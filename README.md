@@ -27,3 +27,24 @@ Run the same check locally with:
 ```sh
 node scripts/verify-repository-integrity.mjs
 ```
+
+### Resolve a ticket atomically
+
+Use the resolver instead of separately commenting, editing the map and closing a
+ticket:
+
+```sh
+node scripts/resolve-wayfinder-ticket.mjs \
+  --issue 42 \
+  --map 1 \
+  --outcome-file /path/to/outcome.md \
+  --map-entry-file /path/to/map-entry.md \
+  --reason completed \
+  --dry-run
+```
+
+Remove `--dry-run` after reviewing the plan. The command validates the native
+parent-child relationship, records one recognizable outcome, inserts one
+decision pointer, closes the ticket with the requested reason, and then reads
+everything back from GitHub. Re-running it is safe: completed steps are detected
+and skipped.
