@@ -7,3 +7,4 @@
 |-----|-------|--------|------|
 | [ADR-0001](ADR-0001-default-form-handling-adapter.md) | Default Cloudflare form-handling adapter | Accepted | 2026-07-25 |
 | [ADR-0002](ADR-0002-default-newsletter-delivery-adapter.md) | Default newsletter-delivery adapter | Accepted | 2026-07-26 |
+| [ADR-0003](ADR-0003-unified-privacy-first-analytics.md) | Unified privacy-first analytics architecture | Accepted | 2026-07-26 |
