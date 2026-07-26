@@ -1,6 +1,10 @@
 # foundry-cms
 Open-source, self-hosted visual CMS for schema-bound websites on Cloudflare
 
+## Product contracts
+
+- [Production MCP contract](docs/mcp/README.md)
+
 ## Repository integrity
 
 The repository runs an event-driven and daily integrity check over its Wayfinder
