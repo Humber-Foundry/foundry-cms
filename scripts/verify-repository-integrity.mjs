@@ -10,6 +10,7 @@ const eventName = process.env.GITHUB_EVENT_NAME ?? "";
 const eventPath = process.env.GITHUB_EVENT_PATH;
 const workspace = resolve(process.env.GITHUB_WORKSPACE ?? process.cwd());
 const mapLabel = process.env.WAYFINDER_MAP_LABEL ?? "wayfinder:map";
+const secretManagerScheme = ["op", "://"].join("");
 const failures = [];
 const notices = [];
 const forbiddenTerms = parseForbiddenTerms(
@@ -59,7 +60,7 @@ function scanText(location, value) {
   if (containsForbiddenTerm(value)) {
     recordFailure(`${location} contains a forbidden client-specific term.`);
   }
-  if (typeof value === "string" && value.includes("op://")) {
+  if (typeof value === "string" && value.includes(secretManagerScheme)) {
     recordFailure(`${location} exposes a secret-manager reference.`);
   }
 }
