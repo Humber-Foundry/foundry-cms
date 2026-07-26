@@ -4,6 +4,9 @@ Open-source, self-hosted visual CMS for schema-bound websites on Cloudflare
 ## Product contracts
 
 - [Production MCP contract](docs/mcp/README.md)
+- [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)
+- [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
+- [Architecture decisions](docs/decisions/DECISION-LOG.md)
 
 ## Repository integrity
 
