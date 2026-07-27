@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import {
   AccessDeniedError,
+  ContentRevisionBookmarkError,
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   createContentActorId,
@@ -36,7 +37,10 @@ export default async function RevisionPreviewPage({
   searchParams,
 }: {
   params: Promise<{ workspaceId: string; revision: string }>;
-  searchParams: Promise<{ capability?: string; bookmark?: string }>;
+  searchParams: Promise<{
+    capability?: string | string[];
+    bookmark?: string | string[];
+  }>;
 }) {
   const {
     workspaceId: workspaceIdParameter,
@@ -57,7 +61,7 @@ export default async function RevisionPreviewPage({
   } catch {
     notFound();
   }
-  if (capability === undefined) {
+  if (typeof capability !== "string" || typeof bookmark !== "string") {
     notFound();
   }
 
@@ -126,6 +130,7 @@ export default async function RevisionPreviewPage({
       error instanceof AccessDeniedError ||
       error instanceof HumanAccessConfigurationError ||
       error instanceof ContentRevisionConfigurationError ||
+      error instanceof ContentRevisionBookmarkError ||
       error instanceof ContentWorkspaceAccessError ||
       error instanceof PreviewCapabilityError
     ) {

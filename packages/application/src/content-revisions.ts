@@ -147,6 +147,13 @@ export class ContentRevisionStaleError extends Error {
   }
 }
 
+export class ContentRevisionBookmarkError extends Error {
+  constructor() {
+    super("content_revision_bookmark_invalid");
+    this.name = "ContentRevisionBookmarkError";
+  }
+}
+
 export function assertContentRevisionIdempotency(
   recordedRequestHash: string,
   requestHash: string,

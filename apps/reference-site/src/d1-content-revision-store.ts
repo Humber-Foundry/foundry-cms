@@ -5,6 +5,7 @@ import type {
 } from "@foundry/application";
 import {
   ContentRevisionConfigurationError,
+  ContentRevisionBookmarkError,
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
   restoreContentActorId,
@@ -232,14 +233,18 @@ export function createD1ContentRevisionStore(
       return getCurrentFrom(connection);
     },
     async getRevision(revision, bookmark) {
-      const connection =
-        bookmark === undefined
-          ? database
-          : database.withSession?.(bookmark);
-      if (connection === undefined) {
-        throw new Error("content_revision_bookmark_unavailable");
+      if (bookmark === undefined) {
+        return getRevisionFrom(database, revision);
       }
-      return getRevisionFrom(connection, revision);
+      try {
+        const connection = database.withSession?.(bookmark);
+        if (connection === undefined) {
+          throw new ContentRevisionBookmarkError();
+        }
+        return await getRevisionFrom(connection, revision);
+      } catch {
+        throw new ContentRevisionBookmarkError();
+      }
     },
     async getRevisionWithBookmark(revision) {
       if (database.withSession === undefined) {

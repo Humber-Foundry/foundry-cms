@@ -5,6 +5,7 @@ import { Miniflare } from "miniflare";
 
 import {
   ContentRevisionConflictError,
+  ContentRevisionBookmarkError,
   ContentRevisionIdempotencyError,
   createContentActorId,
   createContentRevisionApplication,
@@ -278,5 +279,34 @@ describe("D1 content revision store", () => {
         .prepare("DELETE FROM content_revisions WHERE revision = 0")
         .run(),
     ).rejects.toThrow(/content_revisions_are_immutable/);
+  });
+
+  it("translates malformed bookmarks into a preview-safe domain error", async () => {
+    const failingDatabase = {
+      withSession() {
+        return {
+          prepare() {
+            return {
+              bind() {
+                return {
+                  async first() {
+                    throw new Error("invalid_bookmark");
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as Parameters<typeof createD1ContentRevisionStore>[0];
+    const store = createD1ContentRevisionStore(
+      failingDatabase,
+      referenceSiteDefinition.site.id,
+      workspaceId,
+    );
+
+    await expect(
+      store.getRevision(0, "not-a-d1-bookmark"),
+    ).rejects.toBeInstanceOf(ContentRevisionBookmarkError);
   });
 });
