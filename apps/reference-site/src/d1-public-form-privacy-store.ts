@@ -62,19 +62,59 @@ const maximumOnlineBackupSnapshotBytes = 8 * 1_024 * 1_024;
 async function assertSnapshotWithinOnlineBackupLimit(
   database: D1DatabaseBinding,
   tables: SnapshotTables,
+  siteId: string,
 ) {
-  const estimates = await database.batch(
-    Object.entries(tables).map(([key, table]) =>
-      database.prepare(
-        `SELECT COALESCE(SUM(${
-          key === "submissions"
-            ? "length(CAST(fields_json AS BLOB)) + "
-            : ""
-        }512), 0) AS bytes
-         FROM ${table}`,
-      ),
-    ),
-  );
+  const estimates = await database.batch([
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(length(CAST(fields_json AS BLOB)) + 512), 0)
+           AS bytes
+         FROM ${tables.submissions} WHERE site_id = ?1`,
+      )
+      .bind(siteId),
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(512), 0) AS bytes
+         FROM ${tables.classifications} WHERE site_id = ?1`,
+      )
+      .bind(siteId),
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(512), 0) AS bytes
+         FROM ${tables.deliveries} WHERE site_id = ?1`,
+      )
+      .bind(siteId),
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(512), 0) AS bytes
+         FROM ${tables.outboxEvents} AS outbox
+         JOIN ${tables.deliveries} AS delivery
+           ON delivery.id = outbox.delivery_id
+         WHERE delivery.site_id = ?1`,
+      )
+      .bind(siteId),
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(512), 0) AS bytes
+         FROM ${tables.notificationJobs} AS job
+         JOIN ${tables.deliveries} AS delivery
+           ON delivery.id = job.delivery_id
+         WHERE delivery.site_id = ?1`,
+      )
+      .bind(siteId),
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(512), 0) AS bytes
+         FROM ${tables.acceptanceAuditFacts} WHERE site_id = ?1`,
+      )
+      .bind(siteId),
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(512), 0) AS bytes
+         FROM ${tables.auditFacts} WHERE site_id = ?1`,
+      )
+      .bind(siteId),
+  ]);
   let estimatedBytes = 0;
   for (const result of estimates) {
     const row = result.results?.[0];
@@ -121,7 +161,7 @@ async function snapshotRows(
   createdAt: string,
   tables: SnapshotTables = liveSnapshotTables,
 ): Promise<PublicFormBackupSnapshot> {
-  await assertSnapshotWithinOnlineBackupLimit(database, tables);
+  await assertSnapshotWithinOnlineBackupLimit(database, tables, siteId);
   const results = await database.batch([
     database
       .prepare(
@@ -719,13 +759,43 @@ export function createD1PublicFormPrivacyStore(
         .first<{ created_at: string | null }>();
       return row?.created_at ?? null;
     },
-    async recordBackup(input) {
+    async claimBackup({
+      siteId,
+      checkpoint,
+      leaseToken,
+      now,
+      leaseUntil,
+    }) {
       const result = await database
         .prepare(
+          `INSERT INTO public_form_backup_claims (
+             site_id, checkpoint, lease_token, lease_until, claimed_at
+           ) VALUES (?1, ?2, ?3, ?4, ?5)
+           ON CONFLICT (site_id) DO UPDATE SET
+             checkpoint = excluded.checkpoint,
+             lease_token = excluded.lease_token,
+             lease_until = excluded.lease_until,
+             claimed_at = excluded.claimed_at
+           WHERE public_form_backup_claims.lease_until <= ?5`,
+        )
+        .bind(siteId, checkpoint, leaseToken, leaseUntil, now)
+        .run();
+      return (result.meta.changes ?? 0) > 0;
+    },
+    async recordBackup(input) {
+      const [recorded] = await database.batch([
+        database
+          .prepare(
           `INSERT INTO public_form_backup_records (
              backup_id, site_id, object_key, integrity_hash,
              created_at, expires_at, retention_days
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           )
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+           WHERE EXISTS (
+             SELECT 1 FROM public_form_backup_claims
+             WHERE site_id = ?2 AND checkpoint = ?8 AND lease_token = ?9
+               AND lease_until > ?5
+           )
            ON CONFLICT (backup_id) DO UPDATE SET
              integrity_hash = excluded.integrity_hash,
              created_at = excluded.created_at,
@@ -733,19 +803,28 @@ export function createD1PublicFormPrivacyStore(
              retention_days = excluded.retention_days
            WHERE public_form_backup_records.site_id = excluded.site_id
              AND public_form_backup_records.object_key = excluded.object_key`,
-        )
-        .bind(
-          input.backupId,
-          input.siteId,
-          input.objectKey,
-          input.integrityHash,
-          input.createdAt,
-          input.expiresAt,
-          input.retentionDays,
-        )
-        .run();
-      if ((result.meta.changes ?? 0) < 1) {
-        throw new Error("form_backup_record_conflict");
+          )
+          .bind(
+            input.backupId,
+            input.siteId,
+            input.objectKey,
+            input.integrityHash,
+            input.createdAt,
+            input.expiresAt,
+            input.retentionDays,
+            input.checkpoint,
+            input.leaseToken,
+          ),
+        database
+          .prepare(
+            `DELETE FROM public_form_backup_claims
+             WHERE site_id = ?1 AND checkpoint = ?2 AND lease_token = ?3
+               AND changes() > 0`,
+          )
+          .bind(input.siteId, input.checkpoint, input.leaseToken),
+      ]);
+      if ((recorded?.meta.changes ?? 0) < 1) {
+        throw new Error("form_backup_claim_lost");
       }
     },
     async restoreBackupSnapshot({ snapshot, verification }) {

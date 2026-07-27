@@ -187,8 +187,17 @@ export interface PublicFormPrivacyStore {
     now: string;
   }): Promise<PublicFormBackupSnapshot>;
   latestBackupAt(input: { siteId: SiteId }): Promise<string | null>;
+  claimBackup(input: {
+    siteId: SiteId;
+    checkpoint: string;
+    leaseToken: string;
+    now: string;
+    leaseUntil: string;
+  }): Promise<boolean>;
   recordBackup(input: {
     siteId: SiteId;
+    checkpoint: string;
+    leaseToken: string;
     backupId: string;
     objectKey: string;
     integrityHash: string;
@@ -425,12 +434,14 @@ export async function runPublicFormBackupMaintenance({
   store,
   vault,
   now,
+  createBackupLeaseToken = () => crypto.randomUUID(),
   policy = defaultPublicFormRetentionPolicy,
 }: {
   siteId: SiteId;
   store: PublicFormPrivacyStore;
   vault?: PublicFormBackupVault;
   now: Date;
+  createBackupLeaseToken?: () => string;
   policy?: PublicFormRetentionPolicy;
 }) {
   const timestamp = now.toISOString();
@@ -450,6 +461,17 @@ export async function runPublicFormBackupMaintenance({
       ? "initial"
       : latestBackupAt.replaceAll(/[^0-9]/gu, "");
   const backupId = `backup-${siteId}-after-${checkpoint}`;
+  const leaseToken = createBackupLeaseToken();
+  const claimed = await store.claimBackup({
+    siteId,
+    checkpoint,
+    leaseToken,
+    now: timestamp,
+    leaseUntil: new Date(now.getTime() + 15 * 60 * 1_000).toISOString(),
+  });
+  if (!claimed) {
+    return { backupId: null, expiredBackups };
+  }
   const snapshot = await store.createBackupSnapshot({
     siteId,
     now: timestamp,
@@ -462,6 +484,8 @@ export async function runPublicFormBackupMaintenance({
   });
   await store.recordBackup({
     siteId,
+    checkpoint,
+    leaseToken,
     ...saved,
     createdAt: timestamp,
     retentionDays: policy.backupDays,
@@ -471,7 +495,10 @@ export async function runPublicFormBackupMaintenance({
 
 export async function runPublicFormPrivacyMaintenance(
   input: Parameters<typeof runPublicFormRetentionMaintenance>[0] &
-    Pick<Parameters<typeof runPublicFormBackupMaintenance>[0], "vault">,
+    Pick<
+      Parameters<typeof runPublicFormBackupMaintenance>[0],
+      "vault" | "createBackupLeaseToken"
+    >,
 ) {
   const retention = await runPublicFormRetentionMaintenance(input);
   const backup = await runPublicFormBackupMaintenance(input);

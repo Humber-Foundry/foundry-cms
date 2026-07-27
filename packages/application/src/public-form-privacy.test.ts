@@ -54,6 +54,7 @@ function store(
       auditFacts: [],
     }),
     latestBackupAt: vi.fn().mockResolvedValue(null),
+    claimBackup: vi.fn().mockResolvedValue(true),
     recordBackup: vi.fn().mockResolvedValue(undefined),
     restoreBackupSnapshot: vi.fn().mockResolvedValue({
       submissions: 0,
@@ -170,6 +171,8 @@ describe("public form privacy application", () => {
     expect(primary.recordBackup).toHaveBeenCalledWith(
       expect.objectContaining({
         backupId: "backup-site_reference-after-initial",
+        checkpoint: "initial",
+        leaseToken: expect.any(String),
         retentionDays: 30,
       }),
     );
@@ -241,6 +244,50 @@ describe("public form privacy application", () => {
       "save:backup-site_reference-after-initial",
     ]);
     expect(privacyStore.recordBackup).not.toHaveBeenCalled();
+  });
+
+  it("allows only one overlapping scheduler run to write the checkpoint object", async () => {
+    let claimed = false;
+    const privacyStore = store({
+      claimBackup: vi.fn(async () => {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      }),
+    });
+    const vault: PublicFormBackupVault = {
+      deleteExpired: vi.fn().mockResolvedValue(0),
+      saveEncrypted: vi.fn(async (input) => ({
+        backupId: input.backupId,
+        objectKey: `forms/site_reference/${input.backupId}.enc`,
+        integrityHash: "sha256:winner",
+        expiresAt: "2026-08-26T00:00:00.000Z",
+      })),
+    };
+
+    const results = await Promise.all([
+      runPublicFormPrivacyMaintenance({
+        siteId,
+        store: privacyStore,
+        vault,
+        now: new Date("2026-07-27T00:00:00.000Z"),
+        createBackupLeaseToken: () => "lease-a",
+      }),
+      runPublicFormPrivacyMaintenance({
+        siteId,
+        store: privacyStore,
+        vault,
+        now: new Date("2026-07-27T00:00:00.000Z"),
+        createBackupLeaseToken: () => "lease-b",
+      }),
+    ]);
+
+    expect(results.map((result) => result.backupId).sort()).toEqual([
+      "backup-site_reference-after-initial",
+      null,
+    ]);
+    expect(vault.saveEncrypted).toHaveBeenCalledOnce();
+    expect(privacyStore.recordBackup).toHaveBeenCalledOnce();
   });
 
   it("can resume the primary verification write after target promotion", async () => {

@@ -545,27 +545,76 @@ describe("D1 public form privacy store", () => {
     expect(batches).toBe(1);
   });
 
-  it("reconciles a retried backup record without changing its object identity", async () => {
+  it("scopes every online snapshot size estimate to the requested site", async () => {
+    const binding = database as unknown as D1DatabaseBinding;
+    const preparedQueries: string[] = [];
+    const scopedBinding: D1DatabaseBinding = {
+      prepare(query) {
+        preparedQueries.push(query);
+        return binding.prepare(query);
+      },
+      batch: (statements) => binding.batch(statements),
+    };
+
+    await createD1PublicFormPrivacyStore(scopedBinding).createBackupSnapshot({
+      siteId,
+      now: "2026-07-27T00:00:00.000Z",
+    });
+    const estimates = preparedQueries.filter((query) =>
+      query.includes("AS bytes"),
+    );
+    expect(estimates).toHaveLength(7);
+    expect(estimates.every((query) => query.includes("site_id = ?1"))).toBe(
+      true,
+    );
+    expect(
+      estimates
+        .filter(
+          (query) =>
+            query.includes("public_form_outbox_events") ||
+            query.includes("public_form_notification_jobs"),
+        )
+        .every((query) =>
+          query.includes("JOIN public_form_delivery_intents"),
+        ),
+    ).toBe(true);
+  });
+
+  it("fences overlapping backup writers through the complete record operation", async () => {
     const store = createD1PublicFormPrivacyStore(
       database as unknown as D1DatabaseBinding,
     );
+    await expect(
+      store.claimBackup({
+        siteId,
+        checkpoint: "initial",
+        leaseToken: "lease-winner",
+        now: "2026-07-27T00:00:00.000Z",
+        leaseUntil: "2026-07-27T00:15:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      store.claimBackup({
+        siteId,
+        checkpoint: "initial",
+        leaseToken: "lease-loser",
+        now: "2026-07-27T00:00:01.000Z",
+        leaseUntil: "2026-07-27T00:15:01.000Z",
+      }),
+    ).resolves.toBe(false);
     const original = {
       siteId,
-      backupId: "backup-site_reference-2026-07-27",
+      checkpoint: "initial",
+      leaseToken: "lease-winner",
+      backupId: "backup-site_reference-after-initial",
       objectKey:
-        "forms/site_reference/backup-site_reference-2026-07-27.enc",
+        "forms/site_reference/backup-site_reference-after-initial.enc",
       integrityHash: "sha256:first-attempt",
       createdAt: "2026-07-27T00:00:00.000Z",
       expiresAt: "2026-08-26T00:00:00.000Z",
       retentionDays: 30,
     };
     await store.recordBackup(original);
-    await store.recordBackup({
-      ...original,
-      integrityHash: "sha256:reconciled-attempt",
-      createdAt: "2026-07-27T00:05:00.000Z",
-      expiresAt: "2026-08-26T00:05:00.000Z",
-    });
 
     await expect(
       database
@@ -577,15 +626,16 @@ describe("D1 public form privacy store", () => {
         .first(),
     ).resolves.toEqual({
       object_key: original.objectKey,
-      integrity_hash: "sha256:reconciled-attempt",
-      created_at: "2026-07-27T00:05:00.000Z",
+      integrity_hash: "sha256:first-attempt",
+      created_at: "2026-07-27T00:00:00.000Z",
     });
     await expect(
       store.recordBackup({
         ...original,
-        objectKey: "forms/site_reference/different-object.enc",
+        leaseToken: "lease-loser",
+        integrityHash: "sha256:loser",
       }),
-    ).rejects.toThrow("form_backup_record_conflict");
+    ).rejects.toThrow("form_backup_claim_lost");
   });
 
   it("restores a snapshot into an empty isolated database and verifies integrity", async () => {

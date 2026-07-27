@@ -226,12 +226,13 @@ RSA-OAEP recovery recipient, and writes only the envelope to the private
 `FOUNDRY_FORM_BACKUP_RECIPIENT` as the base64-encoded SPKI public key. Keep the
 matching PKCS#8 private key outside Cloudflare and the repository in
 client-controlled recovery custody. The Worker can encrypt backups but cannot
-decrypt them. Backup attempts use the last recorded backup as a stable retry
-checkpoint, so an uncertain R2 response overwrites the same object instead of
-creating an orphan. The online snapshot path rejects estimates above 8 MiB
-before loading all rows into Worker memory. Encrypted objects expire after 30
-days; configure the same 30-day prefix lifecycle on the private R2 bucket as a
-provider-side backstop to the scheduled expiry sweep.
+decrypt them. A D1 lease fences the complete save-and-record operation. Backup
+attempts use the last recorded backup as a stable retry checkpoint, so an
+uncertain R2 response overwrites the same object instead of creating an orphan.
+The online snapshot path rejects per-site estimates above 8 MiB before loading
+all rows into Worker memory. Encrypted objects expire after 30 days; configure
+the same 30-day prefix lifecycle on the private R2 bucket as a provider-side
+backstop to the scheduled expiry sweep.
 
 Restore is deliberately fail-closed and runs from a client-controlled operator
 machine, not the Worker. Set a short-lived `CLOUDFLARE_API_TOKEN` with D1

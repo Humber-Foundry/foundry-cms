@@ -88,6 +88,14 @@ CREATE TABLE public_form_backup_records (
 CREATE INDEX public_form_backup_records_site_time
   ON public_form_backup_records (site_id, created_at);
 
+CREATE TABLE public_form_backup_claims (
+  site_id TEXT PRIMARY KEY,
+  checkpoint TEXT NOT NULL,
+  lease_token TEXT NOT NULL UNIQUE,
+  lease_until TEXT NOT NULL,
+  claimed_at TEXT NOT NULL
+);
+
 CREATE TABLE public_form_maintenance_state (
   site_id TEXT PRIMARY KEY,
   retention_applied_at TEXT NOT NULL
