@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   clearStaleEdits,
   preserveStaleEdits,
+  recoveryToForward,
   recoverStaleEdits,
 } from "./content-editor-recovery";
 
@@ -28,6 +29,16 @@ const edit = {
 };
 
 describe("stale edit recovery", () => {
+  it("forwards an active recovery when its destination later becomes stale", () => {
+    const active = {
+      id: "recovery-chain",
+      sourceWorkspaceId: "workspace-original",
+    };
+
+    expect(recoveryToForward(false, active)).toBeUndefined();
+    expect(recoveryToForward(true, active)).toBe(active);
+  });
+
   it("retains and auto-applies a non-overlapping edit until save", () => {
     const storage = createStorage();
     preserveStaleEdits(storage, "recovery-1", "workspace-first", [edit]);

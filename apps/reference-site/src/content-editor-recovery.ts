@@ -14,6 +14,18 @@ export type StaleRecoveryConflict = StaleRecoveryEdit &
     reason: "changed" | "missing";
   }>;
 
+export type StaleRecoveryPointer = Readonly<{
+  id: string;
+  sourceWorkspaceId: string;
+}>;
+
+export function recoveryToForward(
+  destinationIsStale: boolean,
+  activeRecovery: StaleRecoveryPointer | undefined,
+): StaleRecoveryPointer | undefined {
+  return destinationIsStale ? activeRecovery : undefined;
+}
+
 function recoveryKey(sourceWorkspaceId: string, recoveryId: string): string {
   return `${staleEditRecoveryPrefix}:${sourceWorkspaceId}:${recoveryId}`;
 }

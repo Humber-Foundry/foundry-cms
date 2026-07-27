@@ -17,6 +17,7 @@ import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
   clearStaleEdits,
   preserveStaleEdits,
+  recoveryToForward,
   recoverStaleEdits,
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
@@ -81,6 +82,7 @@ export function ContentEditor({
     body: string;
     idempotencyKey: string;
   } | null>(null);
+  const activeRecovery = useRef(staleRecovery);
   const recoveryApplied = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
   const persistedFields = useMemo(
@@ -234,6 +236,7 @@ export function ContentEditor({
           const recoveryStorage = window.localStorage;
           if (recoveryConflicts.length === 0) {
             recoveryPending.current = [];
+            activeRecovery.current = undefined;
             clearStaleEdits(
               recoveryStorage,
               staleRecovery.id,
@@ -281,16 +284,16 @@ export function ContentEditor({
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
-    const forwardExistingRecovery =
-      destination === "fresh" &&
-      initialStale &&
-      staleRecovery !== undefined;
-    const recoveryId = forwardExistingRecovery
-      ? staleRecovery.id
-      : crypto.randomUUID();
-    const recoverySourceWorkspaceId = forwardExistingRecovery
-      ? staleRecovery.sourceWorkspaceId
-      : initialRevision.workspaceId;
+    const forwardedRecovery =
+      destination === "fresh"
+        ? recoveryToForward(
+            state.status === "stale",
+            activeRecovery.current,
+          )
+        : undefined;
+    const recoveryId = forwardedRecovery?.id ?? crypto.randomUUID();
+    const recoverySourceWorkspaceId =
+      forwardedRecovery?.sourceWorkspaceId ?? initialRevision.workspaceId;
     const persistedValues = new Map(
       persistedFields.map((field) => [field.path, field.value]),
     );
@@ -300,7 +303,7 @@ export function ContentEditor({
     }));
     try {
       if (
-        !forwardExistingRecovery &&
+        forwardedRecovery === undefined &&
         !preserveStaleEdits(
           window.localStorage,
           recoveryId,
@@ -366,6 +369,7 @@ export function ContentEditor({
     if (staleRecovery !== undefined) {
       try {
         if (recoveryPending.current.length === 0) {
+          activeRecovery.current = undefined;
           clearStaleEdits(
             window.localStorage,
             staleRecovery.id,
