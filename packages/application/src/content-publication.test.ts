@@ -207,13 +207,29 @@ describe("content publication application", () => {
       new ContentApprovalInvalidError("production_head_moved"),
     );
     expect(createCommit).not.toHaveBeenCalled();
-
-    vi.mocked(publisher.getProductionHead).mockResolvedValue(productionCommit);
-    isReleaseLive.mockResolvedValue(false);
     await expect(
       app.commands.publish({
         workspaceId,
         approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-invalidated-head-1",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+
+    vi.mocked(publisher.getProductionHead).mockResolvedValue(productionCommit);
+    isReleaseLive.mockResolvedValue(false);
+    const replacement = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: replacement.id,
         requestedBy: membershipId,
         idempotencyKey: "publish-stale-marker-001",
       }),
@@ -221,6 +237,48 @@ describe("content publication application", () => {
       new ContentApprovalInvalidError("release_marker_mismatch"),
     );
     expect(createCommit).not.toHaveBeenCalled();
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: replacement.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-invalid-marker-1",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+  });
+
+  it("invalidates approval when Git's final compare-and-swap sees a moved head", async () => {
+    createCommit.mockResolvedValue({
+      state: "blocked",
+      detail: "production_head_moved",
+    });
+    const { app, approval } = await approve();
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-raced-head-0001",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        detail: "production_head_moved",
+      }),
+    );
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-raced-head-0002",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
   });
 
   it("does not publish an approval through a different workspace boundary", async () => {
@@ -444,6 +502,135 @@ describe("content publication application", () => {
       );
     },
   );
+
+  it("times out a build that remains in progress", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-build-timeout-01",
+    });
+    getDeploymentStatus.mockResolvedValue("building");
+    currentTime = "2026-07-27T10:02:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({ status: "building" }),
+    );
+
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: "c".repeat(40),
+        detail: "deployment_signal_timeout",
+      }),
+    );
+  });
+
+  it("times out a deployment whose exact release marker never appears", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-marker-timeout-1",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    isReleaseLive.mockResolvedValue(false);
+    currentTime = "2026-07-27T10:02:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({ status: "deployed" }),
+    );
+
+    getDeploymentStatus.mockResolvedValue("unknown");
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: "c".repeat(40),
+        detail: "release_marker_timeout",
+      }),
+    );
+  });
+
+  it("reconciles an expired global claim before accepting a later publish", async () => {
+    let currentTime = "2026-07-27T10:10:00.000Z";
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const stranded = {
+      id: createContentPublicationId(`publish_${"7".repeat(32)}`),
+      workspaceId,
+      revision: 1,
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+      idempotencyKey: "stranded-before-next-0001",
+      requestedBy: membershipId,
+      contributors: [editorId],
+      expectedHead: productionCommit,
+      status: "requested" as const,
+      commitSha: null,
+      detail: null,
+      leaseToken: "expired-lease",
+      leaseExpiresAt: "2026-07-27T10:05:00.000Z",
+      requestedAt: "2026-07-27T10:03:00.000Z",
+      updatedAt: "2026-07-27T10:03:00.000Z",
+    };
+    await store.claimPublication(stranded);
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+
+    currentTime = "2026-07-27T10:11:00.000Z";
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-after-stranded-1",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ status: "committed" }));
+    await expect(store.findPublication(stranded.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "publication_lease_expired",
+      }),
+    );
+  });
 
   it("reconciles an expired requested lease so a crashed Worker cannot strand publication", async () => {
     const store = createInMemoryContentPublicationStore();

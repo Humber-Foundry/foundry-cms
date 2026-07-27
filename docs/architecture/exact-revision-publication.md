@@ -59,7 +59,11 @@ trailers support replay and ambiguous-result reconciliation without creating
 another content commit. Refresh transitions compare the prior durable status
 and update timestamp, while exact reconciled commit evidence cannot be erased
 by a delayed not-found result. Reload recovery prioritizes any active
-publication over newer terminal contenders.
+publication over newer terminal contenders. A later publish request first
+reconciles that global active operation, so a crashed Worker does not require
+someone to revisit the originating workspace before the slot can be released.
+If either production-base check observes drift, the approval receives a
+durable `production_changed` invalidation before the request is rejected.
 
 The status vocabulary is:
 
@@ -69,9 +73,11 @@ The status vocabulary is:
 A successful configured Cloudflare check reports only `deployed`. Foundry
 reports `verified-live` only after two uncached reads of
 `/.well-known/foundry-release.json` both exactly match the expected commit,
-published-content hash, and schema version. If no configured deployment signal
-appears within 15 minutes, the operation becomes `failed` with its commit
-evidence preserved so it cannot hold the global publication slot forever.
+published-content hash, and schema version. If the deployment signal remains
+requested, unknown, or building for 15 minutes—or a deployed release never
+serves the exact marker in that window—the operation becomes `failed` with its
+commit evidence preserved so it cannot hold the global publication slot
+forever.
 
 Publication GET requests only read the durable state and remain side-effect
 free. Cloudflare/GitHub reconciliation is a protected, idempotent POST mutation

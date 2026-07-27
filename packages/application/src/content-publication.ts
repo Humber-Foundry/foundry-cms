@@ -108,6 +108,11 @@ export type ContentPublicationClaim =
 export type ContentPublicationStore = Readonly<{
   saveApproval(approval: ContentApproval): Promise<ContentApproval>;
   findApproval(id: ContentApprovalId): Promise<ContentApproval | null>;
+  invalidateApproval(input: {
+    approvalId: ContentApprovalId;
+    invalidatedAt: string;
+    reason: "production_changed";
+  }): Promise<ContentApproval | null>;
   claimPublication(
     publication: ContentPublication,
   ): Promise<ContentPublicationClaim>;
@@ -136,6 +141,7 @@ export type ContentPublicationStore = Readonly<{
     workspaceId: ContentWorkspaceId;
     idempotencyKey: string;
   }): Promise<ContentPublication | null>;
+  findActivePublication(): Promise<ContentPublication | null>;
   findLatestPublication(
     workspaceId: ContentWorkspaceId,
   ): Promise<ContentPublication | null>;
@@ -413,6 +419,18 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
     async findApproval(id) {
       return approvals.get(id) ?? null;
     },
+    async invalidateApproval({ approvalId, invalidatedAt }) {
+      const approval = approvals.get(approvalId);
+      if (approval === undefined) {
+        return null;
+      }
+      if (approval.invalidatedAt !== null) {
+        return approval;
+      }
+      const invalidated = Object.freeze({ ...approval, invalidatedAt });
+      approvals.set(approvalId, invalidated);
+      return invalidated;
+    },
     async claimPublication(publication) {
       const replay = [...publications.values()].find(
         (candidate) =>
@@ -516,6 +534,13 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
         ) ?? null
       );
     },
+    async findActivePublication() {
+      return (
+        [...publications.values()].find((publication) =>
+          activeStatuses.has(publication.status),
+        ) ?? null
+      );
+    },
     async findLatestPublication(workspaceId) {
       return (
         [...publications.values()]
@@ -599,6 +624,134 @@ export function createContentPublicationApplication({
     return { approval, revision };
   }
 
+  async function refreshPublication(publicationId: ContentPublicationId) {
+    const publication = await store.findPublication(publicationId);
+    if (publication === null) {
+      return null;
+    }
+    if (publication.status === "verified-live") {
+      return publication;
+    }
+    let currentPublication = publication;
+    let commitSha = publication.commitSha;
+    if (
+      commitSha === null &&
+      publication.status === "requested" &&
+      publication.leaseExpiresAt !== null &&
+      publication.leaseExpiresAt > now()
+    ) {
+      return publication;
+    }
+    if (
+      commitSha === null &&
+      (publication.status === "unknown" ||
+        publication.status === "requested")
+    ) {
+      const reconciled = await publisher.reconcileCommit(publication.id);
+      if (reconciled.state === "committed") {
+        commitSha = reconciled.commitSha;
+        currentPublication = await store.updatePublication(
+          nextPublication(publication, {
+            status: "committed",
+            commitSha,
+            detail: null,
+            leaseToken: null,
+            leaseExpiresAt: null,
+            updatedAt: now(),
+          }),
+        );
+      } else if (reconciled.state === "not-found") {
+        return store.updatePublication(
+          nextPublication(publication, {
+            status: "failed",
+            detail:
+              publication.status === "requested"
+                ? "publication_lease_expired"
+                : "git_commit_not_found",
+            leaseToken: null,
+            leaseExpiresAt: null,
+            updatedAt: now(),
+          }),
+          {
+            expectedStatus: publication.status,
+            expectedUpdatedAt: publication.updatedAt,
+          },
+        );
+      } else {
+        return publication;
+      }
+    }
+    if (commitSha === null) {
+      return publication;
+    }
+    const deployment = await publisher.getDeploymentStatus(commitSha);
+    const observedAt = now();
+    const timedOut =
+      new Date(observedAt).getTime() -
+        new Date(currentPublication.requestedAt).getTime() >=
+      deploymentSignalTimeoutMs;
+    const update = (
+      status: ContentPublicationStatus,
+      detail: string | null,
+    ) =>
+      store.updatePublication(
+        nextPublication(currentPublication, {
+          status,
+          commitSha,
+          detail,
+          updatedAt: observedAt,
+        }),
+        {
+          expectedStatus: currentPublication.status,
+          expectedUpdatedAt: currentPublication.updatedAt,
+        },
+      );
+
+    if (deployment === "failed") {
+      return update("failed", "cloudflare_build_failed");
+    }
+    if (
+      deployment === "deployed" ||
+      currentPublication.status === "deployed"
+    ) {
+      const approval = await store.findApproval(currentPublication.approvalId);
+      if (approval === null) {
+        return update(
+          timedOut ? "failed" : "unknown",
+          "approval_record_missing",
+        );
+      }
+      const live = await publisher.isReleaseLive({
+        commitSha,
+        contentHash: approval.fingerprint.contentHash,
+        schemaVersion: approval.fingerprint.schemaVersion,
+      });
+      if (live) {
+        return update("verified-live", null);
+      }
+      return update(
+        timedOut ? "failed" : "deployed",
+        timedOut ? "release_marker_timeout" : "release_marker_pending",
+      );
+    }
+    if (timedOut && activeStatuses.has(currentPublication.status)) {
+      return update("failed", "deployment_signal_timeout");
+    }
+    if (deployment === "unknown") {
+      return currentPublication;
+    }
+    const currentProgress = deploymentProgress[currentPublication.status];
+    const nextProgress = deploymentProgress[deployment];
+    if (
+      currentProgress !== undefined &&
+      nextProgress !== undefined &&
+      nextProgress < currentProgress
+    ) {
+      return currentPublication;
+    }
+    return update(deployment, null);
+  }
+
   return Object.freeze({
     commands: Object.freeze({
       async approve(input: {
@@ -672,10 +825,24 @@ export function createContentPublicationApplication({
           }),
         ]);
         if (head !== base.commitSha) {
+          await store.invalidateApproval({
+            approvalId: approval.id,
+            invalidatedAt: now(),
+            reason: "production_changed",
+          });
           throw new ContentApprovalInvalidError("production_head_moved");
         }
         if (!baseIsLive) {
+          await store.invalidateApproval({
+            approvalId: approval.id,
+            invalidatedAt: now(),
+            reason: "production_changed",
+          });
           throw new ContentApprovalInvalidError("release_marker_mismatch");
+        }
+        const activePublication = await store.findActivePublication();
+        if (activePublication !== null) {
+          await refreshPublication(activePublication.id);
         }
         const contributors = await revisions.listContributors(
           approval.workspaceId,
@@ -790,6 +957,16 @@ export function createContentPublicationApplication({
             },
           );
         }
+        if (
+          result.state === "blocked" &&
+          result.detail === "production_head_moved"
+        ) {
+          await store.invalidateApproval({
+            approvalId: approval.id,
+            invalidatedAt: updatedAt,
+            reason: "production_changed",
+          });
+        }
         return store.updatePublication(
           nextPublication(publication, {
             status: result.state,
@@ -805,155 +982,7 @@ export function createContentPublicationApplication({
         );
       },
       async refresh(publicationId: ContentPublicationId) {
-        const publication = await store.findPublication(publicationId);
-        if (publication === null) {
-          return null;
-        }
-        if (publication.status === "verified-live") {
-          return publication;
-        }
-        let currentPublication = publication;
-        let commitSha = publication.commitSha;
-        if (
-          commitSha === null &&
-          publication.status === "requested" &&
-          publication.leaseExpiresAt !== null &&
-          publication.leaseExpiresAt > now()
-        ) {
-          return publication;
-        }
-        if (
-          commitSha === null &&
-          (publication.status === "unknown" ||
-            publication.status === "requested")
-        ) {
-          const reconciled = await publisher.reconcileCommit(publication.id);
-          if (reconciled.state === "committed") {
-            commitSha = reconciled.commitSha;
-            currentPublication = await store.updatePublication(
-              nextPublication(publication, {
-                status: "committed",
-                commitSha,
-                detail: null,
-                leaseToken: null,
-                leaseExpiresAt: null,
-                updatedAt: now(),
-              }),
-            );
-          } else if (reconciled.state === "not-found") {
-            return store.updatePublication(
-              nextPublication(publication, {
-                status: "failed",
-                detail:
-                  publication.status === "requested"
-                    ? "publication_lease_expired"
-                    : "git_commit_not_found",
-                leaseToken: null,
-                leaseExpiresAt: null,
-                updatedAt: now(),
-              }),
-              {
-                expectedStatus: publication.status,
-                expectedUpdatedAt: publication.updatedAt,
-              },
-            );
-          } else {
-            return publication;
-          }
-        }
-        if (commitSha === null) {
-          return publication;
-        }
-        const deployment = await publisher.getDeploymentStatus(commitSha);
-        if (
-          (deployment === "requested" || deployment === "unknown") &&
-          currentPublication.status === "committed"
-        ) {
-          const observedAt = now();
-          if (
-            new Date(observedAt).getTime() -
-              new Date(currentPublication.requestedAt).getTime() >=
-            deploymentSignalTimeoutMs
-          ) {
-            return store.updatePublication(
-              nextPublication(currentPublication, {
-                status: "failed",
-                commitSha,
-                detail: "deployment_signal_timeout",
-                updatedAt: observedAt,
-              }),
-              {
-                expectedStatus: currentPublication.status,
-                expectedUpdatedAt: currentPublication.updatedAt,
-              },
-            );
-          }
-          return currentPublication;
-        }
-        if (deployment === "unknown") {
-          return currentPublication;
-        }
-        const currentProgress =
-          deploymentProgress[currentPublication.status];
-        const nextProgress = deploymentProgress[deployment];
-        if (
-          currentProgress !== undefined &&
-          nextProgress !== undefined &&
-          nextProgress < currentProgress
-        ) {
-          return currentPublication;
-        }
-        if (deployment === "deployed") {
-          const approval = await store.findApproval(
-            currentPublication.approvalId,
-          );
-          if (approval === null) {
-            return store.updatePublication(
-              nextPublication(currentPublication, {
-                status: "unknown",
-                commitSha,
-                detail: "approval_record_missing",
-                updatedAt: now(),
-              }),
-              {
-                expectedStatus: currentPublication.status,
-                expectedUpdatedAt: currentPublication.updatedAt,
-              },
-            );
-          }
-          const live = await publisher.isReleaseLive({
-            commitSha,
-            contentHash: approval.fingerprint.contentHash,
-            schemaVersion: approval.fingerprint.schemaVersion,
-          });
-          return store.updatePublication(
-            nextPublication(currentPublication, {
-              status: live ? "verified-live" : "deployed",
-              commitSha,
-              detail: live ? null : "release_marker_pending",
-              updatedAt: now(),
-            }),
-            {
-              expectedStatus: currentPublication.status,
-              expectedUpdatedAt: currentPublication.updatedAt,
-            },
-          );
-        }
-        return store.updatePublication(
-          nextPublication(currentPublication, {
-            status: deployment,
-            commitSha,
-            detail:
-              deployment === "failed"
-                ? "cloudflare_build_failed"
-                : null,
-            updatedAt: now(),
-          }),
-          {
-            expectedStatus: currentPublication.status,
-            expectedUpdatedAt: currentPublication.updatedAt,
-          },
-        );
+        return refreshPublication(publicationId);
       },
     }),
     queries: Object.freeze({

@@ -367,6 +367,21 @@ export function createD1ContentPublicationStore(
       return approval;
     },
     findApproval,
+    async invalidateApproval({ approvalId, invalidatedAt, reason }) {
+      await database
+        .prepare(
+          `INSERT INTO content_approval_invalidations (
+             approval_id, invalidated_at, reason
+           )
+           SELECT id, ?1, ?2
+           FROM content_approvals
+           WHERE id = ?3
+           ON CONFLICT (approval_id) DO NOTHING`,
+        )
+        .bind(invalidatedAt, reason, approvalId)
+        .run();
+      return findApproval(approvalId);
+    },
     async claimPublication(publication): Promise<ContentPublicationClaim> {
       const replay = await findPublicationByKey(
         publication.workspaceId,
@@ -515,6 +530,19 @@ export function createD1ContentPublicationStore(
       idempotencyKey,
     }) {
       return findPublicationByKey(workspaceId, idempotencyKey);
+    },
+    async findActivePublication() {
+      const row = await database
+        .prepare(
+          `${publicationProjection}
+           WHERE status IN (
+             'requested', 'committed', 'building', 'deployed', 'unknown'
+           )
+           ORDER BY requested_at, id
+           LIMIT 1`,
+        )
+        .first<PublicationRow>();
+      return row === null ? null : toPublication(row);
     },
     async findLatestPublication(workspaceId) {
       const row = await database

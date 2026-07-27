@@ -162,6 +162,34 @@ describe("D1 content publication store", () => {
     );
   });
 
+  it("durably invalidates an approval when production changes", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+
+    await expect(
+      store.invalidateApproval({
+        approvalId: approval.id,
+        invalidatedAt: "2026-07-27T10:02:00.000Z",
+        reason: "production_changed",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: approval.id,
+        invalidatedAt: "2026-07-27T10:02:00.000Z",
+      }),
+    );
+    await expect(
+      database
+        .prepare(
+          `SELECT reason
+           FROM content_approval_invalidations
+           WHERE approval_id = ?1`,
+        )
+        .bind(approval.id)
+        .first<{ reason: string }>(),
+    ).resolves.toEqual({ reason: "production_changed" });
+  });
+
   it("does not insert an approval after the current revision has advanced", async () => {
     const store = createD1ContentPublicationStore(database);
     await revisionApplication.commands.save({
@@ -189,6 +217,7 @@ describe("D1 content publication store", () => {
       state: "claimed",
       publication: first,
     });
+    await expect(store.findActivePublication()).resolves.toEqual(first);
     await expect(store.claimPublication(second)).resolves.toEqual({
       state: "blocked",
       publication: expect.objectContaining({
