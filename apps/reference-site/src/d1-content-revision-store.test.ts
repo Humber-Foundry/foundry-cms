@@ -6,6 +6,7 @@ import { Miniflare } from "miniflare";
 import {
   ContentRevisionConflictError,
   ContentRevisionIdempotencyError,
+  createContentActorId,
   createContentRevisionApplication,
   createContentWorkspaceId,
 } from "@foundry/application";
@@ -14,6 +15,11 @@ import { referenceSiteDefinition } from "@foundry/site-definition";
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";
 
 describe("D1 content revision store", () => {
+  const editorActorId = createContentActorId("membership-editor");
+  const collaboratorActorId = createContentActorId(
+    "membership-collaborator",
+  );
+  const outsiderActorId = createContentActorId("membership-outsider");
   const workspaceId = createContentWorkspaceId("workspace_home");
   let miniflare: Miniflare;
   let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
@@ -39,7 +45,7 @@ describe("D1 content revision store", () => {
     await miniflare.dispose();
   });
 
-  function createApplication(actorId = "membership-editor") {
+  function createApplication(actorId = editorActorId) {
     return createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
       store: createD1ContentRevisionStore(
@@ -58,7 +64,7 @@ describe("D1 content revision store", () => {
   it("persists immutable revisions and replays a completed key", async () => {
     const application = createApplication();
     const command = {
-      actorId: "membership-editor",
+      actorId: editorActorId,
       workspaceId,
       schemaVersion: "1.0.0",
       baseRevision: 0,
@@ -120,13 +126,13 @@ describe("D1 content revision store", () => {
 
   it("allows explicit collaborators and rejects outsiders", async () => {
     const owner = createApplication();
-    await owner.commands.addCollaborator("membership-collaborator");
-    const collaborator = createApplication("membership-collaborator");
+    await owner.commands.addCollaborator(collaboratorActorId);
+    const collaborator = createApplication(collaboratorActorId);
     await expect(collaborator.queries.getCurrent()).resolves.toEqual(
       expect.objectContaining({ workspaceId }),
     );
 
-    const outsider = createApplication("membership-outsider");
+    const outsider = createApplication(outsiderActorId);
     await expect(outsider.queries.getCurrent()).rejects.toThrow(
       "content_workspace_access_denied",
     );
@@ -135,7 +141,7 @@ describe("D1 content revision store", () => {
   it("returns the current revision when optimistic concurrency fails", async () => {
     const application = createApplication();
     await application.commands.save({
-      actorId: "membership-editor",
+      actorId: editorActorId,
       workspaceId,
       schemaVersion: "1.0.0",
       baseRevision: 0,
@@ -145,7 +151,7 @@ describe("D1 content revision store", () => {
 
     await expect(
       application.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         workspaceId,
         schemaVersion: "1.0.0",
         baseRevision: 0,
@@ -158,7 +164,7 @@ describe("D1 content revision store", () => {
   it("rejects a key reused for different mutation input", async () => {
     const application = createApplication();
     await application.commands.save({
-      actorId: "membership-editor",
+      actorId: editorActorId,
       workspaceId,
       schemaVersion: "1.0.0",
       baseRevision: 0,
@@ -168,7 +174,7 @@ describe("D1 content revision store", () => {
 
     await expect(
       application.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         workspaceId,
         schemaVersion: "1.0.0",
         baseRevision: 0,

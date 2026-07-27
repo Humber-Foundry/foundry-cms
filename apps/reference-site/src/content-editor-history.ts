@@ -9,7 +9,7 @@ export type ContentEditorState = Readonly<{
   workingDefinition: SiteDefinition;
   past: ReadonlyArray<SiteDefinition>;
   future: ReadonlyArray<SiteDefinition>;
-  status: "saved" | "dirty" | "saving" | "conflict";
+  status: "saved" | "dirty" | "saving" | "conflict" | "stale";
   errors: Readonly<Record<string, string>>;
 }>;
 
@@ -26,7 +26,7 @@ export type ContentEditorAction =
   | Readonly<{
       type: "failed";
       errors: Readonly<Record<string, string>>;
-      conflict?: boolean;
+      conflict?: "conflict" | "stale";
     }>;
 
 export function createContentEditorState({
@@ -113,7 +113,7 @@ export function contentEditorReducer(
     case "failed":
       return {
         ...state,
-        status: action.conflict === true ? "conflict" : "dirty",
+        status: action.conflict ?? "dirty",
         errors: action.errors,
       };
   }

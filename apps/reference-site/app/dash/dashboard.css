@@ -422,7 +422,8 @@
   color: #72540c;
 }
 
-.state-conflict {
+.state-conflict,
+.state-stale {
   background: #f6d8d5;
   color: #8a352f;
 }

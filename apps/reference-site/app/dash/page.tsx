@@ -1,7 +1,10 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { AccessDeniedError } from "@foundry/application";
+import {
+  AccessDeniedError,
+  createContentActorId,
+} from "@foundry/application";
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import { InvitationActivation } from "@/components/invitation-activation";
@@ -57,11 +60,10 @@ export default async function DashboardPage() {
     access.membership.role === "owner"
       ? await createHumanMutationToken(access.identity)
       : null;
-  const workspaceId = await contentWorkspaceIdForActor(
-    access.membership.id,
-  );
+  const actorId = createContentActorId(access.membership.id);
+  const workspaceId = await contentWorkspaceIdForActor(actorId);
   const contentRevision = await (
-    await loadContentRevisionApplication(workspaceId, access.membership.id)
+    await loadContentRevisionApplication(workspaceId, actorId)
   ).queries.getCurrent();
   const contentMutationToken = await createHumanMutationToken(access.identity);
   const initialPreviewCapability = await createRevisionPreviewCapability({

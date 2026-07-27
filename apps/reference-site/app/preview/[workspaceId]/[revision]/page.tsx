@@ -6,6 +6,7 @@ import {
   AccessDeniedError,
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
+  createContentActorId,
   createContentWorkspaceId,
 } from "@foundry/application";
 
@@ -74,7 +75,7 @@ export default async function RevisionPreviewPage({
     });
     const application = await loadContentRevisionApplication(
       workspaceId,
-      access.membership.id,
+      createContentActorId(access.membership.id),
     );
     const revision = await application.queries.getRevision(
       revisionNumber,

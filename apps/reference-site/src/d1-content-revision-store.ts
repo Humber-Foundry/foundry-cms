@@ -7,6 +7,7 @@ import {
   ContentRevisionConfigurationError,
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
+  restoreContentActorId,
   assertContentRevisionBase,
   assertContentRevisionIdempotency,
   withContentRevisionBookmark,
@@ -44,7 +45,7 @@ function toRevision(row: RevisionRow): ContentRevision {
       productionBase: row.production_base,
     },
     createdAt: row.created_at,
-    createdBy: row.created_by,
+    createdBy: restoreContentActorId(row.created_by),
   };
 }
 
@@ -238,6 +239,25 @@ export function createD1ContentRevisionStore(
         throw new Error("content_revision_bookmark_unavailable");
       }
       return getRevisionFrom(connection, revision);
+    },
+    async replay(idempotencyKey, requestHash) {
+      if (database.withSession === undefined) {
+        throw new Error("content_revision_sessions_unavailable");
+      }
+      const session = database.withSession("first-primary");
+      const receipt = await findReceipt(session, idempotencyKey);
+      if (receipt === null) {
+        return null;
+      }
+      assertContentRevisionIdempotency(receipt.request_hash, requestHash);
+      const revision = await getRevisionFrom(session, receipt.revision);
+      if (revision === null) {
+        throw new ContentRevisionConfigurationError();
+      }
+      return withContentRevisionBookmark(
+        revision,
+        requireBookmark(session.getBookmark()),
+      );
     },
     async persist(command) {
       if (database.withSession === undefined) {

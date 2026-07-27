@@ -54,4 +54,19 @@ describe("content editor history", () => {
     expect(undone.workingDefinition).toEqual(referenceSiteDefinition);
     expect(undone.status).toBe("dirty");
   });
+
+  it("surfaces a stale production base as a distinct non-retry state", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const stale = contentEditorReducer(initial, {
+      type: "failed",
+      conflict: "stale",
+      errors: {},
+    });
+
+    expect(stale.status).toBe("stale");
+    expect(stale.persistedRevision).toBe(4);
+  });
 });

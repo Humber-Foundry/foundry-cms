@@ -112,11 +112,29 @@ export function ContentEditor({
         pendingAttempt.current = null;
         dispatch({
           type: "failed",
-          conflict: true,
+          conflict: "conflict",
           errors: {},
         });
         setMessage(
           "A newer revision exists. Reload before applying these changes.",
+        );
+        return;
+      }
+      if (
+        response.status === 409 &&
+        typeof body === "object" &&
+        body !== null &&
+        "error" in body &&
+        body.error === "revision_stale"
+      ) {
+        pendingAttempt.current = null;
+        dispatch({
+          type: "failed",
+          conflict: "stale",
+          errors: {},
+        });
+        setMessage(
+          "This workspace is based on an older production version. Reload to start from the current site before saving again.",
         );
         return;
       }
@@ -176,7 +194,11 @@ export function ContentEditor({
           <button
             type="button"
             className="button button-primary"
-            disabled={edits.length === 0 || state.status === "saving"}
+            disabled={
+              edits.length === 0 ||
+              state.status === "saving" ||
+              state.status === "stale"
+            }
             onClick={save}
           >
             {state.status === "saving" ? "Saving…" : "Save revision"}
@@ -187,10 +209,16 @@ export function ContentEditor({
         <span className={`state-label state-${state.status}`}>
           Revision {state.persistedRevision} · {state.status}
         </span>
-        <a href={previewUrl} target="_blank" rel="noreferrer">
-          Preview exact saved revision ↗
-        </a>
-        {state.status === "conflict" ? <a href="/dash">Reload latest</a> : null}
+        {state.status === "stale" ? (
+          <span>Saved preview unavailable for the current production version</span>
+        ) : (
+          <a href={previewUrl} target="_blank" rel="noreferrer">
+            Preview exact saved revision ↗
+          </a>
+        )}
+        {state.status === "conflict" || state.status === "stale" ? (
+          <a href="/dash">Reload latest</a>
+        ) : null}
       </div>
       <p role="status" aria-live="polite" className="editor-message">
         {message}

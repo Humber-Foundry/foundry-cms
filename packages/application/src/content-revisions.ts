@@ -23,20 +23,41 @@ export function createContentWorkspaceId(value: string): ContentWorkspaceId {
   return value as ContentWorkspaceId;
 }
 
+declare const contentActorIdBrand: unique symbol;
+export type ContentActorId = string & {
+  readonly [contentActorIdBrand]: "ContentActorId";
+};
+
+export const publishedBaseContentActorId =
+  "system:published-base" as ContentActorId;
+
+export function createContentActorId(value: string): ContentActorId {
+  if (!/^(?:membership|mcp|integration)[-_][A-Za-z0-9._:-]+$/.test(value)) {
+    throw new TypeError("content_actor_id_invalid");
+  }
+  return value as ContentActorId;
+}
+
+export function restoreContentActorId(value: string): ContentActorId {
+  return value === publishedBaseContentActorId
+    ? publishedBaseContentActorId
+    : createContentActorId(value);
+}
+
 export type ContentRevision = Readonly<{
   workspaceId: ContentWorkspaceId;
   revision: number;
   definition: SiteDefinition;
   inputs: ContentRevisionInputs;
   createdAt: string;
-  createdBy: string;
+  createdBy: ContentActorId;
 }>;
 
 export type SavedContentRevision = ContentRevision &
   Readonly<{ bookmark: string }>;
 
 export type SaveContentRevisionCommand = Readonly<{
-  actorId: string;
+  actorId: ContentActorId;
   workspaceId: ContentWorkspaceId;
   schemaVersion: SiteDefinition["schemaVersion"];
   baseRevision: number;
@@ -54,13 +75,17 @@ type PersistContentRevisionCommand = Readonly<{
 export type ContentRevisionStore = Readonly<{
   initialize(
     initialRevision: ContentRevision,
-    ownerActorId: string,
+    ownerActorId: ContentActorId,
   ): Promise<void>;
-  requireAccess(actorId: string): Promise<void>;
+  requireAccess(actorId: ContentActorId): Promise<void>;
   addCollaborator(
-    ownerActorId: string,
-    collaboratorActorId: string,
+    ownerActorId: ContentActorId,
+    collaboratorActorId: ContentActorId,
   ): Promise<void>;
+  replay(
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<SavedContentRevision | null>;
   getCurrent(): Promise<ContentRevision>;
   getRevision(
     revision: number,
@@ -201,8 +226,8 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
     Readonly<{ requestHash: string; revision: SavedContentRevision }>
   >();
   let currentRevision = 0;
-  let ownerActorId: string | undefined;
-  const collaborators = new Set<string>();
+  let ownerActorId: ContentActorId | undefined;
+  const collaborators = new Set<ContentActorId>();
 
   return {
     async initialize(initialRevision, initialOwnerActorId) {
@@ -229,6 +254,14 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
     },
     async getRevision(revision) {
       return revisions.get(revision) ?? null;
+    },
+    async replay(idempotencyKey, requestHash) {
+      const receipt = receipts.get(idempotencyKey);
+      if (receipt === undefined) {
+        return null;
+      }
+      assertContentRevisionIdempotency(receipt.requestHash, requestHash);
+      return receipt.revision;
     },
     async persist(command) {
       const receipt = receipts.get(command.idempotencyKey);
@@ -270,7 +303,7 @@ export function createContentRevisionApplication({
   siteDefinition: SiteDefinition;
   store: ContentRevisionStore;
   workspaceId: ContentWorkspaceId;
-  actorId: string;
+  actorId: ContentActorId;
   rendererVersion: string;
   productionBase: string | ((publishedContentHash: string) => string);
   now?: () => string;
@@ -296,7 +329,7 @@ export function createContentRevisionApplication({
           productionBase: resolvedProductionBase,
         },
         createdAt: now(),
-        createdBy: "published-base",
+        createdBy: publishedBaseContentActorId,
       });
       await store.initialize(initial, actorId);
       await store.requireAccess(actorId);
@@ -340,6 +373,20 @@ export function createContentRevisionApplication({
             workspaceId: "This workspace is not available.",
           });
         }
+        const requestHash = await sha256({
+          actorId: command.actorId,
+          workspaceId: command.workspaceId,
+          schemaVersion: command.schemaVersion,
+          baseRevision: command.baseRevision,
+          edits: command.edits,
+        });
+        const replay = await store.replay(
+          command.idempotencyKey,
+          requestHash,
+        );
+        if (replay !== null) {
+          return replay;
+        }
         if (command.schemaVersion !== siteDefinition.schemaVersion) {
           throw new ContentRevisionValidationError({
             schemaVersion:
@@ -363,13 +410,6 @@ export function createContentRevisionApplication({
         if (!edited.ok) {
           throw new ContentRevisionValidationError(edited.errors);
         }
-        const requestHash = await sha256({
-          actorId: command.actorId,
-          workspaceId: command.workspaceId,
-          schemaVersion: command.schemaVersion,
-          baseRevision: command.baseRevision,
-          edits: command.edits,
-        });
         const nextRevision: ContentRevision = {
           workspaceId,
           revision: command.baseRevision + 1,
@@ -390,7 +430,7 @@ export function createContentRevisionApplication({
           revision: nextRevision,
         });
       },
-      async addCollaborator(collaboratorActorId: string) {
+      async addCollaborator(collaboratorActorId: ContentActorId) {
         await initialize();
         await store.addCollaborator(actorId, collaboratorActorId);
       },

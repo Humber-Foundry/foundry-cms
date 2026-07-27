@@ -7,6 +7,7 @@ import {
   ContentRevisionIdempotencyError,
   ContentRevisionStaleError,
   ContentWorkspaceAccessError,
+  createContentActorId,
   ContentRevisionValidationError,
   createContentWorkspaceId,
   createContentRevisionApplication,
@@ -14,9 +15,15 @@ import {
   isContentRevisionRenderableBy,
 } from "./content-revisions";
 
+const editorActorId = createContentActorId("membership-editor");
+const collaboratorActorId = createContentActorId(
+  "membership-collaborator",
+);
+const outsiderActorId = createContentActorId("membership-outsider");
+
 const applicationInputs = {
   workspaceId: createContentWorkspaceId("workspace_home"),
-  actorId: "membership-editor",
+  actorId: editorActorId,
   rendererVersion: "renderer-commit-a",
   productionBase: "published:site_foundry_reference@1.0.0",
 } as const;
@@ -35,7 +42,7 @@ describe("content revision application", () => {
     });
 
     const saved = await application.commands.save({
-      actorId: "membership-editor",
+      actorId: editorActorId,
       ...commandInputs,
       baseRevision: 0,
       edits: [
@@ -82,7 +89,7 @@ describe("content revision application", () => {
       ...applicationInputs,
     });
     const command = {
-      actorId: "membership-editor",
+      actorId: editorActorId,
       ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "One save" }],
@@ -106,7 +113,7 @@ describe("content revision application", () => {
     });
 
     await application.commands.save({
-      actorId: "membership-editor",
+      actorId: editorActorId,
       ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First input" }],
@@ -115,7 +122,7 @@ describe("content revision application", () => {
 
     await expect(
       application.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         ...commandInputs,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Different input" }],
@@ -131,7 +138,7 @@ describe("content revision application", () => {
       ...applicationInputs,
     });
     await application.commands.save({
-      actorId: "membership-editor",
+      actorId: editorActorId,
       ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First editor" }],
@@ -140,7 +147,7 @@ describe("content revision application", () => {
 
     await expect(
       application.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         ...commandInputs,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Stale editor" }],
@@ -156,12 +163,12 @@ describe("content revision application", () => {
       store,
       ...applicationInputs,
     });
-    await owner.commands.addCollaborator("membership-collaborator");
+    await owner.commands.addCollaborator(collaboratorActorId);
     const collaborator = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
       store,
       ...applicationInputs,
-      actorId: "membership-collaborator",
+      actorId: collaboratorActorId,
     });
 
     await expect(collaborator.queries.getCurrent()).resolves.toEqual(
@@ -172,7 +179,7 @@ describe("content revision application", () => {
       siteDefinition: referenceSiteDefinition,
       store,
       ...applicationInputs,
-      actorId: "membership-outsider",
+      actorId: outsiderActorId,
     });
     await expect(outsider.queries.getCurrent()).rejects.toBeInstanceOf(
       ContentWorkspaceAccessError,
@@ -196,13 +203,38 @@ describe("content revision application", () => {
 
     await expect(
       changedBase.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         ...commandInputs,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Stale base" }],
         idempotencyKey: "save-section-hero-0009",
       }),
     ).rejects.toBeInstanceOf(ContentRevisionStaleError);
+  });
+
+  it("replays an acknowledged save after the production base changes", async () => {
+    const store = createInMemoryContentRevisionStore();
+    const original = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store,
+      ...applicationInputs,
+    });
+    const command = {
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "Recovered save" }],
+      idempotencyKey: "save-section-hero-0010",
+    } as const;
+    const saved = await original.commands.save(command);
+    const changedBase = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store,
+      ...applicationInputs,
+      productionBase: "published:site_foundry_reference@2.0.0",
+    });
+
+    await expect(changedBase.commands.save(command)).resolves.toEqual(saved);
   });
 
   it("rejects invalid fields with path-keyed feedback", async () => {
@@ -214,7 +246,7 @@ describe("content revision application", () => {
 
     await expect(
       application.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         ...commandInputs,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "" }],
@@ -236,7 +268,7 @@ describe("content revision application", () => {
 
     await expect(
       application.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         workspaceId: createContentWorkspaceId("workspace_other"),
         schemaVersion: "1.0.0",
         baseRevision: 0,
@@ -250,7 +282,7 @@ describe("content revision application", () => {
     );
     await expect(
       application.commands.save({
-        actorId: "membership-editor",
+        actorId: editorActorId,
         workspaceId: applicationInputs.workspaceId,
         schemaVersion: "2.0.0" as "1.0.0",
         baseRevision: 0,

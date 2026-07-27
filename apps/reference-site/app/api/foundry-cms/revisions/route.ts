@@ -6,6 +6,7 @@ import {
   ContentRevisionConfigurationError,
   ContentRevisionStaleError,
   ContentWorkspaceAccessError,
+  createContentActorId,
   createContentWorkspaceId,
 } from "@foundry/application";
 import type { SiteDefinitionEdit } from "@foundry/site-definition";
@@ -109,12 +110,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "invalid_command" }, { status: 400 });
     }
     const body = parsed.body;
+    const actorId = createContentActorId(access.membership.id);
     const application = await loadContentRevisionApplication(
       body.workspaceId,
-      access.membership.id,
+      actorId,
     );
     const saved = await application.commands.save({
-      actorId: access.membership.id,
+      actorId,
       workspaceId: body.workspaceId,
       schemaVersion: body.schemaVersion,
       baseRevision: body.baseRevision,

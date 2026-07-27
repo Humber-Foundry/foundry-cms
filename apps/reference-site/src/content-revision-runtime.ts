@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   ContentRevisionConfigurationError,
+  type ContentActorId,
   createContentRevisionApplication,
   createContentWorkspaceId,
   createInMemoryContentRevisionStore,
@@ -31,7 +32,7 @@ export function isGitObjectId(value: string): boolean {
 }
 
 export async function contentWorkspaceIdForActor(
-  actorId: string,
+  actorId: ContentActorId,
 ): Promise<ContentWorkspaceId> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -54,7 +55,7 @@ function applicationFor({
   productionBaseCommit,
 }: {
   workspaceId: ContentWorkspaceId;
-  actorId: string;
+  actorId: ContentActorId;
   store: LocalContentRevisionStore;
   rendererVersion: string;
   productionBaseCommit: string;
@@ -72,7 +73,7 @@ function applicationFor({
 
 export async function loadContentRevisionApplication(
   workspaceId: ContentWorkspaceId,
-  actorId: string,
+  actorId: ContentActorId,
 ) {
   if (process.env.NODE_ENV === "development") {
     let store =
