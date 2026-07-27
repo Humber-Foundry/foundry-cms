@@ -25,10 +25,15 @@ export function DashboardShell({
   initialPreviewUrl: string;
   initialContentStale: boolean;
 }) {
+  const activeWorkspaceUrl =
+    `/dash?workspace=${encodeURIComponent(contentRevision.workspaceId)}`;
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <a className="wordmark wordmark-dashboard" href="/dash">
+        <a
+          className="wordmark wordmark-dashboard"
+          href={activeWorkspaceUrl}
+        >
           <span aria-hidden="true">F</span>
           Foundry
         </a>
@@ -42,7 +47,7 @@ export function DashboardShell({
       <div className="dashboard-layout">
         <nav className="dashboard-nav" aria-label="Dashboard">
           <p className="nav-label">Workspace</p>
-          <a href="/dash" aria-current="page">
+          <a href={activeWorkspaceUrl} aria-current="page">
             Overview
           </a>
           <span aria-disabled="true">Pages</span>

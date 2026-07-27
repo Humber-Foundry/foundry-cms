@@ -68,6 +68,8 @@ export function ContentEditor({
   const edits = changedFields(persistedFields, workingFields);
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked = state.status === "saving" || state.status === "stale";
+  const activeWorkspaceUrl =
+    `/dash?workspace=${encodeURIComponent(initialRevision.workspaceId)}`;
 
   async function save() {
     if (pendingAttempt.current === null) {
@@ -224,7 +226,13 @@ export function ContentEditor({
           </a>
         )}
         {state.status === "conflict" || state.status === "stale" ? (
-          <a href={state.status === "stale" ? "/dash?newWorkspace=1" : "/dash"}>
+          <a
+            href={
+              state.status === "stale"
+                ? "/dash?newWorkspace=1"
+                : activeWorkspaceUrl
+            }
+          >
             {state.status === "stale"
               ? "Start fresh workspace"
               : "Reload latest"}
