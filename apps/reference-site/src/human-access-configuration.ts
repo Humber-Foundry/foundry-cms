@@ -12,6 +12,7 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_ACCESS_API_TOKEN?: string;
   FOUNDRY_CANONICAL_ORIGIN?: string;
   FOUNDRY_CSRF_SECRET?: string;
+  FOUNDRY_SUBSCRIBER_IDENTITY_SECRET?: string;
   FOUNDRY_DB?: D1DatabaseBinding;
 }>;
 
@@ -74,5 +75,17 @@ export function readHumanMutationConfiguration(
     canonicalOrigin: requireSetting(environment.FOUNDRY_CANONICAL_ORIGIN),
     secret: requireSetting(environment.FOUNDRY_CSRF_SECRET),
   };
+}
+
+export function readSubscriberIdentityKeySecret(
+  environment: HumanAccessEnvironment,
+) {
+  const secret = requireSetting(
+    environment.FOUNDRY_SUBSCRIBER_IDENTITY_SECRET,
+  );
+  if (secret.length < 32) {
+    throw new HumanAccessConfigurationError();
+  }
+  return secret;
 }
 import type { HumanAccessEligibilitySynchronizer } from "@foundry/application";

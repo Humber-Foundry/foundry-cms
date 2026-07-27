@@ -14,6 +14,8 @@ export async function loadHumanAccessEnvironment(): Promise<HumanAccessEnvironme
     return {
       FOUNDRY_CANONICAL_ORIGIN: "http://localhost:3000",
       FOUNDRY_CSRF_SECRET: "local-development-csrf-secret",
+      FOUNDRY_SUBSCRIBER_IDENTITY_SECRET:
+        "local-development-subscriber-identity-secret",
       FOUNDRY_ACCESS_AUDIENCE: "local-development-audience",
     };
   }
