@@ -1,0 +1,303 @@
+import { readFile } from "node:fs/promises";
+
+import { Miniflare } from "miniflare";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import {
+  createPublicFormAuditEventId,
+  createPublicFormClassificationId,
+  createPublicFormDeliveryId,
+  createPublicFormId,
+  createPublicFormOutboxEventId,
+  createPublicFormReceiptId,
+  createPublicFormRequestHash,
+  createPublicFormSubmissionId,
+  type PublicFormAcceptance,
+} from "@foundry/application";
+import { createSiteId } from "@foundry/site-definition";
+
+import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
+import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
+
+let runtime: Miniflare;
+let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
+
+function statements(migration: string) {
+  const result: string[] = [];
+  let current = "";
+  let inTrigger = false;
+  for (const line of migration.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    current += ` ${trimmed}`;
+    if (trimmed.startsWith("CREATE TRIGGER")) inTrigger = true;
+    if (
+      (!inTrigger && trimmed.endsWith(";")) ||
+      (inTrigger && trimmed === "END;")
+    ) {
+      result.push(current.trim());
+      current = "";
+      inTrigger = false;
+    }
+  }
+  return result;
+}
+
+const siteId = createSiteId("site_reference");
+const accepted: PublicFormAcceptance = {
+  identity: {
+    siteId,
+    formId: createPublicFormId("contact"),
+    submissionId: createPublicFormSubmissionId(
+      "00000000-0000-4000-8000-000000000047",
+    ),
+  },
+  schemaVersion: "1.0.0",
+  receiptId: createPublicFormReceiptId("receipt-47"),
+  requestHash: createPublicFormRequestHash("hash-47"),
+  fields: { name: "Ada", message: "Private full submission" },
+  classification: "accepted",
+  deliveryStatus: "pending",
+  classificationId: createPublicFormClassificationId("classification-47"),
+  auditEventId: createPublicFormAuditEventId("audit-47"),
+  deliveryId: createPublicFormDeliveryId("delivery-47"),
+  outboxEventId: createPublicFormOutboxEventId("outbox-47"),
+  acceptedAt: "2026-07-27T20:00:00.000Z",
+};
+
+beforeEach(async () => {
+  runtime = new Miniflare({
+    modules: true,
+    script: "export default { fetch() { return new Response('ok') } }",
+    d1Databases: ["FOUNDRY_DB"],
+  });
+  database = await runtime.getD1Database("FOUNDRY_DB");
+  for (const name of [
+    "0003_public_forms.sql",
+    "0004_public_form_notifications.sql",
+  ]) {
+    const migration = await readFile(
+      new URL(`../migrations/${name}`, import.meta.url),
+      "utf8",
+    );
+    for (const statement of statements(migration)) {
+      await database.exec(statement);
+    }
+  }
+});
+
+afterEach(() => runtime.dispose());
+
+describe("D1 public form notification store", () => {
+  it("measures capacity in UTF-8 bytes", async () => {
+    const unicodeAcceptance = {
+      ...accepted,
+      fields: { message: "🪶" },
+    };
+    await createD1PublicFormAcceptanceStore(database).accept(unicodeAcceptance);
+    const encodedBytes = new TextEncoder().encode(
+      JSON.stringify(unicodeAcceptance.fields),
+    ).byteLength;
+    const store = createD1PublicFormNotificationStore(
+      database,
+      encodedBytes + 1024,
+    );
+
+    await expect(
+      store.deliveryHealth({
+        siteId,
+        now: "2026-07-27T20:05:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      capacity: { usedPercent: 100, state: "critical" },
+    });
+  });
+
+  it("claims once, exposes only configured preview fields, and records delivery", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(accepted);
+    const store = createD1PublicFormNotificationStore(
+      database,
+      undefined,
+      ["name"],
+    );
+
+    const claim = await store.claimDue({
+      siteId,
+      now: "2026-07-27T20:05:00.000Z",
+      leaseToken: "lease-1",
+      leaseUntil: "2026-07-27T20:09:00.000Z",
+      limit: 25,
+    });
+    expect(claim).toEqual([
+      expect.objectContaining({
+        deliveryId: accepted.deliveryId,
+        previewFields: { name: "Ada" },
+        attempt: 1,
+      }),
+    ]);
+    expect(JSON.stringify(claim)).not.toContain("Private full submission");
+    await expect(
+      store.claimDue({
+        siteId,
+        now: "2026-07-27T20:05:00.000Z",
+        leaseToken: "lease-2",
+        leaseUntil: "2026-07-27T20:09:00.000Z",
+        limit: 25,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      store.recordOutcome({
+        siteId,
+        deliveryId: accepted.deliveryId,
+        leaseToken: "lease-1",
+        outcome: { outcome: "sent", providerReference: "provider-1" },
+        now: "2026-07-27T20:05:01.000Z",
+        nextAttemptAt: null,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("keeps failures replayable without changing the accepted submission", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(accepted);
+    const store = createD1PublicFormNotificationStore(database);
+    await store.claimDue({
+      siteId,
+      now: "2026-07-27T20:05:00.000Z",
+      leaseToken: "lease-1",
+      leaseUntil: "2026-07-27T20:09:00.000Z",
+      limit: 25,
+    });
+    await store.recordOutcome({
+      siteId,
+      deliveryId: accepted.deliveryId,
+      leaseToken: "lease-1",
+      outcome: { outcome: "permanent_failure", code: "rejected" },
+      now: "2026-07-27T20:05:01.000Z",
+      nextAttemptAt: null,
+    });
+    await expect(store.listFailed({ siteId })).resolves.toEqual([
+      {
+        deliveryId: accepted.deliveryId,
+        formId: accepted.identity.formId,
+        receiptId: accepted.receiptId,
+        attempts: 1,
+        errorCode: "rejected",
+        updatedAt: "2026-07-27T20:05:01.000Z",
+      },
+    ]);
+    await expect(
+      store.replayFailed({
+        siteId,
+        deliveryId: accepted.deliveryId,
+        actorMembershipId: "membership-owner",
+        now: "2026-07-27T20:06:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    const submission = await database
+      .prepare(
+        "SELECT fields_json FROM public_form_submissions WHERE receipt_id = ?1",
+      )
+      .bind(accepted.receiptId)
+      .first<{ fields_json: string }>();
+    expect(submission?.fields_json).toContain("Private full submission");
+  });
+
+  it("stops an expired claim for explicit reconciliation", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(accepted);
+    const store = createD1PublicFormNotificationStore(database);
+    await store.claimDue({
+      siteId,
+      now: "2026-07-27T20:05:00.000Z",
+      leaseToken: "lost-worker",
+      leaseUntil: "2026-07-27T20:09:00.000Z",
+      limit: 25,
+    });
+
+    await expect(
+      store.claimDue({
+        siteId,
+        now: "2026-07-27T20:10:00.000Z",
+        leaseToken: "next-worker",
+        leaseUntil: "2026-07-27T20:14:00.000Z",
+        limit: 25,
+      }),
+    ).resolves.toEqual([]);
+    await expect(store.listFailed({ siteId })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryId: accepted.deliveryId,
+        errorCode: "claim_outcome_unknown",
+      }),
+    ]);
+    const audit = await database
+      .prepare(
+        `SELECT action, outcome_code
+         FROM public_form_operation_audit_events
+         WHERE delivery_id = ?1`,
+      )
+      .bind(accepted.deliveryId)
+      .first<{ action: string; outcome_code: string }>();
+    expect(audit).toEqual({
+      action: "delivery_failed",
+      outcome_code: "claim_outcome_unknown",
+    });
+    await expect(
+      store.replayFailed({
+        siteId,
+        deliveryId: accepted.deliveryId,
+        actorMembershipId: "membership-owner",
+        now: "2026-07-27T20:11:00.000Z",
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("lists held spam without payload and releases it for authorized delivery", async () => {
+    const held: PublicFormAcceptance = {
+      ...accepted,
+      classification: "suspected_spam",
+      deliveryStatus: "held",
+    };
+    await createD1PublicFormAcceptanceStore(database).accept(held);
+    const store = createD1PublicFormNotificationStore(database);
+
+    await expect(store.listSuspectedSpam({ siteId })).resolves.toEqual([
+      {
+        formId: held.identity.formId,
+        receiptId: held.receiptId,
+        acceptedAt: held.acceptedAt,
+      },
+    ]);
+    await expect(
+      store.viewSubmission({
+        siteId,
+        receiptId: held.receiptId,
+        actorMembershipId: "membership-editor",
+        now: "2026-07-27T20:09:00.000Z",
+      }),
+    ).resolves.toEqual({
+      formId: held.identity.formId,
+      receiptId: held.receiptId,
+      acceptedAt: held.acceptedAt,
+      classification: "suspected_spam",
+      fields: held.fields,
+    });
+    await expect(
+      store.releaseSuspectedSpam({
+        siteId,
+        receiptId: held.receiptId,
+        actorMembershipId: "membership-editor",
+        now: "2026-07-27T20:10:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      store.claimDue({
+        siteId,
+        now: "2026-07-27T20:10:00.000Z",
+        leaseToken: "lease-review",
+        leaseUntil: "2026-07-27T20:14:00.000Z",
+        limit: 25,
+      }),
+    ).resolves.toHaveLength(1);
+  });
+});

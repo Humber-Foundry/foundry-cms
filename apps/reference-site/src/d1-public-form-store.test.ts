@@ -86,12 +86,17 @@ beforeEach(async () => {
     d1Databases: ["FOUNDRY_DB"],
   });
   database = await runtime.getD1Database("FOUNDRY_DB");
-  const migration = await readFile(
-    new URL("../migrations/0003_public_forms.sql", import.meta.url),
-    "utf8",
-  );
-  for (const statement of migrationStatements(migration)) {
-    await database.exec(statement);
+  for (const migrationName of [
+    "0003_public_forms.sql",
+    "0004_public_form_notifications.sql",
+  ]) {
+    const migration = await readFile(
+      new URL(`../migrations/${migrationName}`, import.meta.url),
+      "utf8",
+    );
+    for (const statement of migrationStatements(migration)) {
+      await database.exec(statement);
+    }
   }
 });
 
@@ -127,6 +132,7 @@ describe("D1 public form acceptance store", () => {
       "public_form_audit_events",
       "public_form_delivery_intents",
       "public_form_outbox_events",
+      "public_form_notification_jobs",
     ]) {
       const row = await database
         .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
@@ -187,6 +193,7 @@ describe("D1 public form acceptance store", () => {
       "public_form_classifications",
       "public_form_delivery_intents",
       "public_form_outbox_events",
+      "public_form_notification_jobs",
     ]) {
       const row = await database
         .prepare(`SELECT COUNT(*) AS count FROM ${table}`)

@@ -137,6 +137,25 @@ export function createD1PublicFormAcceptanceStore(
             acceptance.identity.formId,
             acceptance.identity.submissionId,
           ),
+        database
+          .prepare(
+            `INSERT INTO public_form_notification_jobs (
+               delivery_id, status, available_at, first_available_at, updated_at
+             )
+             SELECT delivery.id, ?1, ?2, ?2, ?2
+             FROM public_form_delivery_intents AS delivery
+             WHERE delivery.site_id = ?3
+               AND delivery.form_id = ?4
+               AND delivery.submission_id = ?5
+             ON CONFLICT (delivery_id) DO NOTHING`,
+          )
+          .bind(
+            acceptance.deliveryStatus,
+            acceptance.acceptedAt,
+            acceptance.identity.siteId,
+            acceptance.identity.formId,
+            acceptance.identity.submissionId,
+          ),
       ];
       const results = await database.batch(statements);
       if ((results[0]?.meta.changes ?? 0) > 0) {

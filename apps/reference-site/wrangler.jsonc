@@ -29,6 +29,17 @@
       }
     }
   ],
+  "send_email": [
+    {
+      "name": "FOUNDRY_FORM_EMAIL",
+      "destination_address": "owner@example.com"
+    }
+  ],
+  "vars": {
+    "FOUNDRY_FORM_EMAIL_FROM": "forms@example.com",
+    "FOUNDRY_FORM_EMAIL_RECIPIENT": "owner@example.com",
+    "FOUNDRY_FORM_EMAIL_PREVIEW_FIELDS": "name"
+  },
   "observability": {
     "enabled": true
   },

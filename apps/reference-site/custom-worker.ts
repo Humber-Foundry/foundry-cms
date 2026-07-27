@@ -13,6 +13,10 @@ import {
   createDashboardIdentityBoundary,
 } from "./src/dashboard-identity-availability";
 import { createD1HumanAccessStore } from "./src/d1-human-access-store";
+import {
+  deliverPublicFormNotificationsIfDue,
+  type PublicFormNotificationEnvironment,
+} from "./src/public-form-notification-runtime";
 
 type ExecutionContext = Readonly<{
   waitUntil(promise: Promise<unknown>): void;
@@ -36,6 +40,15 @@ async function reconcileHumanAccessEligibilityIfDue(
   });
 }
 
+async function runScheduledWork(
+  environment: HumanAccessEnvironment & PublicFormNotificationEnvironment,
+) {
+  await Promise.all([
+    reconcileHumanAccessEligibilityIfDue(environment),
+    deliverPublicFormNotificationsIfDue(environment),
+  ]);
+}
+
 const fetch = createDashboardIdentityBoundary<
   HumanAccessEnvironment,
   ExecutionContext
@@ -51,6 +64,6 @@ export default {
     environment: HumanAccessEnvironment,
     context: ExecutionContext,
   ) {
-    context.waitUntil(reconcileHumanAccessEligibilityIfDue(environment));
+    context.waitUntil(runScheduledWork(environment));
   },
 };
