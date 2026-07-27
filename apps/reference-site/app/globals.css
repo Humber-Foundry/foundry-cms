@@ -1,0 +1,139 @@
+:root {
+  --ink: #17201d;
+  --ink-soft: #4c5853;
+  --paper: #f5f3ed;
+  --paper-bright: #fbfaf7;
+  --line: #d7d8d0;
+  --moss: #1e5c43;
+  --moss-dark: #154633;
+  --mint: #d7eadf;
+  --sand: #e9e1cf;
+  --white: #ffffff;
+  --font-sans: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
+  --font-serif: Charter, "Source Serif 4", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "Source Code Pro", monospace;
+  --page-gutter: clamp(1.5rem, 5vw, 5rem);
+  --content-width: 78rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.5;
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 3px solid #d58d32;
+  outline-offset: 4px;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+}
+
+.wordmark span {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper-bright);
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+}
+
+.eyebrow {
+  margin: 0 0 1.25rem;
+  color: var(--moss);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.button {
+  display: inline-flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.8rem 1.35rem;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    background-color 180ms ease-out,
+    color 180ms ease-out,
+    transform 180ms ease-out;
+}
+
+.button:hover {
+  transform: translateY(-2px);
+}
+
+.button-primary {
+  background: var(--moss);
+  color: var(--white);
+}
+
+.button-primary:hover {
+  background: var(--moss-dark);
+}
+
+.not-found {
+  width: min(100% - 3rem, 42rem);
+  margin: 0 auto;
+  padding-block: clamp(7rem, 15vw, 12rem);
+}
+
+.not-found h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: clamp(2.5rem, 7vw, 4.5rem);
+  font-weight: 400;
+  line-height: 1.05;
+}
+
+.not-found > p:not(.eyebrow) {
+  max-width: 34rem;
+  margin: 1.5rem 0 2rem;
+  color: var(--ink-soft);
+  font-size: 1.1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .button {
+    transition: none;
+  }
+}

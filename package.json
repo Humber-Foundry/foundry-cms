@@ -1,0 +1,33 @@
+{
+  "name": "foundry-cms",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @foundry/reference-site",
+    "build:worker": "npm run cloudflare:build --workspace @foundry/reference-site",
+    "dev": "npm run dev --workspace @foundry/reference-site",
+    "preview": "npm run preview --workspace @foundry/reference-site",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project apps/reference-site/tsconfig.json",
+    "verify:integrity": "node scripts/verify-repository-integrity.mjs",
+    "verify:bundle": "node scripts/verify-public-bundle.mjs",
+    "verify:worker": "node scripts/verify-worker-runtime.mjs"
+  },
+  "engines": {
+    "node": "^20.17.0 || >=22.9.0"
+  },
+  "packageManager": "npm@11.12.1",
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}
