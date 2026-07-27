@@ -36,6 +36,12 @@ export function MediaManager({
     initialAssets[0]?.assetId ?? "",
   );
   const [occurrenceId, setOccurrenceId] = useState("occurrence_home_hero");
+  const [crop, setCrop] = useState({
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+  });
 
   async function mutateJson(body: unknown) {
     const response = await fetch("/api/foundry-cms/media", {
@@ -118,7 +124,7 @@ export function MediaManager({
         operation: "crop",
         occurrenceId,
         baseRevision: current.revision,
-        crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+        crop,
       })) as MediaOccurrenceRevision;
       setOccurrences((items) => [
         ...items.filter((item) => item.occurrenceId !== occurrenceId),
@@ -127,6 +133,26 @@ export function MediaManager({
       setMessage("Crop saved as revision data; the source is unchanged.");
     } catch {
       setMessage("The crop could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSelected() {
+    if (selectedAsset === "") return;
+    setBusy(true);
+    try {
+      await mutateJson({ operation: "delete", assetId: selectedAsset });
+      const remaining = assets.filter(
+        (asset) => asset.assetId !== selectedAsset,
+      );
+      setAssets(remaining);
+      setSelectedAsset(remaining[0]?.assetId ?? "");
+      setMessage("Unused source and metadata deleted.");
+    } catch {
+      setMessage(
+        "This asset is still referenced by revision history and cannot be deleted.",
+      );
     } finally {
       setBusy(false);
     }
@@ -198,7 +224,36 @@ export function MediaManager({
             >
               Apply inset crop
             </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={busy || selectedAsset === ""}
+              onClick={() => void deleteSelected()}
+            >
+              Delete unused asset
+            </button>
           </div>
+          <fieldset>
+            <legend>Normalized crop</legend>
+            {(["x", "y", "width", "height"] as const).map((field) => (
+              <label key={field}>
+                {field}
+                <input
+                  type="number"
+                  min={field === "width" || field === "height" ? 0.01 : 0}
+                  max={1}
+                  step={0.01}
+                  value={crop[field]}
+                  onChange={(event) =>
+                    setCrop((current) => ({
+                      ...current,
+                      [field]: Number(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+            ))}
+          </fieldset>
           {occurrences.map((occurrence) => (
             <figure key={occurrence.occurrenceId}>
               <img
