@@ -206,6 +206,18 @@ describe("D1 public form notification store", () => {
         errorCode: "claim_outcome_unknown",
       }),
     ]);
+    const audit = await database
+      .prepare(
+        `SELECT action, outcome_code
+         FROM public_form_operation_audit_events
+         WHERE delivery_id = ?1`,
+      )
+      .bind(accepted.deliveryId)
+      .first<{ action: string; outcome_code: string }>();
+    expect(audit).toEqual({
+      action: "delivery_failed",
+      outcome_code: "claim_outcome_unknown",
+    });
     await expect(
       store.replayFailed({
         siteId,

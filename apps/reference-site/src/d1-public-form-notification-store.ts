@@ -48,25 +48,42 @@ export function createD1PublicFormNotificationStore(
   const allowedPreviewFieldIds = new Set(notificationPreviewFieldIds);
   return {
     async claimDue({ siteId, now, leaseToken, leaseUntil, limit }) {
-      await database
-        .prepare(
-          `UPDATE public_form_notification_jobs
-           SET
-             status = 'failed',
-             lease_token = NULL,
-             lease_until = NULL,
-             last_error_code = 'claim_outcome_unknown',
-             updated_at = ?1
-           WHERE status = 'processing'
-             AND lease_until <= ?1
-             AND EXISTS (
-               SELECT 1 FROM public_form_delivery_intents AS delivery
-               WHERE delivery.id = public_form_notification_jobs.delivery_id
-                 AND delivery.site_id = ?2
-             )`,
-        )
-        .bind(now, siteId)
-        .run();
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO public_form_operation_audit_events (
+               site_id, delivery_id, actor_membership_id, action,
+               outcome_code, occurred_at
+             )
+             SELECT ?1, job.delivery_id, NULL, 'delivery_failed',
+                    'claim_outcome_unknown', ?2
+             FROM public_form_notification_jobs AS job
+             JOIN public_form_delivery_intents AS delivery
+               ON delivery.id = job.delivery_id
+             WHERE delivery.site_id = ?1
+               AND job.status = 'processing'
+               AND job.lease_until <= ?2`,
+          )
+          .bind(siteId, now),
+        database
+          .prepare(
+            `UPDATE public_form_notification_jobs
+             SET
+               status = 'failed',
+               lease_token = NULL,
+               lease_until = NULL,
+               last_error_code = 'claim_outcome_unknown',
+               updated_at = ?1
+             WHERE status = 'processing'
+               AND lease_until <= ?1
+               AND EXISTS (
+                 SELECT 1 FROM public_form_delivery_intents AS delivery
+                 WHERE delivery.id = public_form_notification_jobs.delivery_id
+                   AND delivery.site_id = ?2
+               )`,
+          )
+          .bind(now, siteId),
+      ]);
       await database
         .prepare(
           `UPDATE public_form_notification_jobs
