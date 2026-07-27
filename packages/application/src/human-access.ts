@@ -1,5 +1,10 @@
 import type { SiteId } from "@foundry/site-definition";
 
+import {
+  InvalidEmailAddressError,
+  normalizeEmailAddress,
+} from "./email-address";
+
 declare const humanIdBrand: unique symbol;
 
 export type HumanMembershipId = string & {
@@ -58,7 +63,10 @@ export type InvitationStatus =
 export type HumanCapability =
   | "dashboard.view"
   | "content.write"
-  | "access.manage";
+  | "access.manage"
+  | "subscribers.manage"
+  | "subscriber-identities.read"
+  | "subscriber-ledger.export";
 
 export type ExternalIdentityBinding = Readonly<{
   issuer: string;
@@ -225,17 +233,14 @@ export class EligibilitySyncConvergenceError extends Error {
 }
 
 export function normalizeHumanEmail(value: unknown): string {
-  if (typeof value !== "string") {
+  try {
+    return normalizeEmailAddress(value);
+  } catch (error) {
+    if (!(error instanceof InvalidEmailAddressError)) {
+      throw error;
+    }
     throw new InvalidHumanEmailError();
   }
-  const normalized = value.trim().toLowerCase();
-  if (
-    normalized.length > 254 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
-  ) {
-    throw new InvalidHumanEmailError();
-  }
-  return normalized;
 }
 
 export function isInvitationAccessEligible(
@@ -281,7 +286,14 @@ export function availableMembershipStatusActions(
 const roleCapabilities: Readonly<
   Record<HumanRole, ReadonlySet<HumanCapability>>
 > = {
-  owner: new Set(["dashboard.view", "content.write", "access.manage"]),
+  owner: new Set([
+    "dashboard.view",
+    "content.write",
+    "access.manage",
+    "subscribers.manage",
+    "subscriber-identities.read",
+    "subscriber-ledger.export",
+  ]),
   editor: new Set(["dashboard.view", "content.write"]),
 };
 const invitationLifetimeMs = 7 * 24 * 60 * 60 * 1_000;
