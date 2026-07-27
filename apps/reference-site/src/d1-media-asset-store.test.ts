@@ -1,0 +1,135 @@
+import { readFile } from "node:fs/promises";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Miniflare } from "miniflare";
+
+import {
+  MediaAssetReferencedError,
+  createContentActorId,
+  createInMemoryMediaSourceStore,
+  createMediaAssetApplication,
+  createMediaAssetId,
+  createMediaOccurrenceId,
+} from "@foundry/application";
+import { createSiteId } from "@foundry/site-definition";
+
+import { createD1MediaAssetStore } from "./d1-media-asset-store";
+
+describe("D1 media asset store", () => {
+  const siteId = createSiteId("site_reference");
+  const actorId = createContentActorId("membership-editor");
+  const assetId = createMediaAssetId("asset_hero");
+  const replacementId = createMediaAssetId("asset_replacement");
+  const occurrenceId = createMediaOccurrenceId("occurrence_home_hero");
+  let miniflare: Miniflare;
+  let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
+
+  beforeEach(async () => {
+    miniflare = new Miniflare({
+      compatibilityDate: "2026-07-26",
+      modules: true,
+      script: "export default { fetch() { return new Response('ok') } }",
+      d1Databases: ["FOUNDRY_DB"],
+    });
+    database = await miniflare.getD1Database("FOUNDRY_DB");
+    const migration = await readFile(
+      new URL("../migrations/0007_media_assets.sql", import.meta.url),
+      "utf8",
+    );
+    for (const statement of migration.trim().split(/\n\n+/u)) {
+      await database.prepare(statement).run();
+    }
+  });
+
+  afterEach(async () => {
+    await miniflare.dispose();
+  });
+
+  function application() {
+    return createMediaAssetApplication({
+      siteId,
+      actorId,
+      assets: createD1MediaAssetStore(database),
+      sources: createInMemoryMediaSourceStore(),
+      now: () => "2026-07-27T12:00:00.000Z",
+    });
+  }
+
+  async function upload(
+    app: ReturnType<typeof application>,
+    targetAssetId = assetId,
+  ) {
+    const source = new Uint8Array([1, 2, 3]);
+    return app.commands.upload({
+      actorId,
+      assetId: targetAssetId,
+      fileName: `${targetAssetId}.png`,
+      contentType: "image/png",
+      byteLength: source.byteLength,
+      width: 1200,
+      height: 800,
+      source,
+      idempotencyKey: `upload-${targetAssetId}`,
+    });
+  }
+
+  it("persists site-scoped metadata, immutable occurrence revisions, and audit events", async () => {
+    const app = application();
+    await upload(app);
+    await upload(app, replacementId);
+    await app.commands.replaceOccurrence({
+      actorId,
+      occurrenceId,
+      assetId,
+      baseRevision: 0,
+      idempotencyKey: "place-d1-hero",
+    });
+    await app.commands.cropOccurrence({
+      actorId,
+      occurrenceId,
+      baseRevision: 1,
+      crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
+      idempotencyKey: "crop-d1-hero",
+    });
+    await app.commands.replaceOccurrence({
+      actorId,
+      occurrenceId,
+      assetId: replacementId,
+      baseRevision: 2,
+      idempotencyKey: "replace-d1-hero",
+    });
+
+    await expect(app.queries.getOccurrence(occurrenceId)).resolves.toMatchObject({
+      revision: 3,
+      assetId: replacementId,
+      crop: null,
+    });
+    await expect(
+      app.queries.getOccurrenceRevision(occurrenceId, 2),
+    ).resolves.toMatchObject({
+      assetId,
+      crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
+    });
+    await expect(app.queries.audit()).resolves.toHaveLength(5);
+    await expect(
+      app.commands.delete({
+        actorId,
+        assetId,
+        idempotencyKey: "delete-d1-referenced",
+      }),
+    ).rejects.toEqual(new MediaAssetReferencedError(assetId, 1));
+  });
+
+  it("keeps overlapping identifiers isolated by site", async () => {
+    const alpha = application();
+    await upload(alpha);
+    const other = createMediaAssetApplication({
+      siteId: createSiteId("site_other"),
+      actorId,
+      assets: createD1MediaAssetStore(database),
+      sources: createInMemoryMediaSourceStore(),
+    });
+
+    await expect(other.queries.getAsset(assetId)).resolves.toBeNull();
+  });
+});

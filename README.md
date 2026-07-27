@@ -29,6 +29,7 @@ Production installation supplies:
 
 - a D1 database through the `FOUNDRY_DB` binding, after replacing the
   provisioning placeholder in `apps/reference-site/wrangler.jsonc`;
+- a private, client-owned R2 bucket through the `FOUNDRY_MEDIA` binding;
 - `FOUNDRY_ACCESS_ISSUER`, set to the exact HTTPS Cloudflare Access team
   domain;
 - `FOUNDRY_ACCESS_AUDIENCE`, set to the audience of the one Access application
@@ -117,6 +118,18 @@ by the public route. The short-lived preview capability is bound to the current
 actor, workspace and revision, and its D1 bookmark preserves read-your-write
 consistency. The preview identifies its exact content hash, schema version,
 Worker renderer version and bundled production-base content hash.
+
+### Client-owned media
+
+Media sources are written to the private `FOUNDRY_MEDIA` R2 bucket under
+`media/<site-id>/<asset-id>/source`. D1 stores stable asset metadata and
+site-scoped occurrence references. Replacing one occurrence appends a revision
+only for that occurrence; cropping appends normalized crop data and never
+rewrites the R2 source. All mutations are idempotent and audited. Deletion first
+reserves an unreferenced asset in D1, fences new references, removes its source,
+and then completes the metadata deletion. Any current or historical occurrence
+revision rejects deletion so immutable previews never acquire a broken media
+reference.
 
 Build and verify the Cloudflare Workers artifact:
 
