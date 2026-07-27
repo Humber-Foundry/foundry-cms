@@ -638,6 +638,47 @@ describe("content publication application", () => {
     );
   });
 
+  it("retries an unavailable release marker before timing it out", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-marker-unavailable",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    isReleaseLive.mockRejectedValue(new Error("release_marker_unavailable"));
+
+    currentTime = "2026-07-27T10:02:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "deployed",
+        detail: "release_marker_unavailable",
+      }),
+    );
+
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: "c".repeat(40),
+        detail: "release_marker_timeout",
+      }),
+    );
+  });
+
   it("reconciles an expired global claim before accepting a later publish", async () => {
     let currentTime = "2026-07-27T10:10:00.000Z";
     const store = createInMemoryContentPublicationStore();

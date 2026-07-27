@@ -741,11 +741,19 @@ export function createContentPublicationApplication({
           "approval_record_missing",
         );
       }
-      const live = await publisher.isReleaseLive({
-        commitSha,
-        contentHash: approval.fingerprint.contentHash,
-        schemaVersion: approval.fingerprint.schemaVersion,
-      });
+      let live: boolean;
+      try {
+        live = await publisher.isReleaseLive({
+          commitSha,
+          contentHash: approval.fingerprint.contentHash,
+          schemaVersion: approval.fingerprint.schemaVersion,
+        });
+      } catch {
+        return update(
+          timedOut ? "failed" : "deployed",
+          timedOut ? "release_marker_timeout" : "release_marker_unavailable",
+        );
+      }
       if (live) {
         return update("verified-live", null);
       }
