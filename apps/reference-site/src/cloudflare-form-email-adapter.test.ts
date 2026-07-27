@@ -27,6 +27,7 @@ import {
 import {
   createCloudflareFormEmailAdapter,
   FormEmailConfigurationError,
+  isCloudflareFormEmailConfigurationValid,
 } from "./cloudflare-form-email-adapter";
 
 describe("Cloudflare form email adapter", () => {
@@ -71,5 +72,13 @@ describe("Cloudflare form email adapter", () => {
         FOUNDRY_CANONICAL_ORIGIN: "https://",
       }),
     ).toThrow(FormEmailConfigurationError);
+    expect(
+      isCloudflareFormEmailConfigurationValid({
+        FOUNDRY_FORM_EMAIL: { send: vi.fn() },
+        FOUNDRY_FORM_EMAIL_FROM: "forms@example.com",
+        FOUNDRY_FORM_EMAIL_RECIPIENT: "staff@example.com",
+        FOUNDRY_CANONICAL_ORIGIN: "https://example.com/dashboard",
+      }),
+    ).toBe(false);
   });
 });

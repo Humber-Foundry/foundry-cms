@@ -8,6 +8,10 @@ import {
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
+import {
+  isCloudflareFormEmailConfigurationValid,
+  type CloudflareFormEmailEnvironment,
+} from "./cloudflare-form-email-adapter";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import type { HumanAccessRequestContext } from "./human-access-runtime";
 
@@ -22,22 +26,8 @@ const localHealth: PublicFormDeliveryHealth = {
 };
 
 function configurationHealth(environment: Record<string, unknown>) {
-  const email = (value: unknown) =>
-    typeof value === "string" &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
-  let validOrigin = false;
-  try {
-    validOrigin =
-      typeof environment.FOUNDRY_CANONICAL_ORIGIN === "string" &&
-      new URL(environment.FOUNDRY_CANONICAL_ORIGIN).protocol === "https:";
-  } catch {
-    validOrigin = false;
-  }
-  return (
-    environment.FOUNDRY_FORM_EMAIL !== undefined &&
-    email(environment.FOUNDRY_FORM_EMAIL_FROM) &&
-    email(environment.FOUNDRY_FORM_EMAIL_RECIPIENT) &&
-    validOrigin
+  return isCloudflareFormEmailConfigurationValid(
+    environment as CloudflareFormEmailEnvironment,
   );
 }
 

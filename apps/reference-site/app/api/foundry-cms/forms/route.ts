@@ -89,6 +89,9 @@ export async function POST(request: Request) {
             });
           }
         } catch (error) {
+          if (error instanceof AccessDeniedError) {
+            return Response.json({ error: "not_authorized" }, { status: 403 });
+          }
           if (
             error instanceof Error &&
             (error.message === "form_delivery_not_replayable" ||

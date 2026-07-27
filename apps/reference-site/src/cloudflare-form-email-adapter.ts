@@ -32,6 +32,39 @@ function exactEmail(value: string | undefined) {
   return value.trim().toLowerCase();
 }
 
+function canonicalHttpsOrigin(value: string | undefined) {
+  try {
+    const configuredOrigin = new URL(value ?? "");
+    if (
+      configuredOrigin.protocol !== "https:" ||
+      configuredOrigin.username !== "" ||
+      configuredOrigin.password !== "" ||
+      configuredOrigin.pathname !== "/" ||
+      configuredOrigin.search !== "" ||
+      configuredOrigin.hash !== ""
+    ) {
+      throw new FormEmailConfigurationError();
+    }
+    return configuredOrigin.origin;
+  } catch {
+    throw new FormEmailConfigurationError();
+  }
+}
+
+export function isCloudflareFormEmailConfigurationValid(
+  environment: CloudflareFormEmailEnvironment,
+) {
+  try {
+    if (environment.FOUNDRY_FORM_EMAIL === undefined) return false;
+    exactEmail(environment.FOUNDRY_FORM_EMAIL_FROM);
+    exactEmail(environment.FOUNDRY_FORM_EMAIL_RECIPIENT);
+    canonicalHttpsOrigin(environment.FOUNDRY_CANONICAL_ORIGIN);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function encodeHeader(value: string) {
   return value.replaceAll(/[\r\n]/gu, "");
 }
@@ -85,25 +118,9 @@ export function createCloudflareFormEmailAdapter(
   const binding = environment.FOUNDRY_FORM_EMAIL;
   const from = exactEmail(environment.FOUNDRY_FORM_EMAIL_FROM);
   const recipient = exactEmail(environment.FOUNDRY_FORM_EMAIL_RECIPIENT);
-  let canonicalOrigin: string;
-  try {
-    const configuredOrigin = new URL(
-      environment.FOUNDRY_CANONICAL_ORIGIN ?? "",
-    );
-    if (
-      configuredOrigin.protocol !== "https:" ||
-      configuredOrigin.username !== "" ||
-      configuredOrigin.password !== "" ||
-      configuredOrigin.pathname !== "/" ||
-      configuredOrigin.search !== "" ||
-      configuredOrigin.hash !== ""
-    ) {
-      throw new FormEmailConfigurationError();
-    }
-    canonicalOrigin = configuredOrigin.origin;
-  } catch {
-    throw new FormEmailConfigurationError();
-  }
+  const canonicalOrigin = canonicalHttpsOrigin(
+    environment.FOUNDRY_CANONICAL_ORIGIN,
+  );
   return {
     async notify(notification) {
       const { EmailMessage } = await import("cloudflare:email");

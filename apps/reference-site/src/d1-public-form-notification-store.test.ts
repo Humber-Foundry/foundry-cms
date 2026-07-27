@@ -91,6 +91,30 @@ beforeEach(async () => {
 afterEach(() => runtime.dispose());
 
 describe("D1 public form notification store", () => {
+  it("measures capacity in UTF-8 bytes", async () => {
+    const unicodeAcceptance = {
+      ...accepted,
+      fields: { message: "🪶" },
+    };
+    await createD1PublicFormAcceptanceStore(database).accept(unicodeAcceptance);
+    const encodedBytes = new TextEncoder().encode(
+      JSON.stringify(unicodeAcceptance.fields),
+    ).byteLength;
+    const store = createD1PublicFormNotificationStore(
+      database,
+      encodedBytes + 1024,
+    );
+
+    await expect(
+      store.deliveryHealth({
+        siteId,
+        now: "2026-07-27T20:05:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      capacity: { usedPercent: 100, state: "critical" },
+    });
+  });
+
   it("claims once, exposes only configured preview fields, and records delivery", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(accepted);
     const store = createD1PublicFormNotificationStore(

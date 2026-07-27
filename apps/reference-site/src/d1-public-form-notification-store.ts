@@ -234,7 +234,10 @@ export function createD1PublicFormNotificationStore(
                ELSE NULL
              END) AS oldest,
              (
-               SELECT COALESCE(SUM(length(submission.fields_json) + 1024), 0)
+               SELECT COALESCE(
+                 SUM(length(CAST(submission.fields_json AS BLOB)) + 1024),
+                 0
+               )
                FROM public_form_submissions AS submission
                WHERE submission.site_id = ?1
              ) AS used_bytes
