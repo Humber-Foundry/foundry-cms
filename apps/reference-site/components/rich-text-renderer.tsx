@@ -1,8 +1,9 @@
-import type {
-  RichTextDocument,
-  RichTextLinkMark,
-  RichTextParagraph,
-  RichTextText,
+import {
+  visitRichTextBlock,
+  type RichTextDocument,
+  type RichTextLinkMark,
+  type RichTextParagraph,
+  type RichTextText,
 } from "@foundry/site-definition";
 
 function Text({ node }: { node: RichTextText }) {
@@ -32,46 +33,52 @@ function Paragraph({ node }: { node: RichTextParagraph }) {
 
 export function RichTextRenderer({
   document,
+  headingOffset = 0,
 }: {
   document: RichTextDocument;
+  headingOffset?: number;
 }) {
-  return document.children.map((block, blockIndex) => {
-    switch (block.type) {
-      case "paragraph":
-        return <Paragraph key={blockIndex} node={block} />;
-      case "heading": {
-        const Tag = `h${block.level}` as "h1";
+  return document.children.map((block, blockIndex) =>
+    visitRichTextBlock(block, {
+      paragraph: (paragraph) => (
+        <Paragraph key={blockIndex} node={paragraph} />
+      ),
+      heading: (heading) => {
+        const renderedLevel = Math.min(6, heading.level + headingOffset);
+        const Tag = `h${renderedLevel}` as "h1";
         return (
           <Tag key={blockIndex}>
-            {block.children.map((child, index) => (
+            {heading.children.map((child, index) => (
               <Text key={index} node={child} />
             ))}
           </Tag>
         );
-      }
-      case "blockquote":
-        return (
+      },
+      blockquote: (blockquote) => (
           <blockquote key={blockIndex}>
-            {block.children.map((child, index) => (
+            {blockquote.children.map((child, index) => (
               <Paragraph key={index} node={child} />
             ))}
           </blockquote>
-        );
-      case "bulletList":
-      case "orderedList": {
-        const List = block.type === "bulletList" ? "ul" : "ol";
-        return (
-          <List key={blockIndex}>
-            {block.children.map((item, itemIndex) => (
-              <li key={itemIndex}>
-                {item.children.map((child, index) => (
-                  <Paragraph key={index} node={child} />
-                ))}
-              </li>
-            ))}
-          </List>
-        );
-      }
-    }
-  });
+        ),
+      bulletList: (list) => (
+        <ul key={blockIndex}>
+          {list.children.map((item, itemIndex) => (
+            <li key={itemIndex}>
+              <Paragraph node={item.children[0]!} />
+            </li>
+          ))}
+        </ul>
+      ),
+      orderedList: (list) => (
+        <ol key={blockIndex}>
+          {list.children.map((item, itemIndex) => (
+            <li key={itemIndex}>
+              <Paragraph node={item.children[0]!} />
+            </li>
+          ))}
+        </ol>
+      ),
+    }),
+  );
 }

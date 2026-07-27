@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   RichTextValidationError,
   fromTipTapDocument,
+  parseRichTextMarkdown,
   serializeRichTextToMarkdown,
   toTipTapDocument,
   validateRichTextDocument,
@@ -175,14 +176,14 @@ describe("rich text contract", () => {
       [
         "## Safe ***rich text***",
         "",
-        "Read the [guide](/guide).",
+        "Read the [guide](/guide)\\.",
         "",
         "- One",
         "- Two",
         "",
         "1. First",
         "",
-        "> Keep it portable.",
+        "> Keep it portable\\.",
         "",
       ].join("\n"),
     );
@@ -213,6 +214,7 @@ describe("rich text contract", () => {
     ["javascript:alert(1)", "unsafe_link"],
     ["data:text/html,<script>alert(1)</script>", "unsafe_link"],
     ["//attacker.example/path", "unsafe_link"],
+    ["/\\attacker.example/path", "unsafe_link"],
   ])("rejects unsafe link %s", (href, code) => {
     const document = structuredClone(supportedDocument);
     const paragraph = document.children[1];
@@ -326,6 +328,45 @@ describe("rich text contract", () => {
         },
       ],
     });
+  });
+
+  it("round-trips canonical Markdown back to the same engine-neutral AST", () => {
+    const markdown = serializeRichTextToMarkdown(supportedDocument);
+
+    expect(parseRichTextMarkdown(markdown)).toEqual(supportedDocument);
+    expect(serializeRichTextToMarkdown(parseRichTextMarkdown(markdown))).toBe(
+      markdown,
+    );
+  });
+
+  it("escapes paragraph text that resembles a Markdown list marker", () => {
+    const document: RichTextDocument = {
+      version: "1.0.0",
+      type: "document",
+      children: [
+        {
+          type: "paragraph",
+          children: [{ type: "text", text: "1. item", marks: [] }],
+        },
+      ],
+    };
+
+    expect(serializeRichTextToMarkdown(document)).toBe("1\\. item\n");
+    expect(parseRichTextMarkdown("1\\. item\n")).toEqual(document);
+  });
+
+  it.each([
+    ["[run](javascript:alert\\(1\\))\n", "unsafe_link"],
+    ["<script>alert(1)</script>\n", "serializer_ambiguity"],
+    ["- item\ncontinuation\n", "serializer_ambiguity"],
+  ])("rejects non-canonical Markdown %s", (markdown, code) => {
+    expect(() => parseRichTextMarkdown(markdown)).toThrow(
+      expect.objectContaining<Partial<RichTextValidationError>>({
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code }),
+        ]),
+      }),
+    );
   });
 
   it("rejects unknown contract versions", () => {

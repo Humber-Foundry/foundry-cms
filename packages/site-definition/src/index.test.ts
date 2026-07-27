@@ -6,6 +6,10 @@ import {
   DuplicateEditableSiteFieldPathError,
   createSiteId,
   listEditableSiteFields,
+  serializeRichTextDocument,
+  serializeSiteDefinitionRichTextForPublication,
+  type SerializedRichTextDocument,
+  type RichTextDocument,
   referenceSiteDefinition,
   siteDefinitionSchema,
   type SiteDefinition,
@@ -173,11 +177,12 @@ describe("reference Site Definition", () => {
           ],
         },
       ],
-    };
+    } as const satisfies RichTextDocument;
     const result = applySiteDefinitionEdits(referenceSiteDefinition, [
       {
         path: "section_contact.body",
-        value: JSON.stringify(body),
+        format: "richText",
+        value: serializeRichTextDocument(body),
       },
     ]);
 
@@ -200,7 +205,9 @@ describe("reference Site Definition", () => {
       ),
     ).toMatchObject({
       format: "richText",
-      value: JSON.stringify(referenceSiteDefinition.home.sections[3]!.body),
+      value: serializeRichTextDocument(
+        referenceSiteDefinition.home.sections[3]!.body,
+      ),
     });
   });
 
@@ -209,6 +216,7 @@ describe("reference Site Definition", () => {
       applySiteDefinitionEdits(referenceSiteDefinition, [
         {
           path: "section_contact.body",
+          format: "richText",
           value: JSON.stringify({
             version: "1.0.0",
             type: "document",
@@ -224,7 +232,7 @@ describe("reference Site Definition", () => {
                 ],
               },
             ],
-          }),
+          }) as SerializedRichTextDocument,
         },
       ]),
     ).toEqual({
@@ -234,6 +242,19 @@ describe("reference Site Definition", () => {
           "Rich text is invalid or contains unsupported or unsafe content.",
       },
     });
+  });
+
+  it("creates deterministic Markdown publication artifacts for rich text", () => {
+    expect(
+      serializeSiteDefinitionRichTextForPublication(referenceSiteDefinition),
+    ).toEqual([
+      {
+        fieldPath: "section_contact.body",
+        filePath: "content/rich-text/section_contact/body.md",
+        markdown:
+          "Bring the rough notes, the constraints, and the thing that still feels unresolved\\. That is enough to start\\.\n",
+      },
+    ]);
   });
 
   it("returns field-level feedback for unknown and invalid edits", () => {

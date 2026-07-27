@@ -90,7 +90,7 @@ function Section({ section }: { section: PageSection }) {
           <p className="eyebrow">{section.eyebrow}</p>
           <h2 id={`${section.id}_title`}>{section.title}</h2>
           <div className="rich-text">
-            <RichTextRenderer document={section.body} />
+            <RichTextRenderer document={section.body} headingOffset={1} />
           </div>
           <a className="button button-light" href={section.action.href}>
             {section.action.label}

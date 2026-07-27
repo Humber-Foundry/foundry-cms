@@ -487,6 +487,34 @@
   margin-bottom: 0;
 }
 
+.rich-text-editor .tiptap h2 {
+  margin-block: 1rem 0.5rem;
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.rich-text-editor .tiptap p,
+.rich-text-editor .tiptap ul,
+.rich-text-editor .tiptap ol,
+.rich-text-editor .tiptap blockquote {
+  margin-block: 0.65rem;
+}
+
+.rich-text-editor .tiptap blockquote {
+  border-left: 0.2rem solid #8b9c92;
+  padding-left: 0.85rem;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.rich-text-editor .tiptap a {
+  color: inherit;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.2em;
+}
+
 .rich-text-editor small[role="alert"] {
   display: block;
   padding: 0 0.75rem 0.75rem;

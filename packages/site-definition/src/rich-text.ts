@@ -1,4 +1,5 @@
 export const RICH_TEXT_VERSION = "1.0.0" as const;
+declare const serializedRichTextDocumentBrand: unique symbol;
 
 export type RichTextLinkMark = Readonly<{
   type: "link";
@@ -34,10 +35,15 @@ export type RichTextListItem = Readonly<{
   children: ReadonlyArray<RichTextParagraph>;
 }>;
 
-export type RichTextList = Readonly<{
-  type: "bulletList" | "orderedList";
-  children: ReadonlyArray<RichTextListItem>;
-}>;
+export type RichTextList =
+  | Readonly<{
+      type: "bulletList";
+      children: ReadonlyArray<RichTextListItem>;
+    }>
+  | Readonly<{
+      type: "orderedList";
+      children: ReadonlyArray<RichTextListItem>;
+    }>;
 
 export type RichTextBlock =
   | RichTextParagraph
@@ -45,11 +51,41 @@ export type RichTextBlock =
   | RichTextBlockquote
   | RichTextList;
 
+export type RichTextBlockVisitor<Result> = Readonly<{
+  paragraph(block: RichTextParagraph): Result;
+  heading(block: RichTextHeading): Result;
+  blockquote(block: RichTextBlockquote): Result;
+  bulletList(block: Extract<RichTextList, { type: "bulletList" }>): Result;
+  orderedList(block: Extract<RichTextList, { type: "orderedList" }>): Result;
+}>;
+
+export function visitRichTextBlock<Result>(
+  block: RichTextBlock,
+  visitor: RichTextBlockVisitor<Result>,
+): Result {
+  switch (block.type) {
+    case "paragraph":
+      return visitor.paragraph(block);
+    case "heading":
+      return visitor.heading(block);
+    case "blockquote":
+      return visitor.blockquote(block);
+    case "bulletList":
+      return visitor.bulletList(block);
+    case "orderedList":
+      return visitor.orderedList(block);
+  }
+}
+
 export type RichTextDocument = Readonly<{
   version: typeof RICH_TEXT_VERSION;
   type: "document";
   children: ReadonlyArray<RichTextBlock>;
 }>;
+
+export type SerializedRichTextDocument = string & {
+  readonly [serializedRichTextDocumentBrand]: "SerializedRichTextDocument";
+};
 
 export type RichTextValidationIssue = Readonly<{
   code:
@@ -119,7 +155,7 @@ function isSafeLink(href: string): boolean {
     return /^#[A-Za-z][A-Za-z0-9_-]*$/u.test(href);
   }
   if (href.startsWith("/")) {
-    return !href.startsWith("//");
+    return !href.startsWith("//") && !href.includes("\\");
   }
   try {
     const parsed = new URL(href);
@@ -211,18 +247,25 @@ function validateParagraph(value: RichTextParagraph, path: string) {
   if (!Array.isArray(value.children)) {
     issue("invalid_structure", `${path}.children`, "Expected paragraph children.");
   }
-  value.children.forEach((child, index) =>
-    validateText(child, `${path}.children[${index}]`),
+  validateInlineChildren(value.children, `${path}.children`);
+}
+
+function validateInlineChildren(
+  children: ReadonlyArray<RichTextText>,
+  path: string,
+) {
+  children.forEach((child, index) =>
+    validateText(child, `${path}[${index}]`),
   );
-  value.children.forEach((child, index) => {
-    const previous = value.children[index - 1];
+  children.forEach((child, index) => {
+    const previous = children[index - 1];
     if (
       previous !== undefined &&
       JSON.stringify(previous.marks) === JSON.stringify(child.marks)
     ) {
       issue(
         "serializer_ambiguity",
-        `${path}.children[${index}]`,
+        `${path}[${index}]`,
         "Adjacent text nodes with identical marks must be combined.",
       );
     }
@@ -271,9 +314,7 @@ export function validateRichTextDocument(
         if (!Array.isArray(block.children)) {
           issue("invalid_structure", `${path}.children`, "Expected heading children.");
         }
-        block.children.forEach((child, index) =>
-          validateText(child, `${path}.children[${index}]`),
-        );
+        validateInlineChildren(block.children, `${path}.children`);
         break;
       case "blockquote":
         assertOnlyKeys(block, ["type", "children"], path);
@@ -311,6 +352,13 @@ export function validateRichTextDocument(
               "List items require at least one paragraph.",
             );
           }
+          if (item.children.length !== 1) {
+            issue(
+              "serializer_ambiguity",
+              `${itemPath}.children`,
+              "List items require exactly one paragraph in Rich Text 1.0.0.",
+            );
+          }
           item.children.forEach((child, index) =>
             validateParagraph(child, `${itemPath}.children[${index}]`),
           );
@@ -325,6 +373,32 @@ export function validateRichTextDocument(
     }
   });
   return value;
+}
+
+export function serializeRichTextDocument(
+  document: RichTextDocument,
+): SerializedRichTextDocument {
+  return JSON.stringify(
+    validateRichTextDocument(document),
+  ) as SerializedRichTextDocument;
+}
+
+export function parseSerializedRichTextDocument(
+  value: string,
+): RichTextDocument {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    issue("invalid_node", "$", "Rich text must be valid canonical JSON.");
+  }
+  return validateRichTextDocument(parsed as RichTextDocument);
+}
+
+export function createSerializedRichTextDocument(
+  value: string,
+): SerializedRichTextDocument {
+  return serializeRichTextDocument(parseSerializedRichTextDocument(value));
 }
 
 function tipTapMarksToRichText(value: unknown, path: string): RichTextMark[] {
@@ -582,41 +656,43 @@ export function toTipTapDocument(document: RichTextDocument): JsonObject {
     ...(document.children.length === 0
       ? {}
       : {
-          content: document.children.map((block): JsonObject => {
-            switch (block.type) {
-              case "paragraph":
-                return toTipTapParagraph(block);
-              case "heading":
-                return {
+          content: document.children.map((block): JsonObject =>
+            visitRichTextBlock(block, {
+              paragraph: toTipTapParagraph,
+              heading: (heading) => ({
                   type: "heading",
-                  attrs: { level: block.level },
-                  ...(block.children.length === 0
+                  attrs: { level: heading.level },
+                  ...(heading.children.length === 0
                     ? {}
-                    : { content: block.children.map(toTipTapText) }),
-                };
-              case "blockquote":
-                return {
+                    : { content: heading.children.map(toTipTapText) }),
+                }),
+              blockquote: (blockquote) => ({
                   type: "blockquote",
-                  content: block.children.map(toTipTapParagraph),
-                };
-              case "bulletList":
-              case "orderedList":
-                return {
-                  type: block.type,
-                  ...(block.type === "orderedList" ? { attrs: { start: 1 } } : {}),
-                  content: block.children.map((item) => ({
+                  content: blockquote.children.map(toTipTapParagraph),
+                }),
+              bulletList: (list) => ({
+                  type: "bulletList",
+                  content: list.children.map((item) => ({
                     type: "listItem",
                     content: item.children.map(toTipTapParagraph),
                   })),
-                };
-            }
-          }),
+                }),
+              orderedList: (list) => ({
+                type: "orderedList",
+                attrs: { start: 1 },
+                content: list.children.map((item) => ({
+                  type: "listItem",
+                  content: item.children.map(toTipTapParagraph),
+                })),
+              }),
+            }),
+          ),
         }),
   };
 }
 
 function escapeMarkdownText(value: string): string {
-  return value.replace(/([\\`*{}[\]()<>#+\-!_|>])/gu, "\\$1");
+  return value.replace(/([\\`*{}[\]()<>#+\-.!_|>])/gu, "\\$1");
 }
 
 function escapeMarkdownDestination(value: string): string {
@@ -651,34 +727,255 @@ export function serializeRichTextToMarkdown(
   document: RichTextDocument,
 ): string {
   validateRichTextDocument(document);
-  const blocks = document.children.map((block) => {
-    switch (block.type) {
-      case "paragraph":
-        return serializeParagraph(block);
-      case "heading":
-        return `${"#".repeat(block.level)} ${block.children
+  const serializeList = (list: RichTextList) =>
+    list.children
+      .map((item, index) => {
+        const marker = list.type === "bulletList" ? "-" : `${index + 1}.`;
+        return `${marker} ${serializeParagraph(item.children[0]!)}`;
+      })
+      .join("\n");
+  const blocks = document.children.map((block) =>
+    visitRichTextBlock(block, {
+      paragraph: serializeParagraph,
+      heading: (heading) =>
+        `${"#".repeat(heading.level)} ${heading.children
           .map(serializeText)
-          .join("")}`;
-      case "blockquote":
-        return block.children
+          .join("")}`,
+      blockquote: (blockquote) =>
+        blockquote.children
           .map((paragraph) => `> ${serializeParagraph(paragraph)}`)
-          .join("\n>\n");
-      case "bulletList":
-      case "orderedList":
-        return block.children
-          .map((item, index) => {
-            const marker = block.type === "bulletList" ? "-" : `${index + 1}.`;
-            return item.children
-              .map(
-                (paragraph, paragraphIndex) =>
-                  `${paragraphIndex === 0 ? `${marker} ` : "  "}${serializeParagraph(
-                    paragraph,
-                  )}`,
-              )
-              .join("\n");
-          })
-          .join("\n");
-    }
-  });
+          .join("\n>\n"),
+      bulletList: serializeList,
+      orderedList: serializeList,
+    }),
+  );
   return blocks.length === 0 ? "" : `${blocks.join("\n\n")}\n`;
+}
+
+function findUnescaped(value: string, needle: string, from: number): number {
+  for (let index = from; index <= value.length - needle.length; index += 1) {
+    if (
+      value.slice(index, index + needle.length) === needle &&
+      (index === 0 || value[index - 1] !== "\\")
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function unescapeMarkdown(value: string, path: string): string {
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== "\\") {
+      result += value[index];
+      continue;
+    }
+    const escaped = value[index + 1];
+    if (
+      escaped === undefined ||
+      !"\\`*{}[]()<>#+-.!_|>".includes(escaped)
+    ) {
+      issue(
+        "serializer_ambiguity",
+        path,
+        "Markdown contains a non-canonical escape sequence.",
+      );
+    }
+    result += escaped;
+    index += 1;
+  }
+  return result;
+}
+
+function addInlineMark(
+  children: ReadonlyArray<RichTextText>,
+  mark: RichTextMark,
+): RichTextText[] {
+  return children.map((child) => ({
+    ...child,
+    marks: [...child.marks, mark].sort((left, right) => {
+      const order = { bold: 0, italic: 1, link: 2 };
+      const leftKind = typeof left === "string" ? left : left.type;
+      const rightKind = typeof right === "string" ? right : right.type;
+      return order[leftKind] - order[rightKind];
+    }),
+  }));
+}
+
+function parseMarkdownInline(value: string, path: string): RichTextText[] {
+  const children: RichTextText[] = [];
+  let plain = "";
+  const flushPlain = () => {
+    if (plain !== "") {
+      children.push({
+        type: "text",
+        text: unescapeMarkdown(plain, path),
+        marks: [],
+      });
+      plain = "";
+    }
+  };
+  for (let index = 0; index < value.length; ) {
+    if (value[index] === "\\") {
+      if (value[index + 1] === undefined) {
+        issue(
+          "serializer_ambiguity",
+          path,
+          "Markdown ends with an incomplete escape.",
+        );
+      }
+      plain += value.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    if (value[index] === "[") {
+      const labelEnd = findUnescaped(value, "](", index + 1);
+      if (labelEnd < 0) {
+        issue("serializer_ambiguity", path, "Link syntax is incomplete.");
+      }
+      const destinationEnd = findUnescaped(value, ")", labelEnd + 2);
+      if (destinationEnd < 0) {
+        issue("serializer_ambiguity", path, "Link destination is incomplete.");
+      }
+      flushPlain();
+      const href = unescapeMarkdown(
+        value.slice(labelEnd + 2, destinationEnd),
+        path,
+      );
+      if (!isSafeLink(href)) {
+        issue("unsafe_link", path, "Markdown contains an unsafe link.");
+      }
+      children.push(
+        ...addInlineMark(
+          parseMarkdownInline(value.slice(index + 1, labelEnd), path),
+          { type: "link", href },
+        ),
+      );
+      index = destinationEnd + 1;
+      continue;
+    }
+    const delimiter = value.startsWith("***", index)
+      ? "***"
+      : value.startsWith("**", index)
+        ? "**"
+        : value[index] === "*"
+          ? "*"
+          : undefined;
+    if (delimiter !== undefined) {
+      const end = findUnescaped(value, delimiter, index + delimiter.length);
+      if (end < 0) {
+        issue("serializer_ambiguity", path, "Emphasis syntax is incomplete.");
+      }
+      flushPlain();
+      let marked = parseMarkdownInline(
+        value.slice(index + delimiter.length, end),
+        path,
+      );
+      if (delimiter === "***" || delimiter === "**") {
+        marked = addInlineMark(marked, "bold");
+      }
+      if (delimiter === "***" || delimiter === "*") {
+        marked = addInlineMark(marked, "italic");
+      }
+      children.push(...marked);
+      index = end + delimiter.length;
+      continue;
+    }
+    plain += value[index];
+    index += 1;
+  }
+  flushPlain();
+  return combineAdjacentText(children);
+}
+
+export function parseRichTextMarkdown(markdown: string): RichTextDocument {
+  if (markdown === "") {
+    return { version: RICH_TEXT_VERSION, type: "document", children: [] };
+  }
+  if (!markdown.endsWith("\n") || markdown.includes("\r")) {
+    issue(
+      "serializer_ambiguity",
+      "$",
+      "Canonical rich-text Markdown uses LF and one trailing newline.",
+    );
+  }
+  const chunks = markdown.slice(0, -1).split("\n\n");
+  const children = chunks.map((chunk, blockIndex): RichTextBlock => {
+    const path = `$.blocks[${blockIndex}]`;
+    const heading = /^(#{1,6}) (.*)$/u.exec(chunk);
+    if (heading !== null) {
+      return {
+        type: "heading",
+        level: heading[1]!.length as RichTextHeading["level"],
+        children: parseMarkdownInline(heading[2]!, path),
+      };
+    }
+    const lines = chunk.split("\n");
+    if (lines.every((line) => line.startsWith("> ") || line === ">")) {
+      const paragraphs = chunk.split("\n>\n");
+      return {
+        type: "blockquote",
+        children: paragraphs.map((paragraph) => ({
+          type: "paragraph",
+          children: parseMarkdownInline(paragraph.slice(2), path),
+        })),
+      };
+    }
+    if (lines.every((line) => /^- /u.test(line))) {
+      return {
+        type: "bulletList",
+        children: lines.map((line) => ({
+          type: "listItem",
+          children: [
+            {
+              type: "paragraph",
+              children: parseMarkdownInline(line.slice(2), path),
+            },
+          ],
+        })),
+      };
+    }
+    if (lines.every((line, index) => line.startsWith(`${index + 1}. `))) {
+      return {
+        type: "orderedList",
+        children: lines.map((line, index) => ({
+          type: "listItem",
+          children: [
+            {
+              type: "paragraph",
+              children: parseMarkdownInline(
+                line.slice(`${index + 1}. `.length),
+                path,
+              ),
+            },
+          ],
+        })),
+      };
+    }
+    if (lines.length !== 1) {
+      issue(
+        "serializer_ambiguity",
+        path,
+        "Markdown block structure is not canonical.",
+      );
+    }
+    return {
+      type: "paragraph",
+      children: parseMarkdownInline(chunk, path),
+    };
+  });
+  const document = validateRichTextDocument({
+    version: RICH_TEXT_VERSION,
+    type: "document",
+    children,
+  });
+  if (serializeRichTextToMarkdown(document) !== markdown) {
+    issue(
+      "serializer_ambiguity",
+      "$",
+      "Markdown has more than one supported interpretation.",
+    );
+  }
+  return document;
 }

@@ -7,8 +7,10 @@ import StarterKit from "@tiptap/starter-kit";
 import {
   fromTipTapDocument,
   isSafeRichTextLink,
+  parseSerializedRichTextDocument,
+  serializeRichTextDocument,
   toTipTapDocument,
-  type RichTextDocument,
+  type SerializedRichTextDocument,
 } from "@foundry/site-definition";
 
 export function RichTextEditor({
@@ -20,14 +22,14 @@ export function RichTextEditor({
   onChange,
 }: {
   id: string;
-  value: string;
+  value: SerializedRichTextDocument;
   disabled: boolean;
   describedBy: string;
   invalid: boolean;
-  onChange(value: string): void;
+  onChange(value: SerializedRichTextDocument): void;
 }) {
   const [validationMessage, setValidationMessage] = useState("");
-  const document = JSON.parse(value) as RichTextDocument;
+  const document = parseSerializedRichTextDocument(value);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -45,7 +47,7 @@ export function RichTextEditor({
       try {
         const canonical = fromTipTapDocument(currentEditor.getJSON());
         setValidationMessage("");
-        onChange(JSON.stringify(canonical));
+        onChange(serializeRichTextDocument(canonical));
       } catch {
         setValidationMessage(
           "This edit contains unsupported or unsafe rich-text content.",
@@ -62,7 +64,9 @@ export function RichTextEditor({
     if (editor === null) {
       return;
     }
-    const current = JSON.stringify(fromTipTapDocument(editor.getJSON()));
+    const current = serializeRichTextDocument(
+      fromTipTapDocument(editor.getJSON()),
+    );
     if (current !== value) {
       editor.commands.setContent(toTipTapDocument(document), {
         emitUpdate: false,
@@ -103,9 +107,10 @@ export function RichTextEditor({
   return (
     <div
       id={id}
-      className="rich-text-editor"
+      className="rich-text-editor rendered-rich-text"
       aria-invalid={invalid || validationMessage !== ""}
       aria-describedby={describedBy}
+      aria-label="Rendered rich text"
     >
       <div className="rich-text-toolbar" role="toolbar" aria-label="Text formatting">
         <button

@@ -36,8 +36,16 @@ function changedFields(
     persisted.map((field) => [field.path, field.value]),
   );
   return working
-    .filter((field) => persistedValues.get(field.path) !== field.value)
-    .map(({ path, value }) => ({ path, value }));
+    .filter(
+      (field) =>
+        JSON.stringify(persistedValues.get(field.path)) !==
+        JSON.stringify(field.value),
+    )
+    .map((field): SiteDefinitionEdit =>
+      field.format === "richText"
+        ? { path: field.path, format: "richText", value: field.value }
+        : { path: field.path, format: "plainText", value: field.value },
+    );
 }
 
 export function ContentEditor({
@@ -554,7 +562,9 @@ export function ContentEditor({
                 {edit.reason === "changed" ? (
                   <>
                     <span>Latest: {edit.currentValue}</span>
-                    <span>Your unsaved value: {edit.value}</span>
+                    <span>
+                      Your unsaved value: {displayEditableValue(edit.value)}
+                    </span>
                     <span className="editor-conflict-actions">
                       <button
                         type="button"
@@ -578,7 +588,7 @@ export function ContentEditor({
                   <>
                     <span>
                       This field no longer exists. Your unsaved value:{" "}
-                      {edit.value}
+                      {displayEditableValue(edit.value)}
                     </span>
                     <button
                       type="button"
@@ -645,4 +655,23 @@ export function ContentEditor({
       </div>
     </section>
   );
+}
+
+function displayEditableValue(value: SiteDefinitionEdit["value"]): string {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "type" in parsed &&
+        parsed.type === "document"
+      ) {
+        return "Rich-text content";
+      }
+    } catch {
+      // Plain text is displayed as entered.
+    }
+  }
+  return value;
 }

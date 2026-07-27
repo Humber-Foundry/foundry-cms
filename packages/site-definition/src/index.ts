@@ -396,6 +396,7 @@ export const siteDefinitionSchema = {
         children: {
           type: "array",
           minItems: 1,
+          maxItems: 1,
           items: { $ref: "#/$defs/richTextParagraph" },
         },
       },
