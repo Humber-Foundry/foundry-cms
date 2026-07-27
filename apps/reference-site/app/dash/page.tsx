@@ -1,9 +1,12 @@
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import {
   AccessDeniedError,
+  ContentRevisionConfigurationError,
+  ContentWorkspaceAccessError,
   createContentActorId,
+  createContentWorkspaceId,
 } from "@foundry/application";
 
 import { DashboardShell } from "@/components/dashboard-shell";
@@ -25,7 +28,14 @@ import "./dashboard.css";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    workspace?: string | string[];
+    newWorkspace?: string | string[];
+  }>;
+}) {
   let access;
   try {
     access = await loadHumanAccessRequestContext(await headers());
@@ -50,6 +60,13 @@ export default async function DashboardPage() {
       />
     );
   }
+  const requested = await searchParams;
+  if (requested.newWorkspace === "1") {
+    const workspaceId = createContentWorkspaceId(
+      `workspace_${crypto.randomUUID().replaceAll("-", "")}`,
+    );
+    redirect(`/dash?workspace=${workspaceId}`);
+  }
   const members =
     access.membership.role === "owner"
       ? await access.application.queries.listMembers({
@@ -61,10 +78,37 @@ export default async function DashboardPage() {
       ? await createHumanMutationToken(access.identity)
       : null;
   const actorId = createContentActorId(access.membership.id);
-  const workspaceId = await contentWorkspaceIdForActor(actorId);
-  const contentRevision = await (
-    await loadContentRevisionApplication(workspaceId, actorId)
-  ).queries.getCurrent();
+  let workspaceId;
+  try {
+    workspaceId =
+      typeof requested.workspace === "string"
+        ? createContentWorkspaceId(requested.workspace)
+        : await contentWorkspaceIdForActor(actorId);
+  } catch {
+    notFound();
+  }
+  const { contentApplication, contentRevision } = await (async () => {
+    try {
+      const application = await loadContentRevisionApplication(
+        workspaceId,
+        actorId,
+      );
+      return {
+        contentApplication: application,
+        contentRevision: await application.queries.getCurrent(),
+      };
+    } catch (error) {
+      if (
+        error instanceof ContentWorkspaceAccessError ||
+        error instanceof ContentRevisionConfigurationError
+      ) {
+        notFound();
+      }
+      throw error;
+    }
+  })();
+  const initialContentStale =
+    !(await contentApplication.queries.isRevisionCurrent(contentRevision));
   const contentMutationToken = await createHumanMutationToken(access.identity);
   const initialPreviewCapability = await createRevisionPreviewCapability({
     identity: access.identity,
@@ -84,6 +128,7 @@ export default async function DashboardPage() {
       contentRevision={contentRevision}
       contentMutationToken={contentMutationToken}
       initialPreviewUrl={initialPreviewUrl}
+      initialContentStale={initialContentStale}
     />
   );
 }

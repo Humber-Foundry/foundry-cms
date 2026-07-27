@@ -32,19 +32,26 @@ export function ContentEditor({
   csrfToken,
   initialRevision,
   initialPreviewUrl,
+  initialStale = false,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
   initialPreviewUrl: string;
+  initialStale?: boolean;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
     createContentEditorState({
       definition: initialRevision.definition,
       revision: initialRevision.revision,
+      stale: initialStale,
     }),
   );
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(
+    initialStale
+      ? "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved."
+      : "",
+  );
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const pendingAttempt = useRef<{
     body: string;
@@ -135,7 +142,7 @@ export function ContentEditor({
           errors: {},
         });
         setMessage(
-          "This workspace is based on an older production version. Reload to start from the current site before saving again.",
+          "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved.",
         );
         return;
       }
@@ -217,7 +224,11 @@ export function ContentEditor({
           </a>
         )}
         {state.status === "conflict" || state.status === "stale" ? (
-          <a href="/dash">Reload latest</a>
+          <a href={state.status === "stale" ? "/dash?newWorkspace=1" : "/dash"}>
+            {state.status === "stale"
+              ? "Start fresh workspace"
+              : "Reload latest"}
+          </a>
         ) : null}
       </div>
       <p role="status" aria-live="polite" className="editor-message">

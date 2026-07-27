@@ -96,4 +96,15 @@ describe("content editor history", () => {
     expect(contentEditorReducer(stale, { type: "undo" })).toBe(stale);
     expect(contentEditorReducer(stale, { type: "redo" })).toBe(stale);
   });
+
+  it("can initialize a reopened stale workspace as locked", () => {
+    const stale = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+      stale: true,
+    });
+
+    expect(stale.status).toBe("stale");
+    expect(stale.persistedRevision).toBe(4);
+  });
 });

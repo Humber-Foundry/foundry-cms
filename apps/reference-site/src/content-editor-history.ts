@@ -32,9 +32,11 @@ export type ContentEditorAction =
 export function createContentEditorState({
   definition,
   revision,
+  stale = false,
 }: {
   definition: SiteDefinition;
   revision: number;
+  stale?: boolean;
 }): ContentEditorState {
   return {
     persistedRevision: revision,
@@ -42,7 +44,7 @@ export function createContentEditorState({
     workingDefinition: definition,
     past: [],
     future: [],
-    status: "saved",
+    status: stale ? "stale" : "saved",
     errors: {},
   };
 }
