@@ -228,9 +228,26 @@ matching PKCS#8 private key outside Cloudflare and the repository in
 client-controlled recovery custody. The Worker can encrypt backups but cannot
 decrypt them. Encrypted objects expire after 30 days.
 
-Restore is deliberately fail-closed and runs from a client-controlled recovery
-environment, not the Worker. The recovery process supplies the private key
-through hidden input and restores a named backup only into
+Restore is deliberately fail-closed and runs from a client-controlled operator
+machine, not the Worker. Set a short-lived `CLOUDFLARE_API_TOKEN` with D1
+read/write and R2 object-read access, then run:
+
+```sh
+npm run forms:restore --workspace @foundry/reference-site -- \
+  --account-id <cloudflare-account-id> \
+  --primary-database-id <primary-d1-id> \
+  --recovery-database-id <isolated-recovery-d1-id> \
+  --bucket <private-r2-bucket> \
+  --backup-id <backup-id> \
+  --private-key-file </client-controlled/private-key.pem> \
+  --actor-membership-id <active-owner-membership-id> \
+  --confirm-backup-id <same-backup-id>
+```
+
+The command reads the PKCS#8 private key only from the named local file, never
+sends it to Cloudflare, never writes decrypted content to disk, and removes its
+encrypted temporary download before exiting. The explicit confirmation and
+different primary/recovery database IDs are mandatory. It restores only into
 `FOUNDRY_FORM_RECOVERY_DB`. The target must be empty, the encrypted object
 metadata and ciphertext hash must verify, authenticated decryption must
 succeed, and a row-for-row snapshot hash must match after the transaction. It

@@ -12,6 +12,7 @@
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "db:migrate:local": "wrangler d1 migrations apply foundry-reference-site --local && wrangler d1 migrations apply foundry-reference-site-form-recovery --local --config wrangler.recovery.jsonc",
     "db:migrate:remote": "wrangler d1 migrations apply foundry-reference-site --remote && wrangler d1 migrations apply foundry-reference-site-form-recovery --remote --config wrangler.recovery.jsonc",
+    "forms:restore": "node scripts/run-public-form-recovery.mjs",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
@@ -25,6 +26,7 @@
     "server-only": "0.0.1"
   },
   "devDependencies": {
+    "esbuild": "0.28.1",
     "wrangler": "4.114.0"
   }
 }
