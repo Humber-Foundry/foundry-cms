@@ -23,7 +23,9 @@ preview for the current saved revision. The approval fingerprint binds:
 - the `site` publication channel and serialization version.
 
 Any later revision or production-base change makes that evidence unusable
-before Git is contacted.
+before Git is contacted. D1 inserts the approval only while the workspace
+still points to that revision, and publication requires the command workspace
+to equal the approval workspace.
 
 ## Deterministic Git publication
 
@@ -67,7 +69,9 @@ The status vocabulary is:
 A successful configured Cloudflare check reports only `deployed`. Foundry
 reports `verified-live` only after two uncached reads of
 `/.well-known/foundry-release.json` both exactly match the expected commit,
-published-content hash, and schema version.
+published-content hash, and schema version. If no configured deployment signal
+appears within 15 minutes, the operation becomes `failed` with its commit
+evidence preserved so it cannot hold the global publication slot forever.
 
 Publication GET requests only read the durable state and remain side-effect
 free. Cloudflare/GitHub reconciliation is a protected, idempotent POST mutation

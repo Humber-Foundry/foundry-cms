@@ -29,6 +29,7 @@ import {
 import {
   executeIdempotentHumanMutation,
   HumanMutationExecutionNotStartedError,
+  HumanMutationExecutionResumableError,
   HumanMutationIdempotencyError,
   verifyHumanMutation,
 } from "../../../../src/human-mutation-runtime";
@@ -264,6 +265,7 @@ export async function POST(request: Request) {
             return Response.json({ publication });
           }
           const publication = await application.commands.publish({
+            workspaceId,
             approvalId: createContentApprovalId(command.approvalId),
             requestedBy: access.membership.id,
             idempotencyKey: request.headers.get("idempotency-key") ?? "",
@@ -274,7 +276,7 @@ export async function POST(request: Request) {
           if (domain !== null) {
             return domain;
           }
-          throw error;
+          throw new HumanMutationExecutionResumableError(error);
         }
       },
     });

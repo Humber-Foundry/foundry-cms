@@ -151,6 +151,7 @@ describe("content publication endpoint", () => {
 
     expect(response.status).toBe(202);
     expect(mocks.publish).toHaveBeenCalledWith({
+      workspaceId: "workspace_publish",
       approvalId: `approval_${"1".repeat(32)}`,
       requestedBy: "membership-editor",
       idempotencyKey: "publication-route-publish-1",
@@ -173,6 +174,35 @@ describe("content publication endpoint", () => {
     await expect(response.json()).resolves.toEqual({
       error: "production_head_moved",
     });
+  });
+
+  it("marks transient command failures resumable for the outer receipt", async () => {
+    mocks.publish.mockRejectedValue(new Error("github_temporarily_unavailable"));
+    mocks.executeMutation.mockImplementation(
+      async ({ execute }: { execute(): Promise<Response> }) => {
+        try {
+          return await execute();
+        } catch (error) {
+          expect(error).toEqual(
+            expect.objectContaining({
+              name: "HumanMutationExecutionResumableError",
+            }),
+          );
+          return Response.json({ error: "retryable" }, { status: 503 });
+        }
+      },
+    );
+
+    const response = await POST(
+      request({
+        operation: "publish",
+        workspaceId: "workspace_publish",
+        approvalId: `approval_${"1".repeat(32)}`,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.publish).toHaveBeenCalledTimes(1);
   });
 
   it("reads explicit publication states without mutating from GET", async () => {

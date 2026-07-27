@@ -162,6 +162,23 @@ describe("D1 content publication store", () => {
     );
   });
 
+  it("does not insert an approval after the current revision has advanced", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await revisionApplication.commands.save({
+      actorId,
+      workspaceId,
+      schemaVersion: "1.0.0",
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "Advanced first" }],
+      idempotencyKey: "advance-before-approval-1",
+    });
+
+    await expect(store.saveApproval(approval)).rejects.toEqual(
+      expect.objectContaining({ code: "revision_not_current" }),
+    );
+    await expect(store.findApproval(approval.id)).resolves.toBeNull();
+  });
+
   it("claims one active publication globally and records a blocked contender", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);

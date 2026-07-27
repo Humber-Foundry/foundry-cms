@@ -181,6 +181,7 @@ describe("content publication application", () => {
 
     await expect(
       app.commands.publish({
+        workspaceId,
         approvalId: approval.id,
         requestedBy: membershipId,
         idempotencyKey: "publish-after-edit-0001",
@@ -197,6 +198,7 @@ describe("content publication application", () => {
 
     await expect(
       app.commands.publish({
+        workspaceId,
         approvalId: approval.id,
         requestedBy: membershipId,
         idempotencyKey: "publish-stale-head-0001",
@@ -210,6 +212,7 @@ describe("content publication application", () => {
     isReleaseLive.mockResolvedValue(false);
     await expect(
       app.commands.publish({
+        workspaceId,
         approvalId: approval.id,
         requestedBy: membershipId,
         idempotencyKey: "publish-stale-marker-001",
@@ -220,9 +223,26 @@ describe("content publication application", () => {
     expect(createCommit).not.toHaveBeenCalled();
   });
 
+  it("does not publish an approval through a different workspace boundary", async () => {
+    const { app, approval } = await approve();
+
+    await expect(
+      app.commands.publish({
+        workspaceId: createContentWorkspaceId("workspace_other"),
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-cross-workspace-1",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_not_found"),
+    );
+    expect(createCommit).not.toHaveBeenCalled();
+  });
+
   it("serializes one deterministic file and creates one attributed compare-and-swap commit", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
+      workspaceId,
       approvalId: approval.id,
       requestedBy: membershipId,
       idempotencyKey: "publish-exact-revision-1",
@@ -248,6 +268,7 @@ describe("content publication application", () => {
     );
 
     const replay = await app.commands.publish({
+      workspaceId,
       approvalId: approval.id,
       requestedBy: membershipId,
       idempotencyKey: "publish-exact-revision-1",
@@ -274,6 +295,7 @@ describe("content publication application", () => {
 
     await expect(
       app.commands.publish({
+        workspaceId,
         approvalId: approval.id,
         requestedBy: membershipId,
         idempotencyKey: "publish-lease-lost-0001",
@@ -290,6 +312,7 @@ describe("content publication application", () => {
   it("replays the recorded operation even after its own commit advanced production", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
+      workspaceId,
       approvalId: approval.id,
       requestedBy: membershipId,
       idempotencyKey: "publish-after-own-commit-1",
@@ -299,6 +322,7 @@ describe("content publication application", () => {
 
     await expect(
       app.commands.publish({
+        workspaceId,
         approvalId: approval.id,
         requestedBy: membershipId,
         idempotencyKey: "publish-after-own-commit-1",
@@ -311,6 +335,7 @@ describe("content publication application", () => {
     createCommit.mockRejectedValue(new Error("network lost"));
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
+      workspaceId,
       approvalId: approval.id,
       requestedBy: membershipId,
       idempotencyKey: "publish-ambiguous-0001",
@@ -341,6 +366,7 @@ describe("content publication application", () => {
   ] as const)("reports deployment state %s explicitly", async (external, expected) => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
+      workspaceId,
       approvalId: approval.id,
       requestedBy: membershipId,
       idempotencyKey: `publish-state-${external}-0001`,
@@ -355,6 +381,7 @@ describe("content publication application", () => {
   it("reports deployed until the exact marker is repeatedly verified live", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
+      workspaceId,
       approvalId: approval.id,
       requestedBy: membershipId,
       idempotencyKey: "publish-live-check-0001",
@@ -381,6 +408,38 @@ describe("content publication application", () => {
       contentHash: revisionApplication.saved.inputs.contentHash,
       schemaVersion: "1.0.0",
     });
+  });
+
+  it("releases the global publication slot when no deployment signal appears", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-deploy-timeout-1",
+    });
+    getDeploymentStatus.mockResolvedValue("requested");
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: "c".repeat(40),
+        detail: "deployment_signal_timeout",
+      }),
+    );
   });
 
   it("reconciles an expired requested lease so a crashed Worker cannot strand publication", async () => {

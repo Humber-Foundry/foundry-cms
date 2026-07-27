@@ -11,6 +11,7 @@ import type {
   HumanMembershipId,
 } from "@foundry/application";
 import {
+  ContentApprovalInvalidError,
   createContentActorId,
   createContentApprovalId,
   createContentPublicationId,
@@ -306,15 +307,25 @@ export function createD1ContentPublicationStore(
             `INSERT INTO content_approval_invalidations (
                approval_id, invalidated_at, reason
              )
-             SELECT id, ?1, 'superseded'
+            SELECT id, ?1, 'superseded'
              FROM content_approvals
              WHERE workspace_id = ?2
+               AND EXISTS (
+                 SELECT 1
+                 FROM content_workspaces
+                 WHERE workspace_id = ?2
+                   AND current_revision = ?3
+               )
                AND NOT EXISTS (
                  SELECT 1 FROM content_approval_invalidations
                  WHERE approval_id = content_approvals.id
                )`,
           )
-          .bind(approval.approvedAt, approval.workspaceId),
+          .bind(
+            approval.approvedAt,
+            approval.workspaceId,
+            approval.revision,
+          ),
         database
           .prepare(
             `INSERT INTO content_approvals (
@@ -322,8 +333,14 @@ export function createD1ContentPublicationStore(
                content_hash, design_hash, schema_version, renderer_version,
                production_base, artifact_hash, serialization_version,
                approved_by, approved_at
-             ) VALUES (
+             )
+             SELECT
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+             WHERE EXISTS (
+               SELECT 1
+               FROM content_workspaces
+               WHERE workspace_id = ?2
+                 AND current_revision = ?3
              )`,
           )
           .bind(
@@ -342,7 +359,11 @@ export function createD1ContentPublicationStore(
             approval.approvedBy,
             approval.approvedAt,
           ),
-      ]);
+      ]).then((results) => {
+        if ((results[1]?.meta.changes ?? 0) < 1) {
+          throw new ContentApprovalInvalidError("revision_not_current");
+        }
+      });
       return approval;
     },
     findApproval,

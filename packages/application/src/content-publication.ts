@@ -376,6 +376,7 @@ const deploymentProgress: Readonly<
   deployed: 3,
   "verified-live": 4,
 };
+const deploymentSignalTimeoutMs = 15 * 60 * 1_000;
 
 export function createInMemoryContentPublicationStore(): ContentPublicationStore {
   const approvals = new Map<ContentApprovalId, ContentApproval>();
@@ -629,6 +630,7 @@ export function createContentPublicationApplication({
         });
       },
       async publish(input: {
+        workspaceId: ContentWorkspaceId;
         approvalId: ContentApprovalId;
         requestedBy: HumanMembershipId;
         idempotencyKey: string;
@@ -640,6 +642,9 @@ export function createContentPublicationApplication({
         }
         const recordedApproval = await store.findApproval(input.approvalId);
         if (recordedApproval !== null) {
+          if (recordedApproval.workspaceId !== input.workspaceId) {
+            throw new ContentApprovalInvalidError("approval_not_found");
+          }
           const replay = await store.findPublicationByIdempotency({
             workspaceId: recordedApproval.workspaceId,
             idempotencyKey: input.idempotencyKey,
@@ -652,6 +657,9 @@ export function createContentPublicationApplication({
           input.approvalId,
           input.requestedBy,
         );
+        if (approval.workspaceId !== input.workspaceId) {
+          throw new ContentApprovalInvalidError("approval_not_found");
+        }
         const base = parseProductionBase(
           approval.fingerprint.productionBase,
         );
@@ -858,6 +866,31 @@ export function createContentPublicationApplication({
         }
         const deployment = await publisher.getDeploymentStatus(commitSha);
         if (deployment === "unknown") {
+          return currentPublication;
+        }
+        if (
+          deployment === "requested" &&
+          currentPublication.status === "committed"
+        ) {
+          const observedAt = now();
+          if (
+            new Date(observedAt).getTime() -
+              new Date(currentPublication.requestedAt).getTime() >=
+            deploymentSignalTimeoutMs
+          ) {
+            return store.updatePublication(
+              nextPublication(currentPublication, {
+                status: "failed",
+                commitSha,
+                detail: "deployment_signal_timeout",
+                updatedAt: observedAt,
+              }),
+              {
+                expectedStatus: currentPublication.status,
+                expectedUpdatedAt: currentPublication.updatedAt,
+              },
+            );
+          }
           return currentPublication;
         }
         const currentProgress =
