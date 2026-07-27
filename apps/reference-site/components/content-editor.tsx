@@ -534,6 +534,7 @@ export function ContentEditor({
         throw new Error("content_approval_failed");
       }
       setApprovalId(result.body.approval.id);
+      pendingPublicationAttempt.current = null;
       setPublication((current) =>
         current !== null && publicationIsActive(current) ? current : null,
       );
