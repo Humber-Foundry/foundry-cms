@@ -6,6 +6,9 @@ import type {
   MediaAsset,
   MediaOccurrenceRevision,
 } from "@foundry/application";
+import { renderedMediaOccurrenceIds } from "@foundry/application";
+
+import { MediaOccurrence } from "./media-occurrence";
 
 async function imageDimensions(file: File) {
   const url = URL.createObjectURL(file);
@@ -183,11 +186,18 @@ export function MediaManager({
         <div className="editor-fields">
           <label>
             Occurrence ID
-            <input
+            <select
               value={occurrenceId}
-              pattern="occurrence_[a-z0-9_]+"
               onChange={(event) => setOccurrenceId(event.target.value)}
-            />
+            >
+              {renderedMediaOccurrenceIds.map((id) => (
+                <option key={id} value={id}>
+                  {id === "occurrence_home_hero"
+                    ? "Home hero image"
+                    : "Home detail image"}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Source asset
@@ -254,29 +264,23 @@ export function MediaManager({
               </label>
             ))}
           </fieldset>
-          {occurrences.map((occurrence) => (
-            <figure key={occurrence.occurrenceId}>
-              <img
-                src={`/api/foundry-cms/media?assetId=${encodeURIComponent(
-                  occurrence.assetId,
-                )}`}
-                alt=""
-                style={
-                  occurrence.crop === null
-                    ? undefined
-                    : {
-                        objectFit: "cover",
-                        objectPosition: `${occurrence.crop.x * 100}% ${
-                          occurrence.crop.y * 100
-                        }%`,
-                      }
-                }
-              />
+          {occurrences.map((occurrence) => {
+            const asset = assets.find(
+              (candidate) => candidate.assetId === occurrence.assetId,
+            );
+            if (asset === undefined) return null;
+            return (
+              <MediaOccurrence
+                key={occurrence.occurrenceId}
+                occurrence={occurrence}
+                asset={asset}
+              >
               <figcaption>
                 {occurrence.occurrenceId} · revision {occurrence.revision}
               </figcaption>
-            </figure>
-          ))}
+              </MediaOccurrence>
+            );
+          })}
         </div>
       ) : (
         <p>Upload an image to create the first stable media asset.</p>

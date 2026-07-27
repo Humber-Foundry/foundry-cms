@@ -152,6 +152,21 @@ describe("media asset application", () => {
     });
   });
 
+  it("rejects occurrence identities that do not map to rendered Site Definition slots", async () => {
+    const { application } = setup();
+    await upload(application);
+
+    await expect(
+      application.commands.replaceOccurrence({
+        actorId: editor,
+        occurrenceId: createMediaOccurrenceId("occurrence_unmapped"),
+        assetId: assetA,
+        baseRevision: 0,
+        idempotencyKey: "place-unmapped-occurrence",
+      }),
+    ).rejects.toEqual(expect.objectContaining({ field: "occurrenceId" }));
+  });
+
   it("replays completed mutation keys without duplicating revisions or audit facts", async () => {
     const { application } = setup();
     const uploaded = await upload(application);

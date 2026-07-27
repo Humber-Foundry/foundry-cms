@@ -5,6 +5,7 @@ import {
   loadRevisionPreview,
   type RevisionPreviewPageProps,
 } from "@/src/revision-preview-page";
+import { loadPublicMediaPresentation } from "@/src/media-asset-runtime";
 
 import "../../../../public.css";
 import "./preview.css";
@@ -25,7 +26,10 @@ export async function generateMetadata(
 export default async function RevisionPreviewPage(
   props: RevisionPreviewPageProps,
 ) {
-  const revision = await loadRevisionPreview(props);
+  const [revision, media] = await Promise.all([
+    loadRevisionPreview(props),
+    loadPublicMediaPresentation(),
+  ]);
   return (
     <>
       <aside className="preview-provenance" aria-label="Preview provenance">
@@ -57,7 +61,7 @@ export default async function RevisionPreviewPage(
           Return to editor
         </a>
       </aside>
-      <SiteRenderer definition={revision.definition} />
+      <SiteRenderer definition={revision.definition} media={media} />
     </>
   );
 }

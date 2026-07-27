@@ -39,7 +39,10 @@ async function mutationRequest(overrides: {
       "content-type": overrides.contentType ?? "application/json",
       "x-foundry-csrf": token,
     },
-    body: "{}",
+    body:
+      overrides.contentType?.startsWith("multipart/form-data") === true
+        ? "--foundry-test--"
+        : "{}",
   });
 }
 
@@ -48,6 +51,21 @@ describe("human mutation request integrity", () => {
     await expect(
       verifyHumanMutationRequest({
         request: await mutationRequest({}),
+        identity,
+        audience,
+        canonicalOrigin,
+        secret,
+        now,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("accepts same-origin multipart uploads with a current identity-bound token", async () => {
+    await expect(
+      verifyHumanMutationRequest({
+        request: await mutationRequest({
+          contentType: "multipart/form-data; boundary=foundry-test",
+        }),
         identity,
         audience,
         canonicalOrigin,

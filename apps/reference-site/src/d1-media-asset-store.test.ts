@@ -144,7 +144,7 @@ describe("D1 media asset store", () => {
       baseRevision: 0,
       idempotencyKey: "d1-bound-mutation-key",
     });
-    const otherOccurrence = createMediaOccurrenceId("occurrence_other");
+    const otherOccurrence = createMediaOccurrenceId("occurrence_home_detail");
 
     await expect(
       app.commands.replaceOccurrence({
@@ -156,5 +156,39 @@ describe("D1 media asset store", () => {
       }),
     ).rejects.toThrow("media_site_access_denied");
     await expect(app.queries.getOccurrence(otherOccurrence)).resolves.toBeNull();
+  });
+
+  it("retains a tombstone so a deleted stable asset identity cannot be reused", async () => {
+    const app = application();
+    await upload(app);
+    await app.commands.delete({
+      actorId,
+      assetId,
+      idempotencyKey: "delete-unused-stable-asset",
+    });
+
+    await expect(app.queries.getAsset(assetId)).resolves.toBeNull();
+    const source = new Uint8Array([1, 2, 3]);
+    await expect(
+      app.commands.upload({
+        actorId,
+        assetId,
+        fileName: "reused.png",
+        contentType: "image/png",
+        byteLength: source.byteLength,
+        width: 1200,
+        height: 800,
+        source,
+        idempotencyKey: "reuse-deleted-stable-asset",
+      }),
+    ).rejects.toThrow();
+    const row = await database
+      .prepare(
+        `SELECT deleted_at FROM media_assets
+         WHERE site_id = ?1 AND asset_id = ?2`,
+      )
+      .bind(siteId, assetId)
+      .first<{ deleted_at: string | null }>();
+    expect(row?.deleted_at).toBe("2026-07-27T12:00:00.000Z");
   });
 });

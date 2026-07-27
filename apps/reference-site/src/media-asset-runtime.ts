@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  createContentActorId,
   createInMemoryMediaAssetStore,
   createInMemoryMediaSourceStore,
   createMediaAssetApplication,
@@ -50,4 +51,21 @@ export async function loadMediaAssetApplication(actorId: ContentActorId) {
     assets: createD1MediaAssetStore(environment.FOUNDRY_DB),
     sources: createR2MediaSourceStore(environment.FOUNDRY_MEDIA),
   });
+}
+
+const publicRendererActorId = createContentActorId(
+  "integration-public-renderer",
+);
+
+export async function loadPublicMediaPresentation() {
+  const application = await loadMediaAssetApplication(publicRendererActorId);
+  const [assets, occurrences] = await Promise.all([
+    application.queries.listAssets(),
+    application.queries.listOccurrences(),
+  ]);
+  return { assets, occurrences };
+}
+
+export function loadPublicMediaAssetApplication() {
+  return loadMediaAssetApplication(publicRendererActorId);
 }

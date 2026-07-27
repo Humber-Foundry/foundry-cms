@@ -63,6 +63,7 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
 
 export function createInMemoryMediaAssetStore(): MediaAssetStore {
   const assets = new Map<string, MediaAsset>();
+  const deletedAssetIds = new Set<string>();
   const revisions = new Map<string, Map<number, MediaOccurrenceRevision>>();
   const current = new Map<string, number>();
   const auditEvents: MediaAuditEvent[] = [];
@@ -111,10 +112,19 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       );
     },
     async getAsset(siteId, assetId) {
-      return assets.get(scopedKey(siteId, assetId)) ?? null;
+      const key = scopedKey(siteId, assetId);
+      return deletedAssetIds.has(key) ? null : (assets.get(key) ?? null);
+    },
+    async isAssetIdReserved(siteId, assetId) {
+      return assets.has(scopedKey(siteId, assetId));
     },
     async listAssets(siteId) {
-      return [...assets.values()].filter((asset) => asset.siteId === siteId);
+      return [...assets.entries()]
+        .filter(
+          ([key, asset]) =>
+            asset.siteId === siteId && !deletedAssetIds.has(key),
+        )
+        .map(([, asset]) => asset);
     },
     async listOccurrences(siteId) {
       const found: MediaOccurrenceRevision[] = [];
@@ -133,6 +143,9 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     async createAsset(asset, context) {
       const key = scopedKey(asset.siteId, asset.assetId);
       const existing = assets.get(key);
+      if (deletedAssetIds.has(key)) {
+        throw new MediaValidationError("assetId");
+      }
       if (existing !== undefined) {
         if (
           existing.objectKey === asset.objectKey &&
@@ -233,7 +246,7 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       if (!deletionReservations.has(key) || !assets.has(key)) {
         throw new MediaSiteAccessError();
       }
-      assets.delete(key);
+      deletedAssetIds.add(key);
       deletionReservations.delete(key);
       auditEvents.push(
         immutable({

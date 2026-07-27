@@ -27,6 +27,17 @@ export function createMediaOccurrenceId(value: string): MediaOccurrenceId {
   return value as MediaOccurrenceId;
 }
 
+export const renderedMediaOccurrenceIds = [
+  "occurrence_home_hero",
+  "occurrence_home_detail",
+] as const satisfies ReadonlyArray<string>;
+
+function assertRenderedOccurrenceId(value: MediaOccurrenceId): void {
+  if (!(renderedMediaOccurrenceIds as ReadonlyArray<string>).includes(value)) {
+    throw new MediaValidationError("occurrenceId");
+  }
+}
+
 export type MediaAsset = Readonly<{
   siteId: SiteId;
   assetId: MediaAssetId;
@@ -144,6 +155,7 @@ export type MediaAssetStore = Readonly<{
     result: MediaMutationResult,
   ): Promise<void>;
   getAsset(siteId: SiteId, assetId: MediaAssetId): Promise<MediaAsset | null>;
+  isAssetIdReserved(siteId: SiteId, assetId: MediaAssetId): Promise<boolean>;
   listAssets(siteId: SiteId): Promise<ReadonlyArray<MediaAsset>>;
   listOccurrences(
     siteId: SiteId,
@@ -338,6 +350,9 @@ export function createMediaAssetApplication({
             { kind: "asset" }
           >).value;
         }
+        if (await assets.isAssetIdReserved(siteId, command.assetId)) {
+          throw new MediaValidationError("assetId");
+        }
         await assets.claim(context);
         const existing = await assets.getAsset(siteId, command.assetId);
         if (existing !== null) {
@@ -381,6 +396,7 @@ export function createMediaAssetApplication({
         command: ReplaceMediaOccurrenceCommand,
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
+        assertRenderedOccurrenceId(command.occurrenceId);
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
         const context = mutationContext(command.idempotencyKey, hash);
@@ -416,6 +432,7 @@ export function createMediaAssetApplication({
         command: CropMediaOccurrenceCommand,
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
+        assertRenderedOccurrenceId(command.occurrenceId);
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
         const context = mutationContext(command.idempotencyKey, hash);

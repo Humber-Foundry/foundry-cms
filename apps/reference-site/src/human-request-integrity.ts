@@ -112,14 +112,13 @@ export async function verifyHumanMutationRequest({
   secret: string;
   now?: Date;
 }): Promise<void> {
+  const contentType = request.headers.get("content-type")?.toLowerCase();
   if (
     request.method === "GET" ||
     request.method === "HEAD" ||
     request.headers.get("origin") !== canonicalOrigin ||
-    !request.headers
-      .get("content-type")
-      ?.toLowerCase()
-      .startsWith("application/json")
+    (contentType?.startsWith("application/json") !== true &&
+      contentType?.startsWith("multipart/form-data;") !== true)
   ) {
     throw new HumanRequestIntegrityError();
   }

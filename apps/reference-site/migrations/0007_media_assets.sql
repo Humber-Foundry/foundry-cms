@@ -13,6 +13,7 @@ CREATE TABLE media_assets (
   height INTEGER NOT NULL CHECK (height > 0),
   created_at TEXT NOT NULL,
   created_by TEXT NOT NULL,
+  deleted_at TEXT,
   PRIMARY KEY (site_id, asset_id),
   UNIQUE (object_key)
 );

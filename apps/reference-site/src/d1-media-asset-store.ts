@@ -30,6 +30,7 @@ type AssetRow = {
   height: number;
   created_at: string;
   created_by: string;
+  deleted_at: string | null;
 };
 
 type OccurrenceRow = {
@@ -45,6 +46,7 @@ type OccurrenceRow = {
 const assetProjection = `
   SELECT site_id, asset_id, object_key, source_hash, file_name, content_type,
          byte_length, width, height, created_at, created_by
+         , deleted_at
   FROM media_assets
 `;
 
@@ -100,6 +102,7 @@ function restoreMutationResult(value: string): MediaMutationResult {
       height: parsed.value.height,
       created_at: parsed.value.createdAt,
       created_by: parsed.value.createdBy,
+      deleted_at: null,
     }) };
   }
   if (parsed.kind === "occurrence") {
@@ -125,7 +128,10 @@ export function createD1MediaAssetStore(
 ): MediaAssetStore {
   async function getAsset(siteId: SiteId, assetId: MediaAssetId) {
     const row = await database
-      .prepare(`${assetProjection} WHERE site_id = ?1 AND asset_id = ?2`)
+      .prepare(
+        `${assetProjection}
+         WHERE site_id = ?1 AND asset_id = ?2 AND deleted_at IS NULL`,
+      )
       .bind(siteId, assetId)
       .first<AssetRow>();
     return row === null ? null : toAsset(row);
@@ -205,9 +211,23 @@ export function createD1MediaAssetStore(
       }
     },
     getAsset,
+    async isAssetIdReserved(siteId, assetId) {
+      const row = await database
+        .prepare(
+          `SELECT 1 AS reserved FROM media_assets
+           WHERE site_id = ?1 AND asset_id = ?2`,
+        )
+        .bind(siteId, assetId)
+        .first<{ reserved: number }>();
+      return row !== null;
+    },
     async listAssets(siteId) {
       const rows = await database
-        .prepare(`${assetProjection} WHERE site_id = ?1 ORDER BY created_at, asset_id`)
+        .prepare(
+          `${assetProjection}
+           WHERE site_id = ?1 AND deleted_at IS NULL
+           ORDER BY created_at, asset_id`,
+        )
         .bind(siteId)
         .all<AssetRow>();
       return rows.results.map(toAsset);
@@ -288,6 +308,7 @@ export function createD1MediaAssetStore(
                SELECT 1 FROM media_assets
                WHERE site_id = ?1
                  AND asset_id = ?6
+                 AND deleted_at IS NULL
                  AND object_key = ?7
                  AND source_hash = ?8
                  AND file_name = ?9
@@ -319,7 +340,16 @@ export function createD1MediaAssetStore(
           ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
-        const existing = await getAsset(asset.siteId, asset.assetId);
+        const existingRow = await database
+          .prepare(
+            `${assetProjection} WHERE site_id = ?1 AND asset_id = ?2`,
+          )
+          .bind(asset.siteId, asset.assetId)
+          .first<AssetRow>();
+        const existing =
+          existingRow === null || existingRow.deleted_at !== null
+            ? null
+            : toAsset(existingRow);
         if (
           existing === null ||
           existing.objectKey !== asset.objectKey ||
@@ -379,6 +409,7 @@ export function createD1MediaAssetStore(
              WHERE EXISTS (
                SELECT 1 FROM media_assets
                WHERE site_id = ?1 AND asset_id = ?4
+                 AND deleted_at IS NULL
              )
                AND NOT EXISTS (
                  SELECT 1 FROM media_asset_deletions
@@ -555,10 +586,12 @@ export function createD1MediaAssetStore(
           .bind(siteId, assetId),
         database
           .prepare(
-            `DELETE FROM media_assets
-             WHERE site_id = ?1 AND asset_id = ?2`,
+            `UPDATE media_assets
+             SET deleted_at = ?3
+             WHERE site_id = ?1 AND asset_id = ?2
+               AND deleted_at IS NULL`,
           )
-          .bind(siteId, assetId),
+          .bind(siteId, assetId, occurredAt),
         database
           .prepare(
             `INSERT INTO media_mutation_receipts (
