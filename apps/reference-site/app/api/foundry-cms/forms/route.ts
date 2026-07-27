@@ -17,6 +17,7 @@ import { HumanRequestIntegrityError } from "../../../../src/human-request-integr
 import { createPublicFormOperationsContext } from "../../../../src/public-form-delivery-health-runtime";
 import {
   executeIdempotentHumanMutation,
+  HumanMutationExecutionNotStartedError,
   HumanMutationIdempotencyError,
   verifyHumanMutation,
 } from "../../../../src/human-mutation-runtime";
@@ -68,18 +69,37 @@ export async function POST(request: Request) {
         if (humanContext.state !== "authorized") {
           return Response.json({ error: "not_authorized" }, { status: 403 });
         }
-        const application =
-          await createPublicFormOperationsContext(humanContext);
-        if (command.action === "replay_delivery") {
-          await application.commands.replayFailed({
-            actor: humanContext.identity,
-            deliveryId: createPublicFormDeliveryId(command.deliveryId),
-          });
-        } else {
-          await application.commands.releaseSuspectedSpam({
-            actor: humanContext.identity,
-            receiptId: createPublicFormReceiptId(command.receiptId),
-          });
+        let application;
+        try {
+          application =
+            await createPublicFormOperationsContext(humanContext);
+        } catch (error) {
+          throw new HumanMutationExecutionNotStartedError(error);
+        }
+        try {
+          if (command.action === "replay_delivery") {
+            await application.commands.replayFailed({
+              actor: humanContext.identity,
+              deliveryId: createPublicFormDeliveryId(command.deliveryId),
+            });
+          } else {
+            await application.commands.releaseSuspectedSpam({
+              actor: humanContext.identity,
+              receiptId: createPublicFormReceiptId(command.receiptId),
+            });
+          }
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            (error.message === "form_delivery_not_replayable" ||
+              error.message === "form_submission_not_held")
+          ) {
+            return Response.json(
+              { error: "form_operation_not_available" },
+              { status: 409 },
+            );
+          }
+          throw error;
         }
         return Response.json({ applied: true });
       },
