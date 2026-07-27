@@ -36,8 +36,7 @@ export function definitionToPuckData(
 function stableComponentId(
   type: PageComponentType,
   candidate: unknown,
-  index: number,
-): string {
+): string | null {
   if (
     typeof candidate === "string" &&
     /^section_[a-z0-9_]+$/u.test(candidate)
@@ -48,8 +47,11 @@ function stableComponentId(
     typeof candidate === "string"
       ? candidate.toLowerCase().replace(/[^a-z0-9]+/gu, "_").replace(/^_+|_+$/gu, "")
       : "";
+  if (suffix === "") {
+    return null;
+  }
   const typeSlug = type.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`);
-  return `section_${typeSlug}_${suffix || index + 1}`;
+  return `section_${typeSlug}_${suffix}`;
 }
 
 function isPageComponentType(value: unknown): value is PageComponentType {
@@ -99,7 +101,7 @@ export function puckDataToDefinition(
   }
   const ids = new Set<string>();
   const components: PageSection[] = [];
-  for (const [index, item] of value.content.entries()) {
+  for (const item of value.content) {
     if (
       typeof item !== "object" ||
       item === null ||
@@ -118,13 +120,18 @@ export function puckDataToDefinition(
       };
     }
     const componentType = item.type as PageComponentType;
-    let id = stableComponentId(
+    const id = stableComponentId(
       componentType,
       "id" in item.props ? item.props.id : undefined,
-      index,
     );
-    while (ids.has(id)) {
-      id = `${id}_${index + 1}`;
+    if (id === null || ids.has(id)) {
+      return {
+        ok: false,
+        errors: {
+          [pageCompositionContract.slot.id]:
+            "Every Puck component needs one unique stable identifier.",
+        },
+      };
     }
     ids.add(id);
     const existing = definition.home.sections.find(

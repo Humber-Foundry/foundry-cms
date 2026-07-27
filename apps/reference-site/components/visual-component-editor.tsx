@@ -13,6 +13,8 @@ import {
   referencedPageComponentIds,
   type CallToActionSection,
   type HeroSection,
+  type PageComponentType,
+  type PageSection,
   type ProofSection,
   type ServicesSection,
   type SiteDefinition,
@@ -25,23 +27,7 @@ import {
 import { SiteSection } from "./site-renderer";
 
 type RegisteredComponents = {
-  hero: HeroSection;
-  services: ServicesSection;
-  proof: ProofSection;
-  callToAction: CallToActionSection;
-};
-
-const defaults = {
-  hero: createDefaultPageSection("hero", "section_new_hero") as HeroSection,
-  services: createDefaultPageSection(
-    "services",
-    "section_new_services",
-  ) as ServicesSection,
-  proof: createDefaultPageSection("proof", "section_new_proof") as ProofSection,
-  callToAction: createDefaultPageSection(
-    "callToAction",
-    "section_new_call_to_action",
-  ) as CallToActionSection,
+  [Type in PageComponentType]: Extract<PageSection, { type: Type }>;
 };
 
 function newStableComponentId(type: keyof RegisteredComponents): string {
@@ -79,7 +65,10 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
           render: () => <></>,
         },
       },
-      defaultProps: defaults.hero,
+      defaultProps: createDefaultPageSection(
+        "hero",
+        "section_new_hero",
+      ) as HeroSection,
       resolveData: (data, { trigger }) =>
         trigger === "insert"
           ? { ...data, props: { ...data.props, id: newStableComponentId("hero") } }
@@ -116,7 +105,10 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         introduction: { type: "textarea", label: "Introduction" },
         items: { type: "custom", visible: false, render: () => <></> },
       },
-      defaultProps: defaults.services,
+      defaultProps: createDefaultPageSection(
+        "services",
+        "section_new_services",
+      ) as ServicesSection,
       resolveData: (data, { trigger }) =>
         trigger === "insert"
           ? {
@@ -142,7 +134,10 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         attribution: { type: "text", label: "Attribution" },
         metrics: { type: "custom", visible: false, render: () => <></> },
       },
-      defaultProps: defaults.proof,
+      defaultProps: createDefaultPageSection(
+        "proof",
+        "section_new_proof",
+      ) as ProofSection,
       resolveData: (data, { trigger }) =>
         trigger === "insert"
           ? { ...data, props: { ...data.props, id: newStableComponentId("proof") } }
@@ -163,7 +158,10 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         body: { type: "textarea", label: "Body" },
         action: { type: "custom", visible: false, render: () => <></> },
       },
-      defaultProps: defaults.callToAction,
+      defaultProps: createDefaultPageSection(
+        "callToAction",
+        "section_new_call_to_action",
+      ) as CallToActionSection,
       resolveData: (data, { trigger }) =>
         trigger === "insert"
           ? {
@@ -188,20 +186,33 @@ export function createVisualComponentConfig(
 ): Config<RegisteredComponents> {
   return {
     ...visualComponentConfig,
-    components: Object.fromEntries(
-      Object.entries(visualComponentConfig.components).map(
-        ([type, component]) => [
-          type,
-          {
-            ...component,
-            resolvePermissions: (data: { props: { id: string } }) => ({
-              delete: !protectedComponentIds.has(data.props.id),
-            }),
-          },
-        ],
-      ),
-    ),
-  } as unknown as Config<RegisteredComponents>;
+    components: {
+      hero: {
+        ...visualComponentConfig.components.hero,
+        resolvePermissions: (data) => ({
+          delete: !protectedComponentIds.has(data.props.id),
+        }),
+      },
+      services: {
+        ...visualComponentConfig.components.services,
+        resolvePermissions: (data) => ({
+          delete: !protectedComponentIds.has(data.props.id),
+        }),
+      },
+      proof: {
+        ...visualComponentConfig.components.proof,
+        resolvePermissions: (data) => ({
+          delete: !protectedComponentIds.has(data.props.id),
+        }),
+      },
+      callToAction: {
+        ...visualComponentConfig.components.callToAction,
+        resolvePermissions: (data) => ({
+          delete: !protectedComponentIds.has(data.props.id),
+        }),
+      },
+    },
+  };
 }
 
 export function VisualComponentEditor({

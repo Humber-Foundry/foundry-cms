@@ -135,6 +135,39 @@ describe("stale edit recovery", () => {
     ).toEqual({ available: true, recovered: [], conflicts: [] });
   });
 
+  it("preserves one canonical structural slot command for stale recovery", () => {
+    const storage = createStorage();
+    const composition = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify({
+        slotId: "slot_home_sections",
+        components: [{ id: "section_hero", type: "hero" }],
+      }),
+      value: JSON.stringify({
+        slotId: "slot_home_sections",
+        components: [
+          { id: "section_hero", type: "hero" },
+          { id: "section_proof", type: "proof" },
+        ],
+      }),
+    };
+    preserveStaleEdits(
+      storage,
+      "recovery-structure",
+      "workspace-first",
+      [composition],
+    );
+
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-structure",
+        "workspace-first",
+        new Map([[composition.path, composition.baseValue]]),
+      ).recovered,
+    ).toEqual([composition]);
+  });
+
   it("surfaces a same-path concurrent change as a three-way conflict", () => {
     const storage = createStorage();
     preserveStaleEdits(storage, "recovery-overlap", "workspace-shared", [edit]);

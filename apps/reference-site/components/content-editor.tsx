@@ -4,7 +4,9 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type { ContentRevision } from "@foundry/application";
 import {
+  applyPageComposition,
   listEditableSiteFields,
+  pageCompositionContract,
   toPageComposition,
   type EditableSiteField,
   type SiteDefinitionEdit,
@@ -25,6 +27,11 @@ import {
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
+import {
+  clearContentEditorOutbox,
+  readContentEditorOutbox,
+  writeContentEditorOutbox,
+} from "../src/content-editor-outbox";
 import { pageCompositionChanged } from "../src/page-composition-puck";
 import { VisualComponentEditor } from "./visual-component-editor";
 
@@ -76,6 +83,7 @@ export function ContentEditor({
   const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [outboxReady, setOutboxReady] = useState(false);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -91,6 +99,7 @@ export function ContentEditor({
   const recoveryApplied = useRef(false);
   const recoverySyncReady = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
+  const outboxQueue = useRef<Promise<void>>(Promise.resolve());
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
@@ -99,15 +108,181 @@ export function ContentEditor({
     () => listEditableSiteFields(state.workingDefinition),
     [state.workingDefinition],
   );
-  const edits = changedFields(persistedFields, workingFields);
-  const composition = pageCompositionChanged(
-    state.persistedDefinition,
-    state.workingDefinition,
-  )
-    ? toPageComposition(state.workingDefinition)
-    : undefined;
+  const edits = useMemo(
+    () => changedFields(persistedFields, workingFields),
+    [persistedFields, workingFields],
+  );
+  const composition = useMemo(
+    () =>
+      pageCompositionChanged(
+        state.persistedDefinition,
+        state.workingDefinition,
+      )
+        ? toPageComposition(state.workingDefinition)
+        : undefined,
+    [state.persistedDefinition, state.workingDefinition],
+  );
+  const recoverableEdits = useMemo<StaleRecoveryEdit[]>(
+    () => {
+      const fieldEdits = edits.map((edit) => ({
+        ...edit,
+        baseValue:
+          persistedFields.find((field) => field.path === edit.path)?.value ??
+          "",
+      }));
+      return composition === undefined
+        ? fieldEdits
+        : [
+            {
+              path: pageCompositionContract.slot.id,
+              value: JSON.stringify(composition),
+              baseValue: JSON.stringify(
+                toPageComposition(state.persistedDefinition),
+              ),
+            },
+            ...fieldEdits,
+          ];
+    },
+    [composition, edits, persistedFields, state.persistedDefinition],
+  );
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked = state.status === "saving" || state.status === "stale";
+
+  function queueOutbox(operation: () => Promise<void>): Promise<void> {
+    const queued = outboxQueue.current.catch(() => undefined).then(operation);
+    outboxQueue.current = queued.catch(() => undefined);
+    return queued;
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void readContentEditorOutbox(initialRevision.workspaceId)
+      .then((record) => {
+        if (cancelled || record === null || record.edits.length === 0) {
+          return;
+        }
+        recoveryPending.current = record.edits.slice();
+        if (initialStale) {
+          setMessage(
+            "Unsaved browser edits were recovered. Start a fresh workspace to carry them forward.",
+          );
+          return;
+        }
+        const currentValues = new Map([
+          ...workingFields.map(
+            (field) => [field.path, field.value] as const,
+          ),
+          [
+            pageCompositionContract.slot.id,
+            JSON.stringify(toPageComposition(state.workingDefinition)),
+          ] as const,
+        ]);
+        const conflicts: StaleRecoveryConflict[] = [];
+        let recoveredCount = 0;
+        for (const edit of record.edits) {
+          const currentValue = currentValues.get(edit.path);
+          if (currentValue === undefined) {
+            conflicts.push({
+              ...edit,
+              currentValue: null,
+              reason: "missing",
+            });
+            continue;
+          }
+          if (currentValue !== edit.baseValue) {
+            conflicts.push({
+              ...edit,
+              currentValue,
+              reason: "changed",
+            });
+            continue;
+          }
+          if (edit.path === pageCompositionContract.slot.id) {
+            try {
+              const recoveredComposition: unknown = JSON.parse(edit.value);
+              const result = applyPageComposition(
+                initialRevision.definition,
+                recoveredComposition,
+              );
+              if (!result.ok) {
+                throw new Error("invalid_recovered_composition");
+              }
+              dispatch({ type: "compose", definition: result.definition });
+              recoveredCount += 1;
+            } catch {
+              conflicts.push({
+                ...edit,
+                currentValue,
+                reason: "changed",
+              });
+            }
+          } else {
+            dispatch({ type: "edit", ...edit });
+            recoveredCount += 1;
+          }
+        }
+        setRecoveryConflicts(conflicts);
+        if (conflicts.length > 0) {
+          setMessage(
+            "Unsaved browser edits were recovered, but some overlap newer values. Resolve each one before saving.",
+          );
+        } else if (recoveredCount > 0) {
+          setMessage(
+            record.baseRevision === state.persistedRevision
+              ? "Unsaved browser edits were recovered. Review and save them when ready."
+              : "Unsaved browser edits were safely rebased onto the latest revision. Review and save them when ready.",
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMessage(
+            "Browser recovery storage is unavailable. Keep this tab open until your edits are saved.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setOutboxReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!outboxReady || state.status === "stale") {
+      return;
+    }
+    const persist = () => {
+      void queueOutbox(() =>
+        recoverableEdits.length === 0
+          ? clearContentEditorOutbox(initialRevision.workspaceId)
+          : writeContentEditorOutbox({
+              workspaceId: initialRevision.workspaceId,
+              baseRevision: state.persistedRevision,
+              edits: recoverableEdits,
+            }),
+      ).catch(() => {
+        setMessage(
+          "Browser recovery storage could not be updated. Keep this tab open until your edits are saved.",
+        );
+      });
+    };
+    const timer = window.setTimeout(persist, 250);
+    window.addEventListener("blur", persist);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("blur", persist);
+    };
+  }, [
+    initialRevision.workspaceId,
+    outboxReady,
+    recoverableEdits,
+    state.persistedRevision,
+    state.status,
+  ]);
 
   useEffect(() => {
     if (
@@ -130,7 +305,15 @@ export function ContentEditor({
       recoveryStorage,
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
-      new Map(workingFields.map((field) => [field.path, field.value])),
+      new Map([
+        ...workingFields.map(
+          (field) => [field.path, field.value] as const,
+        ),
+        [
+          pageCompositionContract.slot.id,
+          JSON.stringify(toPageComposition(state.workingDefinition)),
+        ],
+      ]),
     );
     if (!available) {
       setMessage(
@@ -143,7 +326,22 @@ export function ContentEditor({
       return;
     }
     for (const edit of recovered) {
-      dispatch({ type: "edit", ...edit });
+      if (edit.path === pageCompositionContract.slot.id) {
+        try {
+          const recoveredComposition: unknown = JSON.parse(edit.value);
+          const result = applyPageComposition(
+            initialRevision.definition,
+            recoveredComposition,
+          );
+          if (result.ok) {
+            dispatch({ type: "compose", definition: result.definition });
+          }
+        } catch {
+          // Malformed browser data remains available for explicit resolution.
+        }
+      } else {
+        dispatch({ type: "edit", ...edit });
+      }
     }
     setRecoveryConflicts(conflicts);
     if (conflicts.length > 0) {
@@ -170,16 +368,9 @@ export function ContentEditor({
       recoverySyncReady.current = true;
       return;
     }
-    const persistedValues = new Map(
-      persistedFields.map((field) => [field.path, field.value]),
-    );
-    const current = edits.map((edit) => ({
-      ...edit,
-      baseValue: persistedValues.get(edit.path) ?? "",
-    }));
     const pending = mergeStaleRecoveryEdits(
       recoveryPending.current,
-      current,
+      recoverableEdits,
       new Set(recoveryConflicts.map((conflict) => conflict.path)),
     );
     try {
@@ -208,7 +399,7 @@ export function ContentEditor({
     }
   }, [
     activeWorkspaceUrl,
-    edits,
+    recoverableEdits,
     initialStale,
     persistedFields,
     recoveryConflicts,
@@ -304,6 +495,14 @@ export function ContentEditor({
       }
       const saved = body as SaveResponse;
       pendingAttempt.current = null;
+      let outboxCleared = true;
+      try {
+        await queueOutbox(() =>
+          clearContentEditorOutbox(initialRevision.workspaceId),
+        );
+      } catch {
+        outboxCleared = false;
+      }
       if (staleRecovery !== undefined) {
         try {
           const recoveryStorage = window.localStorage;
@@ -342,7 +541,11 @@ export function ContentEditor({
         revision: saved.revision,
       });
       setPreviewUrl(saved.previewUrl);
-      setMessage(`Revision ${saved.revision} saved.`);
+      setMessage(
+        outboxCleared
+          ? `Revision ${saved.revision} saved.`
+          : `Revision ${saved.revision} saved, but the local browser recovery record could not be cleared.`,
+      );
     } catch {
       dispatch({ type: "failed", errors: {} });
       setMessage(
@@ -367,25 +570,15 @@ export function ContentEditor({
     const recoveryId = forwardedRecovery?.id ?? crypto.randomUUID();
     const recoverySourceWorkspaceId =
       forwardedRecovery?.sourceWorkspaceId ?? initialRevision.workspaceId;
-    const persistedValues = new Map(
-      persistedFields.map((field) => [field.path, field.value]),
+    const editsToPreserve = mergeStaleRecoveryEdits(
+      recoveryPending.current,
+      recoverableEdits,
+      new Set(
+        initialStale
+          ? recoveryPending.current.map((edit) => edit.path)
+          : recoveryConflicts.map((conflict) => conflict.path),
+      ),
     );
-    const recoveryEdits = edits.map((edit) => ({
-      ...edit,
-      baseValue: persistedValues.get(edit.path) ?? "",
-    }));
-    const editsToPreserve =
-      forwardedRecovery === undefined
-        ? recoveryEdits
-        : mergeStaleRecoveryEdits(
-            recoveryPending.current,
-            recoveryEdits,
-            new Set(
-              initialStale
-                ? recoveryPending.current.map((edit) => edit.path)
-                : recoveryConflicts.map((conflict) => conflict.path),
-            ),
-          );
     try {
       if (
         !preserveStaleEdits(
@@ -440,7 +633,23 @@ export function ContentEditor({
     resolution: "latest" | "mine",
   ) {
     if (resolution === "mine" && conflict.currentValue !== null) {
-      edit(conflict.path, conflict.value);
+      if (conflict.path === pageCompositionContract.slot.id) {
+        try {
+          const recoveredComposition: unknown = JSON.parse(conflict.value);
+          const result = applyPageComposition(
+            state.workingDefinition,
+            recoveredComposition,
+          );
+          if (result.ok) {
+            pendingAttempt.current = null;
+            dispatch({ type: "compose", definition: result.definition });
+          }
+        } catch {
+          // The unresolved recovery stays preserved until explicitly discarded.
+        }
+      } else {
+        edit(conflict.path, conflict.value);
+      }
     }
     const remaining = recoveryConflicts.filter(
       (candidate) => candidate.path !== conflict.path,
@@ -606,7 +815,7 @@ export function ContentEditor({
         </div>
       ) : null}
       <VisualComponentEditor
-        key={state.persistedRevision}
+        key={`${state.persistedRevision}:${state.projectionVersion}`}
         definition={state.workingDefinition}
         disabled={editorLocked}
         onChange={(definition) => {

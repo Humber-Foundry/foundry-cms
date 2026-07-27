@@ -9,6 +9,7 @@ export type ContentEditorState = Readonly<{
   workingDefinition: SiteDefinition;
   past: ReadonlyArray<SiteDefinition>;
   future: ReadonlyArray<SiteDefinition>;
+  projectionVersion: number;
   status: "saved" | "dirty" | "saving" | "conflict" | "stale";
   errors: Readonly<Record<string, string>>;
 }>;
@@ -46,6 +47,7 @@ export function createContentEditorState({
     workingDefinition: definition,
     past: [],
     future: [],
+    projectionVersion: 0,
     status: stale ? "stale" : "saved",
     errors: {},
   };
@@ -72,6 +74,7 @@ export function contentEditorReducer(
         workingDefinition,
         past: [...state.past, state.workingDefinition],
         future: [],
+        projectionVersion: state.projectionVersion + 1,
         status: "dirty",
         errors: { ...state.errors, [action.path]: "" },
       };
@@ -96,6 +99,7 @@ export function contentEditorReducer(
         workingDefinition,
         past: state.past.slice(0, -1),
         future: [state.workingDefinition, ...state.future],
+        projectionVersion: state.projectionVersion + 1,
         status:
           workingDefinition === state.persistedDefinition ? "saved" : "dirty",
         errors: {},
@@ -111,6 +115,7 @@ export function contentEditorReducer(
         workingDefinition,
         past: [...state.past, state.workingDefinition],
         future,
+        projectionVersion: state.projectionVersion + 1,
         status:
           workingDefinition === state.persistedDefinition ? "saved" : "dirty",
         errors: {},
@@ -124,6 +129,7 @@ export function contentEditorReducer(
         persistedDefinition: action.definition,
         persistedRevision: action.revision,
         workingDefinition: action.definition,
+        projectionVersion: state.projectionVersion + 1,
         status: "saved",
         errors: {},
       };

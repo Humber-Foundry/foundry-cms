@@ -54,6 +54,8 @@ describe("content editor history", () => {
     expect(composed.workingDefinition.home.sections[0]?.id).toBe(
       "section_contact",
     );
+    expect(composed.projectionVersion).toBe(initial.projectionVersion);
+    expect(undone.projectionVersion).toBe(initial.projectionVersion + 1);
     expect(undone.workingDefinition).toEqual(referenceSiteDefinition);
     expect(undone.persistedRevision).toBe(4);
   });

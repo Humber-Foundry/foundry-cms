@@ -112,6 +112,21 @@ describe("Puck page-composition adapter", () => {
     });
   });
 
+  it("rejects duplicate Puck identities instead of deriving position-based IDs", () => {
+    const data = structuredClone(
+      definitionToPuckData(referenceSiteDefinition),
+    );
+    data.content.push(structuredClone(data.content[0]!));
+
+    expect(puckDataToDefinition(referenceSiteDefinition, data)).toEqual({
+      ok: false,
+      errors: {
+        slot_home_sections:
+          "Every Puck component needs one unique stable identifier.",
+      },
+    });
+  });
+
   it("only emits a structural command when component identity or order changes", () => {
     const copyEdited = {
       ...referenceSiteDefinition,

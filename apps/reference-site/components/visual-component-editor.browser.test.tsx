@@ -11,6 +11,11 @@ import {
   VisualComponentEditor,
   visualComponentConfig,
 } from "./visual-component-editor";
+import {
+  clearContentEditorOutbox,
+  readContentEditorOutbox,
+  writeContentEditorOutbox,
+} from "../src/content-editor-outbox";
 
 describe("visual component editor browser acceptance", () => {
   const mounted: Array<ReturnType<typeof createRoot>> = [];
@@ -48,6 +53,7 @@ describe("visual component editor browser acceptance", () => {
     const iframe = host.querySelector("iframe");
     expect(iframe).not.toBeNull();
     expect(iframe?.getAttribute("src")).toBeNull();
+    expect(iframe?.contentDocument).not.toBeNull();
 
     const keyboardControls = [
       ...host.querySelectorAll<HTMLElement>(
@@ -61,6 +67,22 @@ describe("visual component editor browser acceptance", () => {
     await userEvent.tab();
     expect(document.activeElement).not.toBe(keyboardControls[0]);
     expect(document.activeElement).not.toBe(document.body);
+
+    await userEvent.click(iframe!);
+    expect(document.activeElement).toBe(iframe);
+    const iframeControls = [
+      ...iframe!.contentDocument!.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
+      ),
+    ];
+    expect(iframeControls.length).toBeGreaterThan(0);
+    iframeControls[0]!.focus();
+    expect(iframe!.contentDocument!.activeElement).toBe(iframeControls[0]);
+    await userEvent.tab();
+    expect(iframe!.contentDocument!.activeElement).not.toBe(iframeControls[0]);
+    expect(iframe!.contentDocument!.activeElement).not.toBe(
+      iframe!.contentDocument!.body,
+    );
   });
 
   it("keeps protected props out of the editable field controls", () => {
@@ -94,5 +116,37 @@ describe("visual component editor browser acceptance", () => {
         {} as never,
       ),
     ).toEqual({ delete: true });
+  });
+
+  it("round-trips unsaved structural edits through the browser outbox", async () => {
+    const workspaceId = "workspace_browser_acceptance";
+    await clearContentEditorOutbox(workspaceId);
+    await writeContentEditorOutbox({
+      workspaceId,
+      baseRevision: 12,
+      edits: [
+        {
+          path: "slot_home_sections",
+          baseValue: '{"slotId":"slot_home_sections","components":[]}',
+          value:
+            '{"slotId":"slot_home_sections","components":[{"id":"section_hero","type":"hero"}]}',
+        },
+      ],
+    });
+
+    expect(await readContentEditorOutbox(workspaceId)).toEqual({
+      workspaceId,
+      baseRevision: 12,
+      edits: [
+        {
+          path: "slot_home_sections",
+          baseValue: '{"slotId":"slot_home_sections","components":[]}',
+          value:
+            '{"slotId":"slot_home_sections","components":[{"id":"section_hero","type":"hero"}]}',
+        },
+      ],
+    });
+    await clearContentEditorOutbox(workspaceId);
+    expect(await readContentEditorOutbox(workspaceId)).toBeNull();
   });
 });
