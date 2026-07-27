@@ -30,6 +30,7 @@ export type MediaAsset = Readonly<{
   siteId: SiteId;
   assetId: MediaAssetId;
   objectKey: string;
+  sourceHash: string;
   fileName: string;
   contentType: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
   byteLength: number;
@@ -112,8 +113,12 @@ export type MediaSourceStore = Readonly<{
   put(
     objectKey: string,
     source: Uint8Array,
-    metadata: Readonly<{ contentType: string }>,
+    metadata: Readonly<{ contentType: string; sourceHash: string }>,
   ): Promise<void>;
+  get(objectKey: string): Promise<
+    | Readonly<{ body: Uint8Array; contentType: string }>
+    | null
+  >;
   delete(objectKey: string): Promise<void>;
 }>;
 
@@ -130,7 +135,15 @@ export type MediaAssetStore = Readonly<{
     result: MediaMutationResult,
   ): Promise<void>;
   getAsset(siteId: SiteId, assetId: MediaAssetId): Promise<MediaAsset | null>;
-  createAsset(asset: MediaAsset): Promise<void>;
+  listAssets(siteId: SiteId): Promise<ReadonlyArray<MediaAsset>>;
+  listOccurrences(
+    siteId: SiteId,
+  ): Promise<ReadonlyArray<MediaOccurrenceRevision>>;
+  createAsset(
+    asset: MediaAsset,
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<MediaAsset>;
   getOccurrence(
     siteId: SiteId,
     occurrenceId: MediaOccurrenceId,
@@ -147,7 +160,9 @@ export type MediaAssetStore = Readonly<{
       MediaAuditAction,
       "media.occurrence.replaced" | "media.occurrence.cropped"
     >,
-  ): Promise<void>;
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<MediaOccurrenceRevision>;
   beginAssetDeletion(
     siteId: SiteId,
     assetId: MediaAssetId,
@@ -157,6 +172,8 @@ export type MediaAssetStore = Readonly<{
     assetId: MediaAssetId,
     actorId: ContentActorId,
     occurredAt: string,
+    idempotencyKey: string,
+    requestHash: string,
   ): Promise<void>;
   audit(siteId: SiteId): Promise<ReadonlyArray<MediaAuditEvent>>;
 }>;
@@ -244,19 +261,54 @@ async function requestHash(command: unknown): Promise<string> {
   ).join("");
 }
 
+async function hashSource(source: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    source.slice().buffer as ArrayBuffer,
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 export function createInMemoryMediaSourceStore(): MediaSourceStore & {
   readForTest(objectKey: string): Promise<Uint8Array | null>;
 } {
-  const objects = new Map<string, Uint8Array>();
+  const objects = new Map<
+    string,
+    Readonly<{
+      source: Uint8Array;
+      sourceHash: string;
+      contentType: string;
+    }>
+  >();
   return {
-    async put(objectKey, source) {
-      objects.set(objectKey, source.slice());
+    async put(objectKey, source, metadata) {
+      const existing = objects.get(objectKey);
+      if (existing !== undefined) {
+        if (existing.sourceHash === metadata.sourceHash) return;
+        throw new MediaValidationError("assetId");
+      }
+      objects.set(objectKey, {
+        source: source.slice(),
+        sourceHash: metadata.sourceHash,
+        contentType: metadata.contentType,
+      });
+    },
+    async get(objectKey) {
+      const object = objects.get(objectKey);
+      return object === undefined
+        ? null
+        : {
+            body: object.source.slice(),
+            contentType: object.contentType,
+          };
     },
     async delete(objectKey) {
       objects.delete(objectKey);
     },
     async readForTest(objectKey) {
-      return objects.get(objectKey)?.slice() ?? null;
+      return objects.get(objectKey)?.source.slice() ?? null;
     },
   };
 }
@@ -299,16 +351,29 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     async getAsset(siteId, assetId) {
       return assets.get(scopedKey(siteId, assetId)) ?? null;
     },
-    async createAsset(asset) {
+    async listAssets(siteId) {
+      return [...assets.values()].filter((asset) => asset.siteId === siteId);
+    },
+    async listOccurrences(siteId) {
+      const found: MediaOccurrenceRevision[] = [];
+      for (const [key, revision] of current) {
+        if (!key.startsWith(`${siteId}:`)) continue;
+        const occurrence = revisions.get(key)?.get(revision);
+        if (occurrence !== undefined) found.push(occurrence);
+      }
+      return found;
+    },
+    async createAsset(asset, idempotencyKey, hash) {
       const key = scopedKey(asset.siteId, asset.assetId);
       const existing = assets.get(key);
       if (existing !== undefined) {
         if (
           existing.objectKey === asset.objectKey &&
+          existing.sourceHash === asset.sourceHash &&
           existing.byteLength === asset.byteLength &&
           existing.contentType === asset.contentType
         ) {
-          return;
+          return existing;
         }
         throw new MediaValidationError("assetId");
       }
@@ -323,6 +388,11 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
           occurredAt: asset.createdAt,
         }),
       );
+      await this.record(asset.siteId, idempotencyKey, hash, {
+        kind: "asset",
+        value: saved,
+      });
+      return saved;
     },
     async getOccurrence(siteId, occurrenceId) {
       const key = scopedKey(siteId, occurrenceId);
@@ -336,7 +406,13 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
         revisions.get(scopedKey(siteId, occurrenceId))?.get(revision) ?? null
       );
     },
-    async saveOccurrence(revision, baseRevision, action) {
+    async saveOccurrence(
+      revision,
+      baseRevision,
+      action,
+      idempotencyKey,
+      hash,
+    ) {
       if (
         !assets.has(scopedKey(revision.siteId, revision.assetId)) ||
         deletionReservations.has(scopedKey(revision.siteId, revision.assetId))
@@ -365,6 +441,11 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
           occurredAt: saved.createdAt,
         }),
       );
+      await this.record(revision.siteId, idempotencyKey, hash, {
+        kind: "occurrence",
+        value: saved,
+      });
+      return saved;
     },
     async beginAssetDeletion(siteId, assetId) {
       const key = scopedKey(siteId, assetId);
@@ -386,7 +467,14 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       deletionReservations.add(key);
       return asset;
     },
-    async completeAssetDeletion(siteId, assetId, actorId, occurredAt) {
+    async completeAssetDeletion(
+      siteId,
+      assetId,
+      actorId,
+      occurredAt,
+      idempotencyKey,
+      hash,
+    ) {
       const key = scopedKey(siteId, assetId);
       if (!deletionReservations.has(key) || !assets.has(key)) {
         throw new MediaSiteAccessError();
@@ -402,6 +490,10 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
           occurredAt,
         }),
       );
+      await this.record(siteId, idempotencyKey, hash, {
+        kind: "deleted",
+        assetId,
+      });
     },
     async audit(siteId) {
       return auditEvents.filter((event) => event.siteId === siteId);
@@ -461,12 +553,30 @@ export function createMediaAssetApplication({
           throw new MediaValidationError("source");
         }
         const existing = await assets.getAsset(siteId, command.assetId);
-        if (existing !== null) return existing;
+        const sourceHash = await hashSource(command.source);
+        if (existing !== null) {
+          if (
+            existing.sourceHash !== sourceHash ||
+            existing.fileName !== command.fileName ||
+            existing.contentType !== command.contentType ||
+            existing.byteLength !== command.byteLength ||
+            existing.width !== command.width ||
+            existing.height !== command.height
+          ) {
+            throw new MediaValidationError("assetId");
+          }
+          await assets.record(siteId, command.idempotencyKey, hash, {
+            kind: "asset",
+            value: existing,
+          });
+          return existing;
+        }
         const objectKey = `media/${siteId}/${command.assetId}/source`;
         const asset: MediaAsset = {
           siteId,
           assetId: command.assetId,
           objectKey,
+          sourceHash,
           fileName: command.fileName,
           contentType: command.contentType as MediaAsset["contentType"],
           byteLength: command.byteLength,
@@ -477,13 +587,9 @@ export function createMediaAssetApplication({
         };
         await sources.put(objectKey, command.source, {
           contentType: asset.contentType,
+          sourceHash: asset.sourceHash,
         });
-        await assets.createAsset(asset);
-        await assets.record(siteId, command.idempotencyKey, hash, {
-          kind: "asset",
-          value: asset,
-        });
-        return immutable(asset);
+        return assets.createAsset(asset, command.idempotencyKey, hash);
       },
       async replaceOccurrence(
         command: ReplaceMediaOccurrenceCommand,
@@ -518,11 +624,9 @@ export function createMediaAssetApplication({
           revision,
           command.baseRevision,
           "media.occurrence.replaced",
+          command.idempotencyKey,
+          hash,
         );
-        await assets.record(siteId, command.idempotencyKey, hash, {
-          kind: "occurrence",
-          value: revision,
-        });
         return immutable(revision);
       },
       async cropOccurrence(
@@ -561,11 +665,9 @@ export function createMediaAssetApplication({
           revision,
           command.baseRevision,
           "media.occurrence.cropped",
+          command.idempotencyKey,
+          hash,
         );
-        await assets.record(siteId, command.idempotencyKey, hash, {
-          kind: "occurrence",
-          value: revision,
-        });
         return immutable(revision);
       },
       async delete(command: {
@@ -597,16 +699,25 @@ export function createMediaAssetApplication({
           command.assetId,
           command.actorId,
           now(),
+          command.idempotencyKey,
+          hash,
         );
-        await assets.record(siteId, command.idempotencyKey, hash, {
-          kind: "deleted",
-          assetId: command.assetId,
-        });
       },
     }),
     queries: Object.freeze({
       getAsset(assetId: MediaAssetId) {
         return assets.getAsset(siteId, assetId);
+      },
+      listAssets() {
+        return assets.listAssets(siteId);
+      },
+      listOccurrences() {
+        return assets.listOccurrences(siteId);
+      },
+      async getSource(assetId: MediaAssetId) {
+        const asset = await assets.getAsset(siteId, assetId);
+        if (asset === null) throw new MediaSiteAccessError();
+        return sources.get(asset.objectKey);
       },
       getOccurrence(occurrenceId: MediaOccurrenceId) {
         return assets.getOccurrence(siteId, occurrenceId);

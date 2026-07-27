@@ -69,6 +69,7 @@ describe("media asset application", () => {
       siteId: siteA,
       assetId: assetA,
       objectKey: `media/${siteA}/${assetA}/source`,
+      sourceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       fileName: `${assetA}.png`,
       contentType: "image/png",
       byteLength: source(assetA).byteLength,
@@ -149,6 +150,29 @@ describe("media asset application", () => {
     expect(replay).toEqual(first);
     expect(uploadReplay).toEqual(uploaded);
     await expect(application.queries.audit()).resolves.toHaveLength(2);
+  });
+
+  it("rejects a different source that collides with an existing asset identity", async () => {
+    const { application, sources } = setup();
+    const original = await upload(application);
+    const different = source("different-source");
+
+    await expect(
+      application.commands.upload({
+        actorId: editor,
+        assetId: assetA,
+        fileName: "different.png",
+        contentType: "image/png",
+        byteLength: different.byteLength,
+        width: 800,
+        height: 600,
+        source: different,
+        idempotencyKey: "different-upload-source",
+      }),
+    ).rejects.toEqual(expect.objectContaining({ field: "assetId" }));
+    await expect(sources.readForTest(original.objectKey)).resolves.toEqual(
+      source(assetA),
+    );
   });
 
   it("records crops as immutable occurrence revision data without changing the source", async () => {

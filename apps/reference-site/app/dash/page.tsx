@@ -27,6 +27,10 @@ import {
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
 import { referenceSiteApplication } from "@/src/reference-installation";
 import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
+import {
+  MediaAssetConfigurationError,
+  loadMediaAssetApplication,
+} from "@/src/media-asset-runtime";
 
 import "./dashboard.css";
 import "../public.css";
@@ -114,6 +118,18 @@ export default async function DashboardPage({
       : [];
   const mutationToken = await createHumanMutationToken(access.identity);
   const formOperations = await loadPublicFormOperationsDashboard(access);
+  let mediaAssets;
+  let mediaOccurrences;
+  try {
+    const mediaApplication = await loadMediaAssetApplication(actorId);
+    [mediaAssets, mediaOccurrences] = await Promise.all([
+      mediaApplication.queries.listAssets(),
+      mediaApplication.queries.listOccurrences(),
+    ]);
+  } catch (error) {
+    if (error instanceof MediaAssetConfigurationError) notFound();
+    throw error;
+  }
   let workspaceId;
   const requestedWorkspace =
     typeof requested.workspace === "string" ? requested.workspace : undefined;
@@ -173,6 +189,8 @@ export default async function DashboardPage({
       formDeliveryHealth={formOperations.health}
       failedFormDeliveries={formOperations.failedDeliveries}
       suspectedSpam={formOperations.suspectedSpam}
+      mediaAssets={mediaAssets}
+      mediaOccurrences={mediaOccurrences}
     />
   );
 }

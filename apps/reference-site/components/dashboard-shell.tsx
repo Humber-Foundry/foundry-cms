@@ -2,6 +2,8 @@ import type {
   ContentRevision,
   FailedPublicFormDelivery,
   HumanMembership,
+  MediaAsset,
+  MediaOccurrenceRevision,
   PublicFormDeliveryHealth,
   SuspectedSpamSubmission,
 } from "@foundry/application";
@@ -12,6 +14,7 @@ import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
+import { MediaManager } from "./media-manager";
 
 export function DashboardShell({
   definition,
@@ -26,6 +29,8 @@ export function DashboardShell({
   formDeliveryHealth,
   failedFormDeliveries,
   suspectedSpam,
+  mediaAssets,
+  mediaOccurrences,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -42,6 +47,8 @@ export function DashboardShell({
   formDeliveryHealth: PublicFormDeliveryHealth;
   failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
+  mediaAssets: ReadonlyArray<MediaAsset>;
+  mediaOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined
@@ -72,7 +79,7 @@ export function DashboardShell({
           </a>
           <span aria-disabled="true">Pages</span>
           <span aria-disabled="true">Design</span>
-          <span aria-disabled="true">Media</span>
+          <a href="#media-heading">Media</a>
           <p className="nav-label">Operate</p>
           <span aria-disabled="true">Forms</span>
           <span aria-disabled="true">Analytics</span>
@@ -106,6 +113,11 @@ export function DashboardShell({
               staleRecovery={staleRecovery}
             />
           )}
+          <MediaManager
+            csrfToken={mutationToken}
+            initialAssets={mediaAssets}
+            initialOccurrences={mediaOccurrences}
+          />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">
               <div>

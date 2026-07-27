@@ -2,6 +2,9 @@ CREATE TABLE media_assets (
   site_id TEXT NOT NULL,
   asset_id TEXT NOT NULL,
   object_key TEXT NOT NULL,
+  source_hash TEXT NOT NULL CHECK (
+    length(source_hash) = 64 AND source_hash NOT GLOB '*[^a-f0-9]*'
+  ),
   file_name TEXT NOT NULL,
   content_type TEXT NOT NULL
     CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp', 'image/avif')),

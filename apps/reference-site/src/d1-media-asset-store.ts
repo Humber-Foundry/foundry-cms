@@ -22,6 +22,7 @@ type AssetRow = {
   site_id: SiteId;
   asset_id: string;
   object_key: string;
+  source_hash: string;
   file_name: string;
   content_type: MediaAsset["contentType"];
   byte_length: number;
@@ -42,7 +43,7 @@ type OccurrenceRow = {
 };
 
 const assetProjection = `
-  SELECT site_id, asset_id, object_key, file_name, content_type,
+  SELECT site_id, asset_id, object_key, source_hash, file_name, content_type,
          byte_length, width, height, created_at, created_by
   FROM media_assets
 `;
@@ -58,6 +59,7 @@ function toAsset(row: AssetRow): MediaAsset {
     siteId: row.site_id,
     assetId: createMediaAssetId(row.asset_id),
     objectKey: row.object_key,
+    sourceHash: row.source_hash,
     fileName: row.file_name,
     contentType: row.content_type,
     byteLength: row.byte_length,
@@ -90,6 +92,7 @@ function restoreMutationResult(value: string): MediaMutationResult {
       site_id: parsed.value.siteId,
       asset_id: parsed.value.assetId,
       object_key: parsed.value.objectKey,
+      source_hash: parsed.value.sourceHash,
       file_name: parsed.value.fileName,
       content_type: parsed.value.contentType,
       byte_length: parsed.value.byteLength,
@@ -175,20 +178,46 @@ export function createD1MediaAssetStore(
       }
     },
     getAsset,
-    async createAsset(asset) {
+    async listAssets(siteId) {
+      const rows = await database
+        .prepare(`${assetProjection} WHERE site_id = ?1 ORDER BY created_at, asset_id`)
+        .bind(siteId)
+        .all<AssetRow>();
+      return rows.results.map(toAsset);
+    },
+    async listOccurrences(siteId) {
+      const rows = await database
+        .prepare(
+          `${occurrenceProjection}
+           WHERE site_id = ?1
+             AND revision = (
+               SELECT current_revision
+               FROM media_occurrences
+               WHERE site_id = ?1
+                 AND occurrence_id = media_occurrence_revisions.occurrence_id
+             )
+           ORDER BY occurrence_id`,
+        )
+        .bind(siteId)
+        .all<OccurrenceRow>();
+      return rows.results.map(toOccurrence);
+    },
+    async createAsset(asset, idempotencyKey, requestHash) {
+      const result: MediaMutationResult = { kind: "asset", value: asset };
       const results = await database.batch([
         database
           .prepare(
             `INSERT INTO media_assets (
-               site_id, asset_id, object_key, file_name, content_type,
+               site_id, asset_id, object_key, source_hash, file_name, content_type,
                byte_length, width, height, created_at, created_by
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT (site_id, asset_id) DO NOTHING`,
           )
           .bind(
             asset.siteId,
             asset.assetId,
             asset.objectKey,
+            asset.sourceHash,
             asset.fileName,
             asset.contentType,
             asset.byteLength,
@@ -210,18 +239,35 @@ export function createD1MediaAssetStore(
             asset.assetId,
             asset.createdAt,
           ),
+        database
+          .prepare(
+            `INSERT INTO media_mutation_receipts (
+               site_id, idempotency_key, request_hash, result_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
+          )
+          .bind(
+            asset.siteId,
+            idempotencyKey,
+            requestHash,
+            JSON.stringify(result),
+            asset.createdAt,
+          ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
         const existing = await getAsset(asset.siteId, asset.assetId);
         if (
           existing === null ||
           existing.objectKey !== asset.objectKey ||
+          existing.sourceHash !== asset.sourceHash ||
           existing.byteLength !== asset.byteLength ||
           existing.contentType !== asset.contentType
         ) {
           throw new MediaSiteAccessError();
         }
+        return existing;
       }
+      return asset;
     },
     async getOccurrence(siteId, occurrenceId) {
       const row = await database
@@ -240,7 +286,17 @@ export function createD1MediaAssetStore(
       return row === null ? null : toOccurrence(row);
     },
     getOccurrenceRevision,
-    async saveOccurrence(revision, baseRevision, action) {
+    async saveOccurrence(
+      revision,
+      baseRevision,
+      action,
+      idempotencyKey,
+      requestHash,
+    ) {
+      const mutationResult: MediaMutationResult = {
+        kind: "occurrence",
+        value: revision,
+      };
       const results = await database.batch([
         database
           .prepare(
@@ -322,6 +378,28 @@ export function createD1MediaAssetStore(
             revision.revision,
             revision.createdAt,
           ),
+        database
+          .prepare(
+            `INSERT INTO media_mutation_receipts (
+               site_id, idempotency_key, request_hash, result_json, created_at
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5
+             WHERE EXISTS (
+               SELECT 1 FROM media_occurrences
+               WHERE site_id = ?1 AND occurrence_id = ?6
+                 AND current_revision = ?7
+             )
+             ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
+          )
+          .bind(
+            revision.siteId,
+            idempotencyKey,
+            requestHash,
+            JSON.stringify(mutationResult),
+            revision.createdAt,
+            revision.occurrenceId,
+            revision.revision,
+          ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
         if ((await getAsset(revision.siteId, revision.assetId)) === null) {
@@ -337,6 +415,7 @@ export function createD1MediaAssetStore(
           .first<{ current_revision: number }>();
         throw new MediaOccurrenceConflictError(current?.current_revision ?? 0);
       }
+      return revision;
     },
     async beginAssetDeletion(siteId, assetId) {
       const existing = await getAsset(siteId, assetId);
@@ -375,7 +454,14 @@ export function createD1MediaAssetStore(
       }
       return existing;
     },
-    async completeAssetDeletion(siteId, assetId, actorId, occurredAt) {
+    async completeAssetDeletion(
+      siteId,
+      assetId,
+      actorId,
+      occurredAt,
+      idempotencyKey,
+      requestHash,
+    ) {
       const results = await database.batch([
         database
           .prepare(
@@ -402,6 +488,20 @@ export function createD1MediaAssetStore(
              WHERE site_id = ?1 AND asset_id = ?2`,
           )
           .bind(siteId, assetId),
+        database
+          .prepare(
+            `INSERT INTO media_mutation_receipts (
+               site_id, idempotency_key, request_hash, result_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
+          )
+          .bind(
+            siteId,
+            idempotencyKey,
+            requestHash,
+            JSON.stringify({ kind: "deleted", assetId }),
+            occurredAt,
+          ),
       ]);
       if ((results[2]?.meta.changes ?? 0) === 0) {
         throw new MediaSiteAccessError();

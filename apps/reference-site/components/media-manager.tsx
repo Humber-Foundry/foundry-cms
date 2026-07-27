@@ -1,0 +1,232 @@
+"use client";
+
+import { useState } from "react";
+
+import type {
+  MediaAsset,
+  MediaOccurrenceRevision,
+} from "@foundry/application";
+
+async function imageDimensions(file: File) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export function MediaManager({
+  csrfToken,
+  initialAssets,
+  initialOccurrences,
+}: {
+  csrfToken: string;
+  initialAssets: ReadonlyArray<MediaAsset>;
+  initialOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
+}) {
+  const [assets, setAssets] = useState([...initialAssets]);
+  const [occurrences, setOccurrences] = useState([...initialOccurrences]);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState<string>(
+    initialAssets[0]?.assetId ?? "",
+  );
+  const [occurrenceId, setOccurrenceId] = useState("occurrence_home_hero");
+
+  async function mutateJson(body: unknown) {
+    const response = await fetch("/api/foundry-cms/media", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": crypto.randomUUID(),
+        "x-foundry-csrf": csrfToken,
+      },
+      body: JSON.stringify(body),
+    });
+    const result: unknown = response.status === 204 ? null : await response.json();
+    if (!response.ok) throw new Error("media_mutation_failed");
+    return result;
+  }
+
+  async function upload(file: File) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const dimensions = await imageDimensions(file);
+      const assetId = `asset_${crypto.randomUUID().replaceAll("-", "")}`;
+      const body = new FormData();
+      body.set("assetId", assetId);
+      body.set("width", String(dimensions.width));
+      body.set("height", String(dimensions.height));
+      body.set("source", file);
+      const response = await fetch("/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "idempotency-key": crypto.randomUUID(),
+          "x-foundry-csrf": csrfToken,
+        },
+        body,
+      });
+      if (!response.ok) throw new Error("media_upload_failed");
+      const asset = (await response.json()) as MediaAsset;
+      setAssets((current) => [...current, asset]);
+      setSelectedAsset(asset.assetId);
+      setMessage("Source stored in client-owned media.");
+    } catch {
+      setMessage("The image could not be stored. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function replaceSelected() {
+    const current = occurrences.find(
+      (occurrence) => occurrence.occurrenceId === occurrenceId,
+    );
+    setBusy(true);
+    try {
+      const revision = (await mutateJson({
+        operation: "replace",
+        occurrenceId,
+        assetId: selectedAsset,
+        baseRevision: current?.revision ?? 0,
+      })) as MediaOccurrenceRevision;
+      setOccurrences((items) => [
+        ...items.filter((item) => item.occurrenceId !== occurrenceId),
+        revision,
+      ]);
+      setMessage("Only the selected occurrence was replaced.");
+    } catch {
+      setMessage("The occurrence changed elsewhere or could not be replaced.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cropSelected() {
+    const current = occurrences.find(
+      (occurrence) => occurrence.occurrenceId === occurrenceId,
+    );
+    if (current === undefined) return;
+    setBusy(true);
+    try {
+      const revision = (await mutateJson({
+        operation: "crop",
+        occurrenceId,
+        baseRevision: current.revision,
+        crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+      })) as MediaOccurrenceRevision;
+      setOccurrences((items) => [
+        ...items.filter((item) => item.occurrenceId !== occurrenceId),
+        revision,
+      ]);
+      setMessage("Crop saved as revision data; the source is unchanged.");
+    } catch {
+      setMessage("The crop could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="content-editor" aria-labelledby="media-heading">
+      <div className="dashboard-section-heading">
+        <div>
+          <h2 id="media-heading">Media</h2>
+          <p>Private source images with occurrence-local replacements and crops.</p>
+        </div>
+        <label className="button button-secondary">
+          {busy ? "Working…" : "Upload image"}
+          <input
+            hidden
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/avif"
+            disabled={busy}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              if (file !== undefined) void upload(file);
+            }}
+          />
+        </label>
+      </div>
+      {assets.length > 0 ? (
+        <div className="editor-fields">
+          <label>
+            Occurrence ID
+            <input
+              value={occurrenceId}
+              pattern="occurrence_[a-z0-9_]+"
+              onChange={(event) => setOccurrenceId(event.target.value)}
+            />
+          </label>
+          <label>
+            Source asset
+            <select
+              value={selectedAsset}
+              onChange={(event) => setSelectedAsset(event.target.value)}
+            >
+              {assets.map((asset) => (
+                <option key={asset.assetId} value={asset.assetId}>
+                  {asset.fileName} · {asset.width}×{asset.height}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="editor-actions">
+            <button
+              className="button button-primary"
+              type="button"
+              disabled={busy || occurrenceId === "" || selectedAsset === ""}
+              onClick={() => void replaceSelected()}
+            >
+              Use in selected occurrence
+            </button>
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={
+                busy ||
+                !occurrences.some(
+                  (occurrence) => occurrence.occurrenceId === occurrenceId,
+                )
+              }
+              onClick={() => void cropSelected()}
+            >
+              Apply inset crop
+            </button>
+          </div>
+          {occurrences.map((occurrence) => (
+            <figure key={occurrence.occurrenceId}>
+              <img
+                src={`/api/foundry-cms/media?assetId=${encodeURIComponent(
+                  occurrence.assetId,
+                )}`}
+                alt=""
+                style={
+                  occurrence.crop === null
+                    ? undefined
+                    : {
+                        objectFit: "cover",
+                        objectPosition: `${occurrence.crop.x * 100}% ${
+                          occurrence.crop.y * 100
+                        }%`,
+                      }
+                }
+              />
+              <figcaption>
+                {occurrence.occurrenceId} · revision {occurrence.revision}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : (
+        <p>Upload an image to create the first stable media asset.</p>
+      )}
+      <p role="status" aria-live="polite">{message}</p>
+    </section>
+  );
+}

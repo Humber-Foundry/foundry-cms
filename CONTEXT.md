@@ -49,6 +49,19 @@ preserves the item, its revisions and its history. Archive is not deletion.
 **Restore** — Creation of active, unpublished work from an archived item. It
 does not silently republish an old revision.
 
+## Media
+
+**Media asset** — A stable, site-scoped identity and metadata record for one
+immutable source image stored in the client's private R2 bucket.
+
+**Media occurrence** — One stable placement of a media asset in editable
+content. Replacing an occurrence changes that placement without changing other
+occurrences that reference the same asset.
+
+**Media occurrence revision** — An immutable snapshot of one occurrence's
+asset reference and optional normalized crop. A crop is presentation data; it
+never rewrites the media asset's source object.
+
 ## Blog
 
 **Post** — A stable blog-content identity with zero or more immutable post
