@@ -35,6 +35,16 @@ type EditableFieldBinding = Readonly<{
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
+export class DuplicateEditableSiteFieldPathError extends Error {
+  readonly path: string;
+
+  constructor(path: string) {
+    super("duplicate_editable_site_field_path");
+    this.name = "DuplicateEditableSiteFieldPathError";
+    this.path = path;
+  }
+}
+
 function fieldBinding({
   path,
   label,
@@ -281,6 +291,13 @@ function editableFieldBindings(
     }
   });
 
+  const paths = new Set<string>();
+  for (const binding of fields) {
+    if (paths.has(binding.field.path)) {
+      throw new DuplicateEditableSiteFieldPathError(binding.field.path);
+    }
+    paths.add(binding.field.path);
+  }
   return fields;
 }
 
@@ -317,7 +334,7 @@ export function applySiteDefinitionEdits(
       binding,
     ]),
   );
-  const errors: Record<string, string> = {};
+  const errors = Object.create(null) as Record<string, string>;
   for (const edit of edits) {
     if (!bindings.has(edit.path)) {
       errors[edit.path] =

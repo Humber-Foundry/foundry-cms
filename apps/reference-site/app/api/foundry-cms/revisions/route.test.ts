@@ -270,4 +270,21 @@ describe("content revision endpoint", () => {
     });
     expect(mocks.save).not.toHaveBeenCalled();
   });
+
+  it("keeps prototype-named paths in field-level feedback", async () => {
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
+        baseRevision: 2,
+        edits: [{ path: "__proto__", value: 42 }],
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(Object.keys(body.fields)).toEqual(["__proto__"]);
+    expect(body.fields["__proto__"]).toBe("Enter a text value.");
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
 });

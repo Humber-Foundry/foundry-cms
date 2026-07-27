@@ -135,7 +135,7 @@ function parseSaveBody(
   ) {
     return { ok: false };
   }
-  const errors: Record<string, string> = {};
+  const errors = Object.create(null) as Record<string, string>;
   const edits: SiteDefinitionEdit[] = [];
   candidate.edits.forEach((edit, index) => {
     if (typeof edit !== "object" || edit === null) {

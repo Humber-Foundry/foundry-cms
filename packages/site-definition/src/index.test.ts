@@ -3,10 +3,12 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 import {
   applySiteDefinitionEdits,
+  DuplicateEditableSiteFieldPathError,
   createSiteId,
   listEditableSiteFields,
   referenceSiteDefinition,
   siteDefinitionSchema,
+  type SiteDefinition,
 } from "./index";
 
 describe("reference Site Definition", () => {
@@ -173,5 +175,30 @@ describe("reference Site Definition", () => {
         "section_hero.href": "This field is not in Site Definition 1.0.0.",
       },
     });
+  });
+
+  it("returns validation feedback for prototype-named field paths", () => {
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      { path: "__proto__", value: "Unknown" },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(Object.keys(result.errors)).toEqual(["__proto__"]);
+      expect(result.errors["__proto__"]).toBe(
+        "This field is not in Site Definition 1.0.0.",
+      );
+    }
+  });
+
+  it("rejects duplicate generated editable paths", () => {
+    const duplicate = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    duplicate.home.sections[1].id = duplicate.home.sections[0].id;
+
+    expect(() =>
+      listEditableSiteFields(duplicate as SiteDefinition),
+    ).toThrow(DuplicateEditableSiteFieldPathError);
   });
 });
