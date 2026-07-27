@@ -81,7 +81,9 @@ published-content hash, and schema version. If the deployment signal remains
 requested, unknown, or building for 15 minutes—or a deployed release never
 serves the exact marker in that window—the operation becomes `failed` with its
 commit evidence preserved so it cannot hold the global publication slot
-forever.
+forever. A transport or non-success response while probing the marker is
+retryable unavailability, not evidence that the approval's production base
+mismatches. The dashboard continues polling after transient refresh failures.
 
 Publication GET requests only read the durable state and remain side-effect
 free. Cloudflare/GitHub reconciliation is a protected, idempotent POST mutation

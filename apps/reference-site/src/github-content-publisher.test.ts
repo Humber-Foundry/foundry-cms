@@ -167,6 +167,82 @@ describe("GitHub content publisher", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not misclassify Git object validation failures as a moved head", async () => {
+    const expectedHead = "a".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ message: "Validation Failed" }, 422));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"2".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: "Publish",
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "unknown",
+      detail: "git_result_unknown",
+    });
+  });
+
+  it("classifies an explicit non-fast-forward ref rejection as a moved head", async () => {
+    const expectedHead = "a".repeat(40);
+    const commitSha = "c".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(json({ sha: commitSha }))
+      .mockResolvedValueOnce(
+        json({ message: "Update is not a fast forward" }, 422),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"3".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: "Publish",
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "blocked",
+      detail: "production_head_moved",
+    });
+  });
+
   it("does not advance the production ref after the publication lease is lost", async () => {
     const expectedHead = "a".repeat(40);
     const assertLease = vi
@@ -261,6 +337,25 @@ describe("GitHub content publisher", () => {
     });
 
     await expect(publisher.isReleaseLive(expected)).resolves.toBe(false);
+  });
+
+  it("keeps a release probe failure distinct from an observed mismatch", async () => {
+    const expected = {
+      commitSha: "c".repeat(40),
+      contentHash: "d".repeat(64),
+      schemaVersion: "1.0.0" as const,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ error: "temporarily unavailable" }, 503));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(publisher.isReleaseLive(expected)).rejects.toThrow(
+      "release_marker_unavailable",
+    );
   });
 
   it("uses only the configured Cloudflare check to report build state", async () => {

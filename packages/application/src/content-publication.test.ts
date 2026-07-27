@@ -249,6 +249,32 @@ describe("content publication application", () => {
     );
   });
 
+  it("preserves approval when the live release probe is temporarily unavailable", async () => {
+    const { app, approval } = await approve();
+    isReleaseLive.mockRejectedValueOnce(
+      new Error("release_marker_unavailable"),
+    );
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-probe-unavailable",
+      }),
+    ).rejects.toThrow("release_marker_unavailable");
+
+    isReleaseLive.mockResolvedValue(true);
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-after-probe-retry",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ status: "committed" }));
+  });
+
   it("invalidates approval when Git's final compare-and-swap sees a moved head", async () => {
     createCommit.mockResolvedValue({
       state: "blocked",

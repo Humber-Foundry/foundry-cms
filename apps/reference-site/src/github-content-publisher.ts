@@ -92,17 +92,27 @@ async function readJson(response: Response): Promise<any> {
   if (!response.ok) {
     throw Object.assign(new Error("github_request_failed"), {
       status: response.status,
+      responseMessage:
+        typeof body === "object" &&
+        body !== null &&
+        "message" in body &&
+        typeof body.message === "string"
+          ? body.message
+          : null,
     });
   }
   return body;
 }
 
-function isBlockedGitError(error: unknown) {
+function isNonFastForwardRefError(error: unknown) {
   return (
     typeof error === "object" &&
     error !== null &&
     "status" in error &&
-    (error.status === 409 || error.status === 422)
+    (error.status === 409 || error.status === 422) &&
+    "responseMessage" in error &&
+    typeof error.responseMessage === "string" &&
+    /not a fast forward|non-fast-forward/iu.test(error.responseMessage)
   );
 }
 
@@ -206,28 +216,24 @@ export function createGitHubContentPublisher({
       configuration.publicOrigin,
     );
     markerUrl.searchParams.set("foundry_probe", crypto.randomUUID());
-    try {
-      const response = await fetchImplementation(markerUrl, {
-        headers: { "cache-control": "no-cache" },
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        return false;
-      }
-      const marker: unknown = await response.json();
-      return (
-        typeof marker === "object" &&
-        marker !== null &&
-        "commitSha" in marker &&
-        marker.commitSha === expected.commitSha &&
-        "contentHash" in marker &&
-        marker.contentHash === expected.contentHash &&
-        "schemaVersion" in marker &&
-        marker.schemaVersion === expected.schemaVersion
-      );
-    } catch {
-      return false;
+    const response = await fetchImplementation(markerUrl, {
+      headers: { "cache-control": "no-cache" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error("release_marker_unavailable");
     }
+    const marker: unknown = await response.json();
+    return (
+      typeof marker === "object" &&
+      marker !== null &&
+      "commitSha" in marker &&
+      marker.commitSha === expected.commitSha &&
+      "contentHash" in marker &&
+      marker.contentHash === expected.contentHash &&
+      "schemaVersion" in marker &&
+      marker.schemaVersion === expected.schemaVersion
+    );
   }
 
   return {
@@ -290,22 +296,26 @@ export function createGitHubContentPublisher({
         if (!(await input.assertLease())) {
           return { state: "blocked", detail: "publication_lease_lost" };
         }
-        await request(
-          token,
-          `/git/refs/heads/${configuration.productionBranch
-            .split("/")
-            .map(encodeURIComponent)
-            .join("/")}`,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ sha: commit.sha, force: false }),
-          },
-        );
+        try {
+          await request(
+            token,
+            `/git/refs/heads/${configuration.productionBranch
+              .split("/")
+              .map(encodeURIComponent)
+              .join("/")}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ sha: commit.sha, force: false }),
+            },
+          );
+        } catch (error) {
+          if (isNonFastForwardRefError(error)) {
+            return { state: "blocked", detail: "production_head_moved" };
+          }
+          throw error;
+        }
         return { state: "committed", commitSha: commit.sha };
       } catch (error) {
-        if (isBlockedGitError(error)) {
-          return { state: "blocked", detail: "production_head_moved" };
-        }
         return {
           state: "unknown",
           detail:

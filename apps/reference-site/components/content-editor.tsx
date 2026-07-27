@@ -111,6 +111,7 @@ export function ContentEditor({
   const [publication, setPublication] =
     useState<PublicationRecord | null>(null);
   const [publicationBusy, setPublicationBusy] = useState(false);
+  const [publicationPollAttempt, setPublicationPollAttempt] = useState(0);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -178,6 +179,7 @@ export function ContentEditor({
     ) {
       return;
     }
+    let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
         const result = await refreshContentPublication({
@@ -185,24 +187,42 @@ export function ContentEditor({
           publicationId: publication.id,
           mutationToken,
         });
+        if (cancelled) {
+          return;
+        }
         setMutationToken(result.mutationToken);
         if (
           typeof result.body === "object" &&
           result.body !== null &&
           "publication" in result.body &&
           typeof result.body.publication === "object" &&
-          result.body.publication !== null
+          result.body.publication !== null &&
+          !cancelled
         ) {
           setPublication(result.body.publication as PublicationRecord);
         }
       } catch {
-        setMessage(
-          "The latest publish state could not be confirmed. The operation remains recorded; retry status shortly.",
-        );
+        if (!cancelled) {
+          setMessage(
+            "The latest publish state could not be confirmed. The operation remains recorded; retry status shortly.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPublicationPollAttempt((attempt) => attempt + 1);
+        }
       }
     }, 2_500);
-    return () => window.clearTimeout(timer);
-  }, [initialRevision.workspaceId, mutationToken, publication]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    initialRevision.workspaceId,
+    mutationToken,
+    publication,
+    publicationPollAttempt,
+  ]);
 
   useEffect(() => {
     if (
