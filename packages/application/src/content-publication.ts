@@ -89,6 +89,8 @@ export type ContentPublication = Readonly<{
   status: ContentPublicationStatus;
   commitSha: string | null;
   detail: string | null;
+  leaseToken: string | null;
+  leaseExpiresAt: string | null;
   requestedAt: string;
   updatedAt: string;
 }>;
@@ -317,6 +319,8 @@ function nextPublication(
     status: ContentPublicationStatus;
     commitSha?: string | null;
     detail?: string | null;
+    leaseToken?: string | null;
+    leaseExpiresAt?: string | null;
     updatedAt: string;
   }>,
 ): ContentPublication {
@@ -325,6 +329,14 @@ function nextPublication(
     status: update.status,
     commitSha: update.commitSha ?? publication.commitSha,
     detail: update.detail === undefined ? publication.detail : update.detail,
+    leaseToken:
+      update.leaseToken === undefined
+        ? publication.leaseToken
+        : update.leaseToken,
+    leaseExpiresAt:
+      update.leaseExpiresAt === undefined
+        ? publication.leaseExpiresAt
+        : update.leaseExpiresAt,
     updatedAt: update.updatedAt,
   });
 }
@@ -337,12 +349,33 @@ const activeStatuses = new Set<ContentPublicationStatus>([
   "unknown",
 ]);
 
+const deploymentProgress: Readonly<
+  Partial<Record<ContentPublicationStatus, number>>
+> = {
+  requested: 0,
+  committed: 1,
+  building: 2,
+  deployed: 3,
+  "verified-live": 4,
+};
+
 export function createInMemoryContentPublicationStore(): ContentPublicationStore {
   const approvals = new Map<ContentApprovalId, ContentApproval>();
   const publications = new Map<ContentPublicationId, ContentPublication>();
 
   return {
     async saveApproval(approval) {
+      const duplicate = [...approvals.values()].find(
+        (candidate) =>
+          candidate.workspaceId === approval.workspaceId &&
+          candidate.revision === approval.revision &&
+          candidate.fingerprint.value === approval.fingerprint.value &&
+          candidate.approvedBy === approval.approvedBy &&
+          candidate.invalidatedAt === null,
+      );
+      if (duplicate !== undefined) {
+        return duplicate;
+      }
       for (const [id, existing] of approvals) {
         if (
           existing.workspaceId === approval.workspaceId &&
@@ -354,17 +387,6 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
             invalidatedAt: approval.approvedAt,
           });
         }
-      }
-      const duplicate = [...approvals.values()].find(
-        (candidate) =>
-          candidate.workspaceId === approval.workspaceId &&
-          candidate.revision === approval.revision &&
-          candidate.fingerprint.value === approval.fingerprint.value &&
-          candidate.approvedBy === approval.approvedBy &&
-          candidate.invalidatedAt === null,
-      );
-      if (duplicate !== undefined) {
-        return duplicate;
       }
       approvals.set(approval.id, Object.freeze({ ...approval }));
       return approval;
@@ -397,6 +419,10 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
       return { state: "claimed", publication };
     },
     async updatePublication(publication) {
+      const current = publications.get(publication.id);
+      if (current?.status === "verified-live") {
+        return current;
+      }
       publications.set(publication.id, Object.freeze({ ...publication }));
       return publication;
     },
@@ -570,12 +596,32 @@ export function createContentPublicationApplication({
           status: "requested",
           commitSha: null,
           detail: null,
+          leaseToken: crypto.randomUUID(),
+          leaseExpiresAt: new Date(
+            new Date(requestedAt).getTime() + 2 * 60 * 1_000,
+          ).toISOString(),
           requestedAt,
           updatedAt: requestedAt,
         });
         const claim = await store.claimPublication(publication);
         if (claim.state !== "claimed") {
           return claim.publication;
+        }
+        try {
+          await requireApproval(input.approvalId, input.requestedBy);
+        } catch (error) {
+          if (error instanceof ContentApprovalInvalidError) {
+            return store.updatePublication(
+              nextPublication(publication, {
+                status: "blocked",
+                detail: "approval_stale",
+                leaseToken: null,
+                leaseExpiresAt: null,
+                updatedAt: now(),
+              }),
+            );
+          }
+          throw error;
         }
         let result: PublicationCommitResult;
         try {
@@ -604,6 +650,8 @@ export function createContentPublicationApplication({
               status: "committed",
               commitSha: result.commitSha,
               detail: null,
+              leaseToken: null,
+              leaseExpiresAt: null,
               updatedAt,
             }),
           );
@@ -612,6 +660,8 @@ export function createContentPublicationApplication({
           nextPublication(publication, {
             status: result.state,
             detail: result.detail,
+            leaseToken: null,
+            leaseExpiresAt: null,
             updatedAt,
           }),
         );
@@ -621,8 +671,23 @@ export function createContentPublicationApplication({
         if (publication === null) {
           return null;
         }
+        if (publication.status === "verified-live") {
+          return publication;
+        }
         let commitSha = publication.commitSha;
-        if (commitSha === null && publication.status === "unknown") {
+        if (
+          commitSha === null &&
+          publication.status === "requested" &&
+          publication.leaseExpiresAt !== null &&
+          publication.leaseExpiresAt > now()
+        ) {
+          return publication;
+        }
+        if (
+          commitSha === null &&
+          (publication.status === "unknown" ||
+            publication.status === "requested")
+        ) {
           const reconciled = await publisher.reconcileCommit(publication.id);
           if (reconciled.state === "committed") {
             commitSha = reconciled.commitSha;
@@ -630,7 +695,12 @@ export function createContentPublicationApplication({
             return store.updatePublication(
               nextPublication(publication, {
                 status: "failed",
-                detail: "git_commit_not_found",
+                detail:
+                  publication.status === "requested"
+                    ? "publication_lease_expired"
+                    : "git_commit_not_found",
+                leaseToken: null,
+                leaseExpiresAt: null,
                 updatedAt: now(),
               }),
             );
@@ -642,6 +712,18 @@ export function createContentPublicationApplication({
           return publication;
         }
         const deployment = await publisher.getDeploymentStatus(commitSha);
+        if (deployment === "unknown") {
+          return publication;
+        }
+        const currentProgress = deploymentProgress[publication.status];
+        const nextProgress = deploymentProgress[deployment];
+        if (
+          currentProgress !== undefined &&
+          nextProgress !== undefined &&
+          nextProgress < currentProgress
+        ) {
+          return publication;
+        }
         if (deployment === "deployed") {
           const approval = await store.findApproval(publication.approvalId);
           if (approval === null) {
@@ -675,9 +757,7 @@ export function createContentPublicationApplication({
             detail:
               deployment === "failed"
                 ? "cloudflare_build_failed"
-                : deployment === "unknown"
-                  ? "deployment_status_unknown"
-                  : null,
+                : null,
             updatedAt: now(),
           }),
         );
@@ -686,6 +766,9 @@ export function createContentPublicationApplication({
     queries: Object.freeze({
       getLatest(workspaceId: ContentWorkspaceId) {
         return store.findLatestPublication(workspaceId);
+      },
+      get(publicationId: ContentPublicationId) {
+        return store.findPublication(publicationId);
       },
     }),
   });

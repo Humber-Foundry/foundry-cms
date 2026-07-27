@@ -66,6 +66,7 @@ describe("GitHub content publisher", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
       .mockResolvedValueOnce(json({ sha: "blob-sha" }))
       .mockResolvedValueOnce(json({ sha: "tree-sha" }))
       .mockResolvedValueOnce(json({ sha: "c".repeat(40) }))
@@ -96,8 +97,24 @@ describe("GitHub content publisher", () => {
       commitSha: "c".repeat(40),
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
     expect(fetchMock.mock.calls[4]![1]).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          base_tree: "base-tree-sha",
+          tree: [
+            {
+              path: "packages/site-definition/src/published-site.json",
+              mode: "100644",
+              type: "blob",
+              sha: "blob-sha",
+            },
+          ],
+        }),
+      }),
+    );
+    expect(fetchMock.mock.calls[5]![1]).toEqual(
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -108,7 +125,7 @@ describe("GitHub content publisher", () => {
         }),
       }),
     );
-    expect(fetchMock.mock.calls[5]![1]).toEqual(
+    expect(fetchMock.mock.calls[6]![1]).toEqual(
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ sha: "c".repeat(40), force: false }),
@@ -211,9 +228,14 @@ describe("GitHub content publisher", () => {
               conclusion: "success",
             },
             {
-              name: "Cloudflare Workers build",
+              name: "Cloudflare Workers",
               status: "in_progress",
               conclusion: null,
+            },
+            {
+              name: "Cloudflare Workers",
+              status: "completed",
+              conclusion: "failure",
             },
           ],
         }),

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  loadContentPublication,
   refreshContentPublication,
   sendContentPublicationAttempt,
 } from "./content-publication-client";
@@ -60,7 +61,7 @@ describe("content publication client", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(json({ publication: { status: "building" } }));
 
-    await refreshContentPublication({
+    await loadContentPublication({
       workspaceId: "workspace_publish",
       publicationId: "publish_123",
       fetcher,
@@ -69,6 +70,52 @@ describe("content publication client", () => {
     expect(fetcher).toHaveBeenCalledWith(
       "/api/foundry-cms/publications?workspaceId=workspace_publish&publicationId=publish_123",
       { cache: "no-store" },
+    );
+  });
+
+  it("loads the latest durable workspace publication after a dashboard reload", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(json({ publication: { status: "deployed" } }));
+
+    await loadContentPublication({
+      workspaceId: "workspace_publish",
+      fetcher,
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/foundry-cms/publications?workspaceId=workspace_publish",
+      { cache: "no-store" },
+    );
+  });
+
+  it("refreshes durable status only through the protected mutation path", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        json({ publication: { status: "verified-live" } }),
+      );
+
+    await refreshContentPublication({
+      workspaceId: "workspace_publish",
+      publicationId: "publish_123",
+      mutationToken: "mutation-token",
+      fetcher,
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/foundry-cms/publications",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "x-foundry-csrf": "mutation-token",
+        }),
+        body: JSON.stringify({
+          operation: "refresh",
+          workspaceId: "workspace_publish",
+          publicationId: "publish_123",
+        }),
+      }),
     );
   });
 });

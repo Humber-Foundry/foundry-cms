@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   refresh: vi.fn(),
   getLatest: vi.fn(),
+  get: vi.fn(),
+  requireExistingAccess: vi.fn(),
 }));
 
 vi.mock("../../../../src/human-access-runtime", () => ({
@@ -33,6 +35,9 @@ vi.mock("../../../../src/human-mutation-runtime", async () => {
 });
 vi.mock("../../../../src/content-publication-runtime", () => ({
   loadContentPublicationApplication: mocks.loadApplication,
+}));
+vi.mock("../../../../src/content-revision-runtime", () => ({
+  requireExistingContentWorkspaceAccess: mocks.requireExistingAccess,
 }));
 
 import { GET, POST } from "./route";
@@ -63,13 +68,14 @@ describe("content publication endpoint", () => {
     mocks.executeMutation.mockImplementation(
       async ({ execute }: { execute(): Promise<Response> }) => execute(),
     );
+    mocks.requireExistingAccess.mockResolvedValue(undefined);
     mocks.loadApplication.mockResolvedValue({
       commands: {
         approve: mocks.approve,
         publish: mocks.publish,
         refresh: mocks.refresh,
       },
-      queries: { getLatest: mocks.getLatest },
+      queries: { getLatest: mocks.getLatest, get: mocks.get },
     });
   });
 
@@ -169,9 +175,10 @@ describe("content publication endpoint", () => {
     });
   });
 
-  it("refreshes explicit publication states without caching", async () => {
-    mocks.refresh.mockResolvedValue({
+  it("reads explicit publication states without mutating from GET", async () => {
+    mocks.get.mockResolvedValue({
       id: `publish_${"2".repeat(32)}`,
+      workspaceId: "workspace_publish",
       status: "verified-live",
     });
     const response = await GET(
@@ -183,19 +190,49 @@ describe("content publication endpoint", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(mocks.refresh).toHaveBeenCalledWith(
+    expect(mocks.get).toHaveBeenCalledWith(
       `publish_${"2".repeat(32)}`,
     );
+    expect(mocks.refresh).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       publication: {
         id: `publish_${"2".repeat(32)}`,
+        workspaceId: "workspace_publish",
         status: "verified-live",
       },
     });
   });
 
+  it("refreshes durable status only through a protected POST mutation", async () => {
+    const existing = {
+      id: `publish_${"2".repeat(32)}`,
+      workspaceId: "workspace_publish",
+      status: "building",
+    };
+    mocks.get.mockResolvedValue(existing);
+    mocks.refresh.mockResolvedValue({
+      ...existing,
+      status: "verified-live",
+    });
+    const response = await POST(
+      request({
+        operation: "refresh",
+        workspaceId: "workspace_publish",
+        publicationId: existing.id,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifyMutation).toHaveBeenCalled();
+    expect(mocks.requireExistingAccess).toHaveBeenCalledWith(
+      "workspace_publish",
+      "membership-editor",
+    );
+    expect(mocks.refresh).toHaveBeenCalledWith(existing.id);
+  });
+
   it("does not expose a workspace publication to an unauthorized actor", async () => {
-    mocks.loadApplication.mockRejectedValue(
+    mocks.requireExistingAccess.mockRejectedValue(
       new (await import("@foundry/application")).ContentWorkspaceAccessError(),
     );
     const response = await GET(

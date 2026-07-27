@@ -52,6 +52,8 @@ type PublicationRow = {
   status: ContentPublicationStatus;
   commit_sha: string | null;
   detail: string | null;
+  lease_token: string | null;
+  lease_expires_at: string | null;
   requested_at: string;
   updated_at: string;
 };
@@ -92,6 +94,8 @@ const publicationProjection = `
     status,
     commit_sha,
     detail,
+    lease_token,
+    lease_expires_at,
     requested_at,
     updated_at
   FROM content_publications
@@ -141,6 +145,8 @@ function toPublication(row: PublicationRow): ContentPublication {
     status: row.status,
     commitSha: row.commit_sha,
     detail: row.detail,
+    leaseToken: row.lease_token,
+    leaseExpiresAt: row.lease_expires_at,
     requestedAt: row.requested_at,
     updatedAt: row.updated_at,
   };
@@ -183,17 +189,39 @@ export function createD1ContentPublicationStore(
     return row === null ? null : toPublication(row);
   }
 
-  async function insertPublication(publication: ContentPublication) {
-    return database
-      .prepare(
-        `INSERT INTO content_publications (
+  function insertPublicationStatement(
+    publication: ContentPublication,
+    requireCurrentApproval: boolean,
+  ) {
+    const statement = database.prepare(
+      `INSERT INTO content_publications (
            id, workspace_id, revision, approval_id, fingerprint,
            idempotency_key, requested_by, contributors_json, expected_head,
-           status, commit_sha, detail, requested_at, updated_at
-         ) VALUES (
-           ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
-         )`,
-      )
+           status, commit_sha, detail, lease_token, lease_expires_at,
+           requested_at, updated_at
+         )
+         SELECT
+           ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+           ?15, ?16
+         ${requireCurrentApproval
+           ? `WHERE EXISTS (
+                SELECT 1
+                FROM content_approvals AS approval
+                JOIN content_workspaces AS workspace
+                  ON workspace.workspace_id = approval.workspace_id
+                WHERE approval.id = ?4
+                  AND approval.workspace_id = ?2
+                  AND approval.revision = ?3
+                  AND approval.fingerprint = ?5
+                  AND workspace.current_revision = ?3
+                  AND NOT EXISTS (
+                    SELECT 1 FROM content_approval_invalidations
+                    WHERE approval_id = approval.id
+                  )
+              )`
+           : ""}`,
+    );
+    return statement
       .bind(
         publication.id,
         publication.workspaceId,
@@ -207,10 +235,46 @@ export function createD1ContentPublicationStore(
         publication.status,
         publication.commitSha,
         publication.detail,
+        publication.leaseToken,
+        publication.leaseExpiresAt,
         publication.requestedAt,
         publication.updatedAt,
+      );
+  }
+
+  function auditStatement(
+    publication: ContentPublication,
+    requireExactState = false,
+  ) {
+    return database
+      .prepare(
+        `INSERT INTO content_publication_audit_events (
+           publication_id, status, detail, occurred_at
+         )
+         SELECT ?1, ?2, ?3, ?4
+         WHERE EXISTS (
+           SELECT 1 FROM content_publications
+           WHERE id = ?1
+             ${requireExactState ? "AND status = ?2 AND updated_at = ?4" : ""}
+         )`,
       )
-      .run();
+      .bind(
+        publication.id,
+        publication.status,
+        publication.detail,
+        publication.updatedAt,
+      );
+  }
+
+  async function insertPublication(
+    publication: ContentPublication,
+    requireCurrentApproval: boolean,
+  ) {
+    const results = await database.batch([
+      insertPublicationStatement(publication, requireCurrentApproval),
+      auditStatement(publication),
+    ]);
+    return results[0]?.meta.changes ?? 0;
   }
 
   return {
@@ -291,7 +355,18 @@ export function createD1ContentPublicationStore(
         return { state: "replayed", publication: replay };
       }
       try {
-        await insertPublication(publication);
+        const inserted = await insertPublication(publication, true);
+        if (inserted < 1) {
+          const blocked = {
+            ...publication,
+            status: "blocked" as const,
+            detail: "approval_stale",
+            leaseToken: null,
+            leaseExpiresAt: null,
+          };
+          await insertPublication(blocked, false);
+          return { state: "blocked", publication: blocked };
+        }
       } catch (error) {
         const racedReplay = await findPublicationByKey(
           publication.workspaceId,
@@ -304,35 +379,16 @@ export function createD1ContentPublicationStore(
           ...publication,
           status: "blocked" as const,
           detail: "publication_in_progress",
+          leaseToken: null,
+          leaseExpiresAt: null,
         };
         try {
-          await insertPublication(blocked);
-          await database
-            .prepare(
-              `INSERT INTO content_publication_audit_events (
-                 publication_id, status, detail, occurred_at
-               ) VALUES (?1, 'blocked', ?2, ?3)`,
-            )
-            .bind(blocked.id, blocked.detail, blocked.updatedAt)
-            .run();
+          await insertPublication(blocked, false);
           return { state: "blocked", publication: blocked };
         } catch {
           throw error;
         }
       }
-      await database
-        .prepare(
-          `INSERT INTO content_publication_audit_events (
-             publication_id, status, detail, occurred_at
-           ) VALUES (?1, ?2, ?3, ?4)`,
-        )
-        .bind(
-          publication.id,
-          publication.status,
-          publication.detail,
-          publication.updatedAt,
-        )
-        .run();
       return { state: "claimed", publication };
     },
     async updatePublication(publication) {
@@ -340,30 +396,44 @@ export function createD1ContentPublicationStore(
         database
           .prepare(
             `UPDATE content_publications
-             SET status = ?1, commit_sha = ?2, detail = ?3, updated_at = ?4
-             WHERE id = ?5`,
+             SET
+               status = ?1,
+               commit_sha = ?2,
+               detail = ?3,
+               lease_token = ?4,
+               lease_expires_at = ?5,
+               updated_at = ?6
+             WHERE id = ?7
+               AND status <> 'verified-live'
+               AND NOT (
+                 status = 'deployed'
+                 AND ?1 IN ('requested', 'committed', 'building', 'unknown')
+               )
+               AND NOT (
+                 status = 'building'
+                 AND ?1 IN ('requested', 'committed', 'unknown')
+               )
+               AND NOT (
+                 status = 'committed'
+                 AND ?1 IN ('requested', 'unknown')
+               )`,
           )
           .bind(
             publication.status,
             publication.commitSha,
             publication.detail,
+            publication.leaseToken,
+            publication.leaseExpiresAt,
             publication.updatedAt,
             publication.id,
           ),
-        database
-          .prepare(
-            `INSERT INTO content_publication_audit_events (
-               publication_id, status, detail, occurred_at
-             ) VALUES (?1, ?2, ?3, ?4)`,
-          )
-          .bind(
-            publication.id,
-            publication.status,
-            publication.detail,
-            publication.updatedAt,
-          ),
+        auditStatement(publication, true),
       ]);
       if ((results[0]?.meta.changes ?? 0) < 1) {
+        const current = await findPublication(publication.id);
+        if (current !== null) {
+          return current;
+        }
         throw new Error("content_publication_not_found");
       }
       return publication;

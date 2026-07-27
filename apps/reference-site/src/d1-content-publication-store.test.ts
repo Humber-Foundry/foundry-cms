@@ -26,6 +26,9 @@ describe("D1 content publication store", () => {
   let miniflare: Miniflare;
   let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
   let approval: ContentApproval;
+  let revisionApplication: ReturnType<
+    typeof createContentRevisionApplication
+  >;
 
   beforeEach(async () => {
     miniflare = new Miniflare({
@@ -47,7 +50,7 @@ describe("D1 content publication store", () => {
         await database.prepare(statement).run();
       }
     }
-    const revisionApplication = createContentRevisionApplication({
+    revisionApplication = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
       store: createD1ContentRevisionStore(
         database,
@@ -100,6 +103,8 @@ describe("D1 content publication store", () => {
       status,
       commitSha: null,
       detail: null,
+      leaseToken: `lease-${id}`,
+      leaseExpiresAt: `2026-07-27T10:1${id}:00.000Z`,
       requestedAt: `2026-07-27T10:0${id}:00.000Z`,
       updatedAt: `2026-07-27T10:0${id}:00.000Z`,
     };
@@ -137,6 +142,26 @@ describe("D1 content publication store", () => {
     ).rejects.toThrow(/content_approvals_are_immutable/u);
   });
 
+  it("invalidates approval in the same D1 transaction that records a later revision", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+
+    await revisionApplication.commands.save({
+      actorId,
+      workspaceId,
+      schemaVersion: "1.0.0",
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "Changed after approval" }],
+      idempotencyKey: "save-after-d1-approval-1",
+    });
+
+    await expect(store.findApproval(approval.id)).resolves.toEqual(
+      expect.objectContaining({
+        invalidatedAt: "2026-07-27T10:00:00.000Z",
+      }),
+    );
+  });
+
   it("claims one active publication globally and records a blocked contender", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);
@@ -155,6 +180,46 @@ describe("D1 content publication store", () => {
         detail: "publication_in_progress",
       }),
     });
+  });
+
+  it("atomically rejects a claim when the approval was invalidated before the lease", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await revisionApplication.commands.save({
+      actorId,
+      workspaceId,
+      schemaVersion: "1.0.0",
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "Invalidate first" }],
+      idempotencyKey: "invalidate-before-claim-1",
+    });
+    const stale = publication("1", "publish-stale-claim-01");
+
+    await expect(store.claimPublication(stale)).resolves.toEqual({
+      state: "blocked",
+      publication: expect.objectContaining({
+        status: "blocked",
+        detail: "approval_stale",
+        leaseToken: null,
+      }),
+    });
+  });
+
+  it("fences revision saves while the Git commit lease is requested", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await store.claimPublication(publication("1", "publish-save-fence-0001"));
+
+    await expect(
+      revisionApplication.commands.save({
+        actorId,
+        workspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Racing save" }],
+        idempotencyKey: "save-during-publish-001",
+      }),
+    ).rejects.toThrow(/content_publication_commit_in_progress/u);
   });
 
   it("replays a publication idempotency key without another operation", async () => {
@@ -185,6 +250,8 @@ describe("D1 content publication store", () => {
       ...requested,
       status: "committed" as const,
       commitSha: "c".repeat(40),
+      leaseToken: null,
+      leaseExpiresAt: null,
       updatedAt: "2026-07-27T10:02:00.000Z",
     };
 
@@ -209,5 +276,100 @@ describe("D1 content publication store", () => {
       success: true,
       meta: expect.any(Object),
     });
+  });
+
+  it("prevents stale refreshes from regressing deployed or verified-live state", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-monotonic-01");
+    await store.claimPublication(requested);
+    const deployed = {
+      ...requested,
+      status: "deployed" as const,
+      commitSha: "c".repeat(40),
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:03:00.000Z",
+    };
+    await store.updatePublication(deployed);
+
+    await expect(
+      store.updatePublication({
+        ...deployed,
+        status: "building",
+        updatedAt: "2026-07-27T10:04:00.000Z",
+      }),
+    ).resolves.toEqual(deployed);
+
+    const live = {
+      ...deployed,
+      status: "verified-live" as const,
+      updatedAt: "2026-07-27T10:05:00.000Z",
+    };
+    await store.updatePublication(live);
+    await expect(
+      store.updatePublication({
+        ...live,
+        status: "unknown",
+        updatedAt: "2026-07-27T10:06:00.000Z",
+      }),
+    ).resolves.toEqual(live);
+    expect(
+      await database
+        .prepare(
+          `SELECT status
+           FROM content_publication_audit_events
+           WHERE publication_id = ?1
+           ORDER BY id`,
+        )
+        .bind(requested.id)
+        .all<{ status: string }>(),
+    ).toEqual({
+      results: [
+        { status: "requested" },
+        { status: "deployed" },
+        { status: "verified-live" },
+      ],
+      success: true,
+      meta: expect.any(Object),
+    });
+  });
+
+  it("enforces immutable invalidation and publication audit evidence", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const next = {
+      ...approval,
+      id: createContentApprovalId(`approval_${"3".repeat(32)}`),
+      fingerprint: { ...approval.fingerprint, value: "e".repeat(64) },
+      approvedAt: "2026-07-27T10:03:00.000Z",
+    };
+    await store.saveApproval(next);
+    const requested = publication("1", "publish-d1-immutable-1");
+    await store.claimPublication({
+      ...requested,
+      approvalId: next.id,
+      fingerprint: next.fingerprint.value,
+    });
+
+    await expect(
+      database
+        .prepare(
+          `UPDATE content_approval_invalidations
+           SET reason = 'production_changed'
+           WHERE approval_id = ?1`,
+        )
+        .bind(approval.id)
+        .run(),
+    ).rejects.toThrow(/content_approval_invalidations_are_immutable/u);
+    await expect(
+      database
+        .prepare(
+          `DELETE FROM content_publication_audit_events
+           WHERE publication_id = ?1`,
+        )
+        .bind(requested.id)
+        .run(),
+    ).rejects.toThrow(/content_publication_audit_is_immutable/u);
   });
 });

@@ -43,7 +43,11 @@ defined by ADR-0004.
 
 D1 stores immutable approvals, separate invalidation records, publication
 operations, and append-only status events. A partial unique index permits only
-one active production publication across workspaces. The stable publication
+one active production publication across workspaces. Claim and initial audit
+are one transaction. The short commit lease atomically requires the approval
+to remain uninvalidated and the approved revision to remain current; D1 fences
+new revision inserts until the Git result releases that lease. An expired lease
+is reconciled by publish ID before it can become failed. The stable publication
 key and commit trailers support replay and ambiguous-result reconciliation
 without creating another content commit.
 
@@ -56,6 +60,10 @@ A successful configured Cloudflare check reports only `deployed`. Foundry
 reports `verified-live` only after two uncached reads of
 `/.well-known/foundry-release.json` both exactly match the expected commit,
 published-content hash, and schema version.
+
+Publication GET requests only read the durable state and remain side-effect
+free. Cloudflare/GitHub reconciliation is a protected, idempotent POST mutation
+with the same Origin and CSRF boundary as approval and publish.
 
 ## Runtime configuration
 

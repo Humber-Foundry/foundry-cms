@@ -58,16 +58,19 @@ export async function sendContentPublicationAttempt({
   return { ...result, mutationToken: refreshed.mutationToken };
 }
 
-export async function refreshContentPublication({
+export async function loadContentPublication({
   workspaceId,
   publicationId,
   fetcher = fetch,
 }: {
   workspaceId: string;
-  publicationId: string;
+  publicationId?: string;
   fetcher?: Fetcher;
 }) {
-  const query = new URLSearchParams({ workspaceId, publicationId });
+  const query = new URLSearchParams({ workspaceId });
+  if (publicationId !== undefined) {
+    query.set("publicationId", publicationId);
+  }
   const response = await fetcher(
     `/api/foundry-cms/publications?${query.toString()}`,
     { cache: "no-store" },
@@ -76,4 +79,29 @@ export async function refreshContentPublication({
     throw new Error("content_publication_refresh_failed");
   }
   return (await response.json()) as unknown;
+}
+
+export function refreshContentPublication({
+  workspaceId,
+  publicationId,
+  mutationToken,
+  fetcher = fetch,
+}: {
+  workspaceId: string;
+  publicationId: string;
+  mutationToken: string;
+  fetcher?: Fetcher;
+}) {
+  return sendContentPublicationAttempt({
+    attempt: {
+      body: JSON.stringify({
+        operation: "refresh",
+        workspaceId,
+        publicationId,
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    },
+    mutationToken,
+    fetcher,
+  });
 }

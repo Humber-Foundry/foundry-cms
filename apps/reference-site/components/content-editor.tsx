@@ -14,6 +14,7 @@ import {
   createContentEditorState,
 } from "../src/content-editor-history";
 import {
+  loadContentPublication,
   refreshContentPublication,
   sendContentPublicationAttempt,
 } from "../src/content-publication-client";
@@ -146,6 +147,31 @@ export function ContentEditor({
   const editorLocked = state.status === "saving" || state.status === "stale";
 
   useEffect(() => {
+    let cancelled = false;
+    void loadContentPublication({
+      workspaceId: initialRevision.workspaceId,
+    })
+      .then((result) => {
+        if (
+          !cancelled &&
+          typeof result === "object" &&
+          result !== null &&
+          "publication" in result &&
+          typeof result.publication === "object" &&
+          result.publication !== null
+        ) {
+          setPublication(result.publication as PublicationRecord);
+        }
+      })
+      .catch(() => {
+        // A missing publication configuration must not block draft editing.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialRevision.workspaceId]);
+
+  useEffect(() => {
     if (
       publication === null ||
       ["verified-live", "blocked", "failed"].includes(publication.status)
@@ -157,15 +183,17 @@ export function ContentEditor({
         const result = await refreshContentPublication({
           workspaceId: initialRevision.workspaceId,
           publicationId: publication.id,
+          mutationToken,
         });
+        setMutationToken(result.mutationToken);
         if (
-          typeof result === "object" &&
-          result !== null &&
-          "publication" in result &&
-          typeof result.publication === "object" &&
-          result.publication !== null
+          typeof result.body === "object" &&
+          result.body !== null &&
+          "publication" in result.body &&
+          typeof result.body.publication === "object" &&
+          result.body.publication !== null
         ) {
-          setPublication(result.publication as PublicationRecord);
+          setPublication(result.body.publication as PublicationRecord);
         }
       } catch {
         setMessage(
@@ -174,7 +202,7 @@ export function ContentEditor({
       }
     }, 2_500);
     return () => window.clearTimeout(timer);
-  }, [initialRevision.workspaceId, publication]);
+  }, [initialRevision.workspaceId, mutationToken, publication]);
 
   useEffect(() => {
     if (

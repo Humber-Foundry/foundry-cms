@@ -246,6 +246,13 @@ export function createGitHubContentPublisher({
         if ((await productionHead(token)) !== input.expectedHead) {
           return { state: "blocked", detail: "production_head_moved" };
         }
+        const baseCommit = await request(
+          token,
+          `/git/commits/${input.expectedHead}`,
+        );
+        if (typeof baseCommit.tree?.sha !== "string") {
+          throw new Error("github_base_tree_invalid");
+        }
         const blob = await request(token, "/git/blobs", {
           method: "POST",
           body: JSON.stringify({ content: input.bytes, encoding: "utf-8" }),
@@ -253,7 +260,7 @@ export function createGitHubContentPublisher({
         const tree = await request(token, "/git/trees", {
           method: "POST",
           body: JSON.stringify({
-            base_tree: input.expectedHead,
+            base_tree: baseCommit.tree.sha,
             tree: [
               {
                 path: input.path,
@@ -331,45 +338,38 @@ export function createGitHubContentPublisher({
           request(token, `/commits/${commitSha}/status`),
         ]);
         const needle = configuration.deploymentCheckName.toLocaleLowerCase();
-        const relevantChecks = Array.isArray(checks.check_runs)
-          ? checks.check_runs.filter(
+        const relevantCheck = Array.isArray(checks.check_runs)
+          ? checks.check_runs.find(
               (check: any) =>
                 typeof check.name === "string" &&
-                check.name.toLocaleLowerCase().includes(needle),
+                check.name.toLocaleLowerCase() === needle,
             )
-          : [];
-        const relevantStatuses = Array.isArray(statuses.statuses)
-          ? statuses.statuses.filter(
+          : undefined;
+        const relevantStatus = Array.isArray(statuses.statuses)
+          ? statuses.statuses.find(
               (status: any) =>
                 typeof status.context === "string" &&
-                status.context.toLocaleLowerCase().includes(needle),
+                status.context.toLocaleLowerCase() === needle,
             )
-          : [];
+          : undefined;
         if (
-          relevantChecks.some(
-            (check: any) =>
-              check.status === "completed" &&
-              check.conclusion !== "success",
-          ) ||
-          relevantStatuses.some((status: any) =>
-            ["failure", "error"].includes(status.state),
-          )
+          (relevantCheck?.status === "completed" &&
+            relevantCheck.conclusion !== "success") ||
+          (relevantStatus !== undefined &&
+            ["failure", "error"].includes(relevantStatus.state))
         ) {
           return "failed";
         }
         if (
-          relevantChecks.some((check: any) => check.status === "in_progress") ||
-          relevantStatuses.some((status: any) => status.state === "pending")
+          relevantCheck?.status === "in_progress" ||
+          relevantStatus?.state === "pending"
         ) {
           return "building";
         }
         if (
-          relevantChecks.some(
-            (check: any) =>
-              check.status === "completed" &&
-              check.conclusion === "success",
-          ) ||
-          relevantStatuses.some((status: any) => status.state === "success")
+          (relevantCheck?.status === "completed" &&
+            relevantCheck.conclusion === "success") ||
+          relevantStatus?.state === "success"
         ) {
           return "deployed";
         }

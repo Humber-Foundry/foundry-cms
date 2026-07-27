@@ -16,6 +16,9 @@ import {
 } from "../../../../src/access-identity";
 import { loadContentPublicationApplication } from "../../../../src/content-publication-runtime";
 import {
+  requireExistingContentWorkspaceAccess,
+} from "../../../../src/content-revision-runtime";
+import {
   GitHubContentPublisherConfigurationError,
 } from "../../../../src/github-content-publisher";
 import { HumanAccessConfigurationError } from "../../../../src/human-access-configuration";
@@ -48,7 +51,15 @@ type PublishCommand = Readonly<{
   approvalId: string;
 }>;
 
-function readCommand(value: unknown): ApproveCommand | PublishCommand | null {
+type RefreshCommand = Readonly<{
+  operation: "refresh";
+  workspaceId: string;
+  publicationId: string;
+}>;
+
+function readCommand(
+  value: unknown,
+): ApproveCommand | PublishCommand | RefreshCommand | null {
   if (
     typeof value !== "object" ||
     value === null ||
@@ -74,6 +85,13 @@ function readCommand(value: unknown): ApproveCommand | PublishCommand | null {
     typeof value.approvalId === "string"
   ) {
     return value as PublishCommand;
+  }
+  if (
+    value.operation === "refresh" &&
+    "publicationId" in value &&
+    typeof value.publicationId === "string"
+  ) {
+    return value as RefreshCommand;
   }
   return null;
 }
@@ -123,23 +141,24 @@ export async function GET(request: Request) {
     }
     const workspaceId = createContentWorkspaceId(workspaceParameter);
     const actorId = createContentActorId(access.membership.id);
+    await requireExistingContentWorkspaceAccess(workspaceId, actorId);
     const application = await loadContentPublicationApplication(
       workspaceId,
       actorId,
     );
     let publication;
     if (publicationParameter !== null) {
-      publication = await application.commands.refresh(
+      publication = await application.queries.get(
         createContentPublicationId(publicationParameter),
       );
-    } else {
-      publication = await application.queries.getLatest(workspaceId);
       if (
         publication !== null &&
-        !["verified-live", "blocked", "failed"].includes(publication.status)
+        publication.workspaceId !== workspaceId
       ) {
-        publication = await application.commands.refresh(publication.id);
+        throw new ContentWorkspaceAccessError();
       }
+    } else {
+      publication = await application.queries.getLatest(workspaceId);
     }
     return Response.json(
       { publication },
@@ -188,6 +207,8 @@ export async function POST(request: Request) {
       workspaceId = createContentWorkspaceId(command.workspaceId);
       if (command.operation === "publish") {
         createContentApprovalId(command.approvalId);
+      } else if (command.operation === "refresh") {
+        createContentPublicationId(command.publicationId);
       }
     } catch {
       return Response.json({ error: "invalid_command" }, { status: 400 });
@@ -207,9 +228,14 @@ export async function POST(request: Request) {
               { status: 403 },
             );
           }
+          const actorId = createContentActorId(access.membership.id);
+          await requireExistingContentWorkspaceAccess(
+            workspaceId,
+            actorId,
+          );
           application = await loadContentPublicationApplication(
             workspaceId,
-            createContentActorId(access.membership.id),
+            actorId,
           );
         } catch (error) {
           throw new HumanMutationExecutionNotStartedError(error);
@@ -223,6 +249,19 @@ export async function POST(request: Request) {
               previewConfirmed: command.previewConfirmed,
             });
             return Response.json({ approval }, { status: 201 });
+          }
+          if (command.operation === "refresh") {
+            const existing = await application.queries.get(
+              createContentPublicationId(command.publicationId),
+            );
+            if (
+              existing === null ||
+              existing.workspaceId !== workspaceId
+            ) {
+              throw new ContentWorkspaceAccessError();
+            }
+            const publication = await application.commands.refresh(existing.id);
+            return Response.json({ publication });
           }
           const publication = await application.commands.publish({
             approvalId: createContentApprovalId(command.approvalId),
@@ -241,6 +280,10 @@ export async function POST(request: Request) {
     });
     return recorded(response);
   } catch (error) {
+    const domain = domainErrorResponse(error);
+    if (domain !== null) {
+      return domain;
+    }
     if (
       error instanceof AccessDeniedError ||
       error instanceof AccessIdentityError ||

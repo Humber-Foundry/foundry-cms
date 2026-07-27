@@ -13,6 +13,7 @@ import {
   ContentApprovalInvalidError,
   ContentPublicationValidationError,
   createContentPublicationApplication,
+  createContentPublicationId,
   createInMemoryContentPublicationStore,
   parseProductionBase,
   serializePublishedSiteDefinition,
@@ -302,10 +303,10 @@ describe("content publication application", () => {
   });
 
   it.each([
-    ["requested", "requested"],
+    ["requested", "committed"],
     ["building", "building"],
     ["failed", "failed"],
-    ["unknown", "unknown"],
+    ["unknown", "committed"],
   ] as const)("reports deployment state %s explicitly", async (external, expected) => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
@@ -349,6 +350,52 @@ describe("content publication application", () => {
       contentHash: revisionApplication.saved.inputs.contentHash,
       schemaVersion: "1.0.0",
     });
+  });
+
+  it("reconciles an expired requested lease so a crashed Worker cannot strand publication", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => "2026-07-27T10:10:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const stranded = {
+      id: createContentPublicationId(`publish_${"9".repeat(32)}`),
+      workspaceId,
+      revision: 1,
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+      idempotencyKey: "stranded-publication-0001",
+      requestedBy: membershipId,
+      contributors: [editorId],
+      expectedHead: productionCommit,
+      status: "requested" as const,
+      commitSha: null,
+      detail: null,
+      leaseToken: "expired-lease",
+      leaseExpiresAt: "2026-07-27T10:05:00.000Z",
+      requestedAt: "2026-07-27T10:03:00.000Z",
+      updatedAt: "2026-07-27T10:03:00.000Z",
+    };
+    await store.claimPublication(stranded);
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+
+    await expect(app.commands.refresh(stranded.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "publication_lease_expired",
+        leaseToken: null,
+      }),
+    );
   });
 
   it("parses only an exact Git and published-content production base", () => {

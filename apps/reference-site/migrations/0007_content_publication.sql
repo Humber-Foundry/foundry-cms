@@ -43,6 +43,8 @@ CREATE TABLE content_publications (
   ),
   commit_sha TEXT,
   detail TEXT,
+  lease_token TEXT,
+  lease_expires_at TEXT,
   requested_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (workspace_id, idempotency_key),
@@ -72,4 +74,54 @@ CREATE TRIGGER content_approvals_prevent_delete
 BEFORE DELETE ON content_approvals
 BEGIN
   SELECT RAISE(ABORT, 'content_approvals_are_immutable');
+END;
+
+CREATE TRIGGER content_revisions_invalidate_approvals
+AFTER INSERT ON content_revisions
+WHEN NEW.revision > 0
+BEGIN
+  INSERT INTO content_approval_invalidations (
+    approval_id, invalidated_at, reason
+  )
+  SELECT id, NEW.created_at, 'revision_changed'
+  FROM content_approvals
+  WHERE workspace_id = NEW.workspace_id
+    AND NOT EXISTS (
+      SELECT 1 FROM content_approval_invalidations
+      WHERE approval_id = content_approvals.id
+    );
+END;
+
+CREATE TRIGGER content_revisions_block_during_publication
+BEFORE INSERT ON content_revisions
+WHEN NEW.revision > 0 AND EXISTS (
+  SELECT 1 FROM content_publications
+  WHERE status = 'requested'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'content_publication_commit_in_progress');
+END;
+
+CREATE TRIGGER content_approval_invalidations_prevent_update
+BEFORE UPDATE ON content_approval_invalidations
+BEGIN
+  SELECT RAISE(ABORT, 'content_approval_invalidations_are_immutable');
+END;
+
+CREATE TRIGGER content_approval_invalidations_prevent_delete
+BEFORE DELETE ON content_approval_invalidations
+BEGIN
+  SELECT RAISE(ABORT, 'content_approval_invalidations_are_immutable');
+END;
+
+CREATE TRIGGER content_publication_audit_prevent_update
+BEFORE UPDATE ON content_publication_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'content_publication_audit_is_immutable');
+END;
+
+CREATE TRIGGER content_publication_audit_prevent_delete
+BEFORE DELETE ON content_publication_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'content_publication_audit_is_immutable');
 END;
