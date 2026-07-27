@@ -70,6 +70,29 @@ describe("content editor history", () => {
     expect(stale.persistedRevision).toBe(4);
   });
 
+  it("shows the immutable revision acknowledged by a stale replay", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const edited = contentEditorReducer(initial, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Saved before deployment changed",
+    });
+    const stale = contentEditorReducer(edited, {
+      type: "failed",
+      conflict: "stale",
+      acknowledgedRevision: 5,
+      errors: {},
+    });
+
+    expect(stale.status).toBe("stale");
+    expect(stale.persistedRevision).toBe(5);
+    expect(stale.workingDefinition).toBe(edited.workingDefinition);
+    expect(stale.persistedDefinition).toBe(initial.persistedDefinition);
+  });
+
   it("keeps a stale editor locked across edit, undo, and redo actions", () => {
     const initial = createContentEditorState({
       definition: referenceSiteDefinition,

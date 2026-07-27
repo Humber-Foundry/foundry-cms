@@ -27,6 +27,7 @@ export type ContentEditorAction =
       type: "failed";
       errors: Readonly<Record<string, string>>;
       conflict?: "conflict" | "stale";
+      acknowledgedRevision?: number;
     }>;
 
 export function createContentEditorState({
@@ -118,6 +119,8 @@ export function contentEditorReducer(
     case "failed":
       return {
         ...state,
+        persistedRevision:
+          action.acknowledgedRevision ?? state.persistedRevision,
         status: action.conflict ?? "dirty",
         errors: action.errors,
       };

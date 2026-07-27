@@ -199,14 +199,23 @@ export function ContentEditor({
         "error" in body &&
         body.error === "revision_stale"
       ) {
+        const acknowledgedRevision =
+          "acknowledgedRevision" in body &&
+          Number.isSafeInteger(body.acknowledgedRevision) &&
+          (body.acknowledgedRevision as number) >= 0
+            ? (body.acknowledgedRevision as number)
+            : undefined;
         pendingAttempt.current = null;
         dispatch({
           type: "failed",
           conflict: "stale",
+          acknowledgedRevision,
           errors: {},
         });
         setMessage(
-          "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved.",
+          acknowledgedRevision === undefined
+            ? "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved."
+            : `Revision ${acknowledgedRevision} was saved, but the current deployment cannot render it. Start a fresh workspace to recover those edits; the saved revision remains preserved.`,
         );
         return;
       }
