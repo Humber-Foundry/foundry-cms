@@ -62,17 +62,53 @@ export default async function DashboardPage({
       />
     );
   }
+  const actorId = createContentActorId(access.membership.id);
   const requested = await searchParams;
+  let staleRecovery:
+    | Readonly<{ id: string; sourceWorkspaceId: string }>
+    | undefined;
+  if (
+    typeof requested.recovery === "string" &&
+    typeof requested.recoverFrom === "string"
+  ) {
+    try {
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          requested.recovery,
+        )
+      ) {
+        notFound();
+      }
+      const sourceWorkspaceId = createContentWorkspaceId(
+        requested.recoverFrom,
+      );
+      await (
+        await loadContentRevisionApplication(sourceWorkspaceId, actorId)
+      ).queries.getCurrent();
+      staleRecovery = {
+        id: requested.recovery,
+        sourceWorkspaceId,
+      };
+    } catch (error) {
+      if (
+        error instanceof ContentWorkspaceAccessError ||
+        error instanceof ContentRevisionConfigurationError ||
+        error instanceof TypeError
+      ) {
+        notFound();
+      }
+      throw error;
+    }
+  }
   if (requested.newWorkspace === "1") {
     const workspaceId = createContentWorkspaceId(
       `workspace_${crypto.randomUUID().replaceAll("-", "")}`,
     );
     const recovery =
-      typeof requested.recovery === "string" &&
-      typeof requested.recoverFrom === "string"
+      staleRecovery !== undefined
         ? new URLSearchParams({
-            recovery: requested.recovery,
-            recoverFrom: requested.recoverFrom,
+            recovery: staleRecovery.id,
+            recoverFrom: staleRecovery.sourceWorkspaceId,
           }).toString()
         : "";
     redirect(
@@ -89,7 +125,6 @@ export default async function DashboardPage({
     access.membership.role === "owner"
       ? await createHumanMutationToken(access.identity)
       : null;
-  const actorId = createContentActorId(access.membership.id);
   let workspaceId;
   try {
     workspaceId =
@@ -137,15 +172,7 @@ export default async function DashboardPage({
       contentMutationToken={contentMutationToken}
       initialPreviewUrl={initialPreviewUrl}
       initialContentStale={initialContentStale}
-      staleRecovery={
-        typeof requested.recovery === "string" &&
-        typeof requested.recoverFrom === "string"
-          ? {
-              id: requested.recovery,
-              sourceWorkspaceId: requested.recoverFrom,
-            }
-          : undefined
-      }
+      staleRecovery={staleRecovery}
     />
   );
 }
