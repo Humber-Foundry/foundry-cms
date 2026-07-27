@@ -226,7 +226,12 @@ RSA-OAEP recovery recipient, and writes only the envelope to the private
 `FOUNDRY_FORM_BACKUP_RECIPIENT` as the base64-encoded SPKI public key. Keep the
 matching PKCS#8 private key outside Cloudflare and the repository in
 client-controlled recovery custody. The Worker can encrypt backups but cannot
-decrypt them. Encrypted objects expire after 30 days.
+decrypt them. Backup attempts use the last recorded backup as a stable retry
+checkpoint, so an uncertain R2 response overwrites the same object instead of
+creating an orphan. The online snapshot path rejects estimates above 8 MiB
+before loading all rows into Worker memory. Encrypted objects expire after 30
+days; configure the same 30-day prefix lifecycle on the private R2 bucket as a
+provider-side backstop to the scheduled expiry sweep.
 
 Restore is deliberately fail-closed and runs from a client-controlled operator
 machine, not the Worker. Set a short-lived `CLOUDFLARE_API_TOKEN` with D1
@@ -256,9 +261,10 @@ part of promotion, mirrors those facts to the primary database, and then
 atomically clears the disposable recovery copy. A retry can reconcile an
 uncertain promotion, finish the primary mirror, or finish cleanup without
 misattributing the original actor. Restore does not perform serving cutover.
-Online restore uses bounded multi-row statements to remain within the D1 Free
-invocation budget; a backup that exceeds the bounded online import fails before
-any recovery rows are written and must use an operator-managed import.
+Online backup and restore use bounded snapshots and multi-row statements to
+remain within Worker memory and the D1 Free invocation budget; a snapshot that
+exceeds the 8 MiB online estimate fails before all rows are loaded or any
+recovery rows are written and must use an operator-managed export/import.
 
 ### Resolve a ticket atomically
 

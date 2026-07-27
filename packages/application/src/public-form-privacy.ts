@@ -425,29 +425,31 @@ export async function runPublicFormBackupMaintenance({
   store,
   vault,
   now,
-  createBackupId,
   policy = defaultPublicFormRetentionPolicy,
 }: {
   siteId: SiteId;
   store: PublicFormPrivacyStore;
   vault?: PublicFormBackupVault;
   now: Date;
-  createBackupId: () => string;
   policy?: PublicFormRetentionPolicy;
 }) {
   const timestamp = now.toISOString();
   if (vault === undefined) {
     return { backupId: null, expiredBackups: 0 };
   }
+  const expiredBackups = await vault.deleteExpired({ now: timestamp });
   const latestBackupAt = await store.latestBackupAt({ siteId });
   if (
     latestBackupAt !== null &&
     Date.parse(timestamp) - Date.parse(latestBackupAt) < 24 * 60 * 60 * 1_000
   ) {
-    const expiredBackups = await vault.deleteExpired({ now: timestamp });
     return { backupId: null, expiredBackups };
   }
-  const backupId = createBackupId();
+  const checkpoint =
+    latestBackupAt === null
+      ? "initial"
+      : latestBackupAt.replaceAll(/[^0-9]/gu, "");
+  const backupId = `backup-${siteId}-after-${checkpoint}`;
   const snapshot = await store.createBackupSnapshot({
     siteId,
     now: timestamp,
@@ -464,16 +466,12 @@ export async function runPublicFormBackupMaintenance({
     createdAt: timestamp,
     retentionDays: policy.backupDays,
   });
-  const expiredBackups = await vault.deleteExpired({ now: timestamp });
   return { backupId, expiredBackups };
 }
 
 export async function runPublicFormPrivacyMaintenance(
   input: Parameters<typeof runPublicFormRetentionMaintenance>[0] &
-    Pick<
-      Parameters<typeof runPublicFormBackupMaintenance>[0],
-      "vault" | "createBackupId"
-    >,
+    Pick<Parameters<typeof runPublicFormBackupMaintenance>[0], "vault">,
 ) {
   const retention = await runPublicFormRetentionMaintenance(input);
   const backup = await runPublicFormBackupMaintenance(input);

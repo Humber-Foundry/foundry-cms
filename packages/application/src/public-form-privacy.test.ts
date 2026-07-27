@@ -111,7 +111,6 @@ describe("public form privacy application", () => {
         siteId,
         store: privacyStore,
         now: new Date("2026-07-27T00:00:00.000Z"),
-        createBackupId: () => "unused",
       }),
     ).resolves.toMatchObject({ backupId: null, expiredBackups: 0 });
     expect(privacyStore.applyRetention).toHaveBeenCalledOnce();
@@ -134,7 +133,6 @@ describe("public form privacy application", () => {
         siteId,
         store: privacyStore,
         now: new Date("2026-07-27T00:05:00.000Z"),
-        createBackupId: () => "unused",
       }),
     ).resolves.toMatchObject({ applied: false });
     expect(privacyStore.applyRetention).not.toHaveBeenCalled();
@@ -145,12 +143,12 @@ describe("public form privacy application", () => {
     const primary = store();
     const isolated = store();
     const vault: PublicFormBackupVault = {
-      saveEncrypted: vi.fn().mockResolvedValue({
-        backupId: "backup-48",
-        objectKey: "forms/site_reference/backup-48.enc",
+      saveEncrypted: vi.fn(async (input) => ({
+        backupId: input.backupId,
+        objectKey: `forms/site_reference/${input.backupId}.enc`,
         integrityHash: "sha256:ciphertext",
         expiresAt: "2026-08-26T00:00:00.000Z",
-      }),
+      })),
       deleteExpired: vi.fn().mockResolvedValue(0),
     };
     const recoveryVault = {
@@ -167,12 +165,11 @@ describe("public form privacy application", () => {
       store: primary,
       vault,
       now: new Date("2026-07-27T00:00:00.000Z"),
-      createBackupId: () => "backup-48",
     });
     expect(vault.saveEncrypted).toHaveBeenCalledOnce();
     expect(primary.recordBackup).toHaveBeenCalledWith(
       expect.objectContaining({
-        backupId: "backup-48",
+        backupId: "backup-site_reference-after-initial",
         retentionDays: 30,
       }),
     );
@@ -208,6 +205,42 @@ describe("public form privacy application", () => {
     expect(isolated.clearRestoredSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ backupId: "backup-48" }),
     );
+  });
+
+  it("sweeps expiry before a checkpoint-stable backup retry can fail", async () => {
+    const events: string[] = [];
+    const privacyStore = store();
+    const vault: PublicFormBackupVault = {
+      async deleteExpired() {
+        events.push("expiry");
+        return 2;
+      },
+      async saveEncrypted(input) {
+        events.push(`save:${input.backupId}`);
+        throw new Error("r2_unavailable");
+      },
+    };
+
+    for (const now of [
+      "2026-07-27T23:59:00.000Z",
+      "2026-07-28T00:04:00.000Z",
+    ]) {
+      await expect(
+        runPublicFormPrivacyMaintenance({
+          siteId,
+          store: privacyStore,
+          vault,
+          now: new Date(now),
+        }),
+      ).rejects.toThrow("r2_unavailable");
+    }
+    expect(events).toEqual([
+      "expiry",
+      "save:backup-site_reference-after-initial",
+      "expiry",
+      "save:backup-site_reference-after-initial",
+    ]);
+    expect(privacyStore.recordBackup).not.toHaveBeenCalled();
   });
 
   it("can resume the primary verification write after target promotion", async () => {

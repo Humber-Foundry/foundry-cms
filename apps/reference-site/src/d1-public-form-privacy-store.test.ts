@@ -517,6 +517,77 @@ describe("D1 public form privacy store", () => {
     });
   });
 
+  it("rejects an oversized online snapshot before loading all form rows", async () => {
+    const binding = database as unknown as D1DatabaseBinding;
+    let batches = 0;
+    const oversizedBinding: D1DatabaseBinding = {
+      prepare: (query) => binding.prepare(query),
+      async batch(statements) {
+        batches += 1;
+        return statements.map((_, index) => ({
+          success: true,
+          meta: {},
+          results: [
+            { bytes: index === 0 ? 8 * 1_024 * 1_024 + 1 : 0 },
+          ],
+        }));
+      },
+    };
+
+    await expect(
+      createD1PublicFormPrivacyStore(
+        oversizedBinding,
+      ).createBackupSnapshot({
+        siteId,
+        now: "2026-07-27T00:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({ code: "recovery_backup_too_large" });
+    expect(batches).toBe(1);
+  });
+
+  it("reconciles a retried backup record without changing its object identity", async () => {
+    const store = createD1PublicFormPrivacyStore(
+      database as unknown as D1DatabaseBinding,
+    );
+    const original = {
+      siteId,
+      backupId: "backup-site_reference-2026-07-27",
+      objectKey:
+        "forms/site_reference/backup-site_reference-2026-07-27.enc",
+      integrityHash: "sha256:first-attempt",
+      createdAt: "2026-07-27T00:00:00.000Z",
+      expiresAt: "2026-08-26T00:00:00.000Z",
+      retentionDays: 30,
+    };
+    await store.recordBackup(original);
+    await store.recordBackup({
+      ...original,
+      integrityHash: "sha256:reconciled-attempt",
+      createdAt: "2026-07-27T00:05:00.000Z",
+      expiresAt: "2026-08-26T00:05:00.000Z",
+    });
+
+    await expect(
+      database
+        .prepare(
+          `SELECT object_key, integrity_hash, created_at
+           FROM public_form_backup_records WHERE backup_id = ?1`,
+        )
+        .bind(original.backupId)
+        .first(),
+    ).resolves.toEqual({
+      object_key: original.objectKey,
+      integrity_hash: "sha256:reconciled-attempt",
+      created_at: "2026-07-27T00:05:00.000Z",
+    });
+    await expect(
+      store.recordBackup({
+        ...original,
+        objectKey: "forms/site_reference/different-object.enc",
+      }),
+    ).rejects.toThrow("form_backup_record_conflict");
+  });
+
   it("restores a snapshot into an empty isolated database and verifies integrity", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(accepted);
     const source = createD1PublicFormPrivacyStore(
@@ -866,7 +937,7 @@ describe("D1 public form privacy store", () => {
       async batch(statements) {
         batchCalls += 1;
         const results = await binding.batch(statements);
-        if (batchCalls === 4) {
+        if (batchCalls === 5) {
           throw new Error("promotion_response_lost");
         }
         return results;

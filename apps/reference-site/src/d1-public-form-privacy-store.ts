@@ -57,6 +57,45 @@ type SnapshotTables = {
   [Key in keyof typeof liveSnapshotTables]: string;
 };
 
+const maximumOnlineBackupSnapshotBytes = 8 * 1_024 * 1_024;
+
+async function assertSnapshotWithinOnlineBackupLimit(
+  database: D1DatabaseBinding,
+  tables: SnapshotTables,
+) {
+  const estimates = await database.batch(
+    Object.entries(tables).map(([key, table]) =>
+      database.prepare(
+        `SELECT COALESCE(SUM(${
+          key === "submissions"
+            ? "length(CAST(fields_json AS BLOB)) + "
+            : ""
+        }512), 0) AS bytes
+         FROM ${table}`,
+      ),
+    ),
+  );
+  let estimatedBytes = 0;
+  for (const result of estimates) {
+    const row = result.results?.[0];
+    if (
+      result.success !== true ||
+      typeof row !== "object" ||
+      row === null ||
+      !("bytes" in row) ||
+      typeof row.bytes !== "number" ||
+      !Number.isSafeInteger(row.bytes) ||
+      row.bytes < 0
+    ) {
+      throw new PublicFormPrivacyError("recovery_target_check_failed");
+    }
+    estimatedBytes += row.bytes;
+  }
+  if (estimatedBytes > maximumOnlineBackupSnapshotBytes) {
+    throw new PublicFormPrivacyError("recovery_backup_too_large");
+  }
+}
+
 function readCountResult(
   result: Awaited<ReturnType<D1DatabaseBinding["batch"]>>[number],
 ) {
@@ -82,6 +121,7 @@ async function snapshotRows(
   createdAt: string,
   tables: SnapshotTables = liveSnapshotTables,
 ): Promise<PublicFormBackupSnapshot> {
+  await assertSnapshotWithinOnlineBackupLimit(database, tables);
   const results = await database.batch([
     database
       .prepare(
@@ -680,12 +720,19 @@ export function createD1PublicFormPrivacyStore(
       return row?.created_at ?? null;
     },
     async recordBackup(input) {
-      await database
+      const result = await database
         .prepare(
           `INSERT INTO public_form_backup_records (
              backup_id, site_id, object_key, integrity_hash,
              created_at, expires_at, retention_days
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           ON CONFLICT (backup_id) DO UPDATE SET
+             integrity_hash = excluded.integrity_hash,
+             created_at = excluded.created_at,
+             expires_at = excluded.expires_at,
+             retention_days = excluded.retention_days
+           WHERE public_form_backup_records.site_id = excluded.site_id
+             AND public_form_backup_records.object_key = excluded.object_key`,
         )
         .bind(
           input.backupId,
@@ -697,6 +744,9 @@ export function createD1PublicFormPrivacyStore(
           input.retentionDays,
         )
         .run();
+      if ((result.meta.changes ?? 0) < 1) {
+        throw new Error("form_backup_record_conflict");
+      }
     },
     async restoreBackupSnapshot({ snapshot, verification }) {
       const expectedHash = await sha256(JSON.stringify(snapshot));
