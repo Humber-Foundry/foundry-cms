@@ -18,6 +18,8 @@ import {
   clearStaleEdits,
   preserveStaleEdits,
   recoverStaleEdits,
+  type StaleRecoveryConflict,
+  type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
@@ -68,13 +70,14 @@ export function ContentEditor({
   const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
-    ReadonlyArray<SiteDefinitionEdit>
+    ReadonlyArray<StaleRecoveryConflict>
   >([]);
   const pendingAttempt = useRef<{
     body: string;
     idempotencyKey: string;
   } | null>(null);
   const recoveryApplied = useRef(false);
+  const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
@@ -105,11 +108,11 @@ export function ContentEditor({
       );
       return;
     }
-    const { available, recovered, unmatched } = recoverStaleEdits(
+    const { available, recovered, conflicts } = recoverStaleEdits(
       recoveryStorage,
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
-      new Set(workingFields.map((field) => field.path)),
+      new Map(workingFields.map((field) => [field.path, field.value])),
     );
     if (!available) {
       setMessage(
@@ -120,10 +123,11 @@ export function ContentEditor({
     for (const edit of recovered) {
       dispatch({ type: "edit", ...edit });
     }
-    setRecoveryConflicts(unmatched);
-    if (unmatched.length > 0) {
+    recoveryPending.current = [...recovered, ...conflicts];
+    setRecoveryConflicts(conflicts);
+    if (conflicts.length > 0) {
       setMessage(
-        "Some unsaved edits refer to fields that changed in the new Site Definition. Their values remain preserved below for manual resolution.",
+        "Some unsaved edits overlap newer values or changed field paths. Choose how to resolve each one.",
       );
     } else if (recovered.length > 0) {
       setMessage(
@@ -215,6 +219,7 @@ export function ContentEditor({
         try {
           const recoveryStorage = window.localStorage;
           if (recoveryConflicts.length === 0) {
+            recoveryPending.current = [];
             clearStaleEdits(
               recoveryStorage,
               staleRecovery.id,
@@ -222,11 +227,19 @@ export function ContentEditor({
             );
             window.history.replaceState(null, "", activeWorkspaceUrl);
           } else {
+            const unresolved = recoveryConflicts.map(
+              ({ path, value, baseValue }) => ({
+                path,
+                value,
+                baseValue,
+              }),
+            );
+            recoveryPending.current = unresolved;
             preserveStaleEdits(
               recoveryStorage,
               staleRecovery.id,
               staleRecovery.sourceWorkspaceId,
-              recoveryConflicts,
+              unresolved,
             );
           }
         } catch {
@@ -255,13 +268,20 @@ export function ContentEditor({
 
   function recoverEdits(destination: "current" | "fresh"): void {
     const recoveryId = crypto.randomUUID();
+    const persistedValues = new Map(
+      persistedFields.map((field) => [field.path, field.value]),
+    );
+    const recoveryEdits = edits.map((edit) => ({
+      ...edit,
+      baseValue: persistedValues.get(edit.path) ?? "",
+    }));
     try {
       if (
         !preserveStaleEdits(
           window.localStorage,
           recoveryId,
           initialRevision.workspaceId,
-          edits,
+          recoveryEdits,
         )
       ) {
         throw new Error("stale_edit_recovery_unavailable");
@@ -281,6 +301,49 @@ export function ContentEditor({
         "The browser could not preserve these edits for recovery. Copy them before reloading or starting a fresh workspace.",
       );
     }
+  }
+
+  function resolveRecoveryConflict(
+    conflict: StaleRecoveryConflict,
+    resolution: "latest" | "mine",
+  ) {
+    if (resolution === "mine" && conflict.currentValue !== null) {
+      edit(conflict.path, conflict.value);
+    }
+    const remaining = recoveryConflicts.filter(
+      (candidate) => candidate.path !== conflict.path,
+    );
+    recoveryPending.current = recoveryPending.current.filter(
+      (candidate) =>
+        candidate.path !== conflict.path || resolution === "mine",
+    );
+    setRecoveryConflicts(remaining);
+    if (staleRecovery !== undefined) {
+      try {
+        if (recoveryPending.current.length === 0) {
+          clearStaleEdits(
+            window.localStorage,
+            staleRecovery.id,
+            staleRecovery.sourceWorkspaceId,
+          );
+          window.history.replaceState(null, "", activeWorkspaceUrl);
+        } else {
+          preserveStaleEdits(
+            window.localStorage,
+            staleRecovery.id,
+            staleRecovery.sourceWorkspaceId,
+            recoveryPending.current,
+          );
+        }
+      } catch {
+        // The in-memory choice remains usable; the durable record stays intact.
+      }
+    }
+    setMessage(
+      resolution === "mine"
+        ? `Your value for ${conflict.path} is ready to save.`
+        : `The latest value for ${conflict.path} was kept.`,
+    );
   }
 
   return (
@@ -367,7 +430,46 @@ export function ContentEditor({
             {recoveryConflicts.map((edit) => (
               <li key={edit.path}>
                 <code>{edit.path}</code>
-                <span>{edit.value}</span>
+                {edit.reason === "changed" ? (
+                  <>
+                    <span>Latest: {edit.currentValue}</span>
+                    <span>Your unsaved value: {edit.value}</span>
+                    <span className="editor-conflict-actions">
+                      <button
+                        type="button"
+                        className="copy-button"
+                        onClick={() =>
+                          resolveRecoveryConflict(edit, "latest")
+                        }
+                      >
+                        Keep latest
+                      </button>
+                      <button
+                        type="button"
+                        className="copy-button"
+                        onClick={() => resolveRecoveryConflict(edit, "mine")}
+                      >
+                        Use my value
+                      </button>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      This field no longer exists. Your unsaved value:{" "}
+                      {edit.value}
+                    </span>
+                    <button
+                      type="button"
+                      className="copy-button"
+                      onClick={() =>
+                        resolveRecoveryConflict(edit, "latest")
+                      }
+                    >
+                      I’ve copied this value
+                    </button>
+                  </>
+                )}
               </li>
             ))}
           </ul>

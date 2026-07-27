@@ -5,18 +5,29 @@ const maximumRecoveredEdits = 500;
 
 type RecoveryStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
 
+export type StaleRecoveryEdit = SiteDefinitionEdit &
+  Readonly<{ baseValue: string }>;
+
+export type StaleRecoveryConflict = StaleRecoveryEdit &
+  Readonly<{
+    currentValue: string | null;
+    reason: "changed" | "missing";
+  }>;
+
 function recoveryKey(sourceWorkspaceId: string, recoveryId: string): string {
   return `${staleEditRecoveryPrefix}:${sourceWorkspaceId}:${recoveryId}`;
 }
 
-function isSiteDefinitionEdit(value: unknown): value is SiteDefinitionEdit {
+function isStaleRecoveryEdit(value: unknown): value is StaleRecoveryEdit {
   return (
     typeof value === "object" &&
     value !== null &&
     "path" in value &&
     typeof value.path === "string" &&
     "value" in value &&
-    typeof value.value === "string"
+    typeof value.value === "string" &&
+    "baseValue" in value &&
+    typeof value.baseValue === "string"
   );
 }
 
@@ -34,13 +45,15 @@ function parseRecovery(encoded: string | null) {
       !("edits" in parsed) ||
       !Array.isArray(parsed.edits) ||
       parsed.edits.length > maximumRecoveredEdits ||
-      !parsed.edits.every(isSiteDefinitionEdit)
+      !parsed.edits.every(isStaleRecoveryEdit) ||
+      new Set(parsed.edits.map((edit) => edit.path)).size !==
+        parsed.edits.length
     ) {
       return null;
     }
     return {
       sourceWorkspaceId: parsed.sourceWorkspaceId,
-      edits: parsed.edits as SiteDefinitionEdit[],
+      edits: parsed.edits as StaleRecoveryEdit[],
     };
   } catch {
     return null;
@@ -51,7 +64,7 @@ export function preserveStaleEdits(
   storage: RecoveryStorage,
   recoveryId: string,
   sourceWorkspaceId: string,
-  edits: ReadonlyArray<SiteDefinitionEdit>,
+  edits: ReadonlyArray<StaleRecoveryEdit>,
 ): boolean {
   try {
     storage.setItem(
@@ -68,11 +81,11 @@ export function recoverStaleEdits(
   storage: RecoveryStorage,
   recoveryId: string,
   sourceWorkspaceId: string,
-  validPaths: ReadonlySet<string>,
+  destinationValues: ReadonlyMap<string, string>,
 ): Readonly<{
   available: boolean;
-  recovered: SiteDefinitionEdit[];
-  unmatched: SiteDefinitionEdit[];
+  recovered: StaleRecoveryEdit[];
+  conflicts: StaleRecoveryConflict[];
 }> {
   try {
     const key = recoveryKey(sourceWorkspaceId, recoveryId);
@@ -82,15 +95,27 @@ export function recoverStaleEdits(
       recovery.sourceWorkspaceId !== sourceWorkspaceId
     ) {
       storage.removeItem(key);
-      return { available: true, recovered: [], unmatched: [] };
+      return { available: true, recovered: [], conflicts: [] };
+    }
+    const recovered: StaleRecoveryEdit[] = [];
+    const conflicts: StaleRecoveryConflict[] = [];
+    for (const edit of recovery.edits) {
+      const currentValue = destinationValues.get(edit.path);
+      if (currentValue === undefined) {
+        conflicts.push({ ...edit, currentValue: null, reason: "missing" });
+      } else if (currentValue === edit.baseValue) {
+        recovered.push(edit);
+      } else {
+        conflicts.push({ ...edit, currentValue, reason: "changed" });
+      }
     }
     return {
       available: true,
-      recovered: recovery.edits.filter((edit) => validPaths.has(edit.path)),
-      unmatched: recovery.edits.filter((edit) => !validPaths.has(edit.path)),
+      recovered,
+      conflicts,
     };
   } catch {
-    return { available: false, recovered: [], unmatched: [] };
+    return { available: false, recovered: [], conflicts: [] };
   }
 }
 

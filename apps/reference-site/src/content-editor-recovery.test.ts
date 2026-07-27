@@ -21,30 +21,34 @@ function createStorage() {
   };
 }
 
+const edit = {
+  path: "section_hero.title",
+  baseValue: "Original title",
+  value: "My unsaved title",
+};
+
 describe("stale edit recovery", () => {
-  it("retains matching unsaved edits until the fresh revision is saved", () => {
+  it("retains and auto-applies a non-overlapping edit until save", () => {
     const storage = createStorage();
-    const edits = [
-      { path: "section_hero.title", value: "Still here after deployment" },
-    ];
-    preserveStaleEdits(storage, "recovery-1", "workspace-first", edits);
+    preserveStaleEdits(storage, "recovery-1", "workspace-first", [edit]);
+    const destination = new Map([[edit.path, edit.baseValue]]);
 
     expect(
       recoverStaleEdits(
         storage,
         "recovery-1",
         "workspace-first",
-        new Set(["section_hero.title"]),
+        destination,
       ),
-    ).toEqual({ available: true, recovered: edits, unmatched: [] });
+    ).toEqual({ available: true, recovered: [edit], conflicts: [] });
     expect(
       recoverStaleEdits(
         storage,
         "recovery-1",
         "workspace-first",
-        new Set(["section_hero.title"]),
+        destination,
       ),
-    ).toEqual({ available: true, recovered: edits, unmatched: [] });
+    ).toEqual({ available: true, recovered: [edit], conflicts: [] });
     expect(
       clearStaleEdits(storage, "recovery-1", "workspace-first"),
     ).toBe(true);
@@ -53,19 +57,47 @@ describe("stale edit recovery", () => {
         storage,
         "recovery-1",
         "workspace-first",
-        new Set(["section_hero.title"]),
+        destination,
       ),
-    ).toEqual({ available: true, recovered: [], unmatched: [] });
+    ).toEqual({ available: true, recovered: [], conflicts: [] });
+  });
+
+  it("surfaces a same-path concurrent change as a three-way conflict", () => {
+    const storage = createStorage();
+    preserveStaleEdits(storage, "recovery-overlap", "workspace-shared", [edit]);
+
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-overlap",
+        "workspace-shared",
+        new Map([[edit.path, "Collaborator's newer title"]]),
+      ),
+    ).toEqual({
+      available: true,
+      recovered: [],
+      conflicts: [
+        {
+          ...edit,
+          currentValue: "Collaborator's newer title",
+          reason: "changed",
+        },
+      ],
+    });
   });
 
   it("keeps renamed fields available as explicit conflicts", () => {
     const storage = createStorage();
-    const removed = [{ path: "section_old.title", value: "Preserve me" }];
+    const removed = {
+      path: "section_old.title",
+      baseValue: "Old title",
+      value: "Preserve me",
+    };
     preserveStaleEdits(
       storage,
       "recovery-removed",
       "workspace-old",
-      removed,
+      [removed],
     );
 
     expect(
@@ -73,17 +105,15 @@ describe("stale edit recovery", () => {
         storage,
         "recovery-removed",
         "workspace-old",
-        new Set(["section_new.title"]),
+        new Map([["section_new.title", "New title"]]),
       ),
-    ).toEqual({ available: true, recovered: [], unmatched: removed });
-    expect(
-      recoverStaleEdits(
-        storage,
-        "recovery-removed",
-        "workspace-old",
-        new Set(["section_new.title"]),
-      ),
-    ).toEqual({ available: true, recovered: [], unmatched: removed });
+    ).toEqual({
+      available: true,
+      recovered: [],
+      conflicts: [
+        { ...removed, currentValue: null, reason: "missing" },
+      ],
+    });
   });
 
   it("fails safely when browser storage is unavailable", () => {
@@ -104,7 +134,7 @@ describe("stale edit recovery", () => {
         blockedStorage,
         "recovery-blocked",
         "workspace-blocked",
-        [{ path: "section_hero.title", value: "Safe" }],
+        [edit],
       ),
     ).toBe(false);
     expect(
@@ -112,9 +142,9 @@ describe("stale edit recovery", () => {
         blockedStorage,
         "recovery-blocked",
         "workspace-blocked",
-        new Set(["section_hero.title"]),
+        new Map([[edit.path, edit.baseValue]]),
       ),
-    ).toEqual({ available: false, recovered: [], unmatched: [] });
+    ).toEqual({ available: false, recovered: [], conflicts: [] });
     expect(
       clearStaleEdits(
         blockedStorage,
@@ -126,26 +156,27 @@ describe("stale edit recovery", () => {
 
   it("isolates simultaneous recoveries by workspace and one-time id", () => {
     const storage = createStorage();
-    const first = [{ path: "section_hero.title", value: "First tab" }];
-    const second = [{ path: "section_hero.title", value: "Second tab" }];
-    preserveStaleEdits(storage, "recovery-a", "workspace-a", first);
-    preserveStaleEdits(storage, "recovery-b", "workspace-b", second);
+    const first = { ...edit, value: "First tab" };
+    const second = { ...edit, value: "Second tab" };
+    preserveStaleEdits(storage, "recovery-a", "workspace-a", [first]);
+    preserveStaleEdits(storage, "recovery-b", "workspace-b", [second]);
+    const destination = new Map([[edit.path, edit.baseValue]]);
 
     expect(
       recoverStaleEdits(
         storage,
         "recovery-b",
         "workspace-b",
-        new Set(["section_hero.title"]),
+        destination,
       ).recovered,
-    ).toEqual(second);
+    ).toEqual([second]);
     expect(
       recoverStaleEdits(
         storage,
         "recovery-a",
         "workspace-a",
-        new Set(["section_hero.title"]),
+        destination,
       ).recovered,
-    ).toEqual(first);
+    ).toEqual([first]);
   });
 });

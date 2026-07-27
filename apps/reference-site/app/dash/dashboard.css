@@ -364,6 +364,12 @@
   gap: 0.25rem;
 }
 
+.editor-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .editor-groups {
   display: grid;
   grid-template-columns: 1fr 1fr;
