@@ -58,6 +58,10 @@ export function createD1RestDatabase({
           "Content-Type": "application/json",
         },
         body: JSON.stringify(
+          // Cloudflare's D1 /query API accepts either D1SingleQuery or the
+          // documented MultipleQueries { batch } request. Keep the latter so
+          // recovery promotion and cleanup retain D1 batch atomicity.
+          // https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/
           queries.length === 1 ? queries[0] : { batch: queries },
         ),
       },

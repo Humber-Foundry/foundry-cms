@@ -233,8 +233,9 @@ object pointer. A stale or ambiguous writer therefore cannot overwrite the
 recoverable checkpoint, and its unreferenced ciphertext remains subject to the
 same expiry sweep. The online snapshot path rejects per-site estimates above 8
 MiB before loading all rows into Worker memory. Encrypted objects expire after
-30 days; configure the same 30-day prefix lifecycle on the private R2 bucket as
-a provider-side backstop to the scheduled expiry sweep.
+30 days by default. Configure the private R2 bucket's prefix lifecycle to the
+same number of days as `FOUNDRY_FORM_RETENTION_BACKUP_DAYS` (30 when unset) so
+the provider-side backstop never shortens the selected retention window.
 
 Restore is deliberately fail-closed and runs from a client-controlled operator
 machine, not the Worker. Set a short-lived `CLOUDFLARE_API_TOKEN` with D1
