@@ -147,6 +147,29 @@ export function createD1MediaAssetStore(
   }
 
   return {
+    async claim(siteId, idempotencyKey, requestHash) {
+      const claimed = await database
+        .prepare(
+          `INSERT INTO media_mutation_claims (
+             site_id, idempotency_key, request_hash, claimed_at
+           ) VALUES (?1, ?2, ?3, datetime('now'))
+           ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
+        )
+        .bind(siteId, idempotencyKey, requestHash)
+        .run();
+      if ((claimed.meta.changes ?? 0) === 0) {
+        const existing = await database
+          .prepare(
+            `SELECT request_hash FROM media_mutation_claims
+             WHERE site_id = ?1 AND idempotency_key = ?2`,
+          )
+          .bind(siteId, idempotencyKey)
+          .first<{ request_hash: string }>();
+        if (existing?.request_hash !== requestHash) {
+          throw new MediaSiteAccessError();
+        }
+      }
+    },
     async replay(siteId, idempotencyKey, requestHash) {
       const row = await database
         .prepare(

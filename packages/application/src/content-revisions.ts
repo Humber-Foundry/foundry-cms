@@ -5,6 +5,7 @@ import {
   type SiteDefinition,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
+import { sha256CanonicalJson } from "./deterministic-hash";
 
 export type ContentRevisionInputs = Readonly<{
   contentHash: string;
@@ -204,29 +205,6 @@ export function isContentRevisionRenderableBy(
   );
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-async function sha256(value: unknown): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonicalJson(value)),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function deepFreeze<Value>(value: Value): Value {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
     return value;
@@ -343,7 +321,7 @@ export function createContentRevisionApplication({
   let productionBaseResolution: Promise<string> | undefined;
   const resolveProductionBase = () => {
     productionBaseResolution ??= (async () => {
-      const publishedContentHash = await sha256(siteDefinition);
+      const publishedContentHash = await sha256CanonicalJson(siteDefinition);
       return typeof productionBase === "function"
         ? productionBase(publishedContentHash)
         : productionBase;
@@ -352,7 +330,7 @@ export function createContentRevisionApplication({
   };
   const initialize = () => {
     initialization ??= (async () => {
-      const publishedContentHash = await sha256(siteDefinition);
+      const publishedContentHash = await sha256CanonicalJson(siteDefinition);
       const resolvedProductionBase = await resolveProductionBase();
       const initial = immutableRevision({
         workspaceId,
@@ -431,7 +409,7 @@ export function createContentRevisionApplication({
         }
         await store.requireAccess(actorId);
         const currentProductionBase = await resolveProductionBase();
-        const requestHash = await sha256({
+        const requestHash = await sha256CanonicalJson({
           actorId: command.actorId,
           workspaceId: command.workspaceId,
           schemaVersion: command.schemaVersion,
@@ -494,7 +472,7 @@ export function createContentRevisionApplication({
           revision: command.baseRevision + 1,
           definition: edited.definition,
           inputs: {
-            contentHash: await sha256(edited.definition),
+            contentHash: await sha256CanonicalJson(edited.definition),
             schemaVersion: edited.definition.schemaVersion,
             rendererVersion,
             productionBase: base.inputs.productionBase,

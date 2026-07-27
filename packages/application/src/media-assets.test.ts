@@ -175,6 +175,32 @@ describe("media asset application", () => {
     );
   });
 
+  it("binds an idempotency key before any differently shaped mutation can run", async () => {
+    const { application } = setup();
+    await upload(application, assetA);
+    await upload(application, assetB);
+    await application.commands.replaceOccurrence({
+      actorId: editor,
+      occurrenceId: occurrenceA,
+      assetId: assetA,
+      baseRevision: 0,
+      idempotencyKey: "one-bound-mutation-key",
+    });
+
+    await expect(
+      application.commands.replaceOccurrence({
+        actorId: editor,
+        occurrenceId: occurrenceB,
+        assetId: assetB,
+        baseRevision: 0,
+        idempotencyKey: "one-bound-mutation-key",
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({ field: "idempotencyKey" }),
+    );
+    await expect(application.queries.getOccurrence(occurrenceB)).resolves.toBeNull();
+  });
+
   it("records crops as immutable occurrence revision data without changing the source", async () => {
     const { application, sources } = setup();
     const asset = await upload(application);

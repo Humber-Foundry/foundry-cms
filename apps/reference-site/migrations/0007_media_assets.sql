@@ -75,6 +75,14 @@ CREATE TABLE media_mutation_receipts (
   PRIMARY KEY (site_id, idempotency_key)
 );
 
+CREATE TABLE media_mutation_claims (
+  site_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  PRIMARY KEY (site_id, idempotency_key)
+);
+
 CREATE UNIQUE INDEX media_audit_occurrence_revision
   ON media_audit_events(site_id, action, subject_id, subject_revision)
   WHERE subject_revision IS NOT NULL;

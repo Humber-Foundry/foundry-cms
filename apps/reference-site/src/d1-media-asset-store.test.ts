@@ -132,4 +132,29 @@ describe("D1 media asset store", () => {
 
     await expect(other.queries.getAsset(assetId)).resolves.toBeNull();
   });
+
+  it("binds one D1 idempotency key to one request before mutation", async () => {
+    const app = application();
+    await upload(app, assetId);
+    await upload(app, replacementId);
+    await app.commands.replaceOccurrence({
+      actorId,
+      occurrenceId,
+      assetId,
+      baseRevision: 0,
+      idempotencyKey: "d1-bound-mutation-key",
+    });
+    const otherOccurrence = createMediaOccurrenceId("occurrence_other");
+
+    await expect(
+      app.commands.replaceOccurrence({
+        actorId,
+        occurrenceId: otherOccurrence,
+        assetId: replacementId,
+        baseRevision: 0,
+        idempotencyKey: "d1-bound-mutation-key",
+      }),
+    ).rejects.toThrow("media_site_access_denied");
+    await expect(app.queries.getOccurrence(otherOccurrence)).resolves.toBeNull();
+  });
 });

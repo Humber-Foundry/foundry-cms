@@ -1,6 +1,7 @@
 import type { SiteId } from "@foundry/site-definition";
 
 import type { ContentActorId } from "./content-revisions";
+import { sha256CanonicalJson } from "./deterministic-hash";
 
 declare const mediaAssetIdBrand: unique symbol;
 export type MediaAssetId = string & {
@@ -123,6 +124,11 @@ export type MediaSourceStore = Readonly<{
 }>;
 
 export type MediaAssetStore = Readonly<{
+  claim(
+    siteId: SiteId,
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<void>;
   replay(
     siteId: SiteId,
     idempotencyKey: string,
@@ -238,29 +244,6 @@ function immutable<Value>(value: Value): Value {
   return Object.freeze(structuredClone(value));
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-async function requestHash(command: unknown): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonicalJson(command)),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-}
-
 async function hashSource(source: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -323,12 +306,21 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     string,
     Readonly<{ requestHash: string; result: MediaMutationResult }>
   >();
+  const claims = new Map<string, string>();
   const scopedKey = (
     siteId: SiteId,
     id: MediaAssetId | MediaOccurrenceId,
   ) => `${siteId}:${id}`;
 
   return {
+    async claim(siteId, idempotencyKey, hash) {
+      const key = `${siteId}:${idempotencyKey}`;
+      const existing = claims.get(key);
+      if (existing !== undefined && existing !== hash) {
+        throw new MediaValidationError("idempotencyKey");
+      }
+      claims.set(key, hash);
+    },
     async replay(siteId, idempotencyKey, hash) {
       const receipt = receipts.get(`${siteId}:${idempotencyKey}`);
       if (receipt === undefined) return null;
@@ -520,7 +512,7 @@ export function createMediaAssetApplication({
       async upload(command: UploadMediaAssetCommand): Promise<MediaAsset> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
-        const hash = await requestHash(command);
+        const hash = await sha256CanonicalJson(command);
         const replay = await assets.replay(
           siteId,
           command.idempotencyKey,
@@ -552,6 +544,7 @@ export function createMediaAssetApplication({
         ) {
           throw new MediaValidationError("source");
         }
+        await assets.claim(siteId, command.idempotencyKey, hash);
         const existing = await assets.getAsset(siteId, command.assetId);
         const sourceHash = await hashSource(command.source);
         if (existing !== null) {
@@ -596,7 +589,7 @@ export function createMediaAssetApplication({
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
-        const hash = await requestHash(command);
+        const hash = await sha256CanonicalJson(command);
         const replay = await assets.replay(
           siteId,
           command.idempotencyKey,
@@ -611,6 +604,7 @@ export function createMediaAssetApplication({
         if ((await assets.getAsset(siteId, command.assetId)) === null) {
           throw new MediaSiteAccessError();
         }
+        await assets.claim(siteId, command.idempotencyKey, hash);
         const revision: MediaOccurrenceRevision = {
           siteId,
           occurrenceId: command.occurrenceId,
@@ -634,7 +628,7 @@ export function createMediaAssetApplication({
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
-        const hash = await requestHash(command);
+        const hash = await sha256CanonicalJson(command);
         const replay = await assets.replay(
           siteId,
           command.idempotencyKey,
@@ -647,6 +641,7 @@ export function createMediaAssetApplication({
           return replay.value;
         }
         assertCrop(command.crop);
+        await assets.claim(siteId, command.idempotencyKey, hash);
         const current = await assets.getOccurrence(
           siteId,
           command.occurrenceId,
@@ -677,7 +672,7 @@ export function createMediaAssetApplication({
       }): Promise<void> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
-        const hash = await requestHash(command);
+        const hash = await sha256CanonicalJson(command);
         const replay = await assets.replay(
           siteId,
           command.idempotencyKey,
@@ -689,6 +684,7 @@ export function createMediaAssetApplication({
           }
           return;
         }
+        await assets.claim(siteId, command.idempotencyKey, hash);
         const asset = await assets.beginAssetDeletion(
           siteId,
           command.assetId,
