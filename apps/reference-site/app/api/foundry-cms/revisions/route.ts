@@ -241,7 +241,15 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof ContentRevisionStaleError) {
-      return Response.json({ error: "revision_stale" }, { status: 409 });
+      return Response.json(
+        {
+          error: "revision_stale",
+          ...(error.acknowledgedRevision === undefined
+            ? {}
+            : { acknowledgedRevision: error.acknowledgedRevision }),
+        },
+        { status: 409 },
+      );
     }
     if (error instanceof ContentWorkspaceAccessError) {
       return Response.json({ error: "workspace_access_denied" }, { status: 403 });

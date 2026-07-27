@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   ContentRevisionConfigurationError,
+  ContentWorkspaceAccessError,
   type ContentActorId,
   createContentRevisionApplication,
   createContentWorkspaceId,
@@ -117,4 +118,27 @@ export async function loadContentRevisionApplication(
     rendererVersion,
     productionBaseCommit: `git:${productionBaseCommit}`,
   });
+}
+
+export async function requireExistingContentWorkspaceAccess(
+  workspaceId: ContentWorkspaceId,
+  actorId: ContentActorId,
+): Promise<void> {
+  if (process.env.NODE_ENV === "development") {
+    const store = localRuntime.__foundryContentRevisionStores!.get(workspaceId);
+    if (store === undefined) {
+      throw new ContentWorkspaceAccessError();
+    }
+    await store.requireAccess(actorId);
+    return;
+  }
+  const environment = await loadHumanAccessEnvironment();
+  if (environment.FOUNDRY_DB === undefined) {
+    throw new ContentRevisionConfigurationError();
+  }
+  await createD1ContentRevisionStore(
+    environment.FOUNDRY_DB,
+    referenceSiteDefinition.site.id,
+    workspaceId,
+  ).requireAccess(actorId);
 }

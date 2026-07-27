@@ -141,9 +141,12 @@ export class ContentWorkspaceAccessError extends Error {
 }
 
 export class ContentRevisionStaleError extends Error {
-  constructor() {
+  readonly acknowledgedRevision: number | undefined;
+
+  constructor(acknowledgedRevision?: number) {
     super("content_revision_stale");
     this.name = "ContentRevisionStaleError";
+    this.acknowledgedRevision = acknowledgedRevision;
   }
 }
 
@@ -408,6 +411,14 @@ export function createContentRevisionApplication({
           requestHash,
         );
         if (replay !== null) {
+          if (
+            !isContentRevisionRenderableBy(replay, {
+              rendererVersion,
+              productionBase: currentProductionBase!,
+            })
+          ) {
+            throw new ContentRevisionStaleError(replay.revision);
+          }
           return replay;
         }
         if (command.schemaVersion !== siteDefinition.schemaVersion) {

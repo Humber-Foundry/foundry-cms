@@ -171,6 +171,24 @@ describe("content revision endpoint", () => {
     });
   });
 
+  it("reports an acknowledged replay that is stale on the current deployment", async () => {
+    mocks.save.mockRejectedValue(new ContentRevisionStaleError(3));
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
+        baseRevision: 2,
+        edits: [{ path: "section_hero.title", value: "Already saved" }],
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "revision_stale",
+      acknowledgedRevision: 3,
+    });
+  });
+
   it("does not disclose a workspace to an unauthorized actor", async () => {
     mocks.loadApplication.mockRejectedValue(
       new ContentWorkspaceAccessError(),

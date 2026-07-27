@@ -20,6 +20,7 @@ import { createHumanMutationToken } from "@/src/human-mutation-runtime";
 import {
   contentWorkspaceIdForActor,
   loadContentRevisionApplication,
+  requireExistingContentWorkspaceAccess,
 } from "@/src/content-revision-runtime";
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
 import { referenceSiteApplication } from "@/src/reference-installation";
@@ -82,9 +83,10 @@ export default async function DashboardPage({
       const sourceWorkspaceId = createContentWorkspaceId(
         requested.recoverFrom,
       );
-      await (
-        await loadContentRevisionApplication(sourceWorkspaceId, actorId)
-      ).queries.getCurrent();
+      await requireExistingContentWorkspaceAccess(
+        sourceWorkspaceId,
+        actorId,
+      );
       staleRecovery = {
         id: requested.recovery,
         sourceWorkspaceId,

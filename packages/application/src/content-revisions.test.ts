@@ -212,7 +212,7 @@ describe("content revision application", () => {
     ).rejects.toBeInstanceOf(ContentRevisionStaleError);
   });
 
-  it("replays an acknowledged save after the production base changes", async () => {
+  it("acknowledges a replay that became stale after a production-base change", async () => {
     const store = createInMemoryContentRevisionStore();
     const original = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -234,7 +234,12 @@ describe("content revision application", () => {
       productionBase: "published:site_foundry_reference@2.0.0",
     });
 
-    await expect(changedBase.commands.save(command)).resolves.toEqual(saved);
+    await expect(changedBase.commands.save(command)).rejects.toEqual(
+      expect.objectContaining({
+        name: "ContentRevisionStaleError",
+        acknowledgedRevision: saved.revision,
+      }),
+    );
   });
 
   it("rejects invalid fields with path-keyed feedback", async () => {

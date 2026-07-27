@@ -7,6 +7,7 @@ import {
   ContentRevisionConflictError,
   ContentRevisionBookmarkError,
   ContentRevisionIdempotencyError,
+  ContentWorkspaceAccessError,
   createContentActorId,
   createContentRevisionApplication,
   createContentWorkspaceId,
@@ -140,6 +141,29 @@ describe("D1 content revision store", () => {
     await expect(outsider.queries.getCurrent()).rejects.toThrow(
       "content_workspace_access_denied",
     );
+  });
+
+  it("does not create a missing workspace during an access check", async () => {
+    const missingWorkspaceId = createContentWorkspaceId("workspace_missing");
+    const store = createD1ContentRevisionStore(
+      database,
+      referenceSiteDefinition.site.id,
+      missingWorkspaceId,
+    );
+
+    await expect(store.requireAccess(editorActorId)).rejects.toBeInstanceOf(
+      ContentWorkspaceAccessError,
+    );
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM content_workspaces
+           WHERE workspace_id = ?1`,
+        )
+        .bind(missingWorkspaceId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
   });
 
   it("returns the current revision when optimistic concurrency fails", async () => {
