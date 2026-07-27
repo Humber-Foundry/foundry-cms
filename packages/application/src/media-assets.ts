@@ -63,6 +63,9 @@ export const mediaAuditActions = [
   "media.occurrence.replaced",
   "media.occurrence.cropped",
   "media.asset.deleted",
+  "media.assets.listed",
+  "media.occurrences.listed",
+  "media.source.read",
 ] as const;
 export type MediaAuditAction = (typeof mediaAuditActions)[number];
 
@@ -70,7 +73,7 @@ export type MediaAuditEvent = Readonly<{
   siteId: SiteId;
   actorId: ContentActorId;
   action: MediaAuditAction;
-  subjectId: MediaAssetId | MediaOccurrenceId;
+  subjectId: string;
   occurredAt: string;
 }>;
 
@@ -145,6 +148,16 @@ export type MediaAssetStore = Readonly<{
   listOccurrences(
     siteId: SiteId,
   ): Promise<ReadonlyArray<MediaOccurrenceRevision>>;
+  auditRead(
+    siteId: SiteId,
+    actorId: ContentActorId,
+    action: Extract<
+      MediaAuditAction,
+      "media.assets.listed" | "media.occurrences.listed" | "media.source.read"
+    >,
+    subjectId: string,
+    occurredAt: string,
+  ): Promise<void>;
   createAsset(
     asset: MediaAsset,
     idempotencyKey: string,
@@ -355,6 +368,17 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       }
       return found;
     },
+    async auditRead(siteId, readActorId, action, subjectId, occurredAt) {
+      auditEvents.push(
+        immutable({
+          siteId,
+          actorId: readActorId,
+          action,
+          subjectId,
+          occurredAt,
+        }),
+      );
+    },
     async createAsset(asset, idempotencyKey, hash) {
       const key = scopedKey(asset.siteId, asset.assetId);
       const existing = assets.get(key);
@@ -512,18 +536,6 @@ export function createMediaAssetApplication({
       async upload(command: UploadMediaAssetCommand): Promise<MediaAsset> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
-        const hash = await sha256CanonicalJson(command);
-        const replay = await assets.replay(
-          siteId,
-          command.idempotencyKey,
-          hash,
-        );
-        if (replay !== null) {
-          if (replay.kind !== "asset") {
-            throw new MediaValidationError("idempotencyKey");
-          }
-          return replay.value;
-        }
         if (
           !allowedContentTypes.has(
             command.contentType as MediaAsset["contentType"],
@@ -544,9 +556,30 @@ export function createMediaAssetApplication({
         ) {
           throw new MediaValidationError("source");
         }
+        const sourceHash = await hashSource(command.source);
+        const hash = await sha256CanonicalJson({
+          actorId: command.actorId,
+          assetId: command.assetId,
+          fileName: command.fileName,
+          contentType: command.contentType,
+          byteLength: command.byteLength,
+          width: command.width,
+          height: command.height,
+          sourceHash,
+        });
+        const replay = await assets.replay(
+          siteId,
+          command.idempotencyKey,
+          hash,
+        );
+        if (replay !== null) {
+          if (replay.kind !== "asset") {
+            throw new MediaValidationError("idempotencyKey");
+          }
+          return replay.value;
+        }
         await assets.claim(siteId, command.idempotencyKey, hash);
         const existing = await assets.getAsset(siteId, command.assetId);
-        const sourceHash = await hashSource(command.source);
         if (existing !== null) {
           if (
             existing.sourceHash !== sourceHash ||
@@ -704,16 +737,40 @@ export function createMediaAssetApplication({
       getAsset(assetId: MediaAssetId) {
         return assets.getAsset(siteId, assetId);
       },
-      listAssets() {
-        return assets.listAssets(siteId);
+      async listAssets() {
+        const result = await assets.listAssets(siteId);
+        await assets.auditRead(
+          siteId,
+          actorId,
+          "media.assets.listed",
+          siteId,
+          now(),
+        );
+        return result;
       },
-      listOccurrences() {
-        return assets.listOccurrences(siteId);
+      async listOccurrences() {
+        const result = await assets.listOccurrences(siteId);
+        await assets.auditRead(
+          siteId,
+          actorId,
+          "media.occurrences.listed",
+          siteId,
+          now(),
+        );
+        return result;
       },
       async getSource(assetId: MediaAssetId) {
         const asset = await assets.getAsset(siteId, assetId);
         if (asset === null) throw new MediaSiteAccessError();
-        return sources.get(asset.objectKey);
+        const source = await sources.get(asset.objectKey);
+        await assets.auditRead(
+          siteId,
+          actorId,
+          "media.source.read",
+          assetId,
+          now(),
+        );
+        return source;
       },
       getOccurrence(occurrenceId: MediaOccurrenceId) {
         return assets.getOccurrence(siteId, occurrenceId);

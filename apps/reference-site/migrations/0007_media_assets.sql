@@ -58,7 +58,10 @@ CREATE TABLE media_audit_events (
       'media.asset.uploaded',
       'media.occurrence.replaced',
       'media.occurrence.cropped',
-      'media.asset.deleted'
+      'media.asset.deleted',
+      'media.assets.listed',
+      'media.occurrences.listed',
+      'media.source.read'
     )
   ),
   subject_id TEXT NOT NULL,
@@ -89,7 +92,8 @@ CREATE UNIQUE INDEX media_audit_occurrence_revision
 
 CREATE UNIQUE INDEX media_audit_asset_lifecycle
   ON media_audit_events(site_id, action, subject_id)
-  WHERE subject_revision IS NULL;
+  WHERE subject_revision IS NULL
+    AND action IN ('media.asset.uploaded', 'media.asset.deleted');
 
 CREATE INDEX media_occurrences_current_asset
   ON media_occurrences(site_id, current_asset_id);

@@ -91,6 +91,26 @@ describe("media asset application", () => {
     ]);
   });
 
+  it("audits authenticated catalog and private-source reads", async () => {
+    const { application } = setup();
+    await upload(application);
+
+    await application.queries.listAssets();
+    await application.queries.listOccurrences();
+    await application.queries.getSource(assetA);
+
+    await expect(application.queries.audit()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "media.assets.listed" }),
+        expect.objectContaining({ action: "media.occurrences.listed" }),
+        expect.objectContaining({
+          action: "media.source.read",
+          subjectId: assetA,
+        }),
+      ]),
+    );
+  });
+
   it("replaces only the selected occurrence", async () => {
     const { application } = setup();
     await upload(application, assetA);

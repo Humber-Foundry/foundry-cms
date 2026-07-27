@@ -225,6 +225,17 @@ export function createD1MediaAssetStore(
         .all<OccurrenceRow>();
       return rows.results.map(toOccurrence);
     },
+    async auditRead(siteId, actorId, action, subjectId, occurredAt) {
+      await database
+        .prepare(
+          `INSERT INTO media_audit_events (
+             site_id, actor_id, action, subject_id,
+             subject_revision, occurred_at
+           ) VALUES (?1, ?2, ?3, ?4, NULL, ?5)`,
+        )
+        .bind(siteId, actorId, action, subjectId, occurredAt)
+        .run();
+    },
     async createAsset(asset, idempotencyKey, requestHash) {
       const result: MediaMutationResult = { kind: "asset", value: asset };
       const results = await database.batch([
@@ -266,7 +277,22 @@ export function createD1MediaAssetStore(
           .prepare(
             `INSERT INTO media_mutation_receipts (
                site_id, idempotency_key, request_hash, result_json, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5
+             WHERE EXISTS (
+               SELECT 1 FROM media_assets
+               WHERE site_id = ?1
+                 AND asset_id = ?6
+                 AND object_key = ?7
+                 AND source_hash = ?8
+                 AND file_name = ?9
+                 AND content_type = ?10
+                 AND byte_length = ?11
+                 AND width = ?12
+                 AND height = ?13
+                 AND created_at = ?14
+                 AND created_by = ?15
+             )
              ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
           )
           .bind(
@@ -275,6 +301,16 @@ export function createD1MediaAssetStore(
             requestHash,
             JSON.stringify(result),
             asset.createdAt,
+            asset.assetId,
+            asset.objectKey,
+            asset.sourceHash,
+            asset.fileName,
+            asset.contentType,
+            asset.byteLength,
+            asset.width,
+            asset.height,
+            asset.createdAt,
+            asset.createdBy,
           ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
@@ -283,11 +319,18 @@ export function createD1MediaAssetStore(
           existing === null ||
           existing.objectKey !== asset.objectKey ||
           existing.sourceHash !== asset.sourceHash ||
+          existing.fileName !== asset.fileName ||
           existing.byteLength !== asset.byteLength ||
-          existing.contentType !== asset.contentType
+          existing.contentType !== asset.contentType ||
+          existing.width !== asset.width ||
+          existing.height !== asset.height
         ) {
           throw new MediaSiteAccessError();
         }
+        await this.record(asset.siteId, idempotencyKey, requestHash, {
+          kind: "asset",
+          value: existing,
+        });
         return existing;
       }
       return asset;
@@ -551,9 +594,7 @@ export function createD1MediaAssetStore(
           siteId: row.site_id,
           actorId: restoreContentActorId(row.actor_id),
           action: row.action,
-          subjectId: row.subject_id.startsWith("asset_")
-            ? createMediaAssetId(row.subject_id)
-            : createMediaOccurrenceId(row.subject_id),
+          subjectId: row.subject_id,
           occurredAt: row.occurred_at,
         }),
       );
