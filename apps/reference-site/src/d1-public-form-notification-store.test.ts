@@ -18,7 +18,9 @@ import {
 } from "@foundry/application";
 import { createSiteId } from "@foundry/site-definition";
 
+import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
+import { createD1PublicFormPrivacyStore } from "./d1-public-form-privacy-store";
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
 
 let runtime: Miniflare;
@@ -77,6 +79,7 @@ beforeEach(async () => {
   for (const name of [
     "0003_public_forms.sql",
     "0004_public_form_notifications.sql",
+    "0006_public_form_privacy.sql",
   ]) {
     const migration = await readFile(
       new URL(`../migrations/${name}`, import.meta.url),
@@ -204,6 +207,122 @@ describe("D1 public form notification store", () => {
     expect(submission?.fields_json).toContain("Private full submission");
   });
 
+  it("does not list or replay a delivery after its payload is erased", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(accepted);
+    await database
+      .prepare(
+        `UPDATE public_form_notification_jobs
+         SET status = 'failed', last_error_code = 'rejected'
+         WHERE delivery_id = ?1`,
+      )
+      .bind(accepted.deliveryId)
+      .run();
+    await createD1PublicFormPrivacyStore(
+      database as unknown as D1DatabaseBinding,
+    ).eraseSubmissionPayload({
+      siteId,
+      receiptId: accepted.receiptId,
+      actorMembershipId: "membership-owner",
+      reason: "authorized_erasure",
+      now: "2026-07-27T20:05:00.000Z",
+    });
+    const store = createD1PublicFormNotificationStore(database);
+
+    await expect(store.listFailed({ siteId })).resolves.toEqual([]);
+    await expect(
+      store.viewSubmission({
+        siteId,
+        receiptId: accepted.receiptId,
+        actorMembershipId: "membership-owner",
+        now: "2026-07-27T20:05:30.000Z",
+      }),
+    ).resolves.toMatchObject({ fields: {}, payloadDeleted: true });
+    await expect(
+      store.replayFailed({
+        siteId,
+        deliveryId: accepted.deliveryId,
+        actorMembershipId: "membership-owner",
+        now: "2026-07-27T20:06:00.000Z",
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("preserves successful retry counts in delivery health", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(accepted);
+    await database
+      .prepare(
+        `UPDATE public_form_notification_jobs
+         SET status = 'delivered', attempts = 2, last_error_code = NULL
+         WHERE delivery_id = ?1`,
+      )
+      .bind(accepted.deliveryId)
+      .run();
+
+    await expect(
+      createD1PublicFormNotificationStore(database).deliveryHealth({
+        siteId,
+        now: "2026-07-27T20:06:00.000Z",
+      }),
+    ).resolves.toMatchObject({ failed: 0, retries: 1 });
+  });
+
+  it("does not release erased spam or record a misleading release audit", async () => {
+    const held: PublicFormAcceptance = {
+      ...accepted,
+      classification: "suspected_spam",
+      deliveryStatus: "held",
+    };
+    await createD1PublicFormAcceptanceStore(database).accept(held);
+    await database
+      .prepare(
+        `UPDATE public_form_notification_jobs
+         SET attempts = 3 WHERE delivery_id = ?1`,
+      )
+      .bind(held.deliveryId)
+      .run();
+    await createD1PublicFormPrivacyStore(
+      database as unknown as D1DatabaseBinding,
+    ).eraseSubmissionPayload({
+      siteId,
+      receiptId: held.receiptId,
+      actorMembershipId: "membership-owner",
+      reason: "authorized_erasure",
+      now: "2026-07-27T20:05:00.000Z",
+    });
+    const store = createD1PublicFormNotificationStore(database);
+
+    await expect(store.listSuspectedSpam({ siteId })).resolves.toEqual([]);
+    await expect(
+      store.deliveryHealth({
+        siteId,
+        now: "2026-07-27T20:06:00.000Z",
+      }),
+    ).resolves.toMatchObject({ failed: 0, retries: 0 });
+    await expect(
+      store.releaseSuspectedSpam({
+        siteId,
+        receiptId: held.receiptId,
+        actorMembershipId: "membership-owner",
+        now: "2026-07-27T20:06:00.000Z",
+      }),
+    ).resolves.toBe(false);
+    const classification = await database
+      .prepare(
+        `SELECT classification FROM public_form_classifications
+         WHERE site_id = ?1`,
+      )
+      .bind(siteId)
+      .first<{ classification: string }>();
+    expect(classification?.classification).toBe("suspected_spam");
+    const releaseFacts = await database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM public_form_operation_audit_events
+         WHERE action = 'spam_released'`,
+      )
+      .first<{ count: number }>();
+    expect(releaseFacts?.count).toBe(0);
+  });
+
   it("stops an expired claim for explicit reconciliation", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(accepted);
     const store = createD1PublicFormNotificationStore(database);
@@ -281,12 +400,13 @@ describe("D1 public form notification store", () => {
       acceptedAt: held.acceptedAt,
       classification: "suspected_spam",
       fields: held.fields,
+      payloadDeleted: false,
     });
     await expect(
       store.releaseSuspectedSpam({
         siteId,
         receiptId: held.receiptId,
-        actorMembershipId: "membership-editor",
+        actorMembershipId: "membership-owner",
         now: "2026-07-27T20:10:00.000Z",
       }),
     ).resolves.toBe(true);

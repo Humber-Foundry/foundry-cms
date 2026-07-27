@@ -45,15 +45,24 @@ Production installation supplies:
   `contact`;
 - the checked-in `FOUNDRY_FORM_RATE_LIMITER` binding, updated to use an
   installation-unique positive integer `namespace_id`;
+- `FOUNDRY_FORM_BACKUP_RECIPIENT`, the client's base64-encoded SPKI public
+  recovery key; its matching private key must remain outside Cloudflare;
 - `FOUNDRY_PRODUCTION_BASE`, set to the exact 40- or 64-character Git commit
   containing the bundled published content; renderer identity comes from the
   Worker version-metadata binding (or an exact `FOUNDRY_RENDERER_VERSION`); and
 - an initial Owner invitation created by guided provisioning before handoff.
 
-Apply the checked-in D1 migration locally with:
+Apply the checked-in D1 migrations to both the primary and isolated recovery
+databases locally with:
 
 ```sh
 npm run db:migrate:local --workspace @foundry/reference-site
+```
+
+Before deployment, apply the same migrations to both remote databases:
+
+```sh
+npm run db:migrate:remote --workspace @foundry/reference-site
 ```
 
 Foundry stores no password or login session. Owners can invite Editors or other
@@ -186,6 +195,80 @@ and conservative logical D1 capacity bands (payload bytes plus per-record
 overhead) without copying submission payloads. An outcome that
 could have reached the provider is stopped for explicit human reconciliation
 instead of being reclaimed automatically.
+
+## Form privacy, retention, backup, and recovery
+
+Only an active Owner can export, reclassify, erase, or restore form data.
+Every view, export, classification, erasure, delivery action, backup, and
+restore verification records only the actor membership, opaque delivery or
+backup identifier, action, outcome code, and time. Audit rows never copy form
+fields.
+
+The scheduled Worker erases payloads after 30 days for suspected spam and
+after 180 days for accepted submissions. It retains minimal audit facts for
+one year. Installations may set the positive whole-day
+`FOUNDRY_FORM_RETENTION_SPAM_DAYS`,
+`FOUNDRY_FORM_RETENTION_ACCEPTED_DAYS`,
+`FOUNDRY_FORM_RETENTION_AUDIT_DAYS`, and
+`FOUNDRY_FORM_RETENTION_BACKUP_DAYS` variables (maximum 3,650 days) to
+override those defaults. Invalid values fail closed. Erasure replaces the field
+payload with an empty object, records the reason, and cancels any unclaimed
+delivery that could still expose the payload. If a delivery already holds an
+active lease, erasure returns a conflict instead of falsely claiming the
+payload is gone; retry after the delivery reaches a terminal state. Immutable
+receipt, classification, and audit identity remain.
+
+Once per day, the Worker snapshots authoritative form submissions,
+classifications, delivery/outbox state, and audit facts. It encrypts each
+snapshot with a fresh AES-256-GCM data key, wraps that key to the client's
+RSA-OAEP recovery recipient, and writes only the envelope to the private
+`FOUNDRY_FORM_BACKUPS` R2 bucket. Configure
+`FOUNDRY_FORM_BACKUP_RECIPIENT` as the base64-encoded SPKI public key. Keep the
+matching PKCS#8 private key outside Cloudflare and the repository in
+client-controlled recovery custody. The Worker can encrypt backups but cannot
+decrypt them. A D1 lease fences the complete save-and-record operation. Backup
+attempts use the last recorded backup as a stable logical retry checkpoint and
+write immutable per-lease R2 objects; D1 atomically promotes only the winning
+object pointer. A stale or ambiguous writer therefore cannot overwrite the
+recoverable checkpoint, and its unreferenced ciphertext remains subject to the
+same expiry sweep. The online snapshot path rejects per-site estimates above 8
+MiB before loading all rows into Worker memory. Encrypted objects expire after
+30 days by default. Configure the private R2 bucket's prefix lifecycle to the
+same number of days as `FOUNDRY_FORM_RETENTION_BACKUP_DAYS` (30 when unset) so
+the provider-side backstop never shortens the selected retention window.
+
+Restore is deliberately fail-closed and runs from a client-controlled operator
+machine, not the Worker. Set a short-lived `CLOUDFLARE_API_TOKEN` with D1
+read/write and R2 object-read access, then run:
+
+```sh
+npm run forms:restore --workspace @foundry/reference-site -- \
+  --account-id <cloudflare-account-id> \
+  --primary-database-id <primary-d1-id> \
+  --recovery-database-id <isolated-recovery-d1-id> \
+  --bucket <private-r2-bucket> \
+  --backup-id <backup-id> \
+  --private-key-file </client-controlled/private-key.pem> \
+  --actor-membership-id <active-owner-membership-id> \
+  --confirm-backup-id <same-backup-id>
+```
+
+The command reads the PKCS#8 private key only from the named local file, never
+sends it to Cloudflare, never writes decrypted content to disk, and removes its
+encrypted temporary download before exiting. The explicit confirmation and
+different primary/recovery database IDs are mandatory. It restores only into
+`FOUNDRY_FORM_RECOVERY_DB`. The target must be empty, the encrypted object
+metadata and ciphertext hash must verify, authenticated decryption must
+succeed, and a row-for-row snapshot hash must match after the transaction. It
+records sanitized counts and the integrity hash in the recovery database as
+part of promotion, mirrors those facts to the primary database, and then
+atomically clears the disposable recovery copy. A retry can reconcile an
+uncertain promotion, finish the primary mirror, or finish cleanup without
+misattributing the original actor. Restore does not perform serving cutover.
+Online backup and restore use bounded snapshots and multi-row statements to
+remain within Worker memory and the D1 Free invocation budget; a snapshot that
+exceeds the 8 MiB online estimate fails before all rows are loaded or any
+recovery rows are written and must use an operator-managed export/import.
 
 ### Resolve a ticket atomically
 

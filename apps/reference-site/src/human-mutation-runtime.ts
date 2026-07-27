@@ -44,6 +44,23 @@ export class HumanMutationExecutionNotStartedError extends Error {
   }
 }
 
+export class HumanMutationExecutionResumableError extends Error {
+  override readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super("human_mutation_execution_resumable");
+    this.name = "HumanMutationExecutionResumableError";
+    this.cause = cause;
+  }
+}
+
+function releasableExecutionCause(error: unknown) {
+  return error instanceof HumanMutationExecutionNotStartedError ||
+    error instanceof HumanMutationExecutionResumableError
+    ? error.cause
+    : undefined;
+}
+
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(",")}]`;
@@ -130,9 +147,10 @@ async function executeWithLocalReceipt({
   try {
     response = await execute();
   } catch (error) {
-    if (error instanceof HumanMutationExecutionNotStartedError) {
+    const cause = releasableExecutionCause(error);
+    if (cause !== undefined) {
       localMutationReceipts.delete(idempotencyKey);
-      throw error.cause;
+      throw cause;
     }
     throw error;
   }
@@ -220,7 +238,8 @@ async function executeWithD1Receipt({
   try {
     response = await execute();
   } catch (error) {
-    if (error instanceof HumanMutationExecutionNotStartedError) {
+    const cause = releasableExecutionCause(error);
+    if (cause !== undefined) {
       await database
         .prepare(
           `DELETE FROM human_mutation_receipts
@@ -237,7 +256,7 @@ async function executeWithD1Receipt({
           requestHash,
         )
         .run();
-      throw error.cause;
+      throw cause;
     }
     throw error;
   }

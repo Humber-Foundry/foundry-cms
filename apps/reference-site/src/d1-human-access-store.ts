@@ -20,6 +20,7 @@ import type { SiteId } from "@foundry/site-definition";
 type D1Result = Readonly<{
   success: boolean;
   meta: Readonly<{ changes?: number }>;
+  results?: ReadonlyArray<unknown>;
 }>;
 
 type D1PreparedStatement = {

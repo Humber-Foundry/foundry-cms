@@ -132,6 +132,7 @@ export function DashboardShell({
             </dl>
             <FormOperationsControls
               csrfToken={mutationToken}
+              canReleaseSpam={currentMembership.role === "owner"}
               failedDeliveries={failedFormDeliveries}
               suspectedSpam={suspectedSpam}
             />

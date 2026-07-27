@@ -3,11 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createSiteId } from "@foundry/site-definition";
 
 import {
+  createHumanMembershipId,
+  createHumanUserId,
+} from "./human-access";
+import {
   createPublicFormDeliveryId,
   createPublicFormId,
   createPublicFormReceiptId,
 } from "./public-form";
 import {
+  createPublicFormOperationsApplication,
   deliverDuePublicFormNotifications,
   type PublicFormNotificationAdapter,
   type PublicFormNotificationStore,
@@ -52,6 +57,41 @@ function store(
 }
 
 describe("public form notification delivery", () => {
+  it("requires owner data authority to release suspected spam", async () => {
+    const notificationStore = store();
+    const authorize = vi.fn().mockResolvedValue({
+      id: createHumanMembershipId("membership-owner"),
+      siteId,
+      userId: createHumanUserId("user-owner"),
+      email: "owner@example.com",
+      identityBinding: { issuer: "issuer", subject: "owner" },
+      role: "owner",
+      status: "active",
+    });
+    const actor = {
+      binding: { issuer: "issuer", subject: "owner" },
+      email: "owner@example.com",
+      nonce: "nonce",
+    };
+    const application = createPublicFormOperationsApplication({
+      siteId,
+      store: notificationStore,
+      adapter: {
+        notify: vi.fn(),
+        health: vi.fn().mockResolvedValue("healthy"),
+      },
+      authorize,
+      clock: () => new Date("2026-07-27T20:05:00.000Z"),
+    });
+
+    await application.commands.releaseSuspectedSpam({
+      actor,
+      receiptId: createPublicFormReceiptId("receipt-1"),
+    });
+
+    expect(authorize).toHaveBeenCalledWith(actor, "forms.data.manage");
+  });
+
   it("claims a bounded lease and sends only adapter-defined destinations", async () => {
     const notificationStore = store();
     const adapter: PublicFormNotificationAdapter = {

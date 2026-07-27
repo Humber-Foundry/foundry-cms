@@ -73,6 +73,7 @@ export type ReviewedPublicFormSubmission = Readonly<{
   acceptedAt: string;
   classification: "accepted" | "suspected_spam";
   fields: Readonly<Record<string, string>>;
+  payloadDeleted: boolean;
 }>;
 
 export interface PublicFormNotificationStore {
@@ -287,7 +288,7 @@ export function createPublicFormOperationsApplication({
         }
       },
       async releaseSuspectedSpam({ actor, receiptId }) {
-        const membership = await authorize(actor, "forms.review");
+        const membership = await authorize(actor, "forms.data.manage");
         if (
           !(await store.releaseSuspectedSpam({
             siteId,

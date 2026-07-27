@@ -7,6 +7,7 @@ export * from "./in-memory-subscriber-ledger-store";
 export * from "./public-form";
 export * from "./content-revisions";
 export * from "./public-form-notification";
+export * from "./public-form-privacy";
 
 export interface PublishedSiteRepository {
   findBySiteId(siteId: SiteId): Promise<SiteDefinition | null>;

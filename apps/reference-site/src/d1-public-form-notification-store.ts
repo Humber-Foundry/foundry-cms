@@ -227,8 +227,16 @@ export function createD1PublicFormNotificationStore(
           `SELECT
              SUM(CASE WHEN job.status IN ('pending', 'retry') THEN 1 ELSE 0 END) AS pending,
              SUM(CASE WHEN job.status = 'processing' THEN 1 ELSE 0 END) AS processing,
-             SUM(CASE WHEN job.status = 'failed' THEN 1 ELSE 0 END) AS failed,
-             SUM(CASE WHEN job.attempts > 1 THEN job.attempts - 1 ELSE 0 END) AS retries,
+             SUM(CASE
+               WHEN job.status = 'failed'
+                AND COALESCE(job.last_error_code, '') NOT IN ('payload_erased', 'payload_expired')
+               THEN 1 ELSE 0
+             END) AS failed,
+             SUM(CASE
+               WHEN job.attempts > 1
+                AND COALESCE(job.last_error_code, '') NOT IN ('payload_erased', 'payload_expired')
+               THEN job.attempts - 1 ELSE 0
+             END) AS retries,
              MIN(CASE
                WHEN job.status IN ('pending', 'retry') THEN job.first_available_at
                ELSE NULL
@@ -290,9 +298,17 @@ export function createD1PublicFormNotificationStore(
                updated_at = ?1
              WHERE delivery_id = ?2
                AND status = 'failed'
+               AND last_error_code NOT IN ('payload_erased', 'payload_expired')
                AND EXISTS (
-                 SELECT 1 FROM public_form_delivery_intents AS delivery
-                 WHERE delivery.id = ?2 AND delivery.site_id = ?3
+                 SELECT 1
+                 FROM public_form_delivery_intents AS delivery
+                 JOIN public_form_classifications AS classification
+                   ON classification.site_id = delivery.site_id
+                  AND classification.form_id = delivery.form_id
+                  AND classification.submission_id = delivery.submission_id
+                 WHERE delivery.id = ?2
+                   AND delivery.site_id = ?3
+                   AND classification.classification = 'accepted'
                )`,
           )
           .bind(now, deliveryId, siteId),
@@ -319,6 +335,7 @@ export function createD1PublicFormNotificationStore(
             AND classification.submission_id = submission.submission_id
            WHERE submission.site_id = ?1
              AND classification.classification = 'suspected_spam'
+             AND submission.payload_deleted_at IS NULL
            ORDER BY submission.accepted_at, submission.receipt_id`,
         )
         .bind(siteId)
@@ -346,7 +363,9 @@ export function createD1PublicFormNotificationStore(
              ON submission.site_id = delivery.site_id
             AND submission.form_id = delivery.form_id
             AND submission.submission_id = delivery.submission_id
-           WHERE delivery.site_id = ?1 AND job.status = 'failed'
+           WHERE delivery.site_id = ?1
+             AND job.status = 'failed'
+             AND job.last_error_code NOT IN ('payload_erased', 'payload_expired')
            ORDER BY job.updated_at, delivery.id`,
         )
         .bind(siteId)
@@ -380,6 +399,7 @@ export function createD1PublicFormNotificationStore(
              submission.receipt_id,
              submission.accepted_at,
              submission.fields_json,
+             submission.payload_deleted_at,
              classification.classification
            FROM public_form_submissions AS submission
            JOIN public_form_classifications AS classification
@@ -394,6 +414,7 @@ export function createD1PublicFormNotificationStore(
           receipt_id: string;
           accepted_at: string;
           fields_json: string;
+          payload_deleted_at: string | null;
           classification: "accepted" | "suspected_spam";
         }>();
       if (row === null) {
@@ -420,6 +441,7 @@ export function createD1PublicFormNotificationStore(
         acceptedAt: row.accepted_at,
         classification: row.classification,
         fields: JSON.parse(row.fields_json) as Record<string, string>,
+        payloadDeleted: row.payload_deleted_at !== null,
       };
     },
     async releaseSuspectedSpam({ siteId, receiptId, actorMembershipId, now }) {
@@ -431,9 +453,18 @@ export function createD1PublicFormNotificationStore(
              WHERE site_id = ?2
                AND classification = 'suspected_spam'
                AND EXISTS (
-                 SELECT 1 FROM public_form_submissions AS submission
+                 SELECT 1
+                 FROM public_form_submissions AS submission
+                 JOIN public_form_delivery_intents AS delivery
+                   ON delivery.site_id = submission.site_id
+                  AND delivery.form_id = submission.form_id
+                  AND delivery.submission_id = submission.submission_id
+                 JOIN public_form_notification_jobs AS job
+                   ON job.delivery_id = delivery.id
                  WHERE submission.site_id = ?2
                    AND submission.receipt_id = ?3
+                   AND submission.payload_deleted_at IS NULL
+                   AND job.status = 'held'
                    AND submission.form_id = public_form_classifications.form_id
                    AND submission.submission_id = public_form_classifications.submission_id
                )`,
@@ -474,7 +505,7 @@ export function createD1PublicFormNotificationStore(
           )
           .bind(siteId, actorMembershipId, now, receiptId),
       ]);
-      return (results[0]?.meta.changes ?? 0) > 0;
+      return (results[1]?.meta.changes ?? 0) > 0;
     },
   };
 }

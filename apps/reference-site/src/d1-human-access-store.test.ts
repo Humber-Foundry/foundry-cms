@@ -20,6 +20,7 @@ import {
 import {
   executeIdempotentHumanMutation,
   HumanMutationExecutionNotStartedError,
+  HumanMutationExecutionResumableError,
 } from "./human-mutation-runtime";
 
 const siteId = createSiteId("site_reference");
@@ -257,6 +258,46 @@ describe("D1 human access store", () => {
       database: database as unknown as D1DatabaseBinding,
     });
 
+    expect(retry.status).toBe(200);
+    expect(executions).toBe(2);
+  });
+
+  it("releases a receipt when a completed operation is explicitly resumable", async () => {
+    const request = new Request(
+      "https://foundry.example/api/foundry-cms/forms",
+      {
+        method: "POST",
+        headers: { "idempotency-key": "mutation-resumable-key" },
+      },
+    );
+    const command = { action: "restore_backup", backupId: "backup-48" };
+    let executions = 0;
+
+    await expect(
+      executeIdempotentHumanMutation({
+        request,
+        identity: owner,
+        command,
+        execute: async () => {
+          executions += 1;
+          throw new HumanMutationExecutionResumableError(
+            new Error("verification mirror pending"),
+          );
+        },
+        database: database as unknown as D1DatabaseBinding,
+      }),
+    ).rejects.toThrow("verification mirror pending");
+
+    const retry = await executeIdempotentHumanMutation({
+      request,
+      identity: owner,
+      command,
+      execute: async () => {
+        executions += 1;
+        return Response.json({ verified: true });
+      },
+      database: database as unknown as D1DatabaseBinding,
+    });
     expect(retry.status).toBe(200);
     expect(executions).toBe(2);
   });
