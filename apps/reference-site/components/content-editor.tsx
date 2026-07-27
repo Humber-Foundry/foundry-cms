@@ -58,6 +58,10 @@ const publicationLabels: Readonly<Record<PublicationStatus, string>> = {
   unknown: "Publish state unknown",
 };
 
+function publicationIsActive(publication: PublicationRecord): boolean {
+  return !["verified-live", "blocked", "failed"].includes(publication.status);
+}
+
 function changedFields(
   persisted: ReadonlyArray<EditableSiteField>,
   working: ReadonlyArray<EditableSiteField>,
@@ -178,7 +182,7 @@ export function ContentEditor({
   useEffect(() => {
     if (
       publication === null ||
-      ["verified-live", "blocked", "failed"].includes(publication.status)
+      !publicationIsActive(publication)
     ) {
       return;
     }
@@ -459,7 +463,9 @@ export function ContentEditor({
         revision: saved.revision,
       });
       setApprovalId(null);
-      setPublication(null);
+      setPublication((current) =>
+        current !== null && publicationIsActive(current) ? current : null,
+      );
       setPreviewedRevision(null);
       pendingApprovalAttempt.current = null;
       pendingPublicationAttempt.current = null;
@@ -526,7 +532,9 @@ export function ContentEditor({
         throw new Error("content_approval_failed");
       }
       setApprovalId(result.body.approval.id);
-      setPublication(null);
+      setPublication((current) =>
+        current !== null && publicationIsActive(current) ? current : null,
+      );
       pendingApprovalAttempt.current = null;
       setMessage(
         `Revision ${state.persistedRevision} approved. It is ready to publish while every bound input remains unchanged.`,
@@ -827,7 +835,7 @@ export function ContentEditor({
             disabled={
               publicationBusy ||
               approvalId === null ||
-              publication !== null ||
+              (publication !== null && publicationIsActive(publication)) ||
               edits.length > 0 ||
               state.status !== "saved"
             }
