@@ -328,6 +328,95 @@ describe("D1 content revision store", () => {
     ).toEqual({ count: 1 });
   });
 
+  it("rechecks a raced receipt before reporting a stale base", async () => {
+    const application = createApplication();
+    await createWorkspace(application, "d1-content-create-raced-receipt");
+    const base = await application.queries.getCurrent();
+    const realStore = createD1ContentRevisionStore(
+      database,
+      referenceSiteDefinition.site.id,
+      workspaceId,
+    );
+    const command: Parameters<typeof realStore.persist>[0] = {
+      baseRevision: 0,
+      idempotencyKey: "d1-content-raced-receipt",
+      requestHash: "matching-request-hash",
+      revision: {
+        ...base,
+        revision: 1,
+        createdAt: "2026-07-27T12:01:00.000Z",
+        createdBy: editorActorId,
+      },
+    };
+
+    function storeWithFirstReceiptMiss(onMiss: () => Promise<void>) {
+      let firstReceiptLookup = true;
+      const racingDatabase = {
+        prepare(query: string) {
+          return database.prepare(query);
+        },
+        batch(statements: Parameters<typeof database.batch>[0]) {
+          return database.batch(statements);
+        },
+        withSession(constraint?: "first-primary" | string) {
+          const session = database.withSession(constraint);
+          return {
+            prepare(query: string) {
+              const statement = session.prepare(query);
+              if (
+                firstReceiptLookup &&
+                query.includes("FROM content_revision_receipts")
+              ) {
+                return {
+                  bind(...values: unknown[]) {
+                    const bound = statement.bind(...values);
+                    return {
+                      async first() {
+                        firstReceiptLookup = false;
+                        await onMiss();
+                        return null;
+                      },
+                      run() {
+                        return bound.run();
+                      },
+                    };
+                  },
+                };
+              }
+              return statement;
+            },
+            batch(statements: Parameters<typeof session.batch>[0]) {
+              return session.batch(statements);
+            },
+            getBookmark() {
+              return session.getBookmark();
+            },
+          };
+        },
+      } as unknown as Parameters<typeof createD1ContentRevisionStore>[0];
+      return createD1ContentRevisionStore(
+        racingDatabase,
+        referenceSiteDefinition.site.id,
+        workspaceId,
+      );
+    }
+
+    const racedStore = storeWithFirstReceiptMiss(async () => {
+      await realStore.persist(command);
+    });
+    await expect(racedStore.persist(command)).resolves.toEqual(
+      expect.objectContaining({ workspaceId, revision: 1 }),
+    );
+
+    const mismatchedStore = storeWithFirstReceiptMiss(async () => {});
+    await expect(
+      mismatchedStore.persist({
+        ...command,
+        requestHash: "different-request-hash",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionIdempotencyError);
+  });
+
   it("rejects a key reused for different mutation input", async () => {
     const application = createApplication();
     await createWorkspace(application, "d1-content-create-idempotency");
