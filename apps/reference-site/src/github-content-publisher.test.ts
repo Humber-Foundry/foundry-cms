@@ -58,6 +58,16 @@ describe("GitHub content publisher", () => {
       privateKey: "line-1\nline-2",
       deploymentCheckName: "Cloudflare",
     });
+    expect(() =>
+      readGitHubContentPublisherConfiguration({
+        FOUNDRY_GITHUB_APP_ID: "123",
+        FOUNDRY_GITHUB_INSTALLATION_ID: "456",
+        FOUNDRY_GITHUB_PRIVATE_KEY: "private-key",
+        FOUNDRY_GITHUB_OWNER: "client-owner",
+        FOUNDRY_GITHUB_REPOSITORY: "client-site",
+        FOUNDRY_PUBLIC_ORIGIN: "http://site.example",
+      }),
+    ).toThrow(GitHubContentPublisherConfigurationError);
   });
 
   it("creates one tree and bot commit before a non-force production ref update", async () => {
@@ -314,6 +324,7 @@ describe("GitHub content publisher", () => {
         expect.objectContaining({
           cache: "no-store",
           headers: { "cache-control": "no-cache" },
+          signal: expect.any(AbortSignal),
         }),
       );
     }

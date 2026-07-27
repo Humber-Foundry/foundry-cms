@@ -52,9 +52,13 @@ export function readGitHubContentPublisherConfiguration(
   }
   let publicOrigin: string;
   try {
-    publicOrigin = new URL(
+    const parsedPublicOrigin = new URL(
       requireValue(environment.FOUNDRY_PUBLIC_ORIGIN),
-    ).origin;
+    );
+    if (parsedPublicOrigin.protocol !== "https:") {
+      throw new GitHubContentPublisherConfigurationError();
+    }
+    publicOrigin = parsedPublicOrigin.origin;
   } catch {
     throw new GitHubContentPublisherConfigurationError();
   }
@@ -219,6 +223,7 @@ export function createGitHubContentPublisher({
     const response = await fetchImplementation(markerUrl, {
       headers: { "cache-control": "no-cache" },
       cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
       throw new Error("release_marker_unavailable");

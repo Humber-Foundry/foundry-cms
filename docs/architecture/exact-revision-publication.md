@@ -84,8 +84,11 @@ commit evidence preserved so it cannot hold the global publication slot
 forever. A transport or non-success response while probing the marker is
 retryable unavailability, not evidence that the approval's production base
 mismatches; it is retried until the same bounded release-marker deadline, then
-becomes `failed`. The dashboard continues polling after transient refresh
-failures.
+becomes `failed`. Each marker request also has a 30-second transport timeout.
+The dashboard continues polling after transient refresh failures and keeps an
+active publication visible while the editor starts a new draft. Editor inputs
+are locked while an approval request is in flight so its response cannot be
+attached to a changed local draft.
 
 Publication GET requests only read the durable state and remain side-effect
 free. Cloudflare/GitHub reconciliation is a protected, idempotent POST mutation
@@ -100,7 +103,7 @@ Set these non-secret values for each installation:
 - `FOUNDRY_GITHUB_OWNER`
 - `FOUNDRY_GITHUB_REPOSITORY`
 - `FOUNDRY_PRODUCTION_BRANCH` (defaults to `main`)
-- `FOUNDRY_PUBLIC_ORIGIN`
+- `FOUNDRY_PUBLIC_ORIGIN` (the canonical HTTPS public-site origin)
 - `FOUNDRY_DEPLOYMENT_CHECK_NAME` (defaults to `Cloudflare`)
 - `FOUNDRY_PRODUCTION_BASE` (a bootstrap fallback Git object ID)
 

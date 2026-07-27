@@ -145,7 +145,10 @@ export function ContentEditor({
   );
   const edits = changedFields(persistedFields, workingFields);
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
-  const editorLocked = state.status === "saving" || state.status === "stale";
+  const editorLocked =
+    state.status === "saving" ||
+    state.status === "stale" ||
+    publicationBusy;
 
   useEffect(() => {
     let cancelled = false;
@@ -471,13 +474,25 @@ export function ContentEditor({
   }
 
   function edit(path: string, value: string) {
+    if (publicationBusy) {
+      return;
+    }
     pendingAttempt.current = null;
     setApprovalId(null);
-    setPublication(null);
     setPreviewedRevision(null);
     pendingApprovalAttempt.current = null;
     pendingPublicationAttempt.current = null;
     dispatch({ type: "edit", path, value });
+  }
+
+  function moveEditHistory(direction: "undo" | "redo") {
+    if (editorLocked) {
+      return;
+    }
+    setApprovalId(null);
+    pendingApprovalAttempt.current = null;
+    pendingPublicationAttempt.current = null;
+    dispatch({ type: direction });
   }
 
   async function approveRevision() {
@@ -716,7 +731,7 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.past.length === 0 || editorLocked}
-            onClick={() => dispatch({ type: "undo" })}
+            onClick={() => moveEditHistory("undo")}
           >
             Undo
           </button>
@@ -724,7 +739,7 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.future.length === 0 || editorLocked}
-            onClick={() => dispatch({ type: "redo" })}
+            onClick={() => moveEditHistory("redo")}
           >
             Redo
           </button>
@@ -812,7 +827,9 @@ export function ContentEditor({
             disabled={
               publicationBusy ||
               approvalId === null ||
-              publication !== null
+              publication !== null ||
+              edits.length > 0 ||
+              state.status !== "saved"
             }
             onClick={() => void publishRevision()}
           >
