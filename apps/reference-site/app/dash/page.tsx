@@ -21,7 +21,7 @@ import {
   contentWorkspaceIdForActor,
   loadContentRevisionApplication,
 } from "@/src/content-revision-runtime";
-import { createRevisionPreviewCapability } from "@/src/preview-capability-runtime";
+import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
 import { referenceSiteApplication } from "@/src/reference-installation";
 
 import "./dashboard.css";
@@ -110,14 +110,10 @@ export default async function DashboardPage({
   const initialContentStale =
     !(await contentApplication.queries.isRevisionCurrent(contentRevision));
   const contentMutationToken = await createHumanMutationToken(access.identity);
-  const initialPreviewCapability = await createRevisionPreviewCapability({
-    identity: access.identity,
-    workspaceId: contentRevision.workspaceId,
-    revision: contentRevision.revision,
-  });
-  const initialPreviewUrl =
-    `/preview/${contentRevision.workspaceId}/${contentRevision.revision}` +
-    `?capability=${encodeURIComponent(initialPreviewCapability)}`;
+  const initialPreviewUrl = revisionPreviewGatewayUrl(
+    contentRevision.workspaceId,
+    contentRevision.revision,
+  );
 
   return (
     <DashboardShell

@@ -13,6 +13,7 @@ import {
   contentEditorReducer,
   createContentEditorState,
 } from "../src/content-editor-history";
+import { sendContentRevisionAttempt } from "../src/content-revision-client";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
 
@@ -54,6 +55,7 @@ export function ContentEditor({
       ? "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved."
       : "",
   );
+  const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const pendingAttempt = useRef<{
     body: string;
@@ -85,17 +87,14 @@ export function ContentEditor({
     }
     dispatch({ type: "saving" });
     setMessage("");
+    const attempt = pendingAttempt.current;
     try {
-      const response = await fetch("/api/foundry-cms/revisions", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": pendingAttempt.current.idempotencyKey,
-          "x-foundry-csrf": csrfToken,
-        },
-        body: pendingAttempt.current.body,
+      const result = await sendContentRevisionAttempt({
+        attempt,
+        mutationToken,
       });
-      const body: unknown = await response.json();
+      const { response, body } = result;
+      setMutationToken(result.mutationToken);
       if (
         response.status === 422 &&
         typeof body === "object" &&

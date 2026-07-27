@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   loadIdentity: vi.fn(),
   save: vi.fn(),
   loadApplication: vi.fn(),
+  createMutationToken: vi.fn(),
+  getRevisionWithBookmark: vi.fn(),
+  isRevisionCurrent: vi.fn(),
   verifyMutation: vi.fn(),
 }));
 vi.mock("../../../../src/human-access-runtime", () => ({
@@ -21,6 +24,7 @@ vi.mock("../../../../src/human-access-runtime", () => ({
   loadHumanIdentityRequestContext: mocks.loadIdentity,
 }));
 vi.mock("../../../../src/human-mutation-runtime", () => ({
+  createHumanMutationToken: mocks.createMutationToken,
   verifyHumanMutation: mocks.verifyMutation,
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
@@ -30,7 +34,7 @@ vi.mock("../../../../src/preview-capability-runtime", () => ({
   createRevisionPreviewCapability: async () => "preview-capability",
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 describe("content revision endpoint", () => {
   beforeEach(() => {
@@ -46,8 +50,14 @@ describe("content revision endpoint", () => {
       membership: { id: "membership-editor", role: "editor" },
     });
     mocks.verifyMutation.mockResolvedValue(undefined);
+    mocks.createMutationToken.mockResolvedValue("fresh-mutation-token");
+    mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.loadApplication.mockResolvedValue({
       commands: { save: mocks.save },
+      queries: {
+        getRevisionWithBookmark: mocks.getRevisionWithBookmark,
+        isRevisionCurrent: mocks.isRevisionCurrent,
+      },
     });
   });
 
@@ -108,8 +118,40 @@ describe("content revision endpoint", () => {
       expect.objectContaining({
         revision: 3,
         previewUrl:
-          "/preview/workspace_home/3?capability=preview-capability&bookmark=d1-bookmark",
+          "/api/foundry-cms/revisions?workspaceId=workspace_home&revision=3",
       }),
+    );
+  });
+
+  it("refreshes the mutation token for a long-lived editor", async () => {
+    const response = await GET(
+      new Request("https://foundry.example/api/foundry-cms/revisions"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      mutationToken: "fresh-mutation-token",
+    });
+  });
+
+  it("mints a fresh bookmarked capability when preview opens", async () => {
+    mocks.getRevisionWithBookmark.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "fresh-d1-bookmark",
+    });
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/revisions" +
+          "?workspaceId=workspace_home&revision=3",
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://foundry.example/preview/workspace_home/3" +
+        "?capability=preview-capability&bookmark=fresh-d1-bookmark",
     );
   });
 

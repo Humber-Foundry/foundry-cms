@@ -155,9 +155,9 @@ export function createD1ContentRevisionStore(
             `INSERT INTO content_revisions (
                workspace_id, revision, definition_json, content_hash,
                schema_version, renderer_version, production_base,
-               created_at, created_by
+               request_hash, created_at, created_by
              )
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
              WHERE NOT EXISTS (
                SELECT 1 FROM content_revisions
                WHERE workspace_id = ?1 AND revision = ?2
@@ -171,6 +171,7 @@ export function createD1ContentRevisionStore(
             initialRevision.inputs.schemaVersion,
             initialRevision.inputs.rendererVersion,
             initialRevision.inputs.productionBase,
+            "system:published-base",
             initialRevision.createdAt,
             initialRevision.createdBy,
           ),
@@ -240,6 +241,19 @@ export function createD1ContentRevisionStore(
       }
       return getRevisionFrom(connection, revision);
     },
+    async getRevisionWithBookmark(revision) {
+      if (database.withSession === undefined) {
+        throw new Error("content_revision_sessions_unavailable");
+      }
+      const session = database.withSession("first-primary");
+      const saved = await getRevisionFrom(session, revision);
+      return saved === null
+        ? null
+        : withContentRevisionBookmark(
+            saved,
+            requireBookmark(session.getBookmark()),
+          );
+    },
     async replay(idempotencyKey, requestHash) {
       if (database.withSession === undefined) {
         throw new Error("content_revision_sessions_unavailable");
@@ -289,16 +303,16 @@ export function createD1ContentRevisionStore(
             `INSERT INTO content_revisions (
                workspace_id, revision, definition_json, content_hash,
                schema_version, renderer_version, production_base,
-               created_at, created_by
+               request_hash, created_at, created_by
              )
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
              WHERE EXISTS (
                SELECT 1 FROM content_workspaces
-               WHERE workspace_id = ?1 AND current_revision = ?10
+               WHERE workspace_id = ?1 AND current_revision = ?11
              )
              AND NOT EXISTS (
                SELECT 1 FROM content_revision_receipts
-               WHERE idempotency_key = ?11
+               WHERE idempotency_key = ?12
              )`,
           )
           .bind(
@@ -309,6 +323,7 @@ export function createD1ContentRevisionStore(
             command.revision.inputs.schemaVersion,
             command.revision.inputs.rendererVersion,
             command.revision.inputs.productionBase,
+            command.requestHash,
             command.revision.createdAt,
             command.revision.createdBy,
             command.baseRevision,
@@ -343,6 +358,12 @@ export function createD1ContentRevisionStore(
              WHERE EXISTS (
                SELECT 1 FROM content_workspaces
                WHERE workspace_id = ?2 AND current_revision = ?4
+             )
+             AND EXISTS (
+               SELECT 1 FROM content_revisions
+               WHERE workspace_id = ?2
+                 AND revision = ?4
+                 AND request_hash = ?3
              )
              ON CONFLICT (idempotency_key) DO NOTHING`,
           )

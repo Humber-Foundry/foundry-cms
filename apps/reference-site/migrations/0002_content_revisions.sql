@@ -27,6 +27,7 @@ CREATE TABLE content_revisions (
   schema_version TEXT NOT NULL,
   renderer_version TEXT NOT NULL,
   production_base TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
   created_by TEXT NOT NULL,
   PRIMARY KEY (workspace_id, revision)

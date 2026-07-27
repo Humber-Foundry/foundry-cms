@@ -20,8 +20,12 @@ import {
   authorizeAuthenticatedHumanIdentity,
   loadHumanIdentityRequestContext,
 } from "../../../../src/human-access-runtime";
-import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
+import {
+  createHumanMutationToken,
+  verifyHumanMutation,
+} from "../../../../src/human-mutation-runtime";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
+import { revisionPreviewGatewayUrl } from "../../../../src/content-revision-links";
 import { createRevisionPreviewCapability } from "../../../../src/preview-capability-runtime";
 
 type SaveBody = {
@@ -30,6 +34,87 @@ type SaveBody = {
   baseRevision: number;
   edits: SiteDefinitionEdit[];
 };
+
+export async function GET(request: Request) {
+  try {
+    const authenticated = await loadHumanIdentityRequestContext(
+      request.headers,
+    );
+    const access = await authorizeAuthenticatedHumanIdentity(authenticated);
+    if (access.state !== "authorized") {
+      throw new AccessDeniedError("membership_not_active");
+    }
+    const url = new URL(request.url);
+    const workspaceParameter = url.searchParams.get("workspaceId");
+    const revisionParameter = url.searchParams.get("revision");
+    if (workspaceParameter === null && revisionParameter === null) {
+      return Response.json(
+        {
+          mutationToken: await createHumanMutationToken(access.identity),
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (workspaceParameter === null || revisionParameter === null) {
+      return Response.json({ error: "invalid_preview" }, { status: 400 });
+    }
+    const revisionNumber = Number(revisionParameter);
+    if (
+      !Number.isSafeInteger(revisionNumber) ||
+      revisionNumber < 0 ||
+      String(revisionNumber) !== revisionParameter
+    ) {
+      return Response.json({ error: "invalid_preview" }, { status: 400 });
+    }
+    const workspaceId = createContentWorkspaceId(workspaceParameter);
+    const application = await loadContentRevisionApplication(
+      workspaceId,
+      createContentActorId(access.membership.id),
+    );
+    const revision = await application.queries.getRevisionWithBookmark(
+      revisionNumber,
+    );
+    if (
+      revision === null ||
+      !(await application.queries.isRevisionCurrent(revision))
+    ) {
+      return Response.json({ error: "preview_unavailable" }, { status: 409 });
+    }
+    const capability = await createRevisionPreviewCapability({
+      identity: access.identity,
+      workspaceId,
+      revision: revisionNumber,
+    });
+    const previewQuery = new URLSearchParams({
+      capability,
+      bookmark: revision.bookmark,
+    });
+    const previewUrl =
+      `/preview/${workspaceId}/${revisionNumber}?${previewQuery.toString()}`;
+    return Response.redirect(new URL(previewUrl, request.url), 307);
+  } catch (error) {
+    if (
+      error instanceof AccessIdentityError ||
+      error instanceof AccessDeniedError ||
+      error instanceof ContentWorkspaceAccessError
+    ) {
+      return Response.json({ error: "request_check_failed" }, { status: 403 });
+    }
+    if (
+      error instanceof HumanAccessConfigurationError ||
+      error instanceof ContentRevisionConfigurationError
+    ) {
+      return Response.json(
+        { error: "request_check_unavailable" },
+        { status: 503 },
+      );
+    }
+    if (error instanceof TypeError) {
+      return Response.json({ error: "invalid_preview" }, { status: 400 });
+    }
+    throw error;
+  }
+}
 
 function parseSaveBody(
   value: unknown,
@@ -123,21 +208,13 @@ export async function POST(request: Request) {
       edits: body.edits,
       idempotencyKey: request.headers.get("idempotency-key") ?? "",
     });
-    const capability = await createRevisionPreviewCapability({
-      identity: access.identity,
-      workspaceId: saved.workspaceId,
-      revision: saved.revision,
-    });
-    const previewQuery = new URLSearchParams({
-      capability,
-      bookmark: saved.bookmark,
-    });
     return Response.json(
       {
         ...saved,
-        previewUrl:
-          `/preview/${saved.workspaceId}/${saved.revision}` +
-          `?${previewQuery.toString()}`,
+        previewUrl: revisionPreviewGatewayUrl(
+          saved.workspaceId,
+          saved.revision,
+        ),
       },
       { status: 201 },
     );

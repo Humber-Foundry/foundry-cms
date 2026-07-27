@@ -161,6 +161,48 @@ describe("D1 content revision store", () => {
     ).rejects.toEqual(new ContentRevisionConflictError(1));
   });
 
+  it("never acknowledges the losing definition in a concurrent save", async () => {
+    const firstApplication = createApplication();
+    const secondApplication = createApplication();
+    const [first, second] = await Promise.allSettled([
+      firstApplication.commands.save({
+        actorId: editorActorId,
+        workspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Concurrent first" }],
+        idempotencyKey: "d1-content-concurrent-0001",
+      }),
+      secondApplication.commands.save({
+        actorId: editorActorId,
+        workspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Concurrent second" }],
+        idempotencyKey: "d1-content-concurrent-0002",
+      }),
+    ]);
+    const fulfilled = [first, second].filter(
+      (result) => result.status === "fulfilled",
+    );
+    const rejected = [first, second].filter(
+      (result) => result.status === "rejected",
+    );
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const acknowledged = fulfilled[0] as PromiseFulfilledResult<
+      Awaited<ReturnType<typeof firstApplication.commands.save>>
+    >;
+    const persisted = await firstApplication.queries.getRevision(1);
+    expect(persisted?.definition).toEqual(acknowledged.value.definition);
+    expect(rejected[0]).toEqual(
+      expect.objectContaining({
+        reason: expect.any(ContentRevisionConflictError),
+      }),
+    );
+  });
+
   it("rejects a key reused for different mutation input", async () => {
     const application = createApplication();
     await application.commands.save({

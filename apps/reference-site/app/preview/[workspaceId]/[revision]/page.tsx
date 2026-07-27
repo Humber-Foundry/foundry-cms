@@ -113,7 +113,9 @@ export default async function RevisionPreviewPage({
               <dd>{revision.inputs.productionBase}</dd>
             </div>
           </dl>
-          <a href="/dash">Return to editor</a>
+          <a href={`/dash?workspace=${encodeURIComponent(workspaceId)}`}>
+            Return to editor
+          </a>
         </aside>
         <SiteRenderer definition={revision.definition} />
       </>

@@ -91,6 +91,9 @@ export type ContentRevisionStore = Readonly<{
     revision: number,
     bookmark?: string,
   ): Promise<ContentRevision | null>;
+  getRevisionWithBookmark(
+    revision: number,
+  ): Promise<SavedContentRevision | null>;
   persist(
     command: PersistContentRevisionCommand,
   ): Promise<SavedContentRevision>;
@@ -255,6 +258,15 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
     async getRevision(revision) {
       return revisions.get(revision) ?? null;
     },
+    async getRevisionWithBookmark(revisionNumber) {
+      const revision = revisions.get(revisionNumber);
+      return revision === undefined
+        ? null
+        : withContentRevisionBookmark(
+            revision,
+            `local:${revision.workspaceId}:${revision.revision}`,
+          );
+    },
     async replay(idempotencyKey, requestHash) {
       const receipt = receipts.get(idempotencyKey);
       if (receipt === undefined) {
@@ -348,6 +360,10 @@ export function createContentRevisionApplication({
       async getRevision(revision: number, bookmark?: string) {
         await initialize();
         return store.getRevision(revision, bookmark);
+      },
+      async getRevisionWithBookmark(revision: number) {
+        await initialize();
+        return store.getRevisionWithBookmark(revision);
       },
       async isRevisionCurrent(revision: ContentRevision) {
         await initialize();
