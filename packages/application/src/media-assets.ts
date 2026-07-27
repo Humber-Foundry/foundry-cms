@@ -82,6 +82,12 @@ export type MediaMutationResult =
   | Readonly<{ kind: "occurrence"; value: MediaOccurrenceRevision }>
   | Readonly<{ kind: "deleted"; assetId: MediaAssetId }>;
 
+export type MediaMutationContext = Readonly<{
+  siteId: SiteId;
+  idempotencyKey: string;
+  requestHash: string;
+}>;
+
 export class MediaAssetReferencedError extends Error {
   constructor(
     readonly assetId: MediaAssetId,
@@ -128,19 +134,13 @@ export type MediaSourceStore = Readonly<{
 
 export type MediaAssetStore = Readonly<{
   claim(
-    siteId: SiteId,
-    idempotencyKey: string,
-    requestHash: string,
+    context: MediaMutationContext,
   ): Promise<void>;
   replay(
-    siteId: SiteId,
-    idempotencyKey: string,
-    requestHash: string,
+    context: MediaMutationContext,
   ): Promise<MediaMutationResult | null>;
   record(
-    siteId: SiteId,
-    idempotencyKey: string,
-    requestHash: string,
+    context: MediaMutationContext,
     result: MediaMutationResult,
   ): Promise<void>;
   getAsset(siteId: SiteId, assetId: MediaAssetId): Promise<MediaAsset | null>;
@@ -160,8 +160,7 @@ export type MediaAssetStore = Readonly<{
   ): Promise<void>;
   createAsset(
     asset: MediaAsset,
-    idempotencyKey: string,
-    requestHash: string,
+    context: MediaMutationContext,
   ): Promise<MediaAsset>;
   getOccurrence(
     siteId: SiteId,
@@ -179,8 +178,7 @@ export type MediaAssetStore = Readonly<{
       MediaAuditAction,
       "media.occurrence.replaced" | "media.occurrence.cropped"
     >,
-    idempotencyKey: string,
-    requestHash: string,
+    context: MediaMutationContext,
   ): Promise<MediaOccurrenceRevision>;
   beginAssetDeletion(
     siteId: SiteId,
@@ -191,8 +189,7 @@ export type MediaAssetStore = Readonly<{
     assetId: MediaAssetId,
     actorId: ContentActorId,
     occurredAt: string,
-    idempotencyKey: string,
-    requestHash: string,
+    context: MediaMutationContext,
   ): Promise<void>;
   audit(siteId: SiteId): Promise<ReadonlyArray<MediaAuditEvent>>;
 }>;
@@ -267,256 +264,6 @@ async function hashSource(source: Uint8Array): Promise<string> {
   ).join("");
 }
 
-export function createInMemoryMediaSourceStore(): MediaSourceStore & {
-  readForTest(objectKey: string): Promise<Uint8Array | null>;
-} {
-  const objects = new Map<
-    string,
-    Readonly<{
-      source: Uint8Array;
-      sourceHash: string;
-      contentType: string;
-    }>
-  >();
-  return {
-    async put(objectKey, source, metadata) {
-      const existing = objects.get(objectKey);
-      if (existing !== undefined) {
-        if (existing.sourceHash === metadata.sourceHash) return;
-        throw new MediaValidationError("assetId");
-      }
-      objects.set(objectKey, {
-        source: source.slice(),
-        sourceHash: metadata.sourceHash,
-        contentType: metadata.contentType,
-      });
-    },
-    async get(objectKey) {
-      const object = objects.get(objectKey);
-      return object === undefined
-        ? null
-        : {
-            body: object.source.slice(),
-            contentType: object.contentType,
-          };
-    },
-    async delete(objectKey) {
-      objects.delete(objectKey);
-    },
-    async readForTest(objectKey) {
-      return objects.get(objectKey)?.source.slice() ?? null;
-    },
-  };
-}
-
-export function createInMemoryMediaAssetStore(): MediaAssetStore {
-  const assets = new Map<string, MediaAsset>();
-  const revisions = new Map<string, Map<number, MediaOccurrenceRevision>>();
-  const current = new Map<string, number>();
-  const auditEvents: MediaAuditEvent[] = [];
-  const deletionReservations = new Set<string>();
-  const receipts = new Map<
-    string,
-    Readonly<{ requestHash: string; result: MediaMutationResult }>
-  >();
-  const claims = new Map<string, string>();
-  const scopedKey = (
-    siteId: SiteId,
-    id: MediaAssetId | MediaOccurrenceId,
-  ) => `${siteId}:${id}`;
-
-  return {
-    async claim(siteId, idempotencyKey, hash) {
-      const key = `${siteId}:${idempotencyKey}`;
-      const existing = claims.get(key);
-      if (existing !== undefined && existing !== hash) {
-        throw new MediaValidationError("idempotencyKey");
-      }
-      claims.set(key, hash);
-    },
-    async replay(siteId, idempotencyKey, hash) {
-      const receipt = receipts.get(`${siteId}:${idempotencyKey}`);
-      if (receipt === undefined) return null;
-      if (receipt.requestHash !== hash) {
-        throw new MediaValidationError("idempotencyKey");
-      }
-      return immutable(receipt.result);
-    },
-    async record(siteId, idempotencyKey, hash, result) {
-      const key = `${siteId}:${idempotencyKey}`;
-      const receipt = receipts.get(key);
-      if (receipt !== undefined && receipt.requestHash !== hash) {
-        throw new MediaValidationError("idempotencyKey");
-      }
-      receipts.set(
-        key,
-        immutable({ requestHash: hash, result }),
-      );
-    },
-    async getAsset(siteId, assetId) {
-      return assets.get(scopedKey(siteId, assetId)) ?? null;
-    },
-    async listAssets(siteId) {
-      return [...assets.values()].filter((asset) => asset.siteId === siteId);
-    },
-    async listOccurrences(siteId) {
-      const found: MediaOccurrenceRevision[] = [];
-      for (const [key, revision] of current) {
-        if (!key.startsWith(`${siteId}:`)) continue;
-        const occurrence = revisions.get(key)?.get(revision);
-        if (occurrence !== undefined) found.push(occurrence);
-      }
-      return found;
-    },
-    async auditRead(siteId, readActorId, action, subjectId, occurredAt) {
-      auditEvents.push(
-        immutable({
-          siteId,
-          actorId: readActorId,
-          action,
-          subjectId,
-          occurredAt,
-        }),
-      );
-    },
-    async createAsset(asset, idempotencyKey, hash) {
-      const key = scopedKey(asset.siteId, asset.assetId);
-      const existing = assets.get(key);
-      if (existing !== undefined) {
-        if (
-          existing.objectKey === asset.objectKey &&
-          existing.sourceHash === asset.sourceHash &&
-          existing.byteLength === asset.byteLength &&
-          existing.contentType === asset.contentType
-        ) {
-          return existing;
-        }
-        throw new MediaValidationError("assetId");
-      }
-      const saved = immutable(asset);
-      assets.set(key, saved);
-      auditEvents.push(
-        immutable({
-          siteId: asset.siteId,
-          actorId: asset.createdBy,
-          action: "media.asset.uploaded" as const,
-          subjectId: asset.assetId,
-          occurredAt: asset.createdAt,
-        }),
-      );
-      await this.record(asset.siteId, idempotencyKey, hash, {
-        kind: "asset",
-        value: saved,
-      });
-      return saved;
-    },
-    async getOccurrence(siteId, occurrenceId) {
-      const key = scopedKey(siteId, occurrenceId);
-      const revision = current.get(key);
-      return revision === undefined
-        ? null
-        : (revisions.get(key)?.get(revision) ?? null);
-    },
-    async getOccurrenceRevision(siteId, occurrenceId, revision) {
-      return (
-        revisions.get(scopedKey(siteId, occurrenceId))?.get(revision) ?? null
-      );
-    },
-    async saveOccurrence(
-      revision,
-      baseRevision,
-      action,
-      idempotencyKey,
-      hash,
-    ) {
-      if (
-        !assets.has(scopedKey(revision.siteId, revision.assetId)) ||
-        deletionReservations.has(scopedKey(revision.siteId, revision.assetId))
-      ) {
-        throw new MediaSiteAccessError();
-      }
-      const key = scopedKey(revision.siteId, revision.occurrenceId);
-      const currentRevision = current.get(key) ?? 0;
-      if (currentRevision !== baseRevision) {
-        throw new MediaOccurrenceConflictError(currentRevision);
-      }
-      const saved = immutable(revision);
-      let history = revisions.get(key);
-      if (history === undefined) {
-        history = new Map();
-        revisions.set(key, history);
-      }
-      history.set(saved.revision, saved);
-      current.set(key, saved.revision);
-      auditEvents.push(
-        immutable({
-          siteId: saved.siteId,
-          actorId: saved.createdBy,
-          action,
-          subjectId: saved.occurrenceId,
-          occurredAt: saved.createdAt,
-        }),
-      );
-      await this.record(revision.siteId, idempotencyKey, hash, {
-        kind: "occurrence",
-        value: saved,
-      });
-      return saved;
-    },
-    async beginAssetDeletion(siteId, assetId) {
-      const key = scopedKey(siteId, assetId);
-      const asset = assets.get(key);
-      if (asset === undefined) {
-        throw new MediaSiteAccessError();
-      }
-      if (deletionReservations.has(key)) return asset;
-      let referenceCount = 0;
-      for (const [occurrenceKey, history] of revisions) {
-        if (!occurrenceKey.startsWith(`${siteId}:`)) continue;
-        if ([...history.values()].some((revision) => revision.assetId === assetId)) {
-          referenceCount += 1;
-        }
-      }
-      if (referenceCount > 0) {
-        throw new MediaAssetReferencedError(assetId, referenceCount);
-      }
-      deletionReservations.add(key);
-      return asset;
-    },
-    async completeAssetDeletion(
-      siteId,
-      assetId,
-      actorId,
-      occurredAt,
-      idempotencyKey,
-      hash,
-    ) {
-      const key = scopedKey(siteId, assetId);
-      if (!deletionReservations.has(key) || !assets.has(key)) {
-        throw new MediaSiteAccessError();
-      }
-      assets.delete(key);
-      deletionReservations.delete(key);
-      auditEvents.push(
-        immutable({
-          siteId,
-          actorId,
-          action: "media.asset.deleted" as const,
-          subjectId: assetId,
-          occurredAt,
-        }),
-      );
-      await this.record(siteId, idempotencyKey, hash, {
-        kind: "deleted",
-        assetId,
-      });
-    },
-    async audit(siteId) {
-      return auditEvents.filter((event) => event.siteId === siteId);
-    },
-  };
-}
-
 export function createMediaAssetApplication({
   siteId,
   actorId,
@@ -530,6 +277,22 @@ export function createMediaAssetApplication({
   sources: MediaSourceStore;
   now?: () => string;
 }) {
+  const mutationContext = (
+    idempotencyKey: string,
+    requestHash: string,
+  ): MediaMutationContext => ({ siteId, idempotencyKey, requestHash });
+
+  async function replayMutation(
+    context: MediaMutationContext,
+    expectedKind: MediaMutationResult["kind"],
+  ) {
+    const replay = await assets.replay(context);
+    if (replay !== null && replay.kind !== expectedKind) {
+      throw new MediaValidationError("idempotencyKey");
+    }
+    return replay;
+  }
+
   return Object.freeze({
     siteId,
     commands: Object.freeze({
@@ -567,18 +330,15 @@ export function createMediaAssetApplication({
           height: command.height,
           sourceHash,
         });
-        const replay = await assets.replay(
-          siteId,
-          command.idempotencyKey,
-          hash,
-        );
+        const context = mutationContext(command.idempotencyKey, hash);
+        const replay = await replayMutation(context, "asset");
         if (replay !== null) {
-          if (replay.kind !== "asset") {
-            throw new MediaValidationError("idempotencyKey");
-          }
-          return replay.value;
+          return (replay as Extract<
+            MediaMutationResult,
+            { kind: "asset" }
+          >).value;
         }
-        await assets.claim(siteId, command.idempotencyKey, hash);
+        await assets.claim(context);
         const existing = await assets.getAsset(siteId, command.assetId);
         if (existing !== null) {
           if (
@@ -591,7 +351,7 @@ export function createMediaAssetApplication({
           ) {
             throw new MediaValidationError("assetId");
           }
-          await assets.record(siteId, command.idempotencyKey, hash, {
+          await assets.record(context, {
             kind: "asset",
             value: existing,
           });
@@ -615,7 +375,7 @@ export function createMediaAssetApplication({
           contentType: asset.contentType,
           sourceHash: asset.sourceHash,
         });
-        return assets.createAsset(asset, command.idempotencyKey, hash);
+        return assets.createAsset(asset, context);
       },
       async replaceOccurrence(
         command: ReplaceMediaOccurrenceCommand,
@@ -623,21 +383,18 @@ export function createMediaAssetApplication({
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
-        const replay = await assets.replay(
-          siteId,
-          command.idempotencyKey,
-          hash,
-        );
+        const context = mutationContext(command.idempotencyKey, hash);
+        const replay = await replayMutation(context, "occurrence");
         if (replay !== null) {
-          if (replay.kind !== "occurrence") {
-            throw new MediaValidationError("idempotencyKey");
-          }
-          return replay.value;
+          return (replay as Extract<
+            MediaMutationResult,
+            { kind: "occurrence" }
+          >).value;
         }
         if ((await assets.getAsset(siteId, command.assetId)) === null) {
           throw new MediaSiteAccessError();
         }
-        await assets.claim(siteId, command.idempotencyKey, hash);
+        await assets.claim(context);
         const revision: MediaOccurrenceRevision = {
           siteId,
           occurrenceId: command.occurrenceId,
@@ -651,8 +408,7 @@ export function createMediaAssetApplication({
           revision,
           command.baseRevision,
           "media.occurrence.replaced",
-          command.idempotencyKey,
-          hash,
+          context,
         );
         return immutable(revision);
       },
@@ -662,19 +418,16 @@ export function createMediaAssetApplication({
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
-        const replay = await assets.replay(
-          siteId,
-          command.idempotencyKey,
-          hash,
-        );
+        const context = mutationContext(command.idempotencyKey, hash);
+        const replay = await replayMutation(context, "occurrence");
         if (replay !== null) {
-          if (replay.kind !== "occurrence") {
-            throw new MediaValidationError("idempotencyKey");
-          }
-          return replay.value;
+          return (replay as Extract<
+            MediaMutationResult,
+            { kind: "occurrence" }
+          >).value;
         }
         assertCrop(command.crop);
-        await assets.claim(siteId, command.idempotencyKey, hash);
+        await assets.claim(context);
         const current = await assets.getOccurrence(
           siteId,
           command.occurrenceId,
@@ -693,8 +446,7 @@ export function createMediaAssetApplication({
           revision,
           command.baseRevision,
           "media.occurrence.cropped",
-          command.idempotencyKey,
-          hash,
+          context,
         );
         return immutable(revision);
       },
@@ -706,18 +458,12 @@ export function createMediaAssetApplication({
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
-        const replay = await assets.replay(
-          siteId,
-          command.idempotencyKey,
-          hash,
-        );
+        const context = mutationContext(command.idempotencyKey, hash);
+        const replay = await replayMutation(context, "deleted");
         if (replay !== null) {
-          if (replay.kind !== "deleted") {
-            throw new MediaValidationError("idempotencyKey");
-          }
           return;
         }
-        await assets.claim(siteId, command.idempotencyKey, hash);
+        await assets.claim(context);
         const asset = await assets.beginAssetDeletion(
           siteId,
           command.assetId,
@@ -728,8 +474,7 @@ export function createMediaAssetApplication({
           command.assetId,
           command.actorId,
           now(),
-          command.idempotencyKey,
-          hash,
+          context,
         );
       },
     }),

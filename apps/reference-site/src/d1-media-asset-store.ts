@@ -147,7 +147,7 @@ export function createD1MediaAssetStore(
   }
 
   return {
-    async claim(siteId, idempotencyKey, requestHash) {
+    async claim({ siteId, idempotencyKey, requestHash }) {
       const claimed = await database
         .prepare(
           `INSERT INTO media_mutation_claims (
@@ -170,7 +170,7 @@ export function createD1MediaAssetStore(
         }
       }
     },
-    async replay(siteId, idempotencyKey, requestHash) {
+    async replay({ siteId, idempotencyKey, requestHash }) {
       const row = await database
         .prepare(
           `SELECT request_hash, result_json
@@ -185,7 +185,7 @@ export function createD1MediaAssetStore(
       }
       return restoreMutationResult(row.result_json);
     },
-    async record(siteId, idempotencyKey, requestHash, result) {
+    async record({ siteId, idempotencyKey, requestHash }, result) {
       const saved = await database
         .prepare(
           `INSERT INTO media_mutation_receipts (
@@ -196,7 +196,11 @@ export function createD1MediaAssetStore(
         .bind(siteId, idempotencyKey, requestHash, JSON.stringify(result))
         .run();
       if ((saved.meta.changes ?? 0) === 0) {
-        const replay = await this.replay(siteId, idempotencyKey, requestHash);
+        const replay = await this.replay({
+          siteId,
+          idempotencyKey,
+          requestHash,
+        });
         if (replay === null) throw new MediaSiteAccessError();
       }
     },
@@ -236,7 +240,8 @@ export function createD1MediaAssetStore(
         .bind(siteId, actorId, action, subjectId, occurredAt)
         .run();
     },
-    async createAsset(asset, idempotencyKey, requestHash) {
+    async createAsset(asset, context) {
+      const { idempotencyKey, requestHash } = context;
       const result: MediaMutationResult = { kind: "asset", value: asset };
       const results = await database.batch([
         database
@@ -327,7 +332,7 @@ export function createD1MediaAssetStore(
         ) {
           throw new MediaSiteAccessError();
         }
-        await this.record(asset.siteId, idempotencyKey, requestHash, {
+        await this.record(context, {
           kind: "asset",
           value: existing,
         });
@@ -356,9 +361,9 @@ export function createD1MediaAssetStore(
       revision,
       baseRevision,
       action,
-      idempotencyKey,
-      requestHash,
+      context,
     ) {
+      const { idempotencyKey, requestHash } = context;
       const mutationResult: MediaMutationResult = {
         kind: "occurrence",
         value: revision,
@@ -525,9 +530,9 @@ export function createD1MediaAssetStore(
       assetId,
       actorId,
       occurredAt,
-      idempotencyKey,
-      requestHash,
+      context,
     ) {
+      const { idempotencyKey, requestHash } = context;
       const results = await database.batch([
         database
           .prepare(

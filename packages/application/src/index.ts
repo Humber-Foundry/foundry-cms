@@ -11,6 +11,7 @@ export * from "./content-publication";
 export * from "./public-form-notification";
 export * from "./public-form-privacy";
 export * from "./media-assets";
+export * from "./in-memory-media-assets";
 
 export interface PublishedSiteRepository {
   findBySiteId(siteId: SiteId): Promise<SiteDefinition | null>;
