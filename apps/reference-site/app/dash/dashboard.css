@@ -426,6 +426,73 @@
   font-weight: 400;
 }
 
+.rich-text-editor {
+  overflow: hidden;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.45rem;
+  background: #fbfcfa;
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.rich-text-editor[aria-invalid="true"] {
+  border-color: #a5453d;
+}
+
+.rich-text-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid #dce1dc;
+  padding: 0.4rem;
+  background: #f2f5f1;
+}
+
+.rich-text-toolbar button {
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  padding: 0.35rem 0.5rem;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.rich-text-toolbar button[aria-pressed="true"] {
+  border-color: #8b9c92;
+  background: var(--white);
+}
+
+.rich-text-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.rich-text-editor .tiptap {
+  min-height: 9rem;
+  padding: 0.75rem;
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  line-height: 1.5;
+  outline: none;
+}
+
+.rich-text-editor .tiptap > :first-child {
+  margin-top: 0;
+}
+
+.rich-text-editor .tiptap > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-text-editor small[role="alert"] {
+  display: block;
+  padding: 0 0.75rem 0.75rem;
+  color: #8a352f;
+}
+
 .editor-groups textarea {
   resize: vertical;
 }

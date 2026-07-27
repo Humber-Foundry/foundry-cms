@@ -215,11 +215,24 @@
   color: #b8d9c6;
 }
 
-.contact p:not(.eyebrow) {
+.contact .rich-text {
   max-width: 36rem;
   margin: 2rem 0;
   color: #d5e0da;
   font-size: 1.1rem;
+}
+
+.contact .rich-text > :first-child {
+  margin-top: 0;
+}
+
+.contact .rich-text > :last-child {
+  margin-bottom: 0;
+}
+
+.contact .rich-text a {
+  color: inherit;
+  text-underline-offset: 0.2em;
 }
 
 .button-light {

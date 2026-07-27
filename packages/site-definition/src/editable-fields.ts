@@ -1,4 +1,10 @@
-import type { ProofSection, ServicesSection, SiteDefinition } from "./index";
+import {
+  validateRichTextDocument,
+  type ProofSection,
+  type RichTextDocument,
+  type ServicesSection,
+  type SiteDefinition,
+} from "./index";
 
 export type SiteDefinitionEdit = Readonly<{
   path: string;
@@ -11,6 +17,7 @@ export type EditableSiteField = Readonly<{
   group: "Page" | "Navigation" | "Footer" | "SEO";
   value: string;
   multiline: boolean;
+  format: "plainText" | "richText";
 }>;
 
 export type SiteDefinitionEditResult =
@@ -51,12 +58,14 @@ function fieldBinding({
   group,
   value,
   multiline = false,
+  format = "plainText",
   write,
-}: EditableSiteField & {
+}: Omit<EditableSiteField, "format"> & {
+  format?: EditableSiteField["format"];
   write(definition: MutableSiteDefinition, value: string): void;
 }): EditableFieldBinding {
   return {
-    field: { path, label, group, value, multiline },
+    field: { path, label, group, value, multiline, format },
     write,
   };
 }
@@ -278,7 +287,22 @@ function editableFieldBindings(
       case "callToAction":
         bindSectionField("eyebrow", "Call to action eyebrow", section.eyebrow);
         bindSectionField("title", "Call to action title", section.title);
-        bindSectionField("body", "Call to action body", section.body, true);
+        fields.push(
+          fieldBinding({
+            path: `${section.id}.body`,
+            label: "Call to action body",
+            group: "Page",
+            value: JSON.stringify(section.body),
+            multiline: true,
+            format: "richText",
+            write: (draft, value) => {
+              const draftSection = draft.home.sections[
+                sectionIndex
+              ] as unknown as Record<string, unknown>;
+              draftSection.body = parseRichTextEdit(value);
+            },
+          }),
+        );
         bindNestedLabel(
           section.action.id,
           "Call to action label",
@@ -341,6 +365,13 @@ export function applySiteDefinitionEdits(
         `This field is not in Site Definition ${definition.definitionVersion}.`;
     } else if (edit.value.trim() === "") {
       errors[edit.path] = "Enter at least one visible character.";
+    } else if (bindings.get(edit.path)!.field.format === "richText") {
+      try {
+        parseRichTextEdit(edit.value);
+      } catch {
+        errors[edit.path] =
+          "Rich text is invalid or contains unsupported or unsafe content.";
+      }
     }
   }
   if (Object.keys(errors).length > 0) {
@@ -357,4 +388,14 @@ export function applySiteDefinitionEdits(
     ok: true,
     definition: draft as unknown as SiteDefinition,
   };
+}
+
+function parseRichTextEdit(value: string): RichTextDocument {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new TypeError("invalid_rich_text_json");
+  }
+  return validateRichTextDocument(parsed as RichTextDocument);
 }

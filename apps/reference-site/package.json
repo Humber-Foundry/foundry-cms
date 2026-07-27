@@ -19,6 +19,8 @@
     "@foundry/application": "0.1.0",
     "@foundry/site-definition": "0.1.0",
     "@opennextjs/cloudflare": "1.20.2",
+    "@tiptap/react": "3.29.1",
+    "@tiptap/starter-kit": "3.29.1",
     "jose": "6.2.4",
     "next": "16.2.12",
     "react": "19.2.8",

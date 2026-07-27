@@ -1,3 +1,10 @@
+import {
+  RICH_TEXT_VERSION,
+  type RichTextDocument,
+} from "./rich-text";
+
+export * from "./rich-text";
+
 declare const siteIdBrand: unique symbol;
 
 export type SiteId = string & {
@@ -67,7 +74,7 @@ export type CallToActionSection = Readonly<{
   type: "callToAction";
   eyebrow: string;
   title: string;
-  body: string;
+  body: RichTextDocument;
   action: SiteLink;
 }>;
 
@@ -264,8 +271,159 @@ export const siteDefinitionSchema = {
         type: { const: "callToAction" },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
-        body: { $ref: "#/$defs/text" },
+        body: { $ref: "#/$defs/richTextDocument" },
         action: { $ref: "#/$defs/link" },
+      },
+    },
+    richTextDocument: {
+      type: "object",
+      additionalProperties: false,
+      required: ["version", "type", "children"],
+      properties: {
+        version: { const: RICH_TEXT_VERSION },
+        type: { const: "document" },
+        children: {
+          type: "array",
+          items: {
+            oneOf: [
+              { $ref: "#/$defs/richTextParagraph" },
+              { $ref: "#/$defs/richTextHeading" },
+              { $ref: "#/$defs/richTextBlockquote" },
+              { $ref: "#/$defs/richTextBulletList" },
+              { $ref: "#/$defs/richTextOrderedList" },
+            ],
+          },
+        },
+      },
+    },
+    richTextText: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "text", "marks"],
+      properties: {
+        type: { const: "text" },
+        text: { type: "string", pattern: "^[^\\r\\n]*$" },
+        marks: {
+          type: "array",
+          uniqueItems: true,
+          maxItems: 3,
+          items: {
+            oneOf: [
+              { const: "bold" },
+              { const: "italic" },
+              { $ref: "#/$defs/richTextLink" },
+            ],
+          },
+          allOf: [
+            {
+              contains: { const: "bold" },
+              minContains: 0,
+              maxContains: 1,
+            },
+            {
+              contains: { const: "italic" },
+              minContains: 0,
+              maxContains: 1,
+            },
+            {
+              contains: { $ref: "#/$defs/richTextLink" },
+              minContains: 0,
+              maxContains: 1,
+            },
+          ],
+        },
+      },
+    },
+    richTextLink: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "href"],
+      properties: {
+        type: { const: "link" },
+        href: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2048,
+          pattern:
+            "^(?:https?://[^\\s]+|mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+|/(?!/)[^\\s]*|#[A-Za-z][A-Za-z0-9_-]*)$",
+        },
+      },
+    },
+    richTextParagraph: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "paragraph" },
+        children: {
+          type: "array",
+          items: { $ref: "#/$defs/richTextText" },
+        },
+      },
+    },
+    richTextHeading: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "level", "children"],
+      properties: {
+        type: { const: "heading" },
+        level: { type: "integer", minimum: 1, maximum: 6 },
+        children: {
+          type: "array",
+          items: { $ref: "#/$defs/richTextText" },
+        },
+      },
+    },
+    richTextBlockquote: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "blockquote" },
+        children: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/$defs/richTextParagraph" },
+        },
+      },
+    },
+    richTextListItem: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "listItem" },
+        children: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/$defs/richTextParagraph" },
+        },
+      },
+    },
+    richTextBulletList: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "bulletList" },
+        children: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/$defs/richTextListItem" },
+        },
+      },
+    },
+    richTextOrderedList: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "orderedList" },
+        children: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/$defs/richTextListItem" },
+        },
       },
     },
   },
@@ -373,8 +531,22 @@ export const referenceSiteDefinition = {
         type: "callToAction",
         eyebrow: "Begin with the real question",
         title: "What should exist when this work is done?",
-        body:
-          "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
+        body: {
+          version: RICH_TEXT_VERSION,
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [
+                {
+                  type: "text",
+                  text: "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
+                  marks: [],
+                },
+              ],
+            },
+          ],
+        },
         action: {
           id: "action_email",
           label: "Write the first note",

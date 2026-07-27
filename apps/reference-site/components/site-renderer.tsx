@@ -4,6 +4,7 @@ import type {
 } from "@foundry/site-definition";
 
 import { sectionAnchor } from "@/src/section-anchor";
+import { RichTextRenderer } from "@/components/rich-text-renderer";
 
 function Section({ section }: { section: PageSection }) {
   switch (section.type) {
@@ -88,7 +89,9 @@ function Section({ section }: { section: PageSection }) {
         >
           <p className="eyebrow">{section.eyebrow}</p>
           <h2 id={`${section.id}_title`}>{section.title}</h2>
-          <p>{section.body}</p>
+          <div className="rich-text">
+            <RichTextRenderer document={section.body} />
+          </div>
           <a className="button button-light" href={section.action.href}>
             {section.action.label}
           </a>

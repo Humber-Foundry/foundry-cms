@@ -24,6 +24,7 @@ import {
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
+import { RichTextEditor } from "./rich-text-editor";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
 
@@ -607,7 +608,16 @@ export function ContentEditor({
                     {field.label}
                     <code>{field.path}</code>
                   </span>
-                  {field.multiline ? (
+                  {field.format === "richText" ? (
+                    <RichTextEditor
+                      id={`${field.path}-editor`}
+                      disabled={editorLocked}
+                      value={field.value}
+                      invalid={Boolean(state.errors[field.path])}
+                      describedBy={`${field.path}-error`}
+                      onChange={(value) => edit(field.path, value)}
+                    />
+                  ) : field.multiline ? (
                     <textarea
                       rows={3}
                       disabled={editorLocked}

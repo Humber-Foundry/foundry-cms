@@ -160,6 +160,82 @@ describe("reference Site Definition", () => {
     );
   });
 
+  it("stores rich-text edits as the canonical versioned AST", () => {
+    const body = {
+      version: "1.0.0",
+      type: "document",
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", text: "A ", marks: [] },
+            { type: "text", text: "clear next step", marks: ["bold"] },
+          ],
+        },
+      ],
+    };
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      {
+        path: "section_contact.body",
+        value: JSON.stringify(body),
+      },
+    ]);
+
+    expect(result).toEqual({
+      ok: true,
+      definition: expect.objectContaining({
+        home: expect.objectContaining({
+          sections: expect.arrayContaining([
+            expect.objectContaining({
+              id: "section_contact",
+              body,
+            }),
+          ]),
+        }),
+      }),
+    });
+    expect(
+      listEditableSiteFields(referenceSiteDefinition).find(
+        (field) => field.path === "section_contact.body",
+      ),
+    ).toMatchObject({
+      format: "richText",
+      value: JSON.stringify(referenceSiteDefinition.home.sections[3]!.body),
+    });
+  });
+
+  it("returns field feedback for unsafe canonical rich text", () => {
+    expect(
+      applySiteDefinitionEdits(referenceSiteDefinition, [
+        {
+          path: "section_contact.body",
+          value: JSON.stringify({
+            version: "1.0.0",
+            type: "document",
+            children: [
+              {
+                type: "paragraph",
+                children: [
+                  {
+                    type: "text",
+                    text: "Run this",
+                    marks: [{ type: "link", href: "javascript:alert(1)" }],
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      ]),
+    ).toEqual({
+      ok: false,
+      errors: {
+        "section_contact.body":
+          "Rich text is invalid or contains unsupported or unsafe content.",
+      },
+    });
+  });
+
   it("returns field-level feedback for unknown and invalid edits", () => {
     expect(
       applySiteDefinitionEdits(referenceSiteDefinition, [
