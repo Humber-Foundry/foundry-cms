@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  createDefaultPageSection,
+  referenceSiteDefinition,
+  toPageComposition,
+  type PageSection,
+} from "@foundry/site-definition";
 
 import {
   ContentRevisionConflictError,
@@ -115,6 +120,79 @@ describe("content revision application", () => {
     ).toBe(false);
     await expect(application.queries.getRevision(0)).resolves.toEqual(
       expect.objectContaining({ definition: referenceSiteDefinition }),
+    );
+  });
+
+  it("creates an immutable revision through the registered page-composition command", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-compose-0001");
+    const composition = {
+      ...toPageComposition(referenceSiteDefinition),
+      components: [
+        ...referenceSiteDefinition.home.sections,
+      ] as PageSection[],
+    };
+    composition.components.splice(
+      0,
+      1,
+      createDefaultPageSection("proof", "section_new_proof"),
+    );
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [],
+      composition,
+      idempotencyKey: "compose-page-components-0001",
+    });
+
+    expect(saved.revision).toBe(1);
+    expect(saved.definition.home.sections.map(({ id }) => id)).toEqual([
+      "section_new_proof",
+      "section_services",
+      "section_proof",
+      "section_contact",
+    ]);
+    await expect(application.queries.getRevision(0)).resolves.toEqual(
+      expect.objectContaining({ definition: referenceSiteDefinition }),
+    );
+  });
+
+  it("rejects composition outside the registered slot before persistence", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-compose-0002");
+
+    await expect(
+      application.commands.save({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        edits: [],
+        composition: {
+          slotId: "slot_home_sections",
+          components: [
+            {
+              ...referenceSiteDefinition.home.sections[0],
+              type: "script",
+            },
+          ],
+        } as never,
+        idempotencyKey: "compose-page-components-0002",
+      }),
+    ).rejects.toEqual(
+      new ContentRevisionValidationError({
+        "section_hero.type":
+          "This component is not registered for the page slot.",
+      }),
     );
   });
 

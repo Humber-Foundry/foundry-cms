@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  referenceSiteDefinition,
+  type SiteDefinition,
+} from "@foundry/site-definition";
 
 import {
   contentEditorReducer,
@@ -28,6 +31,31 @@ describe("content editor history", () => {
     expect(redone.workingDefinition.home.sections[0]).toEqual(
       expect.objectContaining({ title: "Working headline" }),
     );
+  });
+
+  it("undoes visual composition as one editor action", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const definition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections].reverse(),
+      },
+    } as SiteDefinition;
+    const composed = contentEditorReducer(initial, {
+      type: "compose",
+      definition,
+    });
+    const undone = contentEditorReducer(composed, { type: "undo" });
+
+    expect(composed.workingDefinition.home.sections[0]?.id).toBe(
+      "section_contact",
+    );
+    expect(undone.workingDefinition).toEqual(referenceSiteDefinition);
+    expect(undone.persistedRevision).toBe(4);
   });
 
   it("can undo after save while preserving the newly persisted revision", () => {

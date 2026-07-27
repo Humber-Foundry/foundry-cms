@@ -5,6 +5,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ContentRevision } from "@foundry/application";
 import {
   listEditableSiteFields,
+  toPageComposition,
   type EditableSiteField,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
@@ -24,6 +25,8 @@ import {
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
+import { pageCompositionChanged } from "../src/page-composition-puck";
+import { VisualComponentEditor } from "./visual-component-editor";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
 
@@ -97,6 +100,12 @@ export function ContentEditor({
     [state.workingDefinition],
   );
   const edits = changedFields(persistedFields, workingFields);
+  const composition = pageCompositionChanged(
+    state.persistedDefinition,
+    state.workingDefinition,
+  )
+    ? toPageComposition(state.workingDefinition)
+    : undefined;
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked = state.status === "saving" || state.status === "stale";
 
@@ -214,6 +223,7 @@ export function ContentEditor({
           schemaVersion: state.persistedDefinition.schemaVersion,
           baseRevision: state.persistedRevision,
           edits,
+          ...(composition === undefined ? {} : { composition }),
         }),
         idempotencyKey: crypto.randomUUID(),
       };
@@ -501,7 +511,7 @@ export function ContentEditor({
             type="button"
             className="button button-primary"
             disabled={
-              edits.length === 0 ||
+              (edits.length === 0 && composition === undefined) ||
               editorLocked
             }
             onClick={save}
@@ -595,6 +605,15 @@ export function ContentEditor({
           </ul>
         </div>
       ) : null}
+      <VisualComponentEditor
+        key={state.persistedRevision}
+        definition={state.workingDefinition}
+        disabled={editorLocked}
+        onChange={(definition) => {
+          pendingAttempt.current = null;
+          dispatch({ type: "compose", definition });
+        }}
+      />
       <div className="editor-groups">
         {groups.map((group) => (
           <fieldset key={group}>

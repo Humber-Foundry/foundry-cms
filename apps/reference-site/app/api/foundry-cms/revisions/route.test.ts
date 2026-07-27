@@ -129,6 +129,65 @@ describe("content revision endpoint", () => {
     );
   });
 
+  it("passes registered component composition through the shared revision command", async () => {
+    mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "d1-bookmark",
+      definition: { schemaVersion: "1.0.0" },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.0.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    const composition = {
+      slotId: "slot_home_sections",
+      components: [
+        {
+          id: "section_new_proof",
+          type: "proof",
+          quote: "Evidence",
+          attribution: "Source",
+          metrics: [],
+        },
+      ],
+    };
+
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
+        baseRevision: 2,
+        edits: [],
+        composition,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edits: [],
+        composition,
+      }),
+    );
+  });
+
+  it("rejects a save without copy edits or component composition", async () => {
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
+        baseRevision: 2,
+        edits: [],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
   it("creates a workspace only through an authenticated mutation", async () => {
     mocks.create.mockResolvedValue({
       workspaceId: "workspace_created",

@@ -1,0 +1,144 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  referenceSiteDefinition,
+  type PageSection,
+} from "@foundry/site-definition";
+
+import {
+  definitionToPuckData,
+  pageCompositionChanged,
+  puckDataToDefinition,
+} from "./page-composition-puck";
+
+describe("Puck page-composition adapter", () => {
+  it("binds Puck data to stable registered component identifiers", () => {
+    const data = definitionToPuckData(referenceSiteDefinition);
+
+    expect(data.content.map(({ type, props }) => [type, props.id])).toEqual([
+      ["hero", "section_hero"],
+      ["services", "section_services"],
+      ["proof", "section_proof"],
+      ["callToAction", "section_contact"],
+    ]);
+  });
+
+  it("maps a Puck insert, reorder, duplicate, remove, and field change to a valid definition", () => {
+    const data = structuredClone(
+      definitionToPuckData(referenceSiteDefinition),
+    ) as {
+      root: { props: Record<string, never> };
+      content: Array<{ type: PageSection["type"]; props: PageSection }>;
+    };
+    const [hero, services, proof, contact] = data.content;
+    expect(hero).toBeDefined();
+    expect(services).toBeDefined();
+    expect(proof).toBeDefined();
+    expect(contact).toBeDefined();
+    data.content = [
+      proof!,
+      {
+        ...hero!,
+        props: {
+          ...hero!.props,
+          id: "Puck-generated-duplicate",
+          title: "Duplicate headline",
+        } as PageSection,
+      },
+      services!,
+      contact!,
+      {
+        type: "callToAction",
+        props: {
+          id: "Puck-generated-insert",
+          type: "callToAction",
+          eyebrow: "New",
+          title: "A new invitation",
+          body: "Take the next step.",
+          action: {
+            id: "temporary",
+            label: "Ignored protected value",
+            href: "mailto:attacker@example.com",
+          },
+        },
+      },
+    ];
+
+    const result = puckDataToDefinition(referenceSiteDefinition, data);
+
+    expect(result).toEqual({
+      ok: true,
+      definition: expect.objectContaining({
+        home: expect.objectContaining({
+          sections: [
+            referenceSiteDefinition.home.sections[2],
+            expect.objectContaining({
+              id: "section_hero_puck_generated_duplicate",
+              type: "hero",
+              title: "Duplicate headline",
+              primaryAction: expect.objectContaining({
+                id: "section_hero_puck_generated_duplicate_item_1",
+                href: "#section_contact",
+              }),
+            }),
+            referenceSiteDefinition.home.sections[1],
+            referenceSiteDefinition.home.sections[3],
+            expect.objectContaining({
+              id: "section_call_to_action_puck_generated_insert",
+              type: "callToAction",
+              title: "A new invitation",
+              action: expect.objectContaining({
+                href: "mailto:hello@example.com",
+              }),
+            }),
+          ],
+        }),
+      }),
+    });
+  });
+
+  it("fails closed for unregistered Puck content", () => {
+    const result = puckDataToDefinition(referenceSiteDefinition, {
+      root: { props: {} },
+      content: [{ type: "script", props: { id: "section_script" } }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errors: {
+        slot_home_sections:
+          "Only registered page components can enter this slot.",
+      },
+    });
+  });
+
+  it("only emits a structural command when component identity or order changes", () => {
+    const copyEdited = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          {
+            ...referenceSiteDefinition.home.sections[0],
+            title: "Changed copy",
+          },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ] as PageSection[],
+      },
+    };
+    expect(
+      pageCompositionChanged(referenceSiteDefinition, copyEdited),
+    ).toBe(false);
+
+    const reordered = {
+      ...copyEdited,
+      home: {
+        ...copyEdited.home,
+        sections: [...copyEdited.home.sections].reverse(),
+      },
+    };
+    expect(
+      pageCompositionChanged(referenceSiteDefinition, reordered),
+    ).toBe(true);
+  });
+});
