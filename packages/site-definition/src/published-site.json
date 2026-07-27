@@ -1,0 +1,115 @@
+{
+  "definitionVersion": "1.0.0",
+  "schemaVersion": "1.0.0",
+  "site": {
+    "id": "site_foundry_reference",
+    "name": "Foundry Reference",
+    "description": "A representative, client-neutral site powered by a versioned Foundry Site Definition.",
+    "navigation": [
+      {
+        "id": "nav_work",
+        "label": "What we make",
+        "href": "#section_services"
+      },
+      {
+        "id": "nav_approach",
+        "label": "How it works",
+        "href": "#section_proof"
+      },
+      {
+        "id": "nav_contact",
+        "label": "Start a project",
+        "href": "#section_contact"
+      }
+    ],
+    "footer": "An executable Foundry CMS reference installation, built for client ownership."
+  },
+  "home": {
+    "id": "page_home",
+    "seo": {
+      "title": "Foundry Reference — Independent work, thoughtfully made",
+      "description": "See a representative public site rendered from Foundry CMS’s versioned Site Definition."
+    },
+    "sections": [
+      {
+        "id": "section_hero",
+        "type": "hero",
+        "eyebrow": "Independent work, thoughtfully made",
+        "title": "Turn a good idea into something people can use.",
+        "summary": "Foundry brings structure to the fuzzy middle—shaping clear digital products, useful identities, and durable publishing systems.",
+        "primaryAction": {
+          "id": "action_start",
+          "label": "Start a conversation",
+          "href": "#section_contact"
+        },
+        "secondaryAction": {
+          "id": "action_explore",
+          "label": "Explore the approach",
+          "href": "#section_proof"
+        }
+      },
+      {
+        "id": "section_services",
+        "type": "services",
+        "eyebrow": "A practical studio model",
+        "title": "From first sketch to a working system.",
+        "introduction": "Small teams do their best work when strategy, design, and engineering stay in the same conversation.",
+        "items": [
+          {
+            "id": "service_shape",
+            "number": "01",
+            "title": "Shape the opportunity",
+            "description": "Clarify the audience, the job to be done, and the smallest useful version worth making."
+          },
+          {
+            "id": "service_design",
+            "number": "02",
+            "title": "Design the experience",
+            "description": "Create an accessible visual system with a clear hierarchy and a calm path through the work."
+          },
+          {
+            "id": "service_build",
+            "number": "03",
+            "title": "Build for ownership",
+            "description": "Deliver maintainable software and content tools that remain useful after handoff."
+          }
+        ]
+      },
+      {
+        "id": "section_proof",
+        "type": "proof",
+        "quote": "The best handoff is not a folder of files. It is a system the next person can understand, operate, and trust.",
+        "attribution": "The Foundry principle",
+        "metrics": [
+          {
+            "id": "metric_source",
+            "value": "1",
+            "label": "Shared content source"
+          },
+          {
+            "id": "metric_schema",
+            "value": "100%",
+            "label": "Schema-bound output"
+          },
+          {
+            "id": "metric_control",
+            "value": "0",
+            "label": "Vendor control planes"
+          }
+        ]
+      },
+      {
+        "id": "section_contact",
+        "type": "callToAction",
+        "eyebrow": "Begin with the real question",
+        "title": "What should exist when this work is done?",
+        "body": "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
+        "action": {
+          "id": "action_email",
+          "label": "Write the first note",
+          "href": "mailto:hello@example.com"
+        }
+      }
+    ]
+  }
+}

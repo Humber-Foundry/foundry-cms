@@ -17,6 +17,14 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_PRODUCTION_BASE?: string;
   CF_VERSION_METADATA?: Readonly<{ id: string }>;
   FOUNDRY_DB?: D1DatabaseBinding;
+  FOUNDRY_GITHUB_APP_ID?: string;
+  FOUNDRY_GITHUB_INSTALLATION_ID?: string;
+  FOUNDRY_GITHUB_PRIVATE_KEY?: string;
+  FOUNDRY_GITHUB_OWNER?: string;
+  FOUNDRY_GITHUB_REPOSITORY?: string;
+  FOUNDRY_PRODUCTION_BRANCH?: string;
+  FOUNDRY_PUBLIC_ORIGIN?: string;
+  FOUNDRY_DEPLOYMENT_CHECK_NAME?: string;
 }>;
 
 export class HumanAccessConfigurationError extends Error {

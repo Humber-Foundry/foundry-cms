@@ -13,6 +13,10 @@ import {
   contentEditorReducer,
   createContentEditorState,
 } from "../src/content-editor-history";
+import {
+  refreshContentPublication,
+  sendContentPublicationAttempt,
+} from "../src/content-publication-client";
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
   clearStaleEdits,
@@ -26,6 +30,32 @@ import {
 } from "../src/content-editor-recovery";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
+type PublicationStatus =
+  | "requested"
+  | "committed"
+  | "building"
+  | "deployed"
+  | "verified-live"
+  | "blocked"
+  | "failed"
+  | "unknown";
+type PublicationRecord = Readonly<{
+  id: string;
+  status: PublicationStatus;
+  detail: string | null;
+  commitSha: string | null;
+}>;
+
+const publicationLabels: Readonly<Record<PublicationStatus, string>> = {
+  requested: "Publish requested",
+  committed: "Commit created",
+  building: "Cloudflare building",
+  deployed: "Deployed; verifying release",
+  "verified-live": "Verified live",
+  blocked: "Publish blocked",
+  failed: "Publish failed",
+  unknown: "Publish state unknown",
+};
 
 function changedFields(
   persisted: ReadonlyArray<EditableSiteField>,
@@ -73,6 +103,13 @@ export function ContentEditor({
   const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [previewedRevision, setPreviewedRevision] = useState<number | null>(
+    null,
+  );
+  const [approvalId, setApprovalId] = useState<string | null>(null);
+  const [publication, setPublication] =
+    useState<PublicationRecord | null>(null);
+  const [publicationBusy, setPublicationBusy] = useState(false);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -81,6 +118,14 @@ export function ContentEditor({
     idempotencyKey: string;
   } | null>(null);
   const pendingWorkspaceAttempt = useRef<{
+    body: string;
+    idempotencyKey: string;
+  } | null>(null);
+  const pendingApprovalAttempt = useRef<{
+    body: string;
+    idempotencyKey: string;
+  } | null>(null);
+  const pendingPublicationAttempt = useRef<{
     body: string;
     idempotencyKey: string;
   } | null>(null);
@@ -99,6 +144,37 @@ export function ContentEditor({
   const edits = changedFields(persistedFields, workingFields);
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked = state.status === "saving" || state.status === "stale";
+
+  useEffect(() => {
+    if (
+      publication === null ||
+      ["verified-live", "blocked", "failed"].includes(publication.status)
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await refreshContentPublication({
+          workspaceId: initialRevision.workspaceId,
+          publicationId: publication.id,
+        });
+        if (
+          typeof result === "object" &&
+          result !== null &&
+          "publication" in result &&
+          typeof result.publication === "object" &&
+          result.publication !== null
+        ) {
+          setPublication(result.publication as PublicationRecord);
+        }
+      } catch {
+        setMessage(
+          "The latest publish state could not be confirmed. The operation remains recorded; retry status shortly.",
+        );
+      }
+    }, 2_500);
+    return () => window.clearTimeout(timer);
+  }, [initialRevision.workspaceId, publication]);
 
   useEffect(() => {
     if (
@@ -331,6 +407,11 @@ export function ContentEditor({
         definition: saved.definition,
         revision: saved.revision,
       });
+      setApprovalId(null);
+      setPublication(null);
+      setPreviewedRevision(null);
+      pendingApprovalAttempt.current = null;
+      pendingPublicationAttempt.current = null;
       setPreviewUrl(saved.previewUrl);
       setMessage(`Revision ${saved.revision} saved.`);
     } catch {
@@ -343,7 +424,109 @@ export function ContentEditor({
 
   function edit(path: string, value: string) {
     pendingAttempt.current = null;
+    setApprovalId(null);
+    setPublication(null);
+    setPreviewedRevision(null);
+    pendingApprovalAttempt.current = null;
+    pendingPublicationAttempt.current = null;
     dispatch({ type: "edit", path, value });
+  }
+
+  async function approveRevision() {
+    pendingApprovalAttempt.current ??= {
+      body: JSON.stringify({
+        operation: "approve",
+        workspaceId: initialRevision.workspaceId,
+        revision: state.persistedRevision,
+        previewConfirmed: true,
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    setPublicationBusy(true);
+    setMessage("");
+    try {
+      const result = await sendContentPublicationAttempt({
+        attempt: pendingApprovalAttempt.current,
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("approval" in result.body) ||
+        typeof result.body.approval !== "object" ||
+        result.body.approval === null ||
+        !("id" in result.body.approval) ||
+        typeof result.body.approval.id !== "string"
+      ) {
+        throw new Error("content_approval_failed");
+      }
+      setApprovalId(result.body.approval.id);
+      setPublication(null);
+      pendingApprovalAttempt.current = null;
+      setMessage(
+        `Revision ${state.persistedRevision} approved. It is ready to publish while every bound input remains unchanged.`,
+      );
+    } catch {
+      setMessage(
+        "Approval could not be confirmed. Reopen the exact preview if the revision or production version changed.",
+      );
+    } finally {
+      setPublicationBusy(false);
+    }
+  }
+
+  async function publishRevision() {
+    if (approvalId === null) {
+      return;
+    }
+    pendingPublicationAttempt.current ??= {
+      body: JSON.stringify({
+        operation: "publish",
+        workspaceId: initialRevision.workspaceId,
+        approvalId,
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    setPublicationBusy(true);
+    setMessage("");
+    try {
+      const result = await sendContentPublicationAttempt({
+        attempt: pendingPublicationAttempt.current,
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("publication" in result.body) ||
+        typeof result.body.publication !== "object" ||
+        result.body.publication === null
+      ) {
+        const reason =
+          typeof result.body === "object" &&
+          result.body !== null &&
+          "error" in result.body &&
+          typeof result.body.error === "string"
+            ? result.body.error.replaceAll("_", " ")
+            : "publish request failed";
+        throw new Error(reason);
+      }
+      const recorded = result.body.publication as PublicationRecord;
+      setPublication(recorded);
+      pendingPublicationAttempt.current = null;
+      setMessage(publicationLabels[recorded.status]);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Publish was not started: ${error.message}.`
+          : "Publish was not started.",
+      );
+    } finally {
+      setPublicationBusy(false);
+    }
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
@@ -517,7 +700,12 @@ export function ContentEditor({
         {state.status === "stale" ? (
           <span>Saved preview unavailable for the current production version</span>
         ) : (
-          <a href={previewUrl} target="_blank" rel="noreferrer">
+          <a
+            href={previewUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => setPreviewedRevision(state.persistedRevision)}
+          >
             Preview exact saved revision ↗
           </a>
         )}
@@ -540,6 +728,52 @@ export function ContentEditor({
           </button>
         ) : null}
       </div>
+      {state.status !== "stale" ? (
+        <div
+          className="publication-actions"
+          aria-label="Approve and publish exact revision"
+        >
+          <div>
+            <strong>Publication</strong>
+            <span>
+              {publication === null
+                ? approvalId === null
+                  ? "Open and inspect the exact saved preview before approval."
+                  : "Ready to publish"
+                : publicationLabels[publication.status]}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="copy-button"
+            disabled={
+              publicationBusy ||
+              edits.length > 0 ||
+              state.status !== "saved" ||
+              previewedRevision !== state.persistedRevision
+            }
+            onClick={() => void approveRevision()}
+          >
+            {publicationBusy && approvalId === null
+              ? "Approving…"
+              : `Approve revision ${state.persistedRevision}`}
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={
+              publicationBusy ||
+              approvalId === null ||
+              publication !== null
+            }
+            onClick={() => void publishRevision()}
+          >
+            {publicationBusy && approvalId !== null
+              ? "Publishing…"
+              : "Publish approved revision"}
+          </button>
+        </div>
+      ) : null}
       <p role="status" aria-live="polite" className="editor-message">
         {message}
       </p>

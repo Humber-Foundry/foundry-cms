@@ -15,7 +15,10 @@ import {
   createD1ContentRevisionStore,
   findLatestContentWorkspaceIdForActor,
 } from "./d1-content-revision-store";
-import { loadHumanAccessEnvironment } from "./human-access-environment";
+import {
+  loadHumanAccessEnvironment,
+  type HumanAccessEnvironment,
+} from "./human-access-environment";
 
 type LocalContentRevisionStore = ReturnType<
   typeof createInMemoryContentRevisionStore
@@ -33,6 +36,33 @@ export { ContentRevisionConfigurationError };
 
 export function isGitObjectId(value: string): boolean {
   return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value);
+}
+
+export function resolveContentReleaseInputs(
+  environment: HumanAccessEnvironment,
+  embeddedReleaseCommit = process.env.FOUNDRY_RELEASE_COMMIT_SHA,
+) {
+  const releaseCommit =
+    embeddedReleaseCommit !== undefined &&
+    isGitObjectId(embeddedReleaseCommit)
+      ? embeddedReleaseCommit
+      : environment.FOUNDRY_PRODUCTION_BASE;
+  const rendererVersion =
+    releaseCommit ??
+    environment.CF_VERSION_METADATA?.id ??
+    environment.FOUNDRY_RENDERER_VERSION;
+  if (
+    releaseCommit === undefined ||
+    !isGitObjectId(releaseCommit) ||
+    rendererVersion === undefined ||
+    rendererVersion.trim() === ""
+  ) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return {
+    productionBaseCommit: releaseCommit,
+    rendererVersion,
+  };
 }
 
 export async function contentWorkspaceIdForActor(
@@ -152,19 +182,11 @@ export async function loadContentRevisionApplication(
   }
 
   const environment = await loadHumanAccessEnvironment();
-  const rendererVersion =
-    environment.CF_VERSION_METADATA?.id ??
-    environment.FOUNDRY_RENDERER_VERSION;
-  const productionBaseCommit = environment.FOUNDRY_PRODUCTION_BASE;
-  if (
-    environment.FOUNDRY_DB === undefined ||
-    rendererVersion === undefined ||
-    rendererVersion.trim() === "" ||
-    productionBaseCommit === undefined ||
-    !isGitObjectId(productionBaseCommit)
-  ) {
+  if (environment.FOUNDRY_DB === undefined) {
     throw new ContentRevisionConfigurationError();
   }
+  const { rendererVersion, productionBaseCommit } =
+    resolveContentReleaseInputs(environment);
   return applicationFor({
     workspaceId,
     actorId,
