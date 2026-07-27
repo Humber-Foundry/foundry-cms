@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 
 import { referenceSiteDefinition } from "@foundry/site-definition";
@@ -92,10 +92,11 @@ async function runWrangler(
   arguments_: ReadonlyArray<string>,
   accountId: string,
 ) {
-  const executable = resolve(
-    import.meta.dirname,
-    "../../../node_modules/.bin/wrangler",
-  );
+  const executable =
+    process.env.FOUNDRY_FORM_RECOVERY_WRANGLER_EXECUTABLE;
+  if (executable === undefined || executable.length === 0) {
+    throw new Error("form_recovery_wrangler_unavailable");
+  }
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(executable, arguments_, {
       env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId },
