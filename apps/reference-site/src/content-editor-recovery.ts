@@ -167,3 +167,14 @@ export function clearStaleEdits(
     return false;
   }
 }
+
+export function synchronizeStaleEdits(
+  storage: RecoveryStorage,
+  recoveryId: string,
+  sourceWorkspaceId: string,
+  edits: ReadonlyArray<StaleRecoveryEdit>,
+): boolean {
+  return edits.length === 0
+    ? clearStaleEdits(storage, recoveryId, sourceWorkspaceId)
+    : preserveStaleEdits(storage, recoveryId, sourceWorkspaceId, edits);
+}

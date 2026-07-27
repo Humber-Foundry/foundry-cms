@@ -332,6 +332,29 @@ export function createD1ContentRevisionStore(
       }
 
       const current = await getCurrentFrom(session);
+      if (command.baseRevision !== current.revision) {
+        const racedReceipt = await findReceipt(
+          session,
+          command.idempotencyKey,
+        );
+        if (racedReceipt !== null) {
+          assertContentRevisionIdempotency(
+            racedReceipt.request_hash,
+            command.requestHash,
+          );
+          const revision = await getRevisionFrom(
+            session,
+            racedReceipt.revision,
+          );
+          if (revision === null) {
+            throw new ContentRevisionConfigurationError();
+          }
+          return withContentRevisionBookmark(
+            revision,
+            requireBookmark(session.getBookmark()),
+          );
+        }
+      }
       assertContentRevisionBase(command.baseRevision, current.revision);
 
       const results = await session.batch([

@@ -6,6 +6,7 @@ import {
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
+  synchronizeStaleEdits,
 } from "./content-editor-recovery";
 
 function createStorage() {
@@ -222,6 +223,22 @@ describe("stale edit recovery", () => {
         blockedStorage,
         "recovery-blocked",
         "workspace-blocked",
+      ),
+    ).toBe(false);
+    expect(
+      synchronizeStaleEdits(
+        blockedStorage,
+        "recovery-blocked",
+        "workspace-blocked",
+        [edit],
+      ),
+    ).toBe(false);
+    expect(
+      synchronizeStaleEdits(
+        blockedStorage,
+        "recovery-blocked",
+        "workspace-blocked",
+        [],
       ),
     ).toBe(false);
   });

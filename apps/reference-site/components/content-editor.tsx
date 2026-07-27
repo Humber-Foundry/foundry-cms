@@ -20,6 +20,7 @@ import {
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
+  synchronizeStaleEdits,
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
@@ -172,26 +173,29 @@ export function ContentEditor({
       current,
       new Set(recoveryConflicts.map((conflict) => conflict.path)),
     );
-    recoveryPending.current = pending;
     try {
-      if (pending.length === 0) {
-        activeRecovery.current = undefined;
-        clearStaleEdits(
-          window.localStorage,
-          staleRecovery.id,
-          staleRecovery.sourceWorkspaceId,
-        );
-        window.history.replaceState(null, "", activeWorkspaceUrl);
-      } else {
-        preserveStaleEdits(
+      if (
+        !synchronizeStaleEdits(
           window.localStorage,
           staleRecovery.id,
           staleRecovery.sourceWorkspaceId,
           pending,
+        )
+      ) {
+        setMessage(
+          "Browser recovery storage could not be updated. Keep this tab open and copy your edits before reloading.",
         );
+        return;
+      }
+      recoveryPending.current = pending;
+      if (pending.length === 0) {
+        activeRecovery.current = undefined;
+        window.history.replaceState(null, "", activeWorkspaceUrl);
       }
     } catch {
-      // The in-memory edit remains usable; the prior durable record is intact.
+      setMessage(
+        "Browser recovery storage could not be updated. Keep this tab open and copy your edits before reloading.",
+      );
     }
   }, [
     activeWorkspaceUrl,
