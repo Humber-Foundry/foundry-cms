@@ -171,6 +171,66 @@
   text-align: right;
 }
 
+.access-invite-form {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 12rem) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.access-invite-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--ink-subtle);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.access-invite-form input,
+.access-invite-form select {
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  text-transform: none;
+}
+
+.inventory-row strong small {
+  display: block;
+  color: var(--ink-subtle);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.member-actions button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .access-invite-form {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
 .dashboard-section-heading {
   display: flex;
   align-items: start;

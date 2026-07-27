@@ -1,11 +1,19 @@
+import type { HumanMembership } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
 
 import { DashboardControls } from "./dashboard-controls";
+import { MemberAccessControls } from "./member-access-controls";
 
 export function DashboardShell({
   definition,
+  currentMembership,
+  members,
+  mutationToken,
 }: {
   definition: SiteDefinition;
+  currentMembership: HumanMembership;
+  members: ReadonlyArray<HumanMembership>;
+  mutationToken: string | null;
 }) {
   return (
     <div className="dashboard">
@@ -15,7 +23,9 @@ export function DashboardShell({
           Foundry
         </a>
         <div className="dashboard-header-meta">
-          <span className="status-dot">Reference installation</span>
+          <span className="status-dot">
+            {currentMembership.email} · {currentMembership.role}
+          </span>
           <a href="/">View public site ↗</a>
         </div>
       </header>
@@ -65,11 +75,28 @@ export function DashboardShell({
               </div>
               <div>
                 <dt>Dashboard mode</dt>
-                <dd>Read only</dd>
-                <p>Production access remains closed without authentication.</p>
+                <dd>Protected</dd>
+                <p>Cloudflare Access identity with current D1 membership.</p>
               </div>
             </dl>
           </section>
+          {currentMembership.role === "owner" && mutationToken !== null ? (
+            <section aria-labelledby="human-access">
+              <div className="dashboard-section-heading">
+                <div>
+                  <h2 id="human-access">Human access</h2>
+                  <p>
+                    Invitations and membership changes apply on the next
+                    protected request.
+                  </p>
+                </div>
+              </div>
+              <MemberAccessControls
+                csrfToken={mutationToken}
+                members={members}
+              />
+            </section>
+          ) : null}
           <section className="inventory-section" aria-labelledby="content-inventory">
             <div className="dashboard-section-heading">
               <div>

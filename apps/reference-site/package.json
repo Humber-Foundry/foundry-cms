@@ -10,12 +10,14 @@
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "preview:serve": "opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "db:migrate:local": "wrangler d1 migrations apply foundry-reference-site --local",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
     "@foundry/application": "0.1.0",
     "@foundry/site-definition": "0.1.0",
     "@opennextjs/cloudflare": "1.20.2",
+    "jose": "6.2.4",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8",
