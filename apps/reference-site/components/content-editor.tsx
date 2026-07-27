@@ -60,6 +60,7 @@ export function ContentEditor({
   );
   const edits = changedFields(persistedFields, workingFields);
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
+  const editorLocked = state.status === "saving" || state.status === "stale";
 
   async function save() {
     if (pendingAttempt.current === null) {
@@ -178,7 +179,7 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={state.past.length === 0 || state.status === "saving"}
+            disabled={state.past.length === 0 || editorLocked}
             onClick={() => dispatch({ type: "undo" })}
           >
             Undo
@@ -186,7 +187,7 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={state.future.length === 0 || state.status === "saving"}
+            disabled={state.future.length === 0 || editorLocked}
             onClick={() => dispatch({ type: "redo" })}
           >
             Redo
@@ -196,8 +197,7 @@ export function ContentEditor({
             className="button button-primary"
             disabled={
               edits.length === 0 ||
-              state.status === "saving" ||
-              state.status === "stale"
+              editorLocked
             }
             onClick={save}
           >
@@ -238,7 +238,7 @@ export function ContentEditor({
                   {field.multiline ? (
                     <textarea
                       rows={3}
-                      disabled={state.status === "saving"}
+                      disabled={editorLocked}
                       value={field.value}
                       aria-invalid={Boolean(state.errors[field.path])}
                       aria-describedby={`${field.path}-error`}
@@ -246,7 +246,7 @@ export function ContentEditor({
                     />
                   ) : (
                     <input
-                      disabled={state.status === "saving"}
+                      disabled={editorLocked}
                       value={field.value}
                       aria-invalid={Boolean(state.errors[field.path])}
                       aria-describedby={`${field.path}-error`}

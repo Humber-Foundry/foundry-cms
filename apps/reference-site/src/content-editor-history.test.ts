@@ -69,4 +69,31 @@ describe("content editor history", () => {
     expect(stale.status).toBe("stale");
     expect(stale.persistedRevision).toBe(4);
   });
+
+  it("keeps a stale editor locked across edit, undo, and redo actions", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const edited = contentEditorReducer(initial, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Unsaved headline",
+    });
+    const stale = contentEditorReducer(edited, {
+      type: "failed",
+      conflict: "stale",
+      errors: {},
+    });
+
+    expect(
+      contentEditorReducer(stale, {
+        type: "edit",
+        path: "section_hero.title",
+        value: "Another headline",
+      }),
+    ).toBe(stale);
+    expect(contentEditorReducer(stale, { type: "undo" })).toBe(stale);
+    expect(contentEditorReducer(stale, { type: "redo" })).toBe(stale);
+  });
 });
