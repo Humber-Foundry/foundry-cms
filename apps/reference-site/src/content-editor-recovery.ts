@@ -26,6 +26,23 @@ export function recoveryToForward(
   return destinationIsStale ? activeRecovery : undefined;
 }
 
+export function mergeStaleRecoveryEdits(
+  pending: ReadonlyArray<StaleRecoveryEdit>,
+  current: ReadonlyArray<StaleRecoveryEdit>,
+): StaleRecoveryEdit[] {
+  const merged = new Map(
+    pending.map((edit) => [edit.path, edit] as const),
+  );
+  for (const edit of current) {
+    const earlier = merged.get(edit.path);
+    merged.set(edit.path, {
+      ...edit,
+      baseValue: earlier?.baseValue ?? edit.baseValue,
+    });
+  }
+  return [...merged.values()];
+}
+
 function recoveryKey(sourceWorkspaceId: string, recoveryId: string): string {
   return `${staleEditRecoveryPrefix}:${sourceWorkspaceId}:${recoveryId}`;
 }

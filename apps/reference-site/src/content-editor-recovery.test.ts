@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearStaleEdits,
+  mergeStaleRecoveryEdits,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
@@ -37,6 +38,55 @@ describe("stale edit recovery", () => {
 
     expect(recoveryToForward(false, active)).toBeUndefined();
     expect(recoveryToForward(true, active)).toBe(active);
+  });
+
+  it("merges intermediate edits into a forwarded recovery chain", () => {
+    const storage = createStorage();
+    const recovered = {
+      ...edit,
+      value: "Recovered title",
+    };
+    const changedAgain = {
+      ...recovered,
+      value: "Edited again before stale",
+      baseValue: "Destination title",
+    };
+    const added = {
+      path: "page_home.seo.title",
+      value: "New SEO title",
+      baseValue: "Old SEO title",
+    };
+
+    const merged = mergeStaleRecoveryEdits(
+      [recovered],
+      [changedAgain, added],
+    );
+    expect(merged).toEqual([
+      {
+        ...changedAgain,
+        baseValue: edit.baseValue,
+      },
+      added,
+    ]);
+    expect(
+      preserveStaleEdits(
+        storage,
+        "recovery-chain",
+        "workspace-original",
+        merged,
+      ),
+    ).toBe(true);
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-chain",
+        "workspace-original",
+        new Map([
+          [changedAgain.path, edit.baseValue],
+          [added.path, added.baseValue],
+        ]),
+      ).recovered,
+    ).toEqual(merged);
   });
 
   it("retains and auto-applies a non-overlapping edit until save", () => {

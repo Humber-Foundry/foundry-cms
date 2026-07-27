@@ -16,6 +16,7 @@ import {
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
   clearStaleEdits,
+  mergeStaleRecoveryEdits,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
@@ -301,14 +302,20 @@ export function ContentEditor({
       ...edit,
       baseValue: persistedValues.get(edit.path) ?? "",
     }));
+    const editsToPreserve =
+      forwardedRecovery === undefined
+        ? recoveryEdits
+        : mergeStaleRecoveryEdits(
+            recoveryPending.current,
+            recoveryEdits,
+          );
     try {
       if (
-        forwardedRecovery === undefined &&
         !preserveStaleEdits(
           window.localStorage,
           recoveryId,
-          initialRevision.workspaceId,
-          recoveryEdits,
+          recoverySourceWorkspaceId,
+          editsToPreserve,
         )
       ) {
         throw new Error("stale_edit_recovery_unavailable");
