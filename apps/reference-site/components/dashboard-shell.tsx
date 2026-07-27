@@ -1,11 +1,14 @@
 import type {
   HumanMembership,
   PublicFormDeliveryHealth,
+  FailedPublicFormDelivery,
+  SuspectedSpamSubmission,
 } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
 
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
+import { FormOperationsControls } from "./form-operations-controls";
 
 export function DashboardShell({
   definition,
@@ -13,12 +16,16 @@ export function DashboardShell({
   members,
   mutationToken,
   formDeliveryHealth,
+  failedFormDeliveries,
+  suspectedSpam,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
   members: ReadonlyArray<HumanMembership>;
-  mutationToken: string | null;
+  mutationToken: string;
   formDeliveryHealth: PublicFormDeliveryHealth;
+  failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
+  suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
 }) {
   return (
     <div className="dashboard">
@@ -84,6 +91,11 @@ export function DashboardShell({
                 <p>Cloudflare Access identity with current D1 membership.</p>
               </div>
             </dl>
+            <FormOperationsControls
+              csrfToken={mutationToken}
+              failedDeliveries={failedFormDeliveries}
+              suspectedSpam={suspectedSpam}
+            />
           </section>
           <section aria-labelledby="form-delivery-health">
             <div className="dashboard-section-heading">
@@ -130,7 +142,7 @@ export function DashboardShell({
               </div>
             </dl>
           </section>
-          {currentMembership.role === "owner" && mutationToken !== null ? (
+          {currentMembership.role === "owner" ? (
             <section aria-labelledby="human-access">
               <div className="dashboard-section-heading">
                 <div>

@@ -22,22 +22,30 @@ const localHealth: PublicFormDeliveryHealth = {
 };
 
 function configurationHealth(environment: Record<string, unknown>) {
-  return [
-    "FOUNDRY_FORM_EMAIL",
-    "FOUNDRY_FORM_EMAIL_FROM",
-    "FOUNDRY_FORM_EMAIL_RECIPIENT",
-    "FOUNDRY_CANONICAL_ORIGIN",
-  ].every((key) => environment[key] !== undefined);
+  const email = (value: unknown) =>
+    typeof value === "string" &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
+  let validOrigin = false;
+  try {
+    validOrigin =
+      typeof environment.FOUNDRY_CANONICAL_ORIGIN === "string" &&
+      new URL(environment.FOUNDRY_CANONICAL_ORIGIN).protocol === "https:";
+  } catch {
+    validOrigin = false;
+  }
+  return (
+    environment.FOUNDRY_FORM_EMAIL !== undefined &&
+    email(environment.FOUNDRY_FORM_EMAIL_FROM) &&
+    email(environment.FOUNDRY_FORM_EMAIL_RECIPIENT) &&
+    validOrigin
+  );
 }
 
-export async function loadPublicFormDeliveryHealth(
+export async function createPublicFormOperationsContext(
   humanContext: HumanAccessRequestContext,
 ) {
   if (humanContext.state !== "authorized") {
     throw new Error("form_delivery_not_authorized");
-  }
-  if (process.env.NODE_ENV === "development") {
-    return localHealth;
   }
   const environment = (await loadHumanAccessEnvironment()) as Record<
     string,
@@ -69,5 +77,31 @@ export async function loadPublicFormDeliveryHealth(
         capability,
       }),
   });
-  return application.queries.health({ actor: humanContext.identity });
+  return application;
+}
+
+export async function loadPublicFormOperationsDashboard(
+  humanContext: HumanAccessRequestContext,
+) {
+  if (humanContext.state !== "authorized") {
+    throw new Error("form_delivery_not_authorized");
+  }
+  if (process.env.NODE_ENV === "development") {
+    return {
+      health: localHealth,
+      failedDeliveries: [],
+      suspectedSpam: [],
+    };
+  }
+  const application = await createPublicFormOperationsContext(humanContext);
+  const [health, suspectedSpam, failedDeliveries] = await Promise.all([
+    application.queries.health({ actor: humanContext.identity }),
+    application.queries.suspectedSpam({ actor: humanContext.identity }),
+    humanContext.membership.role === "owner"
+      ? application.queries.failedDeliveries({
+          actor: humanContext.identity,
+        })
+      : Promise.resolve([]),
+  ]);
+  return { health, failedDeliveries, suspectedSpam };
 }

@@ -12,6 +12,7 @@ export type CloudflareFormEmailEnvironment = Readonly<{
   FOUNDRY_FORM_EMAIL_FROM?: string;
   FOUNDRY_FORM_EMAIL_RECIPIENT?: string;
   FOUNDRY_CANONICAL_ORIGIN?: string;
+  FOUNDRY_FORM_EMAIL_PREVIEW_FIELDS?: string;
 }>;
 
 export class FormEmailConfigurationError extends Error {

@@ -162,10 +162,15 @@ staff mailbox and configure `FOUNDRY_FORM_EMAIL_FROM` and
 `FOUNDRY_FORM_EMAIL_RECIPIENT` to the same fixed sender/destination pair. The
 application command accepts no recipient input; visitor confirmations and
 arbitrary-recipient delivery are deliberately outside this adapter.
+`FOUNDRY_FORM_EMAIL_PREVIEW_FIELDS` is a comma-separated, per-installation
+allowlist of form field IDs that have been classified as safe for notification
+previews; omit it to send no submitted values.
 
 Delivery failures remain in D1 with capped retries for 24 hours. The protected
 dashboard reports queue age, failures, retry attempts, adapter configuration,
-and D1 capacity bands without copying submission payloads.
+and D1 capacity bands without copying submission payloads. An outcome that
+could have reached the provider is stopped for explicit human reconciliation
+instead of being reclaimed automatically.
 
 ### Resolve a ticket atomically
 

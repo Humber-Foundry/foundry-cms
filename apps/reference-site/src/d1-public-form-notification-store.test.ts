@@ -93,7 +93,11 @@ afterEach(() => runtime.dispose());
 describe("D1 public form notification store", () => {
   it("claims once, exposes only configured preview fields, and records delivery", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(accepted);
-    const store = createD1PublicFormNotificationStore(database);
+    const store = createD1PublicFormNotificationStore(
+      database,
+      undefined,
+      ["name"],
+    );
 
     const claim = await store.claimDue({
       siteId,
@@ -149,6 +153,16 @@ describe("D1 public form notification store", () => {
       now: "2026-07-27T20:05:01.000Z",
       nextAttemptAt: null,
     });
+    await expect(store.listFailed({ siteId })).resolves.toEqual([
+      {
+        deliveryId: accepted.deliveryId,
+        formId: accepted.identity.formId,
+        receiptId: accepted.receiptId,
+        attempts: 1,
+        errorCode: "rejected",
+        updatedAt: "2026-07-27T20:05:01.000Z",
+      },
+    ]);
     await expect(
       store.replayFailed({
         siteId,

@@ -17,7 +17,7 @@ export type PublicFormNotification = Readonly<{
   receiptId: PublicFormReceiptId;
   acceptedAt: string;
   previewFields: Readonly<Record<string, string>>;
-  dashboardPath: `/dash/forms/${string}`;
+  dashboardPath: `/dash${string}`;
 }>;
 
 export type PublicFormNotificationOutcome =
@@ -58,6 +58,15 @@ export type SuspectedSpamSubmission = Readonly<{
   acceptedAt: string;
 }>;
 
+export type FailedPublicFormDelivery = Readonly<{
+  deliveryId: PublicFormDeliveryId;
+  formId: PublicFormId;
+  receiptId: PublicFormReceiptId;
+  attempts: number;
+  errorCode: string;
+  updatedAt: string;
+}>;
+
 export interface PublicFormNotificationStore {
   claimDue(input: {
     siteId: SiteId;
@@ -87,6 +96,9 @@ export interface PublicFormNotificationStore {
   listSuspectedSpam(input: {
     siteId: SiteId;
   }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
+  listFailed(input: {
+    siteId: SiteId;
+  }): Promise<ReadonlyArray<FailedPublicFormDelivery>>;
   releaseSuspectedSpam(input: {
     siteId: SiteId;
     receiptId: PublicFormReceiptId;
@@ -103,6 +115,9 @@ export type PublicFormOperationsApplication = Readonly<{
     suspectedSpam(input: {
       actor: ExternalHumanIdentity;
     }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
+    failedDeliveries(input: {
+      actor: ExternalHumanIdentity;
+    }): Promise<ReadonlyArray<FailedPublicFormDelivery>>;
   }>;
   commands: Readonly<{
     replayFailed(input: {
@@ -164,7 +179,10 @@ export async function deliverDuePublicFormNotifications({
         dashboardPath: claim.dashboardPath,
       });
     } catch {
-      outcome = { outcome: "retry", code: "adapter_unavailable" };
+      outcome = {
+        outcome: "permanent_failure",
+        code: "adapter_outcome_unknown",
+      };
     }
     const nextAttemptAt =
       outcome.outcome === "retry" ? retryAt(claim, now) : null;
@@ -211,6 +229,10 @@ export function createPublicFormOperationsApplication({
       async suspectedSpam({ actor }) {
         await authorize(actor, "forms.review");
         return store.listSuspectedSpam({ siteId });
+      },
+      async failedDeliveries({ actor }) {
+        await authorize(actor, "forms.delivery.manage");
+        return store.listFailed({ siteId });
       },
     });
   const commands: PublicFormOperationsApplication["commands"] = Object.freeze({

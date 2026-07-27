@@ -37,7 +37,8 @@
   ],
   "vars": {
     "FOUNDRY_FORM_EMAIL_FROM": "forms@example.com",
-    "FOUNDRY_FORM_EMAIL_RECIPIENT": "owner@example.com"
+    "FOUNDRY_FORM_EMAIL_RECIPIENT": "owner@example.com",
+    "FOUNDRY_FORM_EMAIL_PREVIEW_FIELDS": "name"
   },
   "observability": {
     "enabled": true

@@ -20,17 +20,18 @@ type ClaimRow = {
 
 function previewFields(
   fieldsJson: string,
+  allowedFieldIds: ReadonlySet<string>,
 ): Readonly<Record<string, string>> {
   const value: unknown = JSON.parse(fieldsJson);
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("name" in value) ||
-    typeof value.name !== "string"
-  ) {
+  if (typeof value !== "object" || value === null) {
     return {};
   }
-  return { name: value.name };
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] =>
+        allowedFieldIds.has(entry[0]) && typeof entry[1] === "string",
+    ),
+  );
 }
 
 function capacityState(usedPercent: number) {
@@ -42,7 +43,9 @@ function capacityState(usedPercent: number) {
 export function createD1PublicFormNotificationStore(
   database: D1DatabaseBinding,
   capacityLimitBytes = 500 * 1_024 * 1_024,
+  notificationPreviewFieldIds: ReadonlyArray<string> = [],
 ): PublicFormNotificationStore {
+  const allowedPreviewFieldIds = new Set(notificationPreviewFieldIds);
   return {
     async claimDue({ siteId, now, leaseToken, leaseUntil, limit }) {
       await database
@@ -62,14 +65,12 @@ export function createD1PublicFormNotificationStore(
              WHERE delivery.site_id = ?4
                AND (
                  (job.status IN ('pending', 'retry') AND job.available_at <= ?3)
-                 OR (job.status = 'processing' AND job.lease_until <= ?3)
                )
              ORDER BY job.available_at, job.delivery_id
              LIMIT ?5
            )
            AND (
              (status IN ('pending', 'retry') AND available_at <= ?3)
-             OR (status = 'processing' AND lease_until <= ?3)
            )`,
         )
         .bind(leaseToken, leaseUntil, now, siteId, limit)
@@ -104,8 +105,11 @@ export function createD1PublicFormNotificationStore(
         formId: createPublicFormId(row.form_id),
         receiptId: createPublicFormReceiptId(row.receipt_id),
         acceptedAt: row.accepted_at,
-        previewFields: previewFields(row.fields_json),
-        dashboardPath: `/dash/forms/${encodeURIComponent(row.receipt_id)}`,
+        previewFields: previewFields(
+          row.fields_json,
+          allowedPreviewFieldIds,
+        ),
+        dashboardPath: "/dash#form-delivery-health",
         leaseToken: row.lease_token,
         attempt: row.attempts,
         firstAvailableAt: row.first_available_at,
@@ -284,6 +288,44 @@ export function createD1PublicFormNotificationStore(
         formId: createPublicFormId(row.form_id),
         receiptId: createPublicFormReceiptId(row.receipt_id),
         acceptedAt: row.accepted_at,
+      }));
+    },
+    async listFailed({ siteId }) {
+      const rows = await database
+        .prepare(
+          `SELECT
+             delivery.id AS delivery_id,
+             delivery.form_id,
+             submission.receipt_id,
+             job.attempts,
+             job.last_error_code,
+             job.updated_at
+           FROM public_form_notification_jobs AS job
+           JOIN public_form_delivery_intents AS delivery
+             ON delivery.id = job.delivery_id
+           JOIN public_form_submissions AS submission
+             ON submission.site_id = delivery.site_id
+            AND submission.form_id = delivery.form_id
+            AND submission.submission_id = delivery.submission_id
+           WHERE delivery.site_id = ?1 AND job.status = 'failed'
+           ORDER BY job.updated_at, delivery.id`,
+        )
+        .bind(siteId)
+        .all<{
+          delivery_id: string;
+          form_id: string;
+          receipt_id: string;
+          attempts: number;
+          last_error_code: string;
+          updated_at: string;
+        }>();
+      return rows.results.map((row) => ({
+        deliveryId: createPublicFormDeliveryId(row.delivery_id),
+        formId: createPublicFormId(row.form_id),
+        receiptId: createPublicFormReceiptId(row.receipt_id),
+        attempts: row.attempts,
+        errorCode: row.last_error_code,
+        updatedAt: row.updated_at,
       }));
     },
     async releaseSuspectedSpam({ siteId, receiptId, actorMembershipId, now }) {

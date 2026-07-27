@@ -44,6 +44,7 @@ function store(
     }),
     replayFailed: vi.fn().mockResolvedValue(true),
     listSuspectedSpam: vi.fn().mockResolvedValue([]),
+    listFailed: vi.fn().mockResolvedValue([]),
     releaseSuspectedSpam: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
@@ -87,7 +88,7 @@ describe("public form notification delivery", () => {
     );
   });
 
-  it("retains the delivery and schedules a capped retry after an outage", async () => {
+  it("stops an ambiguous adapter outcome for explicit reconciliation", async () => {
     const notificationStore = store();
     const adapter: PublicFormNotificationAdapter = {
       notify: vi.fn().mockRejectedValue(new Error("outage")),
@@ -105,8 +106,11 @@ describe("public form notification delivery", () => {
     expect(notificationStore.recordOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryId,
-        outcome: { outcome: "retry", code: "adapter_unavailable" },
-        nextAttemptAt: "2026-07-27T20:05:30.000Z",
+        outcome: {
+          outcome: "permanent_failure",
+          code: "adapter_outcome_unknown",
+        },
+        nextAttemptAt: null,
       }),
     );
   });
