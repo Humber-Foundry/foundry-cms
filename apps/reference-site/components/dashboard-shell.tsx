@@ -75,6 +75,7 @@ export function DashboardShell({
             initialRevision={contentRevision}
             initialPreviewUrl={initialPreviewUrl}
             initialStale={initialContentStale}
+            activeWorkspaceUrl={activeWorkspaceUrl}
           />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">

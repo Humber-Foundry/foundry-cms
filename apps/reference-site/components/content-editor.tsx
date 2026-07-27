@@ -33,11 +33,13 @@ export function ContentEditor({
   initialRevision,
   initialPreviewUrl,
   initialStale = false,
+  activeWorkspaceUrl,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
   initialPreviewUrl: string;
   initialStale?: boolean;
+  activeWorkspaceUrl: string;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -68,8 +70,6 @@ export function ContentEditor({
   const edits = changedFields(persistedFields, workingFields);
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked = state.status === "saving" || state.status === "stale";
-  const activeWorkspaceUrl =
-    `/dash?workspace=${encodeURIComponent(initialRevision.workspaceId)}`;
 
   async function save() {
     if (pendingAttempt.current === null) {
