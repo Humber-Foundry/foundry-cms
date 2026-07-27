@@ -20,9 +20,45 @@ npm run dev
 ```
 
 The public site is available at `http://localhost:3000`. In local development,
-`http://localhost:3000/dash` shows the read-only dashboard. Outside development,
-the dashboard fails closed until the authentication adapter introduced by the
-access-control work is configured.
+`http://localhost:3000/dash` uses a local Owner identity. Outside development,
+the dashboard validates Cloudflare Access and reloads the current D1 membership
+on every protected request. It fails closed if the assertion, Access issuer,
+application audience or database binding is absent or invalid.
+
+Production installation supplies:
+
+- a D1 database through the `FOUNDRY_DB` binding, after replacing the
+  provisioning placeholder in `apps/reference-site/wrangler.jsonc`;
+- `FOUNDRY_ACCESS_ISSUER`, set to the exact HTTPS Cloudflare Access team
+  domain;
+- `FOUNDRY_ACCESS_AUDIENCE`, set to the audience of the one Access application
+  protecting `/dash`, `/api/foundry-cms` and preview paths; and
+- `FOUNDRY_ACCESS_ACCOUNT_ID`, `FOUNDRY_ACCESS_APPLICATION_ID`,
+  `FOUNDRY_ACCESS_POLICY_ID` and `FOUNDRY_ACCESS_LOGIN_METHOD_ID`, identifying
+  the client-owned exact-email Allow policy and required OTP login method;
+- `FOUNDRY_ACCESS_API_TOKEN`, a Worker secret restricted to Access Apps and
+  Policies Write for that client account;
+- `FOUNDRY_CANONICAL_ORIGIN` and a strong `FOUNDRY_CSRF_SECRET` Worker secret,
+  used to bind every JSON mutation to the verified Access identity; and
+- an initial Owner invitation created by guided provisioning before handoff.
+
+Apply the checked-in D1 migration locally with:
+
+```sh
+npm run db:migrate:local --workspace @foundry/reference-site
+```
+
+Foundry stores no password or login session. Owners can invite Editors or other
+Owners and activate, suspend or revoke memberships from `/dash`. Suspensions
+and revocations take effect in D1 before the member's next protected request;
+the database also prevents removal of the final active Owner. New invitations
+remain unclaimable in `pending_access_sync` until the complete D1-derived
+exact-email policy has been written to Cloudflare and read back successfully.
+Failed policy work remains in a transactional outbox with bounded retry delays;
+the custom Worker reconciles due work every five minutes, and Owners can also
+retry immediately from the dashboard. Every member mutation carries an
+idempotency key; D1 replays completed responses and blocks ambiguous duplicate
+execution.
 
 Build and verify the Cloudflare Workers artifact:
 

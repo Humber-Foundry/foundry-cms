@@ -1,5 +1,8 @@
 import type { SiteDefinition, SiteId } from "@foundry/site-definition";
 
+export * from "./human-access";
+export * from "./in-memory-human-access-store";
+
 export interface PublishedSiteRepository {
   findBySiteId(siteId: SiteId): Promise<SiteDefinition | null>;
 }

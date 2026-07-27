@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "main": ".open-next/worker.js",
+  "main": "custom-worker.ts",
   "name": "foundry-reference-site",
   "compatibility_date": "2026-07-26",
   "compatibility_flags": [
@@ -11,7 +11,18 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "d1_databases": [
+    {
+      "binding": "FOUNDRY_DB",
+      "database_name": "foundry-reference-site",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
   "observability": {
     "enabled": true
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
   }
 }

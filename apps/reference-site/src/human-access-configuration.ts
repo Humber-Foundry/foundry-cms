@@ -1,0 +1,78 @@
+import type { CloudflareAccessConfiguration } from "./access-identity";
+import { createCloudflareAccessEligibilitySynchronizer } from "./cloudflare-access-eligibility";
+import type { D1DatabaseBinding } from "./d1-human-access-store";
+
+export type HumanAccessEnvironment = Readonly<{
+  FOUNDRY_ACCESS_ISSUER?: string;
+  FOUNDRY_ACCESS_AUDIENCE?: string;
+  FOUNDRY_ACCESS_ACCOUNT_ID?: string;
+  FOUNDRY_ACCESS_APPLICATION_ID?: string;
+  FOUNDRY_ACCESS_POLICY_ID?: string;
+  FOUNDRY_ACCESS_LOGIN_METHOD_ID?: string;
+  FOUNDRY_ACCESS_API_TOKEN?: string;
+  FOUNDRY_CANONICAL_ORIGIN?: string;
+  FOUNDRY_CSRF_SECRET?: string;
+  FOUNDRY_DB?: D1DatabaseBinding;
+}>;
+
+export class HumanAccessConfigurationError extends Error {
+  constructor() {
+    super("human_access_not_configured");
+    this.name = "HumanAccessConfigurationError";
+  }
+}
+
+function requireSetting(value: string | undefined): string {
+  if (value === undefined || value.trim() === "") {
+    throw new HumanAccessConfigurationError();
+  }
+  return value;
+}
+
+export function readAccessAssertionConfiguration(
+  environment: HumanAccessEnvironment,
+): CloudflareAccessConfiguration {
+  return {
+    issuer: requireSetting(environment.FOUNDRY_ACCESS_ISSUER),
+    audience: requireSetting(environment.FOUNDRY_ACCESS_AUDIENCE),
+  };
+}
+
+export function createAccessEligibilitySynchronizer(
+  environment: HumanAccessEnvironment,
+) {
+  return createCloudflareAccessEligibilitySynchronizer({
+    accountId: requireSetting(environment.FOUNDRY_ACCESS_ACCOUNT_ID),
+    applicationId: requireSetting(
+      environment.FOUNDRY_ACCESS_APPLICATION_ID,
+    ),
+    policyId: requireSetting(environment.FOUNDRY_ACCESS_POLICY_ID),
+    loginMethodId: requireSetting(
+      environment.FOUNDRY_ACCESS_LOGIN_METHOD_ID,
+    ),
+    apiToken: requireSetting(environment.FOUNDRY_ACCESS_API_TOKEN),
+  });
+}
+
+export function createDeferredAccessEligibilitySynchronizer(
+  environment: HumanAccessEnvironment,
+): HumanAccessEligibilitySynchronizer {
+  return {
+    async replaceExactEmailEligibility(emails) {
+      await createAccessEligibilitySynchronizer(
+        environment,
+      ).replaceExactEmailEligibility(emails);
+    },
+  };
+}
+
+export function readHumanMutationConfiguration(
+  environment: HumanAccessEnvironment,
+) {
+  return {
+    audience: requireSetting(environment.FOUNDRY_ACCESS_AUDIENCE),
+    canonicalOrigin: requireSetting(environment.FOUNDRY_CANONICAL_ORIGIN),
+    secret: requireSetting(environment.FOUNDRY_CSRF_SECRET),
+  };
+}
+import type { HumanAccessEligibilitySynchronizer } from "@foundry/application";
