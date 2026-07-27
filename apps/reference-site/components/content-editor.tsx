@@ -308,6 +308,7 @@ export function ContentEditor({
         : mergeStaleRecoveryEdits(
             recoveryPending.current,
             recoveryEdits,
+            new Set(recoveryConflicts.map((conflict) => conflict.path)),
           );
     try {
       if (

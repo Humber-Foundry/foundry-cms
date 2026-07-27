@@ -60,6 +60,7 @@ describe("stale edit recovery", () => {
     const merged = mergeStaleRecoveryEdits(
       [recovered],
       [changedAgain, added],
+      new Set(),
     );
     expect(merged).toEqual([
       {
@@ -87,6 +88,16 @@ describe("stale edit recovery", () => {
         ]),
       ).recovered,
     ).toEqual(merged);
+  });
+
+  it("does not resurrect a recovered edit reverted before another stale hop", () => {
+    expect(mergeStaleRecoveryEdits([edit], [], new Set())).toEqual([]);
+  });
+
+  it("retains unresolved conflicts that are absent from the current delta", () => {
+    expect(
+      mergeStaleRecoveryEdits([edit], [], new Set([edit.path])),
+    ).toEqual([edit]);
   });
 
   it("retains and auto-applies a non-overlapping edit until save", () => {

@@ -29,9 +29,16 @@ export function recoveryToForward(
 export function mergeStaleRecoveryEdits(
   pending: ReadonlyArray<StaleRecoveryEdit>,
   current: ReadonlyArray<StaleRecoveryEdit>,
+  unresolvedPaths: ReadonlySet<string>,
 ): StaleRecoveryEdit[] {
+  const currentPaths = new Set(current.map((edit) => edit.path));
   const merged = new Map(
-    pending.map((edit) => [edit.path, edit] as const),
+    pending
+      .filter(
+        (edit) =>
+          currentPaths.has(edit.path) || unresolvedPaths.has(edit.path),
+      )
+      .map((edit) => [edit.path, edit] as const),
   );
   for (const edit of current) {
     const earlier = merged.get(edit.path);
