@@ -12,7 +12,10 @@ import {
 import type { SiteDefinitionEdit } from "@foundry/site-definition";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
-import { loadContentRevisionApplication } from "../../../../src/content-revision-runtime";
+import {
+  loadContentRevisionApplication,
+  requireExistingContentWorkspaceAccess,
+} from "../../../../src/content-revision-runtime";
 import {
   HumanAccessConfigurationError,
 } from "../../../../src/human-access-configuration";
@@ -67,9 +70,11 @@ export async function GET(request: Request) {
       return Response.json({ error: "invalid_preview" }, { status: 400 });
     }
     const workspaceId = createContentWorkspaceId(workspaceParameter);
+    const actorId = createContentActorId(access.membership.id);
+    await requireExistingContentWorkspaceAccess(workspaceId, actorId);
     const application = await loadContentRevisionApplication(
       workspaceId,
-      createContentActorId(access.membership.id),
+      actorId,
     );
     const revision = await application.queries.getRevisionWithBookmark(
       revisionNumber,

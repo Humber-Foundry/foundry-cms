@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   loadIdentity: vi.fn(),
   save: vi.fn(),
   loadApplication: vi.fn(),
+  requireExistingAccess: vi.fn(),
   createMutationToken: vi.fn(),
   getRevisionWithBookmark: vi.fn(),
   isRevisionCurrent: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("../../../../src/human-mutation-runtime", () => ({
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
   loadContentRevisionApplication: mocks.loadApplication,
+  requireExistingContentWorkspaceAccess: mocks.requireExistingAccess,
 }));
 vi.mock("../../../../src/preview-capability-runtime", () => ({
   createRevisionPreviewCapability: async () => "preview-capability",
@@ -52,6 +54,7 @@ describe("content revision endpoint", () => {
     mocks.verifyMutation.mockResolvedValue(undefined);
     mocks.createMutationToken.mockResolvedValue("fresh-mutation-token");
     mocks.isRevisionCurrent.mockResolvedValue(true);
+    mocks.requireExistingAccess.mockResolvedValue(undefined);
     mocks.loadApplication.mockResolvedValue({
       commands: { save: mocks.save },
       queries: {
@@ -149,10 +152,30 @@ describe("content revision endpoint", () => {
     );
 
     expect(response.status).toBe(307);
+    expect(mocks.requireExistingAccess).toHaveBeenCalledWith(
+      "workspace_home",
+      "membership-editor",
+    );
     expect(response.headers.get("location")).toBe(
       "https://foundry.example/preview/workspace_home/3" +
         "?capability=preview-capability&bookmark=fresh-d1-bookmark",
     );
+  });
+
+  it("does not initialize a missing workspace during preview lookup", async () => {
+    mocks.requireExistingAccess.mockRejectedValue(
+      new ContentWorkspaceAccessError(),
+    );
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/revisions" +
+          "?workspaceId=workspace_missing&revision=0",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.loadApplication).not.toHaveBeenCalled();
   });
 
   it("returns a conflict when the configured revision inputs are stale", async () => {
