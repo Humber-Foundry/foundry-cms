@@ -39,7 +39,12 @@ Production installation supplies:
 - `FOUNDRY_ACCESS_API_TOKEN`, a Worker secret restricted to Access Apps and
   Policies Write for that client account;
 - `FOUNDRY_CANONICAL_ORIGIN` and a strong `FOUNDRY_CSRF_SECRET` Worker secret,
-  used to bind every JSON mutation to the verified Access identity; and
+  used to bind every JSON mutation to the verified Access identity;
+- `FOUNDRY_TURNSTILE_SECRET`, a Worker secret for the Turnstile widget whose
+  hostname matches `FOUNDRY_CANONICAL_ORIGIN` and whose contact-form action is
+  `contact`;
+- the checked-in `FOUNDRY_FORM_RATE_LIMITER` binding, updated to use an
+  installation-unique positive integer `namespace_id`; and
 - an initial Owner invitation created by guided provisioning before handoff.
 
 Apply the checked-in D1 migration locally with:
@@ -59,6 +64,36 @@ the custom Worker reconciles due work every five minutes, and Owners can also
 retry immediately from the dashboard. Every member mutation carries an
 idempotency key; D1 replays completed responses and blocks ambiguous duplicate
 execution.
+
+### Public form intake
+
+The reference installation accepts the versioned, text-only contact form at
+`POST /api/forms/contact/submissions`. Requests must be same-origin JSON no
+larger than 16 KiB and include:
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "submissionId": "00000000-0000-4000-8000-000000000046",
+  "fields": {
+    "name": "Ada",
+    "message": "Please tell me more."
+  },
+  "turnstileToken": "browser-token",
+  "honeypot": "",
+  "startedAt": "2026-07-27T19:59:45.000Z"
+}
+```
+
+`submissionId` is a client-generated UUID v4 and the stable Turnstile
+Siteverify idempotency key. After schema, origin, size, rate, abuse, hostname
+and action checks pass, one D1 batch transaction records the immutable
+submission, classification, payload-free audit fact, delivery intent and
+outbox event. The endpoint returns `201` with the same opaque receipt on a
+network retry only after durable acceptance. Borderline spam is retained with
+delivery held; invalid and clearly automated input is rejected. Capacity,
+Turnstile and D1 failures return retryable public errors without internal
+details.
 
 Build and verify the Cloudflare Workers artifact:
 
