@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
 const repository =
-  process.env.GITHUB_REPOSITORY ?? "Galen-Humber-Foundry/foundry-cms";
+  process.env.GITHUB_REPOSITORY ?? "Humber-Foundry/foundry-cms";
 const eventName = process.env.GITHUB_EVENT_NAME ?? "";
 const eventPath = process.env.GITHUB_EVENT_PATH;
 const workspace = resolve(process.env.GITHUB_WORKSPACE ?? process.cwd());

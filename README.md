@@ -1,6 +1,53 @@
 # foundry-cms
 Open-source, self-hosted visual CMS for schema-bound websites on Cloudflare
 
+## Executable reference installation
+
+The repository is an npm workspace monorepo with three initial boundaries:
+
+- `apps/reference-site` — the Next.js 16 App Router installation configured for
+  Cloudflare Workers through OpenNext;
+- `packages/site-definition` — the versioned, client-neutral Site Definition
+  contract and representative published content; and
+- `packages/application` — the site-scoped application query used by both the
+  public renderer and `/dash`.
+
+Install and run the local development surface:
+
+```sh
+npm install
+npm run dev
+```
+
+The public site is available at `http://localhost:3000`. In local development,
+`http://localhost:3000/dash` shows the read-only dashboard. Outside development,
+the dashboard fails closed until the authentication adapter introduced by the
+access-control work is configured.
+
+Build and verify the Cloudflare Workers artifact:
+
+```sh
+npm run build
+npm run build:worker
+npm run verify:worker
+```
+
+`verify:worker` starts the built artifact in the local `workerd` runtime,
+confirms the public page renders, and confirms an unconfigured production
+dashboard returns a not-found response. No Cloudflare account or secret is
+required.
+
+Run the deterministic checks:
+
+```sh
+npm test
+npm run typecheck
+npm run verify:bundle
+```
+
+The bundle check reads the optimized build and proves that protected dashboard
+client code is absent from the public route’s emitted scripts.
+
 ## Product contracts
 
 - [Production MCP contract](docs/mcp/README.md)

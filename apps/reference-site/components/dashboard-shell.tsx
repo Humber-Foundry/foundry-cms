@@ -1,0 +1,128 @@
+import type { SiteDefinition } from "@foundry/site-definition";
+
+import { DashboardControls } from "./dashboard-controls";
+
+export function DashboardShell({
+  definition,
+}: {
+  definition: SiteDefinition;
+}) {
+  return (
+    <div className="dashboard">
+      <header className="dashboard-header">
+        <a className="wordmark wordmark-dashboard" href="/dash">
+          <span aria-hidden="true">F</span>
+          Foundry
+        </a>
+        <div className="dashboard-header-meta">
+          <span className="status-dot">Reference installation</span>
+          <a href="/">View public site ↗</a>
+        </div>
+      </header>
+      <div className="dashboard-layout">
+        <nav className="dashboard-nav" aria-label="Dashboard">
+          <p className="nav-label">Workspace</p>
+          <a href="/dash" aria-current="page">
+            Overview
+          </a>
+          <span aria-disabled="true">Pages</span>
+          <span aria-disabled="true">Design</span>
+          <span aria-disabled="true">Media</span>
+          <p className="nav-label">Operate</p>
+          <span aria-disabled="true">Forms</span>
+          <span aria-disabled="true">Analytics</span>
+        </nav>
+        <main className="dashboard-main">
+          <div className="notice" role="status">
+            <span>Read-only foundation</span>
+            Editing arrives through later, independently reviewed tickets.
+          </div>
+          <div className="dashboard-title-row">
+            <div>
+              <p className="eyebrow">Site overview</p>
+              <h1>{definition.site.name}</h1>
+              <p>{definition.site.description}</p>
+            </div>
+            <DashboardControls siteId={definition.site.id} />
+          </div>
+          <section aria-labelledby="foundation-status">
+            <div className="dashboard-section-heading">
+              <div>
+                <h2 id="foundation-status">Foundation snapshot</h2>
+                <p>Facts exposed by the current definition and route boundary.</p>
+              </div>
+            </div>
+            <dl className="status-grid">
+              <div>
+                <dt>Public renderer</dt>
+                <dd>Configured</dd>
+                <p>Next.js App Router on the Workers runtime.</p>
+              </div>
+              <div>
+                <dt>Application query</dt>
+                <dd>Connected</dd>
+                <p>Public and dashboard views use one site scope.</p>
+              </div>
+              <div>
+                <dt>Dashboard mode</dt>
+                <dd>Read only</dd>
+                <p>Production access remains closed without authentication.</p>
+              </div>
+            </dl>
+          </section>
+          <section className="inventory-section" aria-labelledby="content-inventory">
+            <div className="dashboard-section-heading">
+              <div>
+                <h2 id="content-inventory">Content inventory</h2>
+                <p>Stable records in the current published Site Definition.</p>
+              </div>
+            </div>
+            <div className="inventory-table" role="table" aria-label="Content inventory">
+              <div className="inventory-row inventory-head" role="row">
+                <span role="columnheader">Record</span>
+                <span role="columnheader">Stable ID</span>
+                <span role="columnheader">State</span>
+              </div>
+              <div className="inventory-row" role="row">
+                <strong role="cell">Home page</strong>
+                <code role="cell">{definition.home.id}</code>
+                <span role="cell" className="state-label">
+                  Published
+                </span>
+              </div>
+              {definition.home.sections.map((section) => (
+                <div className="inventory-row" role="row" key={section.id}>
+                  <strong role="cell">{section.type}</strong>
+                  <code role="cell">{section.id}</code>
+                  <span role="cell" className="state-label">
+                    Published
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="version-card" aria-labelledby="version-heading">
+            <div>
+              <p className="eyebrow">Version contract</p>
+              <h2 id="version-heading">A small, explicit integration boundary.</h2>
+              <p>
+                Client content composes over a pinned definition and schema
+                version. Unknown structure does not silently enter the renderer.
+              </p>
+            </div>
+            <dl>
+              <div>
+                <dt>Definition</dt>
+                <dd>v{definition.definitionVersion}</dd>
+              </div>
+              <div>
+                <dt>Schema</dt>
+                <dd>v{definition.schemaVersion}</dd>
+              </div>
+            </dl>
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}

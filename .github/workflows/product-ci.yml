@@ -1,0 +1,57 @@
+name: Product CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: product-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-reference-installation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install pinned dependencies
+        run: npm ci
+
+      - name: Run application-seam tests
+        run: npm test
+
+      - name: Type-check workspaces
+        run: npm run typecheck
+
+      - name: Build optimized Next.js application
+        run: npm run build
+
+      - name: Verify public bundle boundary
+        run: npm run verify:bundle
+
+      - name: Build Cloudflare Workers artifact
+        run: npm run build:worker
+
+      - name: Verify workerd runtime behavior
+        run: npm run verify:worker
+
+      - name: Verify public repository integrity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAYFINDER_FORBIDDEN_TERMS: ${{ secrets.WAYFINDER_FORBIDDEN_TERMS }}
+        run: npm run verify:integrity
