@@ -67,6 +67,14 @@ export type FailedPublicFormDelivery = Readonly<{
   updatedAt: string;
 }>;
 
+export type ReviewedPublicFormSubmission = Readonly<{
+  formId: PublicFormId;
+  receiptId: PublicFormReceiptId;
+  acceptedAt: string;
+  classification: "accepted" | "suspected_spam";
+  fields: Readonly<Record<string, string>>;
+}>;
+
 export interface PublicFormNotificationStore {
   claimDue(input: {
     siteId: SiteId;
@@ -99,6 +107,12 @@ export interface PublicFormNotificationStore {
   listFailed(input: {
     siteId: SiteId;
   }): Promise<ReadonlyArray<FailedPublicFormDelivery>>;
+  viewSubmission(input: {
+    siteId: SiteId;
+    receiptId: PublicFormReceiptId;
+    actorMembershipId: string;
+    now: string;
+  }): Promise<ReviewedPublicFormSubmission | null>;
   releaseSuspectedSpam(input: {
     siteId: SiteId;
     receiptId: PublicFormReceiptId;
@@ -118,6 +132,10 @@ export type PublicFormOperationsApplication = Readonly<{
     failedDeliveries(input: {
       actor: ExternalHumanIdentity;
     }): Promise<ReadonlyArray<FailedPublicFormDelivery>>;
+    submission(input: {
+      actor: ExternalHumanIdentity;
+      receiptId: PublicFormReceiptId;
+    }): Promise<ReviewedPublicFormSubmission>;
   }>;
   commands: Readonly<{
     replayFailed(input: {
@@ -224,7 +242,13 @@ export function createPublicFormOperationsApplication({
           store.deliveryHealth({ siteId, now: clock().toISOString() }),
           adapter.health(),
         ]);
-        return { ...health, adapter: adapterHealth };
+        return {
+          ...health,
+          adapter:
+            adapterHealth === "healthy" && health.failed > 0
+              ? "degraded"
+              : adapterHealth,
+        };
       },
       async suspectedSpam({ actor }) {
         await authorize(actor, "forms.review");
@@ -233,6 +257,19 @@ export function createPublicFormOperationsApplication({
       async failedDeliveries({ actor }) {
         await authorize(actor, "forms.delivery.manage");
         return store.listFailed({ siteId });
+      },
+      async submission({ actor, receiptId }) {
+        const membership = await authorize(actor, "forms.review");
+        const submission = await store.viewSubmission({
+          siteId,
+          receiptId,
+          actorMembershipId: membership.id,
+          now: clock().toISOString(),
+        });
+        if (submission === null) {
+          throw new Error("form_submission_not_found");
+        }
+        return submission;
       },
     });
   const commands: PublicFormOperationsApplication["commands"] = Object.freeze({

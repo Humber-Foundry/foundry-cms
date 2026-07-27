@@ -42,7 +42,8 @@ CREATE TABLE public_form_operation_audit_events (
       'delivery_retry_scheduled',
       'delivery_failed',
       'delivery_replayed',
-      'spam_released'
+      'spam_released',
+      'submission_viewed'
     )
   ),
   outcome_code TEXT,

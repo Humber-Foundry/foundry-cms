@@ -180,6 +180,42 @@ describe("D1 public form notification store", () => {
     expect(submission?.fields_json).toContain("Private full submission");
   });
 
+  it("stops an expired claim for explicit reconciliation", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(accepted);
+    const store = createD1PublicFormNotificationStore(database);
+    await store.claimDue({
+      siteId,
+      now: "2026-07-27T20:05:00.000Z",
+      leaseToken: "lost-worker",
+      leaseUntil: "2026-07-27T20:09:00.000Z",
+      limit: 25,
+    });
+
+    await expect(
+      store.claimDue({
+        siteId,
+        now: "2026-07-27T20:10:00.000Z",
+        leaseToken: "next-worker",
+        leaseUntil: "2026-07-27T20:14:00.000Z",
+        limit: 25,
+      }),
+    ).resolves.toEqual([]);
+    await expect(store.listFailed({ siteId })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryId: accepted.deliveryId,
+        errorCode: "claim_outcome_unknown",
+      }),
+    ]);
+    await expect(
+      store.replayFailed({
+        siteId,
+        deliveryId: accepted.deliveryId,
+        actorMembershipId: "membership-owner",
+        now: "2026-07-27T20:11:00.000Z",
+      }),
+    ).resolves.toBe(true);
+  });
+
   it("lists held spam without payload and releases it for authorized delivery", async () => {
     const held: PublicFormAcceptance = {
       ...accepted,
@@ -196,6 +232,20 @@ describe("D1 public form notification store", () => {
         acceptedAt: held.acceptedAt,
       },
     ]);
+    await expect(
+      store.viewSubmission({
+        siteId,
+        receiptId: held.receiptId,
+        actorMembershipId: "membership-editor",
+        now: "2026-07-27T20:09:00.000Z",
+      }),
+    ).resolves.toEqual({
+      formId: held.identity.formId,
+      receiptId: held.receiptId,
+      acceptedAt: held.acceptedAt,
+      classification: "suspected_spam",
+      fields: held.fields,
+    });
     await expect(
       store.releaseSuspectedSpam({
         siteId,

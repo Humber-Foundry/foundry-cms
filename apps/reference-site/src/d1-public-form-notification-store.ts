@@ -52,6 +52,25 @@ export function createD1PublicFormNotificationStore(
         .prepare(
           `UPDATE public_form_notification_jobs
            SET
+             status = 'failed',
+             lease_token = NULL,
+             lease_until = NULL,
+             last_error_code = 'claim_outcome_unknown',
+             updated_at = ?1
+           WHERE status = 'processing'
+             AND lease_until <= ?1
+             AND EXISTS (
+               SELECT 1 FROM public_form_delivery_intents AS delivery
+               WHERE delivery.id = public_form_notification_jobs.delivery_id
+                 AND delivery.site_id = ?2
+             )`,
+        )
+        .bind(now, siteId)
+        .run();
+      await database
+        .prepare(
+          `UPDATE public_form_notification_jobs
+           SET
              status = 'processing',
              attempts = attempts + 1,
              lease_token = ?1,
@@ -109,7 +128,7 @@ export function createD1PublicFormNotificationStore(
           row.fields_json,
           allowedPreviewFieldIds,
         ),
-        dashboardPath: "/dash#form-delivery-health",
+        dashboardPath: `/dash/forms/${encodeURIComponent(row.receipt_id)}`,
         leaseToken: row.lease_token,
         attempt: row.attempts,
         firstAvailableAt: row.first_available_at,
@@ -327,6 +346,61 @@ export function createD1PublicFormNotificationStore(
         errorCode: row.last_error_code,
         updatedAt: row.updated_at,
       }));
+    },
+    async viewSubmission({
+      siteId,
+      receiptId,
+      actorMembershipId,
+      now,
+    }) {
+      const row = await database
+        .prepare(
+          `SELECT
+             submission.form_id,
+             submission.receipt_id,
+             submission.accepted_at,
+             submission.fields_json,
+             classification.classification
+           FROM public_form_submissions AS submission
+           JOIN public_form_classifications AS classification
+             ON classification.site_id = submission.site_id
+            AND classification.form_id = submission.form_id
+            AND classification.submission_id = submission.submission_id
+           WHERE submission.site_id = ?1 AND submission.receipt_id = ?2`,
+        )
+        .bind(siteId, receiptId)
+        .first<{
+          form_id: string;
+          receipt_id: string;
+          accepted_at: string;
+          fields_json: string;
+          classification: "accepted" | "suspected_spam";
+        }>();
+      if (row === null) {
+        return null;
+      }
+      await database
+        .prepare(
+          `INSERT INTO public_form_operation_audit_events (
+             site_id, delivery_id, actor_membership_id, action, occurred_at
+           )
+           SELECT ?1, delivery.id, ?2, 'submission_viewed', ?3
+           FROM public_form_delivery_intents AS delivery
+           JOIN public_form_submissions AS submission
+             ON submission.site_id = delivery.site_id
+            AND submission.form_id = delivery.form_id
+            AND submission.submission_id = delivery.submission_id
+           WHERE delivery.site_id = ?1 AND submission.receipt_id = ?4`,
+        )
+        .bind(siteId, actorMembershipId, now, receiptId)
+        .run();
+      return {
+        formId: createPublicFormId(row.form_id),
+        receiptId: createPublicFormReceiptId(row.receipt_id),
+        acceptedAt: row.accepted_at,
+        classification: row.classification,
+        fields: JSON.parse(row.fields_json) as Record<string, string>,
+      };
     },
     async releaseSuspectedSpam({ siteId, receiptId, actorMembershipId, now }) {
       const results = await database.batch([

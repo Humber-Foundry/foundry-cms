@@ -104,7 +104,11 @@ export function FormOperationsControls({
           <div className="inventory-row" role="row" key={submission.receiptId}>
             <strong role="cell">
               {submission.formId}
-              <small>{submission.receiptId}</small>
+              <small>
+                <a href={`/dash/forms/${encodeURIComponent(submission.receiptId)}`}>
+                  Review {submission.receiptId}
+                </a>
+              </small>
             </strong>
             <span role="cell">{submission.acceptedAt}</span>
             <div role="cell">

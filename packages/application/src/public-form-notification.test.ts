@@ -45,6 +45,7 @@ function store(
     replayFailed: vi.fn().mockResolvedValue(true),
     listSuspectedSpam: vi.fn().mockResolvedValue([]),
     listFailed: vi.fn().mockResolvedValue([]),
+    viewSubmission: vi.fn().mockResolvedValue(null),
     releaseSuspectedSpam: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
