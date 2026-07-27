@@ -64,6 +64,10 @@ reconciles that global active operation, so a crashed Worker does not require
 someone to revisit the originating workspace before the slot can be released.
 If either production-base check observes drift, the approval receives a
 durable `production_changed` invalidation before the request is rejected.
+Recovery runs before validating a later request's production base, allowing a
+commit that advanced the ref just before a Worker crash to be discovered. If
+Git cannot resolve an ambiguous no-SHA result for 15 minutes, the operation
+becomes terminal with explicit `git_reconciliation_timeout` evidence.
 
 The status vocabulary is:
 

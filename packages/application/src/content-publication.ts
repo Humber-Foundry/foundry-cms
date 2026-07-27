@@ -678,6 +678,26 @@ export function createContentPublicationApplication({
           },
         );
       } else {
+        const observedAt = now();
+        if (
+          new Date(observedAt).getTime() -
+            new Date(publication.requestedAt).getTime() >=
+          deploymentSignalTimeoutMs
+        ) {
+          return store.updatePublication(
+            nextPublication(publication, {
+              status: "failed",
+              detail: "git_reconciliation_timeout",
+              leaseToken: null,
+              leaseExpiresAt: null,
+              updatedAt: observedAt,
+            }),
+            {
+              expectedStatus: publication.status,
+              expectedUpdatedAt: publication.updatedAt,
+            },
+          );
+        }
         return publication;
       }
     }
@@ -813,6 +833,10 @@ export function createContentPublicationApplication({
         if (approval.workspaceId !== input.workspaceId) {
           throw new ContentApprovalInvalidError("approval_not_found");
         }
+        const activePublication = await store.findActivePublication();
+        if (activePublication !== null) {
+          await refreshPublication(activePublication.id);
+        }
         const base = parseProductionBase(
           approval.fingerprint.productionBase,
         );
@@ -839,10 +863,6 @@ export function createContentPublicationApplication({
             reason: "production_changed",
           });
           throw new ContentApprovalInvalidError("release_marker_mismatch");
-        }
-        const activePublication = await store.findActivePublication();
-        if (activePublication !== null) {
-          await refreshPublication(activePublication.id);
         }
         const contributors = await revisions.listContributors(
           approval.workspaceId,
