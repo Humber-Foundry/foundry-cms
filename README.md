@@ -153,6 +153,20 @@ Run the same check locally with:
 node scripts/verify-repository-integrity.mjs
 ```
 
+## Form notification configuration
+
+The reference Worker processes accepted public forms on its five-minute
+schedule. Each installation must replace the example `send_email`
+`destination_address` in `apps/reference-site/wrangler.jsonc` with one verified
+staff mailbox and configure `FOUNDRY_FORM_EMAIL_FROM` and
+`FOUNDRY_FORM_EMAIL_RECIPIENT` to the same fixed sender/destination pair. The
+application command accepts no recipient input; visitor confirmations and
+arbitrary-recipient delivery are deliberately outside this adapter.
+
+Delivery failures remain in D1 with capped retries for 24 hours. The protected
+dashboard reports queue age, failures, retry attempts, adapter configuration,
+and D1 capacity bands without copying submission payloads.
+
 ### Resolve a ticket atomically
 
 Use the resolver instead of separately commenting, editing the map and closing a

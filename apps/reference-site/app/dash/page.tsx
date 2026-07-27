@@ -12,6 +12,7 @@ import {
 import { HumanAccessConfigurationError } from "@/src/human-access-configuration";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
 import { referenceSiteApplication } from "@/src/reference-installation";
+import { loadPublicFormDeliveryHealth } from "@/src/public-form-delivery-health-runtime";
 
 import "./dashboard.css";
 
@@ -52,6 +53,7 @@ export default async function DashboardPage() {
     access.membership.role === "owner"
       ? await createHumanMutationToken(access.identity)
       : null;
+  const formDeliveryHealth = await loadPublicFormDeliveryHealth(access);
 
   return (
     <DashboardShell
@@ -59,6 +61,7 @@ export default async function DashboardPage() {
       currentMembership={access.membership}
       members={members}
       mutationToken={mutationToken}
+      formDeliveryHealth={formDeliveryHealth}
     />
   );
 }

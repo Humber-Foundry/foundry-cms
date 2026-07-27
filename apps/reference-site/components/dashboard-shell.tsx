@@ -1,4 +1,7 @@
-import type { HumanMembership } from "@foundry/application";
+import type {
+  HumanMembership,
+  PublicFormDeliveryHealth,
+} from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
 
 import { DashboardControls } from "./dashboard-controls";
@@ -9,11 +12,13 @@ export function DashboardShell({
   currentMembership,
   members,
   mutationToken,
+  formDeliveryHealth,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
   members: ReadonlyArray<HumanMembership>;
   mutationToken: string | null;
+  formDeliveryHealth: PublicFormDeliveryHealth;
 }) {
   return (
     <div className="dashboard">
@@ -77,6 +82,51 @@ export function DashboardShell({
                 <dt>Dashboard mode</dt>
                 <dd>Protected</dd>
                 <p>Cloudflare Access identity with current D1 membership.</p>
+              </div>
+            </dl>
+          </section>
+          <section aria-labelledby="form-delivery-health">
+            <div className="dashboard-section-heading">
+              <div>
+                <h2 id="form-delivery-health">Form delivery health</h2>
+                <p>
+                  Queue and adapter facts only; submission payloads stay in
+                  their authoritative records.
+                </p>
+              </div>
+            </div>
+            <dl className="status-grid">
+              <div>
+                <dt>Oldest queued</dt>
+                <dd>
+                  {formDeliveryHealth.oldestPendingAgeSeconds === null
+                    ? "None"
+                    : `${Math.ceil(
+                        formDeliveryHealth.oldestPendingAgeSeconds / 60,
+                      )} min`}
+                </dd>
+                <p>
+                  {formDeliveryHealth.pending} pending ·{" "}
+                  {formDeliveryHealth.processing} processing
+                </p>
+              </div>
+              <div>
+                <dt>Failed deliveries</dt>
+                <dd>{formDeliveryHealth.failed}</dd>
+                <p>{formDeliveryHealth.retries} retry attempts recorded.</p>
+              </div>
+              <div>
+                <dt>Email adapter</dt>
+                <dd>{formDeliveryHealth.adapter}</dd>
+                <p>Fixed installation-owned staff destination.</p>
+              </div>
+              <div>
+                <dt>Database capacity</dt>
+                <dd>{formDeliveryHealth.capacity.state}</dd>
+                <p>
+                  {formDeliveryHealth.capacity.usedPercent.toFixed(1)}% of the
+                  configured limit.
+                </p>
               </div>
             </dl>
           </section>
