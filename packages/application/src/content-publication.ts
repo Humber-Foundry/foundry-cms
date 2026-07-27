@@ -127,6 +127,8 @@ export type ContentPublicationStore = Readonly<{
     options?: {
       expectedLeaseToken?: string;
       expectedLeaseValidAt?: string;
+      expectedStatus?: ContentPublicationStatus;
+      expectedUpdatedAt?: string;
     },
   ): Promise<ContentPublication>;
   findPublication(id: ContentPublicationId): Promise<ContentPublication | null>;
@@ -480,7 +482,22 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
       ) {
         return current ?? publication;
       }
+      if (
+        (options?.expectedStatus !== undefined &&
+          current?.status !== options.expectedStatus) ||
+        (options?.expectedUpdatedAt !== undefined &&
+          current?.updatedAt !== options.expectedUpdatedAt)
+      ) {
+        return current ?? publication;
+      }
       if (current?.status === "verified-live") {
+        return current;
+      }
+      if (
+        current !== undefined &&
+        current.commitSha !== null &&
+        publication.commitSha === null
+      ) {
         return current;
       }
       publications.set(publication.id, Object.freeze({ ...publication }));
@@ -503,6 +520,11 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
         [...publications.values()]
           .filter((publication) => publication.workspaceId === workspaceId)
           .sort((left, right) => {
+            const leftIsActive = activeStatuses.has(left.status);
+            const rightIsActive = activeStatuses.has(right.status);
+            if (leftIsActive !== rightIsActive) {
+              return leftIsActive ? -1 : 1;
+            }
             const leftIsContender =
               left.status === "blocked" &&
               left.detail === "publication_in_progress";
@@ -822,6 +844,10 @@ export function createContentPublicationApplication({
                 leaseExpiresAt: null,
                 updatedAt: now(),
               }),
+              {
+                expectedStatus: publication.status,
+                expectedUpdatedAt: publication.updatedAt,
+              },
             );
           } else {
             return publication;
@@ -856,6 +882,10 @@ export function createContentPublicationApplication({
                 detail: "approval_record_missing",
                 updatedAt: now(),
               }),
+              {
+                expectedStatus: currentPublication.status,
+                expectedUpdatedAt: currentPublication.updatedAt,
+              },
             );
           }
           const live = await publisher.isReleaseLive({
@@ -870,6 +900,10 @@ export function createContentPublicationApplication({
               detail: live ? null : "release_marker_pending",
               updatedAt: now(),
             }),
+            {
+              expectedStatus: currentPublication.status,
+              expectedUpdatedAt: currentPublication.updatedAt,
+            },
           );
         }
         return store.updatePublication(
@@ -882,6 +916,10 @@ export function createContentPublicationApplication({
                 : null,
             updatedAt: now(),
           }),
+          {
+            expectedStatus: currentPublication.status,
+            expectedUpdatedAt: currentPublication.updatedAt,
+          },
         );
       },
     }),

@@ -54,8 +54,10 @@ persist its result. An expired lease is reconciled by publish ID before it can
 become failed; a recovered exact commit is durably recorded and releases the
 lease before deployment polling. The stable publication key and commit
 trailers support replay and ambiguous-result reconciliation without creating
-another content commit. Reload recovery prioritizes the meaningful publication
-over a newer blocked contender.
+another content commit. Refresh transitions compare the prior durable status
+and update timestamp, while exact reconciled commit evidence cannot be erased
+by a delayed not-found result. Reload recovery prioritizes any active
+publication over newer terminal contenders.
 
 The status vocabulary is:
 

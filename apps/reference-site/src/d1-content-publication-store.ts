@@ -428,6 +428,8 @@ export function createD1ContentPublicationStore(
       const expectedLeaseToken = options?.expectedLeaseToken ?? null;
       const expectedLeaseValidAt =
         options?.expectedLeaseValidAt ?? null;
+      const expectedStatus = options?.expectedStatus ?? null;
+      const expectedUpdatedAt = options?.expectedUpdatedAt ?? null;
       const results = await database.batch([
         database
           .prepare(
@@ -446,6 +448,9 @@ export function createD1ContentPublicationStore(
                  OR (status = 'requested' AND lease_token = ?8)
                )
                AND (?9 IS NULL OR lease_expires_at > ?9)
+               AND (?10 IS NULL OR status = ?10)
+               AND (?11 IS NULL OR updated_at = ?11)
+               AND NOT (commit_sha IS NOT NULL AND ?2 IS NULL)
                AND NOT (
                  status = 'deployed'
                  AND ?1 IN ('requested', 'committed', 'building', 'unknown')
@@ -469,6 +474,8 @@ export function createD1ContentPublicationStore(
             publication.id,
             expectedLeaseToken,
             expectedLeaseValidAt,
+            expectedStatus,
+            expectedUpdatedAt,
           ),
         auditStatement(publication, true),
       ]);
@@ -495,10 +502,14 @@ export function createD1ContentPublicationStore(
            WHERE workspace_id = ?1
            ORDER BY
              CASE
+               WHEN status IN (
+                 'requested', 'committed', 'building', 'deployed', 'unknown'
+               )
+               THEN 0
                WHEN status = 'blocked'
                  AND detail = 'publication_in_progress'
-               THEN 1
-               ELSE 0
+               THEN 2
+               ELSE 1
              END,
              requested_at DESC,
              id DESC

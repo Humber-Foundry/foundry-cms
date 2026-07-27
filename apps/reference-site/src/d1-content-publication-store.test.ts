@@ -408,16 +408,57 @@ describe("D1 content publication store", () => {
       updatedAt: "2026-07-27T10:09:00.000Z",
     };
     await store.claimPublication(requested);
-    await expect(store.claimPublication(contender)).resolves.toEqual({
+    const blockedClaim = await store.claimPublication(contender);
+    expect(blockedClaim).toEqual({
       state: "blocked",
       publication: expect.objectContaining({
         status: "blocked",
         detail: "publication_in_progress",
       }),
     });
+    await store.updatePublication({
+      ...blockedClaim.publication,
+      detail: "approval_stale",
+    });
 
     await expect(store.findLatestPublication(workspaceId)).resolves.toEqual(
       requested,
+    );
+  });
+
+  it("does not let a stale refresh erase reconciled commit evidence", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-refresh-cas-1");
+    await store.claimPublication(requested);
+    const committed = {
+      ...requested,
+      status: "committed" as const,
+      commitSha: "c".repeat(40),
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:02:00.000Z",
+    };
+    await store.updatePublication(committed);
+
+    await expect(
+      store.updatePublication(
+        {
+          ...requested,
+          status: "failed",
+          detail: "publication_lease_expired",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          updatedAt: "2026-07-27T10:03:00.000Z",
+        },
+        {
+          expectedStatus: requested.status,
+          expectedUpdatedAt: requested.updatedAt,
+        },
+      ),
+    ).resolves.toEqual(committed);
+    await expect(store.findPublication(requested.id)).resolves.toEqual(
+      committed,
     );
   });
 
