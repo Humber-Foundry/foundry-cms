@@ -20,6 +20,7 @@ import { HumanAccessConfigurationError } from "@/src/human-access-configuration"
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
 import {
   contentWorkspaceIdForActor,
+  latestContentWorkspaceIdForActor,
   loadContentRevisionApplication,
   requireExistingContentWorkspaceAccess,
 } from "@/src/content-revision-runtime";
@@ -118,7 +119,8 @@ export default async function DashboardPage({
   try {
     workspaceId =
       requestedWorkspace === undefined
-        ? await contentWorkspaceIdForActor(actorId)
+        ? (await latestContentWorkspaceIdForActor(actorId)) ??
+          (await contentWorkspaceIdForActor(actorId))
         : createContentWorkspaceId(requestedWorkspace);
   } catch {
     notFound();

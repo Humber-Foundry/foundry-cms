@@ -1,4 +1,5 @@
 import type {
+  ContentActorId,
   ContentRevision,
   ContentRevisionStore,
   ContentWorkspaceId,
@@ -8,6 +9,7 @@ import {
   ContentRevisionBookmarkError,
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
+  createContentWorkspaceId,
   restoreContentActorId,
   assertContentRevisionBase,
   assertContentRevisionIdempotency,
@@ -16,6 +18,36 @@ import {
 import type { SiteDefinition, SiteId } from "@foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+
+export async function findLatestContentWorkspaceIdForActor(
+  database: D1DatabaseBinding,
+  siteId: SiteId,
+  actorId: ContentActorId,
+): Promise<ContentWorkspaceId | null> {
+  const row = await database
+    .prepare(
+      `SELECT workspace.workspace_id
+       FROM content_workspaces AS workspace
+       WHERE workspace.site_id = ?1
+         AND workspace.lifecycle = 'open'
+         AND (
+           workspace.owner_actor_id = ?2
+           OR EXISTS (
+             SELECT 1
+             FROM content_workspace_collaborators AS collaborator
+             WHERE collaborator.workspace_id = workspace.workspace_id
+               AND collaborator.actor_id = ?2
+           )
+         )
+       ORDER BY workspace.updated_at DESC, workspace.workspace_id DESC
+       LIMIT 1`,
+    )
+    .bind(siteId, actorId)
+    .first<{ workspace_id: string }>();
+  return row === null
+    ? null
+    : createContentWorkspaceId(row.workspace_id);
+}
 
 type RevisionRow = {
   workspace_id: ContentWorkspaceId;

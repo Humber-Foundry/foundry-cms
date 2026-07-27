@@ -281,7 +281,16 @@ export function ContentEditor({
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
-    const recoveryId = crypto.randomUUID();
+    const forwardExistingRecovery =
+      destination === "fresh" &&
+      initialStale &&
+      staleRecovery !== undefined;
+    const recoveryId = forwardExistingRecovery
+      ? staleRecovery.id
+      : crypto.randomUUID();
+    const recoverySourceWorkspaceId = forwardExistingRecovery
+      ? staleRecovery.sourceWorkspaceId
+      : initialRevision.workspaceId;
     const persistedValues = new Map(
       persistedFields.map((field) => [field.path, field.value]),
     );
@@ -291,6 +300,7 @@ export function ContentEditor({
     }));
     try {
       if (
+        !forwardExistingRecovery &&
         !preserveStaleEdits(
           window.localStorage,
           recoveryId,
@@ -302,7 +312,7 @@ export function ContentEditor({
       }
       const query = new URLSearchParams({
         recovery: recoveryId,
-        recoverFrom: initialRevision.workspaceId,
+        recoverFrom: recoverySourceWorkspaceId,
       });
       if (destination === "fresh") {
         pendingWorkspaceAttempt.current ??= {

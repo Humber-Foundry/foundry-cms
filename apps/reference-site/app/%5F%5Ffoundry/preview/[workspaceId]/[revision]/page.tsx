@@ -27,21 +27,18 @@ import "./preview.css";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  robots: { index: false, follow: false },
-  title: "Saved revision preview",
-};
-
-export default async function RevisionPreviewPage({
-  params,
-  searchParams,
-}: {
+type PreviewPageProps = {
   params: Promise<{ workspaceId: string; revision: string }>;
   searchParams: Promise<{
     capability?: string | string[];
     bookmark?: string | string[];
   }>;
-}) {
+};
+
+async function loadSelectedRevision({
+  params,
+  searchParams,
+}: PreviewPageProps) {
   const {
     workspaceId: workspaceIdParameter,
     revision: revisionParameter,
@@ -92,38 +89,7 @@ export default async function RevisionPreviewPage({
     ) {
       notFound();
     }
-    return (
-      <>
-        <aside className="preview-provenance" aria-label="Preview provenance">
-          <div>
-            <strong>Exact saved preview · revision {revision.revision}</strong>
-            <span>Created {revision.createdAt}</span>
-          </div>
-          <dl>
-            <div>
-              <dt>Content</dt>
-              <dd>{revision.inputs.contentHash}</dd>
-            </div>
-            <div>
-              <dt>Schema</dt>
-              <dd>{revision.inputs.schemaVersion}</dd>
-            </div>
-            <div>
-              <dt>Renderer</dt>
-              <dd>{revision.inputs.rendererVersion}</dd>
-            </div>
-            <div>
-              <dt>Production base</dt>
-              <dd>{revision.inputs.productionBase}</dd>
-            </div>
-          </dl>
-          <a href={`/dash?workspace=${encodeURIComponent(workspaceId)}`}>
-            Return to editor
-          </a>
-        </aside>
-        <SiteRenderer definition={revision.definition} />
-      </>
-    );
+    return revision;
   } catch (error) {
     if (
       error instanceof AccessIdentityError ||
@@ -138,6 +104,55 @@ export default async function RevisionPreviewPage({
     }
     throw error;
   }
+}
 
-  notFound();
+export async function generateMetadata(
+  props: PreviewPageProps,
+): Promise<Metadata> {
+  const revision = await loadSelectedRevision(props);
+  return {
+    robots: { index: false, follow: false },
+    title: revision.definition.home.seo.title,
+    description: revision.definition.home.seo.description,
+  };
+}
+
+export default async function RevisionPreviewPage(
+  props: PreviewPageProps,
+) {
+  const revision = await loadSelectedRevision(props);
+  return (
+    <>
+      <aside className="preview-provenance" aria-label="Preview provenance">
+        <div>
+          <strong>Exact saved preview · revision {revision.revision}</strong>
+          <span>Created {revision.createdAt}</span>
+        </div>
+        <dl>
+          <div>
+            <dt>Content</dt>
+            <dd>{revision.inputs.contentHash}</dd>
+          </div>
+          <div>
+            <dt>Schema</dt>
+            <dd>{revision.inputs.schemaVersion}</dd>
+          </div>
+          <div>
+            <dt>Renderer</dt>
+            <dd>{revision.inputs.rendererVersion}</dd>
+          </div>
+          <div>
+            <dt>Production base</dt>
+            <dd>{revision.inputs.productionBase}</dd>
+          </div>
+        </dl>
+        <a
+          href={`/dash?workspace=${encodeURIComponent(revision.workspaceId)}`}
+        >
+          Return to editor
+        </a>
+      </aside>
+      <SiteRenderer definition={revision.definition} />
+    </>
+  );
 }

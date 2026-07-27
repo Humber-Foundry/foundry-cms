@@ -14,7 +14,10 @@ import {
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
-import { createD1ContentRevisionStore } from "./d1-content-revision-store";
+import {
+  createD1ContentRevisionStore,
+  findLatestContentWorkspaceIdForActor,
+} from "./d1-content-revision-store";
 
 describe("D1 content revision store", () => {
   const editorActorId = createContentActorId("membership-editor");
@@ -50,6 +53,7 @@ describe("D1 content revision store", () => {
   function createApplication(
     actorId = editorActorId,
     targetWorkspaceId = workspaceId,
+    now = "2026-07-27T12:00:00.000Z",
   ) {
     return createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -62,7 +66,7 @@ describe("D1 content revision store", () => {
       actorId,
       rendererVersion: "renderer-test-commit",
       productionBase: "published:site_foundry_reference@1.0.0",
-      now: () => "2026-07-27T12:00:00.000Z",
+      now: () => now,
     });
   }
 
@@ -164,6 +168,47 @@ describe("D1 content revision store", () => {
         .bind(missingWorkspaceId)
         .first<{ count: number }>(),
     ).toEqual({ count: 0 });
+  });
+
+  it("resumes the most recently updated accessible workspace", async () => {
+    await expect(
+      findLatestContentWorkspaceIdForActor(
+        database,
+        referenceSiteDefinition.site.id,
+        editorActorId,
+      ),
+    ).resolves.toBeNull();
+
+    await createApplication().commands.create({
+      actorId: editorActorId,
+      workspaceId,
+      idempotencyKey: "d1-content-create-default",
+    });
+    const freshWorkspaceId = createContentWorkspaceId("workspace_fresh");
+    await createApplication(
+      editorActorId,
+      freshWorkspaceId,
+      "2026-07-27T13:00:00.000Z",
+    ).commands.create({
+      actorId: editorActorId,
+      workspaceId: freshWorkspaceId,
+      idempotencyKey: "d1-content-create-fresh",
+    });
+
+    await expect(
+      findLatestContentWorkspaceIdForActor(
+        database,
+        referenceSiteDefinition.site.id,
+        editorActorId,
+      ),
+    ).resolves.toBe(freshWorkspaceId);
+    await expect(
+      findLatestContentWorkspaceIdForActor(
+        database,
+        referenceSiteDefinition.site.id,
+        outsiderActorId,
+      ),
+    ).resolves.toBeNull();
   });
 
   it("returns the current revision when optimistic concurrency fails", async () => {

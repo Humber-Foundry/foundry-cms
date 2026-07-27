@@ -11,7 +11,10 @@ import {
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
-import { createD1ContentRevisionStore } from "./d1-content-revision-store";
+import {
+  createD1ContentRevisionStore,
+  findLatestContentWorkspaceIdForActor,
+} from "./d1-content-revision-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 
 type LocalContentRevisionStore = ReturnType<
@@ -43,6 +46,48 @@ export async function contentWorkspaceIdForMutation(
   idempotencyKey: string,
 ): Promise<ContentWorkspaceId> {
   return contentWorkspaceIdFromSeed(`${actorId}:${idempotencyKey}`);
+}
+
+export async function latestContentWorkspaceIdForActor(
+  actorId: ContentActorId,
+): Promise<ContentWorkspaceId | null> {
+  if (process.env.NODE_ENV === "development") {
+    let latest:
+      | Readonly<{ workspaceId: ContentWorkspaceId; updatedAt: string }>
+      | undefined;
+    for (const [workspaceId, store] of localRuntime
+      .__foundryContentRevisionStores!) {
+      try {
+        await store.requireAccess(actorId);
+        const current = await store.getCurrent();
+        if (
+          latest === undefined ||
+          current.createdAt > latest.updatedAt ||
+          (current.createdAt === latest.updatedAt &&
+            workspaceId > latest.workspaceId)
+        ) {
+          latest = {
+            workspaceId: createContentWorkspaceId(workspaceId),
+            updatedAt: current.createdAt,
+          };
+        }
+      } catch (error) {
+        if (!(error instanceof ContentWorkspaceAccessError)) {
+          throw error;
+        }
+      }
+    }
+    return latest?.workspaceId ?? null;
+  }
+  const environment = await loadHumanAccessEnvironment();
+  if (environment.FOUNDRY_DB === undefined) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return findLatestContentWorkspaceIdForActor(
+    environment.FOUNDRY_DB,
+    referenceSiteDefinition.site.id,
+    actorId,
+  );
 }
 
 async function contentWorkspaceIdFromSeed(
