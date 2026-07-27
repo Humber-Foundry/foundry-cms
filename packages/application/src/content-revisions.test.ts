@@ -33,6 +33,17 @@ const commandInputs = {
   schemaVersion: "1.0.0",
 } as const;
 
+async function createWorkspace(
+  application: ReturnType<typeof createContentRevisionApplication>,
+  idempotencyKey: string,
+) {
+  return application.commands.create({
+    actorId: editorActorId,
+    workspaceId: applicationInputs.workspaceId,
+    idempotencyKey,
+  });
+}
+
 describe("content revision application", () => {
   it("keeps reads side-effect free until an explicit create command", async () => {
     const application = createContentRevisionApplication({
@@ -64,6 +75,7 @@ describe("content revision application", () => {
       store: createInMemoryContentRevisionStore(),
       ...applicationInputs,
     });
+    await createWorkspace(application, "create-workspace-save-0001");
 
     const saved = await application.commands.save({
       actorId: editorActorId,
@@ -112,6 +124,7 @@ describe("content revision application", () => {
       store: createInMemoryContentRevisionStore(),
       ...applicationInputs,
     });
+    await createWorkspace(application, "create-workspace-replay-0001");
     const command = {
       actorId: editorActorId,
       ...commandInputs,
@@ -135,6 +148,7 @@ describe("content revision application", () => {
       store: createInMemoryContentRevisionStore(),
       ...applicationInputs,
     });
+    await createWorkspace(application, "create-workspace-conflict-0001");
 
     await application.commands.save({
       actorId: editorActorId,
@@ -161,6 +175,7 @@ describe("content revision application", () => {
       store: createInMemoryContentRevisionStore(),
       ...applicationInputs,
     });
+    await createWorkspace(application, "create-workspace-stale-0001");
     await application.commands.save({
       actorId: editorActorId,
       ...commandInputs,
@@ -187,6 +202,7 @@ describe("content revision application", () => {
       store,
       ...applicationInputs,
     });
+    await createWorkspace(owner, "create-workspace-collaborator-0001");
     await owner.commands.addCollaborator(collaboratorActorId);
     const collaborator = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -247,6 +263,7 @@ describe("content revision application", () => {
       store,
       ...applicationInputs,
     });
+    await createWorkspace(original, "create-workspace-replay-stale-0001");
     const command = {
       actorId: editorActorId,
       ...commandInputs,
@@ -276,6 +293,7 @@ describe("content revision application", () => {
       store: createInMemoryContentRevisionStore(),
       ...applicationInputs,
     });
+    await createWorkspace(application, "create-workspace-validation-0001");
 
     await expect(
       application.commands.save({
@@ -298,6 +316,7 @@ describe("content revision application", () => {
       store: createInMemoryContentRevisionStore(),
       ...applicationInputs,
     });
+    await createWorkspace(application, "create-workspace-metadata-0001");
 
     await expect(
       application.commands.save({
@@ -326,6 +345,27 @@ describe("content revision application", () => {
       new ContentRevisionValidationError({
         schemaVersion: "Use Site Definition schema 1.0.0.",
       }),
+    );
+  });
+
+  it("requires explicit creation before a save can claim a workspace", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+
+    await expect(
+      application.commands.save({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Do not create" }],
+        idempotencyKey: "save-without-workspace-0001",
+      }),
+    ).rejects.toBeInstanceOf(ContentWorkspaceAccessError);
+    await expect(application.queries.getCurrent()).rejects.toBeInstanceOf(
+      ContentWorkspaceAccessError,
     );
   });
 });

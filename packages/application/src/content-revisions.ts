@@ -426,7 +426,7 @@ export function createContentRevisionApplication({
             workspaceId: "This workspace is not available.",
           });
         }
-        await initialize();
+        await store.requireAccess(actorId);
         const currentProductionBase = await resolveProductionBase();
         const requestHash = await sha256({
           actorId: command.actorId,
@@ -494,7 +494,7 @@ export function createContentRevisionApplication({
         });
       },
       async addCollaborator(collaboratorActorId: ContentActorId) {
-        await initialize();
+        await store.requireAccess(actorId);
         await store.addCollaborator(actorId, collaboratorActorId);
       },
     }),

@@ -70,8 +70,20 @@ describe("D1 content revision store", () => {
     });
   }
 
+  async function createWorkspace(
+    application: ReturnType<typeof createApplication>,
+    idempotencyKey: string,
+  ) {
+    return application.commands.create({
+      actorId: editorActorId,
+      workspaceId: application.workspaceId,
+      idempotencyKey,
+    });
+  }
+
   it("persists immutable revisions and replays a completed key", async () => {
     const application = createApplication();
+    await createWorkspace(application, "d1-content-create-save-0001");
     const command = {
       actorId: editorActorId,
       workspaceId,
@@ -135,6 +147,7 @@ describe("D1 content revision store", () => {
 
   it("allows explicit collaborators and rejects outsiders", async () => {
     const owner = createApplication();
+    await createWorkspace(owner, "d1-content-create-collaborator");
     await owner.commands.addCollaborator(collaboratorActorId);
     const collaborator = createApplication(collaboratorActorId);
     await expect(collaborator.queries.getCurrent()).resolves.toEqual(
@@ -213,6 +226,7 @@ describe("D1 content revision store", () => {
 
   it("returns the current revision when optimistic concurrency fails", async () => {
     const application = createApplication();
+    await createWorkspace(application, "d1-content-create-conflict");
     await application.commands.save({
       actorId: editorActorId,
       workspaceId,
@@ -237,6 +251,7 @@ describe("D1 content revision store", () => {
   it("never acknowledges the losing definition in a concurrent save", async () => {
     const firstApplication = createApplication();
     const secondApplication = createApplication();
+    await createWorkspace(firstApplication, "d1-content-create-concurrent");
     const [first, second] = await Promise.allSettled([
       firstApplication.commands.save({
         actorId: editorActorId,
@@ -279,6 +294,7 @@ describe("D1 content revision store", () => {
   it("records one audit event for concurrent retries of the same key", async () => {
     const firstApplication = createApplication();
     const secondApplication = createApplication();
+    await createWorkspace(firstApplication, "d1-content-create-retry");
     const command = {
       actorId: editorActorId,
       workspaceId,
@@ -314,6 +330,7 @@ describe("D1 content revision store", () => {
 
   it("rejects a key reused for different mutation input", async () => {
     const application = createApplication();
+    await createWorkspace(application, "d1-content-create-idempotency");
     await application.commands.save({
       actorId: editorActorId,
       workspaceId,
@@ -340,6 +357,8 @@ describe("D1 content revision store", () => {
     const first = createApplication();
     const second = createApplication(editorActorId, otherWorkspaceId);
     const sharedKey = "d1-content-save-shared";
+    await createWorkspace(first, "d1-content-create-first");
+    await createWorkspace(second, "d1-content-create-second");
 
     await first.commands.save({
       actorId: editorActorId,

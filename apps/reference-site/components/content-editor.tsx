@@ -85,6 +85,7 @@ export function ContentEditor({
   } | null>(null);
   const activeRecovery = useRef(staleRecovery);
   const recoveryApplied = useRef(false);
+  const recoverySyncReady = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
@@ -101,7 +102,6 @@ export function ContentEditor({
   useEffect(() => {
     if (
       staleRecovery === undefined ||
-      initialStale ||
       recoveryApplied.current
     ) {
       return;
@@ -128,10 +128,13 @@ export function ContentEditor({
       );
       return;
     }
+    recoveryPending.current = [...recovered, ...conflicts];
+    if (initialStale) {
+      return;
+    }
     for (const edit of recovered) {
       dispatch({ type: "edit", ...edit });
     }
-    recoveryPending.current = [...recovered, ...conflicts];
     setRecoveryConflicts(conflicts);
     if (conflicts.length > 0) {
       setMessage(
@@ -143,6 +146,61 @@ export function ContentEditor({
       );
     }
   }, [initialStale, staleRecovery, workingFields]);
+
+  useEffect(() => {
+    if (
+      staleRecovery === undefined ||
+      initialStale ||
+      !recoveryApplied.current ||
+      activeRecovery.current === undefined
+    ) {
+      return;
+    }
+    if (!recoverySyncReady.current) {
+      recoverySyncReady.current = true;
+      return;
+    }
+    const persistedValues = new Map(
+      persistedFields.map((field) => [field.path, field.value]),
+    );
+    const current = edits.map((edit) => ({
+      ...edit,
+      baseValue: persistedValues.get(edit.path) ?? "",
+    }));
+    const pending = mergeStaleRecoveryEdits(
+      recoveryPending.current,
+      current,
+      new Set(recoveryConflicts.map((conflict) => conflict.path)),
+    );
+    recoveryPending.current = pending;
+    try {
+      if (pending.length === 0) {
+        activeRecovery.current = undefined;
+        clearStaleEdits(
+          window.localStorage,
+          staleRecovery.id,
+          staleRecovery.sourceWorkspaceId,
+        );
+        window.history.replaceState(null, "", activeWorkspaceUrl);
+      } else {
+        preserveStaleEdits(
+          window.localStorage,
+          staleRecovery.id,
+          staleRecovery.sourceWorkspaceId,
+          pending,
+        );
+      }
+    } catch {
+      // The in-memory edit remains usable; the prior durable record is intact.
+    }
+  }, [
+    activeWorkspaceUrl,
+    edits,
+    initialStale,
+    persistedFields,
+    recoveryConflicts,
+    staleRecovery,
+  ]);
 
   async function save() {
     if (pendingAttempt.current === null) {
@@ -308,7 +366,11 @@ export function ContentEditor({
         : mergeStaleRecoveryEdits(
             recoveryPending.current,
             recoveryEdits,
-            new Set(recoveryConflicts.map((conflict) => conflict.path)),
+            new Set(
+              initialStale
+                ? recoveryPending.current.map((edit) => edit.path)
+                : recoveryConflicts.map((conflict) => conflict.path),
+            ),
           );
     try {
       if (
