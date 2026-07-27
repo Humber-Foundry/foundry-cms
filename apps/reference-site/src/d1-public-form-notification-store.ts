@@ -232,7 +232,12 @@ export function createD1PublicFormNotificationStore(
              MIN(CASE
                WHEN job.status IN ('pending', 'retry') THEN job.first_available_at
                ELSE NULL
-             END) AS oldest
+             END) AS oldest,
+             (
+               SELECT COALESCE(SUM(length(submission.fields_json) + 1024), 0)
+               FROM public_form_submissions AS submission
+               WHERE submission.site_id = ?1
+             ) AS used_bytes
            FROM public_form_notification_jobs AS job
            JOIN public_form_delivery_intents AS delivery
              ON delivery.id = job.delivery_id
@@ -245,16 +250,11 @@ export function createD1PublicFormNotificationStore(
           failed: number | null;
           retries: number | null;
           oldest: string | null;
+          used_bytes: number;
         }>();
-      const pageCount =
-        (await database.prepare("PRAGMA page_count").first<{ page_count: number }>()) ??
-        { page_count: 0 };
-      const pageSize =
-        (await database.prepare("PRAGMA page_size").first<{ page_size: number }>()) ??
-        { page_size: 0 };
       const usedPercent = Math.min(
         100,
-        (pageCount.page_count * pageSize.page_size * 100) / capacityLimitBytes,
+        ((row?.used_bytes ?? 0) * 100) / capacityLimitBytes,
       );
       return {
         pending: row?.pending ?? 0,

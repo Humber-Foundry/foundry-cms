@@ -168,7 +168,8 @@ previews; omit it to send no submitted values.
 
 Delivery failures remain in D1 with capped retries for 24 hours. The protected
 dashboard reports queue age, failures, retry attempts, adapter configuration,
-and D1 capacity bands without copying submission payloads. An outcome that
+and conservative logical D1 capacity bands (payload bytes plus per-record
+overhead) without copying submission payloads. An outcome that
 could have reached the provider is stopped for explicit human reconciliation
 instead of being reclaimed automatically.
 

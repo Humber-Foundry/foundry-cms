@@ -63,5 +63,13 @@ describe("Cloudflare form email adapter", () => {
         FOUNDRY_CANONICAL_ORIGIN: "https://example.com",
       }),
     ).toThrow(FormEmailConfigurationError);
+    expect(() =>
+      createCloudflareFormEmailAdapter({
+        FOUNDRY_FORM_EMAIL: { send: vi.fn() },
+        FOUNDRY_FORM_EMAIL_FROM: "forms@example.com",
+        FOUNDRY_FORM_EMAIL_RECIPIENT: "staff@example.com",
+        FOUNDRY_CANONICAL_ORIGIN: "https://",
+      }),
+    ).toThrow(FormEmailConfigurationError);
   });
 });

@@ -85,11 +85,23 @@ export function createCloudflareFormEmailAdapter(
   const binding = environment.FOUNDRY_FORM_EMAIL;
   const from = exactEmail(environment.FOUNDRY_FORM_EMAIL_FROM);
   const recipient = exactEmail(environment.FOUNDRY_FORM_EMAIL_RECIPIENT);
-  const canonicalOrigin = environment.FOUNDRY_CANONICAL_ORIGIN;
-  if (
-    canonicalOrigin === undefined ||
-    !canonicalOrigin.startsWith("https://")
-  ) {
+  let canonicalOrigin: string;
+  try {
+    const configuredOrigin = new URL(
+      environment.FOUNDRY_CANONICAL_ORIGIN ?? "",
+    );
+    if (
+      configuredOrigin.protocol !== "https:" ||
+      configuredOrigin.username !== "" ||
+      configuredOrigin.password !== "" ||
+      configuredOrigin.pathname !== "/" ||
+      configuredOrigin.search !== "" ||
+      configuredOrigin.hash !== ""
+    ) {
+      throw new FormEmailConfigurationError();
+    }
+    canonicalOrigin = configuredOrigin.origin;
+  } catch {
     throw new FormEmailConfigurationError();
   }
   return {
