@@ -1,66 +1,109 @@
 import "server-only";
 
 import {
-  createContentRevisionApplication,
   ContentRevisionConfigurationError,
+  createContentRevisionApplication,
   createContentWorkspaceId,
   createInMemoryContentRevisionStore,
+  type ContentWorkspaceId,
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 
+type LocalContentRevisionStore = ReturnType<
+  typeof createInMemoryContentRevisionStore
+>;
+
 const localRuntime = globalThis as typeof globalThis & {
-  __foundryContentRevisionStore?: ReturnType<
-    typeof createInMemoryContentRevisionStore
-  >;
+  __foundryContentRevisionStores?: Map<string, LocalContentRevisionStore>;
   __foundryLocalRendererVersion?: string;
 };
-localRuntime.__foundryContentRevisionStore ??=
-  createInMemoryContentRevisionStore();
+localRuntime.__foundryContentRevisionStores ??= new Map();
 localRuntime.__foundryLocalRendererVersion ??=
   `local-runtime:${crypto.randomUUID()}`;
 
-export const referenceContentWorkspaceId =
-  createContentWorkspaceId("workspace_home");
-
 export { ContentRevisionConfigurationError };
 
-const productionBase = (contentHash: string) =>
-  `bundled:${referenceSiteDefinition.site.id}@content:${contentHash}`;
+export async function contentWorkspaceIdForActor(
+  actorId: string,
+): Promise<ContentWorkspaceId> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(
+      `${referenceSiteDefinition.site.id}:${actorId}`,
+    ),
+  );
+  const suffix = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 24);
+  return createContentWorkspaceId(`workspace_${suffix}`);
+}
 
-const localApplication = createContentRevisionApplication({
-  siteDefinition: referenceSiteDefinition,
-  store: localRuntime.__foundryContentRevisionStore,
-  workspaceId: referenceContentWorkspaceId,
-  rendererVersion: localRuntime.__foundryLocalRendererVersion,
-  productionBase,
-});
+function applicationFor({
+  workspaceId,
+  store,
+  rendererVersion,
+  productionBaseCommit,
+}: {
+  workspaceId: ContentWorkspaceId;
+  store: LocalContentRevisionStore;
+  rendererVersion: string;
+  productionBaseCommit: string;
+}) {
+  return createContentRevisionApplication({
+    siteDefinition: referenceSiteDefinition,
+    store,
+    workspaceId,
+    rendererVersion,
+    productionBase: (contentHash) =>
+      `${productionBaseCommit}@content:${contentHash}`,
+  });
+}
 
-export async function loadContentRevisionApplication() {
+export async function loadContentRevisionApplication(
+  workspaceId: ContentWorkspaceId,
+) {
   if (process.env.NODE_ENV === "development") {
-    return localApplication;
+    let store =
+      localRuntime.__foundryContentRevisionStores!.get(workspaceId);
+    if (store === undefined) {
+      store = createInMemoryContentRevisionStore();
+      localRuntime.__foundryContentRevisionStores!.set(workspaceId, store);
+    }
+    return applicationFor({
+      workspaceId,
+      store,
+      rendererVersion: localRuntime.__foundryLocalRendererVersion!,
+      productionBaseCommit:
+        `local-source:${localRuntime.__foundryLocalRendererVersion}`,
+    });
   }
+
   const environment = await loadHumanAccessEnvironment();
-  if (environment.FOUNDRY_DB === undefined) {
-    throw new ContentRevisionConfigurationError();
-  }
   const rendererVersion =
     environment.CF_VERSION_METADATA?.id ??
     environment.FOUNDRY_RENDERER_VERSION;
-  if (rendererVersion === undefined || rendererVersion.trim() === "") {
+  const productionBaseCommit = environment.FOUNDRY_PRODUCTION_BASE;
+  if (
+    environment.FOUNDRY_DB === undefined ||
+    rendererVersion === undefined ||
+    rendererVersion.trim() === "" ||
+    productionBaseCommit === undefined ||
+    !/^[a-f0-9]{40,64}$/u.test(productionBaseCommit)
+  ) {
     throw new ContentRevisionConfigurationError();
   }
-  return createContentRevisionApplication({
-    siteDefinition: referenceSiteDefinition,
+  return applicationFor({
+    workspaceId,
     store: createD1ContentRevisionStore(
       environment.FOUNDRY_DB,
       referenceSiteDefinition.site.id,
-      referenceContentWorkspaceId,
+      workspaceId,
     ),
-    workspaceId: referenceContentWorkspaceId,
     rendererVersion,
-    productionBase,
+    productionBaseCommit: `git:${productionBaseCommit}`,
   });
 }

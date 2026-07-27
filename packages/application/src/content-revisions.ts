@@ -97,6 +97,38 @@ export class ContentRevisionConfigurationError extends Error {
   }
 }
 
+export function assertContentRevisionIdempotency(
+  recordedRequestHash: string,
+  requestHash: string,
+): void {
+  if (recordedRequestHash !== requestHash) {
+    throw new ContentRevisionIdempotencyError();
+  }
+}
+
+export function assertContentRevisionBase(
+  baseRevision: number,
+  currentRevision: number,
+): void {
+  if (baseRevision !== currentRevision) {
+    throw new ContentRevisionConflictError(currentRevision);
+  }
+}
+
+export function withContentRevisionBookmark(
+  revision: ContentRevision,
+  bookmark: string,
+): SavedContentRevision {
+  return { ...revision, bookmark };
+}
+
+export function isContentRevisionRenderableBy(
+  revision: ContentRevision,
+  rendererVersion: string,
+): boolean {
+  return revision.inputs.rendererVersion === rendererVersion;
+}
+
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(",")}]`;
@@ -159,19 +191,20 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
     async persist(command) {
       const receipt = receipts.get(command.idempotencyKey);
       if (receipt !== undefined) {
-        if (receipt.requestHash !== command.requestHash) {
-          throw new ContentRevisionIdempotencyError();
-        }
+        assertContentRevisionIdempotency(
+          receipt.requestHash,
+          command.requestHash,
+        );
         return receipt.revision;
       }
-      if (command.baseRevision !== currentRevision) {
-        throw new ContentRevisionConflictError(currentRevision);
-      }
+      assertContentRevisionBase(command.baseRevision, currentRevision);
       const revision = immutableRevision(command.revision);
-      const saved = deepFreeze({
-        ...revision,
-        bookmark: `local:${revision.workspaceId}:${revision.revision}`,
-      });
+      const saved = deepFreeze(
+        withContentRevisionBookmark(
+          revision,
+          `local:${revision.workspaceId}:${revision.revision}`,
+        ),
+      );
       revisions.set(revision.revision, revision);
       currentRevision = revision.revision;
       receipts.set(command.idempotencyKey, {
@@ -225,6 +258,8 @@ export function createContentRevisionApplication({
   };
 
   return Object.freeze({
+    workspaceId,
+    rendererVersion,
     queries: Object.freeze({
       async getCurrent() {
         await initialize();

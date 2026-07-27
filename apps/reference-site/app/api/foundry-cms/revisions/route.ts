@@ -9,7 +9,10 @@ import {
 import type { SiteDefinitionEdit } from "@foundry/site-definition";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
-import { loadContentRevisionApplication } from "../../../../src/content-revision-runtime";
+import {
+  contentWorkspaceIdForActor,
+  loadContentRevisionApplication,
+} from "../../../../src/content-revision-runtime";
 import {
   HumanAccessConfigurationError,
 } from "../../../../src/human-access-configuration";
@@ -107,7 +110,21 @@ export async function POST(request: Request) {
       return Response.json({ error: "invalid_command" }, { status: 400 });
     }
     const body = parsed.body;
-    const application = await loadContentRevisionApplication();
+    const expectedWorkspaceId = await contentWorkspaceIdForActor(
+      access.membership.id,
+    );
+    if (body.workspaceId !== expectedWorkspaceId) {
+      return Response.json(
+        {
+          error: "validation_failed",
+          fields: { workspaceId: "This workspace is not available." },
+        },
+        { status: 422 },
+      );
+    }
+    const application = await loadContentRevisionApplication(
+      expectedWorkspaceId,
+    );
     const saved = await application.commands.save({
       actorId: access.membership.id,
       workspaceId: body.workspaceId,

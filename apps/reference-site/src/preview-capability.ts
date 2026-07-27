@@ -21,6 +21,13 @@ export class PreviewCapabilityError extends Error {
   }
 }
 
+export type PreviewCapabilitySubject = Readonly<{
+  identity: ExternalHumanIdentity;
+  audience: string;
+  workspaceId: ContentWorkspaceId;
+  revision: number;
+}>;
+
 function encode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) {
@@ -54,26 +61,20 @@ async function signingKey(secret: string) {
 }
 
 export async function createPreviewCapability({
-  identity,
-  audience,
-  workspaceId,
-  revision,
+  subject,
   secret,
   now = new Date(),
 }: {
-  identity: ExternalHumanIdentity;
-  audience: string;
-  workspaceId: ContentWorkspaceId;
-  revision: number;
+  subject: PreviewCapabilitySubject;
   secret: string;
   now?: Date;
 }) {
   const claims: PreviewCapabilityClaims = {
-    issuer: identity.binding.issuer,
-    subject: identity.binding.subject,
-    audience,
-    workspaceId,
-    revision,
+    issuer: subject.identity.binding.issuer,
+    subject: subject.identity.binding.subject,
+    audience: subject.audience,
+    workspaceId: subject.workspaceId,
+    revision: subject.revision,
     expiresAt:
       Math.floor(now.getTime() / 1_000) + capabilityLifetimeSeconds,
   };
@@ -90,18 +91,12 @@ export async function createPreviewCapability({
 
 export async function verifyPreviewCapability({
   capability,
-  identity,
-  audience,
-  workspaceId,
-  revision,
+  subject,
   secret,
   now = new Date(),
 }: {
   capability: string;
-  identity: ExternalHumanIdentity;
-  audience: string;
-  workspaceId: ContentWorkspaceId;
-  revision: number;
+  subject: PreviewCapabilitySubject;
   secret: string;
   now?: Date;
 }): Promise<void> {
@@ -124,11 +119,11 @@ export async function verifyPreviewCapability({
       new TextDecoder().decode(decode(claimsPart)),
     );
     const expected: PreviewCapabilityClaims = {
-      issuer: identity.binding.issuer,
-      subject: identity.binding.subject,
-      audience,
-      workspaceId,
-      revision,
+      issuer: subject.identity.binding.issuer,
+      subject: subject.identity.binding.subject,
+      audience: subject.audience,
+      workspaceId: subject.workspaceId,
+      revision: subject.revision,
       expiresAt:
         typeof claims === "object" &&
         claims !== null &&

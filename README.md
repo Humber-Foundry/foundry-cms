@@ -44,7 +44,10 @@ Production installation supplies:
   hostname matches `FOUNDRY_CANONICAL_ORIGIN` and whose contact-form action is
   `contact`;
 - the checked-in `FOUNDRY_FORM_RATE_LIMITER` binding, updated to use an
-  installation-unique positive integer `namespace_id`; and
+  installation-unique positive integer `namespace_id`;
+- `FOUNDRY_PRODUCTION_BASE`, set to the exact 40- or 64-character Git commit
+  containing the bundled published content; renderer identity comes from the
+  Worker version-metadata binding (or an exact `FOUNDRY_RENDERER_VERSION`); and
 - an initial Owner invitation created by guided provisioning before handoff.
 
 Apply the checked-in D1 migration locally with:

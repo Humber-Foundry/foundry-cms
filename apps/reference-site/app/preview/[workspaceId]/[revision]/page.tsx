@@ -6,6 +6,7 @@ import {
   AccessDeniedError,
   ContentRevisionConfigurationError,
   createContentWorkspaceId,
+  isContentRevisionRenderableBy,
 } from "@foundry/application";
 
 import { SiteRenderer } from "@/components/site-renderer";
@@ -84,10 +85,15 @@ export default async function RevisionPreviewPage({
     throw error;
   }
 
-  const revision = await (
-    await loadContentRevisionApplication()
-  ).queries.getRevision(revisionNumber, bookmark);
+  const application = await loadContentRevisionApplication(workspaceId);
+  const revision = await application.queries.getRevision(
+    revisionNumber,
+    bookmark,
+  );
   if (revision === null || revision.workspaceId !== workspaceId) {
+    notFound();
+  }
+  if (!isContentRevisionRenderableBy(revision, application.rendererVersion)) {
     notFound();
   }
 

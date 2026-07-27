@@ -31,10 +31,7 @@ export async function createRevisionPreviewCapability({
 }) {
   const { audience, secret } = await configuration();
   return createPreviewCapability({
-    identity,
-    workspaceId,
-    revision,
-    audience,
+    subject: { identity, workspaceId, revision, audience },
     secret,
   });
 }
@@ -53,10 +50,7 @@ export async function verifyRevisionPreviewCapability({
   const { audience, secret } = await configuration();
   return verifyPreviewCapability({
     capability,
-    identity,
-    workspaceId,
-    revision,
-    audience,
+    subject: { identity, workspaceId, revision, audience },
     secret,
   });
 }

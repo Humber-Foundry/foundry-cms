@@ -21,6 +21,7 @@ vi.mock("../../../../src/human-mutation-runtime", () => ({
   verifyHumanMutation: mocks.verifyMutation,
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
+  contentWorkspaceIdForActor: async () => "workspace_home",
   loadContentRevisionApplication: async () => ({
     commands: { save: mocks.save },
   }),

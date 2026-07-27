@@ -15,10 +15,12 @@ const identity = {
 };
 const workspaceId = createContentWorkspaceId("workspace_home");
 const inputs = {
-  identity,
-  audience: "foundry-dashboard",
-  workspaceId,
-  revision: 3,
+  subject: {
+    identity,
+    audience: "foundry-dashboard",
+    workspaceId,
+    revision: 3,
+  },
   secret: "a-preview-capability-secret",
 };
 
@@ -39,7 +41,7 @@ describe("preview capability", () => {
     await expect(
       verifyPreviewCapability({
         ...inputs,
-        revision: 4,
+        subject: { ...inputs.subject, revision: 4 },
         capability,
         now: new Date("2026-07-27T12:04:59Z"),
       }),

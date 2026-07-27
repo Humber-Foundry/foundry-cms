@@ -9,6 +9,7 @@ import {
   createContentWorkspaceId,
   createContentRevisionApplication,
   createInMemoryContentRevisionStore,
+  isContentRevisionRenderableBy,
 } from "./content-revisions";
 
 const applicationInputs = {
@@ -54,6 +55,12 @@ describe("content revision application", () => {
       productionBase: "published:site_foundry_reference@1.0.0",
     });
     expect(Object.isFrozen(saved)).toBe(true);
+    expect(isContentRevisionRenderableBy(saved, "renderer-commit-a")).toBe(
+      true,
+    );
+    expect(isContentRevisionRenderableBy(saved, "renderer-commit-b")).toBe(
+      false,
+    );
     await expect(application.queries.getRevision(0)).resolves.toEqual(
       expect.objectContaining({ definition: referenceSiteDefinition }),
     );

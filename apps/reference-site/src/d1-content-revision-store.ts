@@ -6,7 +6,9 @@ import type {
 import {
   ContentRevisionConfigurationError,
   ContentRevisionConflictError,
-  ContentRevisionIdempotencyError,
+  assertContentRevisionBase,
+  assertContentRevisionIdempotency,
+  withContentRevisionBookmark,
 } from "@foundry/application";
 import type { SiteDefinition, SiteId } from "@foundry/site-definition";
 
@@ -194,23 +196,22 @@ export function createD1ContentRevisionStore(
       const session = database.withSession("first-primary");
       const existing = await findReceipt(session, command.idempotencyKey);
       if (existing !== null) {
-        if (existing.request_hash !== command.requestHash) {
-          throw new ContentRevisionIdempotencyError();
-        }
+        assertContentRevisionIdempotency(
+          existing.request_hash,
+          command.requestHash,
+        );
         const revision = (await getRevisionFrom(
           session,
           existing.revision,
         ))!;
-        return {
-          ...revision,
-          bookmark: requireBookmark(session.getBookmark()),
-        };
+        return withContentRevisionBookmark(
+          revision,
+          requireBookmark(session.getBookmark()),
+        );
       }
 
       const current = await getCurrentFrom(session);
-      if (current.revision !== command.baseRevision) {
-        throw new ContentRevisionConflictError(current.revision);
-      }
+      assertContentRevisionBase(command.baseRevision, current.revision);
 
       const results = await session.batch([
         session
@@ -322,27 +323,28 @@ export function createD1ContentRevisionStore(
       ]);
 
       if ((results[2]?.meta.changes ?? 0) > 0) {
-        return {
-          ...command.revision,
-          bookmark: requireBookmark(session.getBookmark()),
-        };
+        return withContentRevisionBookmark(
+          command.revision,
+          requireBookmark(session.getBookmark()),
+        );
       }
       const racedReceipt = await findReceipt(
         session,
         command.idempotencyKey,
       );
       if (racedReceipt !== null) {
-        if (racedReceipt.request_hash !== command.requestHash) {
-          throw new ContentRevisionIdempotencyError();
-        }
+        assertContentRevisionIdempotency(
+          racedReceipt.request_hash,
+          command.requestHash,
+        );
         const revision = (await getRevisionFrom(
           session,
           racedReceipt.revision,
         ))!;
-        return {
-          ...revision,
-          bookmark: requireBookmark(session.getBookmark()),
-        };
+        return withContentRevisionBookmark(
+          revision,
+          requireBookmark(session.getBookmark()),
+        );
       }
       throw new ContentRevisionConflictError(
         (await getCurrentFrom(session)).revision,
