@@ -563,7 +563,7 @@ export function ContentEditor({
                   <>
                     <span>Latest: {edit.currentValue}</span>
                     <span>
-                      Your unsaved value: {displayEditableValue(edit.value)}
+                      Your unsaved value: {displayEditableValue(edit)}
                     </span>
                     <span className="editor-conflict-actions">
                       <button
@@ -588,7 +588,7 @@ export function ContentEditor({
                   <>
                     <span>
                       This field no longer exists. Your unsaved value:{" "}
-                      {displayEditableValue(edit.value)}
+                      {displayEditableValue(edit)}
                     </span>
                     <button
                       type="button"
@@ -657,21 +657,6 @@ export function ContentEditor({
   );
 }
 
-function displayEditableValue(value: SiteDefinitionEdit["value"]): string {
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value) as unknown;
-      if (
-        typeof parsed === "object" &&
-        parsed !== null &&
-        "type" in parsed &&
-        parsed.type === "document"
-      ) {
-        return "Rich-text content";
-      }
-    } catch {
-      // Plain text is displayed as entered.
-    }
-  }
-  return value;
+function displayEditableValue(edit: SiteDefinitionEdit): string {
+  return edit.format === "richText" ? "Rich-text content" : edit.value;
 }
