@@ -606,6 +606,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       checkpoint: "initial",
       leaseToken: "lease-winner",
+      recordedAt: "2026-07-27T00:01:00.000Z",
       backupId: "backup-site_reference-after-initial",
       objectKey:
         "forms/site_reference/backup-site_reference-after-initial.enc",
@@ -634,6 +635,25 @@ describe("D1 public form privacy store", () => {
         ...original,
         leaseToken: "lease-loser",
         integrityHash: "sha256:loser",
+      }),
+    ).rejects.toThrow("form_backup_claim_lost");
+    await expect(
+      store.claimBackup({
+        siteId,
+        checkpoint: original.createdAt,
+        leaseToken: "lease-expiring",
+        now: "2026-07-27T00:02:00.000Z",
+        leaseUntil: "2026-07-27T00:15:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      store.recordBackup({
+        ...original,
+        checkpoint: original.createdAt,
+        leaseToken: "lease-expiring",
+        recordedAt: "2026-07-27T00:16:00.000Z",
+        backupId: "backup-site_reference-after-first",
+        objectKey: "forms/site_reference/backup-after-first.enc",
       }),
     ).rejects.toThrow("form_backup_claim_lost");
   });

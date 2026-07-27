@@ -139,6 +139,7 @@ export async function runPublicFormBackupMaintenanceIfDue(
     vault,
     now: new Date(),
     createBackupLeaseToken: () => crypto.randomUUID(),
+    clock: () => new Date(),
     policy: publicFormRetentionPolicyFromEnvironment(environment),
   });
 }

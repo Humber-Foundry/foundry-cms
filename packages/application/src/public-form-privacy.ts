@@ -198,6 +198,7 @@ export interface PublicFormPrivacyStore {
     siteId: SiteId;
     checkpoint: string;
     leaseToken: string;
+    recordedAt: string;
     backupId: string;
     objectKey: string;
     integrityHash: string;
@@ -435,6 +436,7 @@ export async function runPublicFormBackupMaintenance({
   vault,
   now,
   createBackupLeaseToken = () => crypto.randomUUID(),
+  clock = () => new Date(),
   policy = defaultPublicFormRetentionPolicy,
 }: {
   siteId: SiteId;
@@ -442,6 +444,7 @@ export async function runPublicFormBackupMaintenance({
   vault?: PublicFormBackupVault;
   now: Date;
   createBackupLeaseToken?: () => string;
+  clock?: () => Date;
   policy?: PublicFormRetentionPolicy;
 }) {
   const timestamp = now.toISOString();
@@ -486,6 +489,7 @@ export async function runPublicFormBackupMaintenance({
     siteId,
     checkpoint,
     leaseToken,
+    recordedAt: clock().toISOString(),
     ...saved,
     createdAt: timestamp,
     retentionDays: policy.backupDays,
@@ -497,7 +501,7 @@ export async function runPublicFormPrivacyMaintenance(
   input: Parameters<typeof runPublicFormRetentionMaintenance>[0] &
     Pick<
       Parameters<typeof runPublicFormBackupMaintenance>[0],
-      "vault" | "createBackupLeaseToken"
+      "vault" | "createBackupLeaseToken" | "clock"
     >,
 ) {
   const retention = await runPublicFormRetentionMaintenance(input);

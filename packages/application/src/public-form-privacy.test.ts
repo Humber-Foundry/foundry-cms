@@ -173,6 +173,7 @@ describe("public form privacy application", () => {
         backupId: "backup-site_reference-after-initial",
         checkpoint: "initial",
         leaseToken: expect.any(String),
+        recordedAt: expect.any(String),
         retentionDays: 30,
       }),
     );

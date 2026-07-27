@@ -794,7 +794,7 @@ export function createD1PublicFormPrivacyStore(
            WHERE EXISTS (
              SELECT 1 FROM public_form_backup_claims
              WHERE site_id = ?2 AND checkpoint = ?8 AND lease_token = ?9
-               AND lease_until > ?5
+               AND lease_until > ?10
            )
            ON CONFLICT (backup_id) DO UPDATE SET
              integrity_hash = excluded.integrity_hash,
@@ -814,6 +814,7 @@ export function createD1PublicFormPrivacyStore(
             input.retentionDays,
             input.checkpoint,
             input.leaseToken,
+            input.recordedAt,
           ),
         database
           .prepare(
