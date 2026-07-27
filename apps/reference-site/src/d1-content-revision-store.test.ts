@@ -203,6 +203,42 @@ describe("D1 content revision store", () => {
     );
   });
 
+  it("records one audit event for concurrent retries of the same key", async () => {
+    const firstApplication = createApplication();
+    const secondApplication = createApplication();
+    const command = {
+      actorId: editorActorId,
+      workspaceId,
+      schemaVersion: "1.0.0",
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "One retried save" }],
+      idempotencyKey: "d1-content-concurrent-0003",
+    } as const;
+
+    const [first, second] = await Promise.all([
+      firstApplication.commands.save(command),
+      secondApplication.commands.save(command),
+    ]);
+
+    expect(second).toEqual(
+      expect.objectContaining({
+        workspaceId: first.workspaceId,
+        revision: first.revision,
+        definition: first.definition,
+      }),
+    );
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM content_revision_audit_events
+           WHERE workspace_id = ?1 AND revision = ?2`,
+        )
+        .bind(workspaceId, first.revision)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
+  });
+
   it("rejects a key reused for different mutation input", async () => {
     const application = createApplication();
     await application.commands.save({

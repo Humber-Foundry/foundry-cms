@@ -50,6 +50,7 @@ CREATE TABLE content_revision_audit_events (
   actor_id TEXT NOT NULL,
   event_type TEXT NOT NULL CHECK (event_type = 'content.revision.created'),
   occurred_at TEXT NOT NULL,
+  UNIQUE (workspace_id, revision, event_type),
   FOREIGN KEY (workspace_id, revision)
     REFERENCES content_revisions(workspace_id, revision)
 );

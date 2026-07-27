@@ -385,7 +385,8 @@ export function createD1ContentRevisionStore(
                WHERE idempotency_key = ?5
                  AND workspace_id = ?1
                  AND revision = ?2
-             )`,
+             )
+             ON CONFLICT (workspace_id, revision, event_type) DO NOTHING`,
           )
           .bind(
             workspaceId,
