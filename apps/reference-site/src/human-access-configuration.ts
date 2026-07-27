@@ -13,6 +13,8 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_CANONICAL_ORIGIN?: string;
   FOUNDRY_CSRF_SECRET?: string;
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET?: string;
+  FOUNDRY_RENDERER_VERSION?: string;
+  CF_VERSION_METADATA?: Readonly<{ id: string }>;
   FOUNDRY_DB?: D1DatabaseBinding;
 }>;
 

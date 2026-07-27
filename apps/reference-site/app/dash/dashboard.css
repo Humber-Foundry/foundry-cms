@@ -298,6 +298,135 @@
   margin-top: 3.5rem;
 }
 
+.content-editor {
+  margin-bottom: 3.5rem;
+  border: 1px solid #dce1dc;
+  border-radius: 0.8rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  background: var(--white);
+}
+
+.editor-heading {
+  align-items: center;
+}
+
+.editor-actions,
+.editor-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.editor-actions .button {
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+.editor-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.editor-status {
+  padding-block: 0.85rem;
+  border-block: 1px solid #e6e9e6;
+  font-size: 0.8rem;
+}
+
+.editor-status a {
+  font-weight: 700;
+  text-underline-offset: 0.25rem;
+}
+
+.editor-message {
+  min-height: 1.5rem;
+  margin: 0.75rem 0;
+  color: #8a352f;
+  font-size: 0.8rem;
+}
+
+.editor-groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.editor-groups fieldset {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid #dce1dc;
+  border-radius: 0.65rem;
+  padding: 1rem;
+}
+
+.editor-groups legend {
+  padding-inline: 0.35rem;
+  font-weight: 700;
+}
+
+.editor-groups label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.editor-groups label > span {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.editor-groups code {
+  color: #78817d;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+
+.editor-groups input,
+.editor-groups textarea {
+  width: 100%;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.45rem;
+  padding: 0.65rem 0.75rem;
+  background: #fbfcfa;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+.editor-groups textarea {
+  resize: vertical;
+}
+
+.editor-groups [aria-invalid="true"] {
+  border-color: #a94a42;
+}
+
+.editor-groups small {
+  min-height: 1rem;
+  color: #a94a42;
+  font-weight: 500;
+}
+
+.state-dirty,
+.state-saving {
+  background: #fff0c8;
+  color: #72540c;
+}
+
+.state-conflict {
+  background: #f6d8d5;
+  color: #8a352f;
+}
+
 .inventory-table {
   overflow: hidden;
   border: 1px solid #dce1dc;
@@ -440,7 +569,8 @@
   }
 
   .status-grid,
-  .version-card {
+  .version-card,
+  .editor-groups {
     grid-template-columns: 1fr;
   }
 

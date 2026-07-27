@@ -11,6 +11,7 @@ import {
 } from "@/src/human-access-runtime";
 import { HumanAccessConfigurationError } from "@/src/human-access-configuration";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
+import { loadContentRevisionApplication } from "@/src/content-revision-runtime";
 import { referenceSiteApplication } from "@/src/reference-installation";
 
 import "./dashboard.css";
@@ -52,6 +53,10 @@ export default async function DashboardPage() {
     access.membership.role === "owner"
       ? await createHumanMutationToken(access.identity)
       : null;
+  const contentRevision = await (
+    await loadContentRevisionApplication()
+  ).queries.getCurrent();
+  const contentMutationToken = await createHumanMutationToken(access.identity);
 
   return (
     <DashboardShell
@@ -59,6 +64,8 @@ export default async function DashboardPage() {
       currentMembership={access.membership}
       members={members}
       mutationToken={mutationToken}
+      contentRevision={contentRevision}
+      contentMutationToken={contentMutationToken}
     />
   );
 }

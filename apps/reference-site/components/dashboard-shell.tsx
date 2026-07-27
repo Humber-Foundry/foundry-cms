@@ -1,6 +1,8 @@
 import type { HumanMembership } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
+import type { ContentRevision } from "@foundry/application";
 
+import { ContentEditor } from "./content-editor";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 
@@ -9,11 +11,15 @@ export function DashboardShell({
   currentMembership,
   members,
   mutationToken,
+  contentRevision,
+  contentMutationToken,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
   members: ReadonlyArray<HumanMembership>;
   mutationToken: string | null;
+  contentRevision: ContentRevision;
+  contentMutationToken: string;
 }) {
   return (
     <div className="dashboard">
@@ -44,8 +50,8 @@ export function DashboardShell({
         </nav>
         <main className="dashboard-main">
           <div className="notice" role="status">
-            <span>Read-only foundation</span>
-            Editing arrives through later, independently reviewed tickets.
+            <span>Revision editor</span>
+            Draft saves are immutable and previews are bound to one exact revision.
           </div>
           <div className="dashboard-title-row">
             <div>
@@ -55,6 +61,10 @@ export function DashboardShell({
             </div>
             <DashboardControls siteId={definition.site.id} />
           </div>
+          <ContentEditor
+            csrfToken={contentMutationToken}
+            initialRevision={contentRevision}
+          />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">
               <div>

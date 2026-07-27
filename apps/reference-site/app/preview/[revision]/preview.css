@@ -1,0 +1,57 @@
+.preview-provenance {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 1.5rem;
+  align-items: center;
+  padding: 0.8rem var(--page-gutter);
+  border-bottom: 1px solid #38413d;
+  background: #17201d;
+  color: #fbfaf7;
+  font-size: 0.75rem;
+}
+
+.preview-provenance > div {
+  display: grid;
+}
+
+.preview-provenance span,
+.preview-provenance dt {
+  color: #aeb7b2;
+}
+
+.preview-provenance dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+
+.preview-provenance dl div {
+  min-width: 0;
+}
+
+.preview-provenance dd {
+  overflow: hidden;
+  margin: 0.15rem 0 0;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-provenance a {
+  font-weight: 700;
+}
+
+@media (max-width: 880px) {
+  .preview-provenance {
+    position: static;
+    grid-template-columns: 1fr;
+  }
+
+  .preview-provenance dl {
+    grid-template-columns: 1fr 1fr;
+  }
+}

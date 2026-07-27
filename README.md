@@ -95,6 +95,15 @@ delivery held; invalid and clearly automated input is rejected. Capacity,
 Turnstile and D1 failures return retryable public errors without internal
 details.
 
+### Immutable content revisions
+
+Owners and Editors can change schema-declared copy from `/dash`. Every save uses
+a stable field path, idempotency key and base revision; D1 creates an immutable
+revision or returns the latest revision as an explicit conflict. Saved revisions
+render at `/preview/<revision>` through the same site renderer used by the
+public route. The protected preview identifies its exact content hash, schema
+version, Worker renderer version and bundled production base.
+
 Build and verify the Cloudflare Workers artifact:
 
 ```sh
