@@ -15,6 +15,7 @@ export function DashboardShell({
   contentMutationToken,
   initialPreviewUrl,
   initialContentStale,
+  recoverStaleEdits,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -24,6 +25,7 @@ export function DashboardShell({
   contentMutationToken: string;
   initialPreviewUrl: string;
   initialContentStale: boolean;
+  recoverStaleEdits: boolean;
 }) {
   const activeWorkspaceUrl =
     `/dash?workspace=${encodeURIComponent(contentRevision.workspaceId)}`;
@@ -76,6 +78,7 @@ export function DashboardShell({
             initialPreviewUrl={initialPreviewUrl}
             initialStale={initialContentStale}
             activeWorkspaceUrl={activeWorkspaceUrl}
+            recoverStaleEdits={recoverStaleEdits}
           />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">

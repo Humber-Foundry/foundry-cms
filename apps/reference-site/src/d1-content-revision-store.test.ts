@@ -46,15 +46,18 @@ describe("D1 content revision store", () => {
     await miniflare.dispose();
   });
 
-  function createApplication(actorId = editorActorId) {
+  function createApplication(
+    actorId = editorActorId,
+    targetWorkspaceId = workspaceId,
+  ) {
     return createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
       store: createD1ContentRevisionStore(
         database,
         referenceSiteDefinition.site.id,
-        workspaceId,
+        targetWorkspaceId,
       ),
-      workspaceId,
+      workspaceId: targetWorkspaceId,
       actorId,
       rendererVersion: "renderer-test-commit",
       productionBase: "published:site_foundry_reference@1.0.0",
@@ -261,6 +264,47 @@ describe("D1 content revision store", () => {
         idempotencyKey: "d1-content-save-0004",
       }),
     ).rejects.toBeInstanceOf(ContentRevisionIdempotencyError);
+  });
+
+  it("scopes idempotency keys to one workspace", async () => {
+    const otherWorkspaceId = createContentWorkspaceId("workspace_other");
+    const first = createApplication();
+    const second = createApplication(editorActorId, otherWorkspaceId);
+    const sharedKey = "d1-content-save-shared";
+
+    await first.commands.save({
+      actorId: editorActorId,
+      workspaceId,
+      schemaVersion: "1.0.0",
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "First workspace" }],
+      idempotencyKey: sharedKey,
+    });
+    await expect(
+      second.commands.save({
+        actorId: editorActorId,
+        workspaceId: otherWorkspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Second workspace" }],
+        idempotencyKey: sharedKey,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        workspaceId: otherWorkspaceId,
+        revision: 1,
+      }),
+    );
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM content_revision_receipts
+           WHERE idempotency_key = ?1`,
+        )
+        .bind(sharedKey)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 2 });
   });
 
   it("prevents update and deletion of persisted revision rows", async () => {

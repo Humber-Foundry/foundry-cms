@@ -34,6 +34,7 @@ export default async function DashboardPage({
   searchParams: Promise<{
     workspace?: string | string[];
     newWorkspace?: string | string[];
+    recover?: string | string[];
   }>;
 }) {
   let access;
@@ -65,7 +66,7 @@ export default async function DashboardPage({
     const workspaceId = createContentWorkspaceId(
       `workspace_${crypto.randomUUID().replaceAll("-", "")}`,
     );
-    redirect(`/dash?workspace=${workspaceId}`);
+    redirect(`/dash?workspace=${workspaceId}&recover=1`);
   }
   const members =
     access.membership.role === "owner"
@@ -125,6 +126,7 @@ export default async function DashboardPage({
       contentMutationToken={contentMutationToken}
       initialPreviewUrl={initialPreviewUrl}
       initialContentStale={initialContentStale}
+      recoverStaleEdits={requested.recover === "1"}
     />
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type { ContentRevision } from "@foundry/application";
 import {
@@ -14,6 +14,10 @@ import {
   createContentEditorState,
 } from "../src/content-editor-history";
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
+import {
+  consumeStaleEdits,
+  preserveStaleEdits,
+} from "../src/content-editor-recovery";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
 
@@ -35,12 +39,14 @@ export function ContentEditor({
   initialPreviewUrl,
   initialStale = false,
   activeWorkspaceUrl,
+  recoverStaleEdits = false,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
   initialPreviewUrl: string;
   initialStale?: boolean;
   activeWorkspaceUrl: string;
+  recoverStaleEdits?: boolean;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -72,6 +78,21 @@ export function ContentEditor({
   const edits = changedFields(persistedFields, workingFields);
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked = state.status === "saving" || state.status === "stale";
+
+  useEffect(() => {
+    if (!recoverStaleEdits || initialStale) {
+      return;
+    }
+    const recovered = consumeStaleEdits(window.sessionStorage);
+    for (const edit of recovered) {
+      dispatch({ type: "edit", ...edit });
+    }
+    if (recovered.length > 0) {
+      setMessage(
+        "Unsaved edits were recovered in this fresh workspace. Review and save them when ready.",
+      );
+    }
+  }, [initialStale, recoverStaleEdits]);
 
   async function save() {
     if (pendingAttempt.current === null) {
@@ -172,6 +193,18 @@ export function ContentEditor({
     dispatch({ type: "edit", path, value });
   }
 
+  function preserveEditsForFreshWorkspace(): boolean {
+    try {
+      preserveStaleEdits(window.sessionStorage, edits);
+      return true;
+    } catch {
+      setMessage(
+        "The browser could not transfer these edits. Copy them before starting a fresh workspace.",
+      );
+      return false;
+    }
+  }
+
   return (
     <section className="content-editor" aria-labelledby="content-editor-heading">
       <div className="dashboard-section-heading editor-heading">
@@ -230,6 +263,15 @@ export function ContentEditor({
               state.status === "stale"
                 ? "/dash?newWorkspace=1"
                 : activeWorkspaceUrl
+            }
+            onClick={
+              state.status === "stale"
+                ? (event) => {
+                    if (!preserveEditsForFreshWorkspace()) {
+                      event.preventDefault();
+                    }
+                  }
+                : undefined
             }
           >
             {state.status === "stale"

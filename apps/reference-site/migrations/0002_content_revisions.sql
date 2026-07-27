@@ -34,11 +34,12 @@ CREATE TABLE content_revisions (
 );
 
 CREATE TABLE content_revision_receipts (
-  idempotency_key TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
   request_hash TEXT NOT NULL,
   revision INTEGER NOT NULL,
   created_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, idempotency_key),
   FOREIGN KEY (workspace_id, revision)
     REFERENCES content_revisions(workspace_id, revision)
 );

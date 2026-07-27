@@ -317,7 +317,7 @@ export function createD1ContentRevisionStore(
              )
              AND NOT EXISTS (
                SELECT 1 FROM content_revision_receipts
-               WHERE idempotency_key = ?12
+               WHERE idempotency_key = ?12 AND workspace_id = ?1
              )`,
           )
           .bind(
@@ -370,7 +370,7 @@ export function createD1ContentRevisionStore(
                  AND revision = ?4
                  AND request_hash = ?3
              )
-             ON CONFLICT (idempotency_key) DO NOTHING`,
+             ON CONFLICT (workspace_id, idempotency_key) DO NOTHING`,
           )
           .bind(
             command.idempotencyKey,
