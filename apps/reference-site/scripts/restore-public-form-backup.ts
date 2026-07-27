@@ -123,15 +123,15 @@ function createRemoteBackupBucket({
   destination: string;
 }): R2BackupBucket {
   return {
-    async get(key) {
+    async get() {
       const record = await database
         .prepare(
           `SELECT object_key, integrity_hash, created_at, expires_at
            FROM public_form_backup_records
-           WHERE backup_id = ?1 AND object_key = ?2
+           WHERE backup_id = ?1
            LIMIT 1`,
         )
-        .bind(backupId, key)
+        .bind(backupId)
         .first<{
           object_key: string;
           integrity_hash: string;

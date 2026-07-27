@@ -260,6 +260,7 @@ export function createEncryptedR2PublicFormBackupVault({
   return {
     async saveEncrypted({
       backupId,
+      attemptId,
       snapshot,
       createdAt,
       retentionDays,
@@ -312,7 +313,16 @@ export function createEncryptedR2PublicFormBackupVault({
           ciphertext: encodeBase64(ciphertext),
         }),
       );
-      const objectKey = `${prefix}${backupId}.enc`;
+      if (
+        attemptId !== undefined &&
+        !/^[A-Za-z0-9_-]{1,128}$/u.test(attemptId)
+      ) {
+        throw new Error("form_backup_attempt_invalid");
+      }
+      const objectKey =
+        attemptId === undefined
+          ? `${prefix}${backupId}.enc`
+          : `${prefix}${backupId}/${attemptId}.enc`;
       const integrityHash = await sha256(envelope);
       await bucket.put(objectKey, envelope, {
         customMetadata: {

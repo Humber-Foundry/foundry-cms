@@ -291,6 +291,78 @@ describe("public form privacy application", () => {
     expect(privacyStore.recordBackup).toHaveBeenCalledOnce();
   });
 
+  it("keeps a stale writer from overwriting the promoted R2 object", async () => {
+    let releaseStale!: () => void;
+    let staleStarted!: () => void;
+    const staleGate = new Promise<void>((resolve) => {
+      releaseStale = resolve;
+    });
+    const staleStartedGate = new Promise<void>((resolve) => {
+      staleStarted = resolve;
+    });
+    let promotedObjectKey: string | null = null;
+    const objects = new Map<string, string>();
+    const privacyStore = store({
+      claimBackup: vi.fn().mockResolvedValue(true),
+      recordBackup: vi.fn(async (input) => {
+        if (input.leaseToken === "lease-stale") {
+          throw new Error("form_backup_claim_lost");
+        }
+        promotedObjectKey = input.objectKey;
+      }),
+    });
+    const vault: PublicFormBackupVault = {
+      deleteExpired: vi.fn().mockResolvedValue(0),
+      async saveEncrypted(input) {
+        const objectKey =
+          `forms/site_reference/${input.backupId}/${input.attemptId}.enc`;
+        if (input.attemptId === "lease-stale") {
+          staleStarted();
+          await staleGate;
+        }
+        objects.set(objectKey, String(input.attemptId));
+        return {
+          backupId: input.backupId,
+          objectKey,
+          integrityHash: `sha256:${input.attemptId}`,
+          expiresAt: "2026-08-26T00:00:00.000Z",
+        };
+      },
+    };
+
+    const stale = runPublicFormPrivacyMaintenance({
+      siteId,
+      store: privacyStore,
+      vault,
+      now: new Date("2026-07-27T00:00:00.000Z"),
+      createBackupLeaseToken: () => "lease-stale",
+      clock: () => new Date("2026-07-27T00:16:00.000Z"),
+    });
+    await staleStartedGate;
+    await expect(
+      runPublicFormPrivacyMaintenance({
+        siteId,
+        store: privacyStore,
+        vault,
+        now: new Date("2026-07-27T00:15:01.000Z"),
+        createBackupLeaseToken: () => "lease-winner",
+        clock: () => new Date("2026-07-27T00:15:02.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      backupId: "backup-site_reference-after-initial",
+    });
+    releaseStale();
+    await expect(stale).rejects.toThrow("form_backup_claim_lost");
+
+    const winner =
+      "forms/site_reference/backup-site_reference-after-initial/lease-winner.enc";
+    const staleObject =
+      "forms/site_reference/backup-site_reference-after-initial/lease-stale.enc";
+    expect(promotedObjectKey).toBe(winner);
+    expect(objects.get(winner)).toBe("lease-winner");
+    expect(objects.get(staleObject)).toBe("lease-stale");
+  });
+
   it("can resume the primary verification write after target promotion", async () => {
     const primary = store({
       recordRestoreVerification: vi

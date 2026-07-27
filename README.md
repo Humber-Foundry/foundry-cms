@@ -227,12 +227,14 @@ RSA-OAEP recovery recipient, and writes only the envelope to the private
 matching PKCS#8 private key outside Cloudflare and the repository in
 client-controlled recovery custody. The Worker can encrypt backups but cannot
 decrypt them. A D1 lease fences the complete save-and-record operation. Backup
-attempts use the last recorded backup as a stable retry checkpoint, so an
-uncertain R2 response overwrites the same object instead of creating an orphan.
-The online snapshot path rejects per-site estimates above 8 MiB before loading
-all rows into Worker memory. Encrypted objects expire after 30 days; configure
-the same 30-day prefix lifecycle on the private R2 bucket as a provider-side
-backstop to the scheduled expiry sweep.
+attempts use the last recorded backup as a stable logical retry checkpoint and
+write immutable per-lease R2 objects; D1 atomically promotes only the winning
+object pointer. A stale or ambiguous writer therefore cannot overwrite the
+recoverable checkpoint, and its unreferenced ciphertext remains subject to the
+same expiry sweep. The online snapshot path rejects per-site estimates above 8
+MiB before loading all rows into Worker memory. Encrypted objects expire after
+30 days; configure the same 30-day prefix lifecycle on the private R2 bucket as
+a provider-side backstop to the scheduled expiry sweep.
 
 Restore is deliberately fail-closed and runs from a client-controlled operator
 machine, not the Worker. Set a short-lived `CLOUDFLARE_API_TOKEN` with D1

@@ -93,6 +93,48 @@ function vaults(bucket: R2BackupBucket) {
 }
 
 describe("encrypted R2 form backup vault", () => {
+  it("writes immutable per-attempt objects for one logical backup", async () => {
+    const bucket = memoryBucket();
+    const { backup } = vaults(bucket);
+    const snapshot: PublicFormBackupSnapshot = {
+      version: 1,
+      siteId,
+      createdAt: new Date().toISOString(),
+      submissions: [],
+      classifications: [],
+      deliveries: [],
+      outboxEvents: [],
+      notificationJobs: [],
+      acceptanceAuditFacts: [],
+      auditFacts: [],
+    };
+    const createdAt = new Date().toISOString();
+
+    const first = await backup.saveEncrypted({
+      backupId: "backup-checkpoint",
+      attemptId: "lease-a",
+      snapshot,
+      createdAt,
+      retentionDays: 30,
+    });
+    const second = await backup.saveEncrypted({
+      backupId: "backup-checkpoint",
+      attemptId: "lease-b",
+      snapshot,
+      createdAt,
+      retentionDays: 30,
+    });
+
+    expect(first.objectKey).toBe(
+      "forms/site_reference/backup-checkpoint/lease-a.enc",
+    );
+    expect(second.objectKey).toBe(
+      "forms/site_reference/backup-checkpoint/lease-b.enc",
+    );
+    expect(bucket.objects.has(first.objectKey)).toBe(true);
+    expect(bucket.objects.has(second.objectKey)).toBe(true);
+  });
+
   it("stores ciphertext, authenticates site metadata, and removes expired objects", async () => {
     const bucket = memoryBucket();
     const { backup, recovery } = vaults(bucket);

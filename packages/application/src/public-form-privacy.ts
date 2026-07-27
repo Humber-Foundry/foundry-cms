@@ -230,6 +230,7 @@ export interface PublicFormPrivacyStore {
 export interface PublicFormBackupVault {
   saveEncrypted(input: {
     backupId: string;
+    attemptId?: string;
     snapshot: PublicFormBackupSnapshot;
     createdAt: string;
     retentionDays: number;
@@ -481,6 +482,7 @@ export async function runPublicFormBackupMaintenance({
   });
   const saved = await vault.saveEncrypted({
     backupId,
+    attemptId: leaseToken,
     snapshot,
     createdAt: timestamp,
     retentionDays: policy.backupDays,
