@@ -21,13 +21,13 @@ describe("reference Site Definition", () => {
   );
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.0.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.0.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.1.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.1.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.0.0",
+      "https://foundrycms.dev/schemas/site-definition/1.1.0",
     );
   });
 
@@ -267,9 +267,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.0.0.",
+        "section_missing.title": "This field is not in Site Definition 1.1.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.0.0.",
+        "section_hero.href": "This field is not in Site Definition 1.1.0.",
       },
     });
   });
@@ -283,7 +283,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.0.0.",
+        "This field is not in Site Definition 1.1.0.",
       );
     }
   });

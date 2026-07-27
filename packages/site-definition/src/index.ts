@@ -85,8 +85,8 @@ export type PageSection =
   | CallToActionSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.0.0";
-  schemaVersion: "1.0.0";
+  definitionVersion: "1.1.0";
+  schemaVersion: "1.1.0";
   site: Readonly<{
     id: SiteId;
     name: string;
@@ -106,14 +106,14 @@ export type SiteDefinition = Readonly<{
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.0.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.1.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
   required: ["definitionVersion", "schemaVersion", "site", "home"],
   properties: {
-    definitionVersion: { const: "1.0.0" },
-    schemaVersion: { const: "1.0.0" },
+    definitionVersion: { const: "1.1.0" },
+    schemaVersion: { const: "1.1.0" },
     site: {
       type: "object",
       additionalProperties: false,
@@ -431,8 +431,8 @@ export const siteDefinitionSchema = {
 } as const;
 
 export const referenceSiteDefinition = {
-  definitionVersion: "1.0.0",
-  schemaVersion: "1.0.0",
+  definitionVersion: "1.1.0",
+  schemaVersion: "1.1.0",
   site: {
     id: createSiteId("site_foundry_reference"),
     name: "Foundry Reference",

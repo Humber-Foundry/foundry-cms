@@ -147,7 +147,8 @@ function isSafeLink(href: string): boolean {
   if (
     href.length === 0 ||
     href.length > 2_048 ||
-    /[\u0000-\u0020\u007f]/u.test(href)
+    /[\u0000-\u0020\u007f]/u.test(href) ||
+    href.includes("\\")
   ) {
     return false;
   }
@@ -752,11 +753,23 @@ export function serializeRichTextToMarkdown(
   return blocks.length === 0 ? "" : `${blocks.join("\n\n")}\n`;
 }
 
+function isEscapedAt(value: string, index: number): boolean {
+  let backslashes = 0;
+  for (
+    let candidate = index - 1;
+    candidate >= 0 && value[candidate] === "\\";
+    candidate -= 1
+  ) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
+}
+
 function findUnescaped(value: string, needle: string, from: number): number {
   for (let index = from; index <= value.length - needle.length; index += 1) {
     if (
       value.slice(index, index + needle.length) === needle &&
-      (index === 0 || value[index - 1] !== "\\")
+      !isEscapedAt(value, index)
     ) {
       return index;
     }

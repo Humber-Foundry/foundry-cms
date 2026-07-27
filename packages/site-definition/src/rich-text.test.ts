@@ -355,6 +355,23 @@ describe("rich text contract", () => {
     expect(parseRichTextMarkdown("1\\. item\n")).toEqual(document);
   });
 
+  it("round-trips text ending in a backslash inside formatting", () => {
+    const document: RichTextDocument = {
+      version: "1.0.0",
+      type: "document",
+      children: [
+        {
+          type: "paragraph",
+          children: [{ type: "text", text: "path\\", marks: ["bold"] }],
+        },
+      ],
+    };
+
+    expect(parseRichTextMarkdown(serializeRichTextToMarkdown(document))).toEqual(
+      document,
+    );
+  });
+
   it.each([
     ["[run](javascript:alert\\(1\\))\n", "unsafe_link"],
     ["<script>alert(1)</script>\n", "serializer_ambiguity"],

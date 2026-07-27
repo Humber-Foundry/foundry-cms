@@ -87,7 +87,7 @@ describe("D1 content revision store", () => {
     const command = {
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Persisted in D1" }],
       idempotencyKey: "d1-content-save-0001",
@@ -230,7 +230,7 @@ describe("D1 content revision store", () => {
     await application.commands.save({
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Current revision" }],
       idempotencyKey: "d1-content-save-0002",
@@ -240,7 +240,7 @@ describe("D1 content revision store", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Stale revision" }],
         idempotencyKey: "d1-content-save-0003",
@@ -256,7 +256,7 @@ describe("D1 content revision store", () => {
       firstApplication.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Concurrent first" }],
         idempotencyKey: "d1-content-concurrent-0001",
@@ -264,7 +264,7 @@ describe("D1 content revision store", () => {
       secondApplication.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Concurrent second" }],
         idempotencyKey: "d1-content-concurrent-0002",
@@ -298,7 +298,7 @@ describe("D1 content revision store", () => {
     const command = {
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "One retried save" }],
       idempotencyKey: "d1-content-concurrent-0003",
@@ -423,7 +423,7 @@ describe("D1 content revision store", () => {
     await application.commands.save({
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First input" }],
       idempotencyKey: "d1-content-save-0004",
@@ -433,7 +433,7 @@ describe("D1 content revision store", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Different input" }],
         idempotencyKey: "d1-content-save-0004",
@@ -452,7 +452,7 @@ describe("D1 content revision store", () => {
     await first.commands.save({
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First workspace" }],
       idempotencyKey: sharedKey,
@@ -461,7 +461,7 @@ describe("D1 content revision store", () => {
       second.commands.save({
         actorId: editorActorId,
         workspaceId: otherWorkspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Second workspace" }],
         idempotencyKey: sharedKey,
