@@ -22,7 +22,7 @@ import {
 import { PreviewCapabilityError } from "@/src/preview-capability";
 import { verifyRevisionPreviewCapability } from "@/src/preview-capability-runtime";
 
-import "../../../public.css";
+import "../../../../public.css";
 import "./preview.css";
 
 export const dynamic = "force-dynamic";

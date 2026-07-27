@@ -13,6 +13,8 @@ import type { SiteDefinitionEdit } from "@foundry/site-definition";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
 import {
+  contentWorkspaceIdForActor,
+  contentWorkspaceIdForMutation,
   loadContentRevisionApplication,
   requireExistingContentWorkspaceAccess,
 } from "../../../../src/content-revision-runtime";
@@ -95,7 +97,7 @@ export async function GET(request: Request) {
       bookmark: revision.bookmark,
     });
     const previewUrl =
-      `/preview/${workspaceId}/${revisionNumber}?${previewQuery.toString()}`;
+      `/__foundry/preview/${workspaceId}/${revisionNumber}?${previewQuery.toString()}`;
     return Response.redirect(new URL(previewUrl, request.url), 307);
   } catch (error) {
     if (
@@ -189,7 +191,43 @@ export async function POST(request: Request) {
     if (access.state !== "authorized") {
       throw new AccessDeniedError("membership_not_active");
     }
-    const parsed = parseSaveBody(await request.json());
+    const submitted: unknown = await request.json();
+    const actorId = createContentActorId(access.membership.id);
+    const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const operation =
+      typeof submitted === "object" &&
+      submitted !== null &&
+      "operation" in submitted &&
+      (submitted.operation === "create_default_workspace" ||
+        submitted.operation === "create_workspace")
+        ? submitted.operation
+        : undefined;
+    if (operation !== undefined) {
+      const workspaceId =
+        operation === "create_default_workspace"
+          ? await contentWorkspaceIdForActor(actorId)
+          : await contentWorkspaceIdForMutation(actorId, idempotencyKey);
+      const application = await loadContentRevisionApplication(
+        workspaceId,
+        actorId,
+      );
+      const created = await application.commands.create({
+        actorId,
+        workspaceId,
+        idempotencyKey,
+      });
+      return Response.json(
+        {
+          ...created,
+          previewUrl: revisionPreviewGatewayUrl(
+            created.workspaceId,
+            created.revision,
+          ),
+        },
+        { status: 201 },
+      );
+    }
+    const parsed = parseSaveBody(submitted);
     if (!parsed.ok && parsed.fields !== undefined) {
       return Response.json(
         { error: "validation_failed", fields: parsed.fields },
@@ -200,7 +238,6 @@ export async function POST(request: Request) {
       return Response.json({ error: "invalid_command" }, { status: 400 });
     }
     const body = parsed.body;
-    const actorId = createContentActorId(access.membership.id);
     const application = await loadContentRevisionApplication(
       body.workspaceId,
       actorId,
@@ -211,7 +248,7 @@ export async function POST(request: Request) {
       schemaVersion: body.schemaVersion,
       baseRevision: body.baseRevision,
       edits: body.edits,
-      idempotencyKey: request.headers.get("idempotency-key") ?? "",
+      idempotencyKey,
     });
     return Response.json(
       {

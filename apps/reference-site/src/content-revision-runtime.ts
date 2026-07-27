@@ -35,10 +35,23 @@ export function isGitObjectId(value: string): boolean {
 export async function contentWorkspaceIdForActor(
   actorId: ContentActorId,
 ): Promise<ContentWorkspaceId> {
+  return contentWorkspaceIdFromSeed(actorId);
+}
+
+export async function contentWorkspaceIdForMutation(
+  actorId: ContentActorId,
+  idempotencyKey: string,
+): Promise<ContentWorkspaceId> {
+  return contentWorkspaceIdFromSeed(`${actorId}:${idempotencyKey}`);
+}
+
+async function contentWorkspaceIdFromSeed(
+  seed: string,
+): Promise<ContentWorkspaceId> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(
-      `${referenceSiteDefinition.site.id}:${actorId}`,
+      `${referenceSiteDefinition.site.id}:${seed}`,
     ),
   );
   const suffix = [...new Uint8Array(digest)]

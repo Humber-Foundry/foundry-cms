@@ -12,6 +12,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   loadIdentity: vi.fn(),
+  create: vi.fn(),
   save: vi.fn(),
   loadApplication: vi.fn(),
   requireExistingAccess: vi.fn(),
@@ -29,6 +30,8 @@ vi.mock("../../../../src/human-mutation-runtime", () => ({
   verifyHumanMutation: mocks.verifyMutation,
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
+  contentWorkspaceIdForActor: async () => "workspace_default",
+  contentWorkspaceIdForMutation: async () => "workspace_created",
   loadContentRevisionApplication: mocks.loadApplication,
   requireExistingContentWorkspaceAccess: mocks.requireExistingAccess,
 }));
@@ -56,7 +59,7 @@ describe("content revision endpoint", () => {
     mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.requireExistingAccess.mockResolvedValue(undefined);
     mocks.loadApplication.mockResolvedValue({
-      commands: { save: mocks.save },
+      commands: { create: mocks.create, save: mocks.save },
       queries: {
         getRevisionWithBookmark: mocks.getRevisionWithBookmark,
         isRevisionCurrent: mocks.isRevisionCurrent,
@@ -126,6 +129,72 @@ describe("content revision endpoint", () => {
     );
   });
 
+  it("creates a workspace only through an authenticated mutation", async () => {
+    mocks.create.mockResolvedValue({
+      workspaceId: "workspace_created",
+      revision: 0,
+      definition: { schemaVersion: "1.0.0" },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.0.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+
+    const response = await POST(
+      request({ operation: "create_workspace" }, "workspace-create-0001"),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.verifyMutation).toHaveBeenCalled();
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_created",
+      "membership-editor",
+    );
+    expect(mocks.create).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      workspaceId: "workspace_created",
+      idempotencyKey: "workspace-create-0001",
+    });
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        workspaceId: "workspace_created",
+        revision: 0,
+        previewUrl:
+          "/api/foundry-cms/revisions?workspaceId=workspace_created&revision=0",
+      }),
+    );
+  });
+
+  it("creates the actor's stable default workspace through POST", async () => {
+    mocks.create.mockResolvedValue({
+      workspaceId: "workspace_default",
+      revision: 0,
+      definition: { schemaVersion: "1.0.0" },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.0.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+
+    const response = await POST(
+      request(
+        { operation: "create_default_workspace" },
+        "workspace-default-0001",
+      ),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.create).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      workspaceId: "workspace_default",
+      idempotencyKey: "workspace-default-0001",
+    });
+  });
+
   it("refreshes the mutation token for a long-lived editor", async () => {
     const response = await GET(
       new Request("https://foundry.example/api/foundry-cms/revisions"),
@@ -157,7 +226,7 @@ describe("content revision endpoint", () => {
       "membership-editor",
     );
     expect(response.headers.get("location")).toBe(
-      "https://foundry.example/preview/workspace_home/3" +
+      "https://foundry.example/__foundry/preview/workspace_home/3" +
         "?capability=preview-capability&bookmark=fresh-d1-bookmark",
     );
   });

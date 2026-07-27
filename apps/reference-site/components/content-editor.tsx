@@ -69,10 +69,15 @@ export function ContentEditor({
   );
   const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
   const pendingAttempt = useRef<{
+    body: string;
+    idempotencyKey: string;
+  } | null>(null);
+  const pendingWorkspaceAttempt = useRef<{
     body: string;
     idempotencyKey: string;
   } | null>(null);
@@ -275,7 +280,7 @@ export function ContentEditor({
     dispatch({ type: "edit", path, value });
   }
 
-  function recoverEdits(destination: "current" | "fresh"): void {
+  async function recoverEdits(destination: "current" | "fresh") {
     const recoveryId = crypto.randomUUID();
     const persistedValues = new Map(
       persistedFields.map((field) => [field.path, field.value]),
@@ -300,12 +305,33 @@ export function ContentEditor({
         recoverFrom: initialRevision.workspaceId,
       });
       if (destination === "fresh") {
-        query.set("newWorkspace", "1");
+        pendingWorkspaceAttempt.current ??= {
+          body: JSON.stringify({ operation: "create_workspace" }),
+          idempotencyKey: crypto.randomUUID(),
+        };
+        setCreatingWorkspace(true);
+        const result = await sendContentRevisionAttempt({
+          attempt: pendingWorkspaceAttempt.current,
+          mutationToken,
+        });
+        setMutationToken(result.mutationToken);
+        if (
+          !result.response.ok ||
+          typeof result.body !== "object" ||
+          result.body === null ||
+          !("workspaceId" in result.body) ||
+          typeof result.body.workspaceId !== "string" ||
+          !/^workspace_[a-z0-9_]+$/u.test(result.body.workspaceId)
+        ) {
+          throw new Error("content_workspace_creation_failed");
+        }
+        query.set("workspace", result.body.workspaceId);
       } else {
         query.set("workspace", initialRevision.workspaceId);
       }
       window.location.assign(`/dash?${query.toString()}`);
     } catch {
+      setCreatingWorkspace(false);
       setMessage(
         "The browser could not preserve these edits for recovery. Copy them before reloading or starting a fresh workspace.",
       );
@@ -408,25 +434,22 @@ export function ContentEditor({
           </a>
         )}
         {state.status === "conflict" || state.status === "stale" ? (
-          <a
-            href={
-              state.status === "stale"
-                ? "/dash?newWorkspace=1"
-                : activeWorkspaceUrl
-            }
-            onClick={
-              (event) => {
-                event.preventDefault();
-                recoverEdits(
-                  state.status === "stale" ? "fresh" : "current",
-                );
-              }
+          <button
+            type="button"
+            className="copy-button"
+            disabled={creatingWorkspace}
+            onClick={() =>
+              void recoverEdits(
+                state.status === "stale" ? "fresh" : "current",
+              )
             }
           >
-            {state.status === "stale"
+            {creatingWorkspace
+              ? "Starting…"
+              : state.status === "stale"
               ? "Start fresh workspace"
               : "Reload latest"}
-          </a>
+          </button>
         ) : null}
       </div>
       <p role="status" aria-live="polite" className="editor-message">

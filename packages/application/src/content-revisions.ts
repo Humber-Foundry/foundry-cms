@@ -65,6 +65,12 @@ export type SaveContentRevisionCommand = Readonly<{
   idempotencyKey: string;
 }>;
 
+export type CreateContentWorkspaceCommand = Readonly<{
+  actorId: ContentActorId;
+  workspaceId: ContentWorkspaceId;
+  idempotencyKey: string;
+}>;
+
 type PersistContentRevisionCommand = Readonly<{
   baseRevision: number;
   idempotencyKey: string;
@@ -331,15 +337,20 @@ export function createContentRevisionApplication({
   now?: () => string;
 }) {
   let initialization: Promise<void> | undefined;
-  let currentProductionBase: string | undefined;
+  let productionBaseResolution: Promise<string> | undefined;
+  const resolveProductionBase = () => {
+    productionBaseResolution ??= (async () => {
+      const publishedContentHash = await sha256(siteDefinition);
+      return typeof productionBase === "function"
+        ? productionBase(publishedContentHash)
+        : productionBase;
+    })();
+    return productionBaseResolution;
+  };
   const initialize = () => {
     initialization ??= (async () => {
       const publishedContentHash = await sha256(siteDefinition);
-      const resolvedProductionBase =
-        typeof productionBase === "function"
-          ? productionBase(publishedContentHash)
-          : productionBase;
-      currentProductionBase = resolvedProductionBase;
+      const resolvedProductionBase = await resolveProductionBase();
       const initial = immutableRevision({
         workspaceId,
         revision: 0,
@@ -364,28 +375,27 @@ export function createContentRevisionApplication({
     rendererVersion,
     queries: Object.freeze({
       async getCurrent() {
-        await initialize();
+        await store.requireAccess(actorId);
         return store.getCurrent();
       },
       async getRevision(revision: number, bookmark?: string) {
-        await initialize();
+        await store.requireAccess(actorId);
         return store.getRevision(revision, bookmark);
       },
       async getRevisionWithBookmark(revision: number) {
-        await initialize();
+        await store.requireAccess(actorId);
         return store.getRevisionWithBookmark(revision);
       },
       async isRevisionCurrent(revision: ContentRevision) {
-        await initialize();
+        await store.requireAccess(actorId);
         return isContentRevisionRenderableBy(revision, {
           rendererVersion,
-          productionBase: currentProductionBase!,
+          productionBase: await resolveProductionBase(),
         });
       },
     }),
     commands: Object.freeze({
-      async save(command: SaveContentRevisionCommand) {
-        await initialize();
+      async create(command: CreateContentWorkspaceCommand) {
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
         }
@@ -399,6 +409,25 @@ export function createContentRevisionApplication({
             workspaceId: "This workspace is not available.",
           });
         }
+        await initialize();
+        return store.getCurrent();
+      },
+      async save(command: SaveContentRevisionCommand) {
+        if (command.actorId !== actorId) {
+          throw new ContentWorkspaceAccessError();
+        }
+        if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
+          throw new ContentRevisionValidationError({
+            idempotencyKey: "Use a 16–128 character idempotency key.",
+          });
+        }
+        if (command.workspaceId !== workspaceId) {
+          throw new ContentRevisionValidationError({
+            workspaceId: "This workspace is not available.",
+          });
+        }
+        await initialize();
+        const currentProductionBase = await resolveProductionBase();
         const requestHash = await sha256({
           actorId: command.actorId,
           workspaceId: command.workspaceId,
@@ -414,7 +443,7 @@ export function createContentRevisionApplication({
           if (
             !isContentRevisionRenderableBy(replay, {
               rendererVersion,
-              productionBase: currentProductionBase!,
+              productionBase: currentProductionBase,
             })
           ) {
             throw new ContentRevisionStaleError(replay.revision);
@@ -435,7 +464,7 @@ export function createContentRevisionApplication({
         if (
           !isContentRevisionRenderableBy(base, {
             rendererVersion,
-            productionBase: currentProductionBase!,
+            productionBase: currentProductionBase,
           })
         ) {
           throw new ContentRevisionStaleError();

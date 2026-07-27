@@ -34,6 +34,30 @@ const commandInputs = {
 } as const;
 
 describe("content revision application", () => {
+  it("keeps reads side-effect free until an explicit create command", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+
+    await expect(application.queries.getCurrent()).rejects.toBeInstanceOf(
+      ContentWorkspaceAccessError,
+    );
+
+    const command = {
+      actorId: editorActorId,
+      workspaceId: applicationInputs.workspaceId,
+      idempotencyKey: "create-workspace-0001",
+    } as const;
+    const created = await application.commands.create(command);
+    const replay = await application.commands.create(command);
+
+    expect(created).toEqual(expect.objectContaining({ revision: 0 }));
+    expect(replay).toEqual(created);
+    await expect(application.queries.getCurrent()).resolves.toEqual(created);
+  });
+
   it("creates an immutable revision for a schema-valid edit", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -193,7 +217,11 @@ describe("content revision application", () => {
       store,
       ...applicationInputs,
     });
-    await original.queries.getCurrent();
+    await original.commands.create({
+      actorId: editorActorId,
+      workspaceId: applicationInputs.workspaceId,
+      idempotencyKey: "create-workspace-0002",
+    });
     const changedBase = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
       store,

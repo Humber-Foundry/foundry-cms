@@ -103,7 +103,7 @@ details.
 Owners and Editors can change schema-declared copy from `/dash`. Every save uses
 a stable field path, idempotency key and base revision; D1 creates an immutable
 revision or returns the latest revision as an explicit conflict. Saved revisions
-render at `/preview/<workspace>/<revision>` through the same site renderer used
+render at `/__foundry/preview/<workspace>/<revision>` through the same site renderer used
 by the public route. The short-lived preview capability is bound to the current
 actor, workspace and revision, and its D1 bookmark preserves read-your-write
 consistency. The preview identifies its exact content hash, schema version,

@@ -8,6 +8,7 @@ import type {
 import type { SiteDefinition } from "@foundry/site-definition";
 
 import { ContentEditor } from "./content-editor";
+import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
@@ -30,10 +31,10 @@ export function DashboardShell({
   currentMembership: HumanMembership;
   members: ReadonlyArray<HumanMembership>;
   mutationToken: string;
-  contentRevision: ContentRevision;
+  contentRevision?: ContentRevision;
   contentMutationToken: string;
-  initialPreviewUrl: string;
-  initialContentStale: boolean;
+  initialPreviewUrl?: string;
+  initialContentStale?: boolean;
   staleRecovery?: Readonly<{
     id: string;
     sourceWorkspaceId: string;
@@ -43,7 +44,9 @@ export function DashboardShell({
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
 }) {
   const activeWorkspaceUrl =
-    `/dash?workspace=${encodeURIComponent(contentRevision.workspaceId)}`;
+    contentRevision === undefined
+      ? "/dash"
+      : `/dash?workspace=${encodeURIComponent(contentRevision.workspaceId)}`;
   return (
     <div className="dashboard">
       <header className="dashboard-header">
@@ -87,14 +90,22 @@ export function DashboardShell({
             </div>
             <DashboardControls siteId={definition.site.id} />
           </div>
-          <ContentEditor
-            csrfToken={contentMutationToken}
-            initialRevision={contentRevision}
-            initialPreviewUrl={initialPreviewUrl}
-            initialStale={initialContentStale}
-            activeWorkspaceUrl={activeWorkspaceUrl}
-            staleRecovery={staleRecovery}
-          />
+          {contentRevision === undefined ||
+          initialPreviewUrl === undefined ? (
+            <ContentWorkspaceStarter
+              csrfToken={contentMutationToken}
+              staleRecovery={staleRecovery}
+            />
+          ) : (
+            <ContentEditor
+              csrfToken={contentMutationToken}
+              initialRevision={contentRevision}
+              initialPreviewUrl={initialPreviewUrl}
+              initialStale={initialContentStale}
+              activeWorkspaceUrl={activeWorkspaceUrl}
+              staleRecovery={staleRecovery}
+            />
+          )}
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">
               <div>

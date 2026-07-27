@@ -333,7 +333,11 @@ describe("D1 content revision store", () => {
 
   it("prevents update and deletion of persisted revision rows", async () => {
     const application = createApplication();
-    await application.queries.getCurrent();
+    await application.commands.create({
+      actorId: editorActorId,
+      workspaceId,
+      idempotencyKey: "d1-content-create-0001",
+    });
 
     await expect(
       database

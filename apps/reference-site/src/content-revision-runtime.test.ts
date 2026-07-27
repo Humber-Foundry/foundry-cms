@@ -8,6 +8,7 @@ import {
 
 import {
   contentWorkspaceIdForActor,
+  contentWorkspaceIdForMutation,
   isGitObjectId,
 } from "./content-revision-runtime";
 
@@ -26,6 +27,28 @@ describe("content revision workspace routing", () => {
       ),
     ).resolves.not.toBe(editorWorkspace);
     expect(editorWorkspace).toMatch(/^workspace_[a-f0-9]{24}$/);
+  });
+
+  it("derives retry-stable workspace IDs from mutation identity", async () => {
+    const actorId = createContentActorId("membership-editor");
+    const workspace = await contentWorkspaceIdForMutation(
+      actorId,
+      "create-workspace-request-0001",
+    );
+
+    await expect(
+      contentWorkspaceIdForMutation(
+        actorId,
+        "create-workspace-request-0001",
+      ),
+    ).resolves.toBe(workspace);
+    await expect(
+      contentWorkspaceIdForMutation(
+        actorId,
+        "create-workspace-request-0002",
+      ),
+    ).resolves.not.toBe(workspace);
+    expect(workspace).toMatch(/^workspace_[a-f0-9]{24}$/);
   });
 });
 

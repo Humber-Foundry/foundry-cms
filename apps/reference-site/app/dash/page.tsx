@@ -1,8 +1,9 @@
 import { headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import {
   AccessDeniedError,
+  type ContentRevision,
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   createContentActorId,
@@ -35,7 +36,6 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{
     workspace?: string | string[];
-    newWorkspace?: string | string[];
     recovery?: string | string[];
     recoverFrom?: string | string[];
   }>;
@@ -103,21 +103,6 @@ export default async function DashboardPage({
       throw error;
     }
   }
-  if (requested.newWorkspace === "1") {
-    const workspaceId = createContentWorkspaceId(
-      `workspace_${crypto.randomUUID().replaceAll("-", "")}`,
-    );
-    const recovery =
-      staleRecovery !== undefined
-        ? new URLSearchParams({
-            recovery: staleRecovery.id,
-            recoverFrom: staleRecovery.sourceWorkspaceId,
-          }).toString()
-        : "";
-    redirect(
-      `/dash?workspace=${workspaceId}${recovery === "" ? "" : `&${recovery}`}`,
-    );
-  }
   const members =
     access.membership.role === "owner"
       ? await access.application.queries.listMembers({
@@ -127,40 +112,48 @@ export default async function DashboardPage({
   const mutationToken = await createHumanMutationToken(access.identity);
   const formOperations = await loadPublicFormOperationsDashboard(access);
   let workspaceId;
+  const requestedWorkspace =
+    typeof requested.workspace === "string" ? requested.workspace : undefined;
+  const hasRequestedWorkspace = requestedWorkspace !== undefined;
   try {
     workspaceId =
-      typeof requested.workspace === "string"
-        ? createContentWorkspaceId(requested.workspace)
-        : await contentWorkspaceIdForActor(actorId);
+      requestedWorkspace === undefined
+        ? await contentWorkspaceIdForActor(actorId)
+        : createContentWorkspaceId(requestedWorkspace);
   } catch {
     notFound();
   }
-  const { contentApplication, contentRevision } = await (async () => {
-    try {
-      const application = await loadContentRevisionApplication(
-        workspaceId,
-        actorId,
-      );
-      return {
-        contentApplication: application,
-        contentRevision: await application.queries.getCurrent(),
-      };
-    } catch (error) {
-      if (
-        error instanceof ContentWorkspaceAccessError ||
-        error instanceof ContentRevisionConfigurationError
-      ) {
-        notFound();
-      }
+  let contentRevision: ContentRevision | undefined;
+  let initialContentStale: boolean | undefined;
+  let initialPreviewUrl: string | undefined;
+  try {
+    await requireExistingContentWorkspaceAccess(workspaceId, actorId);
+    const contentApplication = await loadContentRevisionApplication(
+      workspaceId,
+      actorId,
+    );
+    contentRevision = await contentApplication.queries.getCurrent();
+    initialContentStale =
+      !(await contentApplication.queries.isRevisionCurrent(contentRevision));
+    initialPreviewUrl = revisionPreviewGatewayUrl(
+      contentRevision.workspaceId,
+      contentRevision.revision,
+    );
+  } catch (error) {
+    if (
+      error instanceof ContentWorkspaceAccessError &&
+      !hasRequestedWorkspace
+    ) {
+      contentRevision = undefined;
+    } else if (
+      error instanceof ContentWorkspaceAccessError ||
+      error instanceof ContentRevisionConfigurationError
+    ) {
+      notFound();
+    } else {
       throw error;
     }
-  })();
-  const initialContentStale =
-    !(await contentApplication.queries.isRevisionCurrent(contentRevision));
-  const initialPreviewUrl = revisionPreviewGatewayUrl(
-    contentRevision.workspaceId,
-    contentRevision.revision,
-  );
+  }
 
   return (
     <DashboardShell
