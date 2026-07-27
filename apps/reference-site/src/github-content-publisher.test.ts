@@ -109,6 +109,12 @@ describe("GitHub content publisher", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock.mock.calls[0]![1]).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(fetchMock.mock.calls[4]![1]).toEqual(
       expect.objectContaining({
         method: "POST",

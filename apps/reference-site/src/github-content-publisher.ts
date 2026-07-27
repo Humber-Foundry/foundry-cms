@@ -160,6 +160,7 @@ export function createGitHubContentPublisher({
       ),
       {
         method: "POST",
+        signal: AbortSignal.timeout(30_000),
         headers: githubHeaders(jwt),
         body: JSON.stringify({
           repositories: [configuration.repository],

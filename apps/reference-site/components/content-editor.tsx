@@ -168,7 +168,9 @@ export function ContentEditor({
           typeof result.publication === "object" &&
           result.publication !== null
         ) {
-          setPublication(result.publication as PublicationRecord);
+          setPublication(
+            (current) => current ?? (result.publication as PublicationRecord),
+          );
         }
       })
       .catch(() => {

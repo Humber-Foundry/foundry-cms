@@ -84,7 +84,8 @@ commit evidence preserved so it cannot hold the global publication slot
 forever. A transport or non-success response while probing the marker is
 retryable unavailability, not evidence that the approval's production base
 mismatches; it is retried until the same bounded release-marker deadline, then
-becomes `failed`. Each marker request also has a 30-second transport timeout.
+becomes `failed`. Each GitHub and marker request also has a 30-second transport
+timeout.
 The dashboard continues polling after transient refresh failures and keeps an
 active publication visible while the editor starts a new draft. Editor inputs
 are locked while an approval request is in flight so its response cannot be
