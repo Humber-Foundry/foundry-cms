@@ -410,37 +410,40 @@ describe("content publication application", () => {
     });
   });
 
-  it("releases the global publication slot when no deployment signal appears", async () => {
-    let currentTime = "2026-07-27T10:01:00.000Z";
-    const app = createContentPublicationApplication({
-      store: createInMemoryContentPublicationStore(),
-      revisions: repository,
-      publisher,
-      now: () => currentTime,
-    });
-    const approval = await app.commands.approve({
-      workspaceId,
-      revision: 1,
-      approvedBy: membershipId,
-      previewConfirmed: true,
-    });
-    const publication = await app.commands.publish({
-      workspaceId,
-      approvalId: approval.id,
-      requestedBy: membershipId,
-      idempotencyKey: "publish-deploy-timeout-1",
-    });
-    getDeploymentStatus.mockResolvedValue("requested");
-    currentTime = "2026-07-27T10:16:00.000Z";
+  it.each(["requested", "unknown"] as const)(
+    "releases the global publication slot when deployment remains %s",
+    async (deployment) => {
+      let currentTime = "2026-07-27T10:01:00.000Z";
+      const app = createContentPublicationApplication({
+        store: createInMemoryContentPublicationStore(),
+        revisions: repository,
+        publisher,
+        now: () => currentTime,
+      });
+      const approval = await app.commands.approve({
+        workspaceId,
+        revision: 1,
+        approvedBy: membershipId,
+        previewConfirmed: true,
+      });
+      const publication = await app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-deploy-timeout-1",
+      });
+      getDeploymentStatus.mockResolvedValue(deployment);
+      currentTime = "2026-07-27T10:16:00.000Z";
 
-    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
-      expect.objectContaining({
-        status: "failed",
-        commitSha: "c".repeat(40),
-        detail: "deployment_signal_timeout",
-      }),
-    );
-  });
+      await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+        expect.objectContaining({
+          status: "failed",
+          commitSha: "c".repeat(40),
+          detail: "deployment_signal_timeout",
+        }),
+      );
+    },
+  );
 
   it("reconciles an expired requested lease so a crashed Worker cannot strand publication", async () => {
     const store = createInMemoryContentPublicationStore();

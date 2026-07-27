@@ -865,11 +865,8 @@ export function createContentPublicationApplication({
           return publication;
         }
         const deployment = await publisher.getDeploymentStatus(commitSha);
-        if (deployment === "unknown") {
-          return currentPublication;
-        }
         if (
-          deployment === "requested" &&
+          (deployment === "requested" || deployment === "unknown") &&
           currentPublication.status === "committed"
         ) {
           const observedAt = now();
@@ -891,6 +888,9 @@ export function createContentPublicationApplication({
               },
             );
           }
+          return currentPublication;
+        }
+        if (deployment === "unknown") {
           return currentPublication;
         }
         const currentProgress =
