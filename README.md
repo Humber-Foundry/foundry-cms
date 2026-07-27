@@ -44,7 +44,10 @@ Production installation supplies:
   hostname matches `FOUNDRY_CANONICAL_ORIGIN` and whose contact-form action is
   `contact`;
 - the checked-in `FOUNDRY_FORM_RATE_LIMITER` binding, updated to use an
-  installation-unique positive integer `namespace_id`; and
+  installation-unique positive integer `namespace_id`;
+- `FOUNDRY_PRODUCTION_BASE`, set to the exact 40- or 64-character Git commit
+  containing the bundled published content; renderer identity comes from the
+  Worker version-metadata binding (or an exact `FOUNDRY_RENDERER_VERSION`); and
 - an initial Owner invitation created by guided provisioning before handoff.
 
 Apply the checked-in D1 migration locally with:
@@ -94,6 +97,17 @@ network retry only after durable acceptance. Borderline spam is retained with
 delivery held; invalid and clearly automated input is rejected. Capacity,
 Turnstile and D1 failures return retryable public errors without internal
 details.
+
+### Immutable content revisions
+
+Owners and Editors can change schema-declared copy from `/dash`. Every save uses
+a stable field path, idempotency key and base revision; D1 creates an immutable
+revision or returns the latest revision as an explicit conflict. Saved revisions
+render at `/__foundry/preview/<workspace>/<revision>` through the same site renderer used
+by the public route. The short-lived preview capability is bound to the current
+actor, workspace and revision, and its D1 bookmark preserves read-your-write
+consistency. The preview identifies its exact content hash, schema version,
+Worker renderer version and bundled production-base content hash.
 
 Build and verify the Cloudflare Workers artifact:
 

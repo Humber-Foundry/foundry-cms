@@ -5,6 +5,7 @@ export * from "./in-memory-human-access-store";
 export * from "./subscriber-ledger";
 export * from "./in-memory-subscriber-ledger-store";
 export * from "./public-form";
+export * from "./content-revisions";
 export * from "./public-form-notification";
 
 export interface PublishedSiteRepository {

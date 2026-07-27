@@ -1,11 +1,14 @@
 import type {
+  ContentRevision,
+  FailedPublicFormDelivery,
   HumanMembership,
   PublicFormDeliveryHealth,
-  FailedPublicFormDelivery,
   SuspectedSpamSubmission,
 } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
 
+import { ContentEditor } from "./content-editor";
+import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
@@ -15,6 +18,11 @@ export function DashboardShell({
   currentMembership,
   members,
   mutationToken,
+  contentRevision,
+  contentMutationToken,
+  initialPreviewUrl,
+  initialContentStale,
+  staleRecovery,
   formDeliveryHealth,
   failedFormDeliveries,
   suspectedSpam,
@@ -23,14 +31,29 @@ export function DashboardShell({
   currentMembership: HumanMembership;
   members: ReadonlyArray<HumanMembership>;
   mutationToken: string;
+  contentRevision?: ContentRevision;
+  contentMutationToken: string;
+  initialPreviewUrl?: string;
+  initialContentStale?: boolean;
+  staleRecovery?: Readonly<{
+    id: string;
+    sourceWorkspaceId: string;
+  }>;
   formDeliveryHealth: PublicFormDeliveryHealth;
   failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
 }) {
+  const activeWorkspaceUrl =
+    contentRevision === undefined
+      ? "/dash"
+      : `/dash?workspace=${encodeURIComponent(contentRevision.workspaceId)}`;
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <a className="wordmark wordmark-dashboard" href="/dash">
+        <a
+          className="wordmark wordmark-dashboard"
+          href={activeWorkspaceUrl}
+        >
           <span aria-hidden="true">F</span>
           Foundry
         </a>
@@ -44,7 +67,7 @@ export function DashboardShell({
       <div className="dashboard-layout">
         <nav className="dashboard-nav" aria-label="Dashboard">
           <p className="nav-label">Workspace</p>
-          <a href="/dash" aria-current="page">
+          <a href={activeWorkspaceUrl} aria-current="page">
             Overview
           </a>
           <span aria-disabled="true">Pages</span>
@@ -56,8 +79,8 @@ export function DashboardShell({
         </nav>
         <main className="dashboard-main">
           <div className="notice" role="status">
-            <span>Read-only foundation</span>
-            Editing arrives through later, independently reviewed tickets.
+            <span>Revision editor</span>
+            Draft saves are immutable and previews are bound to one exact revision.
           </div>
           <div className="dashboard-title-row">
             <div>
@@ -67,6 +90,22 @@ export function DashboardShell({
             </div>
             <DashboardControls siteId={definition.site.id} />
           </div>
+          {contentRevision === undefined ||
+          initialPreviewUrl === undefined ? (
+            <ContentWorkspaceStarter
+              csrfToken={contentMutationToken}
+              staleRecovery={staleRecovery}
+            />
+          ) : (
+            <ContentEditor
+              csrfToken={contentMutationToken}
+              initialRevision={contentRevision}
+              initialPreviewUrl={initialPreviewUrl}
+              initialStale={initialContentStale}
+              activeWorkspaceUrl={activeWorkspaceUrl}
+              staleRecovery={staleRecovery}
+            />
+          )}
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">
               <div>

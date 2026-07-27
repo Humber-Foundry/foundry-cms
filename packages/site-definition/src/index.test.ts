@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  applySiteDefinitionEdits,
+  DuplicateEditableSiteFieldPathError,
   createSiteId,
+  listEditableSiteFields,
   referenceSiteDefinition,
   siteDefinitionSchema,
+  type SiteDefinition,
 } from "./index";
 
 describe("reference Site Definition", () => {
@@ -89,5 +93,112 @@ describe("reference Site Definition", () => {
     change(malformed);
 
     expect(validate(malformed)).toBe(false);
+  });
+
+  it("exposes editable copy through stable item identifiers", () => {
+    const fields = listEditableSiteFields(referenceSiteDefinition);
+
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "page_home.seo.title",
+          value: referenceSiteDefinition.home.seo.title,
+        }),
+        expect.objectContaining({
+          path: "nav_work.label",
+          value: "What we make",
+        }),
+        expect.objectContaining({
+          path: "section_hero.title",
+          value: "Turn a good idea into something people can use.",
+        }),
+        expect.objectContaining({
+          path: "site_foundry_reference.footer",
+          value:
+            "An executable Foundry CMS reference installation, built for client ownership.",
+        }),
+      ]),
+    );
+    expect(fields.some((field) => field.path.endsWith(".id"))).toBe(false);
+    expect(fields.some((field) => field.path.endsWith(".href"))).toBe(false);
+  });
+
+  it("applies copy edits without changing the source definition", () => {
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      {
+        path: "section_hero.title",
+        value: "A new immutable headline",
+      },
+      {
+        path: "nav_work.label",
+        value: "Our work",
+      },
+    ]);
+
+    expect(result).toEqual({
+      ok: true,
+      definition: expect.objectContaining({
+        site: expect.objectContaining({
+          navigation: expect.arrayContaining([
+            expect.objectContaining({ id: "nav_work", label: "Our work" }),
+          ]),
+        }),
+        home: expect.objectContaining({
+          sections: expect.arrayContaining([
+            expect.objectContaining({
+              id: "section_hero",
+              title: "A new immutable headline",
+            }),
+          ]),
+        }),
+      }),
+    });
+    expect(referenceSiteDefinition.home.sections[0]).toEqual(
+      expect.objectContaining({
+        title: "Turn a good idea into something people can use.",
+      }),
+    );
+  });
+
+  it("returns field-level feedback for unknown and invalid edits", () => {
+    expect(
+      applySiteDefinitionEdits(referenceSiteDefinition, [
+        { path: "section_missing.title", value: "Unknown" },
+        { path: "section_hero.title", value: "   " },
+        { path: "section_hero.href", value: "https://example.com" },
+      ]),
+    ).toEqual({
+      ok: false,
+      errors: {
+        "section_missing.title": "This field is not in Site Definition 1.0.0.",
+        "section_hero.title": "Enter at least one visible character.",
+        "section_hero.href": "This field is not in Site Definition 1.0.0.",
+      },
+    });
+  });
+
+  it("returns validation feedback for prototype-named field paths", () => {
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      { path: "__proto__", value: "Unknown" },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(Object.keys(result.errors)).toEqual(["__proto__"]);
+      expect(result.errors["__proto__"]).toBe(
+        "This field is not in Site Definition 1.0.0.",
+      );
+    }
+  });
+
+  it("rejects duplicate generated editable paths", () => {
+    const duplicate = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    duplicate.home.sections[1].id = duplicate.home.sections[0].id;
+
+    expect(() =>
+      listEditableSiteFields(duplicate as SiteDefinition),
+    ).toThrow(DuplicateEditableSiteFieldPathError);
   });
 });

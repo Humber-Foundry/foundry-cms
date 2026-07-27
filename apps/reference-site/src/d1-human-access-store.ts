@@ -29,11 +29,22 @@ type D1PreparedStatement = {
   run(): Promise<D1Result>;
 };
 
+export type D1DatabaseSessionBinding = {
+  prepare(query: string): D1PreparedStatement;
+  batch(
+    statements: ReadonlyArray<D1PreparedStatement>,
+  ): Promise<ReadonlyArray<D1Result>>;
+  getBookmark(): string | null;
+};
+
 export type D1DatabaseBinding = {
   prepare(query: string): D1PreparedStatement;
   batch(
     statements: ReadonlyArray<D1PreparedStatement>,
   ): Promise<ReadonlyArray<D1Result>>;
+  withSession?(
+    constraint?: "first-primary" | string,
+  ): D1DatabaseSessionBinding;
 };
 
 type MembershipRow = {

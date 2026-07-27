@@ -384,3 +384,5 @@ export const referenceSiteDefinition = {
     ],
   },
 } as const satisfies SiteDefinition;
+
+export * from "./editable-fields";
