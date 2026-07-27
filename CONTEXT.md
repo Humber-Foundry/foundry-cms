@@ -115,4 +115,4 @@ still-valid human approval and active schedule already exist.
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
 - [Draft, preview and publish pipeline](docs/decisions/ADR-0004-draft-preview-publish-pipeline.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
-
+- [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)

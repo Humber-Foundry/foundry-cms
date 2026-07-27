@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-26
+- **Amended:** 2026-07-26 by the
+  [guided provisioning design](../architecture/guided-client-provisioning.md)
+  for issue #20
 
 ## Context
 
@@ -122,12 +125,24 @@ The provider choice must be reopened if Brevo:
 
 ### Production-readiness gate
 
-Before the first production send, run the twelve-step provider acceptance test
-from the research in a new client-owned account at the intended tier. Record
-evidence for credential rotation, subscriber lifecycle and suppression,
-campaign fingerprints, test delivery, timezone scheduling, event coverage,
-analytics reconciliation, quota behaviour, export fidelity, account handoff,
-and migration to a second adapter.
+Before the first production send, run the site-specific portions of the
+twelve-step provider acceptance test from the research in the new client-owned
+account at the intended tier. Record evidence for credential rotation,
+subscriber lifecycle and suppression, campaign fingerprints, test delivery,
+timezone scheduling, event coverage, analytics reconciliation, quota
+behaviour, export fidelity and account handoff.
+
+This decision amends the original per-client interpretation of the
+second-adapter migration step. Each installation must produce and verify a
+provider-neutral export/import artifact against its own data model. A Foundry
+release may claim second-adapter portability only when its signed conformance
+evidence demonstrates a live source-to-destination migration using the exact
+pinned adapter versions in controlled accounts at representative intended
+tiers. Provisioning verifies that evidence's signature, release digest,
+adapter versions, age and mandatory outcomes. The evidence expires on either
+adapter's material API/capability change and must then be regenerated before
+any client can pass the gate. An individual client is not required to purchase
+or provision an otherwise unused second provider account.
 
 Production use is blocked if Brevo cannot perform the mandatory subscriber,
 campaign, test-send, scheduling, event/reconciliation, export, and migration
@@ -142,6 +157,9 @@ manual workaround.
 - Each installation requires a client administrator to create and rotate an API
   key because Brevo's current OAuth model is not public across unrelated client
   organizations.
+- Live second-adapter migration remains a release gate, while each client site
+  proves its own provider-neutral export/import boundary without requiring an
+  unused second provider account.
 - Foundry must implement and operate its own durable consent and suppression
   ledger; provider contacts alone are insufficient evidence.
 - Daily snapshots and reconciliation add operational work but make provider
