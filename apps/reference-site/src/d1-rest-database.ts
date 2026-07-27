@@ -15,6 +15,14 @@ type PreparedStatement = ReturnType<D1DatabaseBinding["prepare"]>;
 
 const statementQuery = new WeakMap<object, Query>();
 
+function normalizeParameter(value: unknown) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  throw new Error("d1_rest_parameter_invalid");
+}
+
 function queryFor(statement: PreparedStatement) {
   const query = statementQuery.get(statement);
   if (query === undefined) throw new Error("d1_rest_statement_invalid");
@@ -83,7 +91,7 @@ export function createD1RestDatabase({
     function createStatement(params: ReadonlyArray<unknown>) {
       const statement: PreparedStatement = {
         bind(...values) {
-          return createStatement(values);
+          return createStatement(values.map(normalizeParameter));
         },
         async first<T>() {
           const result = (await execute([{ sql, params }]))[0];

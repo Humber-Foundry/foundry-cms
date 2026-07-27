@@ -66,7 +66,9 @@ describe("D1 REST database", () => {
     });
     await database.batch([
       database.prepare("INSERT INTO one VALUES (?1)").bind("one"),
-      database.prepare("DELETE FROM two WHERE id = ?1").bind("two"),
+      database
+        .prepare("UPDATE two SET submission_count = ?1 WHERE id = ?2")
+        .bind(48, "two"),
     ]);
 
     const [, request] = (
@@ -77,9 +79,26 @@ describe("D1 REST database", () => {
     expect(JSON.parse(String(request?.body))).toEqual({
       batch: [
         { sql: "INSERT INTO one VALUES (?1)", params: ["one"] },
-        { sql: "DELETE FROM two WHERE id = ?1", params: ["two"] },
+        {
+          sql: "UPDATE two SET submission_count = ?1 WHERE id = ?2",
+          params: ["48", "two"],
+        },
       ],
     });
+  });
+
+  it("rejects unsupported bind values before making a request", async () => {
+    const fetchImplementation = vi.fn();
+    const database = createD1RestDatabase({
+      accountId: "account-48",
+      databaseId: "database-48",
+      apiToken: "secret-token",
+      fetchImplementation,
+    });
+    expect(() => database.prepare("SELECT ?1").bind(null)).toThrow(
+      "d1_rest_parameter_invalid",
+    );
+    expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
   it("fails closed on unsuccessful or malformed API responses", async () => {
