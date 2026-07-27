@@ -51,11 +51,11 @@ export function contentEditorReducer(
   state: ContentEditorState,
   action: ContentEditorAction,
 ): ContentEditorState {
+  if (state.status === "stale") {
+    return state;
+  }
   switch (action.type) {
     case "edit": {
-      if (state.status === "stale") {
-        return state;
-      }
       const workingDefinition = updateEditableSiteField(
         state.workingDefinition,
         action,
@@ -73,9 +73,6 @@ export function contentEditorReducer(
       };
     }
     case "undo": {
-      if (state.status === "stale") {
-        return state;
-      }
       const workingDefinition = state.past.at(-1);
       if (workingDefinition === undefined) {
         return state;
@@ -91,9 +88,6 @@ export function contentEditorReducer(
       };
     }
     case "redo": {
-      if (state.status === "stale") {
-        return state;
-      }
       const [workingDefinition, ...future] = state.future;
       if (workingDefinition === undefined) {
         return state;
