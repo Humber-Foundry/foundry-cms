@@ -25,6 +25,9 @@ vi.mock("../../../../src/content-revision-runtime", () => ({
     commands: { save: mocks.save },
   }),
 }));
+vi.mock("../../../../src/preview-capability-runtime", () => ({
+  createRevisionPreviewCapability: async () => "preview-capability",
+}));
 
 import { POST } from "./route";
 
@@ -63,7 +66,9 @@ describe("content revision endpoint", () => {
 
   it("saves through the authorized editor identity", async () => {
     mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
       revision: 3,
+      bookmark: "d1-bookmark",
       definition: { schemaVersion: "1.0.0" },
       inputs: {
         contentHash: "abc",
@@ -75,6 +80,8 @@ describe("content revision endpoint", () => {
 
     const response = await POST(
       request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Changed" }],
       }),
@@ -83,6 +90,8 @@ describe("content revision endpoint", () => {
     expect(response.status).toBe(201);
     expect(mocks.save).toHaveBeenCalledWith({
       actorId: "membership-editor",
+      workspaceId: "workspace_home",
+      schemaVersion: "1.0.0",
       baseRevision: 2,
       edits: [{ path: "section_hero.title", value: "Changed" }],
       idempotencyKey: "content-save-route-0001",
@@ -90,7 +99,8 @@ describe("content revision endpoint", () => {
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         revision: 3,
-        previewUrl: "/preview/3",
+        previewUrl:
+          "/preview/workspace_home/3?capability=preview-capability&bookmark=d1-bookmark",
       }),
     );
   });
@@ -104,6 +114,8 @@ describe("content revision endpoint", () => {
 
     const response = await POST(
       request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "" }],
       }),
@@ -123,6 +135,8 @@ describe("content revision endpoint", () => {
 
     const response = await POST(
       request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Stale" }],
       }),
@@ -140,6 +154,8 @@ describe("content revision endpoint", () => {
 
     const response = await POST(
       request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Different" }],
       }),
@@ -149,5 +165,25 @@ describe("content revision endpoint", () => {
     await expect(response.json()).resolves.toEqual({
       error: "idempotency_key_conflict",
     });
+  });
+
+  it("keys malformed field values to the submitted path", async () => {
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
+        baseRevision: 2,
+        edits: [{ path: "section_hero.title", value: 42 }],
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "validation_failed",
+      fields: {
+        "section_hero.title": "Enter a text value.",
+      },
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 });

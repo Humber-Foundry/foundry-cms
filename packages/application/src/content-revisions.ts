@@ -11,7 +11,20 @@ export type ContentRevisionInputs = Readonly<{
   productionBase: string;
 }>;
 
+declare const contentWorkspaceIdBrand: unique symbol;
+export type ContentWorkspaceId = string & {
+  readonly [contentWorkspaceIdBrand]: "ContentWorkspaceId";
+};
+
+export function createContentWorkspaceId(value: string): ContentWorkspaceId {
+  if (!/^workspace_[a-z0-9_]+$/.test(value)) {
+    throw new TypeError("content_workspace_id_invalid");
+  }
+  return value as ContentWorkspaceId;
+}
+
 export type ContentRevision = Readonly<{
+  workspaceId: ContentWorkspaceId;
   revision: number;
   definition: SiteDefinition;
   inputs: ContentRevisionInputs;
@@ -19,8 +32,13 @@ export type ContentRevision = Readonly<{
   createdBy: string;
 }>;
 
+export type SavedContentRevision = ContentRevision &
+  Readonly<{ bookmark: string }>;
+
 export type SaveContentRevisionCommand = Readonly<{
   actorId: string;
+  workspaceId: ContentWorkspaceId;
+  schemaVersion: SiteDefinition["schemaVersion"];
   baseRevision: number;
   edits: ReadonlyArray<SiteDefinitionEdit>;
   idempotencyKey: string;
@@ -36,8 +54,13 @@ type PersistContentRevisionCommand = Readonly<{
 export type ContentRevisionStore = Readonly<{
   initialize(initialRevision: ContentRevision): Promise<void>;
   getCurrent(): Promise<ContentRevision>;
-  getRevision(revision: number): Promise<ContentRevision | null>;
-  persist(command: PersistContentRevisionCommand): Promise<ContentRevision>;
+  getRevision(
+    revision: number,
+    bookmark?: string,
+  ): Promise<ContentRevision | null>;
+  persist(
+    command: PersistContentRevisionCommand,
+  ): Promise<SavedContentRevision>;
 }>;
 
 export class ContentRevisionConflictError extends Error {
@@ -64,6 +87,13 @@ export class ContentRevisionValidationError extends Error {
     super("content_revision_validation_failed");
     this.name = "ContentRevisionValidationError";
     this.fields = fields;
+  }
+}
+
+export class ContentRevisionConfigurationError extends Error {
+  constructor() {
+    super("content_revision_not_configured");
+    this.name = "ContentRevisionConfigurationError";
   }
 }
 
@@ -108,7 +138,7 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
   const revisions = new Map<number, ContentRevision>();
   const receipts = new Map<
     string,
-    Readonly<{ requestHash: string; revision: ContentRevision }>
+    Readonly<{ requestHash: string; revision: SavedContentRevision }>
   >();
   let currentRevision = 0;
 
@@ -138,13 +168,17 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
         throw new ContentRevisionConflictError(currentRevision);
       }
       const revision = immutableRevision(command.revision);
+      const saved = deepFreeze({
+        ...revision,
+        bookmark: `local:${revision.workspaceId}:${revision.revision}`,
+      });
       revisions.set(revision.revision, revision);
       currentRevision = revision.revision;
       receipts.set(command.idempotencyKey, {
         requestHash: command.requestHash,
-        revision,
+        revision: saved,
       });
-      return revision;
+      return saved;
     },
   };
 }
@@ -152,27 +186,35 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
 export function createContentRevisionApplication({
   siteDefinition,
   store,
+  workspaceId,
   rendererVersion,
   productionBase,
   now = () => new Date().toISOString(),
 }: {
   siteDefinition: SiteDefinition;
   store: ContentRevisionStore;
+  workspaceId: ContentWorkspaceId;
   rendererVersion: string;
-  productionBase: string;
+  productionBase: string | ((publishedContentHash: string) => string);
   now?: () => string;
 }) {
   let initialization: Promise<void> | undefined;
   const initialize = () => {
     initialization ??= (async () => {
+      const publishedContentHash = await sha256(siteDefinition);
+      const resolvedProductionBase =
+        typeof productionBase === "function"
+          ? productionBase(publishedContentHash)
+          : productionBase;
       const initial = immutableRevision({
+        workspaceId,
         revision: 0,
         definition: siteDefinition,
         inputs: {
-          contentHash: await sha256(siteDefinition),
+          contentHash: publishedContentHash,
           schemaVersion: siteDefinition.schemaVersion,
           rendererVersion,
-          productionBase,
+          productionBase: resolvedProductionBase,
         },
         createdAt: now(),
         createdBy: "published-base",
@@ -188,9 +230,9 @@ export function createContentRevisionApplication({
         await initialize();
         return store.getCurrent();
       },
-      async getRevision(revision: number) {
+      async getRevision(revision: number, bookmark?: string) {
         await initialize();
-        return store.getRevision(revision);
+        return store.getRevision(revision, bookmark);
       },
     }),
     commands: Object.freeze({
@@ -199,6 +241,17 @@ export function createContentRevisionApplication({
         if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
           throw new ContentRevisionValidationError({
             idempotencyKey: "Use a 16–128 character idempotency key.",
+          });
+        }
+        if (command.workspaceId !== workspaceId) {
+          throw new ContentRevisionValidationError({
+            workspaceId: "This workspace is not available.",
+          });
+        }
+        if (command.schemaVersion !== siteDefinition.schemaVersion) {
+          throw new ContentRevisionValidationError({
+            schemaVersion:
+              `Use Site Definition schema ${siteDefinition.schemaVersion}.`,
           });
         }
         const base = await store.getRevision(command.baseRevision);
@@ -212,17 +265,20 @@ export function createContentRevisionApplication({
         }
         const requestHash = await sha256({
           actorId: command.actorId,
+          workspaceId: command.workspaceId,
+          schemaVersion: command.schemaVersion,
           baseRevision: command.baseRevision,
           edits: command.edits,
         });
         const nextRevision: ContentRevision = {
+          workspaceId,
           revision: command.baseRevision + 1,
           definition: edited.definition,
           inputs: {
             contentHash: await sha256(edited.definition),
             schemaVersion: edited.definition.schemaVersion,
             rendererVersion,
-            productionBase,
+            productionBase: base.inputs.productionBase,
           },
           createdAt: now(),
           createdBy: command.actorId,

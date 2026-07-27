@@ -13,6 +13,7 @@ export function DashboardShell({
   mutationToken,
   contentRevision,
   contentMutationToken,
+  initialPreviewUrl,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -20,6 +21,7 @@ export function DashboardShell({
   mutationToken: string | null;
   contentRevision: ContentRevision;
   contentMutationToken: string;
+  initialPreviewUrl: string;
 }) {
   return (
     <div className="dashboard">
@@ -64,6 +66,7 @@ export function DashboardShell({
           <ContentEditor
             csrfToken={contentMutationToken}
             initialRevision={contentRevision}
+            initialPreviewUrl={initialPreviewUrl}
           />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">

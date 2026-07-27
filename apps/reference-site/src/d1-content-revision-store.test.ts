@@ -7,12 +7,14 @@ import {
   ContentRevisionConflictError,
   ContentRevisionIdempotencyError,
   createContentRevisionApplication,
+  createContentWorkspaceId,
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";
 
 describe("D1 content revision store", () => {
+  const workspaceId = createContentWorkspaceId("workspace_home");
   let miniflare: Miniflare;
   let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
 
@@ -43,7 +45,9 @@ describe("D1 content revision store", () => {
       store: createD1ContentRevisionStore(
         database,
         referenceSiteDefinition.site.id,
+        workspaceId,
       ),
+      workspaceId,
       rendererVersion: "renderer-test-commit",
       productionBase: "published:site_foundry_reference@1.0.0",
       now: () => "2026-07-27T12:00:00.000Z",
@@ -54,6 +58,8 @@ describe("D1 content revision store", () => {
     const application = createApplication();
     const command = {
       actorId: "membership-editor",
+      workspaceId,
+      schemaVersion: "1.0.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Persisted in D1" }],
       idempotencyKey: "d1-content-save-0001",
@@ -61,21 +67,62 @@ describe("D1 content revision store", () => {
 
     const first = await application.commands.save(command);
     const replay = await application.commands.save(command);
-    const stored = await application.queries.getRevision(1);
+    const stored = await application.queries.getRevision(1, first.bookmark);
 
-    expect(replay).toEqual(first);
-    expect(stored).toEqual(first);
+    expect(replay).toEqual(
+      expect.objectContaining({
+        workspaceId: first.workspaceId,
+        revision: first.revision,
+        definition: first.definition,
+        inputs: first.inputs,
+      }),
+    );
+    expect(first.bookmark).not.toBe("");
+    expect(stored).toEqual(
+      expect.objectContaining({
+        workspaceId,
+        revision: first.revision,
+        definition: first.definition,
+      }),
+    );
     expect(
       await database
         .prepare("SELECT COUNT(*) AS count FROM content_revisions")
         .first<{ count: number }>(),
     ).toEqual({ count: 2 });
+    expect(
+      await database
+        .prepare("SELECT COUNT(*) AS count FROM content_revision_audit_events")
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
+    expect(
+      await database
+        .prepare(
+          `SELECT owner_actor_id
+           FROM content_workspaces
+           WHERE workspace_id = ?1`,
+        )
+        .bind(workspaceId)
+        .first<{ owner_actor_id: string }>(),
+    ).toEqual({ owner_actor_id: "membership-editor" });
+    expect(
+      await database
+        .prepare(
+          `SELECT actor_id
+           FROM content_workspace_collaborators
+           WHERE workspace_id = ?1`,
+        )
+        .bind(workspaceId)
+        .first<{ actor_id: string }>(),
+    ).toEqual({ actor_id: "membership-editor" });
   });
 
   it("returns the current revision when optimistic concurrency fails", async () => {
     const application = createApplication();
     await application.commands.save({
       actorId: "membership-editor",
+      workspaceId,
+      schemaVersion: "1.0.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Current revision" }],
       idempotencyKey: "d1-content-save-0002",
@@ -84,6 +131,8 @@ describe("D1 content revision store", () => {
     await expect(
       application.commands.save({
         actorId: "membership-other",
+        workspaceId,
+        schemaVersion: "1.0.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Stale revision" }],
         idempotencyKey: "d1-content-save-0003",
@@ -95,6 +144,8 @@ describe("D1 content revision store", () => {
     const application = createApplication();
     await application.commands.save({
       actorId: "membership-editor",
+      workspaceId,
+      schemaVersion: "1.0.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First input" }],
       idempotencyKey: "d1-content-save-0004",
@@ -103,6 +154,8 @@ describe("D1 content revision store", () => {
     await expect(
       application.commands.save({
         actorId: "membership-editor",
+        workspaceId,
+        schemaVersion: "1.0.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Different input" }],
         idempotencyKey: "d1-content-save-0004",

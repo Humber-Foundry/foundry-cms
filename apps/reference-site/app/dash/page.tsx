@@ -12,6 +12,7 @@ import {
 import { HumanAccessConfigurationError } from "@/src/human-access-configuration";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
 import { loadContentRevisionApplication } from "@/src/content-revision-runtime";
+import { createRevisionPreviewCapability } from "@/src/preview-capability-runtime";
 import { referenceSiteApplication } from "@/src/reference-installation";
 
 import "./dashboard.css";
@@ -57,6 +58,14 @@ export default async function DashboardPage() {
     await loadContentRevisionApplication()
   ).queries.getCurrent();
   const contentMutationToken = await createHumanMutationToken(access.identity);
+  const initialPreviewCapability = await createRevisionPreviewCapability({
+    identity: access.identity,
+    workspaceId: contentRevision.workspaceId,
+    revision: contentRevision.revision,
+  });
+  const initialPreviewUrl =
+    `/preview/${contentRevision.workspaceId}/${contentRevision.revision}` +
+    `?capability=${encodeURIComponent(initialPreviewCapability)}`;
 
   return (
     <DashboardShell
@@ -66,6 +75,7 @@ export default async function DashboardPage() {
       mutationToken={mutationToken}
       contentRevision={contentRevision}
       contentMutationToken={contentMutationToken}
+      initialPreviewUrl={initialPreviewUrl}
     />
   );
 }

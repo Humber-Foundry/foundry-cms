@@ -1,8 +1,10 @@
 import type {
   ContentRevision,
   ContentRevisionStore,
+  ContentWorkspaceId,
 } from "@foundry/application";
 import {
+  ContentRevisionConfigurationError,
   ContentRevisionConflictError,
   ContentRevisionIdempotencyError,
 } from "@foundry/application";
@@ -11,6 +13,7 @@ import type { SiteDefinition, SiteId } from "@foundry/site-definition";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 
 type RevisionRow = {
+  workspace_id: ContentWorkspaceId;
   revision: number;
   definition_json: string;
   content_hash: string;
@@ -28,6 +31,7 @@ type ReceiptRow = {
 
 function toRevision(row: RevisionRow): ContentRevision {
   return {
+    workspaceId: row.workspace_id,
     revision: row.revision,
     definition: JSON.parse(row.definition_json) as SiteDefinition,
     inputs: {
@@ -43,6 +47,7 @@ function toRevision(row: RevisionRow): ContentRevision {
 
 const revisionProjection = `
   SELECT
+    workspace_id,
     revision,
     definition_json,
     content_hash,
@@ -54,44 +59,60 @@ const revisionProjection = `
   FROM content_revisions
 `;
 
+function requireBookmark(bookmark: string | null): string {
+  if (bookmark === null) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return bookmark;
+}
+
 export function createD1ContentRevisionStore(
   database: D1DatabaseBinding,
   siteId: SiteId,
+  workspaceId: ContentWorkspaceId,
 ): ContentRevisionStore {
-  async function findReceipt(idempotencyKey: string) {
-    return database
+  async function findReceipt(
+    connection: Pick<D1DatabaseBinding, "prepare">,
+    idempotencyKey: string,
+  ) {
+    return connection
       .prepare(
         `SELECT request_hash, revision
          FROM content_revision_receipts
-         WHERE idempotency_key = ?1 AND site_id = ?2`,
+         WHERE idempotency_key = ?1 AND workspace_id = ?2`,
       )
-      .bind(idempotencyKey, siteId)
+      .bind(idempotencyKey, workspaceId)
       .first<ReceiptRow>();
   }
 
-  async function getRevision(revision: number) {
-    const row = await database
+  async function getRevisionFrom(
+    connection: Pick<D1DatabaseBinding, "prepare">,
+    revision: number,
+  ) {
+    const row = await connection
       .prepare(
         `${revisionProjection}
-         WHERE site_id = ?1 AND revision = ?2`,
+         WHERE workspace_id = ?1 AND revision = ?2`,
       )
-      .bind(siteId, revision)
+      .bind(workspaceId, revision)
       .first<RevisionRow>();
     return row === null ? null : toRevision(row);
   }
 
-  async function getCurrent() {
-    const row = await database
+  async function getCurrentFrom(
+    connection: Pick<D1DatabaseBinding, "prepare">,
+  ) {
+    const row = await connection
       .prepare(
         `${revisionProjection}
-         WHERE site_id = ?1
+         WHERE workspace_id = ?1
            AND revision = (
              SELECT current_revision
              FROM content_workspaces
-             WHERE site_id = ?1
+             WHERE workspace_id = ?1
            )`,
       )
-      .bind(siteId)
+      .bind(workspaceId)
       .first<RevisionRow>();
     if (row === null) {
       throw new Error("content_workspace_not_initialized");
@@ -105,30 +126,41 @@ export function createD1ContentRevisionStore(
         database
           .prepare(
             `INSERT INTO content_workspaces (
-               site_id, current_revision, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?3)
-             ON CONFLICT (site_id) DO NOTHING`,
+               workspace_id, site_id, owner_actor_id,
+               production_base, schema_version, renderer_version,
+               current_revision, current_content_hash, lifecycle,
+               created_at, updated_at
+             ) VALUES (
+               ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'open', ?9, ?9
+             )
+             ON CONFLICT (workspace_id) DO NOTHING`,
           )
           .bind(
+            workspaceId,
             siteId,
+            initialRevision.createdBy,
+            initialRevision.inputs.productionBase,
+            initialRevision.inputs.schemaVersion,
+            initialRevision.inputs.rendererVersion,
             initialRevision.revision,
+            initialRevision.inputs.contentHash,
             initialRevision.createdAt,
           ),
         database
           .prepare(
             `INSERT INTO content_revisions (
-               site_id, revision, definition_json, content_hash,
+               workspace_id, revision, definition_json, content_hash,
                schema_version, renderer_version, production_base,
                created_at, created_by
              )
              SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
              WHERE NOT EXISTS (
                SELECT 1 FROM content_revisions
-               WHERE site_id = ?1 AND revision = ?2
+               WHERE workspace_id = ?1 AND revision = ?2
              )`,
           )
           .bind(
-            siteId,
+            workspaceId,
             initialRevision.revision,
             JSON.stringify(initialRevision.definition),
             initialRevision.inputs.contentHash,
@@ -140,34 +172,58 @@ export function createD1ContentRevisionStore(
           ),
       ]);
     },
-    getCurrent,
-    getRevision,
+    async getCurrent() {
+      const connection =
+        database.withSession?.("first-primary") ?? database;
+      return getCurrentFrom(connection);
+    },
+    async getRevision(revision, bookmark) {
+      const connection =
+        bookmark === undefined
+          ? database
+          : database.withSession?.(bookmark);
+      if (connection === undefined) {
+        throw new Error("content_revision_bookmark_unavailable");
+      }
+      return getRevisionFrom(connection, revision);
+    },
     async persist(command) {
-      const existing = await findReceipt(command.idempotencyKey);
+      if (database.withSession === undefined) {
+        throw new Error("content_revision_sessions_unavailable");
+      }
+      const session = database.withSession("first-primary");
+      const existing = await findReceipt(session, command.idempotencyKey);
       if (existing !== null) {
         if (existing.request_hash !== command.requestHash) {
           throw new ContentRevisionIdempotencyError();
         }
-        return (await getRevision(existing.revision))!;
+        const revision = (await getRevisionFrom(
+          session,
+          existing.revision,
+        ))!;
+        return {
+          ...revision,
+          bookmark: requireBookmark(session.getBookmark()),
+        };
       }
 
-      const current = await getCurrent();
+      const current = await getCurrentFrom(session);
       if (current.revision !== command.baseRevision) {
         throw new ContentRevisionConflictError(current.revision);
       }
 
-      const results = await database.batch([
-        database
+      const results = await session.batch([
+        session
           .prepare(
             `INSERT INTO content_revisions (
-               site_id, revision, definition_json, content_hash,
+               workspace_id, revision, definition_json, content_hash,
                schema_version, renderer_version, production_base,
                created_at, created_by
              )
              SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
              WHERE EXISTS (
                SELECT 1 FROM content_workspaces
-               WHERE site_id = ?1 AND current_revision = ?10
+               WHERE workspace_id = ?1 AND current_revision = ?10
              )
              AND NOT EXISTS (
                SELECT 1 FROM content_revision_receipts
@@ -175,7 +231,7 @@ export function createD1ContentRevisionStore(
              )`,
           )
           .bind(
-            siteId,
+            workspaceId,
             command.revision.revision,
             JSON.stringify(command.revision.definition),
             command.revision.inputs.contentHash,
@@ -187,56 +243,109 @@ export function createD1ContentRevisionStore(
             command.baseRevision,
             command.idempotencyKey,
           ),
-        database
+        session
           .prepare(
             `UPDATE content_workspaces
-             SET current_revision = ?1, updated_at = ?2
-             WHERE site_id = ?3
-               AND current_revision = ?4
+             SET current_revision = ?1,
+                 current_content_hash = ?2,
+                 updated_at = ?3,
+                 owner_actor_id = CASE
+                   WHEN current_revision = 0 THEN ?4
+                   ELSE owner_actor_id
+                 END
+             WHERE workspace_id = ?5
+               AND current_revision = ?6
                AND EXISTS (
                  SELECT 1 FROM content_revisions
-                 WHERE site_id = ?3 AND revision = ?1
+                 WHERE workspace_id = ?5 AND revision = ?1
                )`,
           )
           .bind(
             command.revision.revision,
+            command.revision.inputs.contentHash,
             command.revision.createdAt,
-            siteId,
+            command.revision.createdBy,
+            workspaceId,
             command.baseRevision,
           ),
-        database
+        session
           .prepare(
             `INSERT INTO content_revision_receipts (
-               idempotency_key, site_id, request_hash, revision, created_at
+               idempotency_key, workspace_id, request_hash, revision, created_at
              )
              SELECT ?1, ?2, ?3, ?4, ?5
              WHERE EXISTS (
                SELECT 1 FROM content_workspaces
-               WHERE site_id = ?2 AND current_revision = ?4
+               WHERE workspace_id = ?2 AND current_revision = ?4
              )
              ON CONFLICT (idempotency_key) DO NOTHING`,
           )
           .bind(
             command.idempotencyKey,
-            siteId,
+            workspaceId,
             command.requestHash,
             command.revision.revision,
+            command.revision.createdAt,
+          ),
+        session
+          .prepare(
+            `INSERT INTO content_revision_audit_events (
+               workspace_id, revision, actor_id, event_type, occurred_at
+             )
+             SELECT ?1, ?2, ?3, 'content.revision.created', ?4
+             WHERE EXISTS (
+               SELECT 1 FROM content_revision_receipts
+               WHERE idempotency_key = ?5
+                 AND workspace_id = ?1
+                 AND revision = ?2
+             )`,
+          )
+          .bind(
+            workspaceId,
+            command.revision.revision,
+            command.revision.createdBy,
+            command.revision.createdAt,
+            command.idempotencyKey,
+          ),
+        session
+          .prepare(
+            `INSERT INTO content_workspace_collaborators (
+               workspace_id, actor_id, added_at
+             ) VALUES (?1, ?2, ?3)
+             ON CONFLICT (workspace_id, actor_id) DO NOTHING`,
+          )
+          .bind(
+            workspaceId,
+            command.revision.createdBy,
             command.revision.createdAt,
           ),
       ]);
 
       if ((results[2]?.meta.changes ?? 0) > 0) {
-        return command.revision;
+        return {
+          ...command.revision,
+          bookmark: requireBookmark(session.getBookmark()),
+        };
       }
-      const racedReceipt = await findReceipt(command.idempotencyKey);
+      const racedReceipt = await findReceipt(
+        session,
+        command.idempotencyKey,
+      );
       if (racedReceipt !== null) {
         if (racedReceipt.request_hash !== command.requestHash) {
           throw new ContentRevisionIdempotencyError();
         }
-        return (await getRevision(racedReceipt.revision))!;
+        const revision = (await getRevisionFrom(
+          session,
+          racedReceipt.revision,
+        ))!;
+        return {
+          ...revision,
+          bookmark: requireBookmark(session.getBookmark()),
+        };
       }
       throw new ContentRevisionConflictError(
-        (await getCurrent()).revision,
+        (await getCurrentFrom(session)).revision,
       );
     },
   };

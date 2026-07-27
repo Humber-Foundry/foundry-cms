@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { AccessDeniedError } from "@foundry/application";
+import {
+  AccessDeniedError,
+  ContentRevisionConfigurationError,
+  createContentWorkspaceId,
+} from "@foundry/application";
 
 import { SiteRenderer } from "@/components/site-renderer";
 import { AccessIdentityError } from "@/src/access-identity";
@@ -12,8 +16,10 @@ import {
   authorizeAuthenticatedHumanIdentity,
   loadHumanIdentityRequestContext,
 } from "@/src/human-access-runtime";
+import { PreviewCapabilityError } from "@/src/preview-capability";
+import { verifyRevisionPreviewCapability } from "@/src/preview-capability-runtime";
 
-import "../../public.css";
+import "../../../public.css";
 import "./preview.css";
 
 export const dynamic = "force-dynamic";
@@ -25,16 +31,31 @@ export const metadata: Metadata = {
 
 export default async function RevisionPreviewPage({
   params,
+  searchParams,
 }: {
-  params: Promise<{ revision: string }>;
+  params: Promise<{ workspaceId: string; revision: string }>;
+  searchParams: Promise<{ capability?: string; bookmark?: string }>;
 }) {
-  const { revision: revisionParameter } = await params;
+  const {
+    workspaceId: workspaceIdParameter,
+    revision: revisionParameter,
+  } = await params;
+  const { capability, bookmark } = await searchParams;
   const revisionNumber = Number(revisionParameter);
   if (
     !Number.isSafeInteger(revisionNumber) ||
     revisionNumber < 0 ||
     String(revisionNumber) !== revisionParameter
   ) {
+    notFound();
+  }
+  let workspaceId;
+  try {
+    workspaceId = createContentWorkspaceId(workspaceIdParameter);
+  } catch {
+    notFound();
+  }
+  if (capability === undefined) {
     notFound();
   }
 
@@ -44,11 +65,19 @@ export default async function RevisionPreviewPage({
     if (access.state !== "authorized") {
       notFound();
     }
+    await verifyRevisionPreviewCapability({
+      capability,
+      identity: access.identity,
+      workspaceId,
+      revision: revisionNumber,
+    });
   } catch (error) {
     if (
       error instanceof AccessIdentityError ||
       error instanceof AccessDeniedError ||
-      error instanceof HumanAccessConfigurationError
+      error instanceof HumanAccessConfigurationError ||
+      error instanceof ContentRevisionConfigurationError ||
+      error instanceof PreviewCapabilityError
     ) {
       notFound();
     }
@@ -57,8 +86,8 @@ export default async function RevisionPreviewPage({
 
   const revision = await (
     await loadContentRevisionApplication()
-  ).queries.getRevision(revisionNumber);
-  if (revision === null) {
+  ).queries.getRevision(revisionNumber, bookmark);
+  if (revision === null || revision.workspaceId !== workspaceId) {
     notFound();
   }
 

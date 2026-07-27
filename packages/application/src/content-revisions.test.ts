@@ -6,13 +6,20 @@ import {
   ContentRevisionConflictError,
   ContentRevisionIdempotencyError,
   ContentRevisionValidationError,
+  createContentWorkspaceId,
   createContentRevisionApplication,
   createInMemoryContentRevisionStore,
 } from "./content-revisions";
 
 const applicationInputs = {
+  workspaceId: createContentWorkspaceId("workspace_home"),
   rendererVersion: "renderer-commit-a",
   productionBase: "published:site_foundry_reference@1.0.0",
+} as const;
+
+const commandInputs = {
+  workspaceId: applicationInputs.workspaceId,
+  schemaVersion: "1.0.0",
 } as const;
 
 describe("content revision application", () => {
@@ -25,6 +32,7 @@ describe("content revision application", () => {
 
     const saved = await application.commands.save({
       actorId: "membership-editor",
+      ...commandInputs,
       baseRevision: 0,
       edits: [
         {
@@ -59,6 +67,7 @@ describe("content revision application", () => {
     });
     const command = {
       actorId: "membership-editor",
+      ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "One save" }],
       idempotencyKey: "save-section-hero-0002",
@@ -82,6 +91,7 @@ describe("content revision application", () => {
 
     await application.commands.save({
       actorId: "membership-editor",
+      ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First input" }],
       idempotencyKey: "save-section-hero-0003",
@@ -90,6 +100,7 @@ describe("content revision application", () => {
     await expect(
       application.commands.save({
         actorId: "membership-editor",
+        ...commandInputs,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Different input" }],
         idempotencyKey: "save-section-hero-0003",
@@ -105,6 +116,7 @@ describe("content revision application", () => {
     });
     await application.commands.save({
       actorId: "membership-editor",
+      ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First editor" }],
       idempotencyKey: "save-section-hero-0004",
@@ -113,6 +125,7 @@ describe("content revision application", () => {
     await expect(
       application.commands.save({
         actorId: "membership-other-editor",
+        ...commandInputs,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Stale editor" }],
         idempotencyKey: "save-section-hero-0005",
@@ -130,6 +143,7 @@ describe("content revision application", () => {
     await expect(
       application.commands.save({
         actorId: "membership-editor",
+        ...commandInputs,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "" }],
         idempotencyKey: "save-section-hero-0006",
@@ -137,6 +151,43 @@ describe("content revision application", () => {
     ).rejects.toEqual(
       new ContentRevisionValidationError({
         "section_hero.title": "Enter at least one visible character.",
+      }),
+    );
+  });
+
+  it("rejects mutation metadata from another workspace or schema", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+
+    await expect(
+      application.commands.save({
+        actorId: "membership-editor",
+        workspaceId: createContentWorkspaceId("workspace_other"),
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Wrong workspace" }],
+        idempotencyKey: "save-section-hero-0007",
+      }),
+    ).rejects.toEqual(
+      new ContentRevisionValidationError({
+        workspaceId: "This workspace is not available.",
+      }),
+    );
+    await expect(
+      application.commands.save({
+        actorId: "membership-editor",
+        workspaceId: applicationInputs.workspaceId,
+        schemaVersion: "2.0.0" as "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Wrong schema" }],
+        idempotencyKey: "save-section-hero-0008",
+      }),
+    ).rejects.toEqual(
+      new ContentRevisionValidationError({
+        schemaVersion: "Use Site Definition schema 1.0.0.",
       }),
     );
   });

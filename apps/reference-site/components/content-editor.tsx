@@ -31,9 +31,11 @@ function changedFields(
 export function ContentEditor({
   csrfToken,
   initialRevision,
+  initialPreviewUrl,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
+  initialPreviewUrl: string;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -43,9 +45,7 @@ export function ContentEditor({
     }),
   );
   const [message, setMessage] = useState("");
-  const [previewUrl, setPreviewUrl] = useState(
-    `/preview/${initialRevision.revision}`,
-  );
+  const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const pendingAttempt = useRef<{
     body: string;
     idempotencyKey: string;
@@ -65,6 +65,8 @@ export function ContentEditor({
     if (pendingAttempt.current === null) {
       pendingAttempt.current = {
         body: JSON.stringify({
+          workspaceId: initialRevision.workspaceId,
+          schemaVersion: state.persistedDefinition.schemaVersion,
           baseRevision: state.persistedRevision,
           edits,
         }),
@@ -208,6 +210,7 @@ export function ContentEditor({
                   {field.multiline ? (
                     <textarea
                       rows={3}
+                      disabled={state.status === "saving"}
                       value={field.value}
                       aria-invalid={Boolean(state.errors[field.path])}
                       aria-describedby={`${field.path}-error`}
@@ -215,6 +218,7 @@ export function ContentEditor({
                     />
                   ) : (
                     <input
+                      disabled={state.status === "saving"}
                       value={field.value}
                       aria-invalid={Boolean(state.errors[field.path])}
                       aria-describedby={`${field.path}-error`}

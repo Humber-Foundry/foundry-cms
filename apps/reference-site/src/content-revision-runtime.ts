@@ -2,6 +2,8 @@ import "server-only";
 
 import {
   createContentRevisionApplication,
+  ContentRevisionConfigurationError,
+  createContentWorkspaceId,
   createInMemoryContentRevisionStore,
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
@@ -13,18 +15,26 @@ const localRuntime = globalThis as typeof globalThis & {
   __foundryContentRevisionStore?: ReturnType<
     typeof createInMemoryContentRevisionStore
   >;
+  __foundryLocalRendererVersion?: string;
 };
 localRuntime.__foundryContentRevisionStore ??=
   createInMemoryContentRevisionStore();
+localRuntime.__foundryLocalRendererVersion ??=
+  `local-runtime:${crypto.randomUUID()}`;
 
-const productionBase =
-  `bundled:${referenceSiteDefinition.site.id}` +
-  `@definition:${referenceSiteDefinition.definitionVersion}`;
+export const referenceContentWorkspaceId =
+  createContentWorkspaceId("workspace_home");
+
+export { ContentRevisionConfigurationError };
+
+const productionBase = (contentHash: string) =>
+  `bundled:${referenceSiteDefinition.site.id}@content:${contentHash}`;
 
 const localApplication = createContentRevisionApplication({
   siteDefinition: referenceSiteDefinition,
   store: localRuntime.__foundryContentRevisionStore,
-  rendererVersion: "local-development-renderer",
+  workspaceId: referenceContentWorkspaceId,
+  rendererVersion: localRuntime.__foundryLocalRendererVersion,
   productionBase,
 });
 
@@ -34,18 +44,23 @@ export async function loadContentRevisionApplication() {
   }
   const environment = await loadHumanAccessEnvironment();
   if (environment.FOUNDRY_DB === undefined) {
-    throw new Error("content_revision_database_not_configured");
+    throw new ContentRevisionConfigurationError();
+  }
+  const rendererVersion =
+    environment.CF_VERSION_METADATA?.id ??
+    environment.FOUNDRY_RENDERER_VERSION;
+  if (rendererVersion === undefined || rendererVersion.trim() === "") {
+    throw new ContentRevisionConfigurationError();
   }
   return createContentRevisionApplication({
     siteDefinition: referenceSiteDefinition,
     store: createD1ContentRevisionStore(
       environment.FOUNDRY_DB,
       referenceSiteDefinition.site.id,
+      referenceContentWorkspaceId,
     ),
-    rendererVersion:
-      environment.CF_VERSION_METADATA?.id ??
-      environment.FOUNDRY_RENDERER_VERSION ??
-      "unversioned-renderer",
+    workspaceId: referenceContentWorkspaceId,
+    rendererVersion,
     productionBase,
   });
 }
