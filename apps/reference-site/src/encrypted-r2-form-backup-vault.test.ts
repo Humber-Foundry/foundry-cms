@@ -93,6 +93,40 @@ function vaults(bucket: R2BackupBucket) {
 }
 
 describe("encrypted R2 form backup vault", () => {
+  it("defers recipient-key validation until encryption is required", async () => {
+    const backup = createEncryptedR2PublicFormBackupVault({
+      bucket: memoryBucket(),
+      recoveryRecipientBase64: Buffer.from("not-an-spki-key").toString(
+        "base64",
+      ),
+      siteId,
+    });
+    const snapshot: PublicFormBackupSnapshot = {
+      version: 1,
+      siteId,
+      createdAt: "2026-07-27T00:00:00.000Z",
+      submissions: [],
+      classifications: [],
+      deliveries: [],
+      outboxEvents: [],
+      notificationJobs: [],
+      acceptanceAuditFacts: [],
+      auditFacts: [],
+    };
+
+    await expect(
+      backup.deleteExpired({ now: "2026-07-27T00:00:00.000Z" }),
+    ).resolves.toBe(0);
+    await expect(
+      backup.saveEncrypted({
+        backupId: "backup-invalid-recipient",
+        snapshot,
+        createdAt: snapshot.createdAt,
+        retentionDays: 30,
+      }),
+    ).rejects.toMatchObject({ code: "recovery_backup_unavailable" });
+  });
+
   it("writes immutable per-attempt objects for one logical backup", async () => {
     const bucket = memoryBucket();
     const { backup } = vaults(bucket);

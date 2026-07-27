@@ -246,17 +246,23 @@ export function createEncryptedR2PublicFormBackupVault({
   siteId: SiteId;
 }): PublicFormBackupVault {
   const prefix = `forms/${siteId}/`;
-  const recoveryRecipient = crypto.subtle
-    .importKey(
-      "spki",
-      decodeRecoveryKey(recoveryRecipientBase64),
-      { name: "RSA-OAEP", hash: "SHA-256" },
-      false,
-      ["encrypt"],
-    )
-    .catch(() => {
-      throw new PublicFormPrivacyError("recovery_backup_unavailable");
-    });
+  let recoveryRecipient: Promise<CryptoKey> | undefined;
+  const loadRecoveryRecipient = () => {
+    recoveryRecipient ??= Promise.resolve()
+      .then(() =>
+        crypto.subtle.importKey(
+          "spki",
+          decodeRecoveryKey(recoveryRecipientBase64),
+          { name: "RSA-OAEP", hash: "SHA-256" },
+          false,
+          ["encrypt"],
+        ),
+      )
+      .catch(() => {
+        throw new PublicFormPrivacyError("recovery_backup_unavailable");
+      });
+    return recoveryRecipient;
+  };
   return {
     async saveEncrypted({
       backupId,
@@ -283,7 +289,7 @@ export function createEncryptedR2PublicFormBackupVault({
       const wrappedKey = new Uint8Array(
         await crypto.subtle.encrypt(
           { name: "RSA-OAEP" },
-          await recoveryRecipient,
+          await loadRecoveryRecipient(),
           rawDataKey,
         ),
       );

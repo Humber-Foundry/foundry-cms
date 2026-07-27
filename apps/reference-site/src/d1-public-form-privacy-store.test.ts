@@ -272,6 +272,37 @@ describe("D1 public form privacy store", () => {
     expect(backupEvidence?.count).toBe(0);
   });
 
+  it("keeps an unexpired backup pointer beyond the audit window", async () => {
+    await database
+      .prepare(
+        `INSERT INTO public_form_backup_records (
+           backup_id, site_id, object_key, integrity_hash, created_at,
+           expires_at, retention_days
+         ) VALUES ('long-backup', ?1, 'forms/long.enc', 'sha256:long',
+                   '2025-01-01T00:00:00.000Z',
+                   '2026-12-31T00:00:00.000Z', 730)`,
+      )
+      .bind(siteId)
+      .run();
+    const store = createD1PublicFormPrivacyStore(
+      database as unknown as D1DatabaseBinding,
+    );
+
+    await store.applyRetention({
+      siteId,
+      now: "2026-07-01T00:00:01.000Z",
+      policy: { ...defaultPublicFormRetentionPolicy, backupDays: 730 },
+    });
+
+    await expect(
+      database
+        .prepare(
+          "SELECT object_key FROM public_form_backup_records WHERE backup_id = 'long-backup'",
+        )
+        .first<{ object_key: string }>(),
+    ).resolves.toEqual({ object_key: "forms/long.enc" });
+  });
+
   it("reclassifies a live payload, holds delivery, and records a payload-free fact", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(accepted);
     const store = createD1PublicFormPrivacyStore(

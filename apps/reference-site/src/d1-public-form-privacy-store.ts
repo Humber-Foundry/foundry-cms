@@ -711,9 +711,9 @@ export function createD1PublicFormPrivacyStore(
         database
           .prepare(
             `DELETE FROM public_form_backup_records
-             WHERE site_id = ?1 AND created_at < ?2`,
+             WHERE site_id = ?1 AND expires_at <= ?2`,
           )
-          .bind(siteId, auditCutoff),
+          .bind(siteId, now),
       ]);
       return {
         erasedPayloads: results[1]?.meta.changes ?? 0,
