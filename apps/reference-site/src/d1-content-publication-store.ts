@@ -391,7 +391,43 @@ export function createD1ContentPublicationStore(
       }
       return { state: "claimed", publication };
     },
-    async updatePublication(publication) {
+    async hasPublicationLease({ publicationId, leaseToken, now }) {
+      const row = await database
+        .prepare(
+          `SELECT 1 AS held
+           FROM content_publications
+           WHERE id = ?1
+             AND status = 'requested'
+             AND lease_token = ?2
+             AND lease_expires_at > ?3`,
+        )
+        .bind(publicationId, leaseToken, now)
+        .first<{ held: number }>();
+      return row?.held === 1;
+    },
+    async renewPublicationLease({
+      publicationId,
+      leaseToken,
+      now,
+      leaseExpiresAt,
+    }) {
+      const result = await database
+        .prepare(
+          `UPDATE content_publications
+           SET lease_expires_at = ?1
+           WHERE id = ?2
+             AND status = 'requested'
+             AND lease_token = ?3
+             AND lease_expires_at > ?4`,
+        )
+        .bind(leaseExpiresAt, publicationId, leaseToken, now)
+        .run();
+      return (result.meta.changes ?? 0) === 1;
+    },
+    async updatePublication(publication, options) {
+      const expectedLeaseToken = options?.expectedLeaseToken ?? null;
+      const expectedLeaseValidAt =
+        options?.expectedLeaseValidAt ?? null;
       const results = await database.batch([
         database
           .prepare(
@@ -405,6 +441,11 @@ export function createD1ContentPublicationStore(
                updated_at = ?6
              WHERE id = ?7
                AND status <> 'verified-live'
+               AND (
+                 ?8 IS NULL
+                 OR (status = 'requested' AND lease_token = ?8)
+               )
+               AND (?9 IS NULL OR lease_expires_at > ?9)
                AND NOT (
                  status = 'deployed'
                  AND ?1 IN ('requested', 'committed', 'building', 'unknown')
@@ -426,6 +467,8 @@ export function createD1ContentPublicationStore(
             publication.leaseExpiresAt,
             publication.updatedAt,
             publication.id,
+            expectedLeaseToken,
+            expectedLeaseValidAt,
           ),
         auditStatement(publication, true),
       ]);
@@ -450,7 +493,15 @@ export function createD1ContentPublicationStore(
         .prepare(
           `${publicationProjection}
            WHERE workspace_id = ?1
-           ORDER BY requested_at DESC, id DESC
+           ORDER BY
+             CASE
+               WHEN status = 'blocked'
+                 AND detail = 'publication_in_progress'
+               THEN 1
+               ELSE 0
+             END,
+             requested_at DESC,
+             id DESC
            LIMIT 1`,
         )
         .bind(workspaceId)

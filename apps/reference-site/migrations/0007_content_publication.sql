@@ -96,7 +96,9 @@ CREATE TRIGGER content_revisions_block_during_publication
 BEFORE INSERT ON content_revisions
 WHEN NEW.revision > 0 AND EXISTS (
   SELECT 1 FROM content_publications
-  WHERE status = 'requested'
+  WHERE workspace_id = NEW.workspace_id
+    AND status = 'requested'
+    AND lease_expires_at > NEW.created_at
 )
 BEGIN
   SELECT RAISE(ABORT, 'content_publication_commit_in_progress');

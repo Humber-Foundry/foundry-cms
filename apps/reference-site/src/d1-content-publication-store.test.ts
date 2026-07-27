@@ -222,6 +222,63 @@ describe("D1 content publication store", () => {
     ).rejects.toThrow(/content_publication_commit_in_progress/u);
   });
 
+  it("does not fence another workspace or the same workspace after lease expiry", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-scoped-fence-001");
+    await store.claimPublication(requested);
+
+    const otherWorkspaceId = createContentWorkspaceId("workspace_parallel");
+    const otherApplication = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createD1ContentRevisionStore(
+        database,
+        referenceSiteDefinition.site.id,
+        otherWorkspaceId,
+      ),
+      workspaceId: otherWorkspaceId,
+      actorId,
+      rendererVersion: "renderer-v1",
+      productionBase:
+        `git:${"a".repeat(40)}@content:${"b".repeat(64)}`,
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
+    await otherApplication.commands.create({
+      actorId,
+      workspaceId: otherWorkspaceId,
+      idempotencyKey: "create-parallel-workspace-1",
+    });
+    await expect(
+      otherApplication.commands.save({
+        actorId,
+        workspaceId: otherWorkspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Parallel edit" }],
+        idempotencyKey: "save-parallel-workspace-1",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ revision: 1 }));
+
+    await database
+      .prepare(
+        `UPDATE content_publications
+         SET lease_expires_at = '2026-07-27T09:59:59.000Z'
+         WHERE id = ?1`,
+      )
+      .bind(requested.id)
+      .run();
+    await expect(
+      revisionApplication.commands.save({
+        actorId,
+        workspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Edit after expiry" }],
+        idempotencyKey: "save-after-lease-expiry-1",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ revision: 1 }));
+  });
+
   it("replays a publication idempotency key without another operation", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);
@@ -276,6 +333,92 @@ describe("D1 content publication store", () => {
       success: true,
       meta: expect.any(Object),
     });
+  });
+
+  it("requires the live unexpired lease token for a holder transition", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-lease-fence-1");
+    await store.claimPublication(requested);
+
+    await expect(
+      store.renewPublicationLease({
+        publicationId: requested.id,
+        leaseToken: "lease-1",
+        now: "2026-07-27T10:10:59.000Z",
+        leaseExpiresAt: "2026-07-27T10:13:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      store.hasPublicationLease({
+        publicationId: requested.id,
+        leaseToken: "lease-1",
+        now: "2026-07-27T10:11:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      store.hasPublicationLease({
+        publicationId: requested.id,
+        leaseToken: "lease-1",
+        now: "2026-07-27T10:13:00.000Z",
+      }),
+    ).resolves.toBe(false);
+
+    const renewed = {
+      ...requested,
+      leaseExpiresAt: "2026-07-27T10:13:00.000Z",
+    };
+    const committed = {
+      ...renewed,
+      status: "committed" as const,
+      commitSha: "c".repeat(40),
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:02:00.000Z",
+    };
+    await expect(
+      store.updatePublication(committed, {
+        expectedLeaseToken: "lease-wrong",
+      }),
+    ).resolves.toEqual(renewed);
+    await expect(store.findPublication(requested.id)).resolves.toEqual(
+      renewed,
+    );
+    await expect(
+      store.updatePublication(committed, {
+        expectedLeaseToken: "lease-1",
+        expectedLeaseValidAt: "2026-07-27T10:13:00.000Z",
+      }),
+    ).resolves.toEqual(renewed);
+    await expect(
+      store.updatePublication(committed, {
+        expectedLeaseToken: "lease-1",
+        expectedLeaseValidAt: "2026-07-27T10:12:59.000Z",
+      }),
+    ).resolves.toEqual(committed);
+  });
+
+  it("keeps the meaningful publication discoverable ahead of a blocked contender", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-visible-0001");
+    const contender = {
+      ...publication("2", "publish-d1-contender-01"),
+      requestedAt: "2026-07-27T10:09:00.000Z",
+      updatedAt: "2026-07-27T10:09:00.000Z",
+    };
+    await store.claimPublication(requested);
+    await expect(store.claimPublication(contender)).resolves.toEqual({
+      state: "blocked",
+      publication: expect.objectContaining({
+        status: "blocked",
+        detail: "publication_in_progress",
+      }),
+    });
+
+    await expect(store.findLatestPublication(workspaceId)).resolves.toEqual(
+      requested,
+    );
   });
 
   it("prevents stale refreshes from regressing deployed or verified-live state", async () => {

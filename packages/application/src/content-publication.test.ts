@@ -256,6 +256,37 @@ describe("content publication application", () => {
     expect(createCommit).toHaveBeenCalledTimes(1);
   });
 
+  it("does not enter the publisher after losing the claimed lease", async () => {
+    const store = createInMemoryContentPublicationStore();
+    vi.spyOn(store, "renewPublicationLease").mockResolvedValue(false);
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+
+    await expect(
+      app.commands.publish({
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-lease-lost-0001",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        detail: "publication_lease_lost",
+      }),
+    );
+    expect(createCommit).not.toHaveBeenCalled();
+  });
+
   it("replays the recorded operation even after its own commit advanced production", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
@@ -394,6 +425,55 @@ describe("content publication application", () => {
         status: "failed",
         detail: "publication_lease_expired",
         leaseToken: null,
+      }),
+    );
+  });
+
+  it("clears an expired lease as soon as reconciliation finds the exact commit", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => "2026-07-27T10:10:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const stranded = {
+      id: createContentPublicationId(`publish_${"8".repeat(32)}`),
+      workspaceId,
+      revision: 1,
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+      idempotencyKey: "stranded-commit-found-1",
+      requestedBy: membershipId,
+      contributors: [editorId],
+      expectedHead: productionCommit,
+      status: "requested" as const,
+      commitSha: null,
+      detail: null,
+      leaseToken: "expired-lease",
+      leaseExpiresAt: "2026-07-27T10:05:00.000Z",
+      requestedAt: "2026-07-27T10:03:00.000Z",
+      updatedAt: "2026-07-27T10:03:00.000Z",
+    };
+    await store.claimPublication(stranded);
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "committed",
+      commitSha: "e".repeat(40),
+    });
+    getDeploymentStatus.mockResolvedValue("requested");
+
+    await expect(app.commands.refresh(stranded.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "e".repeat(40),
+        leaseToken: null,
+        leaseExpiresAt: null,
       }),
     );
   });

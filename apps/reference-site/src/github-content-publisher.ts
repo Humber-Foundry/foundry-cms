@@ -172,6 +172,7 @@ export function createGitHubContentPublisher({
     return readJson(
       await fetchImplementation(api(`${repositoryPath}${path}`), {
         ...init,
+        signal: init.signal ?? AbortSignal.timeout(30_000),
         headers: {
           ...githubHeaders(token),
           ...init.headers,
@@ -242,6 +243,9 @@ export function createGitHubContentPublisher({
     async createCommit(input): Promise<PublicationCommitResult> {
       let createdCommitSha: string | undefined;
       try {
+        if (!(await input.assertLease())) {
+          return { state: "blocked", detail: "publication_lease_lost" };
+        }
         const token = await installationToken();
         if ((await productionHead(token)) !== input.expectedHead) {
           return { state: "blocked", detail: "production_head_moved" };
@@ -283,6 +287,9 @@ export function createGitHubContentPublisher({
           throw new Error("github_commit_invalid");
         }
         createdCommitSha = commit.sha;
+        if (!(await input.assertLease())) {
+          return { state: "blocked", detail: "publication_lease_lost" };
+        }
         await request(
           token,
           `/git/refs/heads/${configuration.productionBranch

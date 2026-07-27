@@ -91,6 +91,7 @@ describe("GitHub content publisher", () => {
         path: "packages/site-definition/src/published-site.json",
         bytes: "{\"schemaVersion\":\"1.0.0\"}\n",
         message: "Publish\n\nFoundry-Publish-Id: publish_11111111111111111111111111111111",
+        assertLease: async () => true,
       }),
     ).resolves.toEqual({
       state: "committed",
@@ -157,12 +158,59 @@ describe("GitHub content publisher", () => {
         path: "packages/site-definition/src/published-site.json",
         bytes: "{}\n",
         message: "Publish",
+        assertLease: async () => true,
       }),
     ).resolves.toEqual({
       state: "blocked",
       detail: "production_head_moved",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not advance the production ref after the publication lease is lost", async () => {
+    const expectedHead = "a".repeat(40);
+    const assertLease = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(json({ sha: "c".repeat(40) }));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"1".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: "Publish",
+        assertLease,
+      }),
+    ).resolves.toEqual({
+      state: "blocked",
+      detail: "publication_lease_lost",
+    });
+    expect(assertLease).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
   });
 
   it("requires two uncached exact release-marker reads before reporting live", async () => {
