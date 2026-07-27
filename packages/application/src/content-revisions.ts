@@ -52,7 +52,15 @@ type PersistContentRevisionCommand = Readonly<{
 }>;
 
 export type ContentRevisionStore = Readonly<{
-  initialize(initialRevision: ContentRevision): Promise<void>;
+  initialize(
+    initialRevision: ContentRevision,
+    ownerActorId: string,
+  ): Promise<void>;
+  requireAccess(actorId: string): Promise<void>;
+  addCollaborator(
+    ownerActorId: string,
+    collaboratorActorId: string,
+  ): Promise<void>;
   getCurrent(): Promise<ContentRevision>;
   getRevision(
     revision: number,
@@ -97,6 +105,20 @@ export class ContentRevisionConfigurationError extends Error {
   }
 }
 
+export class ContentWorkspaceAccessError extends Error {
+  constructor() {
+    super("content_workspace_access_denied");
+    this.name = "ContentWorkspaceAccessError";
+  }
+}
+
+export class ContentRevisionStaleError extends Error {
+  constructor() {
+    super("content_revision_stale");
+    this.name = "ContentRevisionStaleError";
+  }
+}
+
 export function assertContentRevisionIdempotency(
   recordedRequestHash: string,
   requestHash: string,
@@ -124,9 +146,15 @@ export function withContentRevisionBookmark(
 
 export function isContentRevisionRenderableBy(
   revision: ContentRevision,
-  rendererVersion: string,
+  inputs: Readonly<{
+    rendererVersion: string;
+    productionBase: string;
+  }>,
 ): boolean {
-  return revision.inputs.rendererVersion === rendererVersion;
+  return (
+    revision.inputs.rendererVersion === inputs.rendererVersion &&
+    revision.inputs.productionBase === inputs.productionBase
+  );
 }
 
 function canonicalJson(value: unknown): string {
@@ -173,14 +201,28 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
     Readonly<{ requestHash: string; revision: SavedContentRevision }>
   >();
   let currentRevision = 0;
+  let ownerActorId: string | undefined;
+  const collaborators = new Set<string>();
 
   return {
-    async initialize(initialRevision) {
+    async initialize(initialRevision, initialOwnerActorId) {
       if (revisions.size === 0) {
         const immutable = immutableRevision(initialRevision);
         revisions.set(immutable.revision, immutable);
         currentRevision = immutable.revision;
+        ownerActorId = initialOwnerActorId;
       }
+    },
+    async requireAccess(actorId) {
+      if (actorId !== ownerActorId && !collaborators.has(actorId)) {
+        throw new ContentWorkspaceAccessError();
+      }
+    },
+    async addCollaborator(actorId, collaboratorActorId) {
+      if (actorId !== ownerActorId) {
+        throw new ContentWorkspaceAccessError();
+      }
+      collaborators.add(collaboratorActorId);
     },
     async getCurrent() {
       return revisions.get(currentRevision)!;
@@ -220,6 +262,7 @@ export function createContentRevisionApplication({
   siteDefinition,
   store,
   workspaceId,
+  actorId,
   rendererVersion,
   productionBase,
   now = () => new Date().toISOString(),
@@ -227,11 +270,13 @@ export function createContentRevisionApplication({
   siteDefinition: SiteDefinition;
   store: ContentRevisionStore;
   workspaceId: ContentWorkspaceId;
+  actorId: string;
   rendererVersion: string;
   productionBase: string | ((publishedContentHash: string) => string);
   now?: () => string;
 }) {
   let initialization: Promise<void> | undefined;
+  let currentProductionBase: string | undefined;
   const initialize = () => {
     initialization ??= (async () => {
       const publishedContentHash = await sha256(siteDefinition);
@@ -239,6 +284,7 @@ export function createContentRevisionApplication({
         typeof productionBase === "function"
           ? productionBase(publishedContentHash)
           : productionBase;
+      currentProductionBase = resolvedProductionBase;
       const initial = immutableRevision({
         workspaceId,
         revision: 0,
@@ -252,7 +298,8 @@ export function createContentRevisionApplication({
         createdAt: now(),
         createdBy: "published-base",
       });
-      await store.initialize(initial);
+      await store.initialize(initial, actorId);
+      await store.requireAccess(actorId);
     })();
     return initialization;
   };
@@ -269,10 +316,20 @@ export function createContentRevisionApplication({
         await initialize();
         return store.getRevision(revision, bookmark);
       },
+      async isRevisionCurrent(revision: ContentRevision) {
+        await initialize();
+        return isContentRevisionRenderableBy(revision, {
+          rendererVersion,
+          productionBase: currentProductionBase!,
+        });
+      },
     }),
     commands: Object.freeze({
       async save(command: SaveContentRevisionCommand) {
         await initialize();
+        if (command.actorId !== actorId) {
+          throw new ContentWorkspaceAccessError();
+        }
         if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
           throw new ContentRevisionValidationError({
             idempotencyKey: "Use a 16–128 character idempotency key.",
@@ -293,6 +350,14 @@ export function createContentRevisionApplication({
         if (base === null) {
           const current = await store.getCurrent();
           throw new ContentRevisionConflictError(current.revision);
+        }
+        if (
+          !isContentRevisionRenderableBy(base, {
+            rendererVersion,
+            productionBase: currentProductionBase!,
+          })
+        ) {
+          throw new ContentRevisionStaleError();
         }
         const edited = applySiteDefinitionEdits(base.definition, command.edits);
         if (!edited.ok) {
@@ -324,6 +389,10 @@ export function createContentRevisionApplication({
           requestHash,
           revision: nextRevision,
         });
+      },
+      async addCollaborator(collaboratorActorId: string) {
+        await initialize();
+        await store.addCollaborator(actorId, collaboratorActorId);
       },
     }),
   });

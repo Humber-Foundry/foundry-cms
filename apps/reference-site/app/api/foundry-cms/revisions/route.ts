@@ -4,15 +4,14 @@ import {
   ContentRevisionIdempotencyError,
   ContentRevisionValidationError,
   ContentRevisionConfigurationError,
+  ContentRevisionStaleError,
+  ContentWorkspaceAccessError,
   createContentWorkspaceId,
 } from "@foundry/application";
 import type { SiteDefinitionEdit } from "@foundry/site-definition";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
-import {
-  contentWorkspaceIdForActor,
-  loadContentRevisionApplication,
-} from "../../../../src/content-revision-runtime";
+import { loadContentRevisionApplication } from "../../../../src/content-revision-runtime";
 import {
   HumanAccessConfigurationError,
 } from "../../../../src/human-access-configuration";
@@ -110,20 +109,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "invalid_command" }, { status: 400 });
     }
     const body = parsed.body;
-    const expectedWorkspaceId = await contentWorkspaceIdForActor(
-      access.membership.id,
-    );
-    if (body.workspaceId !== expectedWorkspaceId) {
-      return Response.json(
-        {
-          error: "validation_failed",
-          fields: { workspaceId: "This workspace is not available." },
-        },
-        { status: 422 },
-      );
-    }
     const application = await loadContentRevisionApplication(
-      expectedWorkspaceId,
+      body.workspaceId,
+      access.membership.id,
     );
     const saved = await application.commands.save({
       actorId: access.membership.id,
@@ -172,6 +160,12 @@ export async function POST(request: Request) {
         { error: "idempotency_key_conflict" },
         { status: 409 },
       );
+    }
+    if (error instanceof ContentRevisionStaleError) {
+      return Response.json({ error: "revision_stale" }, { status: 409 });
+    }
+    if (error instanceof ContentWorkspaceAccessError) {
+      return Response.json({ error: "workspace_access_denied" }, { status: 403 });
     }
     if (
       error instanceof AccessIdentityError ||

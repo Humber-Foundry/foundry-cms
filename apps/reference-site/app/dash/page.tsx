@@ -61,7 +61,7 @@ export default async function DashboardPage() {
     access.membership.id,
   );
   const contentRevision = await (
-    await loadContentRevisionApplication(workspaceId)
+    await loadContentRevisionApplication(workspaceId, access.membership.id)
   ).queries.getCurrent();
   const contentMutationToken = await createHumanMutationToken(access.identity);
   const initialPreviewCapability = await createRevisionPreviewCapability({

@@ -39,7 +39,7 @@ describe("D1 content revision store", () => {
     await miniflare.dispose();
   });
 
-  function createApplication() {
+  function createApplication(actorId = "membership-editor") {
     return createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
       store: createD1ContentRevisionStore(
@@ -48,6 +48,7 @@ describe("D1 content revision store", () => {
         workspaceId,
       ),
       workspaceId,
+      actorId,
       rendererVersion: "renderer-test-commit",
       productionBase: "published:site_foundry_reference@1.0.0",
       now: () => "2026-07-27T12:00:00.000Z",
@@ -108,13 +109,27 @@ describe("D1 content revision store", () => {
     expect(
       await database
         .prepare(
-          `SELECT actor_id
+          `SELECT COUNT(*) AS count
            FROM content_workspace_collaborators
            WHERE workspace_id = ?1`,
         )
         .bind(workspaceId)
-        .first<{ actor_id: string }>(),
-    ).toEqual({ actor_id: "membership-editor" });
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("allows explicit collaborators and rejects outsiders", async () => {
+    const owner = createApplication();
+    await owner.commands.addCollaborator("membership-collaborator");
+    const collaborator = createApplication("membership-collaborator");
+    await expect(collaborator.queries.getCurrent()).resolves.toEqual(
+      expect.objectContaining({ workspaceId }),
+    );
+
+    const outsider = createApplication("membership-outsider");
+    await expect(outsider.queries.getCurrent()).rejects.toThrow(
+      "content_workspace_access_denied",
+    );
   });
 
   it("returns the current revision when optimistic concurrency fails", async () => {
@@ -130,7 +145,7 @@ describe("D1 content revision store", () => {
 
     await expect(
       application.commands.save({
-        actorId: "membership-other",
+        actorId: "membership-editor",
         workspaceId,
         schemaVersion: "1.0.0",
         baseRevision: 0,

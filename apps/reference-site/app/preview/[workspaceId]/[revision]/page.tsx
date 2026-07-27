@@ -5,8 +5,8 @@ import { notFound } from "next/navigation";
 import {
   AccessDeniedError,
   ContentRevisionConfigurationError,
+  ContentWorkspaceAccessError,
   createContentWorkspaceId,
-  isContentRevisionRenderableBy,
 } from "@foundry/application";
 
 import { SiteRenderer } from "@/components/site-renderer";
@@ -72,12 +72,58 @@ export default async function RevisionPreviewPage({
       workspaceId,
       revision: revisionNumber,
     });
+    const application = await loadContentRevisionApplication(
+      workspaceId,
+      access.membership.id,
+    );
+    const revision = await application.queries.getRevision(
+      revisionNumber,
+      bookmark,
+    );
+    if (
+      revision === null ||
+      revision.workspaceId !== workspaceId ||
+      !(await application.queries.isRevisionCurrent(revision))
+    ) {
+      notFound();
+    }
+    return (
+      <>
+        <aside className="preview-provenance" aria-label="Preview provenance">
+          <div>
+            <strong>Exact saved preview · revision {revision.revision}</strong>
+            <span>Created {revision.createdAt}</span>
+          </div>
+          <dl>
+            <div>
+              <dt>Content</dt>
+              <dd>{revision.inputs.contentHash}</dd>
+            </div>
+            <div>
+              <dt>Schema</dt>
+              <dd>{revision.inputs.schemaVersion}</dd>
+            </div>
+            <div>
+              <dt>Renderer</dt>
+              <dd>{revision.inputs.rendererVersion}</dd>
+            </div>
+            <div>
+              <dt>Production base</dt>
+              <dd>{revision.inputs.productionBase}</dd>
+            </div>
+          </dl>
+          <a href="/dash">Return to editor</a>
+        </aside>
+        <SiteRenderer definition={revision.definition} />
+      </>
+    );
   } catch (error) {
     if (
       error instanceof AccessIdentityError ||
       error instanceof AccessDeniedError ||
       error instanceof HumanAccessConfigurationError ||
       error instanceof ContentRevisionConfigurationError ||
+      error instanceof ContentWorkspaceAccessError ||
       error instanceof PreviewCapabilityError
     ) {
       notFound();
@@ -85,46 +131,5 @@ export default async function RevisionPreviewPage({
     throw error;
   }
 
-  const application = await loadContentRevisionApplication(workspaceId);
-  const revision = await application.queries.getRevision(
-    revisionNumber,
-    bookmark,
-  );
-  if (revision === null || revision.workspaceId !== workspaceId) {
-    notFound();
-  }
-  if (!isContentRevisionRenderableBy(revision, application.rendererVersion)) {
-    notFound();
-  }
-
-  return (
-    <>
-      <aside className="preview-provenance" aria-label="Preview provenance">
-        <div>
-          <strong>Exact saved preview · revision {revision.revision}</strong>
-          <span>Created {revision.createdAt}</span>
-        </div>
-        <dl>
-          <div>
-            <dt>Content</dt>
-            <dd>{revision.inputs.contentHash}</dd>
-          </div>
-          <div>
-            <dt>Schema</dt>
-            <dd>{revision.inputs.schemaVersion}</dd>
-          </div>
-          <div>
-            <dt>Renderer</dt>
-            <dd>{revision.inputs.rendererVersion}</dd>
-          </div>
-          <div>
-            <dt>Production base</dt>
-            <dd>{revision.inputs.productionBase}</dd>
-          </div>
-        </dl>
-        <a href="/dash">Return to editor</a>
-      </aside>
-      <SiteRenderer definition={revision.definition} />
-    </>
-  );
+  notFound();
 }

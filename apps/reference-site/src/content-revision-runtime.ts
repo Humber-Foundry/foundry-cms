@@ -26,6 +26,10 @@ localRuntime.__foundryLocalRendererVersion ??=
 
 export { ContentRevisionConfigurationError };
 
+export function isGitObjectId(value: string): boolean {
+  return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value);
+}
+
 export async function contentWorkspaceIdForActor(
   actorId: string,
 ): Promise<ContentWorkspaceId> {
@@ -44,11 +48,13 @@ export async function contentWorkspaceIdForActor(
 
 function applicationFor({
   workspaceId,
+  actorId,
   store,
   rendererVersion,
   productionBaseCommit,
 }: {
   workspaceId: ContentWorkspaceId;
+  actorId: string;
   store: LocalContentRevisionStore;
   rendererVersion: string;
   productionBaseCommit: string;
@@ -57,6 +63,7 @@ function applicationFor({
     siteDefinition: referenceSiteDefinition,
     store,
     workspaceId,
+    actorId,
     rendererVersion,
     productionBase: (contentHash) =>
       `${productionBaseCommit}@content:${contentHash}`,
@@ -65,6 +72,7 @@ function applicationFor({
 
 export async function loadContentRevisionApplication(
   workspaceId: ContentWorkspaceId,
+  actorId: string,
 ) {
   if (process.env.NODE_ENV === "development") {
     let store =
@@ -75,6 +83,7 @@ export async function loadContentRevisionApplication(
     }
     return applicationFor({
       workspaceId,
+      actorId,
       store,
       rendererVersion: localRuntime.__foundryLocalRendererVersion!,
       productionBaseCommit:
@@ -92,12 +101,13 @@ export async function loadContentRevisionApplication(
     rendererVersion === undefined ||
     rendererVersion.trim() === "" ||
     productionBaseCommit === undefined ||
-    !/^[a-f0-9]{40,64}$/u.test(productionBaseCommit)
+    !isGitObjectId(productionBaseCommit)
   ) {
     throw new ContentRevisionConfigurationError();
   }
   return applicationFor({
     workspaceId,
+    actorId,
     store: createD1ContentRevisionStore(
       environment.FOUNDRY_DB,
       referenceSiteDefinition.site.id,

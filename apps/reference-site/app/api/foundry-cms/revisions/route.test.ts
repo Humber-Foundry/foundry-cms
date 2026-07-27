@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ContentRevisionConflictError,
   ContentRevisionIdempotencyError,
+  ContentRevisionStaleError,
   ContentRevisionValidationError,
+  ContentWorkspaceAccessError,
 } from "@foundry/application";
 
 vi.mock("server-only", () => ({}));
@@ -11,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   loadIdentity: vi.fn(),
   save: vi.fn(),
+  loadApplication: vi.fn(),
   verifyMutation: vi.fn(),
 }));
 vi.mock("../../../../src/human-access-runtime", () => ({
@@ -21,10 +24,7 @@ vi.mock("../../../../src/human-mutation-runtime", () => ({
   verifyHumanMutation: mocks.verifyMutation,
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
-  contentWorkspaceIdForActor: async () => "workspace_home",
-  loadContentRevisionApplication: async () => ({
-    commands: { save: mocks.save },
-  }),
+  loadContentRevisionApplication: mocks.loadApplication,
 }));
 vi.mock("../../../../src/preview-capability-runtime", () => ({
   createRevisionPreviewCapability: async () => "preview-capability",
@@ -46,6 +46,9 @@ describe("content revision endpoint", () => {
       membership: { id: "membership-editor", role: "editor" },
     });
     mocks.verifyMutation.mockResolvedValue(undefined);
+    mocks.loadApplication.mockResolvedValue({
+      commands: { save: mocks.save },
+    });
   });
 
   function request(
@@ -97,6 +100,10 @@ describe("content revision endpoint", () => {
       edits: [{ path: "section_hero.title", value: "Changed" }],
       idempotencyKey: "content-save-route-0001",
     });
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_home",
+      "membership-editor",
+    );
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         revision: 3,
@@ -104,6 +111,40 @@ describe("content revision endpoint", () => {
           "/preview/workspace_home/3?capability=preview-capability&bookmark=d1-bookmark",
       }),
     );
+  });
+
+  it("returns a conflict when the configured revision inputs are stale", async () => {
+    mocks.save.mockRejectedValue(new ContentRevisionStaleError());
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.0.0",
+        baseRevision: 2,
+        edits: [{ path: "section_hero.title", value: "Stale inputs" }],
+      }),
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "revision_stale",
+    });
+  });
+
+  it("does not disclose a workspace to an unauthorized actor", async () => {
+    mocks.loadApplication.mockRejectedValue(
+      new ContentWorkspaceAccessError(),
+    );
+    const response = await POST(
+      request({
+        workspaceId: "workspace_private",
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Unauthorized" }],
+      }),
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "workspace_access_denied",
+    });
   });
 
   it("returns field-level validation feedback", async () => {

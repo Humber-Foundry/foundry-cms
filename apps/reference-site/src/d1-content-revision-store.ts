@@ -6,6 +6,7 @@ import type {
 import {
   ContentRevisionConfigurationError,
   ContentRevisionConflictError,
+  ContentWorkspaceAccessError,
   assertContentRevisionBase,
   assertContentRevisionIdempotency,
   withContentRevisionBookmark,
@@ -123,7 +124,7 @@ export function createD1ContentRevisionStore(
   }
 
   return {
-    async initialize(initialRevision) {
+    async initialize(initialRevision, ownerActorId) {
       await database.batch([
         database
           .prepare(
@@ -140,7 +141,7 @@ export function createD1ContentRevisionStore(
           .bind(
             workspaceId,
             siteId,
-            initialRevision.createdBy,
+            ownerActorId,
             initialRevision.inputs.productionBase,
             initialRevision.inputs.schemaVersion,
             initialRevision.inputs.rendererVersion,
@@ -173,6 +174,55 @@ export function createD1ContentRevisionStore(
             initialRevision.createdBy,
           ),
       ]);
+    },
+    async requireAccess(actorId) {
+      const access = await database
+        .prepare(
+          `SELECT 1 AS allowed
+           FROM content_workspaces AS workspace
+           WHERE workspace.workspace_id = ?1
+             AND (
+               workspace.owner_actor_id = ?2
+               OR EXISTS (
+                 SELECT 1
+                 FROM content_workspace_collaborators AS collaborator
+                 WHERE collaborator.workspace_id = workspace.workspace_id
+                   AND collaborator.actor_id = ?2
+               )
+             )`,
+        )
+        .bind(workspaceId, actorId)
+        .first<{ allowed: number }>();
+      if (access === null) {
+        throw new ContentWorkspaceAccessError();
+      }
+    },
+    async addCollaborator(ownerActorId, collaboratorActorId) {
+      const result = await database
+        .prepare(
+          `INSERT INTO content_workspace_collaborators (
+             workspace_id, actor_id, added_at
+           )
+           SELECT workspace_id, ?2, datetime('now')
+           FROM content_workspaces
+           WHERE workspace_id = ?1 AND owner_actor_id = ?3
+           ON CONFLICT (workspace_id, actor_id) DO NOTHING`,
+        )
+        .bind(workspaceId, collaboratorActorId, ownerActorId)
+        .run();
+      if ((result.meta.changes ?? 0) === 0) {
+        const owner = await database
+          .prepare(
+            `SELECT 1 AS allowed
+             FROM content_workspaces
+             WHERE workspace_id = ?1 AND owner_actor_id = ?2`,
+          )
+          .bind(workspaceId, ownerActorId)
+          .first<{ allowed: number }>();
+        if (owner === null) {
+          throw new ContentWorkspaceAccessError();
+        }
+      }
     },
     async getCurrent() {
       const connection =
@@ -249,23 +299,18 @@ export function createD1ContentRevisionStore(
             `UPDATE content_workspaces
              SET current_revision = ?1,
                  current_content_hash = ?2,
-                 updated_at = ?3,
-                 owner_actor_id = CASE
-                   WHEN current_revision = 0 THEN ?4
-                   ELSE owner_actor_id
-                 END
-             WHERE workspace_id = ?5
-               AND current_revision = ?6
+                 updated_at = ?3
+             WHERE workspace_id = ?4
+               AND current_revision = ?5
                AND EXISTS (
                  SELECT 1 FROM content_revisions
-                 WHERE workspace_id = ?5 AND revision = ?1
+                 WHERE workspace_id = ?4 AND revision = ?1
                )`,
           )
           .bind(
             command.revision.revision,
             command.revision.inputs.contentHash,
             command.revision.createdAt,
-            command.revision.createdBy,
             workspaceId,
             command.baseRevision,
           ),
@@ -307,18 +352,6 @@ export function createD1ContentRevisionStore(
             command.revision.createdBy,
             command.revision.createdAt,
             command.idempotencyKey,
-          ),
-        session
-          .prepare(
-            `INSERT INTO content_workspace_collaborators (
-               workspace_id, actor_id, added_at
-             ) VALUES (?1, ?2, ?3)
-             ON CONFLICT (workspace_id, actor_id) DO NOTHING`,
-          )
-          .bind(
-            workspaceId,
-            command.revision.createdBy,
-            command.revision.createdAt,
           ),
       ]);
 
