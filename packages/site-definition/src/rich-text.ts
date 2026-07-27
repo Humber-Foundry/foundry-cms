@@ -21,7 +21,7 @@ export type RichTextParagraph = Readonly<{
 
 export type RichTextHeading = Readonly<{
   type: "heading";
-  level: 1 | 2 | 3 | 4 | 5 | 6;
+  level: 2 | 3 | 4 | 5;
   children: ReadonlyArray<RichTextText>;
 }>;
 
@@ -303,13 +303,13 @@ export function validateRichTextDocument(
         assertOnlyKeys(block, ["type", "level", "children"], path);
         if (
           !Number.isInteger(block.level) ||
-          Number(block.level) < 1 ||
-          Number(block.level) > 6
+          Number(block.level) < 2 ||
+          Number(block.level) > 5
         ) {
           issue(
             "invalid_structure",
             `${path}.level`,
-            "Heading level must be an integer from 1 through 6.",
+            "Heading level must be an integer from 2 through 5.",
           );
         }
         if (!Array.isArray(block.children)) {
@@ -522,13 +522,13 @@ export function fromTipTapDocument(value: unknown): RichTextDocument {
         if (
           !isObject(block.attrs) ||
           !Number.isInteger(block.attrs.level) ||
-          Number(block.attrs.level) < 1 ||
-          Number(block.attrs.level) > 6
+          Number(block.attrs.level) < 2 ||
+          Number(block.attrs.level) > 5
         ) {
           issue(
             "invalid_structure",
             `${path}.attrs.level`,
-            "TipTap heading level must be an integer from 1 through 6.",
+            "TipTap heading level must be an integer from 2 through 5.",
           );
         }
         assertOnlyKeys(block.attrs, ["level"], `${path}.attrs`);
@@ -916,7 +916,7 @@ export function parseRichTextMarkdown(markdown: string): RichTextDocument {
   const chunks = markdown.slice(0, -1).split("\n\n");
   const children = chunks.map((chunk, blockIndex): RichTextBlock => {
     const path = `$.blocks[${blockIndex}]`;
-    const heading = /^(#{1,6}) (.*)$/u.exec(chunk);
+    const heading = /^(#{2,5}) (.*)$/u.exec(chunk);
     if (heading !== null) {
       return {
         type: "heading",

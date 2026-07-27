@@ -403,4 +403,28 @@ describe("rich text contract", () => {
       }),
     );
   });
+
+  it("rejects heading levels outside the contextual design system", () => {
+    expect(() =>
+      fromTipTapDocument({
+        type: "doc",
+        content: [
+          {
+            type: "heading",
+            attrs: { level: 1 },
+            content: [{ type: "text", text: "Page title" }],
+          },
+        ],
+      }),
+    ).toThrow(
+      expect.objectContaining<Partial<RichTextValidationError>>({
+        issues: [
+          expect.objectContaining({
+            code: "invalid_structure",
+            path: "$.content[0].attrs.level",
+          }),
+        ],
+      }),
+    );
+  });
 });

@@ -487,7 +487,10 @@
   margin-bottom: 0;
 }
 
-.rich-text-editor .tiptap h2 {
+.rich-text-editor .tiptap h2,
+.rich-text-editor .tiptap h3,
+.rich-text-editor .tiptap h4,
+.rich-text-editor .tiptap h5 {
   margin-block: 1rem 0.5rem;
   font-family: var(--font-serif);
   font-size: 1.5rem;

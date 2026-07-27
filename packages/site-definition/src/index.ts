@@ -367,7 +367,7 @@ export const siteDefinitionSchema = {
       required: ["type", "level", "children"],
       properties: {
         type: { const: "heading" },
-        level: { type: "integer", minimum: 1, maximum: 6 },
+        level: { type: "integer", minimum: 2, maximum: 5 },
         children: {
           type: "array",
           items: { $ref: "#/$defs/richTextText" },
