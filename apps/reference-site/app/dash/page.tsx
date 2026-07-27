@@ -34,7 +34,8 @@ export default async function DashboardPage({
   searchParams: Promise<{
     workspace?: string | string[];
     newWorkspace?: string | string[];
-    recover?: string | string[];
+    recovery?: string | string[];
+    recoverFrom?: string | string[];
   }>;
 }) {
   let access;
@@ -66,7 +67,17 @@ export default async function DashboardPage({
     const workspaceId = createContentWorkspaceId(
       `workspace_${crypto.randomUUID().replaceAll("-", "")}`,
     );
-    redirect(`/dash?workspace=${workspaceId}&recover=1`);
+    const recovery =
+      typeof requested.recovery === "string" &&
+      typeof requested.recoverFrom === "string"
+        ? new URLSearchParams({
+            recovery: requested.recovery,
+            recoverFrom: requested.recoverFrom,
+          }).toString()
+        : "";
+    redirect(
+      `/dash?workspace=${workspaceId}${recovery === "" ? "" : `&${recovery}`}`,
+    );
   }
   const members =
     access.membership.role === "owner"
@@ -126,7 +137,15 @@ export default async function DashboardPage({
       contentMutationToken={contentMutationToken}
       initialPreviewUrl={initialPreviewUrl}
       initialContentStale={initialContentStale}
-      recoverStaleEdits={requested.recover === "1"}
+      staleRecovery={
+        typeof requested.recovery === "string" &&
+        typeof requested.recoverFrom === "string"
+          ? {
+              id: requested.recovery,
+              sourceWorkspaceId: requested.recoverFrom,
+            }
+          : undefined
+      }
     />
   );
 }

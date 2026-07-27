@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  consumeStaleEdits,
+  clearStaleEdits,
   preserveStaleEdits,
+  recoverStaleEdits,
 } from "./content-editor-recovery";
 
 function createStorage() {
@@ -21,23 +22,130 @@ function createStorage() {
 }
 
 describe("stale edit recovery", () => {
-  it("transfers unsaved edits once to a fresh workspace", () => {
+  it("retains matching unsaved edits until the fresh revision is saved", () => {
     const storage = createStorage();
     const edits = [
       { path: "section_hero.title", value: "Still here after deployment" },
     ];
+    preserveStaleEdits(storage, "recovery-1", "workspace-first", edits);
 
-    preserveStaleEdits(storage, edits);
-
-    expect(consumeStaleEdits(storage)).toEqual(edits);
-    expect(consumeStaleEdits(storage)).toEqual([]);
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-1",
+        "workspace-first",
+        new Set(["section_hero.title"]),
+      ),
+    ).toEqual({ available: true, recovered: edits, unmatched: [] });
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-1",
+        "workspace-first",
+        new Set(["section_hero.title"]),
+      ),
+    ).toEqual({ available: true, recovered: edits, unmatched: [] });
+    expect(
+      clearStaleEdits(storage, "recovery-1", "workspace-first"),
+    ).toBe(true);
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-1",
+        "workspace-first",
+        new Set(["section_hero.title"]),
+      ),
+    ).toEqual({ available: true, recovered: [], unmatched: [] });
   });
 
-  it("discards malformed recovery data", () => {
+  it("keeps renamed fields available as explicit conflicts", () => {
     const storage = createStorage();
-    storage.setItem("foundry-cms:stale-edit-recovery", '{"path": true}');
+    const removed = [{ path: "section_old.title", value: "Preserve me" }];
+    preserveStaleEdits(
+      storage,
+      "recovery-removed",
+      "workspace-old",
+      removed,
+    );
 
-    expect(consumeStaleEdits(storage)).toEqual([]);
-    expect(consumeStaleEdits(storage)).toEqual([]);
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-removed",
+        "workspace-old",
+        new Set(["section_new.title"]),
+      ),
+    ).toEqual({ available: true, recovered: [], unmatched: removed });
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-removed",
+        "workspace-old",
+        new Set(["section_new.title"]),
+      ),
+    ).toEqual({ available: true, recovered: [], unmatched: removed });
+  });
+
+  it("fails safely when browser storage is unavailable", () => {
+    const blockedStorage = {
+      getItem() {
+        throw new DOMException("blocked", "SecurityError");
+      },
+      removeItem() {
+        throw new DOMException("blocked", "SecurityError");
+      },
+      setItem() {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    };
+
+    expect(
+      preserveStaleEdits(
+        blockedStorage,
+        "recovery-blocked",
+        "workspace-blocked",
+        [{ path: "section_hero.title", value: "Safe" }],
+      ),
+    ).toBe(false);
+    expect(
+      recoverStaleEdits(
+        blockedStorage,
+        "recovery-blocked",
+        "workspace-blocked",
+        new Set(["section_hero.title"]),
+      ),
+    ).toEqual({ available: false, recovered: [], unmatched: [] });
+    expect(
+      clearStaleEdits(
+        blockedStorage,
+        "recovery-blocked",
+        "workspace-blocked",
+      ),
+    ).toBe(false);
+  });
+
+  it("isolates simultaneous recoveries by workspace and one-time id", () => {
+    const storage = createStorage();
+    const first = [{ path: "section_hero.title", value: "First tab" }];
+    const second = [{ path: "section_hero.title", value: "Second tab" }];
+    preserveStaleEdits(storage, "recovery-a", "workspace-a", first);
+    preserveStaleEdits(storage, "recovery-b", "workspace-b", second);
+
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-b",
+        "workspace-b",
+        new Set(["section_hero.title"]),
+      ).recovered,
+    ).toEqual(second);
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-a",
+        "workspace-a",
+        new Set(["section_hero.title"]),
+      ).recovered,
+    ).toEqual(first);
   });
 });

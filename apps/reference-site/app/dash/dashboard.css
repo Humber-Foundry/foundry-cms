@@ -346,6 +346,24 @@
   font-size: 0.8rem;
 }
 
+.editor-recovery-conflicts {
+  border: 1px solid #dce1dc;
+  border-radius: 0.65rem;
+  padding: 1rem;
+}
+
+.editor-recovery-conflicts ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.75rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.editor-recovery-conflicts li {
+  display: grid;
+  gap: 0.25rem;
+}
+
 .editor-groups {
   display: grid;
   grid-template-columns: 1fr 1fr;

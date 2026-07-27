@@ -15,8 +15,9 @@ import {
 } from "../src/content-editor-history";
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
-  consumeStaleEdits,
+  clearStaleEdits,
   preserveStaleEdits,
+  recoverStaleEdits,
 } from "../src/content-editor-recovery";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
@@ -39,14 +40,17 @@ export function ContentEditor({
   initialPreviewUrl,
   initialStale = false,
   activeWorkspaceUrl,
-  recoverStaleEdits = false,
+  staleRecovery,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
   initialPreviewUrl: string;
   initialStale?: boolean;
   activeWorkspaceUrl: string;
-  recoverStaleEdits?: boolean;
+  staleRecovery?: Readonly<{
+    id: string;
+    sourceWorkspaceId: string;
+  }>;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -63,10 +67,14 @@ export function ContentEditor({
   );
   const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
+  const [recoveryConflicts, setRecoveryConflicts] = useState<
+    ReadonlyArray<SiteDefinitionEdit>
+  >([]);
   const pendingAttempt = useRef<{
     body: string;
     idempotencyKey: string;
   } | null>(null);
+  const recoveryApplied = useRef(false);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
@@ -80,19 +88,49 @@ export function ContentEditor({
   const editorLocked = state.status === "saving" || state.status === "stale";
 
   useEffect(() => {
-    if (!recoverStaleEdits || initialStale) {
+    if (
+      staleRecovery === undefined ||
+      initialStale ||
+      recoveryApplied.current
+    ) {
       return;
     }
-    const recovered = consumeStaleEdits(window.sessionStorage);
+    recoveryApplied.current = true;
+    let recoveryStorage: Storage;
+    try {
+      recoveryStorage = window.localStorage;
+    } catch {
+      setMessage(
+        "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
+      );
+      return;
+    }
+    const { available, recovered, unmatched } = recoverStaleEdits(
+      recoveryStorage,
+      staleRecovery.id,
+      staleRecovery.sourceWorkspaceId,
+      new Set(workingFields.map((field) => field.path)),
+    );
+    if (!available) {
+      setMessage(
+        "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
+      );
+      return;
+    }
     for (const edit of recovered) {
       dispatch({ type: "edit", ...edit });
     }
-    if (recovered.length > 0) {
+    setRecoveryConflicts(unmatched);
+    if (unmatched.length > 0) {
+      setMessage(
+        "Some unsaved edits refer to fields that changed in the new Site Definition. Their values remain preserved below for manual resolution.",
+      );
+    } else if (recovered.length > 0) {
       setMessage(
         "Unsaved edits were recovered in this fresh workspace. Review and save them when ready.",
       );
     }
-  }, [initialStale, recoverStaleEdits]);
+  }, [initialStale, staleRecovery, workingFields]);
 
   async function save() {
     if (pendingAttempt.current === null) {
@@ -173,6 +211,28 @@ export function ContentEditor({
       }
       const saved = body as SaveResponse;
       pendingAttempt.current = null;
+      if (staleRecovery !== undefined) {
+        try {
+          const recoveryStorage = window.localStorage;
+          if (recoveryConflicts.length === 0) {
+            clearStaleEdits(
+              recoveryStorage,
+              staleRecovery.id,
+              staleRecovery.sourceWorkspaceId,
+            );
+            window.history.replaceState(null, "", activeWorkspaceUrl);
+          } else {
+            preserveStaleEdits(
+              recoveryStorage,
+              staleRecovery.id,
+              staleRecovery.sourceWorkspaceId,
+              recoveryConflicts,
+            );
+          }
+        } catch {
+          window.history.replaceState(null, "", activeWorkspaceUrl);
+        }
+      }
       dispatch({
         type: "saved",
         definition: saved.definition,
@@ -193,15 +253,33 @@ export function ContentEditor({
     dispatch({ type: "edit", path, value });
   }
 
-  function preserveEditsForFreshWorkspace(): boolean {
+  function recoverEdits(destination: "current" | "fresh"): void {
+    const recoveryId = crypto.randomUUID();
     try {
-      preserveStaleEdits(window.sessionStorage, edits);
-      return true;
+      if (
+        !preserveStaleEdits(
+          window.localStorage,
+          recoveryId,
+          initialRevision.workspaceId,
+          edits,
+        )
+      ) {
+        throw new Error("stale_edit_recovery_unavailable");
+      }
+      const query = new URLSearchParams({
+        recovery: recoveryId,
+        recoverFrom: initialRevision.workspaceId,
+      });
+      if (destination === "fresh") {
+        query.set("newWorkspace", "1");
+      } else {
+        query.set("workspace", initialRevision.workspaceId);
+      }
+      window.location.assign(`/dash?${query.toString()}`);
     } catch {
       setMessage(
-        "The browser could not transfer these edits. Copy them before starting a fresh workspace.",
+        "The browser could not preserve these edits for recovery. Copy them before reloading or starting a fresh workspace.",
       );
-      return false;
     }
   }
 
@@ -265,13 +343,12 @@ export function ContentEditor({
                 : activeWorkspaceUrl
             }
             onClick={
-              state.status === "stale"
-                ? (event) => {
-                    if (!preserveEditsForFreshWorkspace()) {
-                      event.preventDefault();
-                    }
-                  }
-                : undefined
+              (event) => {
+                event.preventDefault();
+                recoverEdits(
+                  state.status === "stale" ? "fresh" : "current",
+                );
+              }
             }
           >
             {state.status === "stale"
@@ -283,6 +360,19 @@ export function ContentEditor({
       <p role="status" aria-live="polite" className="editor-message">
         {message}
       </p>
+      {recoveryConflicts.length > 0 ? (
+        <div className="editor-recovery-conflicts" role="alert">
+          <p>Resolve these changed field paths manually:</p>
+          <ul>
+            {recoveryConflicts.map((edit) => (
+              <li key={edit.path}>
+                <code>{edit.path}</code>
+                <span>{edit.value}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="editor-groups">
         {groups.map((group) => (
           <fieldset key={group}>
