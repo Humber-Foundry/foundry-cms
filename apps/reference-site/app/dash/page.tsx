@@ -24,6 +24,7 @@ import {
 } from "@/src/content-revision-runtime";
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
 import { referenceSiteApplication } from "@/src/reference-installation";
+import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
 
 import "./dashboard.css";
 
@@ -123,10 +124,8 @@ export default async function DashboardPage({
           actor: access.identity,
         })
       : [];
-  const mutationToken =
-    access.membership.role === "owner"
-      ? await createHumanMutationToken(access.identity)
-      : null;
+  const mutationToken = await createHumanMutationToken(access.identity);
+  const formOperations = await loadPublicFormOperationsDashboard(access);
   let workspaceId;
   try {
     workspaceId =
@@ -158,7 +157,6 @@ export default async function DashboardPage({
   })();
   const initialContentStale =
     !(await contentApplication.queries.isRevisionCurrent(contentRevision));
-  const contentMutationToken = await createHumanMutationToken(access.identity);
   const initialPreviewUrl = revisionPreviewGatewayUrl(
     contentRevision.workspaceId,
     contentRevision.revision,
@@ -171,10 +169,13 @@ export default async function DashboardPage({
       members={members}
       mutationToken={mutationToken}
       contentRevision={contentRevision}
-      contentMutationToken={contentMutationToken}
+      contentMutationToken={mutationToken}
       initialPreviewUrl={initialPreviewUrl}
       initialContentStale={initialContentStale}
       staleRecovery={staleRecovery}
+      formDeliveryHealth={formOperations.health}
+      failedFormDeliveries={formOperations.failedDeliveries}
+      suspectedSpam={formOperations.suspectedSpam}
     />
   );
 }

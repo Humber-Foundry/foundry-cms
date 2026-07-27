@@ -35,7 +35,7 @@ describe("D1 content revision store", () => {
     });
     database = await miniflare.getD1Database("FOUNDRY_DB");
     const migration = await readFile(
-      new URL("../migrations/0004_content_revisions.sql", import.meta.url),
+      new URL("../migrations/0005_content_revisions.sql", import.meta.url),
       "utf8",
     );
     for (const statement of migration.trim().split(/\n\n+/)) {

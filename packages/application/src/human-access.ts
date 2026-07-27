@@ -66,7 +66,9 @@ export type HumanCapability =
   | "access.manage"
   | "subscribers.manage"
   | "subscriber-identities.read"
-  | "subscriber-ledger.export";
+  | "subscriber-ledger.export"
+  | "forms.review"
+  | "forms.delivery.manage";
 
 export type ExternalIdentityBinding = Readonly<{
   issuer: string;
@@ -293,8 +295,10 @@ const roleCapabilities: Readonly<
     "subscribers.manage",
     "subscriber-identities.read",
     "subscriber-ledger.export",
+    "forms.review",
+    "forms.delivery.manage",
   ]),
-  editor: new Set(["dashboard.view", "content.write"]),
+  editor: new Set(["dashboard.view", "content.write", "forms.review"]),
 };
 const invitationLifetimeMs = 7 * 24 * 60 * 60 * 1_000;
 const maximumEligibilitySyncAttempts = 3;

@@ -1,10 +1,16 @@
-import type { HumanMembership } from "@foundry/application";
+import type {
+  ContentRevision,
+  FailedPublicFormDelivery,
+  HumanMembership,
+  PublicFormDeliveryHealth,
+  SuspectedSpamSubmission,
+} from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
-import type { ContentRevision } from "@foundry/application";
 
 import { ContentEditor } from "./content-editor";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
+import { FormOperationsControls } from "./form-operations-controls";
 
 export function DashboardShell({
   definition,
@@ -16,11 +22,14 @@ export function DashboardShell({
   initialPreviewUrl,
   initialContentStale,
   staleRecovery,
+  formDeliveryHealth,
+  failedFormDeliveries,
+  suspectedSpam,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
   members: ReadonlyArray<HumanMembership>;
-  mutationToken: string | null;
+  mutationToken: string;
   contentRevision: ContentRevision;
   contentMutationToken: string;
   initialPreviewUrl: string;
@@ -29,6 +38,9 @@ export function DashboardShell({
     id: string;
     sourceWorkspaceId: string;
   }>;
+  formDeliveryHealth: PublicFormDeliveryHealth;
+  failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
+  suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
 }) {
   const activeWorkspaceUrl =
     `/dash?workspace=${encodeURIComponent(contentRevision.workspaceId)}`;
@@ -107,8 +119,58 @@ export function DashboardShell({
                 <p>Cloudflare Access identity with current D1 membership.</p>
               </div>
             </dl>
+            <FormOperationsControls
+              csrfToken={mutationToken}
+              failedDeliveries={failedFormDeliveries}
+              suspectedSpam={suspectedSpam}
+            />
           </section>
-          {currentMembership.role === "owner" && mutationToken !== null ? (
+          <section aria-labelledby="form-delivery-health">
+            <div className="dashboard-section-heading">
+              <div>
+                <h2 id="form-delivery-health">Form delivery health</h2>
+                <p>
+                  Queue and adapter facts only; submission payloads stay in
+                  their authoritative records.
+                </p>
+              </div>
+            </div>
+            <dl className="status-grid">
+              <div>
+                <dt>Oldest queued</dt>
+                <dd>
+                  {formDeliveryHealth.oldestPendingAgeSeconds === null
+                    ? "None"
+                    : `${Math.ceil(
+                        formDeliveryHealth.oldestPendingAgeSeconds / 60,
+                      )} min`}
+                </dd>
+                <p>
+                  {formDeliveryHealth.pending} pending ·{" "}
+                  {formDeliveryHealth.processing} processing
+                </p>
+              </div>
+              <div>
+                <dt>Failed deliveries</dt>
+                <dd>{formDeliveryHealth.failed}</dd>
+                <p>{formDeliveryHealth.retries} retry attempts recorded.</p>
+              </div>
+              <div>
+                <dt>Email adapter</dt>
+                <dd>{formDeliveryHealth.adapter}</dd>
+                <p>Fixed installation-owned staff destination.</p>
+              </div>
+              <div>
+                <dt>Database capacity</dt>
+                <dd>{formDeliveryHealth.capacity.state}</dd>
+                <p>
+                  {formDeliveryHealth.capacity.usedPercent.toFixed(1)}% of the
+                  configured limit.
+                </p>
+              </div>
+            </dl>
+          </section>
+          {currentMembership.role === "owner" ? (
             <section aria-labelledby="human-access">
               <div className="dashboard-section-heading">
                 <div>

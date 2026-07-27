@@ -167,6 +167,26 @@ Run the same check locally with:
 node scripts/verify-repository-integrity.mjs
 ```
 
+## Form notification configuration
+
+The reference Worker processes accepted public forms on its five-minute
+schedule. Each installation must replace the example `send_email`
+`destination_address` in `apps/reference-site/wrangler.jsonc` with one verified
+staff mailbox and configure `FOUNDRY_FORM_EMAIL_FROM` and
+`FOUNDRY_FORM_EMAIL_RECIPIENT` to the same fixed sender/destination pair. The
+application command accepts no recipient input; visitor confirmations and
+arbitrary-recipient delivery are deliberately outside this adapter.
+`FOUNDRY_FORM_EMAIL_PREVIEW_FIELDS` is a comma-separated, per-installation
+allowlist of form field IDs that have been classified as safe for notification
+previews; omit it to send no submitted values.
+
+Delivery failures remain in D1 with capped retries for 24 hours. The protected
+dashboard reports queue age, failures, retry attempts, adapter configuration,
+and conservative logical D1 capacity bands (payload bytes plus per-record
+overhead) without copying submission payloads. An outcome that
+could have reached the provider is stopped for explicit human reconciliation
+instead of being reclaimed automatically.
+
 ### Resolve a ticket atomically
 
 Use the resolver instead of separately commenting, editing the map and closing a
