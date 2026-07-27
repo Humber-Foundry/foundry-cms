@@ -56,9 +56,13 @@ persist its result. An expired lease is reconciled by publish ID before it can
 become failed; a recovered exact commit is durably recorded and releases the
 lease before deployment polling. The stable publication key and commit
 trailers support replay and ambiguous-result reconciliation without creating
-another content commit. Refresh transitions compare the prior durable status
-and update timestamp, while exact reconciled commit evidence cannot be erased
-by a delayed not-found result. Reload recovery prioritizes any active
+another content commit. When Git returned a candidate SHA before the reference
+result became ambiguous, reconciliation verifies that exact commit trailer and
+its ancestry from the current production head instead of searching a bounded
+history page. A not-found observation remains uncertain until the same
+15-minute deadline. Refresh transitions compare the prior durable status and
+update timestamp, while exact reconciled commit evidence cannot be erased by a
+delayed not-found result. Reload recovery prioritizes any active
 publication over newer terminal contenders. A later publish request first
 reconciles that global active operation, so a crashed Worker does not require
 someone to revisit the originating workspace before the slot can be released.

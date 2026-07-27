@@ -331,9 +331,31 @@ export function createGitHubContentPublisher({
         };
       }
     },
-    async reconcileCommit(publishId) {
+    async reconcileCommit(publishId, candidateCommitSha) {
       try {
         const token = await installationToken();
+        if (candidateCommitSha !== undefined) {
+          const candidate = await request(
+            token,
+            `/git/commits/${candidateCommitSha}`,
+          );
+          if (!trailerMatches(candidate.message, publishId)) {
+            return { state: "not-found" };
+          }
+          const head = await productionHead(token);
+          if (head === candidateCommitSha) {
+            return { state: "committed", commitSha: candidateCommitSha };
+          }
+          const comparison = await request(
+            token,
+            `/compare/${candidateCommitSha}...${head}`,
+          );
+          return comparison.merge_base_commit?.sha === candidateCommitSha &&
+            (comparison.status === "ahead" ||
+              comparison.status === "identical")
+            ? { state: "committed", commitSha: candidateCommitSha }
+            : { state: "not-found" };
+        }
         const commits = await request(
           token,
           `/commits?sha=${encodeURIComponent(

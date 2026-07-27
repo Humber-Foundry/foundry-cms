@@ -187,6 +187,7 @@ export type ContentPublisher = Readonly<{
   }): Promise<PublicationCommitResult>;
   reconcileCommit(
     publishId: ContentPublicationId,
+    candidateCommitSha?: string,
   ): Promise<
     | Readonly<{ state: "committed"; commitSha: string }>
     | Readonly<{ state: "not-found" | "unknown" }>
@@ -195,6 +196,13 @@ export type ContentPublisher = Readonly<{
     commitSha: string,
   ): Promise<"requested" | "building" | "deployed" | "failed" | "unknown">;
 }>;
+
+function reconciliationCandidate(detail: string | null): string | undefined {
+  const candidate = detail?.match(
+    /^git_reference_result_unknown:([a-f0-9]{40}|[a-f0-9]{64})$/u,
+  )?.[1];
+  return candidate;
+}
 
 export class ContentApprovalInvalidError extends Error {
   readonly code:
@@ -647,7 +655,10 @@ export function createContentPublicationApplication({
       (publication.status === "unknown" ||
         publication.status === "requested")
     ) {
-      const reconciled = await publisher.reconcileCommit(publication.id);
+      const reconciled = await publisher.reconcileCommit(
+        publication.id,
+        reconciliationCandidate(publication.detail),
+      );
       if (reconciled.state === "committed") {
         commitSha = reconciled.commitSha;
         currentPublication = await store.updatePublication(
@@ -660,23 +671,6 @@ export function createContentPublicationApplication({
             updatedAt: now(),
           }),
         );
-      } else if (reconciled.state === "not-found") {
-        return store.updatePublication(
-          nextPublication(publication, {
-            status: "failed",
-            detail:
-              publication.status === "requested"
-                ? "publication_lease_expired"
-                : "git_commit_not_found",
-            leaseToken: null,
-            leaseExpiresAt: null,
-            updatedAt: now(),
-          }),
-          {
-            expectedStatus: publication.status,
-            expectedUpdatedAt: publication.updatedAt,
-          },
-        );
       } else {
         const observedAt = now();
         if (
@@ -687,7 +681,12 @@ export function createContentPublicationApplication({
           return store.updatePublication(
             nextPublication(publication, {
               status: "failed",
-              detail: "git_reconciliation_timeout",
+              detail:
+                reconciled.state === "not-found"
+                  ? publication.status === "requested"
+                    ? "publication_lease_expired"
+                    : "git_commit_not_found"
+                  : "git_reconciliation_timeout",
               leaseToken: null,
               leaseExpiresAt: null,
               updatedAt: observedAt,

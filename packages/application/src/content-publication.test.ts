@@ -477,6 +477,52 @@ describe("content publication application", () => {
     );
   });
 
+  it("keeps a missed ambiguous commit active until the reconciliation deadline", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${"c".repeat(40)}`,
+    });
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-reconcile-miss",
+    });
+
+    currentTime = "2026-07-27T10:05:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({ status: "unknown" }),
+    );
+    expect(publisher.reconcileCommit).toHaveBeenCalledWith(
+      publication.id,
+      "c".repeat(40),
+    );
+
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "git_commit_not_found",
+      }),
+    );
+  });
+
   it.each([
     ["requested", "committed"],
     ["building", "building"],
@@ -717,7 +763,7 @@ describe("content publication application", () => {
       state: "not-found",
     });
 
-    currentTime = "2026-07-27T10:11:00.000Z";
+    currentTime = "2026-07-27T10:19:00.000Z";
     await expect(
       app.commands.publish({
         workspaceId,
@@ -803,7 +849,7 @@ describe("content publication application", () => {
       store,
       revisions: repository,
       publisher,
-      now: () => "2026-07-27T10:10:00.000Z",
+      now: () => "2026-07-27T10:19:00.000Z",
     });
     const approval = await app.commands.approve({
       workspaceId,

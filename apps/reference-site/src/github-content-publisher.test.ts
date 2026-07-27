@@ -438,4 +438,45 @@ describe("GitHub content publisher", () => {
       commitSha: "c".repeat(40),
     });
   });
+
+  it("reconciles a retained candidate without a bounded history search", async () => {
+    const publishId = createContentPublicationId(
+      `publish_${"2".repeat(32)}`,
+    );
+    const candidateCommitSha = "c".repeat(40);
+    const currentHead = "d".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(
+        json({
+          sha: candidateCommitSha,
+          message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+        }),
+      )
+      .mockResolvedValueOnce(json({ object: { sha: currentHead } }))
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          merge_base_commit: { sha: candidateCommitSha },
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.reconcileCommit(publishId, candidateCommitSha),
+    ).resolves.toEqual({
+      state: "committed",
+      commitSha: candidateCommitSha,
+    });
+    expect(String(fetchMock.mock.calls[1]![0])).toContain(
+      `/git/commits/${candidateCommitSha}`,
+    );
+    expect(String(fetchMock.mock.calls[3]![0])).toContain(
+      `/compare/${candidateCommitSha}...${currentHead}`,
+    );
+  });
 });
