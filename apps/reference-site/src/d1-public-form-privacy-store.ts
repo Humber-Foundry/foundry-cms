@@ -875,6 +875,8 @@ export function createD1PublicFormPrivacyStore(
         };
       };
       try {
+      const committed = await reconcileCommittedRestore();
+      if (committed !== null) return committed;
       const [targetCount] = await database.batch([
         database.prepare(
           `SELECT (${restoreTargetEmptySql}) AS count`,
@@ -884,11 +886,7 @@ export function createD1PublicFormPrivacyStore(
         throw new PublicFormPrivacyError("recovery_target_check_failed");
       }
       if (readCountResult(targetCount) !== 0) {
-        const committed = await reconcileCommittedRestore();
-        if (committed === null) {
-          throw new PublicFormPrivacyError("recovery_target_not_empty");
-        }
-        return committed;
+        throw new PublicFormPrivacyError("recovery_target_not_empty");
       }
       await database.batch([
         stageSnapshotStatement(database, expectedHash),
@@ -996,15 +994,6 @@ export function createD1PublicFormPrivacyStore(
     },
     async clearRestoredSnapshot({ siteId, backupId, evidence }) {
       try {
-        const [targetCount] = await database.batch([
-          database.prepare(
-            `SELECT (${restoreTargetEmptySql}) AS count`,
-          ),
-        ]);
-        if (targetCount === undefined) {
-          throw new PublicFormPrivacyError("recovery_target_check_failed");
-        }
-        if (readCountResult(targetCount) === 0) return;
         const verification = await database
           .prepare(
             `SELECT 1 AS verified
@@ -1025,7 +1014,16 @@ export function createD1PublicFormPrivacyStore(
             evidence.verifiedAt,
           )
           .first<{ verified: number }>();
+        const [targetCount] = await database.batch([
+          database.prepare(
+            `SELECT (${restoreTargetEmptySql}) AS count`,
+          ),
+        ]);
+        if (targetCount === undefined) {
+          throw new PublicFormPrivacyError("recovery_target_check_failed");
+        }
         if (verification === null) {
+          if (readCountResult(targetCount) === 0) return;
           throw new PublicFormPrivacyError("recovery_target_check_failed");
         }
         await database.batch([

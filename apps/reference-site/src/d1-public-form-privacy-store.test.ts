@@ -767,6 +767,53 @@ describe("D1 public form privacy store", () => {
     expect(recoveryRows?.count).toBe(0);
   });
 
+  it("reconciles and cleans an already-promoted empty snapshot", async () => {
+    const source = createD1PublicFormPrivacyStore(
+      database as unknown as D1DatabaseBinding,
+    );
+    const snapshot = await source.createBackupSnapshot({
+      siteId,
+      now: "2026-07-27T00:00:00.000Z",
+    });
+    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    await migrate(recovery);
+    const target = createD1PublicFormPrivacyStore(
+      recovery as unknown as D1DatabaseBinding,
+    );
+    const original = await target.restoreBackupSnapshot({
+      snapshot,
+      verification: {
+        backupId: "backup-empty",
+        actorMembershipId: "membership-original",
+        verifiedAt: "2026-07-27T00:01:00.000Z",
+      },
+    });
+
+    await expect(
+      target.restoreBackupSnapshot({
+        snapshot,
+        verification: {
+          backupId: "backup-empty",
+          actorMembershipId: "membership-retry",
+          verifiedAt: "2026-07-27T00:02:00.000Z",
+        },
+      }),
+    ).resolves.toEqual(original);
+
+    await target.clearRestoredSnapshot({
+      siteId,
+      backupId: "backup-empty",
+      evidence: original,
+    });
+    await expect(
+      recovery
+        .prepare(
+          "SELECT COUNT(*) AS count FROM public_form_restore_verifications",
+        )
+        .first<{ count: number }>(),
+    ).resolves.toEqual({ count: 0 });
+  });
+
   it("uses bounded multi-row statements for an ordinary multi-submission restore", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(accepted);
     const source = createD1PublicFormPrivacyStore(
