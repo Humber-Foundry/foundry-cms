@@ -17,6 +17,11 @@ import {
   deliverPublicFormNotificationsIfDue,
   type PublicFormNotificationEnvironment,
 } from "./src/public-form-notification-runtime";
+import {
+  runPublicFormBackupMaintenanceIfDue,
+  runPublicFormRetentionMaintenanceIfDue,
+  type PublicFormPrivacyEnvironment,
+} from "./src/public-form-privacy-runtime";
 
 type ExecutionContext = Readonly<{
   waitUntil(promise: Promise<unknown>): void;
@@ -41,11 +46,26 @@ async function reconcileHumanAccessEligibilityIfDue(
 }
 
 async function runScheduledWork(
-  environment: HumanAccessEnvironment & PublicFormNotificationEnvironment,
+  environment: HumanAccessEnvironment &
+    PublicFormNotificationEnvironment &
+    PublicFormPrivacyEnvironment,
 ) {
   await Promise.all([
     reconcileHumanAccessEligibilityIfDue(environment),
-    deliverPublicFormNotificationsIfDue(environment),
+    (async () => {
+      try {
+        await runPublicFormRetentionMaintenanceIfDue(environment);
+      } catch {
+        console.error("public_form_privacy_maintenance_failed");
+        return;
+      }
+      await Promise.all([
+        deliverPublicFormNotificationsIfDue(environment),
+        runPublicFormBackupMaintenanceIfDue(environment).catch(() => {
+          console.error("public_form_backup_maintenance_failed");
+        }),
+      ]);
+    })(),
   ]);
 }
 
@@ -61,7 +81,9 @@ export default {
   fetch,
   scheduled(
     _event: unknown,
-    environment: HumanAccessEnvironment,
+    environment: HumanAccessEnvironment &
+      PublicFormNotificationEnvironment &
+      PublicFormPrivacyEnvironment,
     context: ExecutionContext,
   ) {
     context.waitUntil(runScheduledWork(environment));

@@ -10,10 +10,12 @@ import type {
 
 export function FormOperationsControls({
   csrfToken,
+  canReleaseSpam,
   failedDeliveries,
   suspectedSpam,
 }: {
   csrfToken: string;
+  canReleaseSpam: boolean;
   failedDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
 }) {
@@ -112,17 +114,21 @@ export function FormOperationsControls({
             </strong>
             <span role="cell">{submission.acceptedAt}</span>
             <div role="cell">
-              <button
-                className="copy-button"
-                disabled={pending}
-                onClick={() => apply({
-                  action: "release_spam",
-                  receiptId: submission.receiptId,
-                })}
-                type="button"
-              >
-                Release and notify
-              </button>
+              {canReleaseSpam ? (
+                <button
+                  className="copy-button"
+                  disabled={pending}
+                  onClick={() => apply({
+                    action: "release_spam",
+                    receiptId: submission.receiptId,
+                  })}
+                  type="button"
+                >
+                  Release and notify
+                </button>
+              ) : (
+                <span>Owner action</span>
+              )}
             </div>
           </div>
         ))}

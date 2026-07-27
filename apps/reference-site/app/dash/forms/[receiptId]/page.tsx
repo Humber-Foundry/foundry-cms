@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 
 import { createPublicFormReceiptId } from "@foundry/application";
 
+import { FormSubmissionControls } from "@/components/form-submission-controls";
 import { loadHumanAccessRequestContext } from "@/src/human-access-runtime";
+import { createHumanMutationToken } from "@/src/human-mutation-runtime";
 import { createPublicFormOperationsContext } from "@/src/public-form-delivery-health-runtime";
 
 import "../../dashboard.css";
@@ -34,14 +36,29 @@ export default async function FormSubmissionPage({
         Receipt {submission.receiptId} · {submission.classification} ·{" "}
         {submission.acceptedAt}
       </p>
-      <dl className="status-grid">
-        {Object.entries(submission.fields).map(([field, value]) => (
-          <div key={field}>
-            <dt>{field}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      {submission.payloadDeleted ? (
+        <p role="status">
+          This submission payload was erased. Its receipt and minimal audit
+          evidence remain.
+        </p>
+      ) : (
+        <dl className="status-grid">
+          {Object.entries(submission.fields).map(([field, value]) => (
+            <div key={field}>
+              <dt>{field}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {humanContext.membership.role === "owner" &&
+      !submission.payloadDeleted ? (
+        <FormSubmissionControls
+          csrfToken={await createHumanMutationToken(humanContext.identity)}
+          receiptId={submission.receiptId}
+          classification={submission.classification}
+        />
+      ) : null}
     </main>
   );
 }

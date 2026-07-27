@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "foundry-reference-site-form-recovery-operator",
+  "compatibility_date": "2026-07-26",
+  "d1_databases": [
+    {
+      "binding": "FOUNDRY_FORM_RECOVERY_DB",
+      "database_name": "foundry-reference-site-form-recovery",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

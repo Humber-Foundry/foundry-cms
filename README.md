@@ -45,15 +45,24 @@ Production installation supplies:
   `contact`;
 - the checked-in `FOUNDRY_FORM_RATE_LIMITER` binding, updated to use an
   installation-unique positive integer `namespace_id`;
+- `FOUNDRY_FORM_BACKUP_RECIPIENT`, the client's base64-encoded SPKI public
+  recovery key; its matching private key must remain outside Cloudflare;
 - `FOUNDRY_PRODUCTION_BASE`, set to the exact 40- or 64-character Git commit
   containing the bundled published content; renderer identity comes from the
   Worker version-metadata binding (or an exact `FOUNDRY_RENDERER_VERSION`); and
 - an initial Owner invitation created by guided provisioning before handoff.
 
-Apply the checked-in D1 migration locally with:
+Apply the checked-in D1 migrations to both the primary and isolated recovery
+databases locally with:
 
 ```sh
 npm run db:migrate:local --workspace @foundry/reference-site
+```
+
+Before deployment, apply the same migrations to both remote databases:
+
+```sh
+npm run db:migrate:remote --workspace @foundry/reference-site
 ```
 
 Foundry stores no password or login session. Owners can invite Editors or other
@@ -186,6 +195,53 @@ and conservative logical D1 capacity bands (payload bytes plus per-record
 overhead) without copying submission payloads. An outcome that
 could have reached the provider is stopped for explicit human reconciliation
 instead of being reclaimed automatically.
+
+## Form privacy, retention, backup, and recovery
+
+Only an active Owner can export, reclassify, erase, or restore form data.
+Every view, export, classification, erasure, delivery action, backup, and
+restore verification records only the actor membership, opaque delivery or
+backup identifier, action, outcome code, and time. Audit rows never copy form
+fields.
+
+The scheduled Worker erases payloads after 30 days for suspected spam and
+after 180 days for accepted submissions. It retains minimal audit facts for
+one year. Installations may set the positive whole-day
+`FOUNDRY_FORM_RETENTION_SPAM_DAYS`,
+`FOUNDRY_FORM_RETENTION_ACCEPTED_DAYS`,
+`FOUNDRY_FORM_RETENTION_AUDIT_DAYS`, and
+`FOUNDRY_FORM_RETENTION_BACKUP_DAYS` variables (maximum 3,650 days) to
+override those defaults. Invalid values fail closed. Erasure replaces the field
+payload with an empty object, records the reason, and cancels any unclaimed
+delivery that could still expose the payload. If a delivery already holds an
+active lease, erasure returns a conflict instead of falsely claiming the
+payload is gone; retry after the delivery reaches a terminal state. Immutable
+receipt, classification, and audit identity remain.
+
+Once per day, the Worker snapshots authoritative form submissions,
+classifications, delivery/outbox state, and audit facts. It encrypts each
+snapshot with a fresh AES-256-GCM data key, wraps that key to the client's
+RSA-OAEP recovery recipient, and writes only the envelope to the private
+`FOUNDRY_FORM_BACKUPS` R2 bucket. Configure
+`FOUNDRY_FORM_BACKUP_RECIPIENT` as the base64-encoded SPKI public key. Keep the
+matching PKCS#8 private key outside Cloudflare and the repository in
+client-controlled recovery custody. The Worker can encrypt backups but cannot
+decrypt them. Encrypted objects expire after 30 days.
+
+Restore is deliberately fail-closed and runs from a client-controlled recovery
+environment, not the Worker. The recovery process supplies the private key
+through hidden input and restores a named backup only into
+`FOUNDRY_FORM_RECOVERY_DB`. The target must be empty, the encrypted object
+metadata and ciphertext hash must verify, authenticated decryption must
+succeed, and a row-for-row snapshot hash must match after the transaction. It
+records sanitized counts and the integrity hash in the recovery database as
+part of promotion, mirrors those facts to the primary database, and then
+atomically clears the disposable recovery copy. A retry can reconcile an
+uncertain promotion, finish the primary mirror, or finish cleanup without
+misattributing the original actor. Restore does not perform serving cutover.
+Online restore uses bounded multi-row statements to remain within the D1 Free
+invocation budget; a backup that exceeds the bounded online import fails before
+any recovery rows are written and must use an operator-managed import.
 
 ### Resolve a ticket atomically
 

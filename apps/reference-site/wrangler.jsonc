@@ -19,6 +19,12 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "FOUNDRY_FORM_BACKUPS",
+      "bucket_name": "foundry-reference-site-form-backups"
+    }
+  ],
   "ratelimits": [
     {
       "name": "FOUNDRY_FORM_RATE_LIMITER",
@@ -41,7 +47,11 @@
   "vars": {
     "FOUNDRY_FORM_EMAIL_FROM": "forms@example.com",
     "FOUNDRY_FORM_EMAIL_RECIPIENT": "owner@example.com",
-    "FOUNDRY_FORM_EMAIL_PREVIEW_FIELDS": "name"
+    "FOUNDRY_FORM_EMAIL_PREVIEW_FIELDS": "name",
+    "FOUNDRY_FORM_RETENTION_SPAM_DAYS": "30",
+    "FOUNDRY_FORM_RETENTION_ACCEPTED_DAYS": "180",
+    "FOUNDRY_FORM_RETENTION_AUDIT_DAYS": "365",
+    "FOUNDRY_FORM_RETENTION_BACKUP_DAYS": "30"
   },
   "observability": {
     "enabled": true

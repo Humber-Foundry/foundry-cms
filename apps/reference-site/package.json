@@ -10,7 +10,8 @@
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "preview:serve": "opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "db:migrate:local": "wrangler d1 migrations apply foundry-reference-site --local",
+    "db:migrate:local": "wrangler d1 migrations apply foundry-reference-site --local && wrangler d1 migrations apply foundry-reference-site-form-recovery --local --config wrangler.recovery.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply foundry-reference-site --remote && wrangler d1 migrations apply foundry-reference-site-form-recovery --remote --config wrangler.recovery.jsonc",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
