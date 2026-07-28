@@ -440,6 +440,11 @@
   font-size: 0.75rem;
 }
 
+.publication-history li > ol span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
 .publication-history button {
   justify-self: start;
 }

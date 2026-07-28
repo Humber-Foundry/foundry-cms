@@ -44,6 +44,7 @@ describe("D1 content publication store", () => {
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
       "0008_media_assets.sql",
+      "0009_content_publication_history_evidence.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -546,11 +547,17 @@ describe("D1 content publication store", () => {
           {
             status: "requested",
             detail: null,
+            commitSha: null,
+            deploymentId: null,
+            approvalFingerprint: approval.fingerprint.value,
             occurredAt: requested.updatedAt,
           },
           {
             status: "verified-live",
             detail: null,
+            commitSha: "c".repeat(40),
+            deploymentId: null,
+            approvalFingerprint: approval.fingerprint.value,
             occurredAt: live.updatedAt,
           },
         ],

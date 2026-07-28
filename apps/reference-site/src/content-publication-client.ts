@@ -1,3 +1,5 @@
+import { contentPublicationHasUnresolvedGitOutcome } from "@foundry/application";
+
 export type ContentPublicationAttempt = Readonly<{
   body: string;
   idempotencyKey: string;
@@ -13,9 +15,7 @@ export function contentPublicationCanRetry(publication: {
   return (
     publication.status === "failed" &&
     (publication.commitSha !== null ||
-      /^git_reference_(?:not_advanced|result_unknown):[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(
-        publication.detail ?? "",
-      ))
+      contentPublicationHasUnresolvedGitOutcome(publication))
   );
 }
 

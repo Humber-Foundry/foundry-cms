@@ -994,12 +994,26 @@ describe("content publication application", () => {
     expect(publication.status).toBe("unknown");
 
     currentTime = "2026-07-27T10:16:00.000Z";
-    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+    const failed = await app.commands.refresh(publication.id);
+    expect(failed).toEqual(
       expect.objectContaining({
         status: "failed",
         detail: "git_reconciliation_timeout",
       }),
     );
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-after-no-sha-timeout",
+      }),
+    ).resolves.toEqual(failed);
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(failed);
+    expect(createCommit).toHaveBeenCalledTimes(1);
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
   it("keeps a missed ambiguous commit active until the reconciliation deadline", async () => {

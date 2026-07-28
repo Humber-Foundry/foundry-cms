@@ -31,11 +31,12 @@ the retained approval:
 
 The restored definition initializes a new D1 workspace whose production base
 is the currently serving release, not the historical commit. It is unpublished
-revision `0`, attributed to the restoring actor. It receives no approval and
-does not contact GitHub or Cloudflare. Publishing it therefore requires the
-ordinary canonical preview, human approval, production-base checks, one new
-commit, build reconciliation, and exact release verification. Git history is
-never reset, force-pushed, or otherwise rewritten.
+revision `0`, attributed to the restoring actor. It receives no approval,
+creates or updates no Git object or reference, and does not contact Cloudflare.
+Publishing it therefore requires the ordinary canonical preview, human
+approval, production-base checks, one new commit, build reconciliation, and
+exact release verification. Git history is never reset, force-pushed, or
+otherwise rewritten.
 
 The target workspace ID is derived from the authenticated actor and the
 protected mutation's idempotency key. D1 workspace initialization is

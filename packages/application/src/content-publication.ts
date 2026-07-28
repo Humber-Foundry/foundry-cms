@@ -1,11 +1,14 @@
 import type { SiteDefinition } from "@foundry/site-definition";
 
-import type {
-  ContentActorId,
-  ContentRevision,
-  ContentWorkspaceId,
+import {
+  isValidContentMutationIdempotencyKey,
+  type ContentActorId,
+  type ContentRevision,
+  type ContentWorkspaceId,
 } from "./content-revisions";
-import type { HumanMembershipId } from "./human-access";
+import type {
+  HumanMembershipId,
+} from "./human-access";
 
 export const publishedSiteDefinitionPath =
   "packages/site-definition/src/published-site.json";
@@ -102,6 +105,9 @@ export type ContentPublication = Readonly<{
 export type ContentPublicationEvent = Readonly<{
   status: ContentPublicationStatus;
   detail: string | null;
+  commitSha: string | null;
+  deploymentId: string | null;
+  approvalFingerprint: string;
   occurredAt: string;
 }>;
 
@@ -307,6 +313,22 @@ function reconciliationCandidate(detail: string | null): string | undefined {
     /^git_reference_(?:result_unknown|not_advanced):([a-f0-9]{40}|[a-f0-9]{64})$/u,
   )?.[1];
   return candidate;
+}
+
+export function contentPublicationHasUnresolvedGitOutcome(publication: {
+  commitSha: string | null;
+  detail: string | null;
+}): boolean {
+  return (
+    publication.commitSha === null &&
+    (reconciliationCandidate(publication.detail) !== undefined ||
+      [
+        "git_commit_not_found",
+        "git_reconciliation_timeout",
+        "git_result_unknown",
+        "publication_lease_expired",
+      ].includes(publication.detail ?? ""))
+  );
 }
 
 export class ContentApprovalInvalidError extends Error {
@@ -540,6 +562,9 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
     history.push({
       status: publication.status,
       detail: publication.detail,
+      commitSha: publication.commitSha,
+      deploymentId: publication.deploymentId,
+      approvalFingerprint: publication.fingerprint,
       occurredAt: publication.updatedAt,
     });
     events.set(publication.id, history);
@@ -776,6 +801,7 @@ export function createContentPublicationApplication({
   publisher,
   publishedRevisions,
   draftRestorer,
+  restoreSourcePublication,
   now = () => new Date().toISOString(),
 }: {
   store: ContentPublicationStore;
@@ -783,6 +809,7 @@ export function createContentPublicationApplication({
   publisher: ContentPublisher;
   publishedRevisions?: ContentPublishedRevisionReader;
   draftRestorer?: ContentPublicationDraftRestorer;
+  restoreSourcePublication?: ContentPublication;
   now?: () => string;
 }) {
   async function requireExactRevision(
@@ -1202,7 +1229,7 @@ export function createContentPublicationApplication({
         requestedBy: HumanMembershipId;
         idempotencyKey: string;
       }) {
-        if (!/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) {
+        if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
           throw new ContentPublicationValidationError(
             "idempotency_key_invalid",
           );
@@ -1245,7 +1272,7 @@ export function createContentPublicationApplication({
           recoverableCandidate.status === "failed" &&
           recoverableCandidate.approvalId === approval.id &&
           recoverableCandidate.fingerprint === approval.fingerprint.value &&
-          reconciliationCandidate(recoverableCandidate.detail) !== undefined
+          contentPublicationHasUnresolvedGitOutcome(recoverableCandidate)
         ) {
           return recoverableCandidate;
         }
@@ -1461,7 +1488,8 @@ export function createContentPublicationApplication({
           publication === null ||
           publication.status !== "failed" ||
           (publication.commitSha === null &&
-            candidateCommitSha === undefined)
+            candidateCommitSha === undefined &&
+            !contentPublicationHasUnresolvedGitOutcome(publication))
         ) {
           throw new ContentPublicationValidationError(
             "deployment_retry_not_available",
@@ -1475,6 +1503,30 @@ export function createContentPublicationApplication({
           approval.fingerprint.value !== publication.fingerprint
         ) {
           throw new ContentApprovalInvalidError("approval_stale");
+        }
+        if (
+          publication.commitSha === null &&
+          candidateCommitSha === undefined &&
+          contentPublicationHasUnresolvedGitOutcome(publication)
+        ) {
+          const reconciled = await publisher.reconcileCommit(
+            commitReconciliationInput(publication, approval),
+          );
+          if (reconciled.state !== "committed") {
+            return publication;
+          }
+          publication = await store.updatePublication(
+            nextPublication(publication, {
+              status: "failed",
+              commitSha: reconciled.commitSha,
+              detail: "git_commit_reconciled",
+              updatedAt: now(),
+            }),
+            {
+              expectedStatus: "failed",
+              expectedUpdatedAt: publication.updatedAt,
+            },
+          );
         }
         if (
           publication.commitSha === null &&
@@ -1917,7 +1969,7 @@ export function createContentPublicationApplication({
         restoredBy: HumanMembershipId;
         idempotencyKey: string;
       }) {
-        if (!/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) {
+        if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
           throw new ContentPublicationValidationError(
             "idempotency_key_invalid",
           );
@@ -1930,9 +1982,10 @@ export function createContentPublicationApplication({
             "restore_not_configured",
           );
         }
-        const publication = await store.findPublication(
-          input.sourcePublicationId,
-        );
+        const publication =
+          restoreSourcePublication?.id === input.sourcePublicationId
+            ? restoreSourcePublication
+            : await store.findPublication(input.sourcePublicationId);
         if (publication === null) {
           throw new ContentPublicationValidationError(
             "restore_source_not_found",

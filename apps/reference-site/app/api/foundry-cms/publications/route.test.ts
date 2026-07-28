@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   verifyMutation: vi.fn(),
   executeMutation: vi.fn(),
   loadApplication: vi.fn(),
+  loadRestoreApplication: vi.fn(),
   loadQueries: vi.fn(),
   approve: vi.fn(),
   publish: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("../../../../src/human-mutation-runtime", async () => {
 });
 vi.mock("../../../../src/content-publication-runtime", () => ({
   loadContentPublicationApplication: mocks.loadApplication,
+  loadContentPublicationRestoreApplication: mocks.loadRestoreApplication,
   loadContentPublicationQueries: mocks.loadQueries,
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
@@ -77,6 +79,20 @@ describe("content publication endpoint", () => {
     );
     mocks.requireExistingAccess.mockResolvedValue(undefined);
     mocks.loadApplication.mockResolvedValue({
+      commands: {
+        approve: mocks.approve,
+        publish: mocks.publish,
+        refresh: mocks.refresh,
+        retryDeployment: mocks.retryDeployment,
+        restore: mocks.restore,
+      },
+      queries: {
+        getLatest: mocks.getLatest,
+        get: mocks.get,
+        listHistory: mocks.listHistory,
+      },
+    });
+    mocks.loadRestoreApplication.mockResolvedValue({
       commands: {
         approve: mocks.approve,
         publish: mocks.publish,
@@ -292,7 +308,6 @@ describe("content publication endpoint", () => {
       status: "verified-live",
       commitSha: "c".repeat(40),
     };
-    mocks.get.mockResolvedValue(source);
     mocks.restore.mockResolvedValue({
       workspaceId: "workspace_restored",
       revision: 0,
@@ -318,6 +333,11 @@ describe("content publication endpoint", () => {
       idempotencyKey: "publication-route-restore-1",
     });
     expect(mocks.requireExistingAccess).not.toHaveBeenCalled();
+    expect(mocks.loadRestoreApplication).toHaveBeenCalledWith(
+      source.id,
+      "membership-editor",
+    );
+    expect(mocks.loadApplication).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       draft: {
         workspaceId: "workspace_restored",

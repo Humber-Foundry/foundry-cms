@@ -2,9 +2,12 @@ import "server-only";
 
 import {
   ContentRevisionConfigurationError,
+  ContentPublicationValidationError,
   createContentPublicationApplication,
   createInMemoryContentPublicationStore,
   type ContentActorId,
+  type ContentPublication,
+  type ContentPublicationId,
   type ContentPublicationStore,
   type ContentPublisher,
   type ContentWorkspaceId,
@@ -83,6 +86,7 @@ export async function loadContentPublicationQueries() {
 export async function loadContentPublicationApplication(
   workspaceId: ContentWorkspaceId,
   actorId: ContentActorId,
+  restoreSourcePublication?: ContentPublication,
 ) {
   const revisionApplication = await loadContentRevisionApplication(
     workspaceId,
@@ -107,6 +111,7 @@ export async function loadContentPublicationApplication(
         },
       },
       publisher: localPublisher,
+      restoreSourcePublication,
     });
   }
   const environment = await loadHumanAccessEnvironment();
@@ -134,6 +139,7 @@ export async function loadContentPublicationApplication(
     },
     publisher,
     publishedRevisions: publisher,
+    restoreSourcePublication,
     draftRestorer: {
       async restore(input) {
         const restored = await loadRestoredContentRevisionApplication(
@@ -154,4 +160,22 @@ export async function loadContentPublicationApplication(
       },
     },
   });
+}
+
+export async function loadContentPublicationRestoreApplication(
+  sourcePublicationId: ContentPublicationId,
+  actorId: ContentActorId,
+) {
+  const queries = await loadContentPublicationQueries();
+  const sourcePublication = await queries.get(sourcePublicationId);
+  if (sourcePublication === null) {
+    throw new ContentPublicationValidationError(
+      "restore_source_not_found",
+    );
+  }
+  return loadContentPublicationApplication(
+    sourcePublication.workspaceId,
+    actorId,
+    sourcePublication,
+  );
 }

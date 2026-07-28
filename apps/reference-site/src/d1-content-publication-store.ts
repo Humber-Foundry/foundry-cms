@@ -71,6 +71,9 @@ type PublicationRow = {
 type PublicationEventRow = {
   status: ContentPublicationStatus;
   detail: string | null;
+  commit_sha: string | null;
+  deployment_id: string | null;
+  approval_fingerprint: string | null;
   occurred_at: string;
 };
 
@@ -287,19 +290,23 @@ export function createD1ContentPublicationStore(
     return database
       .prepare(
         `INSERT INTO content_publication_audit_events (
-           publication_id, status, detail, occurred_at
+           publication_id, status, detail, commit_sha, deployment_id,
+           approval_fingerprint, occurred_at
          )
-         SELECT ?1, ?2, ?3, ?4
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
          WHERE EXISTS (
            SELECT 1 FROM content_publications
            WHERE id = ?1
-             AND mutation_token = ?5
+             AND mutation_token = ?8
          )`,
       )
       .bind(
         publication.id,
         publication.status,
         publication.detail,
+        publication.commitSha,
+        publication.deploymentId,
+        publication.fingerprint,
         publication.updatedAt,
         mutationToken,
       );
@@ -708,7 +715,9 @@ export function createD1ContentPublicationStore(
           findApproval(publication.approvalId),
           database
             .prepare(
-              `SELECT status, detail, occurred_at
+              `SELECT
+                 status, detail, commit_sha, deployment_id,
+                 approval_fingerprint, occurred_at
                FROM content_publication_audit_events
                WHERE publication_id = ?1
                ORDER BY id`,
@@ -723,6 +732,10 @@ export function createD1ContentPublicationStore(
           (event) => ({
             status: event.status,
             detail: event.detail,
+            commitSha: event.commit_sha,
+            deploymentId: event.deployment_id,
+            approvalFingerprint:
+              event.approval_fingerprint ?? publication.fingerprint,
             occurredAt: event.occurred_at,
           }),
         );

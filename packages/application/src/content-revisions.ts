@@ -86,6 +86,12 @@ export type SaveContentMediaOccurrenceCommand = Readonly<{
   idempotencyKey: string;
 }>;
 
+export function isValidContentMutationIdempotencyKey(
+  value: string,
+): boolean {
+  return /^[A-Za-z0-9._:-]{16,128}$/u.test(value);
+}
+
 type PersistContentRevisionCommand = Readonly<{
   baseRevision: number;
   idempotencyKey: string;
@@ -445,7 +451,9 @@ export function createContentRevisionApplication({
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
         }
-        if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
+        if (
+          !isValidContentMutationIdempotencyKey(command.idempotencyKey)
+        ) {
           throw new ContentRevisionValidationError({
             idempotencyKey: "Use a 16–128 character idempotency key.",
           });
@@ -462,7 +470,9 @@ export function createContentRevisionApplication({
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
         }
-        if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
+        if (
+          !isValidContentMutationIdempotencyKey(command.idempotencyKey)
+        ) {
           throw new ContentRevisionValidationError({
             idempotencyKey: "Use a 16–128 character idempotency key.",
           });

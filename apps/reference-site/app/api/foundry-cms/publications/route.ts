@@ -18,6 +18,7 @@ import {
 import {
   loadContentPublicationApplication,
   loadContentPublicationQueries,
+  loadContentPublicationRestoreApplication,
 } from "../../../../src/content-publication-runtime";
 import {
   contentWorkspaceIdForMutation,
@@ -276,27 +277,25 @@ export async function POST(request: Request) {
           }
           const actorId = createContentActorId(access.membership.id);
           if (command.operation === "restore") {
-            const source = await (
-              await loadContentPublicationQueries()
-            ).get(createContentPublicationId(command.sourcePublicationId));
-            if (source === null) {
-              return Response.json(
-                { error: "restore_source_not_found" },
-                { status: 422 },
-              );
-            }
-            workspaceId = source.workspaceId;
+            application = await loadContentPublicationRestoreApplication(
+              createContentPublicationId(command.sourcePublicationId),
+              actorId,
+            );
           } else {
             await requireExistingContentWorkspaceAccess(
               workspaceId!,
               actorId,
             );
+            application = await loadContentPublicationApplication(
+              workspaceId!,
+              actorId,
+            );
           }
-          application = await loadContentPublicationApplication(
-            workspaceId!,
-            actorId,
-          );
         } catch (error) {
+          const domain = domainErrorResponse(error);
+          if (domain !== null) {
+            return domain;
+          }
           throw new HumanMutationExecutionNotStartedError(error);
         }
         try {
