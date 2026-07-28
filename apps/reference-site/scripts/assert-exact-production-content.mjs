@@ -49,8 +49,9 @@ function signatureIsValid({
   path,
   secret,
 }) {
+  const normalizedMessage = message.replace(/(?:\r?\n)+$/u, "");
   const matches = [
-    ...message.matchAll(
+    ...normalizedMessage.matchAll(
       /^Foundry-Publication-Signature: v1=([a-f0-9]{64})$/gmu,
     ),
   ];
@@ -59,10 +60,10 @@ function signatureIsValid({
   }
   const trailer =
     `\nFoundry-Publication-Signature: v1=${matches[0][1]}`;
-  if (!message.endsWith(trailer)) {
+  if (!normalizedMessage.endsWith(trailer)) {
     return false;
   }
-  const unsignedMessage = message.slice(0, -trailer.length);
+  const unsignedMessage = normalizedMessage.slice(0, -trailer.length);
   const expected = createHmac("sha256", secret)
     .update(
       publicationSignaturePayload({

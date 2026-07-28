@@ -133,11 +133,72 @@ describe("production deployment baseline provisioning", () => {
   it("acquires, verifies, and releases the GitHub branch lock", async () => {
     const fetchImplementation = vi
       .fn()
-      .mockResolvedValueOnce(json({ lock_branch: { enabled: false } }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(json({ lock_branch: { enabled: true } }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(json({ lock_branch: { enabled: false } }));
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            repository: {
+              ref: {
+                branchProtectionRule: {
+                  id: "rule-id",
+                  lockBranch: false,
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            updateBranchProtectionRule: {
+              branchProtectionRule: {
+                id: "rule-id",
+                lockBranch: true,
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            repository: {
+              ref: {
+                branchProtectionRule: {
+                  id: "rule-id",
+                  lockBranch: true,
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            updateBranchProtectionRule: {
+              branchProtectionRule: {
+                id: "rule-id",
+                lockBranch: false,
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            repository: {
+              ref: {
+                branchProtectionRule: {
+                  id: "rule-id",
+                  lockBranch: false,
+                },
+              },
+            },
+          },
+        }),
+      );
 
     const release = await acquireProductionBranchLock({
       environment: {
@@ -152,13 +213,38 @@ describe("production deployment baseline provisioning", () => {
 
     expect(fetchImplementation).toHaveBeenCalledTimes(5);
     expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
-      "https://api.github.com/repos/owner/repo/branches/main/lock",
+      "https://api.github.com/graphql",
     );
-    expect(fetchImplementation.mock.calls[1]?.[1]).toEqual(
-      expect.objectContaining({ method: "PUT" }),
+    expect(
+      JSON.parse(fetchImplementation.mock.calls[1]?.[1]?.body),
+    ).toEqual(
+      expect.objectContaining({
+        variables: {
+          input: {
+            branchProtectionRuleId: "rule-id",
+            lockBranch: true,
+          },
+        },
+      }),
     );
-    expect(fetchImplementation.mock.calls[3]?.[1]).toEqual(
-      expect.objectContaining({ method: "DELETE" }),
+    expect(
+      JSON.parse(fetchImplementation.mock.calls[3]?.[1]?.body),
+    ).toEqual(
+      expect.objectContaining({
+        variables: {
+          input: {
+            branchProtectionRuleId: "rule-id",
+            lockBranch: false,
+          },
+        },
+      }),
     );
+    expect(
+      fetchImplementation.mock.calls.every(
+        ([url, init]) =>
+          url === "https://api.github.com/graphql" &&
+          init?.method === "POST",
+      ),
+    ).toBe(true);
   });
 });

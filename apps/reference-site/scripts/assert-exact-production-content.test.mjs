@@ -50,7 +50,7 @@ function inputs(overrides = {}) {
     readChangedPaths: vi.fn().mockReturnValue(
       "packages/site-definition/src/published-site.json\n",
     ),
-    readCommitMessage: vi.fn().mockReturnValue(signedMessage()),
+    readCommitMessage: vi.fn().mockReturnValue(`${signedMessage()}\n\n`),
     readPublishedContent: vi.fn().mockReturnValue(bytes),
     ...overrides,
   };

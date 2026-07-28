@@ -201,12 +201,13 @@ API cannot create that initial deployment. During installation, before enabling
 CMS publication, an operator sets
 `FOUNDRY_BASELINE_PROVISION_COMMIT_SHA` to the exact protected production head
 and supplies a short-lived `FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN` with
-administration permission to lock and unlock that branch. The operator then
-runs `npm run provision:deployment-baseline` once. The command refuses an
-existing deployment, acquires and verifies the GitHub branch lock, checks the
-local, build, and remote commits, deploys only the configured account and
-Worker name, checks the protected head again, and requires the exact authorized
-commit in the live release marker before unlocking. On any failure after
+administration permission to update its existing protection rule. The operator
+then runs `npm run provision:deployment-baseline` once. The command refuses an
+existing deployment, uses GitHub's GraphQL branch-protection mutation to change
+only `lockBranch`, verifies that lock, checks the local, build, and remote
+commits, deploys only the configured account and Worker name, checks the
+protected head again, and requires the exact authorized commit in the live
+release marker before restoring `lockBranch` to `false`. On any failure after
 locking, the branch remains locked for operator diagnosis; it must not be
 manually unlocked until the deployment and marker are reconciled. Remove both
 one-time values afterward. Normal `npm run deploy` requires that verified
