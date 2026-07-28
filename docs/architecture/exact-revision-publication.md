@@ -127,9 +127,18 @@ activation API calls through a loopback gate and rechecks the same fence on the
 actual Cloudflare `POST /deployments` request before forwarding it. It requires
 exactly one bounded activation payload naming only the uploaded version at 100
 percent, checks the fence after receiving that payload, and verifies the fence
-again after success. This deployment-time fence prevents an exact retry of an
-older commit from rolling production back after an external merge. The build
-result is also rejected if Cloudflare reports a different commit hash.
+again after success. Before promotion it records the currently serving
+deployment and traffic allocation. If the protected ref moves after Cloudflare
+accepts the promotion, the controller re-reads the latest deployment and
+restores that prior allocation only when its stale deployment has not already
+been superseded. A build also compares its published-content path with the
+live release marker: content may advance only through one direct,
+trailer-verified Foundry publication commit. This quarantines a content commit
+whose earlier deployment failed so a later code build cannot publish it
+without the exact retry. Together these deployment-time fences prevent an
+older or unapproved revision from becoming the public site after an external
+merge. The build result is also rejected if Cloudflare reports a different
+commit hash.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory
@@ -156,6 +165,9 @@ Set these non-secret values for each installation:
 - `FOUNDRY_CLOUDFLARE_SCRIPT_TAG`
 - `FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID`
 - `FOUNDRY_PRODUCTION_BASE` (a bootstrap fallback Git object ID)
+- `FOUNDRY_INITIAL_RELEASE_COMMIT_SHA` (optional one-time build bootstrap;
+  must equal the exact initial release commit and should be removed after that
+  release is live)
 
 Store `FOUNDRY_GITHUB_PRIVATE_KEY` and `FOUNDRY_CLOUDFLARE_API_TOKEN` only as
 Worker secrets. The Cloudflare token needs the narrow account-scoped Workers CI

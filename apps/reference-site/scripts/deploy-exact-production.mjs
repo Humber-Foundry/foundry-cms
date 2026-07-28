@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { assertExactProductionContent } from "./assert-exact-production-content.mjs";
 import { assertExactProductionHead } from "./assert-exact-production-head.mjs";
 
 const cloudflareApiBaseUrl =
@@ -172,6 +173,137 @@ function rejectActivation(response, message) {
   );
 }
 
+function parseCloudflareResult(body) {
+  try {
+    const payload = JSON.parse(body.toString("utf8"));
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      payload.success !== true ||
+      typeof payload.result !== "object" ||
+      payload.result === null
+    ) {
+      throw new Error("invalid_result");
+    }
+    return payload.result;
+  } catch {
+    throw new Error("exact_activation_cloudflare_response_invalid");
+  }
+}
+
+function deploymentTraffic(result) {
+  if (
+    !Array.isArray(result.deployments) ||
+    result.deployments.length === 0
+  ) {
+    throw new Error("exact_activation_baseline_unavailable");
+  }
+  const latest = result.deployments[0];
+  if (
+    typeof latest !== "object" ||
+    latest === null ||
+    typeof latest.id !== "string" ||
+    latest.id.length === 0 ||
+    !Array.isArray(latest.versions) ||
+    latest.versions.length === 0
+  ) {
+    throw new Error("exact_activation_baseline_invalid");
+  }
+  const versions = latest.versions.map((version) => {
+    if (
+      typeof version !== "object" ||
+      version === null ||
+      typeof version.version_id !== "string" ||
+      !versionIdPattern.test(version.version_id) ||
+      typeof version.percentage !== "number" ||
+      !Number.isFinite(version.percentage) ||
+      version.percentage <= 0 ||
+      version.percentage > 100
+    ) {
+      throw new Error("exact_activation_baseline_invalid");
+    }
+    return {
+      version_id: version.version_id,
+      percentage: version.percentage,
+    };
+  });
+  const total = versions.reduce(
+    (sum, version) => sum + version.percentage,
+    0,
+  );
+  if (Math.abs(total - 100) > Number.EPSILON * 100) {
+    throw new Error("exact_activation_baseline_invalid");
+  }
+  return { deploymentId: latest.id, versions };
+}
+
+function deploymentId(result) {
+  if (typeof result.id !== "string" || result.id.length === 0) {
+    throw new Error("exact_activation_cloudflare_response_invalid");
+  }
+  return result.id;
+}
+
+async function restorePreviousDeployment({
+  activatedDeploymentId,
+  activationPath,
+  headers,
+  previousVersions,
+  upstreamBaseUrl,
+}) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const latestResponse = await fetch(
+        new URL(activationPath, upstreamBaseUrl),
+        {
+          method: "GET",
+          headers,
+          redirect: "manual",
+        },
+      );
+      const latestBody = Buffer.from(await latestResponse.arrayBuffer());
+      if (!latestResponse.ok) {
+        throw new Error("exact_activation_rollback_lookup_failed");
+      }
+      const latest = deploymentTraffic(parseCloudflareResult(latestBody));
+      if (latest.deploymentId !== activatedDeploymentId) {
+        return;
+      }
+
+      const rollbackResponse = await fetch(
+        new URL(activationPath, upstreamBaseUrl),
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            strategy: "percentage",
+            versions: previousVersions,
+            annotations: {
+              "workers/message":
+                "Foundry automatic rollback after protected ref movement",
+            },
+          }),
+          redirect: "manual",
+        },
+      );
+      const rollbackBody = Buffer.from(
+        await rollbackResponse.arrayBuffer(),
+      );
+      if (!rollbackResponse.ok) {
+        throw new Error("exact_activation_rollback_request_failed");
+      }
+      deploymentId(parseCloudflareResult(rollbackBody));
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error("exact_activation_rollback_failed", {
+    cause: lastError,
+  });
+}
+
 export async function activateExactVersion({
   versionId,
   assertHead = assertExactProductionHead,
@@ -187,6 +319,8 @@ export async function activateExactVersion({
   let activationCount = 0;
   let activationAttempted = false;
   let activationError;
+  let activationRecord;
+  let baseline;
   const server = createServer(async (request, response) => {
     try {
       const requestUrl = new URL(
@@ -195,6 +329,9 @@ export async function activateExactVersion({
       );
       const isActivation =
         request.method === "POST" &&
+        activationPathPattern.test(requestUrl.pathname);
+      const isDeploymentLookup =
+        request.method === "GET" &&
         activationPathPattern.test(requestUrl.pathname);
       const body = await readRequestBody(request);
       if (isActivation) {
@@ -209,9 +346,18 @@ export async function activateExactVersion({
           rejectActivation(response, "Exact activation payload required.");
           return;
         }
+        if (baseline === undefined) {
+          activationError = new Error(
+            "exact_activation_baseline_unavailable",
+          );
+          rejectActivation(
+            response,
+            "Previous production deployment required.",
+          );
+          return;
+        }
         try {
           assertHead();
-          activationCount += 1;
         } catch (error) {
           activationError = error;
           rejectActivation(response, "Production head moved.");
@@ -241,10 +387,29 @@ export async function activateExactVersion({
           redirect: "manual",
         },
       );
+      const upstreamBody = Buffer.from(await upstream.arrayBuffer());
+      if (isDeploymentLookup && upstream.ok) {
+        baseline = deploymentTraffic(
+          parseCloudflareResult(upstreamBody),
+        );
+      }
+      if (isActivation && upstream.ok) {
+        const activatedDeploymentId = deploymentId(
+          parseCloudflareResult(upstreamBody),
+        );
+        activationCount += 1;
+        activationRecord = {
+          activatedDeploymentId,
+          activationPath: requestUrl.pathname,
+          headers: new Headers(headers),
+          previousVersions: baseline.versions,
+        };
+      }
       response.statusCode = upstream.status;
       copyResponseHeaders(upstream, response);
-      response.end(Buffer.from(await upstream.arrayBuffer()));
-    } catch {
+      response.end(upstreamBody);
+    } catch (error) {
+      activationError ??= error;
       response.writeHead(502, {
         "content-type": "application/json",
       });
@@ -303,7 +468,25 @@ export async function activateExactVersion({
         `exact_version_activation_count_invalid:${activationCount}`,
       );
     }
-    assertHead();
+    try {
+      assertHead();
+    } catch (headError) {
+      if (activationRecord === undefined) {
+        throw headError;
+      }
+      try {
+        await restorePreviousDeployment({
+          ...activationRecord,
+          upstreamBaseUrl,
+        });
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [headError, rollbackError],
+          "exact_activation_rollback_failed",
+        );
+      }
+      throw headError;
+    }
   } finally {
     await new Promise((resolve, reject) => {
       server.close((error) => {
@@ -319,10 +502,12 @@ export async function activateExactVersion({
 
 export async function deployExactProduction({
   assertHead = assertExactProductionHead,
+  authorizeContent = assertExactProductionContent,
   uploadVersion = uploadExactVersion,
   activateVersion = activateExactVersion,
 } = {}) {
   assertHead();
+  await authorizeContent();
   const versionId = await uploadVersion();
   assertHead();
   await activateVersion({ versionId, assertHead });

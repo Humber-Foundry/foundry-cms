@@ -13,6 +13,8 @@ import {
 } from "./deploy-exact-production.mjs";
 
 const versionId = "12345678-1234-1234-1234-123456789abc";
+const previousVersionId =
+  "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const commitSha = "c".repeat(40);
 const exactActivationBody = JSON.stringify({
   strategy: "percentage",
@@ -56,6 +58,36 @@ function activationProcess(run) {
   return process;
 }
 
+function deploymentResult(
+  id = "deployment-before",
+  deployedVersionId = previousVersionId,
+) {
+  return {
+    success: true,
+    result: {
+      deployments: [
+        {
+          id,
+          versions: [
+            { version_id: deployedVersionId, percentage: 100 },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function activationResult(id = "deployment-activated") {
+  return { success: true, result: { id } };
+}
+
+async function loadDeploymentBaseline(localApiBaseUrl) {
+  const response = await fetch(
+    `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+  );
+  expect(response.status).toBe(200);
+}
+
 describe("guarded exact production deployment", () => {
   it("reads the exact non-serving version from Wrangler output", async () => {
     const uploaded = await uploadExactVersion({
@@ -79,16 +111,19 @@ describe("guarded exact production deployment", () => {
 
   it("uploads without serving, then activates the exact version", async () => {
     const assertHead = vi.fn();
+    const authorizeContent = vi.fn().mockResolvedValue(undefined);
     const uploadVersion = vi.fn().mockResolvedValue(versionId);
     const activateVersion = vi.fn().mockResolvedValue(undefined);
 
     await deployExactProduction({
       assertHead,
+      authorizeContent,
       uploadVersion,
       activateVersion,
     });
 
     expect(uploadVersion).toHaveBeenCalledOnce();
+    expect(authorizeContent).toHaveBeenCalledOnce();
     expect(activateVersion).toHaveBeenCalledWith({
       versionId,
       assertHead,
@@ -101,7 +136,13 @@ describe("guarded exact production deployment", () => {
     const upstream = createServer((request, response) => {
       requests.push(`${request.method} ${request.url}`);
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ success: true, result: { id: "d1" } }));
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
     });
     const upstreamBaseUrl = await listen(upstream);
     const assertHead = vi.fn();
@@ -112,6 +153,7 @@ describe("guarded exact production deployment", () => {
       upstreamBaseUrl,
       startActivation: ({ localApiBaseUrl }) =>
         activationProcess(async () => {
+          await loadDeploymentBaseline(localApiBaseUrl);
           const response = await fetch(
             `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
             { method: "POST", body: exactActivationBody },
@@ -122,6 +164,7 @@ describe("guarded exact production deployment", () => {
 
     expect(assertHead).toHaveBeenCalledTimes(2);
     expect(requests).toEqual([
+      "GET /client/v4/accounts/a/workers/scripts/site/deployments",
       "POST /client/v4/accounts/a/workers/scripts/site/deployments",
     ]);
     await close(upstream);
@@ -129,10 +172,16 @@ describe("guarded exact production deployment", () => {
 
   it("blocks activation when the protected ref advances at promotion", async () => {
     let upstreamRequests = 0;
-    const upstream = createServer((_request, response) => {
+    const upstream = createServer((request, response) => {
       upstreamRequests += 1;
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ success: true }));
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
     });
     const upstreamBaseUrl = await listen(upstream);
     const assertHead = vi.fn(() => {
@@ -146,6 +195,7 @@ describe("guarded exact production deployment", () => {
         upstreamBaseUrl,
         startActivation: ({ localApiBaseUrl }) =>
           activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
             const response = await fetch(
               `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
               { method: "POST", body: exactActivationBody },
@@ -156,7 +206,7 @@ describe("guarded exact production deployment", () => {
     ).rejects.toThrow("exact_production_head_moved");
 
     expect(assertHead).toHaveBeenCalledOnce();
-    expect(upstreamRequests).toBe(0);
+    expect(upstreamRequests).toBe(1);
     await close(upstream);
   });
 
@@ -188,10 +238,16 @@ describe("guarded exact production deployment", () => {
     ],
   ])("rejects %s before forwarding", async (_label, payload) => {
     let upstreamRequests = 0;
-    const upstream = createServer((_request, response) => {
+    const upstream = createServer((request, response) => {
       upstreamRequests += 1;
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ success: true }));
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
     });
     const upstreamBaseUrl = await listen(upstream);
 
@@ -218,10 +274,16 @@ describe("guarded exact production deployment", () => {
   it("rechecks the head after receiving a delayed activation body", async () => {
     let upstreamRequests = 0;
     let headMoved = false;
-    const upstream = createServer((_request, response) => {
+    const upstream = createServer((request, response) => {
       upstreamRequests += 1;
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ success: true }));
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
     });
     const upstreamBaseUrl = await listen(upstream);
     const assertHead = vi.fn(() => {
@@ -237,8 +299,9 @@ describe("guarded exact production deployment", () => {
         upstreamBaseUrl,
         startActivation: ({ localApiBaseUrl }) =>
           activationProcess(
-            () =>
-              new Promise((resolve, reject) => {
+            async () => {
+              await loadDeploymentBaseline(localApiBaseUrl);
+              return new Promise((resolve, reject) => {
                 const target = new URL(
                   `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
                 );
@@ -266,22 +329,29 @@ describe("guarded exact production deployment", () => {
                     `{"version_id":"${versionId}","percentage":100}]}`,
                   );
                 }, 20);
-              }),
+              });
+            },
           ),
       }),
     ).rejects.toThrow("exact_production_head_moved");
 
     expect(assertHead).toHaveBeenCalledOnce();
-    expect(upstreamRequests).toBe(0);
+    expect(upstreamRequests).toBe(1);
     await close(upstream);
   });
 
   it("rejects a repeated activation before forwarding it", async () => {
     let upstreamRequests = 0;
-    const upstream = createServer((_request, response) => {
+    const upstream = createServer((request, response) => {
       upstreamRequests += 1;
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ success: true }));
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
     });
     const upstreamBaseUrl = await listen(upstream);
 
@@ -292,6 +362,7 @@ describe("guarded exact production deployment", () => {
         upstreamBaseUrl,
         startActivation: ({ localApiBaseUrl }) =>
           activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
             const endpoint =
               `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`;
             const first = await fetch(endpoint, {
@@ -308,7 +379,133 @@ describe("guarded exact production deployment", () => {
       }),
     ).rejects.toThrow("exact_activation_repeated");
 
-    expect(upstreamRequests).toBe(1);
+    expect(upstreamRequests).toBe(2);
+    await close(upstream);
+  });
+
+  it("restores the previous deployment when the ref moves after activation", async () => {
+    const requests = [];
+    let lookupCount = 0;
+    const upstream = createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const body = Buffer.concat(chunks).toString("utf8");
+      requests.push({ method: request.method, body });
+      response.writeHead(200, { "content-type": "application/json" });
+      if (request.method === "GET") {
+        lookupCount += 1;
+        response.end(
+          JSON.stringify(
+            lookupCount === 1
+              ? deploymentResult()
+              : deploymentResult(
+                  "deployment-activated",
+                  versionId,
+                ),
+          ),
+        );
+        return;
+      }
+      response.end(
+        JSON.stringify(
+          requests.filter(({ method }) => method === "POST").length ===
+            1
+            ? activationResult()
+            : activationResult("deployment-rollback"),
+        ),
+      );
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    let headCheck = 0;
+    const assertHead = vi.fn(() => {
+      headCheck += 1;
+      if (headCheck === 2) {
+        throw new Error("exact_production_head_moved");
+      }
+    });
+
+    await expect(
+      activateExactVersion({
+        versionId,
+        assertHead,
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) =>
+          activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(200);
+          }),
+      }),
+    ).rejects.toThrow("exact_production_head_moved");
+
+    expect(requests.map(({ method }) => method)).toEqual([
+      "GET",
+      "POST",
+      "GET",
+      "POST",
+    ]);
+    expect(JSON.parse(requests[3].body)).toMatchObject({
+      strategy: "percentage",
+      versions: [
+        { version_id: previousVersionId, percentage: 100 },
+      ],
+    });
+    await close(upstream);
+  });
+
+  it("does not roll back a deployment that a newer one superseded", async () => {
+    let lookupCount = 0;
+    const methods = [];
+    const upstream = createServer((request, response) => {
+      methods.push(request.method);
+      response.writeHead(200, { "content-type": "application/json" });
+      if (request.method === "GET") {
+        lookupCount += 1;
+        response.end(
+          JSON.stringify(
+            lookupCount === 1
+              ? deploymentResult()
+              : deploymentResult(
+                  "deployment-newer",
+                  previousVersionId,
+                ),
+          ),
+        );
+        return;
+      }
+      response.end(JSON.stringify(activationResult()));
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    let headCheck = 0;
+
+    await expect(
+      activateExactVersion({
+        versionId,
+        assertHead: vi.fn(() => {
+          headCheck += 1;
+          if (headCheck === 2) {
+            throw new Error("exact_production_head_moved");
+          }
+        }),
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) =>
+          activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(200);
+          }),
+      }),
+    ).rejects.toThrow("exact_production_head_moved");
+
+    expect(methods).toEqual(["GET", "POST", "GET"]);
     await close(upstream);
   });
 
