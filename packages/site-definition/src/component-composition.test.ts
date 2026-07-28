@@ -372,6 +372,26 @@ describe("page component composition", () => {
     });
   });
 
+  it("ignores schema-valid fragment links that are not component roots", () => {
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      site: {
+        ...referenceSiteDefinition.site,
+        navigation: [
+          {
+            ...referenceSiteDefinition.site.navigation[0]!,
+            href: "#section_services_title",
+          },
+          ...referenceSiteDefinition.site.navigation.slice(1),
+        ],
+      },
+    };
+
+    expect(
+      applyPageComposition(definition, toPageComposition(definition)),
+    ).toEqual({ ok: true, definition });
+  });
+
   it("allows nested human-readable copy while protecting nested identity and links", () => {
     const composition = structuredClone(
       toPageComposition(referenceSiteDefinition),

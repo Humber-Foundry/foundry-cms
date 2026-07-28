@@ -352,6 +352,9 @@ export function referencedPageComponentIds(
   sections: ReadonlyArray<PageSection> = definition.home.sections,
 ): ReadonlySet<string> {
   const referenced = new Set<string>();
+  const componentIds = new Set(
+    definition.home.sections.map(({ id }) => id),
+  );
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
       value.forEach(visit);
@@ -364,7 +367,8 @@ export function referencedPageComponentIds(
       if (
         key === "href" &&
         typeof nested === "string" &&
-        /^#[a-z][a-z0-9_]*$/u.test(nested)
+        /^#[a-z][a-z0-9_]*$/u.test(nested) &&
+        componentIds.has(nested.slice(1))
       ) {
         referenced.add(nested.slice(1));
       } else {

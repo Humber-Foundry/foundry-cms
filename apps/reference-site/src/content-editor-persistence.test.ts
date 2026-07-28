@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createContentEditorTabLease,
   createContentEditorWorkspaceCoordinator,
   contentEditorPersistenceTransition,
   outboxAttemptMatchesWorkspace,
   withContentEditorWorkspaceCoordination,
   type ContentEditorPersistenceState,
+  type ContentEditorLeaseChannel,
 } from "./content-editor-persistence";
 
 const loading: ContentEditorPersistenceState = {
@@ -136,5 +138,58 @@ describe("content editor persistence lifecycle", () => {
       },
     );
     expect(driverCalls).toBe(1);
+  });
+
+  it("distinguishes live tabs from reload orphans without Web Locks", async () => {
+    const channels = new Set<{
+      listener: ((event: MessageEvent<unknown>) => void) | null;
+      channel: ContentEditorLeaseChannel;
+    }>();
+    const createChannel = () => {
+      const entry = {
+        listener: null as ((event: MessageEvent<unknown>) => void) | null,
+        channel: undefined as unknown as ContentEditorLeaseChannel,
+      };
+      entry.channel = {
+        postMessage(message) {
+          for (const candidate of channels) {
+            if (candidate !== entry) {
+              candidate.listener?.({ data: message } as MessageEvent);
+            }
+          }
+        },
+        addEventListener(_type, listener) {
+          entry.listener = listener;
+        },
+        removeEventListener(_type, listener) {
+          if (entry.listener === listener) {
+            entry.listener = null;
+          }
+        },
+        close() {
+          channels.delete(entry);
+        },
+      };
+      channels.add(entry);
+      return entry.channel;
+    };
+    const first = createContentEditorTabLease(
+      "workspace_without_locks",
+      "tab_first",
+      false,
+      createChannel,
+    );
+    const second = createContentEditorTabLease(
+      "workspace_without_locks",
+      "tab_second",
+      false,
+      createChannel,
+    );
+    await Promise.all([first.ready, second.ready]);
+
+    await expect(first.isScopeLive("tab_second")).resolves.toBe(true);
+    second.release();
+    await expect(first.isScopeLive("tab_second")).resolves.toBe(false);
+    first.release();
   });
 });

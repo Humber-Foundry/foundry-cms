@@ -43,28 +43,75 @@ type ContentEditorTabLease = Readonly<{
   release(): void;
 }>;
 
-function createContentEditorTabLease(
+export type ContentEditorLeaseChannel = Readonly<{
+  postMessage(message: unknown): void;
+  addEventListener(
+    type: "message",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  removeEventListener(
+    type: "message",
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void;
+  close(): void;
+}>;
+
+export function createContentEditorTabLease(
   workspaceId: string,
   scopeId: string,
-  locks: LockManager | undefined =
+  locks: LockManager | undefined | false =
     typeof navigator === "undefined" ? undefined : navigator.locks,
+  createChannel: (() => ContentEditorLeaseChannel) | undefined =
+    typeof BroadcastChannel === "undefined"
+      ? undefined
+      : () =>
+          new BroadcastChannel(
+            `foundry-cms:content-editor:${workspaceId}:scope-liveness`,
+          ),
 ): ContentEditorTabLease {
-  let release!: () => void;
+  const lockManager = locks === false ? undefined : locks;
+  let releaseHeld!: () => void;
   let markReady!: () => void;
   const held = new Promise<void>((resolve) => {
-    release = resolve;
+    releaseHeld = resolve;
   });
   const ready = new Promise<void>((resolve) => {
     markReady = resolve;
   });
   const lockName = (candidateScopeId: string) =>
     `foundry-cms:content-editor:${workspaceId}:scope:${candidateScopeId}`;
-  if (locks !== undefined) {
-    void locks.request(lockName(scopeId), () => {
+  const channel = lockManager === undefined ? createChannel?.() : undefined;
+  const pendingProbes = new Map<string, (isLive: boolean) => void>();
+  const onMessage = (event: MessageEvent<unknown>) => {
+    const message = event.data;
+    if (
+      typeof message !== "object" ||
+      message === null ||
+      !("kind" in message) ||
+      !("scopeId" in message) ||
+      typeof message.scopeId !== "string" ||
+      !("probeId" in message) ||
+      typeof message.probeId !== "string"
+    ) {
+      return;
+    }
+    if (message.kind === "probe" && message.scopeId === scopeId) {
+      channel?.postMessage({
+        kind: "alive",
+        scopeId,
+        probeId: message.probeId,
+      });
+    } else if (message.kind === "alive") {
+      pendingProbes.get(message.probeId)?.(true);
+    }
+  };
+  if (lockManager !== undefined) {
+    void lockManager.request(lockName(scopeId), () => {
       markReady();
       return held;
     });
   } else {
+    channel?.addEventListener("message", onMessage);
     markReady();
   }
   return {
@@ -73,18 +120,39 @@ function createContentEditorTabLease(
       if (candidateScopeId === scopeId) {
         return true;
       }
-      if (locks === undefined) {
-        // Without a liveness primitive, preserve foreign records instead of
-        // risking another open tab's durable edits.
-        return true;
+      if (lockManager === undefined) {
+        if (channel === undefined) {
+          return false;
+        }
+        return new Promise<boolean>((resolve) => {
+          const probeId = crypto.randomUUID();
+          const finish = (isLive: boolean) => {
+            globalThis.clearTimeout(timeout);
+            pendingProbes.delete(probeId);
+            resolve(isLive);
+          };
+          const timeout = globalThis.setTimeout(() => finish(false), 50);
+          pendingProbes.set(probeId, finish);
+          channel.postMessage({
+            kind: "probe",
+            scopeId: candidateScopeId,
+            probeId,
+          });
+        });
       }
-      return locks.request(
+      return lockManager.request(
         lockName(candidateScopeId),
         { ifAvailable: true },
         (lock) => lock === null,
       );
     },
-    release,
+    release() {
+      releaseHeld();
+      channel?.removeEventListener("message", onMessage);
+      channel?.close();
+      pendingProbes.forEach((finish) => finish(false));
+      pendingProbes.clear();
+    },
   };
 }
 
