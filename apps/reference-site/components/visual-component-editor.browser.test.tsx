@@ -27,7 +27,7 @@ function browserRevision(workspaceId: string) {
     definition: referenceSiteDefinition,
     inputs: {
       contentHash: "browser-content-hash",
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       rendererVersion: "renderer-browser",
       productionBase: "published-browser",
     },

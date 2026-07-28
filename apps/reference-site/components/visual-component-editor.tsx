@@ -10,6 +10,7 @@ import {
 
 import {
   createDefaultPageSection,
+  designContract,
   pageCompositionContract,
   referencedPageComponentIds,
   siteDesignAttributes,
@@ -31,6 +32,27 @@ import { SiteSection } from "./site-renderer";
 type RegisteredComponents = {
   [Type in PageComponentType]: Extract<PageSection, { type: Type }>;
 };
+
+function selectOptions(values: ReadonlyArray<string>) {
+  return values.map((value) => ({
+    label: `${value[0]!.toUpperCase()}${value.slice(1)}`,
+    value,
+  }));
+}
+
+function DesignScopedSection({
+  definition,
+  section,
+}: {
+  definition: SiteDefinition;
+  section: PageSection;
+}) {
+  return (
+    <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
+      <SiteSection section={section} />
+    </div>
+  );
+}
 
 function newStableComponentId(type: PageComponentType): string {
   const typeSlug = type.replace(
@@ -88,10 +110,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         variant: {
           type: "select",
           label: "Variant",
-          options: [
-            { label: "Editorial", value: "editorial" },
-            { label: "Focused", value: "focused" },
-          ],
+          options: selectOptions(designContract.variants.hero.values),
         },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
@@ -143,10 +162,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         variant: {
           type: "select",
           label: "Variant",
-          options: [
-            { label: "List", value: "list" },
-            { label: "Cards", value: "cards" },
-          ],
+          options: selectOptions(designContract.variants.services.values),
         },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
@@ -187,10 +203,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         variant: {
           type: "select",
           label: "Variant",
-          options: [
-            { label: "Panel", value: "panel" },
-            { label: "Plain", value: "plain" },
-          ],
+          options: selectOptions(designContract.variants.proof.values),
         },
         quote: { type: "textarea", label: "Quote" },
         attribution: { type: "text", label: "Attribution" },
@@ -214,10 +227,9 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         variant: {
           type: "select",
           label: "Variant",
-          options: [
-            { label: "Moss", value: "moss" },
-            { label: "Ink", value: "ink" },
-          ],
+          options: selectOptions(
+            designContract.variants.callToAction.values,
+          ),
         },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
@@ -247,12 +259,10 @@ export function createVisualComponentConfig(
       hero: {
         ...visualComponentConfig.components.hero,
         render: (props) => (
-          <div
-            className="site-canvas"
-            {...siteDesignAttributes(definition.design)}
-          >
-            <SiteSection section={props as HeroSection} />
-          </div>
+          <DesignScopedSection
+            definition={definition}
+            section={props as HeroSection}
+          />
         ),
         defaultProps: createDefaultPageSection(
           "hero",
@@ -266,12 +276,10 @@ export function createVisualComponentConfig(
       services: {
         ...visualComponentConfig.components.services,
         render: (props) => (
-          <div
-            className="site-canvas"
-            {...siteDesignAttributes(definition.design)}
-          >
-            <SiteSection section={props as ServicesSection} />
-          </div>
+          <DesignScopedSection
+            definition={definition}
+            section={props as ServicesSection}
+          />
         ),
         defaultProps: createDefaultPageSection(
           "services",
@@ -285,12 +293,10 @@ export function createVisualComponentConfig(
       proof: {
         ...visualComponentConfig.components.proof,
         render: (props) => (
-          <div
-            className="site-canvas"
-            {...siteDesignAttributes(definition.design)}
-          >
-            <SiteSection section={props as ProofSection} />
-          </div>
+          <DesignScopedSection
+            definition={definition}
+            section={props as ProofSection}
+          />
         ),
         defaultProps: createDefaultPageSection(
           "proof",
@@ -304,12 +310,10 @@ export function createVisualComponentConfig(
       callToAction: {
         ...visualComponentConfig.components.callToAction,
         render: (props) => (
-          <div
-            className="site-canvas"
-            {...siteDesignAttributes(definition.design)}
-          >
-            <SiteSection section={props as CallToActionSection} />
-          </div>
+          <DesignScopedSection
+            definition={definition}
+            section={props as CallToActionSection}
+          />
         ),
         defaultProps: createDefaultPageSection(
           "callToAction",

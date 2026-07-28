@@ -89,7 +89,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
-        variant: "editorial",
+        variant: designContract.variants.hero.values[0],
         eyebrow: "Introduce this page",
         title: "A clear page headline",
         summary: "Explain the page in a short, useful sentence.",
@@ -108,7 +108,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
-        variant: "list",
+        variant: designContract.variants.services.values[0],
         eyebrow: "Services",
         title: "What we can make together",
         introduction: "Describe the work available here.",
@@ -125,7 +125,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
-        variant: "panel",
+        variant: designContract.variants.proof.values[0],
         quote: "Add a principle or a piece of evidence.",
         attribution: "Source",
         metrics: [
@@ -140,7 +140,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
-        variant: "moss",
+        variant: designContract.variants.callToAction.values[0],
         eyebrow: "Next step",
         title: "Invite the reader to act",
         body: "Explain what will happen next.",

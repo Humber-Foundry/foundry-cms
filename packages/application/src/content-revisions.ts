@@ -4,11 +4,12 @@ import {
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
+  type StoredSiteDefinitionSchemaVersion,
 } from "@foundry/site-definition";
 
 export type ContentRevisionInputs = Readonly<{
   contentHash: string;
-  schemaVersion: SiteDefinition["schemaVersion"];
+  schemaVersion: StoredSiteDefinitionSchemaVersion;
   rendererVersion: string;
   productionBase: string;
 }>;

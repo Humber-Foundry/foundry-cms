@@ -15,7 +15,12 @@ import {
   assertContentRevisionIdempotency,
   withContentRevisionBookmark,
 } from "@foundry/application";
-import type { SiteDefinition, SiteId } from "@foundry/site-definition";
+import {
+  upgradeStoredSiteDefinition,
+  type SiteDefinition,
+  type SiteId,
+  type StoredSiteDefinitionSchemaVersion,
+} from "@foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 
@@ -54,7 +59,7 @@ type RevisionRow = {
   revision: number;
   definition_json: string;
   content_hash: string;
-  schema_version: SiteDefinition["schemaVersion"];
+  schema_version: StoredSiteDefinitionSchemaVersion;
   renderer_version: string;
   production_base: string;
   created_at: string;
@@ -70,7 +75,7 @@ function toRevision(row: RevisionRow): ContentRevision {
   return {
     workspaceId: row.workspace_id,
     revision: row.revision,
-    definition: JSON.parse(row.definition_json) as SiteDefinition,
+    definition: upgradeStoredSiteDefinition(JSON.parse(row.definition_json)),
     inputs: {
       contentHash: row.content_hash,
       schemaVersion: row.schema_version,

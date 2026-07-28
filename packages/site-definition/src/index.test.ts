@@ -9,6 +9,7 @@ import {
   referenceSiteDefinition,
   siteDefinitionSchema,
   type SiteDefinition,
+  upgradeStoredSiteDefinition,
 } from "./index";
 
 describe("reference Site Definition", () => {
@@ -17,13 +18,13 @@ describe("reference Site Definition", () => {
   );
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.0.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.0.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.1.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.1.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.0.0",
+      "https://foundrycms.dev/schemas/site-definition/1.1.0",
     );
   });
 
@@ -46,6 +47,32 @@ describe("reference Site Definition", () => {
     expect(validate(referenceSiteDefinition), validate.errors?.toString()).toBe(
       true,
     );
+  });
+
+  it("upgrades stored 1.0 revisions with their deterministic legacy defaults", () => {
+    const legacy = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    legacy.definitionVersion = "1.0.0";
+    legacy.schemaVersion = "1.0.0";
+    delete legacy.design;
+    legacy.home.sections.forEach(
+      (section: Record<string, unknown>) => delete section.variant,
+    );
+
+    const upgraded = upgradeStoredSiteDefinition(legacy);
+
+    expect(upgraded.definitionVersion).toBe("1.1.0");
+    expect(upgraded.schemaVersion).toBe("1.1.0");
+    expect(upgraded.design).toEqual(referenceSiteDefinition.design);
+    expect(
+      upgraded.home.sections.map(({ type, variant }) => [type, variant]),
+    ).toEqual([
+      ["hero", "editorial"],
+      ["services", "list"],
+      ["proof", "panel"],
+      ["callToAction", "moss"],
+    ]);
   });
 
   it.each([
@@ -188,9 +215,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.0.0.",
+        "section_missing.title": "This field is not in Site Definition 1.1.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.0.0.",
+        "section_hero.href": "This field is not in Site Definition 1.1.0.",
       },
     });
   });
@@ -204,7 +231,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.0.0.",
+        "This field is not in Site Definition 1.1.0.",
       );
     }
   });

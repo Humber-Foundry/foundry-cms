@@ -1,15 +1,3 @@
-export type SiteDesign = Readonly<{
-  typography: Readonly<{ heading: "editorial" | "modern" }>;
-  colour: Readonly<{ accent: "moss" | "clay" }>;
-  spacing: Readonly<{ section: "relaxed" | "compact" }>;
-  layout: Readonly<{ contentWidth: "standard" | "wide" }>;
-}>;
-
-export type HeroVariant = "editorial" | "focused";
-export type ServicesVariant = "list" | "cards";
-export type ProofVariant = "panel" | "plain";
-export type CallToActionVariant = "moss" | "ink";
-
 const token = <const Values extends readonly string[]>(
   label: string,
   values: Values,
@@ -38,6 +26,57 @@ export const designContract = Object.freeze({
     callToAction: token("Call to action variant", ["moss", "ink"] as const),
   }),
 });
+
+type RegisteredValue<
+  Registration extends Readonly<{ values: ReadonlyArray<string> }>,
+> = Registration["values"][number];
+
+export type SiteDesign = Readonly<{
+  typography: Readonly<{
+    heading: RegisteredValue<
+      typeof designContract.tokens["typography.heading"]
+    >;
+  }>;
+  colour: Readonly<{
+    accent: RegisteredValue<typeof designContract.tokens["colour.accent"]>;
+  }>;
+  spacing: Readonly<{
+    section: RegisteredValue<typeof designContract.tokens["spacing.section"]>;
+  }>;
+  layout: Readonly<{
+    contentWidth: RegisteredValue<
+      typeof designContract.tokens["layout.contentWidth"]
+    >;
+  }>;
+}>;
+
+export type HeroVariant = RegisteredValue<
+  typeof designContract.variants.hero
+>;
+export type ServicesVariant = RegisteredValue<
+  typeof designContract.variants.services
+>;
+export type ProofVariant = RegisteredValue<
+  typeof designContract.variants.proof
+>;
+export type CallToActionVariant = RegisteredValue<
+  typeof designContract.variants.callToAction
+>;
+
+export const defaultSiteDesign = Object.freeze({
+  typography: Object.freeze({
+    heading: designContract.tokens["typography.heading"].values[0],
+  }),
+  colour: Object.freeze({
+    accent: designContract.tokens["colour.accent"].values[0],
+  }),
+  spacing: Object.freeze({
+    section: designContract.tokens["spacing.section"].values[0],
+  }),
+  layout: Object.freeze({
+    contentWidth: designContract.tokens["layout.contentWidth"].values[0],
+  }),
+} satisfies SiteDesign);
 
 export function siteDesignAttributes(design: SiteDesign) {
   return {

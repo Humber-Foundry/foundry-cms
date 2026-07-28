@@ -5,6 +5,7 @@ import type {
   ServicesVariant,
   SiteDesign,
 } from "./design-tokens";
+import { defaultSiteDesign, designContract } from "./design-tokens";
 
 declare const siteIdBrand: unique symbol;
 
@@ -90,8 +91,8 @@ export type PageSection =
   | CallToActionSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.0.0";
-  schemaVersion: "1.0.0";
+  definitionVersion: "1.1.0";
+  schemaVersion: "1.1.0";
   design: SiteDesign;
   site: Readonly<{
     id: SiteId;
@@ -110,9 +111,59 @@ export type SiteDefinition = Readonly<{
   }>;
 }>;
 
+export type StoredSiteDefinitionSchemaVersion = "1.0.0" | "1.1.0";
+
+export function upgradeStoredSiteDefinition(value: unknown): SiteDefinition {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("site_definition_invalid");
+  }
+  const candidate = structuredClone(value) as Record<string, any>;
+  if (
+    candidate.definitionVersion === "1.0.0" &&
+    candidate.schemaVersion === "1.0.0" &&
+    candidate.design === undefined &&
+    Array.isArray(candidate.home?.sections)
+  ) {
+    candidate.definitionVersion = "1.1.0";
+    candidate.schemaVersion = "1.1.0";
+    candidate.design = structuredClone(defaultSiteDesign);
+    for (const section of candidate.home.sections) {
+      if (
+        typeof section !== "object" ||
+        section === null ||
+        section.variant !== undefined
+      ) {
+        continue;
+      }
+      switch (section.type) {
+        case "hero":
+          section.variant = designContract.variants.hero.values[0];
+          break;
+        case "services":
+          section.variant = designContract.variants.services.values[0];
+          break;
+        case "proof":
+          section.variant = designContract.variants.proof.values[0];
+          break;
+        case "callToAction":
+          section.variant =
+            designContract.variants.callToAction.values[0];
+          break;
+      }
+    }
+  }
+  if (
+    candidate.definitionVersion !== "1.1.0" ||
+    candidate.schemaVersion !== "1.1.0"
+  ) {
+    throw new TypeError("site_definition_version_unsupported");
+  }
+  return candidate as SiteDefinition;
+}
+
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.0.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.1.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
@@ -124,8 +175,8 @@ export const siteDefinitionSchema = {
     "home",
   ],
   properties: {
-    definitionVersion: { const: "1.0.0" },
-    schemaVersion: { const: "1.0.0" },
+    definitionVersion: { const: "1.1.0" },
+    schemaVersion: { const: "1.1.0" },
     design: {
       type: "object",
       additionalProperties: false,
@@ -136,7 +187,9 @@ export const siteDefinitionSchema = {
           additionalProperties: false,
           required: ["heading"],
           properties: {
-            heading: { enum: ["editorial", "modern"] },
+            heading: {
+              enum: designContract.tokens["typography.heading"].values,
+            },
           },
         },
         colour: {
@@ -144,7 +197,9 @@ export const siteDefinitionSchema = {
           additionalProperties: false,
           required: ["accent"],
           properties: {
-            accent: { enum: ["moss", "clay"] },
+            accent: {
+              enum: designContract.tokens["colour.accent"].values,
+            },
           },
         },
         spacing: {
@@ -152,7 +207,9 @@ export const siteDefinitionSchema = {
           additionalProperties: false,
           required: ["section"],
           properties: {
-            section: { enum: ["relaxed", "compact"] },
+            section: {
+              enum: designContract.tokens["spacing.section"].values,
+            },
           },
         },
         layout: {
@@ -160,7 +217,9 @@ export const siteDefinitionSchema = {
           additionalProperties: false,
           required: ["contentWidth"],
           properties: {
-            contentWidth: { enum: ["standard", "wide"] },
+            contentWidth: {
+              enum: designContract.tokens["layout.contentWidth"].values,
+            },
           },
         },
       },
@@ -276,7 +335,7 @@ export const siteDefinitionSchema = {
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "hero" },
-        variant: { enum: ["editorial", "focused"] },
+        variant: { enum: designContract.variants.hero.values },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         summary: { $ref: "#/$defs/text" },
@@ -299,7 +358,7 @@ export const siteDefinitionSchema = {
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "services" },
-        variant: { enum: ["list", "cards"] },
+        variant: { enum: designContract.variants.services.values },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         introduction: { $ref: "#/$defs/text" },
@@ -323,7 +382,7 @@ export const siteDefinitionSchema = {
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "proof" },
-        variant: { enum: ["panel", "plain"] },
+        variant: { enum: designContract.variants.proof.values },
         quote: { $ref: "#/$defs/text" },
         attribution: { $ref: "#/$defs/text" },
         metrics: {
@@ -347,7 +406,7 @@ export const siteDefinitionSchema = {
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "callToAction" },
-        variant: { enum: ["moss", "ink"] },
+        variant: { enum: designContract.variants.callToAction.values },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         body: { $ref: "#/$defs/text" },
@@ -358,14 +417,9 @@ export const siteDefinitionSchema = {
 } as const;
 
 export const referenceSiteDefinition = {
-  definitionVersion: "1.0.0",
-  schemaVersion: "1.0.0",
-  design: {
-    typography: { heading: "editorial" },
-    colour: { accent: "moss" },
-    spacing: { section: "relaxed" },
-    layout: { contentWidth: "standard" },
-  },
+  definitionVersion: "1.1.0",
+  schemaVersion: "1.1.0",
+  design: defaultSiteDesign,
   site: {
     id: createSiteId("site_foundry_reference"),
     name: "Foundry Reference",
@@ -402,7 +456,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_hero",
         type: "hero",
-        variant: "editorial",
+        variant: designContract.variants.hero.values[0],
         eyebrow: "Independent work, thoughtfully made",
         title: "Turn a good idea into something people can use.",
         summary:
@@ -421,7 +475,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_services",
         type: "services",
-        variant: "list",
+        variant: designContract.variants.services.values[0],
         eyebrow: "A practical studio model",
         title: "From first sketch to a working system.",
         introduction:
@@ -453,7 +507,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_proof",
         type: "proof",
-        variant: "panel",
+        variant: designContract.variants.proof.values[0],
         quote:
           "The best handoff is not a folder of files. It is a system the next person can understand, operate, and trust.",
         attribution: "The Foundry principle",
@@ -466,7 +520,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_contact",
         type: "callToAction",
-        variant: "moss",
+        variant: designContract.variants.callToAction.values[0],
         eyebrow: "Begin with the real question",
         title: "What should exist when this work is done?",
         body:
