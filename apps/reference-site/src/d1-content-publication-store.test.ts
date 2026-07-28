@@ -46,6 +46,7 @@ describe("D1 content publication store", () => {
       "0008_media_assets.sql",
       "0009_content_publication_history_evidence.sql",
       "0010_content_publication_restore_identity.sql",
+      "0012_content_approval_revision_hash.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),

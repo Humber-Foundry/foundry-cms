@@ -63,6 +63,27 @@ function fixedBaseRuntimeContentHash(bytes) {
     .digest("hex");
 }
 
+function previousProjectedContentHash(bytes) {
+  const stored = JSON.parse(bytes);
+  if (
+    stored.schemaVersion === "1.3.0" ||
+    stored.definitionVersion === "1.3.0"
+  ) {
+    return null;
+  }
+  const projected = projectPublishedSiteDefinition(stored);
+  const { blog: _blog, ...previous } = projected;
+  return createHash("sha256")
+    .update(
+      canonicalJson({
+        ...previous,
+        definitionVersion: "1.2.0",
+        schemaVersion: "1.2.0",
+      }),
+    )
+    .digest("hex");
+}
+
 function publicationArtifactHash(artifacts) {
   const manifest = [...artifacts]
     .sort((left, right) => left.path.localeCompare(right.path))
@@ -243,6 +264,7 @@ export async function assertExactProductionContent({
     expectedContentHash,
     storedContentHash(expectedPublishedContent),
     fixedBaseRuntimeContentHash(expectedPublishedContent),
+    previousProjectedContentHash(expectedPublishedContent),
   ]);
   const changedPaths = readChangedPaths(liveCommit, expectedCommit)
     .trim()

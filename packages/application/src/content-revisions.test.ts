@@ -241,14 +241,42 @@ describe("content revision application", () => {
     ).rejects.toMatchObject({
       fields: { blog: "post_already_exists" },
     });
-    const republished = await application.commands.republishBlogPost({
-      actorId: editorActorId,
-      ...commandInputs,
-      siteId: liveDefinition.site.id,
-      baseRevision: 1,
-      postId,
-      idempotencyKey: "republish-unpublished-blog-post",
+    await expect(
+      application.commands.republishBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: liveDefinition.site.id,
+        baseRevision: 1,
+        postId,
+        idempotencyKey: "republish-before-unpublish-verification",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_not_unpublished" },
     });
+
+    const publishedWithoutPost = {
+      ...liveDefinition,
+      blog: { ...liveDefinition.blog, posts: [] },
+    };
+    const freshApplication = createContentRevisionApplication({
+      siteDefinition: publishedWithoutPost,
+      initialDefinition: unpublished.definition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(
+      freshApplication,
+      "create-hydrated-unpublished-workspace",
+    );
+    const republished =
+      await freshApplication.commands.republishBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: liveDefinition.site.id,
+        baseRevision: 0,
+        postId,
+        idempotencyKey: "republish-unpublished-blog-post",
+      });
     expect(republished.definition.blog.posts[0]).toMatchObject({
       id: postId,
       revision: 3,

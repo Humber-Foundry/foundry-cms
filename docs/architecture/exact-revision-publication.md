@@ -19,6 +19,7 @@ The dashboard enables approval only after the human opens the canonical
 preview for the current saved revision. The approval fingerprint binds:
 
 - the complete Site Definition content hash;
+- the filtered public Site Definition hash used by the release marker;
 - a structural design projection;
 - schema and renderer versions;
 - the exact production Git base and published-content hash;
@@ -73,7 +74,8 @@ only one can advance it; the loser fails closed and cannot acknowledge its
 definition.
 
 Unpublishing is a guarded successor publication, not deletion of history. The
-command is accepted only when the aggregate has a verified live revision. It
+command is accepted only when the aggregate has a verified live revision and
+no global publication operation is active. It
 creates a new immutable post revision whose target visibility is
 `unpublished`, retaining the stable identity and editable content in D1 and
 the workspace history. Public artifact serialization omits non-public records
@@ -81,8 +83,11 @@ from both canonical JSON and managed Markdown, so the approved successor
 removes the route and public payload. The aggregate live pointer is changed
 only by a callback after the exact publication reaches `verified-live`; a
 failed callback is retried when the durable verified publication is refreshed.
-Republishing creates another attributed successor revision and runs through
-the same preview, approval, commit, deployment, and verification path.
+Only after verified removal may the latest immutable snapshot be hydrated into
+a fresh management workspace. Republishing creates another attributed
+successor revision and runs through the same preview, approval, commit,
+deployment, and verification path. Never-published drafts and in-flight
+withdrawals are not hydrated across workspaces.
 
 Accepted and rejected blog commands are recorded in an append-only D1
 transition audit with the authenticated actor, workspace, post target, request

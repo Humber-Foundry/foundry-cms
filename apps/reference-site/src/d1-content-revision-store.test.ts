@@ -5,6 +5,7 @@ import { Miniflare } from "miniflare";
 
 import {
   ContentRevisionConflictError,
+  ContentRevisionConfigurationError,
   ContentRevisionBookmarkError,
   ContentRevisionIdempotencyError,
   ContentWorkspaceAccessError,
@@ -21,6 +22,7 @@ import {
 import {
   createD1ContentRevisionStore,
   findLatestContentWorkspaceIdForActor,
+  hydrateManagedBlogPosts,
   reconcileVerifiedBlogPostPublication,
 } from "./d1-content-revision-store";
 
@@ -44,6 +46,7 @@ describe("D1 content revision store", () => {
     database = await miniflare.getD1Database("FOUNDRY_DB");
     for (const name of [
       "0005_content_revisions.sql",
+      "0007_content_publication.sql",
       "0008_media_assets.sql",
       "0011_blog_post_transition_audit.sql",
     ]) {
@@ -272,10 +275,16 @@ describe("D1 content revision store", () => {
       before_state_json: JSON.stringify({
         revision: 2,
         visibility: "public",
+        aggregateRevision: 2,
+        liveRevision: null,
+        aggregateVersion: 2,
       }),
       after_state_json: JSON.stringify({
         revision: 2,
         visibility: "public",
+        aggregateRevision: 2,
+        liveRevision: null,
+        aggregateVersion: 2,
       }),
     });
     expect(
@@ -336,6 +345,9 @@ describe("D1 content revision store", () => {
       revision: 2,
     });
 
+    await expect(
+      hydrateManagedBlogPosts(database, referenceSiteDefinition),
+    ).resolves.toMatchObject({ blog: { posts: [] } });
     const current = await reloaded.queries.getCurrent();
     await reconcileVerifiedBlogPostPublication(
       database,
@@ -343,6 +355,65 @@ describe("D1 content revision store", () => {
       current.definition,
       "2026-07-27T12:30:00.000Z",
     );
+
+    await database.batch([
+      database.prepare(
+        `INSERT INTO content_approvals (
+           id, workspace_id, revision, fingerprint, channel,
+           channel_configuration_hash, content_hash, design_hash,
+           schema_version, renderer_version, production_base,
+           artifact_hash, serialization_version, approved_by, approved_at
+         ) VALUES (
+           'approval_blog_in_progress', ?1, 2, ?2, 'site', 'channel',
+           ?2, ?2, '1.3.0', 'renderer-test-commit',
+           'published:site_foundry_reference@1.1.0', ?2,
+           'foundry.site-publication-artifacts.v2', ?3, ?4
+         )`,
+      ).bind(
+        workspaceId,
+        "a".repeat(64),
+        editorActorId,
+        "2026-07-27T12:31:00.000Z",
+      ),
+      database.prepare(
+        `INSERT INTO content_publications (
+           id, workspace_id, revision, approval_id, fingerprint,
+           idempotency_key, command_identity, requested_by,
+           contributors_json, expected_head, status, commit_sha,
+           deployment_id, deployment_requested_at, detail, lease_token,
+           lease_expires_at, requested_at, updated_at, mutation_token
+         ) VALUES (
+           'publish_blog_in_progress', ?1, 2, 'approval_blog_in_progress',
+           ?2, 'publish-blog-in-progress', '{}', ?3, '[]', ?4, 'building',
+           ?4, NULL, NULL, NULL, NULL, NULL, ?5, ?5, 'mutation-blog'
+         )`,
+      ).bind(
+        workspaceId,
+        "a".repeat(64),
+        editorActorId,
+        "b".repeat(40),
+        "2026-07-27T12:32:00.000Z",
+      ),
+    ]);
+    await expect(
+      reloaded.commands.unpublishBlogPost({
+        actorId: editorActorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 2,
+        postId,
+        idempotencyKey: "d1-blog-unpublish-conflicting-publication",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+    await database
+      .prepare(
+        `UPDATE content_publications
+         SET status = 'failed', updated_at = ?1
+         WHERE id = 'publish_blog_in_progress'`,
+      )
+      .bind("2026-07-27T12:33:00.000Z")
+      .run();
 
     await reloaded.commands.unpublishBlogPost({
       actorId: editorActorId,
@@ -427,6 +498,64 @@ describe("D1 content revision store", () => {
       }),
       revision: 3,
     });
+
+    const hydrated = await hydrateManagedBlogPosts(
+      database,
+      referenceSiteDefinition,
+    );
+    expect(hydrated.blog.posts).toEqual([
+      expect.objectContaining({
+        id: postId,
+        revision: 3,
+        visibility: "unpublished",
+      }),
+    ]);
+    const republishWorkspaceId = createContentWorkspaceId(
+      "workspace_republish_blog",
+    );
+    const republishApplication = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      initialDefinition: hydrated,
+      store: createD1ContentRevisionStore(
+        database,
+        referenceSiteDefinition.site.id,
+        republishWorkspaceId,
+      ),
+      workspaceId: republishWorkspaceId,
+      actorId: editorActorId,
+      rendererVersion: "renderer-test-commit",
+      productionBase: "published:site_foundry_reference@1.3.0",
+      now: () => "2026-07-27T13:10:00.000Z",
+    });
+    await republishApplication.commands.create({
+      actorId: editorActorId,
+      workspaceId: republishWorkspaceId,
+      idempotencyKey: "d1-republish-create-workspace",
+    });
+    await expect(
+      republishApplication.commands.republishBlogPost({
+        actorId: editorActorId,
+        workspaceId: republishWorkspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        postId,
+        idempotencyKey: "d1-republish-blog-post",
+      }),
+    ).resolves.toMatchObject({
+      revision: 1,
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              revision: 4,
+              visibility: "public",
+            }),
+          ],
+        },
+      },
+    });
   });
 
   it("allows only one workspace to advance a shared post revision", async () => {
@@ -500,6 +629,38 @@ describe("D1 content revision store", () => {
       status: "rejected",
       reason: expect.any(ContentRevisionConflictError),
     });
+    const losingWorkspaceId =
+      results[0]?.status === "rejected" ? workspaceId : otherWorkspaceId;
+    const losingRequestId =
+      results[0]?.status === "rejected"
+        ? "d1-shared-blog-edit-first"
+        : "d1-shared-blog-edit-second";
+    expect(
+      await database
+        .prepare(
+          `SELECT outcome, before_state_json, after_state_json
+           FROM blog_post_transition_audit_events
+           WHERE workspace_id = ?1 AND request_id = ?2`,
+        )
+        .bind(losingWorkspaceId, losingRequestId)
+        .first(),
+    ).toEqual({
+      outcome: "rejected",
+      before_state_json: JSON.stringify({
+        revision: 1,
+        visibility: "public",
+        aggregateRevision: 2,
+        liveRevision: 1,
+        aggregateVersion: 2,
+      }),
+      after_state_json: JSON.stringify({
+        revision: 1,
+        visibility: "public",
+        aggregateRevision: 2,
+        liveRevision: 1,
+        aggregateVersion: 2,
+      }),
+    });
     expect(
       await database
         .prepare(
@@ -520,6 +681,42 @@ describe("D1 content revision store", () => {
         .bind(definition.site.id, postId)
         .first(),
     ).toEqual({ count: 2, ids: 2 });
+  });
+
+  it("fails verified-live reconciliation when a post aggregate is missing", async () => {
+    const missingPostDefinition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: createBlogPostId(
+              "00000000-0000-4000-8000-00000000000d",
+            ),
+            revision: 1,
+            collectionState: "active" as const,
+            visibility: "public" as const,
+            slug: "missing-aggregate",
+            title: "Missing aggregate",
+            excerpt: "The callback must not silently succeed.",
+            seo: {
+              title: "Missing aggregate | Foundry",
+              description: "The callback must not silently succeed.",
+            },
+            body: createRichTextDocumentFromPlainText("Missing."),
+          },
+        ],
+      },
+    };
+
+    await expect(
+      reconcileVerifiedBlogPostPublication(
+        database,
+        referenceSiteDefinition.site.id,
+        missingPostDefinition,
+        "2026-07-27T15:00:00.000Z",
+      ),
+    ).rejects.toBeInstanceOf(ContentRevisionConfigurationError);
   });
 
   it("preserves immutable stored 1.0 revisions without rewriting their fingerprinted definition", async () => {
@@ -761,6 +958,39 @@ describe("D1 content revision store", () => {
     await expect(outsider.queries.getCurrent()).rejects.toThrow(
       "content_workspace_access_denied",
     );
+    await expect(
+      outsider.commands.createBlogPost({
+        actorId: outsiderActorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        post: {
+          id: createBlogPostId(
+            "00000000-0000-4000-8000-00000000000c",
+          ),
+          slug: "unauthorized-post",
+          title: "Unauthorized post",
+          excerpt: "This must not enter another workspace audit.",
+          seo: {
+            title: "Unauthorized post | Foundry",
+            description: "This must not enter another workspace audit.",
+          },
+          body: createRichTextDocumentFromPlainText("Unauthorized."),
+        },
+        idempotencyKey: "d1-unauthorized-blog-post",
+      }),
+    ).rejects.toBeInstanceOf(ContentWorkspaceAccessError);
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM blog_post_transition_audit_events
+           WHERE workspace_id = ?1`,
+        )
+        .bind(workspaceId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
   });
 
   it("does not create a missing workspace during an access check", async () => {

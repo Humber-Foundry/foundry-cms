@@ -61,6 +61,7 @@ export type ContentApprovalFingerprint = Readonly<{
   channel: ContentPublicationChannel;
   channelConfigurationHash: string;
   contentHash: string;
+  revisionContentHash?: string;
   designHash: string;
   schemaVersion: ContentPublicationSchemaVersion;
   rendererVersion: string;
@@ -453,10 +454,8 @@ export function serializePublishedSiteDefinition(
   return `${canonicalJson(definition)}\n`;
 }
 
-export function serializeContentPublicationArtifacts(
-  definition: SiteDefinition,
-): ReadonlyArray<ContentPublicationArtifact> {
-  const publicDefinition: SiteDefinition = {
+function publicSiteDefinition(definition: SiteDefinition): SiteDefinition {
+  return {
     ...definition,
     blog: {
       ...definition.blog,
@@ -465,6 +464,12 @@ export function serializeContentPublicationArtifacts(
       ),
     },
   };
+}
+
+export function serializeContentPublicationArtifacts(
+  definition: SiteDefinition,
+): ReadonlyArray<ContentPublicationArtifact> {
+  const publicDefinition = publicSiteDefinition(definition);
   return [
     {
       path: publishedSiteDefinitionPath,
@@ -576,10 +581,14 @@ export async function createContentApprovalFingerprint(
   const designHash = await sha256(canonicalJson(designProjection(
     revision.definition,
   )));
+  const publishedContentHash = await hashPublishedSiteDefinition(
+    publicSiteDefinition(revision.definition),
+  );
   const binding = {
     channel,
     channelConfigurationHash,
-    contentHash: revision.inputs.contentHash,
+    contentHash: publishedContentHash,
+    revisionContentHash: revision.inputs.contentHash,
     designHash,
     schemaVersion: revision.inputs.schemaVersion,
     rendererVersion: revision.inputs.rendererVersion,

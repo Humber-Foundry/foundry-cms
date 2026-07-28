@@ -16,6 +16,8 @@ import {
   withContentRevisionBookmark,
 } from "@foundry/application";
 import {
+  isSiteDefinition,
+  type BlogPost,
   type SiteDefinition,
   type SiteId,
   type StoredSiteDefinitionSchemaVersion,
@@ -72,6 +74,45 @@ export async function listContentRevisionContributors(
   return rows.results.map((row) => restoreContentActorId(row.created_by));
 }
 
+export async function hydrateManagedBlogPosts(
+  database: D1DatabaseBinding,
+  definition: SiteDefinition,
+): Promise<SiteDefinition> {
+  const rows = await database
+    .prepare(
+      `SELECT revision.snapshot_json
+       FROM blog_posts AS post
+       JOIN blog_post_revisions AS revision
+         ON revision.site_id = post.site_id
+        AND revision.post_id = post.post_id
+        AND revision.revision = post.current_revision
+       WHERE post.site_id = ?1
+         AND post.live_revision IS NULL
+         AND post.last_verified_revision = post.current_revision
+       ORDER BY post.post_id`,
+    )
+    .bind(definition.site.id)
+    .all<{ snapshot_json: string }>();
+  const managed = rows.results.map(({ snapshot_json }) =>
+    JSON.parse(snapshot_json) as BlogPost
+  );
+  const publishedIds = new Set(definition.blog.posts.map(({ id }) => id));
+  const hydrated = {
+    ...definition,
+    blog: {
+      ...definition.blog,
+      posts: [
+        ...definition.blog.posts,
+        ...managed.filter(({ id }) => !publishedIds.has(id)),
+      ],
+    },
+  };
+  if (!isSiteDefinition(hydrated)) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return hydrated;
+}
+
 export async function reconcileVerifiedBlogPostPublication(
   database: D1DatabaseBinding,
   siteId: SiteId,
@@ -81,7 +122,7 @@ export async function reconcileVerifiedBlogPostPublication(
   if (definition.blog.posts.length === 0) {
     return;
   }
-  await database.batch(
+  const results = await database.batch(
     definition.blog.posts.map((post) =>
       database
         .prepare(
@@ -105,6 +146,27 @@ export async function reconcileVerifiedBlogPostPublication(
         ),
     ),
   );
+  for (const [index, result] of results.entries()) {
+    if ((result.meta.changes ?? 0) > 0) {
+      continue;
+    }
+    const post = definition.blog.posts[index]!;
+    const aggregate = await database
+      .prepare(
+        `SELECT last_verified_revision
+         FROM blog_posts
+         WHERE site_id = ?1 AND post_id = ?2`,
+      )
+      .bind(siteId, post.id)
+      .first<{ last_verified_revision: number | null }>();
+    if (
+      aggregate === null ||
+      aggregate.last_verified_revision === null ||
+      aggregate.last_verified_revision < post.revision
+    ) {
+      throw new ContentRevisionConfigurationError();
+    }
+  }
 }
 
 type RevisionRow = {
@@ -390,7 +452,8 @@ export function createD1ContentRevisionStore(
     async getBlogPostAggregate(postId) {
       const row = await database
         .prepare(
-          `SELECT current_revision, live_revision, version
+          `SELECT current_revision, live_revision,
+                  last_verified_revision, version
            FROM blog_posts
            WHERE site_id = ?1 AND post_id = ?2`,
         )
@@ -398,6 +461,7 @@ export function createD1ContentRevisionStore(
         .first<{
           current_revision: number;
           live_revision: number | null;
+          last_verified_revision: number | null;
           version: number;
         }>();
       return row === null
@@ -405,6 +469,7 @@ export function createD1ContentRevisionStore(
         : {
             currentRevision: row.current_revision,
             liveRevision: row.live_revision,
+            lastVerifiedRevision: row.last_verified_revision,
             version: row.version,
           };
     },
@@ -531,6 +596,16 @@ export function createD1ContentRevisionStore(
           )`;
         })
         .join("\n");
+      const blogPublicationGuard =
+        (command.blogTransitions?.length ?? 0) === 0
+          ? ""
+          : `AND NOT EXISTS (
+              SELECT 1 FROM content_publications
+              WHERE status IN (
+                'requested', 'committed', 'building',
+                'deployed', 'unknown'
+              )
+            )`;
 
       const blogTransitionStatements = (command.blogTransitions ?? []).map(
         (transition) =>
@@ -701,7 +776,8 @@ export function createD1ContentRevisionStore(
                    AND media_revision.crop_json IS ?17
                )
              )
-             ${blogTransitionGuards}`,
+             ${blogTransitionGuards}
+             ${blogPublicationGuard}`,
           )
           .bind(
             workspaceId,

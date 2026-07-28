@@ -63,6 +63,13 @@ const fixedBaseRuntimeContentHash = canonicalHash({
     media: trackedPublishedDefinition.home.media ?? [],
   },
 });
+const { blog: _currentBlog, ...currentDefinitionWithoutBlog } =
+  referenceSiteDefinition;
+const previousProjectedContentHash = canonicalHash({
+  ...currentDefinitionWithoutBlog,
+  definitionVersion: "1.2.0",
+  schemaVersion: "1.2.0",
+});
 const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
 
 function defaultArtifacts() {
@@ -264,6 +271,26 @@ describe("exact production content authorization", () => {
       readLiveMarker: vi.fn().mockResolvedValue({
         commitSha: liveCommit,
         contentHash: fixedBaseRuntimeContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes a code-only 1.3 reader upgrade against the prior 1.2 projection hash", async () => {
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: previousProjectedContentHash,
       }),
       readChangedPaths: vi
         .fn()

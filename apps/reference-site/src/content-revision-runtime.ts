@@ -16,6 +16,7 @@ import type { SiteDefinition } from "@foundry/site-definition";
 import {
   createD1ContentRevisionStore,
   findLatestContentWorkspaceIdForActor,
+  hydrateManagedBlogPosts,
 } from "./d1-content-revision-store";
 import {
   upgradeSiteDefinitionForCurrentSchema,
@@ -237,6 +238,10 @@ export async function loadContentRevisionApplication(
   }
   const { rendererVersion, productionBaseCommit } =
     resolveContentReleaseInputs(environment);
+  const initialDefinition = await hydrateManagedBlogPosts(
+    environment.FOUNDRY_DB,
+    referenceSiteDefinition,
+  );
   return applicationFor({
     workspaceId,
     actorId,
@@ -247,6 +252,7 @@ export async function loadContentRevisionApplication(
     ),
     rendererVersion,
     productionBaseCommit: `git:${productionBaseCommit}`,
+    initialDefinition,
   });
 }
 

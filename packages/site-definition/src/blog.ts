@@ -14,6 +14,7 @@ export class BlogPostSchemaError extends Error {
       | "post_already_live"
       | "post_not_found"
       | "post_not_live"
+      | "post_not_unpublished"
       | "slug_already_exists"
       | "schema_invalid",
   ) {

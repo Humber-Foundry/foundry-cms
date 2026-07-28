@@ -230,6 +230,8 @@ describe("content publication application", () => {
           channel: "site",
           channelConfigurationHash: "channel-a",
           contentHash: revisionApplication.saved.inputs.contentHash,
+          revisionContentHash:
+            revisionApplication.saved.inputs.contentHash,
           designHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           schemaVersion: referenceSiteDefinition.schemaVersion,
           rendererVersion: "renderer-v1",
@@ -377,6 +379,19 @@ describe("content publication application", () => {
       approvedBy: membershipId,
       previewConfirmed: true,
     });
+    const removalPublicDefinition = {
+      ...removalRevision.definition,
+      blog: { ...removalRevision.definition.blog, posts: [] },
+    };
+    expect(removalApproval.fingerprint).toMatchObject({
+      contentHash: await hashPublishedSiteDefinition(
+        removalPublicDefinition,
+      ),
+      revisionContentHash: removalRevision.inputs.contentHash,
+    });
+    expect(removalApproval.fingerprint.contentHash).not.toBe(
+      removalApproval.fingerprint.revisionContentHash,
+    );
     const removalPublication = await removalApplication.commands.publish({
       workspaceId: removalWorkspaceId,
       approvalId: removalApproval.id,

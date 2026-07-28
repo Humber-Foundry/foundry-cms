@@ -35,6 +35,7 @@ type ApprovalRow = {
   channel: "site";
   channel_configuration_hash: string;
   content_hash: string;
+  revision_content_hash: string | null;
   design_hash: string;
   schema_version: ContentApprovalFingerprint["schemaVersion"];
   renderer_version: string;
@@ -89,6 +90,7 @@ const approvalProjection = `
     approval.channel,
     approval.channel_configuration_hash,
     approval.content_hash,
+    approval.revision_content_hash,
     approval.design_hash,
     approval.schema_version,
     approval.renderer_version,
@@ -134,6 +136,8 @@ function toApproval(row: ApprovalRow): ContentApproval {
     channel: row.channel,
     channelConfigurationHash: row.channel_configuration_hash,
     contentHash: row.content_hash,
+    revisionContentHash:
+      row.revision_content_hash ?? row.content_hash,
     designHash: row.design_hash,
     schemaVersion: row.schema_version,
     rendererVersion: row.renderer_version,
@@ -398,12 +402,13 @@ export function createD1ContentPublicationStore(
             `INSERT INTO content_approvals (
                id, workspace_id, revision, fingerprint, channel,
                channel_configuration_hash, content_hash, design_hash,
+               revision_content_hash,
                schema_version, renderer_version, production_base,
                artifact_hash, serialization_version, approved_by, approved_at
              )
              SELECT
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-               ?14, ?15
+               ?14, ?15, ?16
              WHERE EXISTS (
                SELECT 1
                FROM content_workspaces
@@ -420,6 +425,8 @@ export function createD1ContentPublicationStore(
             approval.fingerprint.channelConfigurationHash,
             approval.fingerprint.contentHash,
             approval.fingerprint.designHash,
+            approval.fingerprint.revisionContentHash ??
+              approval.fingerprint.contentHash,
             approval.fingerprint.schemaVersion,
             approval.fingerprint.rendererVersion,
             approval.fingerprint.productionBase,

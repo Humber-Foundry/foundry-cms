@@ -114,6 +114,9 @@ export type RepublishBlogPostCommand = BlogPostMutationCommand &
 type BlogPostAuditState = Readonly<{
   revision: number;
   visibility: BlogPost["visibility"];
+  aggregateRevision?: number;
+  liveRevision?: number | null;
+  aggregateVersion?: number;
 }> | null;
 
 type BlogPostTransitionAudit = Readonly<{
@@ -133,6 +136,7 @@ type BlogPostTransitionAudit = Readonly<{
 type BlogPostAggregateState = Readonly<{
   currentRevision: number;
   liveRevision: number | null;
+  lastVerifiedRevision: number | null;
   version: number;
 }>;
 
@@ -421,6 +425,7 @@ export function createInMemoryContentRevisionStore({
             currentRevision: post.revision,
             liveRevision:
               post.visibility === "public" ? post.revision : null,
+            lastVerifiedRevision: post.revision,
             version: post.revision,
           });
         }
@@ -509,6 +514,8 @@ export function createInMemoryContentRevisionStore({
             currentRevision: transition.afterState!.revision,
             liveRevision:
               blogPosts.get(transition.postId)?.liveRevision ?? null,
+            lastVerifiedRevision:
+              blogPosts.get(transition.postId)?.lastVerifiedRevision ?? null,
             version: (blogPosts.get(transition.postId)?.version ?? 0) + 1,
           });
         }
@@ -726,6 +733,13 @@ export function createContentRevisionApplication({
     postIds: ReadonlyArray<BlogPostId>,
     operation: () => Promise<Result>,
   ): Promise<Result> {
+    if (
+      command.actorId !== actorId ||
+      command.workspaceId !== workspaceId
+    ) {
+      throw new ContentWorkspaceAccessError();
+    }
+    await store.requireAccess(actorId);
     try {
       assertMutationCommand(command);
       return await operation();
@@ -737,10 +751,20 @@ export function createContentRevisionApplication({
         // Rejection audit remains valid when no workspace revision exists.
       }
       for (const postId of postIds) {
-        const beforeState =
+        const aggregate = await store.getBlogPostAggregate(postId);
+        const snapshot =
           currentDefinition === null
             ? null
             : blogPostAuditState(currentDefinition, postId);
+        const beforeState =
+          snapshot === null || aggregate === null
+            ? snapshot
+            : {
+                ...snapshot,
+                aggregateRevision: aggregate.currentRevision,
+                liveRevision: aggregate.liveRevision,
+                aggregateVersion: aggregate.version,
+              };
         await store.recordRejectedBlogTransition({
           workspaceId,
           actorId,
@@ -994,7 +1018,20 @@ export function createContentRevisionApplication({
           command,
           [command.postId],
           () =>
-            persistDefinitionMutation({
+          (async () => {
+            const aggregate = await store.getBlogPostAggregate(
+              command.postId,
+            );
+            if (
+              aggregate === null ||
+              aggregate.liveRevision !== null ||
+              aggregate.lastVerifiedRevision !== aggregate.currentRevision
+            ) {
+              throw new ContentRevisionValidationError({
+                blog: "post_not_unpublished",
+              });
+            }
+            return persistDefinitionMutation({
               command,
               requestIdentity: {
                 operation: "republish_blog_post",
@@ -1012,7 +1049,8 @@ export function createContentRevisionApplication({
                   postId: command.postId,
                 },
               ],
-            }),
+            });
+          })(),
         );
       },
       async saveMediaOccurrence(command: SaveContentMediaOccurrenceCommand) {
