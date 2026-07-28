@@ -1,5 +1,6 @@
 import {
   parseSerializedRichTextDocument,
+  richTextDocumentHasVisibleText,
   serializeRichTextDocument,
   serializeRichTextToMarkdown,
   type ProofSection,
@@ -434,11 +435,17 @@ export function applySiteDefinitionEdits(
       (edit.format ?? "plainText") !== bindings.get(edit.path)!.field.format
     ) {
       errors[edit.path] = "The field value format does not match its schema.";
-    } else if (edit.value.trim() === "") {
+    } else if (
+      bindings.get(edit.path)!.field.format === "plainText" &&
+      edit.value.trim() === ""
+    ) {
       errors[edit.path] = "Enter at least one visible character.";
     } else if (bindings.get(edit.path)!.field.format === "richText") {
       try {
-        parseSerializedRichTextDocument(edit.value);
+        const document = parseSerializedRichTextDocument(edit.value);
+        if (!richTextDocumentHasVisibleText(document)) {
+          errors[edit.path] = "Enter at least one visible character.";
+        }
       } catch {
         errors[edit.path] =
           "Rich text is invalid or contains unsupported or unsafe content.";

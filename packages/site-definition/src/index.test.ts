@@ -172,6 +172,12 @@ describe("reference Site Definition", () => {
       },
     },
     {
+      name: "a NUL text character",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = "before\u0000after";
+      },
+    },
+    {
       name: "non-flanking emphasis across inline nodes",
       mutate(document: Record<string, any>) {
         document.children[0].children = [
@@ -481,6 +487,56 @@ describe("reference Site Definition", () => {
       },
     });
   });
+
+  it.each([
+    [
+      "an empty document",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [],
+      },
+    ],
+    [
+      "an empty paragraph",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [{ type: "paragraph", children: [] }],
+      },
+    ],
+    [
+      "whitespace-only text",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: " \t ", marks: [] }],
+          },
+        ],
+      },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, RichTextDocument]>)(
+    "requires visible text instead of nonempty serialized JSON for $name",
+    (_name, body) => {
+      expect(
+        applySiteDefinitionEdits(referenceSiteDefinition, [
+          {
+            path: "section_contact.body",
+            format: "richText",
+            value: serializeRichTextDocument(body),
+          },
+        ]),
+      ).toEqual({
+        ok: false,
+        errors: {
+          "section_contact.body": "Enter at least one visible character.",
+        },
+      });
+    },
+  );
 
   it("creates deterministic Markdown publication artifacts for rich text", () => {
     expect(

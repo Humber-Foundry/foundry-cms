@@ -44,6 +44,7 @@ export function RichTextEditor({
   labelledBy,
   invalid,
   onChange,
+  onValidationChange = () => undefined,
 }: {
   id: string;
   value: SerializedRichTextDocument;
@@ -51,6 +52,7 @@ export function RichTextEditor({
   describedBy: string;
   invalid: boolean;
   onChange(value: SerializedRichTextDocument): void;
+  onValidationChange?(invalid: boolean): void;
 } & RichTextEditorAccessibleName) {
   const [validationMessage, setValidationMessage] = useState("");
   const validationMessageId = `${id}-validation`;
@@ -60,6 +62,16 @@ export function RichTextEditor({
       : `${describedBy} ${validationMessageId}`;
   const latestValue = useRef(value);
   latestValue.current = value;
+  const latestOnValidationChange = useRef(onValidationChange);
+  latestOnValidationChange.current = onValidationChange;
+  const locallyInvalid = useRef(false);
+  function reportLocalValidation(invalid: boolean) {
+    if (locallyInvalid.current === invalid) {
+      return;
+    }
+    locallyInvalid.current = invalid;
+    latestOnValidationChange.current(invalid);
+  }
   const document = useMemo(
     () => parseSerializedRichTextDocument(value),
     [value],
@@ -91,15 +103,26 @@ export function RichTextEditor({
         setValidationMessage(
           "This edit contains unsupported or unsafe rich-text content.",
         );
-        return;
-      }
-      if (serialized === latestValue.current) {
+        reportLocalValidation(true);
         return;
       }
       setValidationMessage("");
+      reportLocalValidation(false);
+      if (serialized === latestValue.current) {
+        return;
+      }
       onChange(serialized);
     },
   });
+
+  useEffect(
+    () => () => {
+      if (locallyInvalid.current) {
+        latestOnValidationChange.current(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     editor?.setEditable(!disabled);
@@ -135,13 +158,12 @@ export function RichTextEditor({
       return;
     }
     const current = serializeSupportedTipTapDocument(editor.getJSON());
-    if (current === null) {
-      return;
-    }
-    if (current !== value) {
+    if (current === null || current !== value) {
       editor.commands.setContent(toTipTapDocument(document), {
         emitUpdate: false,
       });
+      setValidationMessage("");
+      reportLocalValidation(false);
     }
   }, [document, editor, value]);
 
@@ -158,6 +180,8 @@ export function RichTextEditor({
       return;
     }
     if (href === "") {
+      setValidationMessage("");
+      reportLocalValidation(false);
       editor.chain().focus().extendMarkRange("link").unsetLink().run();
       return;
     }
@@ -165,8 +189,11 @@ export function RichTextEditor({
       setValidationMessage(
         "Use an http, https, mailto, root-relative, or page-anchor link.",
       );
+      reportLocalValidation(true);
       return;
     }
+    setValidationMessage("");
+    reportLocalValidation(false);
     editor
       .chain()
       .focus()

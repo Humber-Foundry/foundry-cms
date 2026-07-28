@@ -47,6 +47,9 @@ const trackedPublishedBytes = readFileSync(
   ),
   "utf8",
 );
+const trackedPublishedContentHash = canonicalHash(
+  JSON.parse(trackedPublishedBytes),
+);
 const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
 
 function defaultArtifacts() {
@@ -198,6 +201,26 @@ describe("exact production content authorization", () => {
       readLiveMarker: vi.fn().mockResolvedValue({
         commitSha: liveCommit,
         contentHash: runtimePublishedContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes the first code-only reader upgrade against a legacy live hash", async () => {
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: trackedPublishedContentHash,
       }),
       readChangedPaths: vi
         .fn()

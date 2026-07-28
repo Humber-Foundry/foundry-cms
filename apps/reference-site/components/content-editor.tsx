@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import type { ContentRevision } from "@foundry/application";
 import {
@@ -156,6 +163,10 @@ export function ContentEditor({
   const [publicationBusy, setPublicationBusy] = useState(false);
   const [publicationPollAttempt, setPublicationPollAttempt] = useState(0);
   const [openingPreview, setOpeningPreview] = useState(false);
+  const [invalidRichTextSources, setInvalidRichTextSources] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const hasInvalidRichText = invalidRichTextSources.size > 0;
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -259,6 +270,38 @@ export function ContentEditor({
     recoveryBlocked: recoveryConflicts.length > 0,
     onStorageError: setMessage,
   });
+  const discardPersistenceAttempt = useRef(persistence.discardAttempt);
+  discardPersistenceAttempt.current = persistence.discardAttempt;
+  const updateRichTextValidation = useCallback(
+    (source: string, invalid: boolean) => {
+      setInvalidRichTextSources((current) => {
+        if (current.has(source) === invalid) {
+          return current;
+        }
+        const next = new Set(current);
+        if (invalid) {
+          next.add(source);
+        } else {
+          next.delete(source);
+        }
+        return next;
+      });
+      if (!invalid) {
+        return;
+      }
+      discardPersistenceAttempt.current();
+      setApprovalId(null);
+      setPreviewedRevision(null);
+      pendingApprovalAttempt.current = null;
+      pendingPublicationAttempt.current = null;
+    },
+    [],
+  );
+  const updateVisualRichTextValidation = useCallback(
+    (source: string, invalid: boolean) =>
+      updateRichTextValidation(`visual:${source}`, invalid),
+    [updateRichTextValidation],
+  );
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
     !persistence.coordinated ||
@@ -691,6 +734,7 @@ export function ContentEditor({
 
   async function save() {
     if (
+      hasInvalidRichText ||
       saveInFlight.current ||
       !persistence.coordinated ||
       !persistence.ready ||
@@ -845,6 +889,9 @@ export function ContentEditor({
   }
 
   async function openPreview() {
+    if (hasInvalidRichText) {
+      return;
+    }
     const popup = window.open("", "_blank");
     if (popup !== null) popup.opener = null;
     setOpeningPreview(true);
@@ -886,6 +933,7 @@ export function ContentEditor({
 
   useContentEditorAutosave({
     enabled:
+      !hasInvalidRichText &&
       persistence.coordinated &&
       persistence.ready &&
       state.status === "dirty" &&
@@ -930,6 +978,9 @@ export function ContentEditor({
   }
 
   async function approveRevision() {
+    if (hasInvalidRichText) {
+      return;
+    }
     pendingApprovalAttempt.current ??= {
       body: JSON.stringify({
         operation: "approve",
@@ -985,7 +1036,7 @@ export function ContentEditor({
   }
 
   async function publishRevision() {
-    if (approvalId === null) {
+    if (hasInvalidRichText || approvalId === null) {
       return;
     }
     pendingPublicationAttempt.current ??= {
@@ -1270,6 +1321,7 @@ export function ContentEditor({
             className="button button-primary"
             disabled={
               (edits.length === 0 && composition === undefined) ||
+              hasInvalidRichText ||
               editorLocked ||
               recoveryConflicts.length > 0
             }
@@ -1289,7 +1341,11 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={openingPreview || previewUrl === undefined}
+            disabled={
+              hasInvalidRichText ||
+              openingPreview ||
+              previewUrl === undefined
+            }
             onClick={() => void openPreview()}
           >
             {openingPreview
@@ -1341,6 +1397,7 @@ export function ContentEditor({
             className="copy-button"
             disabled={
               publicationBusy ||
+              hasInvalidRichText ||
               edits.length > 0 ||
               state.status !== "saved" ||
               previewedRevision !== state.persistedRevision
@@ -1356,6 +1413,7 @@ export function ContentEditor({
             className="button button-primary"
             disabled={
               publicationBusy ||
+              hasInvalidRichText ||
               approvalId === null ||
               (publication !== null && publicationIsActive(publication)) ||
               (publication !== null &&
@@ -1446,6 +1504,7 @@ export function ContentEditor({
         key={`${state.persistedRevision}:${state.projectionVersion}`}
         definition={state.workingDefinition}
         disabled={editorLocked}
+        onValidationChange={updateVisualRichTextValidation}
         onChange={(definition) => {
           if (
             publicationBusy ||
@@ -1503,6 +1562,9 @@ export function ContentEditor({
                             format: "richText",
                             value,
                           })
+                        }
+                        onValidationChange={(invalid) =>
+                          updateRichTextValidation(field.path, invalid)
                         }
                       />
                       {fieldError}

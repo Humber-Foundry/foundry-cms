@@ -42,6 +42,12 @@ function contentHash(bytes) {
     .digest("hex");
 }
 
+function storedContentHash(bytes) {
+  return createHash("sha256")
+    .update(canonicalJson(JSON.parse(bytes)))
+    .digest("hex");
+}
+
 function publicationArtifactHash(artifacts) {
   const manifest = [...artifacts]
     .sort((left, right) => left.path.localeCompare(right.path))
@@ -216,9 +222,12 @@ export async function assertExactProductionContent({
     throw new Error("exact_live_marker_invalid");
   }
   const liveCommit = marker.commitSha.toLowerCase();
-  const expectedContentHash = contentHash(
-    readPublishedContent(expectedCommit),
-  );
+  const expectedPublishedContent = readPublishedContent(expectedCommit);
+  const expectedContentHash = contentHash(expectedPublishedContent);
+  const compatibleExpectedContentHashes = new Set([
+    expectedContentHash,
+    storedContentHash(expectedPublishedContent),
+  ]);
   const changedPaths = readChangedPaths(liveCommit, expectedCommit)
     .trim()
     .split("\n")
@@ -229,7 +238,7 @@ export async function assertExactProductionContent({
       managedRichTextPathPattern.test(path),
   );
   if (
-    marker.contentHash === expectedContentHash &&
+    compatibleExpectedContentHashes.has(marker.contentHash) &&
     !hasPublishedArtifactDelta
   ) {
     return;
@@ -259,7 +268,7 @@ export async function assertExactProductionContent({
     ? publicationArtifactHash([
         {
           path: publishedContentPath,
-          bytes: readPublishedContent(expectedCommit),
+          bytes: expectedPublishedContent,
         },
         ...managedRichTextPaths.map((path) => ({
           path,

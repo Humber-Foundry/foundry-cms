@@ -43,6 +43,7 @@ function newStableComponentId(type: PageComponentType): string {
 }
 
 const useVisualPuck = createUsePuck();
+const ignoreRichTextValidation = () => undefined;
 
 function InsertComponentActions({ disabled }: { disabled: boolean }) {
   const dispatch = useVisualPuck((state) => state.dispatch);
@@ -208,6 +209,10 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
 export function createVisualComponentConfig(
   protectedComponentIds: ReadonlySet<string>,
   definition: SiteDefinition,
+  onValidationChange: (
+    source: string,
+    invalid: boolean,
+  ) => void = ignoreRichTextValidation,
 ): Config<RegisteredComponents> {
   return {
     ...visualComponentConfig,
@@ -247,6 +252,31 @@ export function createVisualComponentConfig(
       },
       callToAction: {
         ...visualComponentConfig.components.callToAction,
+        fields: {
+          ...visualComponentConfig.components.callToAction.fields,
+          body: {
+            type: "custom",
+            label: "Body",
+            render: ({ name, onChange, value }) => (
+              <RichTextEditor
+                id={`${name}-editor`}
+                value={serializeRichTextDocument(value)}
+                disabled={false}
+                invalid={false}
+                describedBy={`${name}-help`}
+                label="Body"
+                onChange={(nextValue) =>
+                  onChange(parseSerializedRichTextDocument(nextValue))
+                }
+                onValidationChange={(invalid) =>
+                  onValidationChange(name, invalid)
+                }
+              />
+            ),
+          },
+        } as NonNullable<
+          (typeof visualComponentConfig.components.callToAction)["fields"]
+        >,
         defaultProps: createDefaultPageSection(
           "callToAction",
           "section_new_call_to_action",
@@ -264,11 +294,13 @@ export function VisualComponentEditor({
   definition,
   disabled,
   onChange,
+  onValidationChange = ignoreRichTextValidation,
   iframeEnabled = true,
 }: {
   definition: SiteDefinition;
   disabled: boolean;
   onChange(definition: SiteDefinition): void;
+  onValidationChange?(source: string, invalid: boolean): void;
   iframeEnabled?: boolean;
 }) {
   const initialData = useMemo(
@@ -282,8 +314,9 @@ export function VisualComponentEditor({
       createVisualComponentConfig(
         referencedPageComponentIds(definition),
         definition,
+        onValidationChange,
       ),
-    [definition],
+    [definition, onValidationChange],
   );
   const [message, setMessage] = useState("");
   const active = useRef(true);

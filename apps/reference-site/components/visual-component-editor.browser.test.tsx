@@ -121,6 +121,68 @@ describe("visual component editor browser acceptance", () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
+  it("reports local rich-text validation and clears it after a valid edit", async () => {
+    vi.stubGlobal(
+      "prompt",
+      vi.fn().mockReturnValue("javascript:alert(1)"),
+    );
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const onValidationChange = vi.fn();
+
+    flushSync(() => {
+      root.render(
+        createElement(RichTextEditor, {
+          id: "rich-editor-local-validation",
+          value: serializeRichTextDocument(callToAction.body),
+          disabled: false,
+          describedBy: "rich-editor-local-help",
+          labelledBy: "rich-editor-local-label",
+          invalid: false,
+          onChange: () => undefined,
+          onValidationChange,
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    const linkButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Link");
+    expect(linkButton).toBeDefined();
+    await userEvent.click(linkButton!);
+
+    expect(onValidationChange).toHaveBeenLastCalledWith(true);
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    const editable = host.querySelector<HTMLElement>(
+      '[contenteditable="true"]',
+    )!;
+    expect(editable.getAttribute("aria-invalid")).toBe("true");
+
+    editable.focus();
+    await userEvent.keyboard("{End}x");
+    for (
+      let index = 0;
+      index < 20 && host.querySelector('[role="alert"]') !== null;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+
+    expect(onValidationChange).toHaveBeenLastCalledWith(false);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(editable.getAttribute("aria-invalid")).toBe("false");
+  });
+
   it("synchronizes a recovered rich-text value into the rendered editor", async () => {
     const host = document.createElement("div");
     document.body.append(host);
@@ -411,6 +473,171 @@ describe("visual component editor browser acceptance", () => {
         },
       ],
     });
+    await clearContentEditorOutbox(workspaceId);
+  });
+
+  it("blocks save, preview, and autosave while a rich-text editor is locally invalid", async () => {
+    const workspaceId = "workspace_browser_invalid_rich_text";
+    await clearContentEditorOutbox(workspaceId);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (
+          url.includes("/api/foundry-cms/publications?") &&
+          init?.method === undefined
+        ) {
+          return new Response(JSON.stringify({ publication: null }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        const body =
+          typeof init?.body === "string"
+            ? JSON.parse(init.body) as Record<string, unknown>
+            : {};
+        if (
+          url.endsWith("/api/foundry-cms/revisions") &&
+          body.operation === "open_preview"
+        ) {
+          return new Response(
+            JSON.stringify({ previewUrl: "/preview/exact-revision" }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        if (
+          url.endsWith("/api/foundry-cms/publications") &&
+          body.operation === "approve"
+        ) {
+          return new Response(
+            JSON.stringify({
+              approval: { id: `approval_${"a".repeat(32)}` },
+            }),
+            {
+              status: 201,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        return new Promise<Response>(() => undefined);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal(
+      "open",
+      vi.fn().mockReturnValue({
+        opener: null,
+        location: { href: "" },
+        close: vi.fn(),
+      }),
+    );
+    vi.stubGlobal(
+      "prompt",
+      vi.fn().mockReturnValue("javascript:alert(1)"),
+    );
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-browser-test",
+          initialRevision: browserRevision(workspaceId),
+          initialPreviewUrl: "/preview/browser",
+          activeWorkspaceUrl: "/dash?workspace=browser",
+        }),
+      );
+    });
+    for (
+      let index = 0;
+      index < 100 &&
+      host.querySelector<HTMLInputElement>(
+        'input[value="Foundry Reference"]',
+      )?.disabled !== false;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+    const previewButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) =>
+      button.textContent?.includes("Preview exact saved revision"),
+    )!;
+    await userEvent.click(previewButton);
+    const approvalButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("Approve revision"))!;
+    for (
+      let index = 0;
+      index < 20 && approvalButton.disabled;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(approvalButton.disabled).toBe(false);
+    await userEvent.click(approvalButton);
+    const publishButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Publish approved revision")!;
+    for (
+      let index = 0;
+      index < 20 && publishButton.disabled;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(publishButton.disabled).toBe(false);
+
+    const richTextEditor = host
+      .querySelector("#section_contact\\.body-editor")
+      ?.closest(".rich-text-editor");
+    const linkButton = Array.from(
+      richTextEditor?.querySelectorAll<HTMLButtonElement>("button") ?? [],
+    ).find((button) => button.textContent === "Link");
+    expect(linkButton).toBeDefined();
+    await userEvent.click(linkButton!);
+
+    const siteName = host.querySelector<HTMLInputElement>(
+      'input[value="Foundry Reference"]',
+    );
+    expect(siteName).not.toBeNull();
+    await userEvent.fill(siteName!, "Unsaved while rich text is invalid");
+
+    const saveButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Save revision");
+    expect(saveButton?.disabled).toBe(true);
+    expect(previewButton.disabled).toBe(true);
+    expect(approvalButton.disabled).toBe(true);
+    expect(publishButton.disabled).toBe(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          String(input).includes("/api/foundry-cms/revisions") &&
+          init?.method === "POST" &&
+          typeof init.body === "string" &&
+          !("operation" in (JSON.parse(init.body) as object)),
+      ),
+    ).toBe(false);
+
+    const editable = host.querySelector<HTMLElement>(
+      "#section_contact\\.body-editor",
+    )!;
+    editable.focus();
+    await userEvent.keyboard("{End}x");
+    for (
+      let index = 0;
+      index < 20 && saveButton?.disabled !== false;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(saveButton?.disabled).toBe(false);
+    expect(editable.getAttribute("aria-invalid")).toBe("false");
     await clearContentEditorOutbox(workspaceId);
   });
 

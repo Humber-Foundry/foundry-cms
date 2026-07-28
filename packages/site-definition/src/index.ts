@@ -477,7 +477,7 @@ export const siteDefinitionSchema = {
         text: {
           type: "string",
           minLength: 1,
-          pattern: "^[^\\r\\n]*$",
+          pattern: "^[^\\u0000\\r\\n]*$",
         },
         marks: {
           type: "array",

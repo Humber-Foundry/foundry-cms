@@ -534,6 +534,47 @@ describe("rich text contract", () => {
     },
   );
 
+  it("rejects NUL before CommonMark replaces it with U+FFFD", () => {
+    const markdown = "before\u0000after\n";
+    expect(renderCommonMark(markdown)).toBe("<p>before�after</p>\n");
+    expect(() =>
+      serializeRichTextToMarkdown({
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                type: "text",
+                text: "before\u0000after",
+                marks: [],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(
+      expect.objectContaining<Partial<RichTextValidationError>>({
+        issues: [
+          expect.objectContaining({
+            code: "ambiguous_text",
+            path: "$.children[0].children[0].text",
+          }),
+        ],
+      }),
+    );
+    expect(() => parseRichTextMarkdown(markdown)).toThrow(
+      expect.objectContaining<Partial<RichTextValidationError>>({
+        issues: [
+          expect.objectContaining({
+            code: "ambiguous_text",
+          }),
+        ],
+      }),
+    );
+  });
+
   it.each([
     {
       name: "opening strong emphasis after alphanumeric text",

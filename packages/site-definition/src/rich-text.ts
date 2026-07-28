@@ -189,6 +189,13 @@ function validateText(text: RichTextText, path: string) {
       "Text nodes cannot contain line breaks; use block nodes instead.",
     );
   }
+  if (text.text.includes("\u0000")) {
+    issue(
+      "ambiguous_text",
+      `${path}.text`,
+      "Text nodes cannot contain NUL because CommonMark replaces it with U+FFFD.",
+    );
+  }
   if (text.text.length === 0) {
     issue(
       "serializer_ambiguity",
@@ -511,6 +518,41 @@ export function validateRichTextDocument(
     }
   });
   return value;
+}
+
+function inlineChildrenHaveVisibleText(
+  children: ReadonlyArray<RichTextText>,
+): boolean {
+  return children.some((child) => child.text.trim() !== "");
+}
+
+export function richTextDocumentHasVisibleText(
+  document: RichTextDocument,
+): boolean {
+  return document.children.some((block) =>
+    visitRichTextBlock(block, {
+      paragraph: (paragraph) =>
+        inlineChildrenHaveVisibleText(paragraph.children),
+      heading: (heading) =>
+        inlineChildrenHaveVisibleText(heading.children),
+      blockquote: (blockquote) =>
+        blockquote.children.some((paragraph) =>
+          inlineChildrenHaveVisibleText(paragraph.children),
+        ),
+      bulletList: (list) =>
+        list.children.some((item) =>
+          item.children.some((paragraph) =>
+            inlineChildrenHaveVisibleText(paragraph.children),
+          ),
+        ),
+      orderedList: (list) =>
+        list.children.some((item) =>
+          item.children.some((paragraph) =>
+            inlineChildrenHaveVisibleText(paragraph.children),
+          ),
+        ),
+    }),
+  );
 }
 
 export function serializeRichTextDocument(
