@@ -6,6 +6,7 @@ import { page, userEvent } from "vitest/browser";
 
 import {
   referenceSiteDefinition,
+  serializeRichTextDocument,
   type SiteDefinition,
 } from "@foundry/site-definition";
 
@@ -15,6 +16,7 @@ import {
   visualComponentConfig,
 } from "./visual-component-editor";
 import { ContentEditor } from "./content-editor";
+import { RichTextEditor } from "./rich-text-editor";
 import {
   clearContentEditorOutbox,
   readContentEditorOutbox,
@@ -44,6 +46,45 @@ describe("visual component editor browser acceptance", () => {
       flushSync(() => root.unmount());
     }
     document.body.replaceChildren();
+  });
+
+  it("keeps Shift+Enter inside the supported rich-text schema without crashing", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+
+    flushSync(() => {
+      root.render(
+        createElement(RichTextEditor, {
+          id: "rich-editor-regression",
+          value: serializeRichTextDocument(callToAction.body),
+          disabled: false,
+          describedBy: "rich-editor-help",
+          invalid: false,
+          onChange: () => undefined,
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    const editable = host.querySelector<HTMLElement>(
+      '[contenteditable="true"]',
+    );
+    expect(editable).not.toBeNull();
+
+    editable!.focus();
+    await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+
+    expect(host.querySelector("#rich-editor-regression")).not.toBeNull();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("renders the registered editor in a same-origin iframe with keyboard-visible controls", async () => {

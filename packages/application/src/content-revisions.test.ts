@@ -133,12 +133,14 @@ describe("content revision application", () => {
       isContentRevisionRenderableBy(saved, {
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
+        schemaVersion: "1.1.0",
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
+        schemaVersion: "1.1.0",
       }),
     ).toBe(false);
     await expect(application.queries.getRevision(0)).resolves.toEqual(

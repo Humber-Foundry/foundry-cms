@@ -4,11 +4,12 @@ import {
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
+  type SiteDefinitionSchemaVersion,
 } from "@foundry/site-definition";
 
 export type ContentRevisionInputs = Readonly<{
   contentHash: string;
-  schemaVersion: SiteDefinition["schemaVersion"];
+  schemaVersion: SiteDefinitionSchemaVersion;
   rendererVersion: string;
   productionBase: string;
 }>;
@@ -196,9 +197,11 @@ export function isContentRevisionRenderableBy(
   inputs: Readonly<{
     rendererVersion: string;
     productionBase: string;
+    schemaVersion: SiteDefinition["schemaVersion"];
   }>,
 ): boolean {
   return (
+    revision.inputs.schemaVersion === inputs.schemaVersion &&
     revision.inputs.rendererVersion === inputs.rendererVersion &&
     revision.inputs.productionBase === inputs.productionBase
   );
@@ -394,6 +397,7 @@ export function createContentRevisionApplication({
         return isContentRevisionRenderableBy(revision, {
           rendererVersion,
           productionBase: await resolveProductionBase(),
+          schemaVersion: siteDefinition.schemaVersion,
         });
       },
     }),
@@ -450,6 +454,7 @@ export function createContentRevisionApplication({
             !isContentRevisionRenderableBy(replay, {
               rendererVersion,
               productionBase: currentProductionBase,
+              schemaVersion: siteDefinition.schemaVersion,
             })
           ) {
             throw new ContentRevisionStaleError(replay.revision);
@@ -471,6 +476,7 @@ export function createContentRevisionApplication({
           !isContentRevisionRenderableBy(base, {
             rendererVersion,
             productionBase: currentProductionBase,
+            schemaVersion: siteDefinition.schemaVersion,
           })
         ) {
           throw new ContentRevisionStaleError();

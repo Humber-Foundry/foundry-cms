@@ -8,6 +8,8 @@ import {
   listEditableSiteFields,
   serializeRichTextDocument,
   serializeSiteDefinitionRichTextForPublication,
+  upgradeSiteDefinition,
+  validateRichTextDocument,
   type SerializedRichTextDocument,
   type RichTextDocument,
   referenceSiteDefinition,
@@ -29,6 +31,9 @@ describe("reference Site Definition", () => {
     expect(siteDefinitionSchema.$id).toBe(
       "https://foundrycms.dev/schemas/site-definition/1.1.0",
     );
+    expect(
+      siteDefinitionSchema.$defs.richTextDocument.$comment,
+    ).toContain("validateRichTextDocument");
   });
 
   it("uses unique stable identifiers for every page section", () => {
@@ -51,6 +56,101 @@ describe("reference Site Definition", () => {
       true,
     );
   });
+
+  it("projects a preserved 1.0 definition into the current rich-text schema", () => {
+    const legacy = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    legacy.definitionVersion = "1.0.0";
+    legacy.schemaVersion = "1.0.0";
+    legacy.home.sections[3].body =
+      "Preserve this legacy draft.\nAcross paragraphs.";
+
+    const upgraded = upgradeSiteDefinition(legacy);
+    const callToAction = upgraded.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+
+    expect(upgraded).not.toBe(legacy);
+    expect(upgraded.definitionVersion).toBe("1.1.0");
+    expect(upgraded.schemaVersion).toBe("1.1.0");
+    expect(callToAction).toEqual(
+      expect.objectContaining({
+        body: {
+          version: "1.0.0",
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [
+                {
+                  type: "text",
+                  text: "Preserve this legacy draft.",
+                  marks: [],
+                },
+              ],
+            },
+            {
+              type: "paragraph",
+              children: [
+                {
+                  type: "text",
+                  text: "Across paragraphs.",
+                  marks: [],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    expect(validate(upgraded), validate.errors?.toString()).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "an empty text run",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = "";
+      },
+    },
+    {
+      name: "a link containing a backslash",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href: "https://example.com/a\\b" },
+        ];
+      },
+    },
+    {
+      name: "a link containing a control character",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href: "https://example.com/a\u0007b" },
+        ];
+      },
+    },
+    {
+      name: "non-canonical mark ordering",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = ["italic", "bold"];
+      },
+    },
+  ])(
+    "keeps JSON Schema and runtime rich-text rejection aligned for $name",
+    ({ mutate }) => {
+      const malformed = structuredClone(
+        referenceSiteDefinition,
+      ) as unknown as Record<string, any>;
+      const document = malformed.home.sections[3].body;
+      mutate(document);
+
+      expect(validate(malformed)).toBe(false);
+      expect(() =>
+        validateRichTextDocument(document as RichTextDocument),
+      ).toThrow();
+    },
+  );
 
   it.each([
     {

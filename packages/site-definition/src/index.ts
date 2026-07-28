@@ -1,5 +1,6 @@
 import {
   RICH_TEXT_VERSION,
+  validateRichTextDocument,
   type RichTextDocument,
 } from "./rich-text";
 
@@ -103,6 +104,83 @@ export type SiteDefinition = Readonly<{
     sections: ReadonlyArray<PageSection>;
   }>;
 }>;
+
+export type SiteDefinitionSchemaVersion = "1.0.0" | "1.1.0";
+
+function isSiteDefinitionRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function legacyTextToRichText(value: string): RichTextDocument {
+  return {
+    version: RICH_TEXT_VERSION,
+    type: "document",
+    children: value.split(/\r\n?|\n/u).map((text) => ({
+      type: "paragraph",
+      children:
+        text === ""
+          ? []
+          : [{ type: "text", text, marks: [] }],
+    })),
+  };
+}
+
+export function upgradeSiteDefinition(value: unknown): SiteDefinition {
+  if (
+    !isSiteDefinitionRecord(value) ||
+    !isSiteDefinitionRecord(value.home) ||
+    !Array.isArray(value.home.sections)
+  ) {
+    throw new TypeError("site_definition_invalid");
+  }
+  if (
+    value.definitionVersion === "1.1.0" &&
+    value.schemaVersion === "1.1.0"
+  ) {
+    for (const section of value.home.sections) {
+      if (
+        isSiteDefinitionRecord(section) &&
+        section.type === "callToAction"
+      ) {
+        validateRichTextDocument(section.body as RichTextDocument);
+      }
+    }
+    return value as SiteDefinition;
+  }
+  if (
+    value.definitionVersion !== "1.0.0" ||
+    value.schemaVersion !== "1.0.0"
+  ) {
+    throw new TypeError("site_definition_version_unsupported");
+  }
+  const upgraded = structuredClone(value);
+  if (
+    !isSiteDefinitionRecord(upgraded.home) ||
+    !Array.isArray(upgraded.home.sections)
+  ) {
+    throw new TypeError("site_definition_invalid");
+  }
+  upgraded.definitionVersion = "1.1.0";
+  upgraded.schemaVersion = "1.1.0";
+  upgraded.home.sections = upgraded.home.sections.map((section) => {
+    if (
+      !isSiteDefinitionRecord(section) ||
+      section.type !== "callToAction"
+    ) {
+      return section;
+    }
+    if (typeof section.body !== "string") {
+      throw new TypeError("site_definition_legacy_rich_text_invalid");
+    }
+    return {
+      ...section,
+      body: legacyTextToRichText(section.body),
+    };
+  });
+  return upgraded as SiteDefinition;
+}
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -278,6 +356,8 @@ export const siteDefinitionSchema = {
     richTextDocument: {
       type: "object",
       additionalProperties: false,
+      $comment:
+        "Cross-node canonicality, including adjacent equivalent mark runs, is enforced by validateRichTextDocument.",
       required: ["version", "type", "children"],
       properties: {
         version: { const: RICH_TEXT_VERSION },
@@ -302,33 +382,59 @@ export const siteDefinitionSchema = {
       required: ["type", "text", "marks"],
       properties: {
         type: { const: "text" },
-        text: { type: "string", pattern: "^[^\\r\\n]*$" },
+        text: {
+          type: "string",
+          minLength: 1,
+          pattern: "^[^\\r\\n]*$",
+        },
         marks: {
           type: "array",
-          uniqueItems: true,
-          maxItems: 3,
-          items: {
-            oneOf: [
-              { const: "bold" },
-              { const: "italic" },
-              { $ref: "#/$defs/richTextLink" },
-            ],
-          },
-          allOf: [
+          oneOf: [
+            { maxItems: 0 },
             {
-              contains: { const: "bold" },
-              minContains: 0,
-              maxContains: 1,
+              minItems: 1,
+              maxItems: 1,
+              prefixItems: [{ const: "bold" }],
             },
             {
-              contains: { const: "italic" },
-              minContains: 0,
-              maxContains: 1,
+              minItems: 1,
+              maxItems: 1,
+              prefixItems: [{ const: "italic" }],
             },
             {
-              contains: { $ref: "#/$defs/richTextLink" },
-              minContains: 0,
-              maxContains: 1,
+              minItems: 1,
+              maxItems: 1,
+              prefixItems: [{ $ref: "#/$defs/richTextLink" }],
+            },
+            {
+              minItems: 2,
+              maxItems: 2,
+              prefixItems: [{ const: "bold" }, { const: "italic" }],
+            },
+            {
+              minItems: 2,
+              maxItems: 2,
+              prefixItems: [
+                { const: "bold" },
+                { $ref: "#/$defs/richTextLink" },
+              ],
+            },
+            {
+              minItems: 2,
+              maxItems: 2,
+              prefixItems: [
+                { const: "italic" },
+                { $ref: "#/$defs/richTextLink" },
+              ],
+            },
+            {
+              minItems: 3,
+              maxItems: 3,
+              prefixItems: [
+                { const: "bold" },
+                { const: "italic" },
+                { $ref: "#/$defs/richTextLink" },
+              ],
             },
           ],
         },
@@ -345,7 +451,7 @@ export const siteDefinitionSchema = {
           minLength: 1,
           maxLength: 2048,
           pattern:
-            "^(?:https?://[^\\s]+|mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+|/(?!/)[^\\s]*|#[A-Za-z][A-Za-z0-9_-]*)$",
+            "^(?:https?://[^\\u0000-\\u0020\\u007f\\\\]+|mailto:[^\\u0000-\\u0020\\u007f\\\\@]+@[^\\u0000-\\u0020\\u007f\\\\@]+\\.[^\\u0000-\\u0020\\u007f\\\\@]+|/(?!/)[^\\u0000-\\u0020\\u007f\\\\]*|#[A-Za-z][A-Za-z0-9_-]*)$",
         },
       },
     },

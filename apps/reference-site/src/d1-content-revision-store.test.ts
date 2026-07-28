@@ -12,7 +12,10 @@ import {
   createContentRevisionApplication,
   createContentWorkspaceId,
 } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  listEditableSiteFields,
+  referenceSiteDefinition,
+} from "@foundry/site-definition";
 
 import {
   createD1ContentRevisionStore,
@@ -143,6 +146,72 @@ describe("D1 content revision store", () => {
         .bind(workspaceId)
         .first<{ count: number }>(),
     ).toEqual({ count: 0 });
+  });
+
+  it("reads a preserved 1.0 workspace through the current recovery projection", async () => {
+    const legacy = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    legacy.definitionVersion = "1.0.0";
+    legacy.schemaVersion = "1.0.0";
+    legacy.home.sections[3].body = "A draft from before rich text.";
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO content_workspaces (
+             workspace_id, site_id, owner_actor_id,
+             production_base, schema_version, renderer_version,
+             current_revision, current_content_hash, lifecycle,
+             created_at, updated_at
+           ) VALUES (?1, ?2, ?3, ?4, '1.0.0', ?5, 0, ?6, 'open', ?7, ?7)`,
+        )
+        .bind(
+          workspaceId,
+          referenceSiteDefinition.site.id,
+          editorActorId,
+          "published:site_foundry_reference@1.0.0",
+          "renderer-test-commit",
+          "legacy-content-hash",
+          "2026-07-26T12:00:00.000Z",
+        ),
+      database
+        .prepare(
+          `INSERT INTO content_revisions (
+             workspace_id, revision, definition_json, content_hash,
+             schema_version, renderer_version, production_base,
+             request_hash, created_at, created_by
+           ) VALUES (?1, 0, ?2, ?3, '1.0.0', ?4, ?5, ?6, ?7, ?8)`,
+        )
+        .bind(
+          workspaceId,
+          JSON.stringify(legacy),
+          "legacy-content-hash",
+          "renderer-test-commit",
+          "published:site_foundry_reference@1.0.0",
+          "system:published-base",
+          "2026-07-26T12:00:00.000Z",
+          "system:published-base",
+        ),
+    ]);
+
+    const application = createApplication();
+    const current = await application.queries.getCurrent();
+    const body = current.definition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )?.body;
+
+    expect(current.inputs.schemaVersion).toBe("1.0.0");
+    expect(current.definition.schemaVersion).toBe("1.1.0");
+    expect(body).toEqual(
+      expect.objectContaining({
+        version: "1.0.0",
+        type: "document",
+      }),
+    );
+    expect(() => listEditableSiteFields(current.definition)).not.toThrow();
+    await expect(
+      application.queries.isRevisionCurrent(current),
+    ).resolves.toBe(false);
   });
 
   it("allows explicit collaborators and rejects outsiders", async () => {

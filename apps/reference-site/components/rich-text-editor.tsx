@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
-  fromTipTapDocument,
   isSafeRichTextLink,
   parseSerializedRichTextDocument,
-  serializeRichTextDocument,
   toTipTapDocument,
   type SerializedRichTextDocument,
 } from "@foundry/site-definition";
+
+import {
+  serializeSupportedTipTapDocument,
+  supportedRichTextStarterKitOptions,
+} from "../src/rich-text-editor-state";
 
 export function RichTextEditor({
   id,
@@ -29,33 +32,29 @@ export function RichTextEditor({
   onChange(value: SerializedRichTextDocument): void;
 }) {
   const [validationMessage, setValidationMessage] = useState("");
-  const document = parseSerializedRichTextDocument(value);
+  const document = useMemo(
+    () => parseSerializedRichTextDocument(value),
+    [value],
+  );
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({
-        heading: {
-          levels: [2, 3, 4, 5],
-        },
-        link: {
-          openOnClick: false,
-          autolink: false,
-          linkOnPaste: false,
-        },
-      }),
+      StarterKit.configure(supportedRichTextStarterKitOptions),
     ],
     content: toTipTapDocument(document),
     editable: !disabled,
     immediatelyRender: false,
     onUpdate: ({ editor: currentEditor }) => {
-      try {
-        const canonical = fromTipTapDocument(currentEditor.getJSON());
-        setValidationMessage("");
-        onChange(serializeRichTextDocument(canonical));
-      } catch {
+      const serialized = serializeSupportedTipTapDocument(
+        currentEditor.getJSON(),
+      );
+      if (serialized === null) {
         setValidationMessage(
           "This edit contains unsupported or unsafe rich-text content.",
         );
+        return;
       }
+      setValidationMessage("");
+      onChange(serialized);
     },
   });
 
@@ -67,9 +66,10 @@ export function RichTextEditor({
     if (editor === null) {
       return;
     }
-    const current = serializeRichTextDocument(
-      fromTipTapDocument(editor.getJSON()),
-    );
+    const current = serializeSupportedTipTapDocument(editor.getJSON());
+    if (current === null) {
+      return;
+    }
     if (current !== value) {
       editor.commands.setContent(toTipTapDocument(document), {
         emitUpdate: false,
