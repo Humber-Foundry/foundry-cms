@@ -226,6 +226,54 @@ describe("content revision application", () => {
     );
   });
 
+  it("rejects a composition-only save with empty required rich text", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-empty-rich-text");
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const callToAction = composition.components.find(
+      (section) => section.type === "callToAction",
+    );
+    if (callToAction?.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    (
+      callToAction as unknown as {
+        body: typeof callToAction.body;
+      }
+    ).body = {
+      version: "1.0.0",
+      type: "document",
+      children: [],
+    };
+
+    await expect(
+      application.commands.save({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        edits: [],
+        composition,
+        idempotencyKey: "composition-empty-rich-text",
+      }),
+    ).rejects.toEqual(
+      new ContentRevisionValidationError({
+        "section_contact.body": "Enter at least one visible character.",
+      }),
+    );
+    await expect(application.queries.getCurrent()).resolves.toEqual(
+      expect.objectContaining({
+        revision: 0,
+        definition: referenceSiteDefinition,
+      }),
+    );
+  });
+
   it("combines structural composition with allowed nested copy edits", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,

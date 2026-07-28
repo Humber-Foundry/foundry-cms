@@ -5,6 +5,7 @@ import type {
 } from "./index";
 import {
   RICH_TEXT_VERSION,
+  richTextDocumentHasVisibleText,
   validateRichTextDocument,
   type RichTextDocument,
 } from "./rich-text";
@@ -255,7 +256,11 @@ function validateRichTextField(
   errors: Record<string, string>,
 ): boolean {
   try {
-    validateRichTextDocument(value as RichTextDocument);
+    const document = validateRichTextDocument(value as RichTextDocument);
+    if (!richTextDocumentHasVisibleText(document)) {
+      errors[path] = "Enter at least one visible character.";
+      return false;
+    }
     return true;
   } catch {
     errors[path] =
