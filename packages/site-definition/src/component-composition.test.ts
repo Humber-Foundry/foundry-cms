@@ -373,6 +373,38 @@ describe("page component composition", () => {
     ).toBe(false);
   });
 
+  it("binds duplicate nested identifiers to schema paths, not object key order", () => {
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const hero = composition.components[0]!;
+    if (hero.type !== "hero") {
+      throw new Error("expected_hero_fixture");
+    }
+    const duplicate = {
+      id: "section_second_hero",
+      type: "hero" as const,
+      secondaryAction: {
+        ...structuredClone(hero.secondaryAction),
+        id: "section_second_hero_item_1",
+      },
+      primaryAction: {
+        ...structuredClone(hero.primaryAction),
+        id: "section_second_hero_item_2",
+      },
+      eyebrow: hero.eyebrow,
+      title: hero.title,
+      summary: hero.summary,
+    };
+
+    expect(
+      applyPageComposition(referenceSiteDefinition, {
+        ...composition,
+        components: [...composition.components, duplicate],
+      }).ok,
+    ).toBe(false);
+  });
+
   it.each([
     {
       name: "an unknown slot",

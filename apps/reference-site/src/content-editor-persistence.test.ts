@@ -86,23 +86,17 @@ describe("content editor persistence lifecycle", () => {
     ).toBe(false);
   });
 
-  it("allows only one live tab to own a workspace and releases ownership on close", async () => {
-    const held = new Set<string>();
+  it("coordinates persistence operations without making a browser tab the workspace owner", async () => {
+    const queues = new Map<string, Promise<unknown>>();
     const locks = {
       async request(
         name: string,
-        _options: unknown,
-        callback: (lock: Lock | null) => Promise<void>,
+        callback: () => Promise<unknown>,
       ) {
-        if (held.has(name)) {
-          return callback(null);
-        }
-        held.add(name);
-        try {
-          return await callback({ name } as Lock);
-        } finally {
-          held.delete(name);
-        }
+        const previous = queues.get(name) ?? Promise.resolve();
+        const current = previous.then(callback);
+        queues.set(name, current.catch(() => undefined));
+        return current;
       },
     };
 
@@ -115,16 +109,20 @@ describe("content editor persistence lifecycle", () => {
       locks as never,
     );
     expect(first.acquired).toBe(true);
-    expect(duplicate.acquired).toBe(false);
-
-    first.release();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const reopened = await claimContentEditorWorkspace(
-      "workspace_shared",
-      locks as never,
-    );
-    expect(reopened.acquired).toBe(true);
-    reopened.release();
+    expect(duplicate.acquired).toBe(true);
+    let active = 0;
+    let maximumActive = 0;
+    const operation = async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+    };
+    await Promise.all([
+      first.run(operation),
+      duplicate.run(operation),
+    ]);
+    expect(maximumActive).toBe(1);
   });
 
   it("does not invoke persistence for a denied workspace claimant", async () => {
@@ -132,7 +130,11 @@ describe("content editor persistence lifecycle", () => {
 
     await expect(
       withContentEditorWorkspaceOwnership(
-        Promise.resolve({ acquired: false, release() {} }),
+        Promise.resolve({
+          acquired: false,
+          run: async (operation) => operation(),
+          release() {},
+        }),
         async () => {
           driverCalls += 1;
         },

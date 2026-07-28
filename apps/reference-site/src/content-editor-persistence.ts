@@ -13,6 +13,7 @@ type SaveAttempt = NonNullable<ContentEditorOutboxRecord["attempt"]>;
 
 export type ContentEditorWorkspaceClaim = Readonly<{
   acquired: boolean;
+  run<Value>(operation: () => Promise<Value>): Promise<Value>;
   release(): void;
 }>;
 
@@ -30,45 +31,23 @@ export async function withContentEditorWorkspaceOwnership<Value>(
   if (!(await claim).acquired) {
     throw new ContentEditorWorkspaceOwnershipError();
   }
-  return operation();
+  return (await claim).run(operation);
 }
 
 export async function claimContentEditorWorkspace(
   workspaceId: string,
   locks: Pick<LockManager, "request"> | undefined =
     typeof navigator === "undefined" ? undefined : navigator.locks,
-  retryDelay: () => Promise<void> = () =>
-    new Promise((resolve) => setTimeout(resolve, 25)),
 ): Promise<ContentEditorWorkspaceClaim> {
-  if (locks === undefined) {
-    return { acquired: false, release() {} };
-  }
-  let releaseHold = () => {};
-  const hold = new Promise<void>((resolve) => {
-    releaseHold = resolve;
-  });
   const lockName = `foundry-cms:content-editor:${workspaceId}`;
-  const acquire = (): Promise<boolean> =>
-    new Promise((resolve) => {
-      void locks
-        .request(lockName, { ifAvailable: true }, async (lock) => {
-          resolve(lock !== null);
-          if (lock !== null) {
-            await hold;
-          }
-        })
-        .catch(() => resolve(false));
-    });
-  let ownsWorkspace = await acquire();
-  if (!ownsWorkspace) {
-    await retryDelay();
-    ownsWorkspace = await acquire();
-  }
   return {
-    acquired: ownsWorkspace,
-    release() {
-      releaseHold();
+    acquired: true,
+    run<Value>(operation: () => Promise<Value>): Promise<Value> {
+      return locks === undefined
+        ? operation()
+        : locks.request(lockName, operation);
     },
+    release() {},
   };
 }
 

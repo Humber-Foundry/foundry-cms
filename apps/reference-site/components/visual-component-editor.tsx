@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  createUsePuck,
   Puck,
   type Config,
   type Data,
@@ -30,12 +31,44 @@ type RegisteredComponents = {
   [Type in PageComponentType]: Extract<PageSection, { type: Type }>;
 };
 
-function newStableComponentId(type: keyof RegisteredComponents): string {
+function newStableComponentId(type: PageComponentType): string {
   const typeSlug = type.replace(
     /[A-Z]/gu,
     (letter) => `_${letter.toLowerCase()}`,
   );
   return `section_${typeSlug}_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
+const useVisualPuck = createUsePuck();
+
+function InsertComponentActions({ disabled }: { disabled: boolean }) {
+  const dispatch = useVisualPuck((state) => state.dispatch);
+  const contentLength = useVisualPuck(
+    (state) => state.appState.data.content.length,
+  );
+  return (
+    <div aria-label="Add registered page component">
+      {pageCompositionContract.slot.allowedComponents.map((type) => (
+        <button
+          key={type}
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            dispatch({
+              type: "insert",
+              componentType: type,
+              destinationIndex: contentLength,
+              destinationZone: "root:default-zone",
+              id: newStableComponentId(type),
+              recordHistory: true,
+            })
+          }
+        >
+          Add {pageCompositionContract.components[type].label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export const visualComponentConfig: Config<RegisteredComponents> = {
@@ -69,10 +102,6 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         "hero",
         "section_new_hero",
       ) as HeroSection,
-      resolveData: (data, { trigger }) =>
-        trigger === "insert"
-          ? { ...data, props: { ...data.props, id: newStableComponentId("hero") } }
-          : data,
       render: ({
         id,
         type,
@@ -109,16 +138,6 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         "services",
         "section_new_services",
       ) as ServicesSection,
-      resolveData: (data, { trigger }) =>
-        trigger === "insert"
-          ? {
-              ...data,
-              props: {
-                ...data.props,
-                id: newStableComponentId("services"),
-              },
-            }
-          : data,
       render: ({ id, type, eyebrow, title, introduction, items }) => (
         <SiteSection
           section={{ id, type, eyebrow, title, introduction, items }}
@@ -138,10 +157,6 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         "proof",
         "section_new_proof",
       ) as ProofSection,
-      resolveData: (data, { trigger }) =>
-        trigger === "insert"
-          ? { ...data, props: { ...data.props, id: newStableComponentId("proof") } }
-          : data,
       render: ({ id, type, quote, attribution, metrics }) => (
         <SiteSection
           section={{ id, type, quote, attribution, metrics }}
@@ -162,16 +177,6 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         "callToAction",
         "section_new_call_to_action",
       ) as CallToActionSection,
-      resolveData: (data, { trigger }) =>
-        trigger === "insert"
-          ? {
-              ...data,
-              props: {
-                ...data.props,
-                id: newStableComponentId("callToAction"),
-              },
-            }
-          : data,
       render: ({ id, type, eyebrow, title, body, action }) => (
         <SiteSection
           section={{ id, type, eyebrow, title, body, action }}
@@ -240,10 +245,12 @@ export function VisualComponentEditor({
   definition,
   disabled,
   onChange,
+  iframeEnabled = true,
 }: {
   definition: SiteDefinition;
   disabled: boolean;
   onChange(definition: SiteDefinition): void;
+  iframeEnabled?: boolean;
 }) {
   const initialData = useMemo(
     () => definitionToPuckData(definition),
@@ -303,7 +310,10 @@ export function VisualComponentEditor({
         <Puck
           config={config as Config}
           data={initialData as Data}
-          iframe={{ enabled: true, syncHostStyles: true }}
+          iframe={{
+            enabled: iframeEnabled,
+            syncHostStyles: iframeEnabled,
+          }}
           height="46rem"
           permissions={{
             insert: !disabled,
@@ -315,6 +325,7 @@ export function VisualComponentEditor({
           onChange={(data) => accept(data as Data<RegisteredComponents>)}
         >
           <Puck.Layout>
+            <InsertComponentActions disabled={disabled} />
             <Puck.Components />
             <Puck.Preview />
             <Puck.Fields />

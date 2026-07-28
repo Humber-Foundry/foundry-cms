@@ -2,6 +2,7 @@ import {
   applyPageComposition,
   createDefaultPageSection,
   pageCompositionContract,
+  remapPageSectionNestedIds,
   type PageComponentType,
   type PageSection,
   type SiteDefinition,
@@ -59,26 +60,6 @@ function isPageComponentType(value: unknown): value is PageComponentType {
     typeof value === "string" &&
     Object.hasOwn(pageCompositionContract.components, value)
   );
-}
-
-function remapNestedIds(section: Record<string, unknown>, rootId: string): void {
-  let sequence = 0;
-  const visit = (value: unknown, root: boolean): void => {
-    if (Array.isArray(value)) {
-      value.forEach((nested) => visit(nested, false));
-      return;
-    }
-    if (typeof value !== "object" || value === null) {
-      return;
-    }
-    const record = value as Record<string, unknown>;
-    if (!root && typeof record.id === "string") {
-      sequence += 1;
-      record.id = `${rootId}_item_${sequence}`;
-    }
-    Object.values(record).forEach((nested) => visit(nested, false));
-  };
-  visit(section, true);
 }
 
 export function puckDataToDefinition(
@@ -181,7 +162,10 @@ export function puckDataToDefinition(
           section[key] = structuredClone(propertyValue);
         }
       }
-      remapNestedIds(section, id);
+      Object.assign(
+        section,
+        remapPageSectionNestedIds(section as unknown as PageSection),
+      );
     }
     section.id = id;
     section.type = componentType;

@@ -2,9 +2,12 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { userEvent } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  referenceSiteDefinition,
+  type SiteDefinition,
+} from "@foundry/site-definition";
 
 import {
   createVisualComponentConfig,
@@ -17,11 +20,6 @@ import {
   readContentEditorOutbox,
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
-import {
-  clearStaleEdits,
-  preserveStaleEdits,
-} from "../src/content-editor-recovery";
-
 function browserRevision(workspaceId: string) {
   return {
     workspaceId,
@@ -148,6 +146,47 @@ describe("visual component editor browser acceptance", () => {
     ).toEqual({ delete: true });
   });
 
+  it("inserts a registered component through Puck without changing its generated identity", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    let latest: SiteDefinition = referenceSiteDefinition;
+    flushSync(() => {
+      root.render(
+        createElement(VisualComponentEditor, {
+          definition: referenceSiteDefinition,
+          disabled: false,
+          iframeEnabled: false,
+          onChange: (definition) => {
+            latest = definition;
+          },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
+    const addProof = page.getByRole("button", { name: "Add Proof" });
+    await addProof.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+
+    expect(latest.home.sections).toHaveLength(
+      referenceSiteDefinition.home.sections.length + 1,
+    );
+    expect(
+      latest.home.sections.some(
+        (section) =>
+          section.type === "proof" &&
+          !referenceSiteDefinition.home.sections.some(
+            ({ id }) => id === section.id,
+          ) &&
+          /^section_proof_[a-z0-9_]+$/u.test(section.id),
+      ),
+    ).toBe(true);
+  });
+
   it("round-trips unsaved structural edits through the browser outbox", async () => {
     const workspaceId = "workspace_browser_acceptance";
     await clearContentEditorOutbox(workspaceId);
@@ -233,17 +272,9 @@ describe("visual component editor browser acceptance", () => {
     await clearContentEditorOutbox(workspaceId);
   });
 
-  it("keeps recovery controls inert in a duplicate workspace tab", async () => {
+  it("keeps duplicate workspace tabs editable while coordinating browser persistence", async () => {
     const workspaceId = "workspace_browser_lock";
-    const recoveryId = "recovery-browser-lock";
     await clearContentEditorOutbox(workspaceId);
-    preserveStaleEdits(window.localStorage, recoveryId, workspaceId, [
-      {
-        path: "section_hero.title",
-        baseValue: "A title from another revision",
-        value: "Blocked tab value",
-      },
-    ]);
 
     const ownerHost = document.createElement("div");
     const duplicateHost = document.createElement("div");
@@ -279,28 +310,22 @@ describe("visual component editor browser acceptance", () => {
           initialRevision: browserRevision(workspaceId),
           initialPreviewUrl: "/preview/duplicate",
           activeWorkspaceUrl: "/dash?workspace=duplicate",
-          staleRecovery: {
-            id: recoveryId,
-            sourceWorkspaceId: workspaceId,
-          },
         }),
       );
     });
     await new Promise((resolve) => window.setTimeout(resolve, 60));
 
-    expect(duplicateHost.textContent).toContain(
+    expect(duplicateHost.textContent).not.toContain(
       "already open in another tab",
     );
-    expect(duplicateHost.textContent).not.toContain("Use my value");
     expect(
       Array.from(
         duplicateHost.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
           ".editor-groups input, .editor-groups textarea",
         ),
-      ).every((control) => control.disabled),
+      ).every((control) => !control.disabled),
     ).toBe(true);
 
-    clearStaleEdits(window.localStorage, recoveryId, workspaceId);
     await clearContentEditorOutbox(workspaceId);
   });
 });

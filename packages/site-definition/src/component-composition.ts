@@ -435,27 +435,36 @@ function equalProtectedShape(
   );
 }
 
+function nestedSectionRecords(
+  section: PageSection,
+): ReadonlyArray<{ id: string }> {
+  switch (section.type) {
+    case "hero":
+      return [section.primaryAction, section.secondaryAction];
+    case "services":
+      return section.items;
+    case "proof":
+      return section.metrics;
+    case "callToAction":
+      return [section.action];
+  }
+}
+
+export function remapPageSectionNestedIds(
+  section: PageSection,
+): PageSection {
+  const remapped = structuredClone(section);
+  nestedSectionRecords(remapped).forEach((record, index) => {
+    (record as { id: string }).id = `${section.id}_item_${index + 1}`;
+  });
+  return remapped;
+}
+
 function hasCanonicalDuplicateIds(section: PageSection): boolean {
-  let sequence = 0;
-  let valid = true;
-  const visit = (value: unknown, root: boolean): void => {
-    if (Array.isArray(value)) {
-      value.forEach((nested) => visit(nested, false));
-      return;
-    }
-    if (!isRecord(value)) {
-      return;
-    }
-    if (!root && typeof value.id === "string") {
-      sequence += 1;
-      if (value.id !== `${section.id}_item_${sequence}`) {
-        valid = false;
-      }
-    }
-    Object.values(value).forEach((nested) => visit(nested, false));
-  };
-  visit(section, true);
-  return valid;
+  return nestedSectionRecords(section).every(
+    (record, index) =>
+      record.id === `${section.id}_item_${index + 1}`,
+  );
 }
 
 function validateEditableProps(
