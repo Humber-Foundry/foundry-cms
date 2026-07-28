@@ -391,7 +391,7 @@ describe("commit-pinned Graphify index", () => {
     expect(result.output).not.toContain("EDGE stable -> changed");
   });
 
-  it("drops all relationships when indexed code or an extended JSON config changes", () => {
+  it("drops all relationships when an extended JSON config changes", () => {
     const { root } = createRepository();
     mkdirSync(join(root, "config"));
     writeFileSync(
@@ -408,7 +408,6 @@ describe("commit-pinned Graphify index", () => {
     ).toBe(0);
 
     git(root, "checkout", "-b", "feature");
-    writeFileSync(join(root, "src", "changed.ts"), "export const changed = 2;\n");
     writeFileSync(
       join(root, "config", "aliases.json"),
       JSON.stringify({ compilerOptions: { paths: { "@lib/*": ["other/*"] } } }),
@@ -423,6 +422,29 @@ describe("commit-pinned Graphify index", () => {
     expect(result.status, result.output).toBe(0);
     expect(result.output).toContain("Graph relationships excluded");
     expect(result.output).toContain("config/aliases.json");
+    expect(result.output).not.toContain("EDGE stable -> external");
+  });
+
+  it("drops unrelated relationships when only an indexed source changes", () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const graphify = createFakeGraphify();
+    const graph = writeFakeGraph(root);
+    expect(
+      runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+    ).toBe(0);
+
+    git(root, "checkout", "-b", "feature");
+    writeFileSync(join(root, "src", "changed.ts"), "export const changed = 2;\n");
+
+    const result = runIndex(root, ["query", "stable"], {
+      cache,
+      graphify,
+      graph,
+    });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toContain("Graph relationships excluded");
     expect(result.output).toContain("src/changed.ts");
     expect(result.output).not.toContain("EDGE stable -> external");
   });
