@@ -22,31 +22,57 @@ preview for the current saved revision. The approval fingerprint binds:
 - a structural design projection;
 - schema and renderer versions;
 - the exact production Git base and published-content hash;
-- the deterministic serialized artifact;
+- the deterministic serialized artifact set;
 - the `site` publication channel and serialization version; and
 - a non-secret channel-configuration hash covering the GitHub App
   installation, repository, production ref, public origin, deployment signal,
   Cloudflare account, and build trigger.
 
 Any later revision, production-base, or channel-configuration change makes
-that evidence unusable before Git is contacted. Private-key and API-token
-values are deliberately excluded. For secrets configured in the Workers build
-trigger, Cloudflare's non-secret creation timestamp remains in the channel
-fingerprint as a rotation version, so rotating one intentionally requires a
-fresh preview and approval without exposing its value. D1 inserts the approval
-only while the workspace still points to that revision, and publication
-requires the command workspace to equal the approval workspace.
+that evidence unusable before Git is contacted, except for the narrow legacy
+watch-filter transition described below. Private-key and API-token values are
+deliberately excluded. For secrets configured in the Workers build trigger,
+Cloudflare's non-secret creation timestamp remains in the channel fingerprint
+as a rotation version, so rotating one intentionally requires a fresh preview
+and approval without exposing its value. D1 inserts the approval only while the
+workspace still points to that revision, and publication requires the command
+workspace to equal the approval workspace.
 
 ## Deterministic Git publication
 
-Published site content lives at
-`packages/site-definition/src/published-site.json`. The publisher writes
-canonical key-sorted JSON with one trailing newline. GitHub's
-`createCommitOnBranch` mutation receives the approved head as
-`expectedHeadOid`, the exact file addition, and the signed message, so creation
-of the one-parent commit and advancement of the configured production branch
-are one optimistic compare-and-swap. A moved ref is blocked and is never
-silently rebased.
+Published site content is one atomic artifact set: canonical key-sorted JSON
+with one trailing newline at
+`packages/site-definition/src/published-site.json`, plus deterministic Markdown
+for every rich-text field under `content/rich-text/`. The v2 artifact
+fingerprint hashes a canonical manifest of every sorted path, UTF-8 byte length,
+and SHA-256 digest. GitHub's `createCommitOnBranch` mutation receives the
+approved head as `expectedHeadOid`, every artifact addition, every obsolete
+managed-Markdown deletion, and the signed message. Creation of the one-parent
+commit and advancement of the configured production branch are therefore one
+optimistic compare-and-swap. A moved ref is blocked and is never silently
+rebased.
+
+Schema reader upgrades are staged separately from published-content migration.
+A code release may add an in-memory projection for an older stored Site
+Definition, but it keeps the tracked published bytes unchanged. The canonical
+JSON and managed Markdown advance to the new schema only through a later
+signature-verified Foundry publication. This prevents an ordinary code merge
+from being mistaken for an authorized content publication. The release marker
+and build authorization gate hash the same shared versioned projection, so an
+unchanged legacy artifact remains deployable while its reader is upgraded.
+Completed and in-flight approvals retain their recorded serialization contract
+across that rollout. A retained canonical-JSON v1 operation is restored,
+reconciled, or safely retried with its original single-file byte hash and v1
+HMAC payload; new approvals use the v2 JSON-plus-Markdown manifest. Once a
+legacy release is restored as a current draft, its next human-approved
+publication advances through v2 rather than rewriting the historical evidence.
+The required Cloudflare watch-filter expansion is the only compatible channel
+transition: for a retained v1 approval, the live adapter also computes the old
+fingerprint by removing the exact `content/rich-text/*` include while retaining
+every other repository, destination, trigger, branch, exclusion, environment,
+and secret-rotation field. A cryptographic match to that projection permits the
+single-JSON v1 operation; any other channel difference still vetoes it. New
+approvals always require the complete live v2 filter configuration.
 
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author
@@ -81,7 +107,7 @@ lease before deployment polling. The stable publication key and commit
 trailers support replay and ambiguous-result reconciliation without creating
 another content commit. Successful ambiguous atomic mutations are reachable
 from the production branch and are discovered by exact signed-message, parent,
-one-commit, one-file, and artifact-byte checks. Historical operations that
+one-commit, managed-diff, complete-tree, and artifact-byte checks. Historical operations that
 retained a candidate SHA are reconciled directly instead of searching a
 bounded history page. A not-found observation remains uncertain until the same
 15-minute deadline. Refresh transitions compare the prior durable status and
@@ -90,6 +116,9 @@ delayed not-found result. Reload recovery prioritizes any active
 publication over newer terminal contenders. A later publish request first
 reconciles that global active operation, so a crashed Worker does not require
 someone to revisit the originating workspace before the slot can be released.
+An unresolved Git outcome is reconciled read-only before an incompatible or
+unavailable channel is made terminal; an exact landed commit is recorded first,
+but the channel failure still vetoes every subsequent external mutation.
 If either production-base check observes drift, the approval receives a
 durable `production_changed` invalidation before the request is rejected.
 Recovery runs before validating a later request's production base, allowing a
@@ -151,19 +180,21 @@ The non-null manual `deploymentRequestedAt` timestamp is the durable dispatch
 fence; status detail, channel failures and later provider observations cannot
 erase it. Git commit-repair attempts do not set that deployment field.
 Any later edit invalidates that retry authority; the newer revision must be
-previewed and approved instead. A retained historical candidate whose ref
-update was ambiguous can be retried through the same explicit action. Foundry
-verifies its publish trailer, sole expected parent, and sole exact content-file
-change before attempting the non-force ref compare-and-swap again. When a lost
-atomic mutation response leaves no returned SHA, branch-history reconciliation
-applies the same signed-message, parent, one-commit, one-file, and artifact-byte
-checks to every matching trailer; a later code commit that copies the public
-publication ID is not accepted. HTTP timeout, early-data, rate-limit,
-client-closed, and server-error responses from writes remain ambiguous rather
-than releasing
+previewed and approved instead. A retained candidate from an ambiguous mutation
+can be retried through the same explicit action. Foundry verifies its publish
+trailer, sole expected parent, complete candidate artifact tree, and absence of
+unrelated changes before attempting the non-force ref compare-and-swap again.
+Unchanged artifacts may be omitted from Git's diff, while obsolete managed
+Markdown must be absent from the candidate tree. When a lost atomic mutation
+response leaves no candidate SHA, branch-history reconciliation applies the
+same signed-message, parent, one-commit, managed-diff, complete-tree, and
+artifact-byte checks to every matching trailer; a later code commit that copies
+the public publication ID is not accepted. HTTP timeout, early-data,
+rate-limit, client-closed, and server-error responses from writes remain
+ambiguous rather than releasing
 authority for a duplicate commit, ref update, or build dispatch.
-The commit carries an HMAC publication signature over its parent, content path,
-content hash, and complete attribution message. The signing secret is shared
+The commit carries a v2 HMAC publication signature over its parent, complete
+artifact-manifest hash, content hash, and attribution message. The signing secret is shared
 only by the CMS publisher and Workers Builds, so an ordinary pull request
 cannot forge the Foundry trailers and enter the exact content deployment path.
 The only accepted trigger deploy command is `npm run deploy`. Before building,
@@ -203,8 +234,8 @@ that raced its rollback. Once the controller has recorded the one
 permitted activation and the final production-head fence passes, a later
 non-zero Wrangler exit cannot turn that observed activation into an ambiguous
 failure. Every direct Cloudflare request and reconciliation loop uses its
-remaining bounded timeout. A build compares its published-content path with
-the live release marker: content may
+remaining bounded timeout. A build compares its complete JSON-and-Markdown
+artifact set with the live release marker: content may
 advance only through one direct, signature-verified Foundry publication
 commit. This quarantines a content commit whose earlier deployment failed so a
 later code build cannot publish it without the exact retry. The activation
@@ -263,8 +294,9 @@ Cloudflare creation timestamps act as rotation versions. Missing pages,
 duplicates, malformed secret metadata, or an unreadable trigger fail closed.
 The trigger must also identify the
 configured GitHub owner/repository and its documented exclude-first branch and
-path filters must permit both the production branch and
-`packages/site-definition/src/published-site.json`; otherwise Foundry refuses
+path filters must permit the production branch,
+`packages/site-definition/src/published-site.json`, and managed
+`content/rich-text/` paths; otherwise Foundry refuses
 to approve a channel that cannot observe the publication commit. Production
 branch names are validated once against the supported Git ref-name subset and
 the same validator protects publisher URLs, build-side ref checks, and baseline

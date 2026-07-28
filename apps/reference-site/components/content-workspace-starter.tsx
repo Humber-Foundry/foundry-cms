@@ -23,6 +23,7 @@ import {
   comparableRecoveryValue,
   preserveStaleEdits,
   recoverStaleEdits,
+  upgradeLegacyRichTextRecoveryEdit,
   type StaleRecoveryPointer,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
@@ -128,16 +129,41 @@ export async function preparePreservedRevisionRecovery({
             throw new Error("stale_edit_recovery_unavailable");
           }
           return [...chained.recovered, ...chained.conflicts].map(
-            ({ path, value, baseValue }) => ({
-              path,
-              value,
-              baseValue,
-            }),
+            (edit): StaleRecoveryEdit =>
+              edit.format === "richText"
+                ? {
+                    path: edit.path,
+                    format: edit.format,
+                    value: edit.value,
+                    baseValue: edit.baseValue,
+                  }
+                : {
+                    path: edit.path,
+                    value: edit.value,
+                    baseValue: edit.baseValue,
+                    ...(edit.format === undefined
+                      ? {}
+                      : { format: edit.format }),
+                  },
           );
         })();
   const durableByPath = new Map(
     durableRecoveryEdits.map((edit) => [edit.path, edit] as const),
   );
+  const durableRichTextPaths = new Set(
+    durableRecoveryEdits.flatMap((edit) =>
+      edit.format === "richText" ? [edit.path] : [],
+    ),
+  );
+  const normalizeOverlay = (
+    edits: ReadonlyArray<StaleRecoveryEdit>,
+  ): StaleRecoveryEdit[] =>
+    upgradeLegacyRecoveryEdits(edits).map((edit) =>
+      upgradeLegacyRichTextRecoveryEdit(
+        edit,
+        durableRichTextPaths,
+      ),
+    );
   const rebaseOverlay = (
     edits: ReadonlyArray<StaleRecoveryEdit>,
   ): StaleRecoveryEdit[] =>
@@ -172,12 +198,12 @@ export async function preparePreservedRevisionRecovery({
     throw new Error("content_editor_outbox_revision_conflict");
   }
   const safeOutboxEdits = rebaseOverlay(
-    upgradeLegacyRecoveryEdits(record?.edits ?? []),
+    normalizeOverlay(record?.edits ?? []),
   );
   const recoveryEdits = mergeDurableAndOutboxRecoveryEdits(
     mergeDurableAndOutboxRecoveryEdits(
       durableRecoveryEdits,
-      rebaseOverlay(upgradeLegacyRecoveryEdits(chainedRecoveryEdits)),
+      rebaseOverlay(normalizeOverlay(chainedRecoveryEdits)),
     ),
     safeOutboxEdits,
   );

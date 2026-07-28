@@ -36,7 +36,7 @@ const applicationInputs = {
 
 const commandInputs = {
   workspaceId: applicationInputs.workspaceId,
-  schemaVersion: "1.1.0",
+  schemaVersion: "1.2.0",
 } as const;
 
 async function createWorkspace(
@@ -175,21 +175,21 @@ describe("content revision application", () => {
     );
     expect(saved.inputs).toEqual({
       contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      schemaVersion: "1.1.0",
+      schemaVersion: "1.2.0",
       rendererVersion: "renderer-commit-a",
       productionBase: "published:site_foundry_reference@1.1.0",
     });
     expect(Object.isFrozen(saved)).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
       }),
@@ -201,7 +201,7 @@ describe("content revision application", () => {
           inputs: { ...saved.inputs, schemaVersion: "1.0.0" },
         },
         {
-          schemaVersion: "1.1.0",
+          schemaVersion: "1.2.0",
           rendererVersion: "renderer-commit-a",
           productionBase: applicationInputs.productionBase,
         },
@@ -313,6 +313,54 @@ describe("content revision application", () => {
     ]);
     await expect(application.queries.getRevision(0)).resolves.toEqual(
       expect.objectContaining({ definition: referenceSiteDefinition }),
+    );
+  });
+
+  it("rejects a composition-only save with empty required rich text", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-empty-rich-text");
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const callToAction = composition.components.find(
+      (section) => section.type === "callToAction",
+    );
+    if (callToAction?.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    (
+      callToAction as unknown as {
+        body: typeof callToAction.body;
+      }
+    ).body = {
+      version: "1.0.0",
+      type: "document",
+      children: [],
+    };
+
+    await expect(
+      application.commands.save({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        edits: [],
+        composition,
+        idempotencyKey: "composition-empty-rich-text",
+      }),
+    ).rejects.toEqual(
+      new ContentRevisionValidationError({
+        "section_contact.body": "Enter at least one visible character.",
+      }),
+    );
+    await expect(application.queries.getCurrent()).resolves.toEqual(
+      expect.objectContaining({
+        revision: 0,
+        definition: referenceSiteDefinition,
+      }),
     );
   });
 
@@ -879,7 +927,7 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: createContentWorkspaceId("workspace_other"),
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong workspace" }],
         idempotencyKey: "save-section-hero-0007",
@@ -893,14 +941,14 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: applicationInputs.workspaceId,
-        schemaVersion: "2.0.0" as "1.1.0",
+        schemaVersion: "2.0.0" as "1.2.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong schema" }],
         idempotencyKey: "save-section-hero-0008",
       }),
     ).rejects.toEqual(
       new ContentRevisionValidationError({
-        schemaVersion: "Use Site Definition schema 1.1.0.",
+        schemaVersion: "Use Site Definition schema 1.2.0.",
       }),
     );
   });

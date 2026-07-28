@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   referenceSiteDefinition,
+  serializeRichTextDocument,
   type SiteDefinition,
 } from "@foundry/site-definition";
 
@@ -12,6 +13,54 @@ import {
 } from "./content-editor-history";
 
 describe("content editor history", () => {
+  it("applies a rich-text edit only when its format discriminator is preserved", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const body = {
+      ...callToAction.body,
+      children: [
+        {
+          type: "heading" as const,
+          level: 3 as const,
+          children: [
+            {
+              type: "text" as const,
+              text: "Recovered rich heading",
+              marks: ["bold" as const],
+            },
+          ],
+        },
+      ],
+    };
+
+    const edited = contentEditorReducer(initial, {
+      type: "edit",
+      path: `${callToAction.id}.body`,
+      format: "richText",
+      value: serializeRichTextDocument(body),
+    });
+    const missingDiscriminator = contentEditorReducer(initial, {
+      type: "edit",
+      path: `${callToAction.id}.body`,
+      value: serializeRichTextDocument(body),
+    });
+
+    expect(
+      edited.workingDefinition.home.sections.find(
+        (section) => section.id === callToAction.id,
+      ),
+    ).toEqual(expect.objectContaining({ body }));
+    expect(missingDiscriminator).toBe(initial);
+  });
+
   it("locks mutation controls until a structural conflict is recovered", () => {
     expect(contentEditorStatusLocked("conflict")).toBe(true);
     expect(contentEditorStatusLocked("stale")).toBe(true);

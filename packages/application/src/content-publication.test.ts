@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  referenceSiteDefinition,
+  serializeSiteDefinitionRichTextForPublication,
+} from "@foundry/site-definition";
 
 import {
   createContentActorId,
@@ -17,8 +20,10 @@ import {
   createContentPublicationApplication,
   createContentPublicationId,
   createInMemoryContentPublicationStore,
+  hashContentPublicationArtifacts,
   hashPublishedSiteDefinition,
   parseProductionBase,
+  serializeContentPublicationArtifacts,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
   type ContentPublicationDraftRestorer,
@@ -52,7 +57,7 @@ async function revisionFixture() {
   const saved = await application.commands.save({
     actorId: editorId,
     workspaceId,
-    schemaVersion: "1.1.0",
+    schemaVersion: referenceSiteDefinition.schemaVersion,
     baseRevision: 0,
     edits: [{ path: "section_hero.title", value: "Approved headline" }],
     idempotencyKey: "save-publish-workspace-0001",
@@ -127,6 +132,62 @@ describe("content publication application", () => {
     };
   });
 
+  it("rejects approval when legacy input metadata cannot render the current definition", async () => {
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            schemaVersion: "1.0.0",
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+  });
+
+  it("hashes the full publication manifest without path or byte ambiguity", async () => {
+    const jsonArtifact = {
+      path: "packages/site-definition/src/published-site.json" as const,
+      bytes: "{}\n",
+    };
+    const richPath =
+      "content/rich-text/section_contact/body.md" as const;
+    const [left, right] = await Promise.all([
+      hashContentPublicationArtifacts([
+        jsonArtifact,
+        { path: richPath, bytes: "One.\n" },
+      ]),
+      hashContentPublicationArtifacts([
+        jsonArtifact,
+        { path: richPath, bytes: "Two.\n" },
+      ]),
+    ]);
+    expect(left).not.toBe(right);
+    await expect(
+      hashContentPublicationArtifacts([
+        jsonArtifact,
+        jsonArtifact,
+      ]),
+    ).rejects.toThrow("content_publication_artifacts_invalid");
+  });
+
+  it("hashes an empty managed Markdown artifact for valid empty rich text", async () => {
+    await expect(
+      hashContentPublicationArtifacts([
+        {
+          path: "packages/site-definition/src/published-site.json",
+          bytes: "{}\n",
+        },
+        {
+          path: "content/rich-text/section_contact/body.md",
+          bytes: "",
+        },
+      ]),
+    ).resolves.toMatch(/^[a-f0-9]{64}$/u);
+  });
+
   function application() {
     return createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),
@@ -163,12 +224,12 @@ describe("content publication application", () => {
           channelConfigurationHash: "channel-a",
           contentHash: revisionApplication.saved.inputs.contentHash,
           designHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-          schemaVersion: "1.1.0",
+          schemaVersion: referenceSiteDefinition.schemaVersion,
           rendererVersion: "renderer-v1",
           productionBase,
           artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           serializationVersion:
-            "foundry.site-definition.canonical-json.v1",
+            "foundry.site-publication-artifacts.v2",
         },
       }),
     );
@@ -419,7 +480,7 @@ describe("content publication application", () => {
     await revisionApplication.application.commands.save({
       actorId: editorId,
       workspaceId,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
       baseRevision: 1,
       edits: [{ path: "section_hero.summary", value: "Changed after approval" }],
       idempotencyKey: "save-after-approval-0001",
@@ -782,7 +843,7 @@ describe("content publication application", () => {
     expect(createCommit).not.toHaveBeenCalled();
   });
 
-  it("serializes one deterministic file and creates one attributed compare-and-swap commit", async () => {
+  it("serializes one deterministic artifact set and creates one attributed compare-and-swap commit", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
       workspaceId,
@@ -797,10 +858,21 @@ describe("content publication application", () => {
     expect(createCommit).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedHead: productionCommit,
-        path: "packages/site-definition/src/published-site.json",
-        bytes: serializePublishedSiteDefinition(
-          revisionApplication.saved.definition,
-        ),
+        artifacts: [
+          {
+            path: "packages/site-definition/src/published-site.json",
+            bytes: serializePublishedSiteDefinition(
+              revisionApplication.saved.definition,
+            ),
+          },
+          ...serializeSiteDefinitionRichTextForPublication(
+            revisionApplication.saved.definition,
+          ).map(({ filePath, markdown }) => ({
+            path: filePath,
+            bytes: markdown,
+          })),
+        ],
+        artifactHash: approval.fingerprint.artifactHash,
         message: expect.stringContaining(
           `Foundry-Approved-By: ${membershipId}`,
         ),
@@ -871,11 +943,18 @@ describe("content publication application", () => {
 
   it("restores a verified historical Git artifact into one new draft without publishing it", async () => {
     const store = createInMemoryContentPublicationStore();
-    const historicalBytes = serializePublishedSiteDefinition(
+    const historicalArtifacts = serializeContentPublicationArtifacts(
       revisionApplication.saved.definition,
     );
+    const historicalBytes = historicalArtifacts.find(
+      ({ path }) =>
+        path === "packages/site-definition/src/published-site.json",
+    )!.bytes;
     const reader: ContentPublishedRevisionReader = {
-      readPublishedArtifact: vi.fn().mockResolvedValue(historicalBytes),
+      readPublishedArtifact: vi.fn(async ({ path }) =>
+        historicalArtifacts.find((artifact) => artifact.path === path)?.bytes ??
+        null,
+      ),
     };
     const restoredWorkspaceId =
       createContentWorkspaceId("workspace_restored");
@@ -928,6 +1007,9 @@ describe("content publication application", () => {
       commitSha: "c".repeat(40),
       path: "packages/site-definition/src/published-site.json",
     });
+    expect(reader.readPublishedArtifact).toHaveBeenCalledTimes(
+      historicalArtifacts.length,
+    );
     expect(restorer.restore).toHaveBeenCalledWith(
       expect.objectContaining({
         definition: revisionApplication.saved.definition,
@@ -941,6 +1023,268 @@ describe("content publication application", () => {
       sourcePublicationId: publication.id,
     });
     expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores a verified legacy v1 artifact without applying the v2 rich-text manifest contract", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const legacyDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    legacyDefinition.definitionVersion = "1.1.0";
+    legacyDefinition.schemaVersion = "1.1.0";
+    delete legacyDefinition.home.media;
+    legacyDefinition.home.sections.find(
+      (section: any) => section.type === "callToAction",
+    ).body = "Restored legacy CTA copy.";
+    const historicalBytes =
+      serializePublishedSiteDefinition(legacyDefinition);
+    const historicalArtifactHash = [
+      ...new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(historicalBytes),
+        ),
+      ),
+    ]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    const restoredWorkspaceId = createContentWorkspaceId(
+      "workspace_restored_legacy",
+    );
+    const reader: ContentPublishedRevisionReader = {
+      readPublishedArtifact: vi.fn().mockResolvedValue(historicalBytes),
+    };
+    const restorer: ContentPublicationDraftRestorer = {
+      restore: vi.fn().mockResolvedValue({
+        workspaceId: restoredWorkspaceId,
+        revision: 0,
+        sourcePublicationId: createContentPublicationId(
+          `publish_${"0".repeat(32)}`,
+        ),
+      }),
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      publishedRevisions: reader,
+      draftRestorer: restorer,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-legacy-restore",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+    await store.saveApproval({
+      ...approval,
+      fingerprint: {
+        ...approval.fingerprint,
+        value: "e".repeat(64),
+        contentHash: await hashPublishedSiteDefinition(legacyDefinition),
+        schemaVersion: "1.1.0",
+        artifactHash: historicalArtifactHash,
+        serializationVersion:
+          "foundry.site-definition.canonical-json.v1",
+      },
+    });
+    vi.mocked(restorer.restore).mockResolvedValue({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+
+    await expect(
+      app.commands.restore({
+        sourcePublicationId: publication.id,
+        actorId: editorId,
+        workspaceId: restoredWorkspaceId,
+        idempotencyKey: "restore-legacy-published-version",
+      }),
+    ).resolves.toEqual({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+    expect(reader.readPublishedArtifact).toHaveBeenCalledTimes(1);
+    expect(restorer.restore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        definition: legacyDefinition,
+        sourcePublicationId: publication.id,
+        workspaceId: restoredWorkspaceId,
+      }),
+    );
+  });
+
+  it("reconciles and explicitly retries an ambiguous legacy v1 publication after rollout", async () => {
+    const backingStore = createInMemoryContentPublicationStore();
+    let approvalOverride: Awaited<
+      ReturnType<typeof backingStore.findApproval>
+    > = null;
+    let revisionOverride: Awaited<
+      ReturnType<ContentPublicationRevisionRepository["getRevision"]>
+    > = null;
+    const rolloutStore = {
+      ...backingStore,
+      findApproval: async (approvalId: Parameters<
+        typeof backingStore.findApproval
+      >[0]) =>
+        approvalOverride?.id === approvalId
+          ? approvalOverride
+          : backingStore.findApproval(approvalId),
+    };
+    const rolloutRepository: ContentPublicationRevisionRepository = {
+      getRevision: async (targetWorkspaceId, revision) =>
+        revisionOverride?.workspaceId === targetWorkspaceId &&
+        revisionOverride.revision === revision
+          ? revisionOverride
+          : repository.getRevision(targetWorkspaceId, revision),
+      getCurrent: async (targetWorkspaceId) =>
+        revisionOverride?.workspaceId === targetWorkspaceId
+          ? revisionOverride
+          : repository.getCurrent(targetWorkspaceId),
+      isCurrent: repository.isCurrent,
+      listContributors: repository.listContributors,
+    };
+    let currentTime = "2026-07-27T10:00:00.000Z";
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: "git_result_unknown",
+    });
+    const app = createContentPublicationApplication({
+      store: rolloutStore,
+      revisions: rolloutRepository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-ambiguous-before-v2-rollout",
+    });
+    const legacyDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    legacyDefinition.definitionVersion = "1.1.0";
+    legacyDefinition.schemaVersion = "1.1.0";
+    delete legacyDefinition.home.media;
+    legacyDefinition.home.sections.find(
+      (section: any) => section.type === "callToAction",
+    ).body = "Ambiguous legacy CTA copy.";
+    const legacyBytes = serializePublishedSiteDefinition(legacyDefinition);
+    const legacyArtifactHash = [
+      ...new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(legacyBytes),
+        ),
+      ),
+    ]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    const legacyContentHash =
+      await hashPublishedSiteDefinition(legacyDefinition);
+    approvalOverride = {
+      ...approval,
+      fingerprint: {
+        ...approval.fingerprint,
+        contentHash: legacyContentHash,
+        schemaVersion: "1.1.0",
+        artifactHash: legacyArtifactHash,
+        serializationVersion:
+          "foundry.site-definition.canonical-json.v1",
+      },
+    };
+    revisionOverride = {
+      ...revisionApplication.saved,
+      definition: legacyDefinition,
+      inputs: {
+        ...revisionApplication.saved.inputs,
+        contentHash: legacyContentHash,
+        schemaVersion: "1.1.0",
+      },
+    } as any;
+    await expect(
+      repository.isCurrent(revisionOverride!),
+    ).resolves.toBe(false);
+    vi.mocked(
+      publisher.getChannelConfigurationHash,
+    ).mockImplementation(async (serializationVersion) =>
+      serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
+        ? "channel-a"
+        : "channel-b",
+    );
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "git_commit_not_found",
+      }),
+    );
+    createCommit.mockResolvedValue({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(publisher.reconcileCommit).toHaveBeenCalledTimes(2);
+    for (const [input] of vi.mocked(publisher.reconcileCommit).mock.calls) {
+      expect(input).toEqual(
+        expect.objectContaining({
+          serializationVersion:
+            "foundry.site-definition.canonical-json.v1",
+          artifactHash: legacyArtifactHash,
+          artifacts: [
+            {
+              path: "packages/site-definition/src/published-site.json",
+              bytes: legacyBytes,
+            },
+          ],
+        }),
+      );
+    }
+    expect(createCommit).toHaveBeenCalledTimes(2);
+    expect(createCommit.mock.calls[1]![0]).toEqual(
+      expect.objectContaining({
+        serializationVersion:
+          "foundry.site-definition.canonical-json.v1",
+        artifactHash: legacyArtifactHash,
+        artifacts: [
+          {
+            path: "packages/site-definition/src/published-site.json",
+            bytes: legacyBytes,
+          },
+        ],
+      }),
+    );
   });
 
   it("fails closed when historical Git bytes do not match the published evidence", async () => {
@@ -1121,7 +1465,7 @@ describe("content publication application", () => {
       await revisionApplication.application.commands.save({
         actorId: editorId,
         workspaceId,
-        schemaVersion: "1.1.0",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 1,
         edits: [{ path: "section_hero.title", value: "Newer headline" }],
         idempotencyKey: "save-after-publication-claim",
@@ -1351,7 +1695,8 @@ describe("content publication application", () => {
         publishId: input.publishId,
         expectedHead: input.expectedHead,
         message: input.message,
-        bytes: input.bytes,
+        artifacts: input.artifacts,
+        artifactHash: input.artifactHash,
       })),
     ).toEqual([
       expect.objectContaining({
@@ -1366,8 +1711,11 @@ describe("content publication application", () => {
     expect(createCommit.mock.calls[1]![0].message).toBe(
       createCommit.mock.calls[0]![0].message,
     );
-    expect(createCommit.mock.calls[1]![0].bytes).toBe(
-      createCommit.mock.calls[0]![0].bytes,
+    expect(createCommit.mock.calls[1]![0].artifacts).toEqual(
+      createCommit.mock.calls[0]![0].artifacts,
+    );
+    expect(createCommit.mock.calls[1]![0].artifactHash).toBe(
+      createCommit.mock.calls[0]![0].artifactHash,
     );
     expect(publisher.reconcileCommit).toHaveBeenCalledTimes(4);
     expect(publisher.retryDeployment).not.toHaveBeenCalled();
@@ -1410,7 +1758,14 @@ describe("content publication application", () => {
         publishId: publication.id,
         candidateCommitSha: "c".repeat(40),
         expectedHead: publication.expectedHead,
-        path: "packages/site-definition/src/published-site.json",
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "packages/site-definition/src/published-site.json",
+          }),
+          expect.objectContaining({
+            path: "content/rich-text/section_contact/body.md",
+          }),
+        ]),
         artifactHash: approval.fingerprint.artifactHash,
         contentHash: approval.fingerprint.contentHash,
       }),
@@ -1448,7 +1803,15 @@ describe("content publication application", () => {
         publishId: publication.id,
         candidateCommitSha: "c".repeat(40),
         expectedHead: productionCommit,
-        path: "packages/site-definition/src/published-site.json",
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "packages/site-definition/src/published-site.json",
+          }),
+          expect.objectContaining({
+            path: "content/rich-text/section_contact/body.md",
+          }),
+        ]),
+        artifactHash: approval.fingerprint.artifactHash,
       }),
     );
   });
@@ -1703,6 +2066,52 @@ describe("content publication application", () => {
     expect(publisher.reconcileCommit).toHaveBeenCalled();
   });
 
+  it("records an exact ambiguous commit before rejecting a changed channel", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const commitSha = "c".repeat(40);
+    createCommit.mockRejectedValue(new Error("atomic_response_lost"));
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-no-sha-channel-changed",
+    });
+    vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+      "channel-b",
+    );
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "committed",
+      commitSha,
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha,
+        detail: "publication_channel_changed",
+      }),
+    );
+    expect(publisher.reconcileCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publishId: publication.id,
+        candidateCommitSha: undefined,
+      }),
+    );
+  });
+
   it("invalidates a retained candidate before ref retry when its live base changes", async () => {
     let currentTime = "2026-07-27T10:01:00.000Z";
     const candidateCommitSha = "c".repeat(40);
@@ -1811,7 +2220,7 @@ describe("content publication application", () => {
     expect(isReleaseLive).toHaveBeenLastCalledWith({
       commitSha: "c".repeat(40),
       contentHash: revisionApplication.saved.inputs.contentHash,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
     });
   });
 
@@ -2678,7 +3087,7 @@ describe("content publication application", () => {
     await revisionApplication.application.commands.save({
       actorId: editorId,
       workspaceId,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
       baseRevision: 1,
       edits: [{ path: "section_hero.title", value: "Newer headline" }],
       idempotencyKey: "save-publish-workspace-0002",

@@ -3,6 +3,12 @@ import type {
   SiteDefinition,
   SiteHref,
 } from "./index";
+import {
+  RICH_TEXT_VERSION,
+  richTextDocumentHasVisibleText,
+  validateRichTextDocument,
+  type RichTextDocument,
+} from "./rich-text";
 import { designContract } from "./design-tokens";
 
 export type PageComponentType = PageSection["type"];
@@ -141,7 +147,22 @@ export function createDefaultPageSection(
         variant: designContract.variants.callToAction.values[0],
         eyebrow: "Next step",
         title: "Invite the reader to act",
-        body: "Explain what will happen next.",
+        body: {
+          version: RICH_TEXT_VERSION,
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [
+                {
+                  type: "text",
+                  text: "Explain what will happen next.",
+                  marks: [],
+                },
+              ],
+            },
+          ],
+        },
         action: {
           id: `${id}_action`,
           label:
@@ -240,6 +261,25 @@ function validateLink(
     errors[`${path}.href`] = "Use a registered page anchor or email link.";
   }
   return textValid && hrefValid;
+}
+
+function validateRichTextField(
+  value: unknown,
+  path: string,
+  errors: Record<string, string>,
+): boolean {
+  try {
+    const document = validateRichTextDocument(value as RichTextDocument);
+    if (!richTextDocumentHasVisibleText(document)) {
+      errors[path] = "Enter at least one visible character.";
+      return false;
+    }
+    return true;
+  } catch {
+    errors[path] =
+      "Provide supported, safe rich text in the versioned Site Definition format.";
+    return false;
+  }
 }
 
 function validateItemArray(
@@ -390,10 +430,11 @@ function validateSectionSchema(
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "variant", "eyebrow", "title", "body"],
+          ["id", "type", "variant", "eyebrow", "title"],
           path,
           errors,
         ) &&
+        validateRichTextField(section.body, `${path}.body`, errors) &&
         validateLink(section.action, `${path}.action`, errors)
       );
   }
@@ -559,6 +600,10 @@ function validateEditableProps(
   const registration = pageCompositionContract.components[section.type];
   const record = section as unknown as Record<string, unknown>;
   for (const property of registration.editableProps) {
+    if (section.type === "callToAction" && property === "body") {
+      validateRichTextField(record[property], `${section.id}.${property}`, errors);
+      continue;
+    }
     if (
       typeof record[property] !== "string" ||
       (record[property] as string).trim() === ""

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
   assertExactProductionContent,
@@ -10,27 +13,105 @@ const liveCommit = "a".repeat(40);
 const failedCommit = "b".repeat(40);
 const expectedCommit = "c".repeat(40);
 const publicationId = `publish_${"d".repeat(32)}`;
-const bytes = '{"definitionVersion":"1.0.0","site":{"name":"New"}}\n';
-const contentHash =
-  "3dc0e81afff0e11bf535cfde86b19b872e73c87e6d0053829cdf9198399eb9f9";
+const bytes =
+  '{"definitionVersion":"1.2.0","schemaVersion":"1.2.0",' +
+  '"site":{"name":"New"},"home":{"media":[],"sections":[]}}\n';
+const currentDefinitionWithoutMedia = structuredClone(
+  referenceSiteDefinition,
+);
+delete currentDefinitionWithoutMedia.home.media;
+const currentBytesWithoutMedia =
+  `${JSON.stringify(currentDefinitionWithoutMedia)}\n`;
+const currentContentHashWithoutMedia = canonicalHash(
+  currentDefinitionWithoutMedia,
+);
+const richTextPath = "content/rich-text/section_contact/body.md";
+const richTextBytes = "A deterministic **Markdown** artifact.\n";
 const signingSecret = "publication-signing-secret-32-bytes";
 
-function signedMessage(parent = liveCommit) {
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalHash(value) {
+  return createHash("sha256")
+    .update(canonicalJson(value))
+    .digest("hex");
+}
+
+const contentHash = canonicalHash(JSON.parse(bytes));
+const trackedPublishedBytes = readFileSync(
+  new URL(
+    "../../../packages/site-definition/src/published-site.json",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const trackedPublishedDefinition = JSON.parse(trackedPublishedBytes);
+const trackedPublishedContentHash = canonicalHash(trackedPublishedDefinition);
+const fixedBaseRuntimeContentHash = canonicalHash({
+  ...trackedPublishedDefinition,
+  home: {
+    ...trackedPublishedDefinition.home,
+    media: trackedPublishedDefinition.home.media ?? [],
+  },
+});
+const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
+
+function defaultArtifacts() {
+  return [
+    {
+      path: "packages/site-definition/src/published-site.json",
+      bytes,
+    },
+    { path: richTextPath, bytes: richTextBytes },
+  ];
+}
+
+function artifactHash(artifacts = defaultArtifacts()) {
+  const manifest = [...artifacts]
+    .sort((left, right) => left.path.localeCompare(right.path))
+    .map((artifact) => ({
+    byteLength: Buffer.byteLength(artifact.bytes),
+    path: artifact.path,
+    sha256: createHash("sha256")
+      .update(artifact.bytes)
+      .digest("hex"),
+    }));
+  return createHash("sha256")
+    .update(JSON.stringify(manifest))
+    .digest("hex");
+}
+
+function signedMessage(
+  parent = liveCommit,
+  artifacts = defaultArtifacts(),
+  expectedContentHash = contentHash,
+) {
   const message =
     `Publish\n\nFoundry-Publish-Id: ${publicationId}\n` +
-    `Foundry-Content-Hash: ${contentHash}`;
+    `Foundry-Content-Hash: ${expectedContentHash}`;
   const signature = createHmac("sha256", signingSecret)
     .update(
       [
-        "foundry-publication-signature-v1",
+        "foundry-publication-signature-v2",
         parent,
-        "packages/site-definition/src/published-site.json",
-        contentHash,
+        artifactHash(artifacts),
+        expectedContentHash,
         message,
       ].join("\0"),
     )
     .digest("hex");
-  return `${message}\nFoundry-Publication-Signature: v1=${signature}`;
+  return `${message}\nFoundry-Publication-Signature: v2=${signature}`;
 }
 
 function inputs(overrides = {}) {
@@ -48,10 +129,17 @@ function inputs(overrides = {}) {
       `${expectedCommit} ${liveCommit}\n`,
     ),
     readChangedPaths: vi.fn().mockReturnValue(
-      "packages/site-definition/src/published-site.json\n",
+      "packages/site-definition/src/published-site.json\n" +
+        `${richTextPath}\n`,
     ),
     readCommitMessage: vi.fn().mockReturnValue(`${signedMessage()}\n\n`),
     readPublishedContent: vi.fn().mockReturnValue(bytes),
+    readManagedRichTextPaths: vi.fn().mockReturnValue(
+      `${richTextPath}\n`,
+    ),
+    readArtifact: vi.fn((_commit, path) =>
+      path === richTextPath ? richTextBytes : bytes,
+    ),
     ...overrides,
   };
 }
@@ -113,6 +201,9 @@ describe("exact production content authorization", () => {
         commitSha: liveCommit,
         contentHash,
       }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
     });
 
     await expect(
@@ -121,9 +212,167 @@ describe("exact production content authorization", () => {
     expect(options.readCommitParents).not.toHaveBeenCalled();
   });
 
-  it("allows one exact Foundry content commit on the live release", async () => {
+  it("authorizes unchanged legacy bytes through the runtime schema projection", async () => {
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: runtimePublishedContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes the first code-only reader upgrade against a legacy live hash", async () => {
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: trackedPublishedContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes the first code-only reader upgrade against the fixed-base runtime hash", async () => {
+    expect(fixedBaseRuntimeContentHash).toBe(
+      "4aa6fd159782ff3dd54a16be5447fc6e367eca5f9870bbf116255e6282f6f8a3",
+    );
+    expect(fixedBaseRuntimeContentHash).not.toBe(
+      trackedPublishedContentHash,
+    );
+    expect(fixedBaseRuntimeContentHash).not.toBe(
+      runtimePublishedContentHash,
+    );
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: fixedBaseRuntimeContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("does not let a rename out of the managed tree bypass equal JSON content", async () => {
+    await expect(
+      assertExactProductionContent(
+        inputs({
+          readLiveMarker: vi.fn().mockResolvedValue({
+            commitSha: liveCommit,
+            contentHash,
+          }),
+          readChangedPaths: vi
+            .fn()
+            .mockReturnValue(`${richTextPath}\ndocs/body.md\n`),
+          readCommitMessage: vi
+            .fn()
+            .mockReturnValue("Ordinary code commit\n"),
+        }),
+      ),
+    ).rejects.toThrow("exact_content_release_not_authorized");
+  });
+
+  it("allows one exact Foundry JSON and Markdown artifact commit on the live release", async () => {
     await expect(
       assertExactProductionContent(inputs()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("preserves the publisher hash for a current definition without optional media", async () => {
+    const artifacts = [
+      {
+        path: "packages/site-definition/src/published-site.json",
+        bytes: currentBytesWithoutMedia,
+      },
+      { path: richTextPath, bytes: richTextBytes },
+    ];
+
+    await expect(
+      assertExactProductionContent(
+        inputs({
+          readCommitMessage: vi.fn().mockReturnValue(
+            `${signedMessage(
+              liveCommit,
+              artifacts,
+              currentContentHashWithoutMedia,
+            )}\n`,
+          ),
+          readPublishedContent: vi
+            .fn()
+            .mockReturnValue(currentBytesWithoutMedia),
+          readArtifact: vi.fn((_commit, path) =>
+            path === richTextPath
+              ? richTextBytes
+              : currentBytesWithoutMedia,
+          ),
+        }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects an unrelated file in the publication commit", async () => {
+    await expect(
+      assertExactProductionContent(
+        inputs({
+          readChangedPaths: vi.fn().mockReturnValue(
+            "packages/site-definition/src/published-site.json\n" +
+              "apps/reference-site/app/page.tsx\n",
+          ),
+        }),
+      ),
+    ).rejects.toThrow("exact_content_release_not_authorized");
+  });
+
+  it("allows an obsolete managed Markdown path to be removed", async () => {
+    const currentArtifacts = [
+      {
+        path: "packages/site-definition/src/published-site.json",
+        bytes,
+      },
+    ];
+    await expect(
+      assertExactProductionContent(
+        inputs({
+          readChangedPaths: vi.fn().mockReturnValue(
+            "packages/site-definition/src/published-site.json\n" +
+              "content/rich-text/section_old/body.md\n",
+          ),
+          readManagedRichTextPaths: vi.fn().mockReturnValue(""),
+          readCommitMessage: vi
+            .fn()
+            .mockReturnValue(
+              `${signedMessage(liveCommit, currentArtifacts)}\n`,
+            ),
+        }),
+      ),
     ).resolves.toBeUndefined();
   });
 

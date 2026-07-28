@@ -1,6 +1,8 @@
 import {
   isSiteDefinition,
+  serializeSiteDefinitionRichTextForPublication,
   type SiteDefinition,
+  type SiteDefinitionSchemaVersion,
 } from "@foundry/site-definition";
 
 import {
@@ -15,7 +17,14 @@ import type { HumanMembershipId } from "./human-access";
 export const publishedSiteDefinitionPath =
   "packages/site-definition/src/published-site.json";
 export const contentSerializationVersion =
-  "foundry.site-definition.canonical-json.v1";
+  "foundry.site-publication-artifacts.v2";
+export type ContentSerializationVersion =
+  | "foundry.site-definition.canonical-json.v1"
+  | typeof contentSerializationVersion;
+export type ContentPublicationSchemaVersion =
+  | "1.0.0"
+  | "1.1.0"
+  | SiteDefinitionSchemaVersion;
 const publicationLeaseDurationMs = 5 * 60 * 1_000;
 
 declare const contentApprovalIdBrand: unique symbol;
@@ -52,11 +61,18 @@ export type ContentApprovalFingerprint = Readonly<{
   channelConfigurationHash: string;
   contentHash: string;
   designHash: string;
-  schemaVersion: SiteDefinition["schemaVersion"];
+  schemaVersion: ContentPublicationSchemaVersion;
   rendererVersion: string;
   productionBase: string;
   artifactHash: string;
-  serializationVersion: typeof contentSerializationVersion;
+  serializationVersion: ContentSerializationVersion;
+}>;
+
+export type ContentPublicationArtifact = Readonly<{
+  path:
+    | typeof publishedSiteDefinitionPath
+    | `content/rich-text/${string}.md`;
+  bytes: string;
 }>;
 
 export type ContentApproval = Readonly<{
@@ -122,7 +138,7 @@ export type ContentPublicationHistoryEntry = Readonly<{
 export type ContentPublishedRevisionReader = Readonly<{
   readPublishedArtifact(input: {
     commitSha: string;
-    path: typeof publishedSiteDefinitionPath;
+    path: ContentPublicationArtifact["path"];
   }): Promise<string | null>;
 }>;
 
@@ -270,12 +286,14 @@ export type PublicationCommitResult =
   | Readonly<{ state: "unknown"; detail: string }>;
 
 export type ContentPublisher = Readonly<{
-  getChannelConfigurationHash(): Promise<string>;
+  getChannelConfigurationHash(
+    serializationVersion?: ContentSerializationVersion,
+  ): Promise<string>;
   getProductionHead(): Promise<string>;
   isReleaseLive(expected: {
     commitSha: string;
     contentHash: string;
-    schemaVersion: SiteDefinition["schemaVersion"];
+    schemaVersion: ContentPublicationSchemaVersion;
   }): Promise<boolean>;
   createCommit(input: {
     publishId: ContentPublicationId;
@@ -285,8 +303,9 @@ export type ContentPublisher = Readonly<{
     contributors: ReadonlyArray<ContentActorId>;
     contentHash: string;
     expectedHead: string;
-    path: typeof publishedSiteDefinitionPath;
-    bytes: string;
+    serializationVersion: ContentSerializationVersion;
+    artifacts: ReadonlyArray<ContentPublicationArtifact>;
+    artifactHash: string;
     message: string;
     assertLease(): Promise<boolean>;
   }): Promise<PublicationCommitResult>;
@@ -294,7 +313,8 @@ export type ContentPublisher = Readonly<{
     publishId: ContentPublicationId;
     candidateCommitSha?: string;
     expectedHead: string;
-    path: typeof publishedSiteDefinitionPath;
+    serializationVersion: ContentSerializationVersion;
+    artifacts: ReadonlyArray<ContentPublicationArtifact>;
     artifactHash: string;
     contentHash: string;
     message: string;
@@ -306,8 +326,9 @@ export type ContentPublisher = Readonly<{
     publishId: ContentPublicationId;
     candidateCommitSha: string;
     expectedHead: string;
-    path: typeof publishedSiteDefinitionPath;
-    bytes: string;
+    serializationVersion: ContentSerializationVersion;
+    artifacts: ReadonlyArray<ContentPublicationArtifact>;
+    artifactHash: string;
     assertLease(): Promise<boolean>;
   }): Promise<PublicationCommitResult>;
   getDeploymentStatus(
@@ -431,6 +452,70 @@ export function serializePublishedSiteDefinition(
   return `${canonicalJson(definition)}\n`;
 }
 
+export function serializeContentPublicationArtifacts(
+  definition: SiteDefinition,
+): ReadonlyArray<ContentPublicationArtifact> {
+  return [
+    {
+      path: publishedSiteDefinitionPath,
+      bytes: serializePublishedSiteDefinition(definition),
+    },
+    ...serializeSiteDefinitionRichTextForPublication(definition).map(
+      ({ filePath, markdown }) => ({
+        path: filePath,
+        bytes: markdown,
+      }),
+    ),
+  ];
+}
+
+function serializeContentPublicationArtifactsForVersion(
+  definition: SiteDefinition,
+  serializationVersion: ContentSerializationVersion,
+): ReadonlyArray<ContentPublicationArtifact> {
+  return serializationVersion ===
+    "foundry.site-definition.canonical-json.v1"
+    ? [
+        {
+          path: publishedSiteDefinitionPath,
+          bytes: serializePublishedSiteDefinition(definition),
+        },
+      ]
+    : serializeContentPublicationArtifacts(definition);
+}
+
+export async function hashContentPublicationArtifacts(
+  artifacts: ReadonlyArray<ContentPublicationArtifact>,
+): Promise<string> {
+  const sorted = [...artifacts].sort(({ path: left }, { path: right }) =>
+    left.localeCompare(right),
+  );
+  if (
+    sorted.length === 0 ||
+    !sorted.some(({ path }) => path === publishedSiteDefinitionPath) ||
+    sorted.some(
+      (artifact, index) =>
+        (artifact.path === publishedSiteDefinitionPath &&
+          artifact.bytes.length === 0) ||
+        (artifact.path !== publishedSiteDefinitionPath &&
+          !/^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u.test(
+            artifact.path,
+          )) ||
+        (index > 0 && sorted[index - 1]?.path === artifact.path),
+    )
+  ) {
+    throw new TypeError("content_publication_artifacts_invalid");
+  }
+  const manifest = await Promise.all(
+    sorted.map(async ({ path, bytes }) => ({
+      path,
+      byteLength: new TextEncoder().encode(bytes).byteLength,
+      sha256: await sha256(bytes),
+    })),
+  );
+  return sha256(canonicalJson(manifest));
+}
+
 export function hashPublishedSiteDefinition(
   definition: SiteDefinition,
 ): Promise<string> {
@@ -466,12 +551,16 @@ export async function createContentApprovalFingerprint(
   if (!isSiteDefinition(revision.definition)) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
-  const serialized = serializePublishedSiteDefinition(revision.definition);
-  const artifactHash = await sha256(serialized);
+  const artifactHash = await hashContentPublicationArtifacts(
+    serializeContentPublicationArtifacts(revision.definition),
+  );
   const canonicalDefinitionHash = await sha256(
     canonicalJson(revision.definition),
   );
-  if (canonicalDefinitionHash !== revision.inputs.contentHash) {
+  if (
+    canonicalDefinitionHash !== revision.inputs.contentHash ||
+    revision.inputs.schemaVersion !== revision.definition.schemaVersion
+  ) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
   const designHash = await sha256(canonicalJson(designProjection(
@@ -856,7 +945,7 @@ export function createContentPublicationApplication({
   restoreSourcePublication?: ContentPublication;
   now?: () => string;
 }) {
-  async function requireExactRevision(
+  async function requireBoundRevision(
     workspaceId: ContentWorkspaceId,
     revisionNumber: number,
   ) {
@@ -871,10 +960,49 @@ export function createContentPublicationApplication({
     ) {
       throw new ContentApprovalInvalidError("revision_not_current");
     }
+    return selected;
+  }
+
+  async function requireExactRevision(
+    workspaceId: ContentWorkspaceId,
+    revisionNumber: number,
+  ) {
+    const selected = await requireBoundRevision(
+      workspaceId,
+      revisionNumber,
+    );
     if (!(await revisions.isCurrent(selected))) {
       throw new ContentApprovalInvalidError("revision_stale");
     }
     return selected;
+  }
+
+  async function approvalChannelConfigurationMatches(
+    approval: ContentApproval,
+  ) {
+    try {
+      if (
+        approval.fingerprint.channelConfigurationHash ===
+        (await publisher.getChannelConfigurationHash())
+      ) {
+        return true;
+      }
+    } catch (error) {
+      if (
+        approval.fingerprint.serializationVersion !==
+        "foundry.site-definition.canonical-json.v1"
+      ) {
+        throw error;
+      }
+    }
+    return (
+      approval.fingerprint.serializationVersion ===
+        "foundry.site-definition.canonical-json.v1" &&
+      approval.fingerprint.channelConfigurationHash ===
+        (await publisher.getChannelConfigurationHash(
+          "foundry.site-definition.canonical-json.v1",
+        ))
+    );
   }
 
   async function requireApproval(
@@ -888,16 +1016,49 @@ export function createContentPublicationApplication({
     if (approval.invalidatedAt !== null) {
       throw new ContentApprovalInvalidError("approval_invalidated");
     }
-    const revision = await requireExactRevision(
-      approval.workspaceId,
-      approval.revision,
-    );
-    const fingerprint = await createContentApprovalFingerprint(
-      revision,
-      await publisher.getChannelConfigurationHash(),
-    );
-    if (fingerprint.value !== approval.fingerprint.value) {
-      throw new ContentApprovalInvalidError("approval_stale");
+    const revision =
+      approval.fingerprint.serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
+        ? await requireBoundRevision(
+            approval.workspaceId,
+            approval.revision,
+          )
+        : await requireExactRevision(
+            approval.workspaceId,
+            approval.revision,
+          );
+    if (
+      approval.fingerprint.serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
+    ) {
+      const serializedDefinition = serializePublishedSiteDefinition(
+        revision.definition,
+      );
+      if (
+        !(await approvalChannelConfigurationMatches(approval)) ||
+        approval.fingerprint.contentHash !==
+          (await hashPublishedSiteDefinition(revision.definition)) ||
+        approval.fingerprint.artifactHash !==
+          (await sha256(serializedDefinition)) ||
+        approval.fingerprint.schemaVersion !==
+          revision.definition.schemaVersion ||
+        approval.fingerprint.rendererVersion !==
+          revision.inputs.rendererVersion ||
+        approval.fingerprint.productionBase !==
+          revision.inputs.productionBase
+      ) {
+        throw new ContentApprovalInvalidError("approval_stale");
+      }
+    } else {
+      const channelConfigurationHash =
+        await publisher.getChannelConfigurationHash();
+      const fingerprint = await createContentApprovalFingerprint(
+        revision,
+        channelConfigurationHash,
+      );
+      if (fingerprint.value !== approval.fingerprint.value) {
+        throw new ContentApprovalInvalidError("approval_stale");
+      }
     }
     if (actorId.trim() === "") {
       throw new ContentApprovalInvalidError("approval_not_found");
@@ -929,11 +1090,16 @@ export function createContentPublicationApplication({
   function commitReconciliationInput(
     publication: ContentPublication,
     approval: ContentApproval,
+    revision: ContentRevision,
   ): Parameters<ContentPublisher["reconcileCommit"]>[0] {
     return {
       publishId: publication.id,
       expectedHead: publication.expectedHead,
-      path: publishedSiteDefinitionPath,
+      serializationVersion: approval.fingerprint.serializationVersion,
+      artifacts: serializeContentPublicationArtifactsForVersion(
+        revision.definition,
+        approval.fingerprint.serializationVersion,
+      ),
       artifactHash: approval.fingerprint.artifactHash,
       contentHash: approval.fingerprint.contentHash,
       message: commitMessage({ publication, approval }),
@@ -989,8 +1155,13 @@ export function createContentPublicationApplication({
         contributors: input.publication.contributors,
         contentHash: input.approval.fingerprint.contentHash,
         expectedHead: input.publication.expectedHead,
-        path: publishedSiteDefinitionPath,
-        bytes: serializePublishedSiteDefinition(input.revision.definition),
+        serializationVersion:
+          input.approval.fingerprint.serializationVersion,
+        artifacts: serializeContentPublicationArtifactsForVersion(
+          input.revision.definition,
+          input.approval.fingerprint.serializationVersion,
+        ),
+        artifactHash: input.approval.fingerprint.artifactHash,
         message: commitMessage({
           publication: input.publication,
           approval: input.approval,
@@ -1063,44 +1234,53 @@ export function createContentPublicationApplication({
     }
     let channelFailure: "changed" | "unavailable" | null = null;
     try {
-      if (
-        boundApproval.fingerprint.channelConfigurationHash !==
-        (await publisher.getChannelConfigurationHash())
-      ) {
+      if (!(await approvalChannelConfigurationMatches(boundApproval))) {
         channelFailure = "changed";
       }
     } catch {
       channelFailure = "unavailable";
     }
-    if (channelFailure !== null) {
+    const handleChannelFailure = (
+      currentPublication: ContentPublication,
+      failure: Exclude<typeof channelFailure, null>,
+    ) => {
       const observedAt = now();
       const channelCheckStartedAt =
-        publication.deploymentRequestedAt ?? publication.requestedAt;
+        currentPublication.deploymentRequestedAt ??
+        currentPublication.requestedAt;
       if (
         new Date(observedAt).getTime() -
           new Date(channelCheckStartedAt).getTime() >=
         deploymentSignalTimeoutMs
       ) {
         return store.updatePublication(
-          nextPublication(publication, {
+          nextPublication(currentPublication, {
             status: "failed",
             detail:
-              deploymentRetryDispatchWasAttempted(publication)
+              deploymentRetryDispatchWasAttempted(currentPublication)
                 ? "deployment_retry_timeout"
-                : contentPublicationHasUnresolvedGitOutcome(publication)
-                ? publication.detail
-                : channelFailure === "changed"
+                : contentPublicationHasUnresolvedGitOutcome(
+                    currentPublication,
+                  )
+                ? currentPublication.detail
+                : failure === "changed"
                   ? "publication_channel_changed"
                   : "publication_channel_unavailable",
             updatedAt: observedAt,
           }),
           {
-            expectedStatus: publication.status,
-            expectedUpdatedAt: publication.updatedAt,
+            expectedStatus: currentPublication.status,
+            expectedUpdatedAt: currentPublication.updatedAt,
           },
         );
       }
-      return publication;
+      return Promise.resolve(currentPublication);
+    };
+    if (
+      channelFailure !== null &&
+      !contentPublicationHasUnresolvedGitOutcome(publication)
+    ) {
+      return handleChannelFailure(publication, channelFailure);
     }
     if (publication.detail === "deployment_retry_dispatching") {
       const observedAt = now();
@@ -1141,8 +1321,19 @@ export function createContentPublicationApplication({
       (publication.status === "unknown" ||
         publication.status === "requested")
     ) {
+      const boundRevision = await revisions.getRevision(
+        boundApproval.workspaceId,
+        boundApproval.revision,
+      );
+      if (boundRevision === null) {
+        return publication;
+      }
       const reconciled = await publisher.reconcileCommit({
-        ...commitReconciliationInput(publication, boundApproval),
+        ...commitReconciliationInput(
+          publication,
+          boundApproval,
+          boundRevision,
+        ),
         candidateCommitSha: reconciliationCandidate(publication.detail),
       });
       if (reconciled.state === "committed") {
@@ -1168,6 +1359,9 @@ export function createContentPublicationApplication({
           return currentPublication;
         }
       } else {
+        if (channelFailure !== null) {
+          return handleChannelFailure(publication, channelFailure);
+        }
         const observedAt = now();
         const candidateCommitSha = reconciliationCandidate(
           publication.detail,
@@ -1203,6 +1397,9 @@ export function createContentPublicationApplication({
         }
         return publication;
       }
+    }
+    if (channelFailure !== null) {
+      return handleChannelFailure(currentPublication, channelFailure);
     }
     if (commitSha === null) {
       return publication;
@@ -1665,7 +1862,7 @@ export function createContentPublicationApplication({
           contentPublicationHasUnresolvedGitOutcome(publication)
         ) {
           const reconciled = await publisher.reconcileCommit(
-            commitReconciliationInput(publication, approval),
+            commitReconciliationInput(publication, approval, revision),
           );
           if (reconciled.state === "committed") {
             publication = await store.updatePublication(
@@ -1687,7 +1884,7 @@ export function createContentPublicationApplication({
             ]);
             if (currentHead !== publication.expectedHead) {
               const retryReconciliation = await publisher.reconcileCommit(
-                commitReconciliationInput(publication, approval),
+                commitReconciliationInput(publication, approval, revision),
               );
               if (retryReconciliation.state !== "committed") {
                 return publication;
@@ -1739,7 +1936,11 @@ export function createContentPublicationApplication({
                 result.detail === "production_head_moved"
               ) {
                 const afterCas = await publisher.reconcileCommit(
-                  commitReconciliationInput(retryPublication, approval),
+                  commitReconciliationInput(
+                    retryPublication,
+                    approval,
+                    revision,
+                  ),
                 );
                 if (afterCas.state === "committed") {
                   result = afterCas;
@@ -1787,7 +1988,11 @@ export function createContentPublicationApplication({
           candidateCommitSha !== undefined
         ) {
           const reconciled = await publisher.reconcileCommit({
-            ...commitReconciliationInput(publication, approval),
+            ...commitReconciliationInput(
+              publication,
+              approval,
+              revision,
+            ),
             candidateCommitSha,
           });
           if (reconciled.state === "committed") {
@@ -1850,8 +2055,13 @@ export function createContentPublicationApplication({
             publishId: publication.id,
             candidateCommitSha,
             expectedHead: publication.expectedHead,
-            path: publishedSiteDefinitionPath,
-            bytes: serializePublishedSiteDefinition(revision.definition),
+            serializationVersion:
+              approval.fingerprint.serializationVersion,
+            artifacts: serializeContentPublicationArtifactsForVersion(
+              revision.definition,
+              approval.fingerprint.serializationVersion,
+            ),
+            artifactHash: approval.fingerprint.artifactHash,
             assertLease,
           });
           const updatedAt = now();
@@ -2279,15 +2489,48 @@ export function createContentPublicationApplication({
           );
         }
         const definition = parsed as SiteDefinition;
-        const [artifactHash, contentHash] = await Promise.all([
-          sha256(bytes),
-          hashPublishedSiteDefinition(definition),
-        ]);
+        const contentHash = await hashPublishedSiteDefinition(definition);
+        let artifactHash: string;
+        let publishedArtifactsMatch = true;
+        if (
+          approval.fingerprint.serializationVersion ===
+          "foundry.site-definition.canonical-json.v1"
+        ) {
+          artifactHash = await sha256(bytes);
+        } else {
+          let artifacts: ReadonlyArray<ContentPublicationArtifact>;
+          try {
+            artifacts = serializeContentPublicationArtifacts(definition);
+          } catch {
+            throw new ContentPublicationValidationError(
+              "restore_artifact_mismatch",
+            );
+          }
+          const [manifestHash, publishedArtifactBytes] = await Promise.all([
+            hashContentPublicationArtifacts(artifacts),
+            Promise.all(
+              artifacts.map((artifact) =>
+                artifact.path === publishedSiteDefinitionPath
+                  ? bytes
+                  : publishedRevisions.readPublishedArtifact({
+                      commitSha: publication.commitSha!,
+                      path: artifact.path,
+                    }),
+              ),
+            ),
+          ]);
+          artifactHash = manifestHash;
+          publishedArtifactsMatch = publishedArtifactBytes.every(
+            (publishedBytes, index) =>
+              publishedBytes === artifacts[index]!.bytes,
+          );
+        }
         if (
           artifactHash !== approval.fingerprint.artifactHash ||
           contentHash !== approval.fingerprint.contentHash ||
           serializePublishedSiteDefinition(definition) !== bytes ||
-          definition.schemaVersion !== approval.fingerprint.schemaVersion
+          definition.schemaVersion !== approval.fingerprint.schemaVersion ||
+          !publishedArtifactsMatch
         ) {
           throw new ContentPublicationValidationError(
             "restore_artifact_mismatch",

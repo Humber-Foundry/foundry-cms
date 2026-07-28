@@ -2,12 +2,12 @@ import {
   canonicalJson,
 } from "@foundry/application";
 import {
-  defaultSiteDesign,
+  createRichTextDocumentFromPlainText,
   designContract,
-  isSiteDefinition,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
+  upgradeSiteDefinition,
   type PageSection,
   type SiteDefinition,
 } from "@foundry/site-definition";
@@ -31,58 +31,43 @@ function upgradeLegacyPageComponent(component: unknown): PageSection {
     throw new Error("unsupported_legacy_page_component");
   }
   const type = component.type as PageSection["type"];
-  if ("variant" in component) {
+  let upgraded: Record<string, unknown> = { ...component };
+  if ("variant" in upgraded) {
     if (
-      typeof component.variant !== "string" ||
+      typeof upgraded.variant !== "string" ||
       !designContract.variants[type].values.includes(
-        component.variant as never,
+        upgraded.variant as never,
       )
     ) {
       throw new Error("unsupported_legacy_component_variant");
     }
-    return component as PageSection;
+  } else {
+    upgraded = {
+      ...upgraded,
+      variant: designContract.variants[type].values[0],
+    };
   }
-  return {
-    ...component,
-    variant: designContract.variants[type].values[0],
-  } as PageSection;
+  if (
+    type === "callToAction" &&
+    "body" in upgraded &&
+    typeof upgraded.body === "string"
+  ) {
+    upgraded = {
+      ...upgraded,
+      body: createRichTextDocumentFromPlainText(upgraded.body),
+    };
+  }
+  return upgraded as PageSection;
 }
 
 export function upgradeSiteDefinitionForCurrentSchema(
   definition: SiteDefinition,
 ): SiteDefinition {
-  const upgraded =
-    definition.schemaVersion === "1.1.0"
-      ? definition
-      : (() => {
-          if ((definition.schemaVersion as string) !== "1.0.0") {
-            throw new Error("unsupported_site_definition_schema");
-          }
-          const legacy = definition as unknown as Omit<
-            SiteDefinition,
-            "definitionVersion" | "schemaVersion" | "design" | "home"
-          > & {
-            home: Omit<SiteDefinition["home"], "sections"> & {
-              sections: ReadonlyArray<Omit<PageSection, "variant">>;
-            };
-          };
-          return {
-            ...legacy,
-            definitionVersion: "1.1.0",
-            schemaVersion: "1.1.0",
-            design: defaultSiteDesign,
-            home: {
-              ...legacy.home,
-              sections: legacy.home.sections.map(
-                upgradeLegacyPageComponent,
-              ),
-            },
-          };
-        })();
-  if (!isSiteDefinition(upgraded)) {
-    throw new Error("invalid_site_definition");
+  try {
+    return upgradeSiteDefinition(definition);
+  } catch {
+    throw new Error("unsupported_site_definition_schema");
   }
-  return upgraded;
 }
 
 export function durableSchemaRecoveryEdits(
@@ -92,16 +77,35 @@ export function durableSchemaRecoveryEdits(
   const base = upgradeSiteDefinitionForCurrentSchema(baseDefinition);
   const current = upgradeSiteDefinitionForCurrentSchema(currentDefinition);
   const baseFields = new Map(
-    listEditableSiteFields(base).map(({ path, value }) => [path, value]),
+    listEditableSiteFields(base).map((field) => [field.path, field]),
   );
   const fieldEdits = listEditableSiteFields(current).flatMap(
-    ({ path, value }) => {
-      const baseValue = baseFields.get(path);
-      return baseValue === undefined || baseValue === value
-        ? []
-        : [{ path, baseValue, value }];
+    ({ path, value, format }) => {
+      const baseField = baseFields.get(path);
+      if (baseField === undefined || baseField.value === value) {
+        return [];
+      }
+      if (format === "richText") {
+        return baseField.format === "richText"
+          ? [
+              {
+                path,
+                format,
+                baseValue: baseField.value,
+                value,
+              },
+            ]
+          : [];
+      }
+      return [
+        {
+          path,
+          baseValue: baseField.value,
+          value,
+        },
+      ];
     },
-  );
+  ) satisfies StaleRecoveryEdit[];
   const baseComposition = toPageComposition(base);
   const currentComposition = toPageComposition(current);
   const baseMedia = canonicalJson(base.home.media ?? []);
@@ -179,7 +183,7 @@ function upgradeLegacyStructuralRecoveryEdit(
 ): StaleRecoveryEdit {
   return edit.path === pageCompositionContract.slot.id
     ? {
-        ...edit,
+        path: edit.path,
         baseValue: upgradeLegacyComposition(edit.baseValue),
         value: upgradeLegacyComposition(edit.value),
       }

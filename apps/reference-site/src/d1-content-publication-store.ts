@@ -41,7 +41,8 @@ type ApprovalRow = {
   production_base: string;
   artifact_hash: string;
   serialization_version:
-    "foundry.site-definition.canonical-json.v1";
+    | "foundry.site-definition.canonical-json.v1"
+    | "foundry.site-publication-artifacts.v2";
   approved_by: string;
   approved_at: string;
   invalidated_at: string | null;

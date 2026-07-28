@@ -165,7 +165,26 @@ export function puckDataToDefinition(
     >;
     const props = item.props as Record<string, unknown>;
     for (const property of editableProps) {
-      if (typeof props[property] === "string") {
+      if (
+        componentType === "callToAction" &&
+        property === "body" &&
+        props[property] !== undefined
+      ) {
+        if (
+          typeof props[property] !== "object" ||
+          props[property] === null ||
+          Array.isArray(props[property])
+        ) {
+          return {
+            ok: false,
+            errors: {
+              [`${id}.body`]:
+                "The visual editor must preserve the versioned rich-text document.",
+            },
+          };
+        }
+        section[property] = structuredClone(props[property]);
+      } else if (typeof props[property] === "string") {
         section[property] = props[property];
       }
     }

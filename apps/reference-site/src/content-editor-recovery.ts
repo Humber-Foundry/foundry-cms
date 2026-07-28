@@ -1,7 +1,10 @@
 import {
   applyPageComposition,
+  createRichTextDocumentFromPlainText,
+  createSerializedRichTextDocument,
   listEditableSiteFields,
   pageCompositionContract,
+  serializeRichTextDocument,
   toPageCompositionIdentity,
   type PageSection,
   type SiteDefinition,
@@ -27,6 +30,86 @@ export type StaleRecoveryPointer = Readonly<{
   id: string;
   sourceWorkspaceId: string;
 }>;
+
+function upgradeLegacyStructuralRecoveryEdit(
+  edit: StaleRecoveryEdit,
+): StaleRecoveryEdit {
+  if (
+    edit.path !== pageCompositionContract.slot.id ||
+    edit.format === "richText"
+  ) {
+    return edit;
+  }
+  const upgradeComposition = (serialized: string): string => {
+    try {
+      const composition: unknown = JSON.parse(serialized);
+      if (
+        typeof composition !== "object" ||
+        composition === null ||
+        !("components" in composition) ||
+        !Array.isArray(composition.components)
+      ) {
+        return serialized;
+      }
+      let changed = false;
+      const components = composition.components.map((candidate) => {
+        if (
+          typeof candidate !== "object" ||
+          candidate === null ||
+          !("type" in candidate) ||
+          candidate.type !== "callToAction" ||
+          !("body" in candidate) ||
+          typeof candidate.body !== "string"
+        ) {
+          return candidate;
+        }
+        changed = true;
+        return {
+          ...candidate,
+          body: createRichTextDocumentFromPlainText(candidate.body),
+        };
+      });
+      return changed
+        ? JSON.stringify({ ...composition, components })
+        : serialized;
+    } catch {
+      return serialized;
+    }
+  };
+  const value = upgradeComposition(edit.value);
+  const baseValue = upgradeComposition(edit.baseValue);
+  return value === edit.value && baseValue === edit.baseValue
+    ? edit
+    : { ...edit, value, baseValue };
+}
+
+export function upgradeLegacyRichTextRecoveryEdit(
+  edit: StaleRecoveryEdit,
+  richTextPaths: ReadonlySet<string>,
+): StaleRecoveryEdit {
+  const structuralEdit = upgradeLegacyStructuralRecoveryEdit(edit);
+  if (structuralEdit !== edit) {
+    return structuralEdit;
+  }
+  if (!richTextPaths.has(edit.path) || edit.format !== undefined) {
+    return edit;
+  }
+  const normalizeValue = (value: string) => {
+    try {
+      return createSerializedRichTextDocument(value);
+    } catch {
+      return serializeRichTextDocument(
+        createRichTextDocumentFromPlainText(value),
+      );
+    }
+  };
+  return {
+    path: edit.path,
+    format: "richText",
+    value: normalizeValue(edit.value),
+    baseValue: normalizeValue(edit.baseValue),
+  };
+}
 
 export function comparableRecoveryValue(edit: StaleRecoveryEdit): string {
   if (edit.path !== pageCompositionContract.slot.id) {
@@ -69,7 +152,14 @@ export function comparableRecoveryValue(edit: StaleRecoveryEdit): string {
 export function comparableRecoveryBaseValue(
   edit: StaleRecoveryEdit,
 ): string {
-  return comparableRecoveryValue({ ...edit, value: edit.baseValue });
+  return edit.path === pageCompositionContract.slot.id
+    ? comparableRecoveryValue({
+        path: edit.path,
+        format: "plainText",
+        value: edit.baseValue,
+        baseValue: edit.baseValue,
+      })
+    : edit.baseValue;
 }
 
 export function applyStructuralRecovery(
@@ -81,8 +171,9 @@ export function applyStructuralRecovery(
   if (edit.path !== pageCompositionContract.slot.id) {
     return { ok: false };
   }
+  const recoveredEdit = upgradeLegacyStructuralRecoveryEdit(edit);
   try {
-    const composition: unknown = JSON.parse(edit.value);
+    const composition: unknown = JSON.parse(recoveredEdit.value);
     if (
       typeof composition !== "object" ||
       composition === null ||
@@ -94,7 +185,7 @@ export function applyStructuralRecovery(
     let baseComposition: unknown = null;
     let baseIds: ReadonlySet<string> | null = null;
     try {
-      baseComposition = JSON.parse(edit.baseValue);
+      baseComposition = JSON.parse(recoveredEdit.baseValue);
     } catch {
       // Identity-only records from older editor sessions remain recoverable.
     }
@@ -281,6 +372,18 @@ export function recoveryToForward(
   return destinationIsStale ? activeRecovery : undefined;
 }
 
+function chainRecoveryEdit(
+  earlier: StaleRecoveryEdit | undefined,
+  current: StaleRecoveryEdit,
+): StaleRecoveryEdit {
+  const format = current.format ?? earlier?.format;
+  return {
+    ...current,
+    ...(format === undefined ? {} : { format }),
+    baseValue: earlier?.baseValue ?? current.baseValue,
+  } as StaleRecoveryEdit;
+}
+
 export function mergeRecoverySources(
   ...sources: ReadonlyArray<ReadonlyArray<StaleRecoveryEdit>>
 ): StaleRecoveryEdit[] {
@@ -288,10 +391,7 @@ export function mergeRecoverySources(
   for (const source of sources) {
     for (const edit of source) {
       const earlier = merged.get(edit.path);
-      merged.set(edit.path, {
-        ...edit,
-        baseValue: earlier?.baseValue ?? edit.baseValue,
-      });
+      merged.set(edit.path, chainRecoveryEdit(earlier, edit));
     }
   }
   return [...merged.values()];
@@ -313,10 +413,7 @@ export function mergeStaleRecoveryEdits(
   );
   for (const edit of current) {
     const earlier = merged.get(edit.path);
-    merged.set(edit.path, {
-      ...edit,
-      baseValue: earlier?.baseValue ?? edit.baseValue,
-    });
+    merged.set(edit.path, chainRecoveryEdit(earlier, edit));
   }
   return [...merged.values()];
 }
@@ -389,6 +486,7 @@ export function recoverStaleEdits(
   recoveryId: string,
   sourceWorkspaceId: string,
   destinationValues: ReadonlyMap<string, string>,
+  richTextPaths: ReadonlySet<string> = new Set(),
 ): Readonly<{
   available: boolean;
   recovered: StaleRecoveryEdit[];
@@ -406,7 +504,11 @@ export function recoverStaleEdits(
     }
     const recovered: StaleRecoveryEdit[] = [];
     const conflicts: StaleRecoveryConflict[] = [];
-    for (const edit of recovery.edits) {
+    for (const persistedEdit of recovery.edits) {
+      const edit = upgradeLegacyRichTextRecoveryEdit(
+        persistedEdit,
+        richTextPaths,
+      );
       const currentValue = destinationValues.get(edit.path);
       if (currentValue === undefined) {
         conflicts.push({ ...edit, currentValue: null, reason: "missing" });

@@ -456,6 +456,93 @@ describe("page component composition", () => {
 
   it.each([
     {
+      name: "an empty document",
+      body: {
+        version: "1.0.0",
+        type: "document",
+        children: [],
+      },
+    },
+    {
+      name: "an empty paragraph",
+      body: {
+        version: "1.0.0",
+        type: "document",
+        children: [{ type: "paragraph", children: [] }],
+      },
+    },
+    {
+      name: "a whitespace-only paragraph",
+      body: {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: "   ", marks: [] }],
+          },
+        ],
+      },
+    },
+    {
+      name: "a zero-width-only paragraph",
+      body: {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              { type: "text", text: "\u200B", marks: [] },
+            ],
+          },
+        ],
+      },
+    },
+    ...[
+      ["a variation-selector-only paragraph", "\uFE0F"],
+      ["a grapheme-joiner-only paragraph", "\u034F"],
+    ].map(([name, text]) => ({
+      name,
+      body: {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text, marks: [] }],
+          },
+        ],
+      },
+    })),
+  ])("rejects required rich text with $name", ({ body }) => {
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const callToAction = composition.components.find(
+      (section) => section.type === "callToAction",
+    );
+    if (callToAction?.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    (
+      callToAction as unknown as {
+        body: typeof callToAction.body;
+      }
+    ).body = body as typeof callToAction.body;
+
+    expect(
+      applyPageComposition(referenceSiteDefinition, composition),
+    ).toEqual({
+      ok: false,
+      errors: {
+        "section_contact.body": "Enter at least one visible character.",
+      },
+    });
+  });
+
+  it.each([
+    {
       name: "a missing nested field",
       change: (composition: Record<string, any>) => {
         delete composition.components[0].primaryAction.label;

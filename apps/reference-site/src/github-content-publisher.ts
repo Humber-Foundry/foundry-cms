@@ -1,12 +1,17 @@
 import { SignJWT, importPKCS8 } from "jose";
 
 import type {
+  ContentPublicationArtifact,
   ContentPublisher,
   ContentPublicationId,
   ContentPublishedRevisionReader,
+  ContentSerializationVersion,
   PublicationCommitResult,
 } from "@foundry/application";
-import { isValidGitBranchName } from "@foundry/application";
+import {
+  hashContentPublicationArtifacts,
+  isValidGitBranchName,
+} from "@foundry/application";
 
 export type GitHubContentPublisherConfiguration = Readonly<{
   appId: string;
@@ -331,42 +336,16 @@ function buildEnvironmentProjection(value: unknown) {
 }
 
 async function sha256(value: string) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return sha256Bytes(new TextEncoder().encode(value));
 }
 
 async function sha256Bytes(value: Uint8Array) {
-  const bytes = new ArrayBuffer(value.byteLength);
-  new Uint8Array(bytes).set(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const bytes = new Uint8Array(value.byteLength);
+  bytes.set(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes.buffer);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function decodeGitHubBlob(value: unknown): Uint8Array | null {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("encoding" in value) ||
-    value.encoding !== "base64" ||
-    !("content" in value) ||
-    typeof value.content !== "string" ||
-    value.content.length > 2_000_000
-  ) {
-    return null;
-  }
-  try {
-    const decoded = atob(value.content.replaceAll(/\s/gu, ""));
-    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
-  } catch {
-    return null;
-  }
 }
 
 function encodeBase64Utf8(value: string) {
@@ -380,24 +359,37 @@ function encodeBase64Utf8(value: string) {
 
 function publicationSignaturePayload(input: {
   expectedHead: string;
+  serializationVersion: ContentSerializationVersion;
   path: string;
+  artifactHash: string;
   contentHash: string;
   message: string;
 }) {
-  return [
-    "foundry-publication-signature-v1",
-    input.expectedHead,
-    input.path,
-    input.contentHash,
-    input.message,
-  ].join("\0");
+  return input.serializationVersion ===
+    "foundry.site-definition.canonical-json.v1"
+    ? [
+        "foundry-publication-signature-v1",
+        input.expectedHead,
+        input.path,
+        input.contentHash,
+        input.message,
+      ].join("\0")
+    : [
+        "foundry-publication-signature-v2",
+        input.expectedHead,
+        input.artifactHash,
+        input.contentHash,
+        input.message,
+      ].join("\0");
 }
 
 async function signPublicationMessage(
   secret: string,
   input: {
     expectedHead: string;
+    serializationVersion: ContentSerializationVersion;
     path: string;
+    artifactHash: string;
     contentHash: string;
     message: string;
   },
@@ -417,7 +409,12 @@ async function signPublicationMessage(
   const hex = [...new Uint8Array(signature)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  return `${input.message}\nFoundry-Publication-Signature: v1=${hex}`;
+  const version =
+    input.serializationVersion ===
+    "foundry.site-definition.canonical-json.v1"
+      ? "v1"
+      : "v2";
+  return `${input.message}\nFoundry-Publication-Signature: ${version}=${hex}`;
 }
 
 async function gitBlobSha(value: string, repositoryObjectId: string) {
@@ -439,6 +436,109 @@ async function gitBlobSha(value: string, repositoryObjectId: string) {
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+const managedRichTextArtifactPathPattern =
+  /^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u;
+
+function gitTreeBlobs(value: unknown): ReadonlyMap<string, string> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    ("truncated" in value && value.truncated === true) ||
+    !("tree" in value) ||
+    !Array.isArray(value.tree)
+  ) {
+    throw new Error("github_tree_invalid");
+  }
+  const blobs = new Map<string, string>();
+  for (const entry of value.tree) {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      !("type" in entry) ||
+      entry.type !== "blob"
+    ) {
+      continue;
+    }
+    if (
+      !("path" in entry) ||
+      typeof entry.path !== "string" ||
+      !("sha" in entry) ||
+      typeof entry.sha !== "string" ||
+      blobs.has(entry.path)
+    ) {
+      throw new Error("github_tree_invalid");
+    }
+    blobs.set(entry.path, entry.sha);
+  }
+  return blobs;
+}
+
+function publicationCandidateMatches({
+  artifacts,
+  candidateBlobs,
+  expectedBlobShas,
+  files,
+}: {
+  artifacts: ReadonlyArray<ContentPublicationArtifact>;
+  candidateBlobs: ReadonlyMap<string, string>;
+  expectedBlobShas: ReadonlyArray<string>;
+  files: ReadonlyArray<any>;
+}) {
+  const expectedArtifacts = new Map(
+    artifacts.map((artifact, index) => [
+      artifact.path,
+      expectedBlobShas[index]!,
+    ]),
+  );
+  const candidateManagedPaths = [...candidateBlobs.keys()]
+    .filter((path) => managedRichTextArtifactPathPattern.test(path))
+    .sort();
+  const expectedManagedPaths = artifacts
+    .map(({ path }) => path)
+    .filter((path) => managedRichTextArtifactPathPattern.test(path))
+    .sort();
+  if (
+    candidateManagedPaths.join("\0") !== expectedManagedPaths.join("\0") ||
+    ![...expectedArtifacts].every(
+      ([path, sha]) => candidateBlobs.get(path) === sha,
+    )
+  ) {
+    return false;
+  }
+  const seenFiles = new Set<string>();
+  return files.every((file) => {
+    if (
+      typeof file?.filename !== "string" ||
+      seenFiles.has(file.filename)
+    ) {
+      return false;
+    }
+    seenFiles.add(file.filename);
+    const expectedSha = expectedArtifacts.get(file.filename);
+    if (
+      expectedSha !== undefined &&
+      (file.status === "added" || file.status === "modified") &&
+      file.sha === expectedSha
+    ) {
+      return true;
+    }
+    if (
+      expectedSha !== undefined &&
+      file.status === "renamed" &&
+      file.sha === expectedSha &&
+      typeof file.previous_filename === "string" &&
+      managedRichTextArtifactPathPattern.test(file.previous_filename)
+    ) {
+      return true;
+    }
+    return (
+      expectedSha === undefined &&
+      managedRichTextArtifactPathPattern.test(file.filename) &&
+      file.status === "removed"
+    );
+  });
 }
 
 function trailerMatches(message: unknown, publishId: ContentPublicationId) {
@@ -689,6 +789,33 @@ export function createGitHubContentPublisher({
     input: Parameters<ContentPublisher["reconcileCommit"]>[0],
     signedMessage: string,
   ) {
+    const artifacts = [...input.artifacts].sort(
+      ({ path: left }, { path: right }) => left.localeCompare(right),
+    );
+    const legacyArtifact =
+      input.serializationVersion ===
+        "foundry.site-definition.canonical-json.v1" &&
+      artifacts.length === 1 &&
+      artifacts[0]?.path ===
+        "packages/site-definition/src/published-site.json"
+        ? artifacts[0]
+        : null;
+    if (
+      input.serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
+    ) {
+      if (
+        legacyArtifact === null ||
+        (await sha256(legacyArtifact.bytes)) !== input.artifactHash
+      ) {
+        return false;
+      }
+    } else if (
+      (await hashContentPublicationArtifacts(artifacts)) !==
+      input.artifactHash
+    ) {
+      return false;
+    }
     const [candidate, comparison] = await Promise.all([
       request(token, `/git/commits/${commitSha}`),
       request(
@@ -705,21 +832,48 @@ export function createGitHubContentPublisher({
       comparison.status !== "ahead" ||
       comparison.ahead_by !== 1 ||
       comparison.total_commits !== 1 ||
-      files.length !== 1 ||
-      files[0]?.filename !== input.path ||
-      files[0]?.status !== "modified" ||
-      typeof files[0]?.sha !== "string"
+      files.length >= 300
     ) {
       return false;
     }
-    const blob = await requestRaw(
-      token,
-      `/git/blobs/${files[0].sha}`,
+    if (legacyArtifact !== null) {
+      if (
+        files.length !== 1 ||
+        files[0]?.filename !== legacyArtifact.path ||
+        files[0]?.status !== "modified" ||
+        typeof files[0]?.sha !== "string"
+      ) {
+        return false;
+      }
+      const blob = await requestRaw(
+        token,
+        `/git/blobs/${files[0].sha}`,
+      );
+      return (
+        blob !== null &&
+        (await sha256Bytes(blob)) === input.artifactHash
+      );
+    }
+    if (typeof candidate.tree?.sha !== "string") {
+      return false;
+    }
+    const expectedBlobShas = await Promise.all(
+      artifacts.map(({ bytes }) =>
+        gitBlobSha(bytes, input.expectedHead),
+      ),
     );
-    return (
-      blob !== null &&
-      (await sha256Bytes(blob)) === input.artifactHash
+    const candidateBlobs = gitTreeBlobs(
+      await request(
+        token,
+        `/git/trees/${candidate.tree.sha}?recursive=1`,
+      ),
     );
+    return publicationCandidateMatches({
+      artifacts,
+      candidateBlobs,
+      expectedBlobShas,
+      files,
+    });
   }
 
   async function readReleaseMarker(expected: {
@@ -755,7 +909,7 @@ export function createGitHubContentPublisher({
   }
 
   return {
-    async getChannelConfigurationHash() {
+    async getChannelConfigurationHash(serializationVersion) {
       const root =
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
           configuration.cloudflareAccountId,
@@ -828,6 +982,9 @@ export function createGitHubContentPublisher({
           )
         : undefined;
       const repository = trigger?.repo_connection;
+      const legacySerialization =
+        serializationVersion ===
+        "foundry.site-definition.canonical-json.v1";
       if (
         typeof trigger !== "object" ||
         trigger === null ||
@@ -849,10 +1006,27 @@ export function createGitHubContentPublisher({
           "packages/site-definition/src/published-site.json",
           trigger.path_includes,
           trigger.path_excludes,
-        )
+        ) ||
+        (!legacySerialization &&
+          (!cloudflareWatchFilterAllows(
+            "content/rich-text/foundry-probe.md",
+            trigger.path_includes,
+            trigger.path_excludes,
+          ) ||
+            !cloudflareWatchFilterAllows(
+              "content/rich-text/nested/foundry-probe.md",
+              trigger.path_includes,
+              trigger.path_excludes,
+            )))
       ) {
         throw new Error("cloudflare_build_configuration_invalid");
       }
+      const pathIncludes = sortedStrings(trigger.path_includes);
+      const fingerprintPathIncludes = legacySerialization
+        ? pathIncludes.filter(
+            (path) => path !== "content/rich-text/*",
+          )
+        : pathIncludes;
       return sha256(
         JSON.stringify({
           appId: configuration.appId,
@@ -879,7 +1053,7 @@ export function createGitHubContentPublisher({
             rootDirectory: trigger.root_directory,
             branchIncludes: sortedStrings(trigger.branch_includes),
             branchExcludes: sortedStrings(trigger.branch_excludes),
-            pathIncludes: sortedStrings(trigger.path_includes),
+            pathIncludes: fingerprintPathIncludes,
             pathExcludes: sortedStrings(trigger.path_excludes),
             buildCachingEnabled: trigger.build_caching_enabled,
             environment: buildEnvironmentProjection(environment),
@@ -928,6 +1102,28 @@ export function createGitHubContentPublisher({
     async createCommit(input): Promise<PublicationCommitResult> {
       let gitSideEffectStarted = false;
       try {
+        const artifacts = [...input.artifacts].sort(
+          ({ path: left }, { path: right }) => left.localeCompare(right),
+        );
+        const legacyArtifact =
+          input.serializationVersion ===
+            "foundry.site-definition.canonical-json.v1" &&
+          artifacts.length === 1 &&
+          artifacts[0]?.path ===
+            "packages/site-definition/src/published-site.json"
+            ? artifacts[0]
+            : null;
+        const artifactsValid =
+          legacyArtifact !== null
+            ? (await sha256(legacyArtifact.bytes)) ===
+              input.artifactHash
+            : input.serializationVersion ===
+                "foundry.site-publication-artifacts.v2" &&
+              (await hashContentPublicationArtifacts(artifacts)) ===
+                input.artifactHash;
+        if (!artifactsValid) {
+          return { state: "failed", detail: "git_operation_failed" };
+        }
         if (!(await input.assertLease())) {
           return { state: "blocked", detail: "publication_lease_lost" };
         }
@@ -935,11 +1131,41 @@ export function createGitHubContentPublisher({
         if ((await productionHead(token)) !== input.expectedHead) {
           return { state: "blocked", detail: "production_head_moved" };
         }
+        let staleManagedPaths: string[] = [];
+        if (legacyArtifact === null) {
+          const baseCommit = await request(
+            token,
+            `/git/commits/${input.expectedHead}`,
+          );
+          if (typeof baseCommit.tree?.sha !== "string") {
+            throw new Error("github_base_tree_invalid");
+          }
+          const baseBlobs = gitTreeBlobs(
+            await request(
+              token,
+              `/git/trees/${baseCommit.tree.sha}?recursive=1`,
+            ),
+          );
+          const artifactPaths = new Set(
+            artifacts.map(({ path }) => path),
+          );
+          staleManagedPaths = [...baseBlobs.keys()]
+            .filter(
+              (path) =>
+                managedRichTextArtifactPathPattern.test(path) &&
+                !artifactPaths.has(
+                  path as ContentPublicationArtifact["path"],
+                ),
+            )
+            .sort();
+        }
         const signedMessage = await signPublicationMessage(
           configuration.publicationSigningSecret,
           {
             expectedHead: input.expectedHead,
-            path: input.path,
+            serializationVersion: input.serializationVersion,
+            path: artifacts[0]!.path,
+            artifactHash: input.artifactHash,
             contentHash: input.contentHash,
             message: input.message,
           },
@@ -979,12 +1205,17 @@ export function createGitHubContentPublisher({
                 ...(body === null ? {} : { body }),
               },
               fileChanges: {
-                additions: [
-                  {
-                    path: input.path,
-                    contents: encodeBase64Utf8(input.bytes),
-                  },
-                ],
+                additions: artifacts.map(({ path, bytes }) => ({
+                  path,
+                  contents: encodeBase64Utf8(bytes),
+                })),
+                ...(staleManagedPaths.length === 0
+                  ? {}
+                  : {
+                      deletions: staleManagedPaths.map((path) => ({
+                        path,
+                      })),
+                    }),
               },
             },
           },
@@ -1020,7 +1251,9 @@ export function createGitHubContentPublisher({
           configuration.publicationSigningSecret,
           {
             expectedHead: input.expectedHead,
-            path: input.path,
+            serializationVersion: input.serializationVersion,
+            path: input.artifacts[0]!.path,
+            artifactHash: input.artifactHash,
             contentHash: input.contentHash,
             message: input.message,
           },
@@ -1091,6 +1324,31 @@ export function createGitHubContentPublisher({
     async retryReference(input) {
       let refUpdateStarted = false;
       try {
+        const artifacts = [...input.artifacts].sort(
+          ({ path: left }, { path: right }) => left.localeCompare(right),
+        );
+        const legacyArtifact =
+          input.serializationVersion ===
+            "foundry.site-definition.canonical-json.v1" &&
+          artifacts.length === 1 &&
+          artifacts[0]?.path ===
+            "packages/site-definition/src/published-site.json"
+            ? artifacts[0]
+            : null;
+        const artifactsValid =
+          legacyArtifact !== null
+            ? (await sha256(legacyArtifact.bytes)) ===
+              input.artifactHash
+            : input.serializationVersion ===
+                "foundry.site-publication-artifacts.v2" &&
+              (await hashContentPublicationArtifacts(artifacts)) ===
+                input.artifactHash;
+        if (!artifactsValid) {
+          return {
+            state: "failed",
+            detail: "git_reference_candidate_invalid",
+          };
+        }
         if (!(await input.assertLease())) {
           return { state: "blocked", detail: "publication_lease_lost" };
         }
@@ -1102,13 +1360,17 @@ export function createGitHubContentPublisher({
         ) {
           return { state: "blocked", detail: "production_head_moved" };
         }
-        const [candidate, comparison, expectedBlobSha] = await Promise.all([
+        const [candidate, comparison, expectedBlobShas] = await Promise.all([
           request(token, `/git/commits/${input.candidateCommitSha}`),
           request(
             token,
             `/compare/${input.expectedHead}...${input.candidateCommitSha}`,
           ),
-          gitBlobSha(input.bytes, input.expectedHead),
+          Promise.all(
+            artifacts.map(({ bytes }) =>
+              gitBlobSha(bytes, input.expectedHead),
+            ),
+          ),
         ]);
         const parents = Array.isArray(candidate.parents)
           ? candidate.parents
@@ -1121,11 +1383,32 @@ export function createGitHubContentPublisher({
           comparison.status !== "ahead" ||
           comparison.ahead_by !== 1 ||
           comparison.total_commits !== 1 ||
-          files.length !== 1 ||
-          files[0]?.filename !== input.path ||
-          files[0]?.status !== "modified" ||
-          files[0]?.sha !== expectedBlobSha
+          files.length >= 300
         ) {
+          return {
+            state: "failed",
+            detail: "git_reference_candidate_invalid",
+          };
+        }
+        const candidateMatches =
+          legacyArtifact !== null
+            ? files.length === 1 &&
+              files[0]?.filename === legacyArtifact.path &&
+              files[0]?.status === "modified" &&
+              files[0]?.sha === expectedBlobShas[0]
+            : typeof candidate.tree?.sha === "string" &&
+              publicationCandidateMatches({
+                artifacts,
+                candidateBlobs: gitTreeBlobs(
+                  await request(
+                    token,
+                    `/git/trees/${candidate.tree.sha}?recursive=1`,
+                  ),
+                ),
+                expectedBlobShas,
+                files,
+              });
+        if (!candidateMatches) {
           return {
             state: "failed",
             detail: "git_reference_candidate_invalid",

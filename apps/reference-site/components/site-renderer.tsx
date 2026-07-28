@@ -3,9 +3,11 @@ import type {
   SiteDefinition,
 } from "@foundry/site-definition";
 import { siteDesignAttributes } from "@foundry/site-definition";
+import type { ReactNode } from "react";
 
 import { MediaOccurrence } from "./media-occurrence";
 import { sectionAnchor } from "@/src/section-anchor";
+import { RichTextRenderer } from "@/components/rich-text-renderer";
 
 function occurrenceFor(
   definition: SiteDefinition | undefined,
@@ -21,11 +23,13 @@ export function SiteSection({
   definition,
   mediaDelivery = "published",
   mediaAccessToken,
+  callToActionBody,
 }: {
   section: PageSection;
   definition?: SiteDefinition;
   mediaDelivery?: "authenticated" | "published";
   mediaAccessToken?: string;
+  callToActionBody?: ReactNode;
 }) {
   switch (section.type) {
     case "hero": {
@@ -139,7 +143,11 @@ export function SiteSection({
         >
           <p className="eyebrow">{section.eyebrow}</p>
           <h2 id={`${section.id}_title`}>{section.title}</h2>
-          <p>{section.body}</p>
+          <div className="rich-text">
+            {callToActionBody ?? (
+              <RichTextRenderer document={section.body} headingOffset={1} />
+            )}
+          </div>
           <a className="button button-light" href={section.action.href}>
             {section.action.label}
           </a>

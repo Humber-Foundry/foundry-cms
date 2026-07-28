@@ -4,6 +4,7 @@ import {
   toPageCompositionIdentity,
   updateEditableSiteField,
   type SiteDefinition,
+  type SiteDefinitionEdit,
 } from "@foundry/site-definition";
 
 function compositionIdentity(definition: SiteDefinition): string {
@@ -212,7 +213,7 @@ export function contentEditorStatusLocked(
 }
 
 export type ContentEditorAction =
-  | Readonly<{ type: "edit"; path: string; value: string }>
+  | (SiteDefinitionEdit & Readonly<{ type: "edit" }>)
   | Readonly<{
       type: "compose";
       definition: SiteDefinition;

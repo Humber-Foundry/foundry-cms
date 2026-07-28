@@ -1,4 +1,9 @@
-import type { SiteDefinition, SiteId } from "@foundry/site-definition";
+import {
+  serializeSiteDefinitionRichTextForPublication,
+  type PublishedRichTextArtifact,
+  type SiteDefinition,
+  type SiteId,
+} from "@foundry/site-definition";
 
 export * from "./human-access";
 export { isValidGitBranchName } from "./git-branch-name.mjs";
@@ -15,11 +20,19 @@ export * from "./media-assets";
 export * from "./in-memory-media-assets";
 
 export interface PublishedSiteRepository {
-  findBySiteId(siteId: SiteId): Promise<SiteDefinition | null>;
+  findBySiteId(siteId: SiteId): Promise<PublishedSiteBundle | null>;
 }
+
+export type PublishedSiteBundle = Readonly<{
+  definition: SiteDefinition;
+  richTextArtifacts: ReadonlyArray<PublishedRichTextArtifact>;
+}>;
 
 export type PublishedSiteQueries = Readonly<{
   getPublishedSite(): Promise<SiteDefinition>;
+  getPublishedRichTextArtifacts(): Promise<
+    ReadonlyArray<PublishedRichTextArtifact>
+  >;
 }>;
 
 export type SiteApplication = Readonly<{
@@ -46,13 +59,22 @@ export function createSiteApplication({
 }): SiteApplication {
   const queries: PublishedSiteQueries = Object.freeze({
     async getPublishedSite() {
-      const definition = await publishedSites.findBySiteId(siteId);
+      const published = await publishedSites.findBySiteId(siteId);
 
-      if (definition === null) {
+      if (published === null) {
         throw new SiteNotFoundError(siteId);
       }
 
-      return definition;
+      return published.definition;
+    },
+    async getPublishedRichTextArtifacts() {
+      const published = await publishedSites.findBySiteId(siteId);
+
+      if (published === null) {
+        throw new SiteNotFoundError(siteId);
+      }
+
+      return published.richTextArtifacts;
     },
   });
 
@@ -63,15 +85,25 @@ export function createSiteApplication({
 }
 
 export function createInMemoryPublishedSiteRepository(
-  definitions: ReadonlyArray<SiteDefinition>,
+  bundles: ReadonlyArray<PublishedSiteBundle>,
 ): PublishedSiteRepository {
   const definitionsBySite = new Map(
-    definitions.map((definition) => [definition.site.id, definition]),
+    bundles.map((bundle) => [bundle.definition.site.id, bundle]),
   );
 
   return Object.freeze({
     async findBySiteId(siteId: SiteId) {
       return definitionsBySite.get(siteId) ?? null;
     },
+  });
+}
+
+export function createPublishedSiteBundle(
+  definition: SiteDefinition,
+): PublishedSiteBundle {
+  return Object.freeze({
+    definition,
+    richTextArtifacts:
+      serializeSiteDefinitionRichTextForPublication(definition),
   });
 }

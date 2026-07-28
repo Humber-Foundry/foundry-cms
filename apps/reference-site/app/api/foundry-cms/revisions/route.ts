@@ -12,10 +12,11 @@ import {
   createContentWorkspaceId,
   createMediaAssetId,
 } from "@foundry/application";
-import type {
-  PageComposition,
-  SiteDefinition,
-  SiteDefinitionEdit,
+import {
+  createSerializedRichTextDocument,
+  type PageComposition,
+  type SiteDefinition,
+  type SiteDefinitionEdit,
 } from "@foundry/site-definition";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
@@ -212,8 +213,36 @@ function parseSaveBody(
       errors[path] = "Provide a stable Site Definition field path.";
     } else if (typeof entry.value !== "string") {
       errors[path] = "Enter a text value.";
+    } else if (
+      entry.format !== undefined &&
+      entry.format !== "plainText" &&
+      entry.format !== "richText"
+    ) {
+      errors[path] = "Provide a supported field value format.";
+    } else if (entry.format === "richText") {
+      try {
+        edits.push({
+          path: entry.path,
+          format: "richText",
+          value: createSerializedRichTextDocument(entry.value),
+        });
+      } catch {
+        errors[path] =
+          "Rich text is invalid or contains unsupported or unsafe content.";
+      }
     } else {
-      edits.push({ path: entry.path, value: entry.value });
+      edits.push(
+        entry.format === "plainText"
+          ? {
+              path: entry.path,
+              format: "plainText",
+              value: entry.value,
+            }
+          : {
+              path: entry.path,
+              value: entry.value,
+            },
+      );
     }
   });
   if (Object.keys(errors).length > 0) {

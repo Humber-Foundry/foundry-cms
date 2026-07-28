@@ -256,11 +256,48 @@
   color: #b8d9c6;
 }
 
-.contact p:not(.eyebrow) {
+.contact .rich-text {
   max-width: 36rem;
   margin: 2rem 0;
   color: #d5e0da;
   font-size: 1.1rem;
+}
+
+.contact .rich-text > :first-child {
+  margin-top: 0;
+}
+
+.contact .rich-text > :last-child {
+  margin-bottom: 0;
+}
+
+.contact .rich-text a {
+  color: inherit;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.2em;
+}
+
+.contact .rich-text h3,
+.contact .rich-text h4,
+.contact .rich-text h5,
+.contact .rich-text h6 {
+  max-width: 28ch;
+  margin: 1.5rem 0 0.5rem;
+  font-family: var(--font-serif);
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.contact .rich-text ul,
+.contact .rich-text ol {
+  padding-left: 1.4rem;
+}
+
+.contact .rich-text blockquote {
+  margin-inline: 0;
+  border-left: 0.2rem solid #b8d9c6;
+  padding-left: 1rem;
+  font-style: italic;
 }
 
 .button-light {

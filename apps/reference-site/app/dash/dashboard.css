@@ -532,7 +532,8 @@
   font-weight: 700;
 }
 
-.editor-groups label {
+.editor-groups label,
+.editor-groups .editor-field {
   display: grid;
   gap: 0.35rem;
   color: var(--ink-soft);
@@ -540,7 +541,8 @@
   font-weight: 700;
 }
 
-.editor-groups label > span {
+.editor-groups label > span,
+.editor-groups .editor-field > span {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -566,6 +568,104 @@
   font: inherit;
   font-size: 0.9rem;
   font-weight: 400;
+}
+
+.rich-text-editor {
+  overflow: hidden;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.45rem;
+  background: #fbfcfa;
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.rich-text-editor[data-invalid="true"] {
+  border-color: #a5453d;
+}
+
+.rich-text-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid #dce1dc;
+  padding: 0.4rem;
+  background: #f2f5f1;
+}
+
+.rich-text-toolbar button {
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  padding: 0.35rem 0.5rem;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.rich-text-toolbar button[aria-pressed="true"] {
+  border-color: #8b9c92;
+  background: var(--white);
+}
+
+.rich-text-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.rich-text-editor .tiptap {
+  min-height: 9rem;
+  padding: 0.75rem;
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  line-height: 1.5;
+  outline: none;
+}
+
+.rich-text-editor .tiptap > :first-child {
+  margin-top: 0;
+}
+
+.rich-text-editor .tiptap > :last-child {
+  margin-bottom: 0;
+}
+
+.rich-text-editor .tiptap h2,
+.rich-text-editor .tiptap h3,
+.rich-text-editor .tiptap h4,
+.rich-text-editor .tiptap h5 {
+  margin-block: 1rem 0.5rem;
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.rich-text-editor .tiptap p,
+.rich-text-editor .tiptap ul,
+.rich-text-editor .tiptap ol,
+.rich-text-editor .tiptap blockquote {
+  margin-block: 0.65rem;
+}
+
+.rich-text-editor .tiptap blockquote {
+  border-left: 0.2rem solid #8b9c92;
+  padding-left: 0.85rem;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.rich-text-editor .tiptap a {
+  color: inherit;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.2em;
+}
+
+.rich-text-editor small[role="alert"] {
+  display: block;
+  padding: 0 0.75rem 0.75rem;
+  color: #8a352f;
 }
 
 .editor-groups textarea {

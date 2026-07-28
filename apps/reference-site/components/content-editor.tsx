@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import type { ContentRevision } from "@foundry/application";
 import {
@@ -8,6 +15,7 @@ import {
   pageCompositionContract,
   toPageComposition,
   toPageCompositionIdentity,
+  updateEditableSiteField,
   type EditableSiteField,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
@@ -40,6 +48,7 @@ import {
   recoverStaleEdits,
   resolveStructuralRecovery,
   synchronizeStaleEdits,
+  upgradeLegacyRichTextRecoveryEdit,
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
@@ -49,6 +58,7 @@ import {
   useContentEditorPersistence,
 } from "../src/content-editor-persistence";
 import { pageCompositionChanged } from "../src/page-composition-puck";
+import { RichTextEditor } from "./rich-text-editor";
 import {
   PublicationHistory,
   publicationLabels,
@@ -70,8 +80,16 @@ function changedFields(
     persisted.map((field) => [field.path, field.value]),
   );
   return working
-    .filter((field) => persistedValues.get(field.path) !== field.value)
-    .map(({ path, value }) => ({ path, value }));
+    .filter(
+      (field) =>
+        JSON.stringify(persistedValues.get(field.path)) !==
+        JSON.stringify(field.value),
+    )
+    .map((field): SiteDefinitionEdit =>
+      field.format === "richText"
+        ? { path: field.path, format: "richText", value: field.value }
+        : { path: field.path, format: "plainText", value: field.value },
+    );
 }
 
 export function ContentEditor({
@@ -126,6 +144,10 @@ export function ContentEditor({
   const [publicationBusy, setPublicationBusy] = useState(false);
   const [publicationPollAttempt, setPublicationPollAttempt] = useState(0);
   const [openingPreview, setOpeningPreview] = useState(false);
+  const [invalidRichTextSources, setInvalidRichTextSources] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const hasInvalidRichText = invalidRichTextSources.size > 0;
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -166,6 +188,15 @@ export function ContentEditor({
   const workingFields = useMemo(
     () => listEditableSiteFields(state.workingDefinition),
     [state.workingDefinition],
+  );
+  const richTextPaths = useMemo(
+    () =>
+      new Set(
+        workingFields
+          .filter((field) => field.format === "richText")
+          .map((field) => field.path),
+      ),
+    [workingFields],
   );
   const edits = useMemo(
     () => changedFields(persistedFields, workingFields),
@@ -220,6 +251,38 @@ export function ContentEditor({
     recoveryBlocked: recoveryConflicts.length > 0,
     onStorageError: setMessage,
   });
+  const discardPersistenceAttempt = useRef(persistence.discardAttempt);
+  discardPersistenceAttempt.current = persistence.discardAttempt;
+  const updateRichTextValidation = useCallback(
+    (source: string, invalid: boolean) => {
+      setInvalidRichTextSources((current) => {
+        if (current.has(source) === invalid) {
+          return current;
+        }
+        const next = new Set(current);
+        if (invalid) {
+          next.add(source);
+        } else {
+          next.delete(source);
+        }
+        return next;
+      });
+      if (!invalid) {
+        return;
+      }
+      discardPersistenceAttempt.current();
+      setApprovalId(null);
+      setPreviewedRevision(null);
+      pendingApprovalAttempt.current = null;
+      pendingPublicationAttempt.current = null;
+    },
+    [],
+  );
+  const updateVisualRichTextValidation = useCallback(
+    (source: string, invalid: boolean) =>
+      updateRichTextValidation(`visual:${source}`, invalid),
+    [updateRichTextValidation],
+  );
   const groups = ["Design", "Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
     !persistence.coordinated ||
@@ -271,9 +334,12 @@ export function ContentEditor({
         if (cancelled || record === null || record.edits.length === 0) {
           return;
         }
+        const recoveredEdits = record.edits.map((edit) =>
+          upgradeLegacyRichTextRecoveryEdit(edit, richTextPaths),
+        );
         recoveryPending.current = mergeRecoverySources(
           recoveryPending.current,
-          record.edits,
+          recoveredEdits,
         );
         if (initialStale) {
           setMessage(
@@ -286,11 +352,12 @@ export function ContentEditor({
           destinationValues: currentValues,
         } = planStructuralFirstRecovery(
           state.workingDefinition,
-          record.edits,
+          recoveredEdits,
         );
         const conflicts: StaleRecoveryConflict[] = [];
         let recoveredCount = 0;
         let alreadyAppliedCount = 0;
+        let recoveryDefinition = state.workingDefinition;
         for (const edit of orderedEdits) {
           const currentValue = currentValues.get(edit.path);
           if (currentValue === undefined) {
@@ -315,10 +382,11 @@ export function ContentEditor({
           }
           if (edit.path === pageCompositionContract.slot.id) {
             const result = applyStructuralRecovery(
-              state.workingDefinition,
+              recoveryDefinition,
               edit,
             );
             if (result.ok) {
+              recoveryDefinition = result.definition;
               dispatch({
                 type: "compose",
                 definition: result.definition,
@@ -333,8 +401,21 @@ export function ContentEditor({
               });
             }
           } else {
-            dispatch({ type: "edit", ...edit });
-            recoveredCount += 1;
+            const updatedDefinition = updateEditableSiteField(
+              recoveryDefinition,
+              edit,
+            );
+            if (updatedDefinition === null) {
+              conflicts.push({
+                ...edit,
+                currentValue,
+                reason: "changed",
+              });
+            } else {
+              recoveryDefinition = updatedDefinition;
+              dispatch({ type: "edit", ...edit });
+              recoveredCount += 1;
+            }
           }
         }
         if (alreadyAppliedCount === orderedEdits.length) {
@@ -504,6 +585,7 @@ export function ContentEditor({
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
       destinationValues,
+      richTextPaths,
     );
     if (!recovery.available) {
       setRecoverySourcesReady(true);
@@ -530,6 +612,7 @@ export function ContentEditor({
         staleRecovery.id,
         staleRecovery.sourceWorkspaceId,
         projectedRecovery.destinationValues,
+        richTextPaths,
       );
       if (!recovery.available) {
         setRecoverySourcesReady(true);
@@ -546,15 +629,17 @@ export function ContentEditor({
         state.workingDefinition,
         recovery.recovered,
       );
+    let recoveryDefinition = state.workingDefinition;
     for (const edit of orderedRecovered) {
       if (edit.path === pageCompositionContract.slot.id) {
         const result = resolveStructuralRecovery(
-          state.workingDefinition,
+          recoveryDefinition,
           edit,
           destinationValues.get(edit.path) ?? null,
         );
         if (result.ok) {
           applied.push(edit);
+          recoveryDefinition = result.definition;
           dispatch({
             type: "compose",
             definition: result.definition,
@@ -564,8 +649,21 @@ export function ContentEditor({
           nextConflicts.push(result.conflict);
         }
       } else {
-        applied.push(edit);
-        dispatch({ type: "edit", ...edit });
+        const updatedDefinition = updateEditableSiteField(
+          recoveryDefinition,
+          edit,
+        );
+        if (updatedDefinition === null) {
+          nextConflicts.push({
+            ...edit,
+            currentValue: destinationValues.get(edit.path) ?? null,
+            reason: "changed",
+          });
+        } else {
+          applied.push(edit);
+          recoveryDefinition = updatedDefinition;
+          dispatch({ type: "edit", ...edit });
+        }
       }
     }
     recoveryPending.current = mergeRecoverySources(
@@ -646,6 +744,7 @@ export function ContentEditor({
 
   async function save() {
     if (
+      hasInvalidRichText ||
       saveInFlight.current ||
       !persistence.coordinated ||
       !persistence.ready ||
@@ -757,11 +856,8 @@ export function ContentEditor({
             window.history.replaceState(null, "", activeWorkspaceUrl);
           } else {
             const unresolved = recoveryConflicts.map(
-              ({ path, value, baseValue }) => ({
-                path,
-                value,
-                baseValue,
-              }),
+              ({ currentValue: _currentValue, reason: _reason, ...edit }) =>
+                edit,
             );
             recoveryPending.current = unresolved;
             preserveStaleEdits(
@@ -803,6 +899,9 @@ export function ContentEditor({
   }
 
   async function openPreview() {
+    if (hasInvalidRichText) {
+      return;
+    }
     const popup = window.open("", "_blank");
     if (popup !== null) popup.opener = null;
     setOpeningPreview(true);
@@ -844,6 +943,7 @@ export function ContentEditor({
 
   useContentEditorAutosave({
     enabled:
+      !hasInvalidRichText &&
       persistence.coordinated &&
       persistence.ready &&
       state.status === "dirty" &&
@@ -853,7 +953,7 @@ export function ContentEditor({
     onSave: () => void save(),
   });
 
-  function edit(path: string, value: string) {
+  function edit(edit: SiteDefinitionEdit): boolean {
     if (
       publicationBusy ||
       saveInFlight.current ||
@@ -861,14 +961,18 @@ export function ContentEditor({
       !persistence.ready ||
       contentEditorStatusLocked(state.status)
     ) {
-      return;
+      return false;
+    }
+    if (updateEditableSiteField(state.workingDefinition, edit) === null) {
+      return false;
     }
     persistence.discardAttempt();
     setApprovalId(null);
     setPreviewedRevision(null);
     pendingApprovalAttempt.current = null;
     pendingPublicationAttempt.current = null;
-    dispatch({ type: "edit", path, value });
+    dispatch({ type: "edit", ...edit });
+    return true;
   }
 
   function moveEditHistory(direction: "undo" | "redo") {
@@ -884,6 +988,9 @@ export function ContentEditor({
   }
 
   async function approveRevision() {
+    if (hasInvalidRichText) {
+      return;
+    }
     pendingApprovalAttempt.current ??= {
       body: JSON.stringify({
         operation: "approve",
@@ -939,7 +1046,7 @@ export function ContentEditor({
   }
 
   async function publishRevision() {
-    if (approvalId === null) {
+    if (hasInvalidRichText || approvalId === null) {
       return;
     }
     pendingPublicationAttempt.current ??= {
@@ -1146,7 +1253,12 @@ export function ContentEditor({
           return;
         }
       } else {
-        edit(conflict.path, conflict.value);
+        if (!edit(conflict)) {
+          setMessage(
+            "That recovered value no longer fits the current Site Definition. It remains preserved until you keep the latest value.",
+          );
+          return;
+        }
       }
     }
     const remaining = recoveryConflicts.filter(
@@ -1227,6 +1339,7 @@ export function ContentEditor({
             className="button button-primary"
             disabled={
               (edits.length === 0 && composition === undefined) ||
+              hasInvalidRichText ||
               editorLocked ||
               recoveryConflicts.length > 0
             }
@@ -1246,7 +1359,11 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={openingPreview || previewUrl === undefined}
+            disabled={
+              hasInvalidRichText ||
+              openingPreview ||
+              previewUrl === undefined
+            }
             onClick={() => void openPreview()}
           >
             {openingPreview
@@ -1298,6 +1415,7 @@ export function ContentEditor({
             className="copy-button"
             disabled={
               publicationBusy ||
+              hasInvalidRichText ||
               edits.length > 0 ||
               state.status !== "saved" ||
               previewedRevision !== state.persistedRevision
@@ -1313,6 +1431,7 @@ export function ContentEditor({
             className="button button-primary"
             disabled={
               publicationBusy ||
+              hasInvalidRichText ||
               approvalId === null ||
               (publication !== null && publicationIsActive(publication)) ||
               (publication !== null &&
@@ -1358,7 +1477,9 @@ export function ContentEditor({
                 {edit.reason === "changed" ? (
                   <>
                     <span>Latest: {edit.currentValue}</span>
-                    <span>Your unsaved value: {edit.value}</span>
+                    <span>
+                      Your unsaved value: {displayEditableValue(edit)}
+                    </span>
                     <span className="editor-conflict-actions">
                       <button
                         type="button"
@@ -1384,7 +1505,7 @@ export function ContentEditor({
                   <>
                     <span>
                       This field no longer exists. Your unsaved value:{" "}
-                      {edit.value}
+                      {displayEditableValue(edit)}
                     </span>
                     <button
                       type="button"
@@ -1407,14 +1528,20 @@ export function ContentEditor({
         key={`${state.persistedRevision}:${state.projectionVersion}`}
         definition={state.workingDefinition}
         disabled={editorLocked}
+        onValidationChange={updateVisualRichTextValidation}
         onChange={(definition) => {
           if (
+            publicationBusy ||
             saveInFlight.current ||
             contentEditorStatusLocked(state.status)
           ) {
             return;
           }
           persistence.discardAttempt();
+          setApprovalId(null);
+          setPreviewedRevision(null);
+          pendingApprovalAttempt.current = null;
+          pendingPublicationAttempt.current = null;
           dispatch({ type: "compose", definition });
         }}
       />
@@ -1424,52 +1551,114 @@ export function ContentEditor({
             <legend>{group}</legend>
             {workingFields
               .filter((field) => field.group === group)
-              .map((field) => (
-                <label key={field.path}>
-                  <span>
+              .map((field) => {
+                const labelId = `${field.path}-label`;
+                const fieldLabel = (
+                  <span id={labelId}>
                     {field.label}
                     <code>{field.path}</code>
                   </span>
-                  {field.values !== undefined ? (
-                    <select
-                      disabled={editorLocked}
-                      value={field.value}
-                      aria-invalid={Boolean(state.errors[field.path])}
-                      aria-describedby={`${field.path}-error`}
-                      onChange={(event) => edit(field.path, event.target.value)}
-                    >
-                      {field.values.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  ) : field.multiline ? (
-                    <textarea
-                      rows={3}
-                      disabled={editorLocked}
-                      value={field.value}
-                      aria-invalid={Boolean(state.errors[field.path])}
-                      aria-describedby={`${field.path}-error`}
-                      onChange={(event) => edit(field.path, event.target.value)}
-                    />
-                  ) : (
-                    <input
-                      disabled={editorLocked}
-                      value={field.value}
-                      aria-invalid={Boolean(state.errors[field.path])}
-                      aria-describedby={`${field.path}-error`}
-                      onChange={(event) => edit(field.path, event.target.value)}
-                    />
-                  )}
+                );
+                const fieldError = (
                   <small id={`${field.path}-error`}>
                     {state.errors[field.path] ?? ""}
                   </small>
-                </label>
-              ))}
+                );
+                if (field.format === "richText") {
+                  return (
+                    <div
+                      className="editor-field"
+                      key={field.path}
+                      role="group"
+                      aria-labelledby={labelId}
+                    >
+                      {fieldLabel}
+                      <RichTextEditor
+                        id={`${field.path}-editor`}
+                        disabled={editorLocked}
+                        value={field.value}
+                        invalid={Boolean(state.errors[field.path])}
+                        describedBy={`${field.path}-error`}
+                        labelledBy={labelId}
+                        onChange={(value) =>
+                          edit({
+                            path: field.path,
+                            format: "richText",
+                            value,
+                          })
+                        }
+                        onValidationChange={(invalid) =>
+                          updateRichTextValidation(field.path, invalid)
+                        }
+                      />
+                      {fieldError}
+                    </div>
+                  );
+                }
+                return (
+                  <label key={field.path}>
+                    {fieldLabel}
+                    {field.values !== undefined ? (
+                      <select
+                        disabled={editorLocked}
+                        value={field.value}
+                        aria-invalid={Boolean(state.errors[field.path])}
+                        aria-describedby={`${field.path}-error`}
+                        onChange={(event) =>
+                          edit({
+                            path: field.path,
+                            format: "plainText",
+                            value: event.target.value,
+                          })
+                        }
+                      >
+                        {field.values.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.multiline ? (
+                      <textarea
+                        rows={3}
+                        disabled={editorLocked}
+                        value={field.value}
+                        aria-invalid={Boolean(state.errors[field.path])}
+                        aria-describedby={`${field.path}-error`}
+                        onChange={(event) =>
+                          edit({
+                            path: field.path,
+                            format: "plainText",
+                            value: event.target.value,
+                          })
+                        }
+                      />
+                    ) : (
+                      <input
+                        disabled={editorLocked}
+                        value={field.value}
+                        aria-invalid={Boolean(state.errors[field.path])}
+                        aria-describedby={`${field.path}-error`}
+                        onChange={(event) =>
+                          edit({
+                            path: field.path,
+                            format: "plainText",
+                            value: event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                    {fieldError}
+                  </label>
+                );
+              })}
           </fieldset>
         ))}
       </div>
     </section>
   );
+}
+
+function displayEditableValue(edit: SiteDefinitionEdit): string {
+  return edit.format === "richText" ? "Rich-text content" : edit.value;
 }

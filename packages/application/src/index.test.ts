@@ -8,6 +8,7 @@ import {
 import {
   SiteNotFoundError,
   createInMemoryPublishedSiteRepository,
+  createPublishedSiteBundle,
   createSiteApplication,
 } from "./index";
 
@@ -16,7 +17,7 @@ describe("site-scoped published-site query", () => {
     const application = createSiteApplication({
       siteId: referenceSiteDefinition.site.id,
       publishedSites: createInMemoryPublishedSiteRepository([
-        referenceSiteDefinition,
+        createPublishedSiteBundle(referenceSiteDefinition),
       ]),
     });
 
@@ -36,5 +37,23 @@ describe("site-scoped published-site query", () => {
     await expect(application.queries.getPublishedSite()).rejects.toEqual(
       new SiteNotFoundError(createSiteId("site_missing")),
     );
+  });
+
+  it("carries deterministic Markdown in the published site bundle", async () => {
+    const application = createSiteApplication({
+      siteId: referenceSiteDefinition.site.id,
+      publishedSites: createInMemoryPublishedSiteRepository([
+        createPublishedSiteBundle(referenceSiteDefinition),
+      ]),
+    });
+
+    await expect(
+      application.queries.getPublishedRichTextArtifacts(),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        filePath: "content/rich-text/section_contact/body.md",
+        markdown: expect.stringContaining("Bring the rough notes"),
+      }),
+    ]);
   });
 });

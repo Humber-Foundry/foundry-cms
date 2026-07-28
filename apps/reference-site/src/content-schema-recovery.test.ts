@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { canonicalJson } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  createRichTextDocumentFromPlainText,
+  referenceSiteDefinition,
+  serializeRichTextDocument,
+} from "@foundry/site-definition";
 
 import {
   durableSchemaRecoveryEdits,
@@ -25,6 +29,17 @@ function legacyDefinition(
   return definition;
 }
 
+function storedDesignDefinition(body: string) {
+  const definition = structuredClone(referenceSiteDefinition) as any;
+  definition.definitionVersion = "1.1.0";
+  definition.schemaVersion = "1.1.0";
+  const callToAction = definition.home.sections.find(
+    (section: any) => section.type === "callToAction",
+  );
+  callToAction.body = body;
+  return definition;
+}
+
 describe("content schema recovery", () => {
   it("upgrades a verified legacy publication into a valid current draft base", () => {
     const legacy = legacyDefinition("Restored legacy release");
@@ -33,9 +48,10 @@ describe("content schema recovery", () => {
 
     expect(restored).toEqual(
       expect.objectContaining({
-        definitionVersion: "1.1.0",
-        schemaVersion: "1.1.0",
+        definitionVersion: "1.2.0",
+        schemaVersion: "1.2.0",
         design: referenceSiteDefinition.design,
+        home: expect.objectContaining({ media: [] }),
         site: expect.objectContaining({
           name: "Restored legacy release",
         }),
@@ -70,6 +86,38 @@ describe("content schema recovery", () => {
         legacyDefinition(),
       ),
     ).toEqual([]);
+  });
+
+  it("carries a durable rich-text edit from the stored design schema", () => {
+    const [structural, richText] = durableSchemaRecoveryEdits(
+      storedDesignDefinition("Saved design-schema body."),
+      storedDesignDefinition("Updated design-schema body."),
+    );
+    const recoveredComposition = JSON.parse(structural!.value);
+    const recoveredCallToAction = recoveredComposition.components.find(
+      (component: any) => component.type === "callToAction",
+    );
+
+    expect(structural?.path).toBe("slot_home_sections");
+    expect(recoveredCallToAction.body).toEqual(
+      createRichTextDocumentFromPlainText(
+        "Updated design-schema body.",
+      ),
+    );
+    expect(richText).toEqual({
+      path: "section_contact.body",
+      format: "richText",
+      baseValue: serializeRichTextDocument(
+        createRichTextDocumentFromPlainText(
+          "Saved design-schema body.",
+        ),
+      ),
+      value: serializeRichTextDocument(
+        createRichTextDocumentFromPlainText(
+          "Updated design-schema body.",
+        ),
+      ),
+    });
   });
 
   it("preserves a durable media replacement and crop for fresh-workspace migration", () => {

@@ -1,3 +1,9 @@
+import {
+  RICH_TEXT_VERSION,
+  SAFE_RICH_TEXT_LINK_PATTERN,
+  validateRichTextDocument,
+  type RichTextDocument,
+} from "./rich-text";
 import type {
   CallToActionVariant,
   HeroVariant,
@@ -7,7 +13,13 @@ import type {
 } from "./design-tokens";
 import { designContract } from "./design-tokens";
 import publishedSite from "./published-site.json";
+import {
+  projectPublishedSiteDefinition,
+  projectSiteDefinitionSchema,
+} from "./site-definition-projection.mjs";
 import validateSiteDefinition from "./site-definition-validator.mjs";
+
+export * from "./rich-text";
 
 declare const siteIdBrand: unique symbol;
 
@@ -103,7 +115,7 @@ export type CallToActionSection = Readonly<{
   variant: CallToActionVariant;
   eyebrow: string;
   title: string;
-  body: string;
+  body: RichTextDocument;
   action: SiteLink;
 }>;
 
@@ -114,8 +126,8 @@ export type PageSection =
   | CallToActionSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.1.0";
-  schemaVersion: "1.1.0";
+  definitionVersion: "1.2.0";
+  schemaVersion: "1.2.0";
   design: SiteDesign;
   site: Readonly<{
     id: SiteId;
@@ -135,11 +147,41 @@ export type SiteDefinition = Readonly<{
   }>;
 }>;
 
-export type StoredSiteDefinitionSchemaVersion = "1.0.0" | "1.1.0";
+export type SiteDefinitionSchemaVersion = SiteDefinition["schemaVersion"];
+export type StoredSiteDefinitionSchemaVersion =
+  | "1.0.0"
+  | "1.1.0"
+  | SiteDefinitionSchemaVersion;
+
+function isSiteDefinitionRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function upgradeSiteDefinition(value: unknown): SiteDefinition {
+  const upgraded = projectSiteDefinitionSchema(value);
+  if (
+    !isSiteDefinitionRecord(upgraded) ||
+    !isSiteDefinitionRecord(upgraded.home) ||
+    !Array.isArray(upgraded.home.sections)
+  ) {
+    throw new TypeError("site_definition_invalid");
+  }
+  for (const section of upgraded.home.sections) {
+    if (
+      isSiteDefinitionRecord(section) &&
+      section.type === "callToAction"
+    ) {
+      validateRichTextDocument(section.body as RichTextDocument);
+    }
+  }
+  return upgraded as SiteDefinition;
+}
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.1.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.2.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
@@ -151,8 +193,8 @@ export const siteDefinitionSchema = {
     "home",
   ],
   properties: {
-    definitionVersion: { const: "1.1.0" },
-    schemaVersion: { const: "1.1.0" },
+    definitionVersion: { const: "1.2.0" },
+    schemaVersion: { const: "1.2.0" },
     design: {
       type: "object",
       additionalProperties: false,
@@ -454,35 +496,247 @@ export const siteDefinitionSchema = {
         variant: { enum: designContract.variants.callToAction.values },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
-        body: { $ref: "#/$defs/text" },
+        body: { $ref: "#/$defs/richTextDocument" },
         action: { $ref: "#/$defs/link" },
+      },
+    },
+    richTextDocument: {
+      type: "object",
+      additionalProperties: false,
+      $comment:
+        "Cross-node canonicality, including adjacent equivalent mark runs and CommonMark delimiter flanking, is enforced by validateRichTextDocument through isSiteDefinition.",
+      required: ["version", "type", "children"],
+      properties: {
+        version: { const: RICH_TEXT_VERSION },
+        type: { const: "document" },
+        children: {
+          type: "array",
+          items: {
+            oneOf: [
+              { $ref: "#/$defs/richTextParagraph" },
+              { $ref: "#/$defs/richTextHeading" },
+              { $ref: "#/$defs/richTextBlockquote" },
+              { $ref: "#/$defs/richTextBulletList" },
+              { $ref: "#/$defs/richTextOrderedList" },
+            ],
+          },
+        },
+      },
+    },
+    richTextText: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "text", "marks"],
+      properties: {
+        type: { const: "text" },
+        text: {
+          type: "string",
+          minLength: 1,
+          pattern: "^[^\\u0000\\r\\n\\uD800-\\uDFFF]*$",
+        },
+        marks: {
+          type: "array",
+          oneOf: [
+            { maxItems: 0 },
+            {
+              minItems: 1,
+              maxItems: 1,
+              prefixItems: [{ const: "bold" }],
+            },
+            {
+              minItems: 1,
+              maxItems: 1,
+              prefixItems: [{ const: "italic" }],
+            },
+            {
+              minItems: 1,
+              maxItems: 1,
+              prefixItems: [{ $ref: "#/$defs/richTextLink" }],
+            },
+            {
+              minItems: 2,
+              maxItems: 2,
+              prefixItems: [{ const: "bold" }, { const: "italic" }],
+            },
+            {
+              minItems: 2,
+              maxItems: 2,
+              prefixItems: [
+                { const: "bold" },
+                { $ref: "#/$defs/richTextLink" },
+              ],
+            },
+            {
+              minItems: 2,
+              maxItems: 2,
+              prefixItems: [
+                { const: "italic" },
+                { $ref: "#/$defs/richTextLink" },
+              ],
+            },
+            {
+              minItems: 3,
+              maxItems: 3,
+              prefixItems: [
+                { const: "bold" },
+                { const: "italic" },
+                { $ref: "#/$defs/richTextLink" },
+              ],
+            },
+          ],
+        },
+      },
+      allOf: [
+        {
+          if: {
+            properties: {
+              marks: {
+                type: "array",
+                contains: { enum: ["bold", "italic"] },
+              },
+            },
+            required: ["marks"],
+          },
+          then: {
+            properties: {
+              text: {
+                type: "string",
+                pattern: "^\\S(?:[^\\r\\n]*\\S)?$",
+              },
+            },
+          },
+        },
+      ],
+    },
+    richTextLink: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "href"],
+      properties: {
+        type: { const: "link" },
+        href: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2048,
+          pattern: SAFE_RICH_TEXT_LINK_PATTERN,
+        },
+      },
+    },
+    richTextParagraph: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "paragraph" },
+        children: {
+          type: "array",
+          items: { $ref: "#/$defs/richTextText" },
+        },
+      },
+    },
+    richTextHeading: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "level", "children"],
+      properties: {
+        type: { const: "heading" },
+        level: { type: "integer", minimum: 2, maximum: 5 },
+        children: {
+          type: "array",
+          items: { $ref: "#/$defs/richTextText" },
+        },
+      },
+    },
+    richTextBlockquote: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "blockquote" },
+        children: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/$defs/richTextParagraph" },
+        },
+      },
+    },
+    richTextListItem: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "listItem" },
+        children: {
+          type: "array",
+          minItems: 1,
+          maxItems: 1,
+          items: { $ref: "#/$defs/richTextParagraph" },
+        },
+      },
+    },
+    richTextBulletList: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "bulletList" },
+        children: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/$defs/richTextListItem" },
+        },
+      },
+    },
+    richTextOrderedList: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "children"],
+      properties: {
+        type: { const: "orderedList" },
+        children: {
+          type: "array",
+          minItems: 1,
+          items: { $ref: "#/$defs/richTextListItem" },
+        },
       },
     },
   },
 } as const;
 
 export function isSiteDefinition(value: unknown): value is SiteDefinition {
-  return validateSiteDefinition(value);
+  if (!validateSiteDefinition(value)) {
+    return false;
+  }
+  try {
+    const definition = value as SiteDefinition;
+    definition.home.sections.forEach((section) => {
+      if (section.type === "callToAction") {
+        validateRichTextDocument(section.body);
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function createReferenceSiteDefinition(
-  published: SiteDefinition,
+  published: unknown,
 ): SiteDefinition {
+  const current = upgradeSiteDefinition(
+    projectPublishedSiteDefinition(published),
+  );
   return {
-    ...published,
+    ...current,
     site: {
-      ...published.site,
-      id: createSiteId(published.site.id),
-    },
-    home: {
-      ...published.home,
-      media: published.home.media ?? [],
+      ...current.site,
+      id: createSiteId(current.site.id),
     },
   };
 }
 
 export const referenceSiteDefinition = createReferenceSiteDefinition(
-  publishedSite as unknown as SiteDefinition,
+  publishedSite,
 );
 
 export * from "./editable-fields";

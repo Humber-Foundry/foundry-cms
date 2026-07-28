@@ -12,6 +12,19 @@ import {
   puckDataToDefinition,
 } from "./page-composition-puck";
 
+function richBody(text: string) {
+  return {
+    version: "1.0.0" as const,
+    type: "document" as const,
+    children: [
+      {
+        type: "paragraph" as const,
+        children: [{ type: "text" as const, text, marks: [] }],
+      },
+    ],
+  };
+}
+
 describe("Puck page-composition adapter", () => {
   it("binds Puck data to stable registered component identifiers", () => {
     const data = definitionToPuckData(referenceSiteDefinition);
@@ -119,7 +132,7 @@ describe("Puck page-composition adapter", () => {
           variant: "moss",
           eyebrow: "New",
           title: "A new invitation",
-          body: "Take the next step.",
+          body: richBody("Take the next step."),
           action: {
             id: "temporary",
             label: "Ignored protected value",
@@ -189,7 +202,7 @@ describe("Puck page-composition adapter", () => {
             type: "callToAction",
             eyebrow: "Next",
             title: "Continue",
-            body: "Take the next step",
+            body: richBody("Take the next step"),
           },
         },
         {
@@ -225,6 +238,54 @@ describe("Puck page-composition adapter", () => {
       errors: {
         slot_home_sections:
           "Only registered page components can enter this slot.",
+      },
+    });
+  });
+
+  it("carries a versioned rich-text body through the Puck adapter", () => {
+    const data = structuredClone(
+      definitionToPuckData(referenceSiteDefinition),
+    );
+    const callToAction = data.content.find(
+      (component) => component.type === "callToAction",
+    )!;
+    const body = richBody("Edited without raw markup");
+    callToAction.props = {
+      ...callToAction.props,
+      body,
+    } as PageSection;
+
+    const result = puckDataToDefinition(referenceSiteDefinition, data);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(
+        result.definition.home.sections.find(
+          (section) => section.type === "callToAction",
+        ),
+      ).toEqual(expect.objectContaining({ body }));
+    }
+  });
+
+  it("rejects a raw string in the rich-text Puck field", () => {
+    const data = structuredClone(
+      definitionToPuckData(referenceSiteDefinition),
+    ) as unknown as {
+      content: Array<{
+        type: PageSection["type"];
+        props: Record<string, unknown>;
+      }>;
+    };
+    const callToAction = data.content.find(
+      (component) => component.type === "callToAction",
+    )!;
+    callToAction.props.body = "<script>alert(1)</script>";
+
+    expect(puckDataToDefinition(referenceSiteDefinition, data)).toEqual({
+      ok: false,
+      errors: {
+        "section_contact.body":
+          "The visual editor must preserve the versioned rich-text document.",
       },
     });
   });

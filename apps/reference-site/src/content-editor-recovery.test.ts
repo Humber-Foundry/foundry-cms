@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   createDefaultPageSection,
   referenceSiteDefinition,
+  remapPageSectionNestedIds,
+  serializeRichTextDocument,
   toPageComposition,
   toPageCompositionIdentity,
+  type SiteDefinition,
 } from "@foundry/site-definition";
 
 import {
@@ -20,6 +23,7 @@ import {
   recoverStaleEdits,
   resolveStructuralRecovery,
   synchronizeStaleEdits,
+  upgradeLegacyRichTextRecoveryEdit,
 } from "./content-editor-recovery";
 
 function createStorage() {
@@ -43,7 +47,139 @@ const edit = {
   value: "My unsaved title",
 };
 
+function legacyComposition(definition: SiteDefinition) {
+  return {
+    ...toPageComposition(definition),
+    components: definition.home.sections.map((section) => {
+      if (section.type !== "callToAction") {
+        return section;
+      }
+      const body = section.body.children
+        .map((block) => {
+          if (block.type !== "paragraph") {
+            throw new Error("expected_plain_legacy_fixture");
+          }
+          return block.children.map(({ text }) => text).join("");
+        })
+        .join("\n");
+      return { ...section, body };
+    }),
+  };
+}
+
 describe("stale edit recovery", () => {
+  it("preserves the rich-text discriminator through durable recovery", () => {
+    const storage = createStorage();
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const baseValue = serializeRichTextDocument(callToAction.body);
+    const value = serializeRichTextDocument({
+      ...callToAction.body,
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "text",
+              text: "Recovered safely",
+              marks: ["italic"],
+            },
+          ],
+        },
+      ],
+    });
+    const richEdit = {
+      path: `${callToAction.id}.body`,
+      format: "richText" as const,
+      baseValue,
+      value,
+    };
+
+    expect(
+      preserveStaleEdits(storage, "rich-recovery", "workspace-old", [
+        richEdit,
+      ]),
+    ).toBe(true);
+    expect(
+      recoverStaleEdits(
+        storage,
+        "rich-recovery",
+        "workspace-old",
+        new Map([[richEdit.path, baseValue]]),
+      ).recovered,
+    ).toEqual([richEdit]);
+  });
+
+  it("upgrades a legacy plain CTA recovery record before comparison", () => {
+    const storage = createStorage();
+    const legacyEdit = {
+      path: "section_contact.body",
+      baseValue:
+        "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
+      value: "Recovered from a pre-rich-text browser outbox.",
+    };
+    preserveStaleEdits(
+      storage,
+      "legacy-rich-recovery",
+      "workspace-old",
+      [legacyEdit],
+    );
+    const currentBody = serializeRichTextDocument(
+      referenceSiteDefinition.home.sections.find(
+        (section) => section.type === "callToAction",
+      )!.body,
+    );
+
+    const result = recoverStaleEdits(
+      storage,
+      "legacy-rich-recovery",
+      "workspace-old",
+      new Map([[legacyEdit.path, currentBody]]),
+      new Set([legacyEdit.path]),
+    );
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.recovered).toEqual([
+      {
+        path: legacyEdit.path,
+        format: "richText",
+        baseValue: currentBody,
+        value: expect.stringContaining(
+          "Recovered from a pre-rich-text browser outbox.",
+        ),
+      },
+    ]);
+  });
+
+  it("recognizes serialized rich text when an older chain lost its format", () => {
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const serialized = serializeRichTextDocument(callToAction.body);
+    const editWithoutDiscriminator = {
+      path: `${callToAction.id}.body`,
+      baseValue: serialized,
+      value: serialized,
+    };
+
+    expect(
+      upgradeLegacyRichTextRecoveryEdit(
+        editWithoutDiscriminator,
+        new Set([editWithoutDiscriminator.path]),
+      ),
+    ).toEqual({
+      ...editWithoutDiscriminator,
+      format: "richText",
+    });
+  });
+
   it("compares a structural command by stable composition identity", () => {
     expect(
       comparableRecoveryValue({
@@ -152,6 +288,65 @@ describe("stale edit recovery", () => {
         ]),
       ).recovered,
     ).toEqual(merged);
+  });
+
+  it("preserves rich-text format while chaining recovered edits", () => {
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const baseValue = serializeRichTextDocument(callToAction.body);
+    const recoveredValue = serializeRichTextDocument({
+      ...callToAction.body,
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", text: "Recovered once", marks: [] },
+          ],
+        },
+      ],
+    });
+    const editedAgainValue = serializeRichTextDocument({
+      ...callToAction.body,
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", text: "Edited again", marks: ["bold"] },
+          ],
+        },
+      ],
+    });
+    const pending = {
+      path: `${callToAction.id}.body`,
+      format: "richText" as const,
+      baseValue,
+      value: recoveredValue,
+    };
+    const currentWithoutDiscriminator = {
+      path: pending.path,
+      baseValue: recoveredValue,
+      value: editedAgainValue,
+    };
+    const expected = {
+      ...currentWithoutDiscriminator,
+      format: "richText",
+      baseValue,
+    };
+
+    expect(
+      mergeStaleRecoveryEdits(
+        [pending],
+        [currentWithoutDiscriminator],
+        new Set(),
+      ),
+    ).toEqual([expected]);
+    expect(
+      mergeRecoverySources([pending], [currentWithoutDiscriminator]),
+    ).toEqual([expected]);
   });
 
   it("merges disjoint durable recovery sources before forwarding", () => {
@@ -308,6 +503,86 @@ describe("stale edit recovery", () => {
         value: "{malformed",
       }),
     ).toEqual({ ok: false });
+  });
+
+  it.each([
+    ["adds", false],
+    ["duplicates", true],
+  ] as const)(
+    "%s a CTA from a legacy structural recovery command",
+    (_operation, duplicate) => {
+      const added = duplicate
+        ? remapPageSectionNestedIds({
+            ...structuredClone(
+              referenceSiteDefinition.home.sections.find(
+                (section) => section.type === "callToAction",
+              )!,
+            ),
+            id: "section_legacy_contact_copy",
+          })
+        : createDefaultPageSection(
+            "callToAction",
+            "section_legacy_contact_added",
+            referenceSiteDefinition,
+          );
+      const target = {
+        ...referenceSiteDefinition,
+        home: {
+          ...referenceSiteDefinition.home,
+          sections: [...referenceSiteDefinition.home.sections, added],
+        },
+      } as SiteDefinition;
+      const result = applyStructuralRecovery(referenceSiteDefinition, {
+        path: "slot_home_sections",
+        baseValue: JSON.stringify(
+          legacyComposition(referenceSiteDefinition),
+        ),
+        value: JSON.stringify(legacyComposition(target)),
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(
+          result.definition.home.sections.find(
+            ({ id }) => id === added.id,
+          ),
+        ).toEqual(added);
+      }
+    },
+  );
+
+  it("removes an unreferenced CTA from a legacy structural recovery command", () => {
+    const removable = createDefaultPageSection(
+      "callToAction",
+      "section_legacy_contact_removable",
+      referenceSiteDefinition,
+    );
+    const source = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections, removable],
+      },
+    } as SiteDefinition;
+    const result = applyStructuralRecovery(source, {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(legacyComposition(source)),
+      value: JSON.stringify({
+        ...legacyComposition(source),
+        components: legacyComposition(source).components.filter(
+          ({ id }) => id !== removable.id,
+        ),
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(
+        result.definition.home.sections.some(
+          ({ id }) => id === removable.id,
+        ),
+      ).toBe(false);
+    }
   });
 
   it("retains a recovered structural edit as a conflict when revalidation fails", () => {

@@ -8,6 +8,10 @@ import {
   ContentWorkspaceAccessError,
   MediaValidationError,
 } from "@foundry/application";
+import {
+  referenceSiteDefinition,
+  serializeRichTextDocument,
+} from "@foundry/site-definition";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
 
 vi.mock("server-only", () => ({}));
@@ -108,15 +112,15 @@ describe("content revision endpoint", () => {
     );
   }
 
-  it("saves through the authorized editor identity", async () => {
+  it("preserves an omitted legacy format for idempotent retry compatibility", async () => {
     mocks.save.mockResolvedValue({
       workspaceId: "workspace_home",
       revision: 3,
       bookmark: "d1-bookmark",
-      definition: { schemaVersion: "1.1.0" },
+      definition: { schemaVersion: "1.2.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -125,7 +129,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Changed" }],
       }),
@@ -135,9 +139,14 @@ describe("content revision endpoint", () => {
     expect(mocks.save).toHaveBeenCalledWith({
       actorId: "membership-editor",
       workspaceId: "workspace_home",
-      schemaVersion: "1.1.0",
+      schemaVersion: "1.2.0",
       baseRevision: 2,
-      edits: [{ path: "section_hero.title", value: "Changed" }],
+      edits: [
+        {
+          path: "section_hero.title",
+          value: "Changed",
+        },
+      ],
       idempotencyKey: "content-save-route-0001",
     });
     expect(mocks.loadApplication).toHaveBeenCalledWith(
@@ -153,15 +162,109 @@ describe("content revision endpoint", () => {
     );
   });
 
+  it("preserves a canonical rich-text edit at the API boundary", async () => {
+    mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "d1-bookmark",
+      definition: referenceSiteDefinition,
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.2.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const value = serializeRichTextDocument(callToAction.body);
+
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.2.0",
+        baseRevision: 2,
+        edits: [
+          {
+            path: `${callToAction.id}.body`,
+            format: "richText",
+            value,
+          },
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edits: [
+          {
+            path: `${callToAction.id}.body`,
+            format: "richText",
+            value,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("rejects unsafe rich text before calling the application", async () => {
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.2.0",
+        baseRevision: 2,
+        edits: [
+          {
+            path: "section_contact.body",
+            format: "richText",
+            value: JSON.stringify({
+              version: "1.0.0",
+              type: "document",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [
+                    {
+                      type: "text",
+                      text: "Unsafe",
+                      marks: [
+                        { type: "link", href: "javascript:alert(1)" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "validation_failed",
+      fields: {
+        "section_contact.body":
+          "Rich text is invalid or contains unsupported or unsafe content.",
+      },
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
   it("passes registered component composition through the shared revision command", async () => {
     mocks.save.mockResolvedValue({
       workspaceId: "workspace_home",
       revision: 3,
       bookmark: "d1-bookmark",
-      definition: { schemaVersion: "1.1.0" },
+      definition: { schemaVersion: "1.2.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -182,7 +285,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [],
         composition,
@@ -202,7 +305,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [],
       }),
@@ -216,10 +319,10 @@ describe("content revision endpoint", () => {
     mocks.create.mockResolvedValue({
       workspaceId: "workspace_created",
       revision: 0,
-      definition: { schemaVersion: "1.1.0" },
+      definition: { schemaVersion: "1.2.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -254,10 +357,10 @@ describe("content revision endpoint", () => {
     mocks.create.mockResolvedValue({
       workspaceId: "workspace_default",
       revision: 0,
-      definition: { schemaVersion: "1.1.0" },
+      definition: { schemaVersion: "1.2.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -495,7 +598,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Stale inputs" }],
       }),
@@ -511,7 +614,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Already saved" }],
       }),
@@ -531,7 +634,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_private",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Unauthorized" }],
       }),
@@ -552,7 +655,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "" }],
       }),
@@ -573,7 +676,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Stale" }],
       }),
@@ -592,7 +695,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Different" }],
       }),
@@ -608,7 +711,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: 42 }],
       }),
@@ -628,7 +731,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         baseRevision: 2,
         edits: [{ path: "__proto__", value: 42 }],
       }),

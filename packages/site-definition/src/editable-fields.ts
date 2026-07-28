@@ -1,19 +1,43 @@
-import type { ProofSection, ServicesSection, SiteDefinition } from "./index";
+import {
+  parseSerializedRichTextDocument,
+  richTextDocumentHasVisibleText,
+  serializeRichTextDocument,
+  serializeRichTextToMarkdown,
+  type ProofSection,
+  type SerializedRichTextDocument,
+  type ServicesSection,
+  type SiteDefinition,
+} from "./index";
 import { designContract } from "./design-tokens";
 
-export type SiteDefinitionEdit = Readonly<{
-  path: string;
-  value: string;
-}>;
+export type SiteDefinitionEdit =
+  | Readonly<{
+      path: string;
+      format?: "plainText";
+      value: string;
+    }>
+  | Readonly<{
+      path: string;
+      format: "richText";
+      value: SerializedRichTextDocument;
+    }>;
 
-export type EditableSiteField = Readonly<{
+type EditableSiteFieldBase = Readonly<{
   path: string;
   label: string;
   group: "Page" | "Navigation" | "Footer" | "SEO" | "Design";
-  value: string;
   multiline: boolean;
   values?: ReadonlyArray<string>;
 }>;
+
+export type EditableSiteField =
+  | (EditableSiteFieldBase &
+      Readonly<{ format: "plainText"; value: string }>)
+  | (EditableSiteFieldBase &
+      Readonly<{
+        format: "richText";
+        value: SerializedRichTextDocument;
+      }>);
 
 export type SiteDefinitionEditResult =
   | Readonly<{ ok: true; definition: SiteDefinition }>
@@ -47,17 +71,37 @@ export class DuplicateEditableSiteFieldPathError extends Error {
   }
 }
 
+type EditableFieldBindingInput = Readonly<{
+  path: string;
+  label: string;
+  group: EditableSiteField["group"];
+  multiline?: boolean;
+  values?: ReadonlyArray<string>;
+  write(definition: MutableSiteDefinition, value: string): void;
+}>;
+
+function fieldBinding(
+  input: EditableFieldBindingInput &
+    Readonly<{ format?: "plainText"; value: string }>,
+): EditableFieldBinding;
+function fieldBinding(
+  input: EditableFieldBindingInput &
+    Readonly<{ format: "richText"; value: SerializedRichTextDocument }>,
+): EditableFieldBinding;
 function fieldBinding({
   path,
   label,
   group,
   value,
   multiline = false,
+  format = "plainText",
   values,
   write,
-}: EditableSiteField & {
-  write(definition: MutableSiteDefinition, value: string): void;
-}): EditableFieldBinding {
+}: EditableFieldBindingInput &
+  Readonly<{
+    format?: EditableSiteField["format"];
+    value: string | SerializedRichTextDocument;
+  }>): EditableFieldBinding {
   return {
     field: {
       path,
@@ -65,8 +109,9 @@ function fieldBinding({
       group,
       value,
       multiline,
+      format,
       ...(values === undefined ? {} : { values }),
-    },
+    } as EditableSiteField,
     write,
   };
 }
@@ -79,7 +124,11 @@ function editableFieldBindings(
     value,
     values,
     write,
-  }: Pick<EditableSiteField, "path" | "label" | "value" | "values"> & {
+  }: {
+    path: string;
+    label: string;
+    value: string;
+    values: ReadonlyArray<string>;
     write(definition: MutableSiteDefinition, value: string): void;
   }) =>
     fieldBinding({
@@ -363,7 +412,22 @@ function editableFieldBindings(
       case "callToAction":
         bindSectionField("eyebrow", "Call to action eyebrow", section.eyebrow);
         bindSectionField("title", "Call to action title", section.title);
-        bindSectionField("body", "Call to action body", section.body, true);
+        fields.push(
+          fieldBinding({
+            path: `${section.id}.body`,
+            label: "Call to action body",
+            group: "Page",
+            value: serializeRichTextDocument(section.body),
+            multiline: true,
+            format: "richText",
+            write: (draft, value) => {
+              const draftSection = draft.home.sections[
+                sectionIndex
+              ] as unknown as Record<string, unknown>;
+              draftSection.body = parseSerializedRichTextDocument(value);
+            },
+          }),
+        );
         bindNestedLabel(
           section.action.id,
           "Call to action label",
@@ -392,6 +456,31 @@ export function listEditableSiteFields(
   return editableFieldBindings(definition).map(({ field }) => field);
 }
 
+export type PublishedRichTextArtifact = Readonly<{
+  fieldPath: string;
+  filePath: `content/rich-text/${string}.md`;
+  markdown: string;
+}>;
+
+export function serializeSiteDefinitionRichTextForPublication(
+  definition: SiteDefinition,
+): ReadonlyArray<PublishedRichTextArtifact> {
+  return listEditableSiteFields(definition)
+    .filter(
+      (
+        field,
+      ): field is Extract<EditableSiteField, { format: "richText" }> =>
+        field.format === "richText",
+    )
+    .map((field) => ({
+      fieldPath: field.path,
+      filePath: `content/rich-text/${field.path.replaceAll(".", "/")}.md`,
+      markdown: serializeRichTextToMarkdown(
+        parseSerializedRichTextDocument(field.value),
+      ),
+    }));
+}
+
 export function updateEditableSiteField(
   definition: SiteDefinition,
   edit: SiteDefinitionEdit,
@@ -403,15 +492,20 @@ export function updateEditableSiteField(
     return null;
   }
   if (
-    binding.field.values !== undefined &&
-    !binding.field.values.includes(edit.value)
+    (edit.format ?? "plainText") !== binding.field.format ||
+    (binding.field.values !== undefined &&
+      !binding.field.values.includes(edit.value))
   ) {
     return null;
   }
   const draft = structuredClone(
     definition,
   ) as unknown as MutableSiteDefinition;
-  binding.write(draft, edit.value);
+  try {
+    binding.write(draft, edit.value);
+  } catch {
+    return null;
+  }
   return draft as unknown as SiteDefinition;
 }
 
@@ -430,9 +524,27 @@ export function applySiteDefinitionEdits(
     if (!bindings.has(edit.path)) {
       errors[edit.path] =
         `This field is not in Site Definition ${definition.definitionVersion}.`;
-    } else if (edit.value.trim() === "") {
+    } else if (
+      (edit.format ?? "plainText") !== bindings.get(edit.path)!.field.format
+    ) {
+      errors[edit.path] = "The field value format does not match its schema.";
+    } else if (
+      bindings.get(edit.path)!.field.format === "plainText" &&
+      edit.value.trim() === ""
+    ) {
       errors[edit.path] = "Enter at least one visible character.";
-    } else {
+    } else if (bindings.get(edit.path)!.field.format === "richText") {
+      try {
+        const document = parseSerializedRichTextDocument(edit.value);
+        if (!richTextDocumentHasVisibleText(document)) {
+          errors[edit.path] = "Enter at least one visible character.";
+        }
+      } catch {
+        errors[edit.path] =
+          "Rich text is invalid or contains unsupported or unsafe content.";
+      }
+    }
+    if (errors[edit.path] === undefined) {
       const values = bindings.get(edit.path)!.field.values;
       if (values !== undefined && !values.includes(edit.value)) {
         errors[edit.path] =

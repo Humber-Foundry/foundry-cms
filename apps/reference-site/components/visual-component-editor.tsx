@@ -1,17 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createUsePuck,
   Puck,
+  registerOverlayPortal,
   type Config,
   type Data,
 } from "@puckeditor/core";
 
 import {
   createDefaultPageSection,
+  parseSerializedRichTextDocument,
   pageCompositionContract,
   referencedPageComponentIds,
+  serializeRichTextDocument,
   siteDesignAttributes,
   type CallToActionSection,
   type HeroSection,
@@ -26,6 +29,7 @@ import {
   definitionToPuckData,
   puckDataToDefinition,
 } from "../src/page-composition-puck";
+import { RichTextEditor } from "./rich-text-editor";
 import { SiteSection } from "./site-renderer";
 
 type RegisteredComponents = {
@@ -55,6 +59,92 @@ function newStableComponentId(type: PageComponentType): string {
 }
 
 const useVisualPuck = createUsePuck();
+const ignoreRichTextValidation = () => undefined;
+
+function RenderedCallToActionSection({
+  definition,
+  section,
+  disabled,
+  onValidationChange,
+}: {
+  definition: SiteDefinition;
+  section: CallToActionSection;
+  disabled: boolean;
+  onValidationChange(source: string, invalid: boolean): void;
+}) {
+  const dispatch = useVisualPuck((state) => state.dispatch);
+  const getSelectorForId = useVisualPuck(
+    (state) => state.getSelectorForId,
+  );
+  const portalRef = useRef<HTMLDivElement>(null);
+  const pageSection: CallToActionSection = {
+    id: section.id,
+    type: section.type,
+    variant: section.variant,
+    eyebrow: section.eyebrow,
+    title: section.title,
+    body: section.body,
+    action: section.action,
+  };
+
+  useEffect(() => {
+    if (portalRef.current === null) {
+      return;
+    }
+    return registerOverlayPortal(portalRef.current, {
+      disableDragOnFocus: true,
+    });
+  }, []);
+
+  return (
+    <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
+      <SiteSection
+        section={pageSection}
+        callToActionBody={
+          <div
+            ref={portalRef}
+            data-rendered-rich-text-editor={section.id}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <RichTextEditor
+              id={`${section.id}-rendered-body-editor`}
+              value={serializeRichTextDocument(section.body)}
+              disabled={disabled}
+              invalid={false}
+              describedBy={`${section.id}_title`}
+              label="Body"
+              onChange={(nextValue) => {
+                const selector = getSelectorForId(section.id);
+                if (selector === undefined) {
+                  return;
+                }
+                dispatch({
+                  type: "replace",
+                  destinationIndex: selector.index,
+                  destinationZone: selector.zone,
+                  data: {
+                    type: "callToAction",
+                    props: {
+                      ...pageSection,
+                      body: parseSerializedRichTextDocument(nextValue),
+                    },
+                  },
+                  recordHistory: true,
+                });
+              }}
+              onValidationChange={(invalid) =>
+                onValidationChange(
+                  `${section.id}.body.rendered`,
+                  invalid,
+                )
+              }
+            />
+          </div>
+        }
+      />
+    </div>
+  );
+}
 
 function InsertComponentActions({ disabled }: { disabled: boolean }) {
   const dispatch = useVisualPuck((state) => state.dispatch);
@@ -207,7 +297,23 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         variant: { type: "custom", visible: false, render: () => <></> },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
-        body: { type: "textarea", label: "Body" },
+        body: {
+          type: "custom",
+          label: "Body",
+          render: ({ name, onChange, value }) => (
+            <RichTextEditor
+              id={`${name}-editor`}
+              value={serializeRichTextDocument(value)}
+              disabled={false}
+              invalid={false}
+              describedBy={`${name}-help`}
+              label="Body"
+              onChange={(nextValue) =>
+                onChange(parseSerializedRichTextDocument(nextValue))
+              }
+            />
+          ),
+        },
         action: { type: "custom", visible: false, render: () => <></> },
       },
       defaultProps: createDefaultPageSection(
@@ -226,6 +332,11 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
 export function createVisualComponentConfig(
   protectedComponentIds: ReadonlySet<string>,
   definition: SiteDefinition,
+  onValidationChange: (
+    source: string,
+    invalid: boolean,
+  ) => void = ignoreRichTextValidation,
+  disabled = false,
 ): Config<RegisteredComponents> {
   return {
     ...visualComponentConfig,
@@ -283,10 +394,37 @@ export function createVisualComponentConfig(
       },
       callToAction: {
         ...visualComponentConfig.components.callToAction,
+        fields: {
+          ...visualComponentConfig.components.callToAction.fields,
+          body: {
+            type: "custom",
+            label: "Body",
+            render: ({ name, onChange, value }) => (
+              <RichTextEditor
+                id={`${name}-editor`}
+                value={serializeRichTextDocument(value)}
+                disabled={false}
+                invalid={false}
+                describedBy={`${name}-help`}
+                label="Body"
+                onChange={(nextValue) =>
+                  onChange(parseSerializedRichTextDocument(nextValue))
+                }
+                onValidationChange={(invalid) =>
+                  onValidationChange(name, invalid)
+                }
+              />
+            ),
+          },
+        } as NonNullable<
+          (typeof visualComponentConfig.components.callToAction)["fields"]
+        >,
         render: (props) => (
-          <DesignScopedSection
+          <RenderedCallToActionSection
             definition={definition}
             section={props as CallToActionSection}
+            disabled={disabled}
+            onValidationChange={onValidationChange}
           />
         ),
         defaultProps: createDefaultPageSection(
@@ -306,11 +444,13 @@ export function VisualComponentEditor({
   definition,
   disabled,
   onChange,
+  onValidationChange = ignoreRichTextValidation,
   iframeEnabled = true,
 }: {
   definition: SiteDefinition;
   disabled: boolean;
   onChange(definition: SiteDefinition): void;
+  onValidationChange?(source: string, invalid: boolean): void;
   iframeEnabled?: boolean;
 }) {
   const initialData = useMemo(
@@ -324,13 +464,23 @@ export function VisualComponentEditor({
       createVisualComponentConfig(
         referencedPageComponentIds(definition),
         definition,
+        onValidationChange,
+        disabled,
       ),
-    [definition],
+    [definition, disabled, onValidationChange],
   );
   const [message, setMessage] = useState("");
+  const active = useRef(true);
+
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
 
   function accept(data: Data<RegisteredComponents>) {
-    if (disabled) {
+    if (!active.current || disabled) {
       return;
     }
     const result = puckDataToDefinition(definition, data);

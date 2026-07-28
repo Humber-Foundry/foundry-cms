@@ -9,10 +9,17 @@ import {
   createSiteId,
   isSiteDefinition,
   listEditableSiteFields,
+  serializeRichTextDocument,
+  serializeSiteDefinitionRichTextForPublication,
+  upgradeSiteDefinition,
+  validateRichTextDocument,
+  type SerializedRichTextDocument,
+  type RichTextDocument,
   referenceSiteDefinition,
   siteDefinitionSchema,
   type SiteDefinition,
 } from "./index";
+import publishedSite from "./published-site.json";
 
 describe("reference Site Definition", () => {
   const ajv = new Ajv2020({ allErrors: true });
@@ -22,14 +29,64 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.1.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.1.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.2.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.2.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.1.0",
+      "https://foundrycms.dev/schemas/site-definition/1.2.0",
     );
+    expect(
+      siteDefinitionSchema.$defs.richTextDocument.$comment,
+    ).toContain("isSiteDefinition");
+  });
+
+  it("stages the rich-text schema upgrade without rewriting published bytes", () => {
+    const stored = publishedSite as unknown as Record<string, any>;
+    const storedCallToAction = stored.home.sections.find(
+      (section: Record<string, unknown>) =>
+        section.type === "callToAction",
+    );
+    const runtimeCallToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    );
+
+    expect(stored.definitionVersion).toBe("1.1.0");
+    expect(stored.schemaVersion).toBe("1.1.0");
+    expect(typeof storedCallToAction?.body).toBe("string");
+    expect(runtimeCallToAction).toEqual(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          version: "1.0.0",
+          type: "document",
+        }),
+      }),
+    );
+  });
+
+  it("does not inject optional media into an already-current definition", () => {
+    const current = structuredClone(referenceSiteDefinition);
+    const { media: _media, ...homeWithoutMedia } = current.home;
+
+    const loaded = createReferenceSiteDefinition({
+      ...current,
+      home: homeWithoutMedia,
+    });
+
+    expect(Object.hasOwn(loaded.home, "media")).toBe(false);
+    expect(isSiteDefinition(loaded)).toBe(true);
+  });
+
+  it("rejects unpaired UTF-16 surrogates in the text schema without rejecting scalar pairs", () => {
+    const textPattern = new RegExp(
+      siteDefinitionSchema.$defs.richTextText.properties.text.pattern,
+      "u",
+    );
+
+    expect(textPattern.test("\uD800")).toBe(false);
+    expect(textPattern.test("\uDFFF")).toBe(false);
+    expect(textPattern.test("Visible 😀 text")).toBe(true);
   });
 
   it("uses unique stable identifiers for every page section", () => {
@@ -53,6 +110,155 @@ describe("reference Site Definition", () => {
     );
     expect(isSiteDefinition(referenceSiteDefinition)).toBe(true);
   });
+
+  it("projects a preserved 1.0 definition into the current rich-text schema", () => {
+    const legacy = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    legacy.definitionVersion = "1.0.0";
+    legacy.schemaVersion = "1.0.0";
+    legacy.home.sections[3].body =
+      "Preserve this legacy draft.\nAcross paragraphs.";
+
+    const upgraded = upgradeSiteDefinition(legacy);
+    const callToAction = upgraded.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+
+    expect(upgraded).not.toBe(legacy);
+    expect(upgraded.definitionVersion).toBe("1.2.0");
+    expect(upgraded.schemaVersion).toBe("1.2.0");
+    expect(callToAction).toEqual(
+      expect.objectContaining({
+        body: {
+          version: "1.0.0",
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [
+                {
+                  type: "text",
+                  text: "Preserve this legacy draft.",
+                  marks: [],
+                },
+              ],
+            },
+            {
+              type: "paragraph",
+              children: [
+                {
+                  type: "text",
+                  text: "Across paragraphs.",
+                  marks: [],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    expect(validate(upgraded), validate.errors?.toString()).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "an empty text run",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = "";
+      },
+    },
+    {
+      name: "a link containing a backslash",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href: "https://example.com/a\\b" },
+        ];
+      },
+    },
+    {
+      name: "a link containing a control character",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href: "https://example.com/a\u0007b" },
+        ];
+      },
+    },
+    {
+      name: "non-canonical mark ordering",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = ["italic", "bold"];
+      },
+    },
+    {
+      name: "marked edge whitespace",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = " marked";
+        document.children[0].children[0].marks = ["bold"];
+      },
+    },
+    {
+      name: "a NUL text character",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = "before\u0000after";
+      },
+    },
+    {
+      name: "an unpaired UTF-16 surrogate",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = "before\uD800after";
+      },
+    },
+    {
+      name: "an unpaired UTF-16 surrogate in a link",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href: "https://example.com/\uD800" },
+        ];
+      },
+    },
+    {
+      name: "non-flanking emphasis across inline nodes",
+      mutate(document: Record<string, any>) {
+        document.children[0].children = [
+          { type: "text", text: "a", marks: [] },
+          { type: "text", text: "!marked", marks: ["bold"] },
+        ];
+      },
+    },
+    {
+      name: "a three-node joined emphasis delimiter run",
+      mutate(document: Record<string, any>) {
+        document.children[0].children = [
+          { type: "text", text: "a", marks: ["bold"] },
+          { type: "text", text: "b", marks: ["bold", "italic"] },
+          { type: "text", text: "c", marks: ["italic"] },
+        ];
+      },
+    },
+    ...["https://?", "https://#", "http://[::1"].map((href) => ({
+      name: `a malformed absolute link (${href})`,
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href },
+        ];
+      },
+    })),
+  ])(
+    "keeps JSON Schema and runtime rich-text rejection aligned for $name",
+    ({ mutate }) => {
+      const malformed = structuredClone(
+        referenceSiteDefinition,
+      ) as unknown as Record<string, any>;
+      const document = malformed.home.sections[3].body;
+      mutate(document);
+
+      expect(isSiteDefinition(malformed)).toBe(false);
+      expect(() =>
+        validateRichTextDocument(document as RichTextDocument),
+      ).toThrow();
+    },
+  );
 
   it("preserves the Git-published media manifest at runtime", () => {
     const published = {
@@ -259,6 +465,183 @@ describe("reference Site Definition", () => {
     );
   });
 
+  it("stores rich-text edits as the canonical versioned AST", () => {
+    const body = {
+      version: "1.0.0",
+      type: "document",
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", text: "A ", marks: [] },
+            { type: "text", text: "clear next step", marks: ["bold"] },
+          ],
+        },
+      ],
+    } as const satisfies RichTextDocument;
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      {
+        path: "section_contact.body",
+        format: "richText",
+        value: serializeRichTextDocument(body),
+      },
+    ]);
+
+    expect(result).toEqual({
+      ok: true,
+      definition: expect.objectContaining({
+        home: expect.objectContaining({
+          sections: expect.arrayContaining([
+            expect.objectContaining({
+              id: "section_contact",
+              body,
+            }),
+          ]),
+        }),
+      }),
+    });
+    expect(
+      listEditableSiteFields(referenceSiteDefinition).find(
+        (field) => field.path === "section_contact.body",
+      ),
+    ).toMatchObject({
+      format: "richText",
+      value: serializeRichTextDocument(
+        referenceSiteDefinition.home.sections.find(
+          (section) => section.type === "callToAction",
+        )!.body,
+      ),
+    });
+  });
+
+  it("returns field feedback for unsafe canonical rich text", () => {
+    expect(
+      applySiteDefinitionEdits(referenceSiteDefinition, [
+        {
+          path: "section_contact.body",
+          format: "richText",
+          value: JSON.stringify({
+            version: "1.0.0",
+            type: "document",
+            children: [
+              {
+                type: "paragraph",
+                children: [
+                  {
+                    type: "text",
+                    text: "Run this",
+                    marks: [{ type: "link", href: "javascript:alert(1)" }],
+                  },
+                ],
+              },
+            ],
+          }) as SerializedRichTextDocument,
+        },
+      ]),
+    ).toEqual({
+      ok: false,
+      errors: {
+        "section_contact.body":
+          "Rich text is invalid or contains unsupported or unsafe content.",
+      },
+    });
+  });
+
+  it.each([
+    [
+      "an empty document",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [],
+      },
+    ],
+    [
+      "an empty paragraph",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [{ type: "paragraph", children: [] }],
+      },
+    ],
+    [
+      "whitespace-only text",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: " \t ", marks: [] }],
+          },
+        ],
+      },
+    ],
+    [
+      "zero-width format text",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: "\u200B", marks: [] }],
+          },
+        ],
+      },
+    ],
+    ...[
+      ["variation selector", "\uFE0F"],
+      ["combining grapheme joiner", "\u034F"],
+    ].map(
+      ([name, text]) =>
+        [
+          name,
+          {
+            version: "1.0.0",
+            type: "document",
+            children: [
+              {
+                type: "paragraph",
+                children: [{ type: "text", text, marks: [] }],
+              },
+            ],
+          },
+        ] as const,
+    ),
+  ] satisfies ReadonlyArray<readonly [string, RichTextDocument]>)(
+    "requires visible text instead of nonempty serialized JSON for $name",
+    (_name, body) => {
+      expect(
+        applySiteDefinitionEdits(referenceSiteDefinition, [
+          {
+            path: "section_contact.body",
+            format: "richText",
+            value: serializeRichTextDocument(body),
+          },
+        ]),
+      ).toEqual({
+        ok: false,
+        errors: {
+          "section_contact.body": "Enter at least one visible character.",
+        },
+      });
+    },
+  );
+
+  it("creates deterministic Markdown publication artifacts for rich text", () => {
+    expect(
+      serializeSiteDefinitionRichTextForPublication(referenceSiteDefinition),
+    ).toEqual([
+      {
+        fieldPath: "section_contact.body",
+        filePath: "content/rich-text/section_contact/body.md",
+        markdown:
+          "Bring the rough notes, the constraints, and the thing that still feels unresolved\\. That is enough to start\\.\n",
+      },
+    ]);
+  });
+
   it("returns field-level feedback for unknown and invalid edits", () => {
     expect(
       applySiteDefinitionEdits(referenceSiteDefinition, [
@@ -269,9 +652,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.1.0.",
+        "section_missing.title": "This field is not in Site Definition 1.2.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.1.0.",
+        "section_hero.href": "This field is not in Site Definition 1.2.0.",
       },
     });
   });
@@ -285,7 +668,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.1.0.",
+        "This field is not in Site Definition 1.2.0.",
       );
     }
   });
