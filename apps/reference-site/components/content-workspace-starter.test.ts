@@ -277,6 +277,61 @@ describe("content workspace schema recovery", () => {
     );
   });
 
+  it("accepts identity-only structural ancestry without dropping the full value", async () => {
+    const savedProof = {
+      id: "section_saved_proof",
+      type: "proof",
+      variant: "panel",
+      quote: "Saved proof",
+      attribution: "Saved author",
+      metrics: [],
+    };
+    const composition = (components: ReadonlyArray<unknown>) =>
+      JSON.stringify({ slotId: "slot_home_sections", components });
+    const setItem = vi.fn();
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision: { ...preservedRevision, revision: 5 },
+        durableRecoveryEdits: [
+          {
+            path: "slot_home_sections",
+            baseValue: composition([]),
+            value: composition([savedProof]),
+          },
+        ],
+        readOutbox: async () => ({
+          workspaceId: preservedRevision.workspaceId,
+          baseRevision: 5,
+          edits: [
+            {
+              path: "slot_home_sections",
+              baseValue: composition([
+                { id: savedProof.id, type: savedProof.type },
+              ]),
+              value: composition([
+                { ...savedProof, quote: "Unsaved identity recovery" },
+              ]),
+            },
+          ],
+        }),
+        storage: {
+          getItem: () => null,
+          removeItem: vi.fn(),
+          setItem,
+        },
+        createRecoveryId: () =>
+          "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      }),
+    ).resolves.toEqual({
+      id: "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      sourceWorkspaceId: "workspace_legacy",
+    });
+    expect(setItem).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("Unsaved identity recovery"),
+    );
+  });
+
   it("copies an active recovery record through another schema transition", async () => {
     const recoveryId = "12345678-1234-4123-8123-123456789abc";
     const sourceWorkspaceId = "workspace_original";

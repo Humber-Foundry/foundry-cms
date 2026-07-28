@@ -19,6 +19,7 @@
 .site-canvas {
   --design-heading-font: var(--font-serif);
   --design-accent: var(--moss);
+  --design-accent-hover: var(--moss-dark);
   --design-section-padding: clamp(6rem, 12vw, 10rem);
   --design-content-width: var(--content-width);
 }
@@ -29,6 +30,7 @@
 
 .site-canvas[data-colour-accent="clay"] {
   --design-accent: #9a4f36;
+  --design-accent-hover: #753824;
 }
 
 .site-canvas[data-spacing-section="compact"] {
@@ -127,7 +129,7 @@ button:focus-visible {
 }
 
 .button-primary:hover {
-  background: var(--moss-dark);
+  background: var(--design-accent-hover, var(--moss-dark));
 }
 
 .not-found {

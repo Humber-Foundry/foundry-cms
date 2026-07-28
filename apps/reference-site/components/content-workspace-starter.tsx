@@ -14,6 +14,8 @@ import {
   type ContentEditorOutboxRecord,
 } from "../src/content-editor-outbox";
 import {
+  comparableRecoveryBaseValue,
+  comparableRecoveryValue,
   preserveStaleEdits,
   recoverStaleEdits,
   type StaleRecoveryPointer,
@@ -42,6 +44,31 @@ function fullRecoveryValue(
     return canonicalJson(JSON.parse(edit[property]));
   } catch {
     return edit[property];
+  }
+}
+
+function hasIdentityOnlyStructuralBase(edit: StaleRecoveryEdit): boolean {
+  if (edit.path !== pageCompositionContract.slot.id) {
+    return false;
+  }
+  try {
+    const composition: unknown = JSON.parse(edit.baseValue);
+    return (
+      typeof composition === "object" &&
+      composition !== null &&
+      "components" in composition &&
+      Array.isArray(composition.components) &&
+      composition.components.every(
+        (component) =>
+          typeof component === "object" &&
+          component !== null &&
+          Object.keys(component).every((key) =>
+            ["id", "type", "variant"].includes(key),
+          ),
+      )
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -117,7 +144,12 @@ export async function preparePreservedRevisionRecovery({
       }
       if (
         fullRecoveryValue(edit, "baseValue") !==
-        fullRecoveryValue(durable, "value")
+          fullRecoveryValue(durable, "value") &&
+        !(
+          hasIdentityOnlyStructuralBase(edit) &&
+          comparableRecoveryBaseValue(edit) ===
+            comparableRecoveryValue(durable)
+        )
       ) {
         throw new Error("content_editor_recovery_revision_conflict");
       }
