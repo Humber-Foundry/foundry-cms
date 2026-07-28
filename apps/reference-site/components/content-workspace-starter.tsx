@@ -5,6 +5,14 @@ import { useRef, useState } from "react";
 import type { ContentRevision } from "@foundry/application";
 
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
+import {
+  createContentEditorOutboxController,
+  type ContentEditorOutboxRecord,
+} from "../src/content-editor-outbox";
+import {
+  preserveStaleEdits,
+  type StaleRecoveryPointer,
+} from "../src/content-editor-recovery";
 
 type CreatedWorkspace = Readonly<{ workspaceId: string }>;
 type PreservedContentRevision = Readonly<{
@@ -12,6 +20,54 @@ type PreservedContentRevision = Readonly<{
   revision: ContentRevision["revision"];
   schemaVersion: ContentRevision["inputs"]["schemaVersion"];
 }>;
+
+export function workspaceCreationOperation(
+  preservedRevision: PreservedContentRevision | undefined,
+): "create_default_workspace" | "create_workspace" {
+  return preservedRevision === undefined
+    ? "create_default_workspace"
+    : "create_workspace";
+}
+
+export async function preparePreservedRevisionRecovery({
+  preservedRevision,
+  readOutbox = async (workspaceId) =>
+    createContentEditorOutboxController(workspaceId).read(
+      async () => false,
+    ),
+  storage = window.localStorage,
+  createRecoveryId = () => crypto.randomUUID(),
+}: {
+  preservedRevision: PreservedContentRevision | undefined;
+  readOutbox?: (
+    workspaceId: string,
+  ) => Promise<ContentEditorOutboxRecord | null>;
+  storage?: Pick<Storage, "getItem" | "removeItem" | "setItem">;
+  createRecoveryId?: () => string;
+}): Promise<StaleRecoveryPointer | undefined> {
+  if (preservedRevision === undefined) {
+    return undefined;
+  }
+  const record = await readOutbox(preservedRevision.workspaceId);
+  if (record === null || record.edits.length === 0) {
+    return undefined;
+  }
+  const recovery = {
+    id: createRecoveryId(),
+    sourceWorkspaceId: preservedRevision.workspaceId,
+  };
+  if (
+    !preserveStaleEdits(
+      storage,
+      recovery.id,
+      recovery.sourceWorkspaceId,
+      record.edits,
+    )
+  ) {
+    throw new Error("stale_edit_recovery_unavailable");
+  }
+  return recovery;
+}
 
 export function ContentWorkspaceStarter({
   csrfToken,
@@ -32,15 +88,27 @@ export function ContentWorkspaceStarter({
     body: string;
     idempotencyKey: string;
   } | null>(null);
+  const pendingRecovery = useRef<
+    Promise<StaleRecoveryPointer | undefined> | undefined
+  >(undefined);
 
   async function startWorkspace() {
     pendingAttempt.current ??= {
-      body: JSON.stringify({ operation: "create_default_workspace" }),
+      body: JSON.stringify({
+        operation: workspaceCreationOperation(preservedRevision),
+      }),
       idempotencyKey: crypto.randomUUID(),
     };
     setStarting(true);
     setMessage("");
     try {
+      pendingRecovery.current ??= preparePreservedRevisionRecovery({
+        preservedRevision,
+      }).catch((error: unknown) => {
+        pendingRecovery.current = undefined;
+        throw error;
+      });
+      const preservedOutboxRecovery = await pendingRecovery.current;
       const result = await sendContentRevisionAttempt({
         attempt: pendingAttempt.current,
         mutationToken,
@@ -60,12 +128,20 @@ export function ContentWorkspaceStarter({
       if (staleRecovery !== undefined) {
         query.set("recovery", staleRecovery.id);
         query.set("recoverFrom", staleRecovery.sourceWorkspaceId);
+      } else if (preservedOutboxRecovery !== undefined) {
+        query.set("recovery", preservedOutboxRecovery.id);
+        query.set(
+          "recoverFrom",
+          preservedOutboxRecovery.sourceWorkspaceId,
+        );
       }
       window.location.assign(`/dash?${query.toString()}`);
     } catch {
       setStarting(false);
       setMessage(
-        "The workspace could not be confirmed. Retry to check the same request.",
+        preservedRevision === undefined
+          ? "The workspace could not be confirmed. Retry to check the same request."
+          : "The fresh workspace could not be confirmed without preserving browser edits. Retry, or copy the edits from the preserved workspace before leaving it.",
       );
     }
   }
