@@ -167,12 +167,13 @@ export function useContentEditorPersistence({
           undefined,
           tabId,
         ),
-        lease: createContentEditorTabLease(workspaceId, tabId),
+        tabId,
       };
     },
     [workspaceId],
   );
-  const { controller, lease } = scopedPersistence;
+  const { controller, tabId } = scopedPersistence;
+  const leaseRef = useRef<ContentEditorTabLease | null>(null);
   const coordinationWaiter = useRef<{
     promise: Promise<ContentEditorWorkspaceCoordinator>;
     resolve(coordinator: ContentEditorWorkspaceCoordinator): void;
@@ -198,6 +199,8 @@ export function useContentEditorPersistence({
     );
 
   useEffect(() => {
+    const lease = createContentEditorTabLease(workspaceId, tabId);
+    leaseRef.current = lease;
     let cancelled = false;
     void Promise.all([
       createContentEditorWorkspaceCoordinator(workspaceId),
@@ -213,10 +216,12 @@ export function useContentEditorPersistence({
     );
     return () => {
       cancelled = true;
+      lease.release();
+      if (leaseRef.current === lease) {
+        leaseRef.current = null;
+      }
     };
-  }, [lease, workspaceId]);
-
-  useEffect(() => () => lease.release(), [lease]);
+  }, [tabId, workspaceId]);
 
   useEffect(() => {
     if (
@@ -256,7 +261,12 @@ export function useContentEditorPersistence({
     ready: lifecycle.phase !== "loading",
     attempt: lifecycle.attempt,
     read: () =>
-      coordinate(() => controller.read((scopeId) => lease.isScopeLive(scopeId))),
+      coordinate(() => {
+        const lease = leaseRef.current;
+        return controller.read((scopeId) =>
+          lease === null ? Promise.resolve(true) : lease.isScopeLive(scopeId),
+        );
+      }),
     finishHydration: () => transition({ type: "hydrated" }),
     restoreAttempt: (attempt: SaveAttempt) =>
       transition({ type: "attempt", attempt }),

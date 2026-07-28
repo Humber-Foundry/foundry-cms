@@ -240,4 +240,40 @@ describe("content editor outbox controller", () => {
       "workspace_orphans::tab_reopened",
     ]);
   });
+
+  it("replays one orphaned attempt without discarding the others", async () => {
+    const { driver, records } = memoryDriver();
+    const first = createContentEditorOutboxController(
+      "workspace_attempts",
+      driver,
+      "tab_first",
+    );
+    const second = createContentEditorOutboxController(
+      "workspace_attempts",
+      driver,
+      "tab_second",
+    );
+    const reopened = createContentEditorOutboxController(
+      "workspace_attempts",
+      driver,
+      "tab_reopened",
+    );
+    await first.saveAttempt(2, [edit], {
+      body: '{"workspaceId":"workspace_attempts","baseRevision":2}',
+      idempotencyKey: "stable-attempt-first-0002",
+    });
+    await second.saveAttempt(2, [{ ...edit, value: "Second attempt" }], {
+      body: '{"workspaceId":"workspace_attempts","baseRevision":2}',
+      idempotencyKey: "stable-attempt-second-0002",
+    });
+
+    const recovered = await reopened.read(async () => false);
+    expect(recovered?.attempt?.idempotencyKey).toBe(
+      "stable-attempt-second-0002",
+    );
+    expect(
+      records.get("workspace_attempts::tab_first")?.attempt?.idempotencyKey,
+    ).toBe("stable-attempt-first-0002");
+    expect(records.has("workspace_attempts::tab_second")).toBe(false);
+  });
 });

@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, StrictMode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -284,12 +284,16 @@ describe("visual component editor browser acceptance", () => {
     mounted.push(ownerRoot, duplicateRoot);
     flushSync(() => {
       ownerRoot.render(
-        createElement(ContentEditor, {
-          csrfToken: "csrf-owner",
-          initialRevision: browserRevision(workspaceId),
-          initialPreviewUrl: "/preview/owner",
-          activeWorkspaceUrl: "/dash?workspace=owner",
-        }),
+        createElement(
+          StrictMode,
+          null,
+          createElement(ContentEditor, {
+            csrfToken: "csrf-owner",
+            initialRevision: browserRevision(workspaceId),
+            initialPreviewUrl: "/preview/owner",
+            activeWorkspaceUrl: "/dash?workspace=owner",
+          }),
+        ),
       );
     });
     let ownerReady = false;
@@ -303,20 +307,35 @@ describe("visual component editor browser acceptance", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 10));
     }
     expect(ownerReady).toBe(true);
+    const ownerSiteName = Array.from(
+      ownerHost.querySelectorAll("input"),
+    ).find(
+      (input) => input.value === referenceSiteDefinition.site.name,
+    );
+    expect(ownerSiteName).toBeDefined();
+    await userEvent.fill(ownerSiteName!, "Owner tab draft");
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
     flushSync(() => {
       duplicateRoot.render(
-        createElement(ContentEditor, {
-          csrfToken: "csrf-duplicate",
-          initialRevision: browserRevision(workspaceId),
-          initialPreviewUrl: "/preview/duplicate",
-          activeWorkspaceUrl: "/dash?workspace=duplicate",
-        }),
+        createElement(
+          StrictMode,
+          null,
+          createElement(ContentEditor, {
+            csrfToken: "csrf-duplicate",
+            initialRevision: browserRevision(workspaceId),
+            initialPreviewUrl: "/preview/duplicate",
+            activeWorkspaceUrl: "/dash?workspace=duplicate",
+          }),
+        ),
       );
     });
     await new Promise((resolve) => window.setTimeout(resolve, 60));
 
     expect(duplicateHost.textContent).not.toContain(
       "already open in another tab",
+    );
+    expect(duplicateHost.textContent).not.toContain(
+      "Unsaved browser edits were recovered",
     );
     expect(
       Array.from(
@@ -325,6 +344,13 @@ describe("visual component editor browser acceptance", () => {
         ),
       ).every((control) => !control.disabled),
     ).toBe(true);
+    expect(
+      (await readContentEditorOutbox(workspaceId))?.edits,
+    ).toContainEqual({
+      path: "site_foundry_reference.name",
+      baseValue: "Foundry Reference",
+      value: "Owner tab draft",
+    });
 
     await clearContentEditorOutbox(workspaceId);
   });

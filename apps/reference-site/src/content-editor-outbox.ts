@@ -17,6 +17,12 @@ export type ContentEditorOutboxRecord = Readonly<{
 type StoredContentEditorOutboxRecord = ContentEditorOutboxRecord &
   Readonly<{ updatedAt?: number }>;
 
+function outboxTimestamp(): number {
+  return typeof performance === "undefined"
+    ? Date.now()
+    : performance.timeOrigin + performance.now();
+}
+
 type ContentEditorOutboxDriver = Readonly<{
   read(workspaceId: string): Promise<ContentEditorOutboxRecord | null>;
   list?(
@@ -175,7 +181,7 @@ export async function writeContentEditorOutbox(
   try {
     const transaction = database.transaction(storeName, "readwrite");
     transaction.objectStore(storeName).put(
-      structuredClone({ ...record, updatedAt: Date.now() }),
+      structuredClone({ ...record, updatedAt: outboxTimestamp() }),
     );
     await complete(transaction);
   } finally {
@@ -191,7 +197,7 @@ async function replaceContentEditorOutboxEntries(
   try {
     const transaction = database.transaction(storeName, "readwrite");
     const store = transaction.objectStore(storeName);
-    store.put(structuredClone({ ...record, updatedAt: Date.now() }));
+    store.put(structuredClone({ ...record, updatedAt: outboxTimestamp() }));
     sourceWorkspaceIds
       .filter((sourceWorkspaceId) => sourceWorkspaceId !== record.workspaceId)
       .forEach((sourceWorkspaceId) => store.delete(sourceWorkspaceId));
@@ -307,20 +313,25 @@ export function createContentEditorOutboxController(
           ((first as StoredContentEditorOutboxRecord).updatedAt ?? 0) -
           ((second as StoredContentEditorOutboxRecord).updatedAt ?? 0),
       );
+      const attempted = recoverable.filter(
+        ({ attempt }) => attempt !== undefined,
+      );
+      const selected =
+        attempted.length === 0 ? recoverable : [attempted.at(-1)!];
       const editsByPath = new Map<string, StaleRecoveryEdit>();
-      for (const candidate of recoverable) {
+      for (const candidate of selected) {
         for (const edit of candidate.edits) {
           editsByPath.set(edit.path, edit);
         }
       }
-      const latest = recoverable.at(-1)!;
+      const latest = selected.at(-1)!;
       const stored: ContentEditorOutboxRecord = {
         workspaceId: storageId,
         baseRevision: Math.max(
-          ...recoverable.map(({ baseRevision }) => baseRevision),
+          ...selected.map(({ baseRevision }) => baseRevision),
         ),
         edits: [...editsByPath.values()],
-        ...(recoverable.length === 1 && latest.attempt !== undefined
+        ...(selected.length === 1 && latest.attempt !== undefined
           ? { attempt: latest.attempt }
           : {}),
       };
@@ -328,12 +339,12 @@ export function createContentEditorOutboxController(
         throw new Error("content_editor_outbox_too_large");
       }
       if (
-        recoverable.some(({ workspaceId: id }) => id !== storageId)
+        selected.some(({ workspaceId: id }) => id !== storageId)
       ) {
         await serialize(async () => {
           if (driver.replace === undefined) {
             await driver.write(stored);
-            for (const candidate of recoverable) {
+            for (const candidate of selected) {
               if (candidate.workspaceId !== storageId) {
                 await driver.clear(candidate.workspaceId);
               }
@@ -341,7 +352,7 @@ export function createContentEditorOutboxController(
           } else {
             await driver.replace(
               stored,
-              recoverable.map(({ workspaceId: id }) => id),
+              selected.map(({ workspaceId: id }) => id),
             );
           }
         });
