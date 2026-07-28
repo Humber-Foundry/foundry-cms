@@ -5,6 +5,7 @@ import type {
   ContentRevision,
   ContentWorkspaceId,
 } from "./content-revisions";
+import { canonicalJson } from "./content-revisions";
 import type { HumanMembershipId } from "./human-access";
 
 export const publishedSiteDefinitionPath =
@@ -310,19 +311,6 @@ export class ContentPublicationValidationError extends Error {
     this.name = "ContentPublicationValidationError";
     this.code = code;
   }
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 async function sha256(value: string): Promise<string> {
