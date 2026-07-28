@@ -47,6 +47,14 @@ describe("page component composition", () => {
       ...structuredClone(hero),
       id: "section_hero_copy",
       title: "A copied hero",
+      primaryAction: {
+        ...structuredClone(hero.primaryAction),
+        id: "section_hero_copy_item_1",
+      },
+      secondaryAction: {
+        ...structuredClone(hero.secondaryAction),
+        id: "section_hero_copy_item_2",
+      },
     };
     const result = applyPageComposition(source, {
       slotId: "slot_home_sections",
@@ -329,10 +337,40 @@ describe("page component composition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_second_contact.id":
-          "Every component and nested item needs a unique stable identifier.",
+        "section_second_contact.action":
+          "This component scaffolding is protected by the Site Definition.",
       },
     });
+  });
+
+  it("rejects caller-selected nested identifiers on duplicated components", () => {
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const proof = composition.components[2]!;
+    if (proof.type !== "proof") {
+      throw new Error("expected_proof_fixture");
+    }
+    const duplicate = {
+      ...structuredClone(proof),
+      id: "section_second_proof",
+      metrics: proof.metrics.map((metric) => ({
+        ...structuredClone(metric),
+        id: "action_start",
+      })),
+    };
+
+    expect(
+      applyPageComposition(referenceSiteDefinition, {
+        ...composition,
+        components: [
+          ...composition.components.filter(
+            ({ id }) => id !== "section_hero",
+          ),
+          duplicate,
+        ],
+      }).ok,
+    ).toBe(false);
   });
 
   it.each([

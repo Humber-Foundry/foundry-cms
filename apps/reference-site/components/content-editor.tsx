@@ -157,6 +157,7 @@ export function ContentEditor({
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
     !persistence.owned ||
+    !persistence.ready ||
     state.status === "saving" ||
     state.status === "stale" ||
     recoveryConflicts.length > 0;
@@ -440,7 +441,11 @@ export function ContentEditor({
   ]);
 
   async function save() {
-    if (saveInFlight.current || !persistence.owned) {
+    if (
+      saveInFlight.current ||
+      !persistence.owned ||
+      !persistence.ready
+    ) {
       return;
     }
     saveInFlight.current = true;
@@ -595,7 +600,11 @@ export function ContentEditor({
   });
 
   function edit(path: string, value: string) {
-    if (saveInFlight.current) {
+    if (
+      saveInFlight.current ||
+      !persistence.owned ||
+      !persistence.ready
+    ) {
       return;
     }
     persistence.discardAttempt();
@@ -603,7 +612,7 @@ export function ContentEditor({
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
-    if (!persistence.owned) {
+    if (!persistence.owned || !persistence.ready) {
       return;
     }
     const forwardedRecovery =
@@ -678,7 +687,7 @@ export function ContentEditor({
     conflict: StaleRecoveryConflict,
     resolution: "latest" | "mine",
   ) {
-    if (!persistence.owned) {
+    if (!persistence.owned || !persistence.ready) {
       return;
     }
     if (resolution === "mine" && conflict.currentValue !== null) {

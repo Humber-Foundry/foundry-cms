@@ -435,6 +435,29 @@ function equalProtectedShape(
   );
 }
 
+function hasCanonicalDuplicateIds(section: PageSection): boolean {
+  let sequence = 0;
+  let valid = true;
+  const visit = (value: unknown, root: boolean): void => {
+    if (Array.isArray(value)) {
+      value.forEach((nested) => visit(nested, false));
+      return;
+    }
+    if (!isRecord(value)) {
+      return;
+    }
+    if (!root && typeof value.id === "string") {
+      sequence += 1;
+      if (value.id !== `${section.id}_item_${sequence}`) {
+        valid = false;
+      }
+    }
+    Object.values(value).forEach((nested) => visit(nested, false));
+  };
+  visit(section, true);
+  return valid;
+}
+
 function validateEditableProps(
   section: PageSection,
   errors: Record<string, string>,
@@ -552,17 +575,21 @@ export function applyPageComposition(
         "An existing component cannot change its registered type.";
       continue;
     }
+    const defaultScaffold =
+      existing === undefined &&
+      equalProtectedShape(
+        createDefaultPageSection(section.type, id, definition),
+        section,
+      );
+    const duplicateScaffold =
+      existing === undefined &&
+      hasCanonicalDuplicateIds(section) &&
+      definition.home.sections
+        .filter((source) => source.type === section.type)
+        .some((source) => equalProtectedShape(source, section, true));
     const scaffoldAllowed =
       existing === undefined
-        ? equalProtectedShape(
-            createDefaultPageSection(section.type, id, definition),
-            section,
-          ) ||
-          definition.home.sections
-            .filter((source) => source.type === section.type)
-            .some((source) =>
-              equalProtectedShape(source, section, true),
-            )
+        ? defaultScaffold || duplicateScaffold
         : equalProtectedShape(existing, section);
     if (!scaffoldAllowed) {
       const protectedProperty = Object.keys(protectedShape(section))[1] ?? "type";
