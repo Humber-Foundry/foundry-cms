@@ -374,8 +374,22 @@ describe("content publication application", () => {
         path === "packages/site-definition/src/published-site.json",
     );
     expect(JSON.parse(removalJson?.bytes ?? "{}")).toMatchObject({
-      blog: { posts: [] },
+      blog: {
+        posts: [
+          expect.objectContaining({
+            id: "post_exact_pipeline",
+            visibility: "unpublished",
+          }),
+        ],
+      },
     });
+    expect(removalCommit?.artifacts).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "content/rich-text/post_exact_pipeline/body.md",
+        }),
+      ]),
+    );
     await expect(removalRevisions.queries.getRevision(0)).resolves.toMatchObject({
       definition: {
         blog: {

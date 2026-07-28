@@ -333,20 +333,30 @@ export function createD1ContentRevisionStore(
         requireBookmark(session.getBookmark()),
       );
     },
-    async recordRejection(input) {
+    async recordRejectedBlogTransition(input) {
       await database
         .prepare(
-          `INSERT INTO blog_post_rejection_audit_events (
-             workspace_id, actor_id, command_type, reason_code,
-             request_id, occurred_at
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+          `INSERT INTO blog_post_transition_audit_events (
+             workspace_id, actor_id, post_id, command_type, outcome,
+             reason_code, request_id, before_state_json, after_state_json,
+             revision, occurred_at
+           ) VALUES (?1, ?2, ?3, ?4, 'rejected', ?5, ?6, ?7, ?8, NULL, ?9)
+           ON CONFLICT (workspace_id, request_id, outcome, post_id)
+           DO NOTHING`,
         )
         .bind(
           input.workspaceId,
           input.actorId,
+          input.postId ?? "unknown",
           input.commandType,
           input.reasonCode,
           input.requestId,
+          input.beforeState === null
+            ? null
+            : JSON.stringify(input.beforeState),
+          input.afterState === null
+            ? null
+            : JSON.stringify(input.afterState),
           input.occurredAt,
         )
         .run();
@@ -403,6 +413,42 @@ export function createD1ContentRevisionStore(
           ? null
           : JSON.stringify(mediaOccurrence.crop);
 
+      const blogTransitionStatements = (command.blogTransitions ?? []).map(
+        (transition) =>
+          session
+            .prepare(
+              `INSERT INTO blog_post_transition_audit_events (
+                 workspace_id, actor_id, post_id, command_type, outcome,
+                 reason_code, request_id, before_state_json, after_state_json,
+                 revision, occurred_at
+               )
+               SELECT ?1, ?2, ?3, ?4, 'accepted', 'accepted', ?5,
+                      ?6, ?7, ?8, ?9
+               WHERE EXISTS (
+                 SELECT 1 FROM content_revision_receipts
+                 WHERE idempotency_key = ?5
+                   AND workspace_id = ?1
+                   AND revision = ?8
+               )
+               ON CONFLICT (workspace_id, request_id, outcome, post_id)
+               DO NOTHING`,
+            )
+            .bind(
+              workspaceId,
+              command.revision.createdBy,
+              transition.postId,
+              transition.commandType,
+              command.idempotencyKey,
+              transition.beforeState === null
+                ? null
+                : JSON.stringify(transition.beforeState),
+              transition.afterState === null
+                ? null
+                : JSON.stringify(transition.afterState),
+              command.revision.revision,
+              command.revision.createdAt,
+            ),
+      );
       const results = await session.batch([
         session
           .prepare(
@@ -547,6 +593,7 @@ export function createD1ContentRevisionStore(
             command.revision.createdAt,
             command.idempotencyKey,
           ),
+        ...blogTransitionStatements,
       ]);
 
       if ((results[2]?.meta.changes ?? 0) > 0) {

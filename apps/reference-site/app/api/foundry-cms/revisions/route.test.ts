@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   createBlogPost: vi.fn(),
   editBlogPost: vi.fn(),
   unpublishBlogPost: vi.fn(),
+  recordRejectedBlogPostCommand: vi.fn(),
   loadApplication: vi.fn(),
   requireExistingAccess: vi.fn(),
   createMutationToken: vi.fn(),
@@ -96,6 +97,8 @@ describe("content revision endpoint", () => {
         createBlogPost: mocks.createBlogPost,
         editBlogPost: mocks.editBlogPost,
         unpublishBlogPost: mocks.unpublishBlogPost,
+        recordRejectedBlogPostCommand:
+          mocks.recordRejectedBlogPostCommand,
       },
       queries: {
         getRevisionWithBookmark: mocks.getRevisionWithBookmark,
@@ -191,6 +194,7 @@ describe("content revision endpoint", () => {
             {
               id: "post_route",
               revision: 1,
+              visibility: "public",
               slug: "route-post",
               title: "Route post",
               excerpt: "Created through the route.",
@@ -250,6 +254,38 @@ describe("content revision endpoint", () => {
       previewUrl:
         "/api/foundry-cms/revisions?workspaceId=workspace_home&revision=1&post=route-post",
     });
+  });
+
+  it("audits a malformed recognized blog command at the authenticated boundary", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "create_blog_post",
+          workspaceId: "not a workspace",
+          schemaVersion: referenceSiteDefinition.schemaVersion,
+          baseRevision: 0,
+          post: {
+            id: "not-a-post-id",
+            slug: "bad slug",
+          },
+        },
+        "malformed-blog-route-0001",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_default",
+      "membership-editor",
+    );
+    expect(mocks.recordRejectedBlogPostCommand).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      postId: null,
+      commandType: "blog.post.create",
+      reasonCode: "blog_command_invalid",
+      requestId: "malformed-blog-route-0001",
+    });
+    expect(mocks.createBlogPost).not.toHaveBeenCalled();
   });
 
   it("preserves a canonical rich-text edit at the API boundary", async () => {

@@ -478,6 +478,7 @@ describe("reference Site Definition", () => {
           {
             id: firstPostId,
             revision: 1,
+            visibility: "public",
             slug: "first",
             title: "First",
             excerpt: "First excerpt",
@@ -487,6 +488,7 @@ describe("reference Site Definition", () => {
           {
             id: secondPostId,
             revision: 1,
+            visibility: "public",
             slug: "second",
             title: "Second",
             excerpt: "Second excerpt",

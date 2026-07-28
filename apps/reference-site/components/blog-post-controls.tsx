@@ -119,12 +119,12 @@ export function BlogPostControls({
             <div>
               <strong>{post.title}</strong>
               <span>
-                Revision {post.revision} · /blog/{post.slug}
+                Revision {post.revision} · {post.visibility} · /blog/{post.slug}
               </span>
             </div>
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || post.visibility === "unpublished"}
               onClick={() => {
                 void send(
                   {

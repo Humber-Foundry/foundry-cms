@@ -5,6 +5,7 @@ import {
   serializeRichTextDocument,
   serializeRichTextToMarkdown,
   type ProofSection,
+  type BlogPostId,
   type SerializedRichTextDocument,
   type ServicesSection,
   type SiteDefinition,
@@ -519,12 +520,19 @@ export type PublishedRichTextArtifact = Readonly<{
 export function serializeSiteDefinitionRichTextForPublication(
   definition: SiteDefinition,
 ): ReadonlyArray<PublishedRichTextArtifact> {
+  const publicPostIds = new Set(
+    definition.blog.posts
+      .filter(({ visibility }) => visibility === "public")
+      .map(({ id }) => id),
+  );
   return listEditableSiteFields(definition)
     .filter(
       (
         field,
       ): field is Extract<EditableSiteField, { format: "richText" }> =>
-        field.format === "richText",
+        field.format === "richText" &&
+        (field.group !== "Blog" ||
+          publicPostIds.has(field.path.split(".", 1)[0] as BlogPostId)),
     )
     .map((field) => ({
       fieldPath: field.path,

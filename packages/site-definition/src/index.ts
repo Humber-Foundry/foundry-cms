@@ -56,6 +56,7 @@ export function createBlogPostId(value: string): BlogPostId {
 export type BlogPost = Readonly<{
   id: BlogPostId;
   revision: number;
+  visibility: "public" | "unpublished";
   slug: string;
   title: string;
   excerpt: string;
@@ -401,6 +402,7 @@ export const siteDefinitionSchema = {
       required: [
         "id",
         "revision",
+        "visibility",
         "slug",
         "title",
         "excerpt",
@@ -410,6 +412,7 @@ export const siteDefinitionSchema = {
       properties: {
         id: { type: "string", pattern: "^post_[a-z0-9_]+$" },
         revision: { type: "integer", minimum: 1 },
+        visibility: { enum: ["public", "unpublished"] },
         slug: {
           type: "string",
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",

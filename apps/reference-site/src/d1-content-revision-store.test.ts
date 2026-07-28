@@ -44,7 +44,7 @@ describe("D1 content revision store", () => {
     for (const name of [
       "0005_content_revisions.sql",
       "0008_media_assets.sql",
-      "0011_blog_post_rejection_audit.sql",
+      "0011_blog_post_transition_audit.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -156,7 +156,7 @@ describe("D1 content revision store", () => {
     ).toEqual({ count: 0 });
   });
 
-  it("persists blog revisions, rejection audit, and live unpublish history in D1", async () => {
+  it("persists blog revisions, transition audit, and live unpublish history in D1", async () => {
     const application = createApplication();
     await createWorkspace(application, "d1-blog-create-workspace");
     const postId = createBlogPostId("post_durable");
@@ -179,13 +179,21 @@ describe("D1 content revision store", () => {
       },
       idempotencyKey: "d1-blog-create-post",
     });
+    await application.commands.save({
+      actorId: editorActorId,
+      workspaceId,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 1,
+      edits: [{ path: `${postId}.title`, value: "Durable post, edited" }],
+      idempotencyKey: "d1-blog-edit-post",
+    });
     await expect(
       application.commands.createBlogPost({
         actorId: editorActorId,
         workspaceId,
         siteId: referenceSiteDefinition.site.id,
         schemaVersion: referenceSiteDefinition.schemaVersion,
-        baseRevision: 1,
+        baseRevision: 2,
         post: {
           id: postId,
           slug: "durable-post",
@@ -208,7 +216,7 @@ describe("D1 content revision store", () => {
         workspaceId,
         siteId: referenceSiteDefinition.site.id,
         schemaVersion: referenceSiteDefinition.schemaVersion,
-        baseRevision: 1,
+        baseRevision: 2,
         postId,
         idempotencyKey: "d1-blog-unpublish-post",
       }),
@@ -218,10 +226,10 @@ describe("D1 content revision store", () => {
 
     const reloaded = createApplication();
     await expect(reloaded.queries.getCurrent()).resolves.toMatchObject({
-      revision: 1,
+      revision: 2,
       definition: {
         blog: {
-          posts: [expect.objectContaining({ id: postId, revision: 1 })],
+          posts: [expect.objectContaining({ id: postId, revision: 2 })],
         },
       },
     });
@@ -241,12 +249,13 @@ describe("D1 content revision store", () => {
         )
         .bind(workspaceId)
         .first<{ count: number }>(),
-    ).toEqual({ count: 1 });
+    ).toEqual({ count: 2 });
     expect(
       await database
         .prepare(
-          `SELECT command_type, reason_code, request_id
-           FROM blog_post_rejection_audit_events
+          `SELECT command_type, reason_code, request_id, outcome, post_id,
+                  before_state_json, after_state_json
+           FROM blog_post_transition_audit_events
            WHERE workspace_id = ?1 AND request_id = ?2`,
         )
         .bind(workspaceId, "d1-blog-duplicate-post")
@@ -255,12 +264,22 @@ describe("D1 content revision store", () => {
       command_type: "blog.post.create",
       reason_code: "post_already_exists",
       request_id: "d1-blog-duplicate-post",
+      outcome: "rejected",
+      post_id: postId,
+      before_state_json: JSON.stringify({
+        revision: 2,
+        visibility: "public",
+      }),
+      after_state_json: JSON.stringify({
+        revision: 2,
+        visibility: "public",
+      }),
     });
     expect(
       await database
         .prepare(
           `SELECT command_type, reason_code
-           FROM blog_post_rejection_audit_events
+           FROM blog_post_transition_audit_events
            WHERE workspace_id = ?1 AND request_id = ?2`,
         )
         .bind(workspaceId, "d1-blog-unpublish-post")
@@ -268,6 +287,50 @@ describe("D1 content revision store", () => {
     ).toEqual({
       command_type: "blog.post.unpublish",
       reason_code: "post_not_live",
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT outcome, post_id, before_state_json, after_state_json,
+                  revision
+           FROM blog_post_transition_audit_events
+           WHERE workspace_id = ?1 AND request_id = ?2`,
+        )
+        .bind(workspaceId, "d1-blog-create-post")
+        .first(),
+    ).toEqual({
+      outcome: "accepted",
+      post_id: postId,
+      before_state_json: null,
+      after_state_json: JSON.stringify({
+        revision: 1,
+        visibility: "public",
+      }),
+      revision: 1,
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT command_type, outcome, post_id, before_state_json,
+                  after_state_json, revision
+           FROM blog_post_transition_audit_events
+           WHERE workspace_id = ?1 AND request_id = ?2`,
+        )
+        .bind(workspaceId, "d1-blog-edit-post")
+        .first(),
+    ).toEqual({
+      command_type: "blog.post.edit",
+      outcome: "accepted",
+      post_id: postId,
+      before_state_json: JSON.stringify({
+        revision: 1,
+        visibility: "public",
+      }),
+      after_state_json: JSON.stringify({
+        revision: 2,
+        visibility: "public",
+      }),
+      revision: 2,
     });
 
     const liveWorkspaceId = createContentWorkspaceId(
@@ -281,6 +344,7 @@ describe("D1 content revision store", () => {
           {
             id: postId,
             revision: 1,
+            visibility: "public" as const,
             slug: "durable-post",
             title: "Durable post",
             excerpt: "Persisted in D1.",
@@ -316,7 +380,17 @@ describe("D1 content revision store", () => {
 
     await expect(liveApplication.queries.getCurrent()).resolves.toMatchObject({
       revision: 1,
-      definition: { blog: { posts: [] } },
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              revision: 2,
+              visibility: "unpublished",
+            }),
+          ],
+        },
+      },
     });
     await expect(liveApplication.queries.getRevision(0)).resolves.toMatchObject({
       definition: {
@@ -324,6 +398,29 @@ describe("D1 content revision store", () => {
           posts: [expect.objectContaining({ id: postId, revision: 1 })],
         },
       },
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT outcome, post_id, before_state_json, after_state_json,
+                  revision
+           FROM blog_post_transition_audit_events
+           WHERE workspace_id = ?1 AND request_id = ?2`,
+        )
+        .bind(liveWorkspaceId, "d1-live-blog-unpublish-post")
+        .first(),
+    ).toEqual({
+      outcome: "accepted",
+      post_id: postId,
+      before_state_json: JSON.stringify({
+        revision: 1,
+        visibility: "public",
+      }),
+      after_state_json: JSON.stringify({
+        revision: 2,
+        visibility: "unpublished",
+      }),
+      revision: 1,
     });
   });
 

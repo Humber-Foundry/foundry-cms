@@ -172,6 +172,9 @@ export function SiteRenderer({
   mediaAccessToken?: string;
   blogPostHref?: (slug: string) => string;
 }) {
+  const publicPosts = definition.blog.posts.filter(
+    ({ visibility }) => visibility === "public",
+  );
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
       <header className="site-header">
@@ -197,12 +200,12 @@ export function SiteRenderer({
             mediaAccessToken={mediaAccessToken}
           />
         ))}
-        {definition.blog.posts.length === 0 ? null : (
+        {publicPosts.length === 0 ? null : (
           <section className="blog-index" aria-labelledby="blog_index_title">
             <p className="eyebrow">Journal</p>
             <h2 id="blog_index_title">Latest posts</h2>
             <ul>
-              {definition.blog.posts.map((post) => (
+              {publicPosts.map((post) => (
                 <li key={post.id}>
                   <a href={blogPostHref(post.slug)}>{post.title}</a>
                   <p>{post.excerpt}</p>

@@ -18,6 +18,7 @@ describe("SiteRenderer controlled design projection", () => {
     const postDefinition = {
       id: createBlogPostId("post_renderer"),
       revision: 1,
+      visibility: "public" as const,
       slug: "renderer-post",
       title: "Renderer post",
       excerpt: "A public post.",
@@ -45,6 +46,19 @@ describe("SiteRenderer controlled design projection", () => {
     expect(home).toContain("Renderer post");
     expect(post).toContain("<h1>Renderer post</h1>");
     expect(post).toContain("Rendered body.");
+
+    const unpublished = renderToStaticMarkup(
+      <SiteRenderer
+        definition={{
+          ...definition,
+          blog: {
+            ...definition.blog,
+            posts: [{ ...postDefinition, visibility: "unpublished" }],
+          },
+        }}
+      />,
+    );
+    expect(unpublished).not.toContain("/blog/renderer-post");
   });
 
   it("renders registered tokens and variants as deterministic semantic attributes", () => {

@@ -6,6 +6,7 @@ import {
   editBlogPostDefinition,
   unpublishBlogPostDefinition,
   BlogPostSchemaError,
+  createBlogPostId,
   type BlogPost,
   type BlogPostId,
   type PageComposition,
@@ -88,16 +89,31 @@ type BlogPostMutationCommand = Readonly<{
 }>;
 
 export type CreateBlogPostCommand = BlogPostMutationCommand &
-  Readonly<{ post: Omit<BlogPost, "revision"> }>;
+  Readonly<{ post: Omit<BlogPost, "revision" | "visibility"> }>;
 
 export type EditBlogPostCommand = BlogPostMutationCommand &
   Readonly<{
     postId: BlogPostId;
-    post: Omit<BlogPost, "id" | "revision">;
+    post: Omit<BlogPost, "id" | "revision" | "visibility">;
   }>;
 
 export type UnpublishBlogPostCommand = BlogPostMutationCommand &
   Readonly<{ postId: BlogPostId }>;
+
+type BlogPostAuditState = Readonly<{
+  revision: number;
+  visibility: BlogPost["visibility"];
+}> | null;
+
+type BlogPostTransitionAudit = Readonly<{
+  postId: BlogPostId | null;
+  commandType: "blog.post.create" | "blog.post.edit" | "blog.post.unpublish";
+  requestId: string;
+  reasonCode: string;
+  beforeState: BlogPostAuditState;
+  afterState: BlogPostAuditState;
+  occurredAt: string;
+}>;
 
 function compositionWithAuthoritativeVariants(
   definition: SiteDefinition,
@@ -177,6 +193,9 @@ type PersistContentRevisionCommand = Readonly<{
     assetId: string;
     crop: SiteMediaOccurrence["crop"];
   }>;
+  blogTransitions?: ReadonlyArray<
+    Omit<BlogPostTransitionAudit, "reasonCode">
+  >;
 }>;
 
 export type ContentRevisionStore = Readonly<{
@@ -204,14 +223,10 @@ export type ContentRevisionStore = Readonly<{
   persist(
     command: PersistContentRevisionCommand,
   ): Promise<SavedContentRevision>;
-  recordRejection(input: {
+  recordRejectedBlogTransition(input: {
     workspaceId: ContentWorkspaceId;
     actorId: ContentActorId;
-    commandType: string;
-    reasonCode: string;
-    requestId: string;
-    occurredAt: string;
-  }): Promise<void>;
+  } & BlogPostTransitionAudit): Promise<void>;
 }>;
 
 export class ContentRevisionConflictError extends Error {
@@ -403,7 +418,7 @@ export function createInMemoryContentRevisionStore({
             `local:${revision.workspaceId}:${revision.revision}`,
           );
     },
-    async recordRejection() {},
+    async recordRejectedBlogTransition() {},
     async replay(idempotencyKey, requestHash) {
       const receipt = receipts.get(idempotencyKey);
       if (receipt === undefined) {
@@ -536,6 +551,10 @@ export function createContentRevisionApplication({
     };
     requestIdentity: unknown;
     mutate(base: SiteDefinition): SiteDefinition;
+    blogTransitions?: ReadonlyArray<Readonly<{
+      postId: BlogPostId;
+      commandType: BlogPostTransitionAudit["commandType"];
+    }>>;
   }) {
     await store.requireAccess(actorId);
     const currentProductionBase = await resolveProductionBase();
@@ -605,34 +624,83 @@ export function createContentRevisionApplication({
       idempotencyKey: input.command.idempotencyKey,
       requestHash,
       revision: nextRevision,
+      ...(input.blogTransitions === undefined
+        ? {}
+        : {
+            blogTransitions: input.blogTransitions.map((transition) => ({
+              ...transition,
+              requestId: input.command.idempotencyKey,
+              beforeState: blogPostAuditState(
+                base.definition,
+                transition.postId,
+              ),
+              afterState: blogPostAuditState(definition, transition.postId),
+              occurredAt: nextRevision.createdAt,
+            })),
+          }),
     });
   }
 
+  function blogPostAuditState(
+    definition: SiteDefinition,
+    postId: BlogPostId,
+  ): BlogPostAuditState {
+    const post = definition.blog.posts.find(({ id }) => id === postId);
+    return post === undefined
+      ? null
+      : { revision: post.revision, visibility: post.visibility };
+  }
+
   async function executeBlogMutation<Result>(
-    commandType: string,
-    command: BlogPostMutationCommand,
+    commandType: BlogPostTransitionAudit["commandType"],
+    command: Pick<
+      BlogPostMutationCommand,
+      | "actorId"
+      | "workspaceId"
+      | "schemaVersion"
+      | "baseRevision"
+      | "idempotencyKey"
+    >,
+    postIds: ReadonlyArray<BlogPostId>,
     operation: () => Promise<Result>,
   ): Promise<Result> {
-    assertMutationCommand(command);
     try {
+      assertMutationCommand(command);
       return await operation();
     } catch (error) {
-      await store.recordRejection({
-        workspaceId,
-        actorId,
-        commandType,
-        reasonCode:
-          error instanceof ContentRevisionValidationError &&
-          typeof error.fields.blog === "string"
-            ? error.fields.blog
-            : error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)
-            ? error.message
-            : "blog_post_command_rejected",
-        requestId: isValidContentMutationIdempotencyKey(command.idempotencyKey)
-          ? command.idempotencyKey
-          : "invalid",
-        occurredAt: now(),
-      });
+      let currentDefinition: SiteDefinition | null = null;
+      try {
+        currentDefinition = (await store.getCurrent()).definition;
+      } catch {
+        // Rejection audit remains valid when no workspace revision exists.
+      }
+      for (const postId of postIds) {
+        const beforeState =
+          currentDefinition === null
+            ? null
+            : blogPostAuditState(currentDefinition, postId);
+        await store.recordRejectedBlogTransition({
+          workspaceId,
+          actorId,
+          postId,
+          commandType,
+          reasonCode:
+            error instanceof ContentRevisionValidationError &&
+            typeof error.fields.blog === "string"
+              ? error.fields.blog
+              : error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)
+                ? error.message
+                : "blog_post_command_rejected",
+          requestId: isValidContentMutationIdempotencyKey(
+            command.idempotencyKey,
+          )
+            ? command.idempotencyKey
+            : "invalid",
+          beforeState,
+          afterState: beforeState,
+          occurredAt: now(),
+        });
+      }
       throw error;
     }
   }
@@ -663,6 +731,30 @@ export function createContentRevisionApplication({
       },
     }),
     commands: Object.freeze({
+      async recordRejectedBlogPostCommand(command: {
+        actorId: ContentActorId;
+        postId: BlogPostId | null;
+        commandType: BlogPostTransitionAudit["commandType"];
+        reasonCode: string;
+        requestId: string;
+      }) {
+        if (command.actorId !== actorId) {
+          throw new ContentWorkspaceAccessError();
+        }
+        await store.recordRejectedBlogTransition({
+          workspaceId,
+          actorId,
+          postId: command.postId,
+          commandType: command.commandType,
+          reasonCode: command.reasonCode,
+          requestId: isValidContentMutationIdempotencyKey(command.requestId)
+            ? command.requestId
+            : "invalid",
+          beforeState: null,
+          afterState: null,
+          occurredAt: now(),
+        });
+      },
       async create(command: CreateContentWorkspaceCommand) {
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
@@ -683,8 +775,19 @@ export function createContentRevisionApplication({
         return store.getCurrent();
       },
       async save(command: SaveContentRevisionCommand) {
-        assertMutationCommand(command);
-        return persistDefinitionMutation({
+        const blogPostIds = [
+          ...new Set(
+            command.edits.flatMap(({ path }) => {
+              const candidate = path.split(".", 1)[0] ?? "";
+              try {
+                return [createBlogPostId(candidate)];
+              } catch {
+                return [];
+              }
+            }),
+          ),
+        ];
+        const operation = () => persistDefinitionMutation({
           command,
           requestIdentity: {
             actorId: command.actorId,
@@ -720,10 +823,32 @@ export function createContentRevisionApplication({
             }
             return edited.definition;
           },
+          ...(blogPostIds.length === 0
+            ? {}
+            : {
+                blogTransitions: blogPostIds.map((postId) => ({
+                  commandType: "blog.post.edit" as const,
+                  postId,
+                })),
+              }),
         });
+        if (blogPostIds.length === 0) {
+          assertMutationCommand(command);
+          return operation();
+        }
+        return executeBlogMutation(
+          "blog.post.edit",
+          command,
+          blogPostIds,
+          operation,
+        );
       },
       async createBlogPost(command: CreateBlogPostCommand) {
-        return executeBlogMutation("blog.post.create", command, () =>
+        return executeBlogMutation(
+          "blog.post.create",
+          command,
+          [command.post.id],
+          () =>
           persistDefinitionMutation({
             command,
             requestIdentity: { operation: "create_blog_post", ...command },
@@ -733,11 +858,21 @@ export function createContentRevisionApplication({
                 command.siteId,
                 command.post,
               ),
+            blogTransitions: [
+              {
+                commandType: "blog.post.create",
+                postId: command.post.id,
+              },
+            ],
           }),
         );
       },
       async editBlogPost(command: EditBlogPostCommand) {
-        return executeBlogMutation("blog.post.edit", command, () =>
+        return executeBlogMutation(
+          "blog.post.edit",
+          command,
+          [command.postId],
+          () =>
           persistDefinitionMutation({
             command,
             requestIdentity: { operation: "edit_blog_post", ...command },
@@ -748,11 +883,21 @@ export function createContentRevisionApplication({
                 command.postId,
                 command.post,
               ),
+            blogTransitions: [
+              {
+                commandType: "blog.post.edit",
+                postId: command.postId,
+              },
+            ],
           }),
         );
       },
       async unpublishBlogPost(command: UnpublishBlogPostCommand) {
-        return executeBlogMutation("blog.post.unpublish", command, () =>
+        return executeBlogMutation(
+          "blog.post.unpublish",
+          command,
+          [command.postId],
+          () =>
           (async () => {
             await store.requireAccess(actorId);
             const publishedBase = await store.getRevision(0);
@@ -766,7 +911,8 @@ export function createContentRevisionApplication({
                 if (
                   publishedBase === null ||
                   !publishedBase.definition.blog.posts.some(
-                    ({ id }) => id === command.postId,
+                    ({ id, visibility }) =>
+                      id === command.postId && visibility === "public",
                   )
                 ) {
                   throw new BlogPostSchemaError("post_not_live");
@@ -777,6 +923,12 @@ export function createContentRevisionApplication({
                   command.postId,
                 );
               },
+              blogTransitions: [
+                {
+                  commandType: "blog.post.unpublish",
+                  postId: command.postId,
+                },
+              ],
             });
           })(),
         );

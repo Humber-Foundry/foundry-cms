@@ -15,7 +15,8 @@ async function loadPost(props: BlogPostPageProps) {
     await referenceSiteApplication.queries.getPublishedSite();
   const { slug } = await props.params;
   const post = definition.blog.posts.find(
-    (candidate) => candidate.slug === slug,
+    (candidate) =>
+      candidate.slug === slug && candidate.visibility === "public",
   );
   if (post === undefined) {
     notFound();

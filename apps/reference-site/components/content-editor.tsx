@@ -283,7 +283,14 @@ export function ContentEditor({
       updateRichTextValidation(`visual:${source}`, invalid),
     [updateRichTextValidation],
   );
-  const groups = ["Design", "Page", "Navigation", "Footer", "SEO"] as const;
+  const groups = [
+    "Design",
+    "Page",
+    "Navigation",
+    "Footer",
+    "SEO",
+    "Blog",
+  ] as const;
   const editorLocked =
     !persistence.coordinated ||
     !persistence.ready ||

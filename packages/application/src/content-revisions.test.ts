@@ -106,6 +106,7 @@ describe("content revision application", () => {
     expect(created.definition.blog.posts[0]).toMatchObject({
       id: postId,
       revision: 1,
+      visibility: "public",
       title: "First post",
     });
 
@@ -176,6 +177,7 @@ describe("content revision application", () => {
           {
             id: postId,
             revision: 1,
+            visibility: "public" as const,
             slug: "live-post",
             title: "Live post",
             excerpt: "This post is currently live.",
@@ -204,10 +206,36 @@ describe("content revision application", () => {
       idempotencyKey: "unpublish-live-blog-post-0001",
     });
 
-    expect(unpublished.definition.blog.posts).toEqual([]);
+    expect(unpublished.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 2,
+      visibility: "unpublished",
+    });
     expect(
       (await application.queries.getRevision(0))?.definition.blog.posts[0],
     ).toMatchObject({ id: postId, revision: 1, title: "Live post" });
+    await expect(
+      application.commands.createBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: liveDefinition.site.id,
+        baseRevision: 1,
+        post: {
+          id: postId,
+          slug: "recreated-post",
+          title: "Recreated post",
+          excerpt: "Identity reuse must fail.",
+          seo: {
+            title: "Recreated post | Foundry",
+            description: "Identity reuse must fail.",
+          },
+          body: createRichTextDocumentFromPlainText("Recreated body."),
+        },
+        idempotencyKey: "recreate-unpublished-blog-post",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_already_exists" },
+    });
   });
 
   it("replays blog commands and fails closed for concurrency, invalid schemas, and cross-site IDs", async () => {

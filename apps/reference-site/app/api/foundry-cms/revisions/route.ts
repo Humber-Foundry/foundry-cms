@@ -64,7 +64,10 @@ type BlogMutationBody =
       workspaceId: ReturnType<typeof createContentWorkspaceId>;
       schemaVersion: SiteDefinition["schemaVersion"];
       baseRevision: number;
-      post: Omit<SiteDefinition["blog"]["posts"][number], "revision">;
+      post: Omit<
+        SiteDefinition["blog"]["posts"][number],
+        "revision" | "visibility"
+      >;
     }>
   | Readonly<{
       operation: "edit_blog_post";
@@ -72,7 +75,10 @@ type BlogMutationBody =
       schemaVersion: SiteDefinition["schemaVersion"];
       baseRevision: number;
       postId: SiteDefinition["blog"]["posts"][number]["id"];
-      post: Omit<SiteDefinition["blog"]["posts"][number], "id" | "revision">;
+      post: Omit<
+        SiteDefinition["blog"]["posts"][number],
+        "id" | "revision" | "visibility"
+      >;
     }>
   | Readonly<{
       operation: "unpublish_blog_post";
@@ -218,7 +224,8 @@ export async function GET(request: Request) {
     if (
       postParameter !== null &&
       !revision.definition.blog.posts.some(
-        ({ slug }) => slug === postParameter,
+        ({ slug, visibility }) =>
+          slug === postParameter && visibility === "public",
       )
     ) {
       return Response.json({ error: "preview_unavailable" }, { status: 409 });
@@ -405,7 +412,55 @@ export async function POST(request: Request) {
     const submitted: unknown = await request.json();
     const actorId = createContentActorId(access.membership.id);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
-    const blogMutation = parseBlogMutation(submitted);
+    let blogMutation: BlogMutationBody | null;
+    try {
+      blogMutation = parseBlogMutation(submitted);
+    } catch (error) {
+      if (
+        error instanceof TypeError &&
+        typeof submitted === "object" &&
+        submitted !== null &&
+        "operation" in submitted &&
+        (submitted.operation === "create_blog_post" ||
+          submitted.operation === "edit_blog_post" ||
+          submitted.operation === "unpublish_blog_post")
+      ) {
+        const candidate = submitted as Record<string, unknown>;
+        const rawPostId =
+          candidate.operation === "create_blog_post" &&
+          typeof candidate.post === "object" &&
+          candidate.post !== null
+            ? (candidate.post as Record<string, unknown>).id
+            : candidate.postId;
+        let postId = null;
+        if (typeof rawPostId === "string") {
+          try {
+            postId = createBlogPostId(rawPostId);
+          } catch {
+            // A malformed target is represented by the null audit target.
+          }
+        }
+        const workspaceId = await contentWorkspaceIdForActor(actorId);
+        const application = await loadContentRevisionApplication(
+          workspaceId,
+          actorId,
+        );
+        await application.commands.recordRejectedBlogPostCommand({
+          actorId,
+          postId,
+          commandType:
+            candidate.operation === "create_blog_post"
+              ? "blog.post.create"
+              : candidate.operation === "edit_blog_post"
+                ? "blog.post.edit"
+                : "blog.post.unpublish",
+          reasonCode: "blog_command_invalid",
+          requestId: idempotencyKey,
+        });
+        return Response.json({ error: "invalid_command" }, { status: 400 });
+      }
+      throw error;
+    }
     if (blogMutation !== null) {
       const application = await loadContentRevisionApplication(
         blogMutation.workspaceId,

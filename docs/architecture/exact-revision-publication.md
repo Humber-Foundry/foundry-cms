@@ -64,14 +64,22 @@ and two-read live-marker verification use the existing publication
 transaction described here.
 
 Unpublishing is a guarded successor publication, not deletion of history. The
-command is accepted only when the post exists in revision 0, the immutable
-published base of that workspace. It creates a new draft definition without
-the post; the previous revision and its audit evidence remain in D1. After
-human preview and approval, the same exact-revision transaction removes the
-post from canonical JSON and deletes its obsolete managed Markdown from the
-production artifact set. Rejected blog commands are recorded in an append-only
-D1 rejection audit with the authenticated actor, workspace, request identity,
-command type, and stable reason code.
+command is accepted only when the post exists as public content in revision 0,
+the immutable published base of that workspace. It creates a new immutable
+post revision whose target visibility is `unpublished`, retaining the stable
+identity and editable content in canonical JSON. Public renderers and managed
+rich-text serialization include only records with `public` target visibility,
+so after human preview and approval the same exact-revision transaction removes
+the route and its obsolete Markdown while preserving the post aggregate. The
+production-base/current-revision pair distinguishes never-published, live,
+live-with-draft, unpublishing, and unpublished states without treating a failed
+deployment as a successful transition.
+
+Accepted and rejected blog commands are recorded in an append-only D1
+transition audit with the authenticated actor, workspace, post target, request
+identity, command type, stable reason, and non-secret before/after state.
+Accepted audit insertion is in the same D1 batch as its immutable revision and
+idempotency receipt.
 
 Schema reader upgrades are staged separately from published-content migration.
 A code release may add an in-memory projection for an older stored Site

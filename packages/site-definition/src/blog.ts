@@ -37,7 +37,7 @@ function requireValid(definition: SiteDefinition): SiteDefinition {
 export function createBlogPostDefinition(
   definition: SiteDefinition,
   siteId: SiteId,
-  post: Omit<BlogPost, "revision">,
+  post: Omit<BlogPost, "revision" | "visibility">,
 ): SiteDefinition {
   requireSite(definition, siteId);
   if (definition.blog.posts.some(({ id }) => id === post.id)) {
@@ -50,7 +50,10 @@ export function createBlogPostDefinition(
     ...definition,
     blog: {
       ...definition.blog,
-      posts: [...definition.blog.posts, { ...post, revision: 1 }],
+      posts: [
+        ...definition.blog.posts,
+        { ...post, revision: 1, visibility: "public" },
+      ],
     },
   });
 }
@@ -59,7 +62,7 @@ export function editBlogPostDefinition(
   definition: SiteDefinition,
   siteId: SiteId,
   postId: BlogPostId,
-  replacement: Omit<BlogPost, "id" | "revision">,
+  replacement: Omit<BlogPost, "id" | "revision" | "visibility">,
 ): SiteDefinition {
   requireSite(definition, siteId);
   const index = definition.blog.posts.findIndex(({ id }) => id === postId);
@@ -78,6 +81,7 @@ export function editBlogPostDefinition(
   posts[index] = {
     id: current.id,
     revision: current.revision + 1,
+    visibility: current.visibility,
     slug: replacement.slug,
     title: replacement.title,
     excerpt: replacement.excerpt,
@@ -99,11 +103,23 @@ export function unpublishBlogPostDefinition(
   if (!definition.blog.posts.some(({ id }) => id === postId)) {
     throw new BlogPostSchemaError("post_not_found");
   }
+  const current = definition.blog.posts.find(({ id }) => id === postId)!;
+  if (current.visibility === "unpublished") {
+    throw new BlogPostSchemaError("post_not_live");
+  }
   return requireValid({
     ...definition,
     blog: {
       ...definition.blog,
-      posts: definition.blog.posts.filter(({ id }) => id !== postId),
+      posts: definition.blog.posts.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              revision: post.revision + 1,
+              visibility: "unpublished" as const,
+            }
+          : post,
+      ),
     },
   });
 }

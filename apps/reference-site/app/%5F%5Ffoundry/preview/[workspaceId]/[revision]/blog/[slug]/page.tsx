@@ -29,7 +29,8 @@ async function loadPostPreview(props: BlogPostPreviewProps) {
     searchParams: props.searchParams,
   });
   const post = revision.definition.blog.posts.find(
-    (candidate) => candidate.slug === params.slug,
+    (candidate) =>
+      candidate.slug === params.slug && candidate.visibility === "public",
   );
   if (post === undefined) {
     notFound();
