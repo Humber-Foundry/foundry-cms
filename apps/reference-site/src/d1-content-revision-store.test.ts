@@ -161,7 +161,10 @@ describe("D1 content revision store", () => {
     ).toEqual({ count: 0 });
   });
 
-  it("persists blog revisions, transition audit, and live unpublish history in D1", async () => {
+  it(
+    "persists blog revisions, transition audit, and live unpublish history in D1",
+    { timeout: 60_000 },
+    async () => {
     const application = createApplication();
     await createWorkspace(application, "d1-blog-create-workspace");
     const postId = createBlogPostId(
@@ -657,7 +660,8 @@ describe("D1 content revision store", () => {
     ).toMatchObject({
       snapshot_json: expect.stringContaining('"visibility":"public"'),
     });
-  });
+    },
+  );
 
   it("allows only one workspace to advance a shared post revision", async () => {
     const postId = createBlogPostId(

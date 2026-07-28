@@ -22,9 +22,15 @@ CREATE TABLE blog_publication_reconciliation_order (
 );
 
 INSERT INTO blog_publication_reconciliation_order (publication_id)
-SELECT id
-FROM content_publications
-ORDER BY requested_at, id;
+SELECT publication.id
+FROM content_publications AS publication
+JOIN content_publication_audit_events AS initial_event
+  ON initial_event.id = (
+    SELECT MIN(event.id)
+    FROM content_publication_audit_events AS event
+    WHERE event.publication_id = publication.id
+  )
+ORDER BY initial_event.id;
 
 UPDATE blog_posts
 SET last_verified_visibility = CASE
@@ -50,3 +56,15 @@ SET last_verified_visibility = CASE
       ORDER BY publication_order.sequence DESC
       LIMIT 1
     );
+
+CREATE TRIGGER blog_publication_reconciliation_order_prevent_update
+BEFORE UPDATE ON blog_publication_reconciliation_order
+BEGIN
+  SELECT RAISE(ABORT, 'blog_publication_reconciliation_order_is_immutable');
+END;
+
+CREATE TRIGGER blog_publication_reconciliation_order_prevent_delete
+BEFORE DELETE ON blog_publication_reconciliation_order
+BEGIN
+  SELECT RAISE(ABORT, 'blog_publication_reconciliation_order_is_immutable');
+END;
