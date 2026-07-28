@@ -11,7 +11,10 @@ import { renderedMediaOccurrenceIds } from "@foundry/application";
 import { requireRenderedMediaOccurrenceId } from "@foundry/application";
 
 import { MediaOccurrence } from "./media-occurrence";
-import { cropForOccurrence } from "./media-manager-state";
+import {
+  cropForOccurrence,
+  cropForSelectedRevision,
+} from "./media-manager-state";
 import {
   mediaUploadAttemptAfterResult,
   type MediaUploadAttempt,
@@ -57,6 +60,7 @@ export function MediaManager({
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [uploadPending, setUploadPending] = useState(false);
   const [mutationToken, setMutationToken] = useState(csrfToken);
+  const selectedOccurrenceId = useRef(occurrenceId);
   const uploadAttempt = useRef<MediaUploadAttempt | null>(null);
   const replaceAttempt = useRef<JsonAttempt | null>(null);
   const cropAttempt = useRef<JsonAttempt | null>(null);
@@ -157,7 +161,11 @@ export function MediaManager({
         ...items.filter((item) => item.occurrenceId !== occurrenceId),
         revision,
       ]);
-      setCrop(cropForOccurrence([revision], revision.occurrenceId));
+      const nextCrop = cropForSelectedRevision(
+        selectedOccurrenceId.current,
+        revision,
+      );
+      if (nextCrop !== undefined) setCrop(nextCrop);
       replaceAttempt.current = null;
       onRevisionSaved(result.contentRevision, result.previewUrl);
       setPreviewUrl(result.previewUrl);
@@ -274,6 +282,7 @@ export function MediaManager({
                 replaceAttempt.current = null;
                 cropAttempt.current = null;
                 const nextOccurrenceId = event.target.value;
+                selectedOccurrenceId.current = nextOccurrenceId;
                 setOccurrenceId(nextOccurrenceId);
                 setCrop(cropForOccurrence(occurrences, nextOccurrenceId));
               }}

@@ -19,3 +19,12 @@ export function cropForOccurrence(
     )?.crop ?? fullFrameCrop
   );
 }
+
+export function cropForSelectedRevision(
+  selectedOccurrenceId: string,
+  revision: Readonly<{ occurrenceId: string; crop: MediaCrop | null }>,
+) {
+  return selectedOccurrenceId === revision.occurrenceId
+    ? revision.crop ?? fullFrameCrop
+    : undefined;
+}

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { cropForOccurrence } from "./media-manager-state";
+import {
+  cropForOccurrence,
+  cropForSelectedRevision,
+} from "./media-manager-state";
 
 describe("media manager crop state", () => {
   it("loads the persisted crop for the selected occurrence", () => {
@@ -24,5 +27,14 @@ describe("media manager crop state", () => {
       width: 1,
       height: 1,
     });
+  });
+
+  it("ignores a delayed revision for an occurrence that is no longer selected", () => {
+    expect(
+      cropForSelectedRevision("occurrence_home_detail", {
+        occurrenceId: "occurrence_home_hero",
+        crop: null,
+      }),
+    ).toBeUndefined();
   });
 });
