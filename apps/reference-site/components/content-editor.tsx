@@ -152,7 +152,10 @@ export function ContentEditor({
     [composition, edits, persistedFields, state.persistedDefinition],
   );
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
-  const editorLocked = state.status === "saving" || state.status === "stale";
+  const editorLocked =
+    state.status === "saving" ||
+    state.status === "stale" ||
+    recoveryConflicts.length > 0;
 
   useEffect(() => {
     if (state.status !== "saving") {
