@@ -449,6 +449,48 @@ describe("GitHub content publisher", () => {
     ).toHaveLength(1);
   });
 
+  it("coalesces concurrent refreshes of an expired installation token", async () => {
+    let currentTime = "2026-07-27T10:00:00.000Z";
+    let tokenMints = 0;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes("/access_tokens")) {
+        tokenMints += 1;
+        return json({
+          token: `installation-token-${tokenMints}`,
+          expires_at:
+            tokenMints === 1
+              ? "2026-07-27T10:02:00.000Z"
+              : "2026-07-27T11:00:00.000Z",
+        });
+      }
+      if (requestUrl.includes("/check-runs")) {
+        return json({ check_runs: [] });
+      }
+      return json({ statuses: [] });
+    });
+    const inputs = {
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date(currentTime),
+    };
+
+    await createGitHubContentPublisher(inputs).getDeploymentStatus(
+      "c".repeat(40),
+    );
+    currentTime = "2026-07-27T10:02:00.000Z";
+    await Promise.all([
+      createGitHubContentPublisher(inputs).getDeploymentStatus(
+        "c".repeat(40),
+      ),
+      createGitHubContentPublisher(inputs).getDeploymentStatus(
+        "c".repeat(40),
+      ),
+    ]);
+
+    expect(tokenMints).toBe(2);
+  });
+
   it("reconciles an ambiguous publish by its exact commit trailer", async () => {
     const publishId = createContentPublicationId(
       `publish_${"1".repeat(32)}`,

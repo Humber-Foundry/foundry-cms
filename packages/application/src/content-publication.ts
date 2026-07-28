@@ -939,7 +939,15 @@ export function createContentPublicationApplication({
         if (leaseToken === null) {
           return blockForLostLease();
         }
-        const renewLease = () => {
+        const renewLease = async () => {
+          try {
+            await requireApproval(input.approvalId, input.requestedBy);
+          } catch (error) {
+            if (error instanceof ContentApprovalInvalidError) {
+              return false;
+            }
+            throw error;
+          }
           const leaseNow = now();
           return store.renewPublicationLease({
             publicationId: publication.id,

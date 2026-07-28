@@ -207,31 +207,37 @@ export function createGitHubContentPublisher({
     };
   }
 
-  async function installationToken() {
-    const current = now();
-    const cachedPromise = tokenCache.get(tokenCacheKey);
-    if (cachedPromise !== undefined) {
-      try {
-        const cached = await cachedPromise;
-        if (cached.usableUntil > current.getTime()) {
-          return cached.token;
+  async function installationToken(): Promise<string> {
+    for (;;) {
+      const current = now();
+      const cachedPromise = tokenCache.get(tokenCacheKey);
+      if (cachedPromise !== undefined) {
+        try {
+          const cached = await cachedPromise;
+          if (cached.usableUntil > current.getTime()) {
+            return cached.token;
+          }
+        } catch {
+          // A failed mint is never retained.
         }
-      } catch {
-        // A failed mint is never retained.
-      }
-      if (tokenCache.get(tokenCacheKey) === cachedPromise) {
+        if (tokenCache.get(tokenCacheKey) !== cachedPromise) {
+          continue;
+        }
         tokenCache.delete(tokenCacheKey);
       }
-    }
-    const mintedPromise = mintInstallationToken(current);
-    tokenCache.set(tokenCacheKey, mintedPromise);
-    try {
-      return (await mintedPromise).token;
-    } catch (error) {
-      if (tokenCache.get(tokenCacheKey) === mintedPromise) {
-        tokenCache.delete(tokenCacheKey);
+      if (tokenCache.has(tokenCacheKey)) {
+        continue;
       }
-      throw error;
+      const mintedPromise = mintInstallationToken(current);
+      tokenCache.set(tokenCacheKey, mintedPromise);
+      try {
+        return (await mintedPromise).token;
+      } catch (error) {
+        if (tokenCache.get(tokenCacheKey) === mintedPromise) {
+          tokenCache.delete(tokenCacheKey);
+        }
+        throw error;
+      }
     }
   }
 

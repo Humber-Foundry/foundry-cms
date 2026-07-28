@@ -590,6 +590,7 @@ export function ContentEditor({
         throw new Error(reason);
       }
       const recorded = result.body.publication as PublicationRecord;
+      setPublicationPollAttempt(0);
       setPublication(recorded);
       pendingPublicationAttempt.current = null;
       setMessage(publicationLabels[recorded.status]);

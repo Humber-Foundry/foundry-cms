@@ -484,6 +484,48 @@ describe("content publication application", () => {
     );
   });
 
+  it("loses the application lease when the approved revision stops being current", async () => {
+    createCommit.mockImplementation(async (input) => {
+      await revisionApplication.application.commands.save({
+        actorId: editorId,
+        workspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 1,
+        edits: [{ path: "section_hero.title", value: "Newer headline" }],
+        idempotencyKey: "save-after-publication-claim",
+      });
+      return (await input.assertLease())
+        ? { state: "committed", commitSha: "c".repeat(40) }
+        : { state: "blocked", detail: "publication_lease_lost" };
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-revision-advanced-during-commit",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        detail: "publication_lease_lost",
+      }),
+    );
+  });
+
   it("replays the recorded operation even after its own commit advanced production", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
