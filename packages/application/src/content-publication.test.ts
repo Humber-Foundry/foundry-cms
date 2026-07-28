@@ -2697,6 +2697,15 @@ describe("content publication application", () => {
         detail: "deployment_retry_result_unknown",
       }),
     );
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "unknown",
+        detail: "deployment_retry_result_unknown",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
     isReleaseLive.mockResolvedValue(true);
 
     await expect(app.commands.refresh(publication.id)).resolves.toEqual(

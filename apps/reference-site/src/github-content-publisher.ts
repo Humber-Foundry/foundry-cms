@@ -1255,10 +1255,19 @@ export function createGitHubContentPublisher({
           },
         );
         const body = await readJson(response);
-        return body.success === true &&
-          typeof body.result?.build_uuid === "string"
-          ? { state: "requested" as const, deploymentId: body.result.build_uuid }
-          : { state: "failed" as const };
+        if (
+          body.success === true &&
+          typeof body.result?.build_uuid === "string" &&
+          body.result.build_uuid.trim() !== ""
+        ) {
+          return {
+            state: "requested" as const,
+            deploymentId: body.result.build_uuid,
+          };
+        }
+        return body.success === false
+          ? { state: "failed" as const }
+          : { state: "unknown" as const };
       } catch (error) {
         return isDefiniteHttpRejection(error)
           ? { state: "failed" as const }

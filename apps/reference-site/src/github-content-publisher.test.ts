@@ -814,6 +814,44 @@ describe("GitHub content publisher", () => {
     },
   );
 
+  it.each([
+    { success: true, result: {} },
+    { success: true, result: { build_uuid: "" } },
+    { success: true, result: { build_uuid: "   " } },
+    { result: { build_uuid: "build-without-success" } },
+  ])(
+    "keeps an incomplete successful Cloudflare build response unknown",
+    async (body) => {
+      const publisher = createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(json(body)),
+      });
+
+      await expect(
+        publisher.retryDeployment({
+          commitSha: "c".repeat(40),
+          assertDispatch: vi.fn().mockResolvedValue(true),
+        }),
+      ).resolves.toEqual({ state: "unknown" });
+    },
+  );
+
+  it("classifies an explicit Cloudflare build rejection as failed", async () => {
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(json({ success: false, errors: [] })),
+    });
+
+    await expect(
+      publisher.retryDeployment({
+        commitSha: "c".repeat(40),
+        assertDispatch: vi.fn().mockResolvedValue(true),
+      }),
+    ).resolves.toEqual({ state: "failed" });
+  });
+
   it("does not contact Cloudflare after losing the exact retry claim", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     const assertDispatch = vi.fn().mockResolvedValue(false);
