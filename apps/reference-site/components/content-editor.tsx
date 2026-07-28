@@ -7,6 +7,7 @@ import {
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
+  toPageCompositionIdentity,
   type EditableSiteField,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
@@ -134,12 +135,17 @@ export function ContentEditor({
               path: pageCompositionContract.slot.id,
               value: JSON.stringify(composition),
               baseValue: JSON.stringify(
-                toPageComposition(state.persistedDefinition),
+                toPageCompositionIdentity(state.persistedDefinition),
               ),
             },
             ...excludeCompositionOwnedEdits(
               fieldEdits,
-              composition.components,
+              composition.components.filter(
+                (component) =>
+                  !state.persistedDefinition.home.sections.some(
+                    ({ id }) => id === component.id,
+                  ),
+              ),
             ),
           ];
     },
@@ -198,7 +204,9 @@ export function ContentEditor({
           ),
           [
             pageCompositionContract.slot.id,
-            JSON.stringify(toPageComposition(state.workingDefinition)),
+            JSON.stringify(
+              toPageCompositionIdentity(state.workingDefinition),
+            ),
           ] as const,
         ]);
         const conflicts: StaleRecoveryConflict[] = [];
@@ -322,7 +330,9 @@ export function ContentEditor({
       ),
       [
         pageCompositionContract.slot.id,
-        JSON.stringify(toPageComposition(state.workingDefinition)),
+        JSON.stringify(
+          toPageCompositionIdentity(state.workingDefinition),
+        ),
       ] as const,
     ]);
     const { available, recovered, conflicts } = recoverStaleEdits(

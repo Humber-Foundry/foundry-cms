@@ -4,6 +4,7 @@ import {
   createDefaultPageSection,
   referenceSiteDefinition,
   toPageComposition,
+  toPageCompositionIdentity,
 } from "@foundry/site-definition";
 
 import {
@@ -259,6 +260,68 @@ describe("stale edit recovery", () => {
         reason: "changed",
       },
     });
+  });
+
+  it("recovers structure without overwriting disjoint concurrent copy", () => {
+    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const reordered = {
+      ...sourceComposition,
+      components: [...sourceComposition.components].reverse(),
+    };
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(
+        toPageCompositionIdentity(referenceSiteDefinition),
+      ),
+      value: JSON.stringify(reordered),
+    };
+    const concurrent = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          {
+            ...referenceSiteDefinition.home.sections[0]!,
+            title: "Concurrent headline",
+          },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    };
+    const storage = createStorage();
+    preserveStaleEdits(
+      storage,
+      "recovery-disjoint-copy",
+      "workspace-disjoint-copy",
+      [edit],
+    );
+    const recovered = recoverStaleEdits(
+      storage,
+      "recovery-disjoint-copy",
+      "workspace-disjoint-copy",
+      new Map([
+        [
+          edit.path,
+          JSON.stringify(toPageCompositionIdentity(concurrent)),
+        ],
+      ]),
+    );
+    const result = applyStructuralRecovery(concurrent, edit);
+
+    expect(recovered.conflicts).toEqual([]);
+    expect(recovered.recovered).toEqual([edit]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.definition.home.sections[0]?.id).toBe(
+        "section_contact",
+      );
+      const hero = result.definition.home.sections.find(
+        ({ id }) => id === "section_hero",
+      );
+      expect(hero?.type === "hero" ? hero.title : undefined).toBe(
+        "Concurrent headline",
+      );
+    }
   });
 
   it("surfaces a same-path concurrent change as a three-way conflict", () => {

@@ -153,6 +153,23 @@ export function toPageComposition(
   };
 }
 
+export function toPageCompositionIdentity(
+  definition: SiteDefinition,
+): Readonly<{
+  slotId: PageComposition["slotId"];
+  components: ReadonlyArray<
+    Readonly<{ id: string; type: PageComponentType }>
+  >;
+}> {
+  return {
+    slotId: pageCompositionContract.slot.id,
+    components: definition.home.sections.map(({ id, type }) => ({
+      id,
+      type,
+    })),
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -36,7 +36,34 @@ export function applyStructuralRecovery(
   }
   try {
     const composition: unknown = JSON.parse(edit.value);
-    const result = applyPageComposition(definition, composition);
+    if (
+      typeof composition !== "object" ||
+      composition === null ||
+      !("components" in composition) ||
+      !Array.isArray(composition.components)
+    ) {
+      return { ok: false };
+    }
+    const currentById = new Map(
+      definition.home.sections.map((section) => [section.id, section]),
+    );
+    const mergedComposition = {
+      ...composition,
+      components: composition.components.map((candidate) => {
+        if (
+          typeof candidate !== "object" ||
+          candidate === null ||
+          !("id" in candidate) ||
+          typeof candidate.id !== "string" ||
+          !("type" in candidate)
+        ) {
+          return candidate;
+        }
+        const current = currentById.get(candidate.id);
+        return current?.type === candidate.type ? current : candidate;
+      }),
+    };
+    const result = applyPageComposition(definition, mergedComposition);
     return result.ok
       ? { ok: true, definition: result.definition }
       : { ok: false };
