@@ -133,6 +133,37 @@ describe("content workspace schema recovery", () => {
     ).rejects.toThrow("content_editor_recovery_revision_conflict");
   });
 
+  it("rebases each edit when a reconciled outbox reports the latest revision", async () => {
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision: { ...preservedRevision, revision: 5 },
+        durableRecoveryEdits: [
+          {
+            path: "site_foundry_reference.name",
+            baseValue: "Foundry Reference",
+            value: "Newer saved draft",
+          },
+        ],
+        readOutbox: async () => ({
+          workspaceId: preservedRevision.workspaceId,
+          baseRevision: 5,
+          edits: [
+            {
+              path: "site_foundry_reference.name",
+              baseValue: "Older saved draft",
+              value: "Older tab edit",
+            },
+          ],
+        }),
+        storage: {
+          getItem: () => null,
+          removeItem: vi.fn(),
+          setItem: vi.fn(),
+        },
+      }),
+    ).rejects.toThrow("content_editor_recovery_revision_conflict");
+  });
+
   it("copies an active recovery record through another schema transition", async () => {
     const recoveryId = "12345678-1234-4123-8123-123456789abc";
     const sourceWorkspaceId = "workspace_original";

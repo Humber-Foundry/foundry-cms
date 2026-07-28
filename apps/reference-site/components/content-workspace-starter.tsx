@@ -104,11 +104,7 @@ export async function preparePreservedRevisionRecovery({
   ) {
     throw new Error("content_editor_outbox_revision_conflict");
   }
-  const safeOutboxEdits =
-    record === null ||
-    record.baseRevision === preservedRevision.revision
-      ? (record?.edits ?? [])
-      : rebaseOverlay(record.edits);
+  const safeOutboxEdits = rebaseOverlay(record?.edits ?? []);
   const recoveryEdits = mergeDurableAndOutboxRecoveryEdits(
     mergeDurableAndOutboxRecoveryEdits(
       durableRecoveryEdits,
