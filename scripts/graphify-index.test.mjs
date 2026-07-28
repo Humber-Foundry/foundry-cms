@@ -147,6 +147,16 @@ if (args[0] === "extract") {
       "  warning: 1 source file(s) produced zero nodes and are absent from the graph: changed.ts.",
     );
   }
+  if (process.env.GRAPHIFY_FAKE_WARNING === "scan-failure") {
+    console.error(
+      "[graphify] WARNING: could not scan src/private (permission denied); its files are missing from this run's enumeration.",
+    );
+  }
+  if (process.env.GRAPHIFY_FAKE_WARNING === "resolver-failure") {
+    console.error(
+      "WARNING: typescript_member_calls resolution failed, skipping: simulated failure",
+    );
+  }
   if (process.env.GRAPHIFY_FAKE_MUTATE_REPOSITORY === "1") {
     writeFileSync(
       join(
@@ -344,6 +354,42 @@ describe("commit-pinned Graphify index", () => {
         source_file: "src/stable.ts",
       }),
     );
+  });
+
+  it("stores a credential-free repository identity across remote credential rotation", () => {
+    const { root, main } = createRepository();
+    git(
+      root,
+      "remote",
+      "set-url",
+      "origin",
+      "https://automation:initial-secret@example.test/foundry/cms.git",
+    );
+
+    const result = runIndex(root, ["refresh"]);
+    expect(result.status, result.output).toBe(0);
+    const metadata = JSON.parse(
+      readFileSync(
+        join(result.cache, "snapshots", main, "metadata.json"),
+        "utf8",
+      ),
+    );
+    expect(metadata.repository).toBe(
+      "https://example.test/foundry/cms.git",
+    );
+    expect(JSON.stringify(metadata)).not.toContain("initial-secret");
+
+    git(
+      root,
+      "remote",
+      "set-url",
+      "origin",
+      "https://replacement:rotated-secret@example.test/foundry/cms.git",
+    );
+    const status = runIndex(root, ["status"], { cache: result.cache });
+
+    expect(status.status, status.output).toBe(0);
+    expect(status.output).toContain("Graph snapshot: verified (code)");
   });
 
   it("uses the branch merge-base snapshot and excludes branch-modified files", () => {
@@ -663,6 +709,23 @@ describe("commit-pinned Graphify index", () => {
       "Graphify extraction reported incomplete results",
     );
     expect(result.output).toContain("produced zero nodes");
+    expect(
+      existsSync(join(result.cache, "snapshots", main)),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["an incomplete directory scan", "scan-failure"],
+    ["a failed registered resolver", "resolver-failure"],
+  ])("rejects %s reported by Graphify", (_label, warning) => {
+    const { root, main } = createRepository();
+
+    const result = runIndex(root, ["refresh"], { warning });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain(
+      "Graphify extraction reported incomplete results",
+    );
     expect(
       existsSync(join(result.cache, "snapshots", main)),
     ).toBe(false);

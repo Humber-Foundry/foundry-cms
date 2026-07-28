@@ -26,7 +26,7 @@ queries never trust it when selecting a graph.
 
 Snapshot metadata binds the graph to:
 
-- the repository remote;
+- a canonical credential-free repository identity;
 - the exact commit and tree;
 - the tracked-file manifest hash;
 - the Graphify version;

@@ -54,6 +54,32 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function credentialFreeRepositoryIdentity(remote) {
+  const value = remote.trim();
+  try {
+    const url = new URL(value);
+    if (url.hostname) {
+      url.username = "";
+      url.password = "";
+      url.search = "";
+      url.hash = "";
+      url.hostname = url.hostname.toLowerCase();
+      return url.href;
+    }
+  } catch {
+    // Fall through for SCP-like and local-path remotes.
+  }
+  if (!/^[a-z]:[\\/]/iu.test(value)) {
+    const scpLike = value.match(
+      /^(?:[^@\s/]+@)?(\[[^\]]+\]|[^:/\s]+):(.+)$/u,
+    );
+    if (scpLike) {
+      return `${scpLike[1].toLowerCase()}:${scpLike[2]}`;
+    }
+  }
+  return value;
+}
+
 function repositoryContext() {
   const repositoryRoot = gitText(process.cwd(), "rev-parse", "--show-toplevel");
   const commonGitDirectory = gitText(
@@ -68,7 +94,9 @@ function repositoryContext() {
   return {
     repositoryRoot,
     cacheRoot,
-    repository: gitText(repositoryRoot, "remote", "get-url", "origin"),
+    repository: credentialFreeRepositoryIdentity(
+      gitText(repositoryRoot, "remote", "get-url", "origin"),
+    ),
     head: gitText(repositoryRoot, "rev-parse", "HEAD"),
     originMain: gitText(
       repositoryRoot,
@@ -393,7 +421,7 @@ function runGraphify(arguments_, options = {}) {
       .filter(Boolean)
       .filter(
         (line) =>
-          /warning:\s+(?:worker failed for|skipped |could not read |failed to parse |\d+ source file\(s\) produced zero nodes)|classified as code but graphify has no AST extractor|contributed nothing to the graph because a dependency is missing|(?:cross-file .*resolution|type-reference resolution) failed/iu.test(
+          /warning:\s+(?:worker failed for|skipped |could not read |could not scan |failed to parse |\d+ source file\(s\) produced zero nodes)|classified as code but graphify has no AST extractor|contributed nothing to the graph because a dependency is missing|\bresolution failed(?:,\s*skipping)?/iu.test(
             line,
           ),
       );
