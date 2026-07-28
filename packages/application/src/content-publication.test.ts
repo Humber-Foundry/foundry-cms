@@ -976,12 +976,14 @@ describe("content publication application", () => {
     vi.mocked(publisher.reconcileCommit)
       .mockResolvedValueOnce({ state: "unknown" })
       .mockResolvedValueOnce({ state: "unknown" })
+      .mockResolvedValueOnce({ state: "unknown" })
       .mockResolvedValueOnce({
         state: "committed",
         commitSha: "c".repeat(40),
       });
+    const store = createInMemoryContentPublicationStore();
     const app = createContentPublicationApplication({
-      store: createInMemoryContentPublicationStore(),
+      store,
       revisions: repository,
       publisher,
       now: () => currentTime,
@@ -1014,7 +1016,17 @@ describe("content publication application", () => {
     );
     expect(retried).toEqual(
       expect.objectContaining({
-        status: "committed",
+        status: "unknown",
+        commitSha: null,
+        detail: "git_result_unknown",
+      }),
+    );
+    await expect(store.findApproval(approval.id)).resolves.toEqual(
+      expect.objectContaining({ invalidatedAt: null }),
+    );
+    const reconciled = await app.commands.refresh(publication.id);
+    expect(reconciled).toEqual(
+      expect.objectContaining({
         commitSha: "c".repeat(40),
       }),
     );
@@ -1027,8 +1039,8 @@ describe("content publication application", () => {
       }),
     ).resolves.toEqual(
       expect.objectContaining({
-        id: retried.id,
-        commitSha: retried.commitSha,
+        id: reconciled!.id,
+        commitSha: "c".repeat(40),
       }),
     );
     expect(createCommit).toHaveBeenCalledTimes(2);
@@ -1055,7 +1067,7 @@ describe("content publication application", () => {
     expect(createCommit.mock.calls[1]![0].bytes).toBe(
       createCommit.mock.calls[0]![0].bytes,
     );
-    expect(publisher.reconcileCommit).toHaveBeenCalledTimes(3);
+    expect(publisher.reconcileCommit).toHaveBeenCalledTimes(4);
     expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
@@ -2052,6 +2064,15 @@ describe("content publication application", () => {
         detail: "deployment_retry_timeout",
       }),
     );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
     getDeploymentStatus.mockResolvedValue("building");
     await expect(
       app.commands.retryDeployment(publication.id, membershipId),
@@ -2059,6 +2080,21 @@ describe("content publication application", () => {
       expect.objectContaining({
         status: "building",
         detail: "deployment_retry_reconciled",
+      }),
+    );
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
       }),
     );
     expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);

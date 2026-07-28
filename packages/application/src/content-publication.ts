@@ -333,7 +333,8 @@ export function contentPublicationHasUnresolvedGitOutcome(publication: {
 function deploymentRetryDispatchIsUncertain(detail: string | null) {
   return (
     detail === "deployment_retry_result_unknown" ||
-    detail === "deployment_retry_timeout"
+    detail === "deployment_retry_timeout" ||
+    detail === "deployment_retry_reconciled"
   );
 }
 
@@ -1232,6 +1233,18 @@ export function createContentPublicationApplication({
             currentPublication.requestedAt,
         ).getTime() >=
       deploymentSignalTimeoutMs;
+    const manualDispatchFenced = deploymentRetryDispatchIsUncertain(
+      currentPublication.detail,
+    );
+    const preserveManualDispatchFence = (
+      detail: string | null,
+      failed = false,
+    ) =>
+      manualDispatchFenced
+        ? failed
+          ? "deployment_retry_timeout"
+          : "deployment_retry_reconciled"
+        : detail;
     const update = (
       status: ContentPublicationStatus,
       detail: string | null,
@@ -1257,7 +1270,10 @@ export function createContentPublicationApplication({
       if (approval === null) {
         return update(
           timedOut ? "failed" : "unknown",
-          "approval_record_missing",
+          preserveManualDispatchFence(
+            "approval_record_missing",
+            timedOut,
+          ),
         );
       }
       let live: boolean;
@@ -1270,7 +1286,12 @@ export function createContentPublicationApplication({
       } catch {
         return update(
           timedOut ? "failed" : "deployed",
-          timedOut ? "release_marker_timeout" : "release_marker_unavailable",
+          preserveManualDispatchFence(
+            timedOut
+              ? "release_marker_timeout"
+              : "release_marker_unavailable",
+            timedOut,
+          ),
         );
       }
       if (live) {
@@ -1278,14 +1299,23 @@ export function createContentPublicationApplication({
       }
       return update(
         timedOut ? "failed" : "deployed",
-        timedOut ? "release_marker_timeout" : "release_marker_pending",
+        preserveManualDispatchFence(
+          timedOut ? "release_marker_timeout" : "release_marker_pending",
+          timedOut,
+        ),
       );
     }
     if (deployment === "failed") {
-      return update("failed", "cloudflare_build_failed");
+      return update(
+        "failed",
+        preserveManualDispatchFence("cloudflare_build_failed", true),
+      );
     }
     if (timedOut && activeStatuses.has(currentPublication.status)) {
-      return update("failed", "deployment_signal_timeout");
+      return update(
+        "failed",
+        preserveManualDispatchFence("deployment_signal_timeout", true),
+      );
     }
     if (deployment === "unknown") {
       return currentPublication;
@@ -1299,7 +1329,10 @@ export function createContentPublicationApplication({
     ) {
       return currentPublication;
     }
-    return update(deployment, null);
+    return update(
+      deployment,
+      preserveManualDispatchFence(null),
+    );
   }
 
   return Object.freeze({
@@ -1664,6 +1697,11 @@ export function createContentPublicationApplication({
                 );
                 if (afterCas.state === "committed") {
                   result = afterCas;
+                } else if (afterCas.state === "unknown") {
+                  result = {
+                    state: "unknown",
+                    detail: "git_result_unknown",
+                  };
                 } else {
                   await invalidateForProductionChange(approval);
                 }
@@ -1839,7 +1877,6 @@ export function createContentPublicationApplication({
         if (deploymentRetryDispatchIsUncertain(publication.detail)) {
           const observed = await publisher.getDeploymentStatus(commitSha);
           if (
-            observed === "requested" ||
             observed === "building" ||
             observed === "deployed"
           ) {
