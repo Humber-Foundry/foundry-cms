@@ -3,6 +3,7 @@ import type {
   SiteDefinition,
   SiteHref,
 } from "./index";
+import { designContract } from "./design-tokens";
 
 export type PageComponentType = PageSection["type"];
 
@@ -36,19 +37,29 @@ export const pageCompositionContract = Object.freeze({
   components: Object.freeze({
     hero: Object.freeze({
       label: "Hero",
-      editableProps: Object.freeze(["eyebrow", "title", "summary"]),
+      editableProps: Object.freeze([
+        "variant",
+        "eyebrow",
+        "title",
+        "summary",
+      ]),
     }),
     services: Object.freeze({
       label: "Services",
-      editableProps: Object.freeze(["eyebrow", "title", "introduction"]),
+      editableProps: Object.freeze([
+        "variant",
+        "eyebrow",
+        "title",
+        "introduction",
+      ]),
     }),
     proof: Object.freeze({
       label: "Proof",
-      editableProps: Object.freeze(["quote", "attribution"]),
+      editableProps: Object.freeze(["variant", "quote", "attribution"]),
     }),
     callToAction: Object.freeze({
       label: "Call to action",
-      editableProps: Object.freeze(["eyebrow", "title", "body"]),
+      editableProps: Object.freeze(["variant", "eyebrow", "title", "body"]),
     }),
   } satisfies Readonly<Record<PageComponentType, ComponentRegistration>>),
 });
@@ -78,6 +89,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: "editorial",
         eyebrow: "Introduce this page",
         title: "A clear page headline",
         summary: "Explain the page in a short, useful sentence.",
@@ -96,6 +108,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: "list",
         eyebrow: "Services",
         title: "What we can make together",
         introduction: "Describe the work available here.",
@@ -112,6 +125,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: "panel",
         quote: "Add a principle or a piece of evidence.",
         attribution: "Source",
         metrics: [
@@ -126,6 +140,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: "moss",
         eyebrow: "Next step",
         title: "Invite the reader to act",
         body: "Explain what will happen next.",
@@ -260,6 +275,14 @@ function validateSectionSchema(
   errors: Record<string, string>,
 ): boolean {
   const path = id;
+  if (
+    typeof section.variant !== "string" ||
+    !designContract.variants[type].values.includes(section.variant as never)
+  ) {
+    errors[`${path}.variant`] =
+      "Choose a variant registered for this component.";
+    return false;
+  }
   switch (type) {
     case "hero":
       return (
@@ -268,6 +291,7 @@ function validateSectionSchema(
           [
             "id",
             "type",
+            "variant",
             "eyebrow",
             "title",
             "summary",
@@ -279,7 +303,7 @@ function validateSectionSchema(
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "eyebrow", "title", "summary"],
+          ["id", "type", "variant", "eyebrow", "title", "summary"],
           path,
           errors,
         ) &&
@@ -290,13 +314,28 @@ function validateSectionSchema(
       return (
         validateObjectKeys(
           section,
-          ["id", "type", "eyebrow", "title", "introduction", "items"],
+          [
+            "id",
+            "type",
+            "variant",
+            "eyebrow",
+            "title",
+            "introduction",
+            "items",
+          ],
           path,
           errors,
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "eyebrow", "title", "introduction"],
+          [
+            "id",
+            "type",
+            "variant",
+            "eyebrow",
+            "title",
+            "introduction",
+          ],
           path,
           errors,
         ) &&
@@ -311,13 +350,20 @@ function validateSectionSchema(
       return (
         validateObjectKeys(
           section,
-          ["id", "type", "quote", "attribution", "metrics"],
+          [
+            "id",
+            "type",
+            "variant",
+            "quote",
+            "attribution",
+            "metrics",
+          ],
           path,
           errors,
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "quote", "attribution"],
+          ["id", "type", "variant", "quote", "attribution"],
           path,
           errors,
         ) &&
@@ -332,13 +378,21 @@ function validateSectionSchema(
       return (
         validateObjectKeys(
           section,
-          ["id", "type", "eyebrow", "title", "body", "action"],
+          [
+            "id",
+            "type",
+            "variant",
+            "eyebrow",
+            "title",
+            "body",
+            "action",
+          ],
           path,
           errors,
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "eyebrow", "title", "body"],
+          ["id", "type", "variant", "eyebrow", "title", "body"],
           path,
           errors,
         ) &&

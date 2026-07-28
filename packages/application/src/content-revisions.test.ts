@@ -146,6 +146,33 @@ describe("content revision application", () => {
     );
   });
 
+  it("includes controlled design changes in the canonical revision fingerprint", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    const initial = await createWorkspace(
+      application,
+      "create-workspace-design-hash",
+    );
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [
+        { path: "design.colour.accent", value: "clay" },
+        { path: "section_hero.variant", value: "focused" },
+      ],
+      idempotencyKey: "save-controlled-design-0001",
+    });
+
+    expect(saved.definition.design.colour.accent).toBe("clay");
+    expect(saved.definition.home.sections[0].variant).toBe("focused");
+    expect(saved.inputs.contentHash).not.toBe(initial.inputs.contentHash);
+  });
+
   it("keeps pre-composition request hashes stable for retry compatibility", async () => {
     const baseStore = createInMemoryContentRevisionStore();
     let observedRequestHash = "";

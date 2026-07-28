@@ -1,6 +1,6 @@
 .site-header,
 .site-footer {
-  width: min(100%, var(--content-width));
+  width: min(100%, var(--design-content-width));
   margin: 0 auto;
   padding-inline: var(--page-gutter);
 }
@@ -27,21 +27,21 @@
 }
 
 .site-header nav a:hover {
-  color: var(--moss);
+  color: var(--design-accent);
 }
 
 .hero,
 .services,
 .proof,
 .contact {
-  width: min(100%, var(--content-width));
+  width: min(100%, var(--design-content-width));
   margin: 0 auto;
   padding-inline: var(--page-gutter);
 }
 
 .hero {
   min-height: 43rem;
-  padding-block: clamp(6rem, 13vw, 10rem);
+  padding-block: var(--design-section-padding);
   background:
     radial-gradient(circle at 82% 22%, rgba(30, 92, 67, 0.13), transparent 25%),
     linear-gradient(135deg, transparent 62%, rgba(233, 225, 207, 0.72) 62%);
@@ -50,7 +50,7 @@
 .hero h1 {
   max-width: 15ch;
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   font-size: clamp(3rem, 7.3vw, 6.5rem);
   font-weight: 400;
   letter-spacing: -0.045em;
@@ -80,7 +80,7 @@
 }
 
 .services {
-  padding-block: clamp(5rem, 10vw, 8rem);
+  padding-block: var(--design-section-padding);
   border-top: 1px solid var(--line);
 }
 
@@ -100,7 +100,7 @@
 .contact h2 {
   max-width: 15ch;
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   font-size: clamp(2.2rem, 4.8vw, 4.3rem);
   font-weight: 400;
   letter-spacing: -0.035em;
@@ -131,14 +131,14 @@
 
 .service-number {
   padding-top: 0.35rem;
-  color: var(--moss);
+  color: var(--design-accent);
   font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
 .service-list h3 {
   margin: 0 0 0.45rem;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   font-size: clamp(1.45rem, 2.4vw, 2rem);
   font-weight: 400;
   line-height: 1.25;
@@ -154,7 +154,7 @@
   display: grid;
   grid-template-columns: 1.45fr 0.8fr;
   gap: clamp(3rem, 8vw, 8rem);
-  padding-block: clamp(5rem, 10vw, 8rem);
+  padding-block: var(--design-section-padding);
   background: var(--sand);
 }
 
@@ -165,7 +165,7 @@
 .proof blockquote {
   max-width: 24ch;
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   font-size: clamp(2rem, 4vw, 3.5rem);
   letter-spacing: -0.025em;
   line-height: 1.14;
@@ -206,9 +206,39 @@
 }
 
 .contact {
-  padding-block: clamp(6rem, 12vw, 10rem);
+  padding-block: var(--design-section-padding);
   background: var(--moss-dark);
   color: var(--paper-bright);
+}
+
+.hero[data-component-variant="focused"] h1 {
+  max-width: 11ch;
+  text-align: center;
+}
+
+.hero[data-component-variant="focused"] > * {
+  margin-inline: auto;
+}
+
+.services[data-component-variant="cards"] .service-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  border-top: 0;
+}
+
+.services[data-component-variant="cards"] .service-list li {
+  grid-template-columns: 1fr;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+}
+
+.proof[data-component-variant="plain"] {
+  background: transparent;
+}
+
+.contact[data-component-variant="ink"] {
+  background: var(--ink);
 }
 
 .contact .eyebrow {
@@ -278,6 +308,10 @@
 
   .proof {
     gap: 4rem;
+  }
+
+  .services[data-component-variant="cards"] .service-list {
+    grid-template-columns: 1fr;
   }
 
   .site-footer {

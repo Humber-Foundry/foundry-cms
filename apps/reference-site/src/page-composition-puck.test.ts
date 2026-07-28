@@ -74,6 +74,7 @@ describe("Puck page-composition adapter", () => {
         props: {
           id: "Puck-generated-insert",
           type: "callToAction",
+          variant: "moss",
           eyebrow: "New",
           title: "A new invitation",
           body: "Take the next step.",

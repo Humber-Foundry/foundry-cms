@@ -85,6 +85,24 @@ describe("reference Site Definition", () => {
         definition.site.navigation[0].href = "https://example.com";
       },
     },
+    {
+      name: "an unknown design token",
+      change: (definition: Record<string, any>) => {
+        definition.design.colour.custom = "red";
+      },
+    },
+    {
+      name: "an executable design value",
+      change: (definition: Record<string, any>) => {
+        definition.design.colour.accent = "url(javascript:alert(1))";
+      },
+    },
+    {
+      name: "a variant registered for a different component",
+      change: (definition: Record<string, any>) => {
+        definition.home.sections[0].variant = "cards";
+      },
+    },
   ])("rejects $name", ({ change }) => {
     const malformed = structuredClone(referenceSiteDefinition) as unknown as Record<
       string,

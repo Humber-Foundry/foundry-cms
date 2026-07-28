@@ -31,6 +31,7 @@ describe("page component composition", () => {
       "callToAction",
     ]);
     expect(pageCompositionContract.components.hero.editableProps).toEqual([
+      "variant",
       "eyebrow",
       "title",
       "summary",

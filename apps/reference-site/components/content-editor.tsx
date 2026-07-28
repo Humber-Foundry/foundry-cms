@@ -165,7 +165,7 @@ export function ContentEditor({
     recoveryBlocked: recoveryConflicts.length > 0,
     onStorageError: setMessage,
   });
-  const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
+  const groups = ["Design", "Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
     !persistence.coordinated ||
     !persistence.ready ||
@@ -956,7 +956,21 @@ export function ContentEditor({
                     {field.label}
                     <code>{field.path}</code>
                   </span>
-                  {field.multiline ? (
+                  {field.values !== undefined ? (
+                    <select
+                      disabled={editorLocked}
+                      value={field.value}
+                      aria-invalid={Boolean(state.errors[field.path])}
+                      aria-describedby={`${field.path}-error`}
+                      onChange={(event) => edit(field.path, event.target.value)}
+                    >
+                      {field.values.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.multiline ? (
                     <textarea
                       rows={3}
                       disabled={editorLocked}

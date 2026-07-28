@@ -73,6 +73,11 @@ describe("visual component editor browser acceptance", () => {
     expect(iframe).not.toBeNull();
     expect(iframe?.getAttribute("src")).toBeNull();
     expect(iframe?.contentDocument).not.toBeNull();
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    const designScope =
+      host.querySelector(".site-canvas") ??
+      iframe?.contentDocument?.querySelector(".site-canvas");
+    expect(designScope?.getAttribute("data-colour-accent")).toBe("moss");
 
     (document.activeElement as HTMLElement | null)?.blur();
     let categoryToggle: HTMLButtonElement | null = null;
@@ -116,6 +121,7 @@ describe("visual component editor browser acceptance", () => {
     expect(Object.keys(visualComponentConfig.components.hero.fields!)).toEqual([
       "id",
       "type",
+      "variant",
       "eyebrow",
       "title",
       "summary",
@@ -125,6 +131,14 @@ describe("visual component editor browser acceptance", () => {
     expect(
       visualComponentConfig.components.hero.fields!.primaryAction,
     ).toEqual(expect.objectContaining({ visible: false }));
+    expect(visualComponentConfig.components.hero.fields!.variant).toEqual({
+      type: "select",
+      label: "Variant",
+      options: [
+        { label: "Editorial", value: "editorial" },
+        { label: "Focused", value: "focused" },
+      ],
+    });
     expect(visualComponentConfig.components.services.fields!.items).toEqual(
       expect.objectContaining({ visible: false }),
     );

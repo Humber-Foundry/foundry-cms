@@ -1,3 +1,11 @@
+import type {
+  CallToActionVariant,
+  HeroVariant,
+  ProofVariant,
+  ServicesVariant,
+  SiteDesign,
+} from "./design-tokens";
+
 declare const siteIdBrand: unique symbol;
 
 export type SiteId = string & {
@@ -25,6 +33,7 @@ export type SiteLink = Readonly<{
 export type HeroSection = Readonly<{
   id: string;
   type: "hero";
+  variant: HeroVariant;
   eyebrow: string;
   title: string;
   summary: string;
@@ -35,6 +44,7 @@ export type HeroSection = Readonly<{
 export type ServicesSection = Readonly<{
   id: string;
   type: "services";
+  variant: ServicesVariant;
   eyebrow: string;
   title: string;
   introduction: string;
@@ -51,6 +61,7 @@ export type ServicesSection = Readonly<{
 export type ProofSection = Readonly<{
   id: string;
   type: "proof";
+  variant: ProofVariant;
   quote: string;
   attribution: string;
   metrics: ReadonlyArray<
@@ -65,6 +76,7 @@ export type ProofSection = Readonly<{
 export type CallToActionSection = Readonly<{
   id: string;
   type: "callToAction";
+  variant: CallToActionVariant;
   eyebrow: string;
   title: string;
   body: string;
@@ -80,6 +92,7 @@ export type PageSection =
 export type SiteDefinition = Readonly<{
   definitionVersion: "1.0.0";
   schemaVersion: "1.0.0";
+  design: SiteDesign;
   site: Readonly<{
     id: SiteId;
     name: string;
@@ -103,10 +116,55 @@ export const siteDefinitionSchema = {
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
-  required: ["definitionVersion", "schemaVersion", "site", "home"],
+  required: [
+    "definitionVersion",
+    "schemaVersion",
+    "design",
+    "site",
+    "home",
+  ],
   properties: {
     definitionVersion: { const: "1.0.0" },
     schemaVersion: { const: "1.0.0" },
+    design: {
+      type: "object",
+      additionalProperties: false,
+      required: ["typography", "colour", "spacing", "layout"],
+      properties: {
+        typography: {
+          type: "object",
+          additionalProperties: false,
+          required: ["heading"],
+          properties: {
+            heading: { enum: ["editorial", "modern"] },
+          },
+        },
+        colour: {
+          type: "object",
+          additionalProperties: false,
+          required: ["accent"],
+          properties: {
+            accent: { enum: ["moss", "clay"] },
+          },
+        },
+        spacing: {
+          type: "object",
+          additionalProperties: false,
+          required: ["section"],
+          properties: {
+            section: { enum: ["relaxed", "compact"] },
+          },
+        },
+        layout: {
+          type: "object",
+          additionalProperties: false,
+          required: ["contentWidth"],
+          properties: {
+            contentWidth: { enum: ["standard", "wide"] },
+          },
+        },
+      },
+    },
     site: {
       type: "object",
       additionalProperties: false,
@@ -208,6 +266,7 @@ export const siteDefinitionSchema = {
       required: [
         "id",
         "type",
+        "variant",
         "eyebrow",
         "title",
         "summary",
@@ -217,6 +276,7 @@ export const siteDefinitionSchema = {
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "hero" },
+        variant: { enum: ["editorial", "focused"] },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         summary: { $ref: "#/$defs/text" },
@@ -227,10 +287,19 @@ export const siteDefinitionSchema = {
     servicesSection: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "type", "eyebrow", "title", "introduction", "items"],
+      required: [
+        "id",
+        "type",
+        "variant",
+        "eyebrow",
+        "title",
+        "introduction",
+        "items",
+      ],
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "services" },
+        variant: { enum: ["list", "cards"] },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         introduction: { $ref: "#/$defs/text" },
@@ -243,10 +312,18 @@ export const siteDefinitionSchema = {
     proofSection: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "type", "quote", "attribution", "metrics"],
+      required: [
+        "id",
+        "type",
+        "variant",
+        "quote",
+        "attribution",
+        "metrics",
+      ],
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "proof" },
+        variant: { enum: ["panel", "plain"] },
         quote: { $ref: "#/$defs/text" },
         attribution: { $ref: "#/$defs/text" },
         metrics: {
@@ -258,10 +335,19 @@ export const siteDefinitionSchema = {
     callToActionSection: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "type", "eyebrow", "title", "body", "action"],
+      required: [
+        "id",
+        "type",
+        "variant",
+        "eyebrow",
+        "title",
+        "body",
+        "action",
+      ],
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "callToAction" },
+        variant: { enum: ["moss", "ink"] },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         body: { $ref: "#/$defs/text" },
@@ -274,6 +360,12 @@ export const siteDefinitionSchema = {
 export const referenceSiteDefinition = {
   definitionVersion: "1.0.0",
   schemaVersion: "1.0.0",
+  design: {
+    typography: { heading: "editorial" },
+    colour: { accent: "moss" },
+    spacing: { section: "relaxed" },
+    layout: { contentWidth: "standard" },
+  },
   site: {
     id: createSiteId("site_foundry_reference"),
     name: "Foundry Reference",
@@ -310,6 +402,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_hero",
         type: "hero",
+        variant: "editorial",
         eyebrow: "Independent work, thoughtfully made",
         title: "Turn a good idea into something people can use.",
         summary:
@@ -328,6 +421,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_services",
         type: "services",
+        variant: "list",
         eyebrow: "A practical studio model",
         title: "From first sketch to a working system.",
         introduction:
@@ -359,6 +453,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_proof",
         type: "proof",
+        variant: "panel",
         quote:
           "The best handoff is not a folder of files. It is a system the next person can understand, operate, and trust.",
         attribution: "The Foundry principle",
@@ -371,6 +466,7 @@ export const referenceSiteDefinition = {
       {
         id: "section_contact",
         type: "callToAction",
+        variant: "moss",
         eyebrow: "Begin with the real question",
         title: "What should exist when this work is done?",
         body:
@@ -387,3 +483,4 @@ export const referenceSiteDefinition = {
 
 export * from "./editable-fields";
 export * from "./component-composition";
+export * from "./design-tokens";

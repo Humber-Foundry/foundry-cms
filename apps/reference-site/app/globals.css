@@ -16,6 +16,29 @@
   --content-width: 78rem;
 }
 
+.site-canvas {
+  --design-heading-font: var(--font-serif);
+  --design-accent: var(--moss);
+  --design-section-padding: clamp(6rem, 12vw, 10rem);
+  --design-content-width: var(--content-width);
+}
+
+.site-canvas[data-typography-heading="modern"] {
+  --design-heading-font: var(--font-sans);
+}
+
+.site-canvas[data-colour-accent="clay"] {
+  --design-accent: #9a4f36;
+}
+
+.site-canvas[data-spacing-section="compact"] {
+  --design-section-padding: clamp(3.5rem, 7vw, 5rem);
+}
+
+.site-canvas[data-layout-content-width="wide"] {
+  --design-content-width: 92rem;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -69,7 +92,7 @@ button:focus-visible {
 
 .eyebrow {
   margin: 0 0 1.25rem;
-  color: var(--moss);
+  color: var(--design-accent, var(--moss));
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.1em;
@@ -99,7 +122,7 @@ button:focus-visible {
 }
 
 .button-primary {
-  background: var(--moss);
+  background: var(--design-accent, var(--moss));
   color: var(--white);
 }
 
