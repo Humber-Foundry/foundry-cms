@@ -98,5 +98,64 @@ export function mergeDurableAndOutboxRecoveryEdits(
   durableEdits: ReadonlyArray<StaleRecoveryEdit>,
   outboxEdits: ReadonlyArray<StaleRecoveryEdit>,
 ): StaleRecoveryEdit[] {
-  return mergeRecoverySources(durableEdits, outboxEdits);
+  return mergeRecoverySources(
+    durableEdits,
+    outboxEdits.map(upgradeLegacyStructuralRecoveryEdit),
+  );
+}
+
+function upgradeLegacyComposition(encoded: string): string {
+  const composition: unknown = JSON.parse(encoded);
+  if (
+    typeof composition !== "object" ||
+    composition === null ||
+    !("slotId" in composition) ||
+    composition.slotId !== pageCompositionContract.slot.id ||
+    !("components" in composition) ||
+    !Array.isArray(composition.components)
+  ) {
+    throw new Error("invalid_legacy_page_composition");
+  }
+  return JSON.stringify({
+    ...composition,
+    components: composition.components.map((component) => {
+      if (
+        typeof component !== "object" ||
+        component === null ||
+        !("type" in component) ||
+        typeof component.type !== "string" ||
+        !(component.type in designContract.variants)
+      ) {
+        throw new Error("unsupported_legacy_page_component");
+      }
+      const type = component.type as PageSection["type"];
+      if ("variant" in component) {
+        if (
+          typeof component.variant !== "string" ||
+          !designContract.variants[type].values.includes(
+            component.variant as never,
+          )
+        ) {
+          throw new Error("unsupported_legacy_component_variant");
+        }
+        return component;
+      }
+      return {
+        ...component,
+        variant: designContract.variants[type].values[0],
+      };
+    }),
+  });
+}
+
+function upgradeLegacyStructuralRecoveryEdit(
+  edit: StaleRecoveryEdit,
+): StaleRecoveryEdit {
+  return edit.path === pageCompositionContract.slot.id
+    ? {
+        ...edit,
+        baseValue: upgradeLegacyComposition(edit.baseValue),
+        value: upgradeLegacyComposition(edit.value),
+      }
+    : edit;
 }

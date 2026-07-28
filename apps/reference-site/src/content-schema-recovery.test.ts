@@ -72,4 +72,64 @@ describe("content schema recovery", () => {
       },
     ]);
   });
+
+  it("adds registered variants to a legacy structural outbox edit", () => {
+    const base = legacyDefinition();
+    const added = {
+      id: "section_unsaved_proof",
+      type: "proof",
+      quote: "Unsaved legacy proof",
+      attribution: "Legacy editor",
+      metrics: [],
+    };
+    const composition = (definition: any) =>
+      JSON.stringify({
+        slotId: "slot_home_sections",
+        components: definition.home.sections,
+      });
+    const [recovered] = mergeDurableAndOutboxRecoveryEdits([], [
+      {
+        path: "slot_home_sections",
+        baseValue: composition(base),
+        value: JSON.stringify({
+          slotId: "slot_home_sections",
+          components: [...base.home.sections, added],
+        }),
+      },
+    ]);
+
+    expect(JSON.parse(recovered!.value).components.at(-1)).toEqual({
+      ...added,
+      variant: "panel",
+    });
+    expect(
+      JSON.parse(recovered!.baseValue).components.every(
+        (component: any) => typeof component.variant === "string",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects an unregistered structural outbox variant", () => {
+    const base = legacyDefinition();
+    expect(() =>
+      mergeDurableAndOutboxRecoveryEdits([], [
+        {
+          path: "slot_home_sections",
+          baseValue: JSON.stringify({
+            slotId: "slot_home_sections",
+            components: base.home.sections,
+          }),
+          value: JSON.stringify({
+            slotId: "slot_home_sections",
+            components: [
+              {
+                ...base.home.sections[0],
+                variant: "arbitrary",
+              },
+            ],
+          }),
+        },
+      ]),
+    ).toThrow("unsupported_legacy_component_variant");
+  });
 });
