@@ -16,6 +16,13 @@ import {
   contentEditorReducer,
   createContentEditorState,
 } from "../src/content-editor-history";
+import {
+  contentPublicationCanRetry,
+  contentPublicationPollDelay,
+  loadContentPublication,
+  refreshContentPublication,
+  sendContentPublicationAttempt,
+} from "../src/content-publication-client";
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
   applyStructuralRecovery,
@@ -42,6 +49,36 @@ import { pageCompositionChanged } from "../src/page-composition-puck";
 import { VisualComponentEditor } from "./visual-component-editor";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
+type PublicationStatus =
+  | "requested"
+  | "committed"
+  | "building"
+  | "deployed"
+  | "verified-live"
+  | "blocked"
+  | "failed"
+  | "unknown";
+type PublicationRecord = Readonly<{
+  id: string;
+  status: PublicationStatus;
+  detail: string | null;
+  commitSha: string | null;
+}>;
+
+const publicationLabels: Readonly<Record<PublicationStatus, string>> = {
+  requested: "Publish requested",
+  committed: "Commit created",
+  building: "Cloudflare building",
+  deployed: "Deployed; verifying release",
+  "verified-live": "Verified live",
+  blocked: "Publish blocked",
+  failed: "Publish failed",
+  unknown: "Publish state unknown",
+};
+
+function publicationIsActive(publication: PublicationRecord): boolean {
+  return !["verified-live", "blocked", "failed"].includes(publication.status);
+}
 
 function changedFields(
   persisted: ReadonlyArray<EditableSiteField>,
@@ -89,10 +126,30 @@ export function ContentEditor({
   const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [previewedRevision, setPreviewedRevision] = useState<number | null>(
+    null,
+  );
+  const [approvalId, setApprovalId] = useState<string | null>(null);
+  const [publication, setPublication] =
+    useState<PublicationRecord | null>(null);
+  const [publicationBusy, setPublicationBusy] = useState(false);
+  const [publicationPollAttempt, setPublicationPollAttempt] = useState(0);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
   const pendingWorkspaceAttempt = useRef<{
+    body: string;
+    idempotencyKey: string;
+  } | null>(null);
+  const pendingApprovalAttempt = useRef<{
+    body: string;
+    idempotencyKey: string;
+  } | null>(null);
+  const pendingPublicationAttempt = useRef<{
+    body: string;
+    idempotencyKey: string;
+  } | null>(null);
+  const pendingDeploymentRetryAttempt = useRef<{
     body: string;
     idempotencyKey: string;
   } | null>(null);
@@ -171,7 +228,8 @@ export function ContentEditor({
     !persistence.ready ||
     state.status === "saving" ||
     state.status === "stale" ||
-    recoveryConflicts.length > 0;
+    recoveryConflicts.length > 0 ||
+    publicationBusy;
 
   useEffect(() => {
     if (state.status !== "saving") {
@@ -314,6 +372,89 @@ export function ContentEditor({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadContentPublication({
+      workspaceId: initialRevision.workspaceId,
+    })
+      .then((result) => {
+        if (
+          !cancelled &&
+          typeof result === "object" &&
+          result !== null &&
+          "publication" in result &&
+          typeof result.publication === "object" &&
+          result.publication !== null
+        ) {
+          setPublication(
+            (current) => current ?? (result.publication as PublicationRecord),
+          );
+        }
+      })
+      .catch(() => {
+        // A missing publication configuration must not block draft editing.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialRevision.workspaceId]);
+
+  useEffect(() => {
+    pendingDeploymentRetryAttempt.current = null;
+  }, [publication?.id]);
+
+  useEffect(() => {
+    if (
+      publication === null ||
+      !publicationIsActive(publication)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await refreshContentPublication({
+          workspaceId: initialRevision.workspaceId,
+          publicationId: publication.id,
+          mutationToken,
+        });
+        if (cancelled) {
+          return;
+        }
+        setMutationToken(result.mutationToken);
+        if (
+          typeof result.body === "object" &&
+          result.body !== null &&
+          "publication" in result.body &&
+          typeof result.body.publication === "object" &&
+          result.body.publication !== null &&
+          !cancelled
+        ) {
+          setPublication(result.body.publication as PublicationRecord);
+        }
+      } catch {
+        if (!cancelled) {
+          setMessage(
+            "The latest publish state could not be confirmed. The operation remains recorded; retry status shortly.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPublicationPollAttempt((attempt) => attempt + 1);
+        }
+      }
+    }, contentPublicationPollDelay(publicationPollAttempt));
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    initialRevision.workspaceId,
+    mutationToken,
+    publication,
+    publicationPollAttempt,
+  ]);
 
   useEffect(() => {
     if (
@@ -599,6 +740,13 @@ export function ContentEditor({
         definition: saved.definition,
         revision: saved.revision,
       });
+      setApprovalId(null);
+      setPublication((current) =>
+        current !== null && publicationIsActive(current) ? current : null,
+      );
+      setPreviewedRevision(null);
+      pendingApprovalAttempt.current = null;
+      pendingPublicationAttempt.current = null;
       setPreviewUrl(saved.previewUrl);
       setMessage(
         outboxCleared
@@ -626,6 +774,7 @@ export function ContentEditor({
 
   function edit(path: string, value: string) {
     if (
+      publicationBusy ||
       saveInFlight.current ||
       !persistence.coordinated ||
       !persistence.ready
@@ -633,7 +782,169 @@ export function ContentEditor({
       return;
     }
     persistence.discardAttempt();
+    setApprovalId(null);
+    setPreviewedRevision(null);
+    pendingApprovalAttempt.current = null;
+    pendingPublicationAttempt.current = null;
     dispatch({ type: "edit", path, value });
+  }
+
+  function moveEditHistory(direction: "undo" | "redo") {
+    if (editorLocked) {
+      return;
+    }
+    persistence.discardAttempt();
+    setApprovalId(null);
+    setPreviewedRevision(null);
+    pendingApprovalAttempt.current = null;
+    pendingPublicationAttempt.current = null;
+    dispatch({ type: direction });
+  }
+
+  async function approveRevision() {
+    pendingApprovalAttempt.current ??= {
+      body: JSON.stringify({
+        operation: "approve",
+        workspaceId: initialRevision.workspaceId,
+        revision: state.persistedRevision,
+        previewConfirmed: true,
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    setPublicationBusy(true);
+    setMessage("");
+    try {
+      const result = await sendContentPublicationAttempt({
+        attempt: pendingApprovalAttempt.current,
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("approval" in result.body) ||
+        typeof result.body.approval !== "object" ||
+        result.body.approval === null ||
+        !("id" in result.body.approval) ||
+        typeof result.body.approval.id !== "string"
+      ) {
+        throw new Error("content_approval_failed");
+      }
+      setApprovalId(result.body.approval.id);
+      pendingPublicationAttempt.current = null;
+      pendingDeploymentRetryAttempt.current = null;
+      setPublication((current) =>
+        current !== null && publicationIsActive(current) ? current : null,
+      );
+      pendingApprovalAttempt.current = null;
+      setMessage(
+        `Revision ${state.persistedRevision} approved. It is ready to publish while every bound input remains unchanged.`,
+      );
+    } catch {
+      setMessage(
+        "Approval could not be confirmed. Reopen the exact preview if the revision or production version changed.",
+      );
+    } finally {
+      setPublicationBusy(false);
+    }
+  }
+
+  async function publishRevision() {
+    if (approvalId === null) {
+      return;
+    }
+    pendingPublicationAttempt.current ??= {
+      body: JSON.stringify({
+        operation: "publish",
+        workspaceId: initialRevision.workspaceId,
+        approvalId,
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    setPublicationBusy(true);
+    setMessage("");
+    try {
+      const result = await sendContentPublicationAttempt({
+        attempt: pendingPublicationAttempt.current,
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("publication" in result.body) ||
+        typeof result.body.publication !== "object" ||
+        result.body.publication === null
+      ) {
+        const reason =
+          typeof result.body === "object" &&
+          result.body !== null &&
+          "error" in result.body &&
+          typeof result.body.error === "string"
+            ? result.body.error.replaceAll("_", " ")
+            : "publish request failed";
+        throw new Error(reason);
+      }
+      const recorded = result.body.publication as PublicationRecord;
+      setPublicationPollAttempt(0);
+      setPublication(recorded);
+      pendingPublicationAttempt.current = null;
+      setMessage(publicationLabels[recorded.status]);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Publish was not started: ${error.message}.`
+          : "Publish was not started.",
+      );
+    } finally {
+      setPublicationBusy(false);
+    }
+  }
+
+  async function retryDeployment() {
+    if (publication === null || !contentPublicationCanRetry(publication)) {
+      return;
+    }
+    pendingDeploymentRetryAttempt.current ??= {
+      body: JSON.stringify({
+        operation: "retry_deployment",
+        workspaceId: initialRevision.workspaceId,
+        publicationId: publication.id,
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    setPublicationBusy(true);
+    setMessage("");
+    try {
+      const result = await sendContentPublicationAttempt({
+        attempt: pendingDeploymentRetryAttempt.current,
+        mutationToken,
+      });
+      pendingDeploymentRetryAttempt.current = null;
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("publication" in result.body) ||
+        typeof result.body.publication !== "object" ||
+        result.body.publication === null
+      ) {
+        throw new Error("deployment_retry_failed");
+      }
+      const recorded = result.body.publication as PublicationRecord;
+      setPublicationPollAttempt(0);
+      setPublication(recorded);
+      setMessage("The exact committed revision is queued for another build.");
+    } catch {
+      setMessage(
+        "The deployment retry could not be confirmed. Retry the same request.",
+      );
+    } finally {
+      setPublicationBusy(false);
+    }
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
@@ -803,12 +1114,7 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.past.length === 0 || editorLocked}
-            onClick={() => {
-              if (!saveInFlight.current) {
-                persistence.discardAttempt();
-                dispatch({ type: "undo" });
-              }
-            }}
+            onClick={() => moveEditHistory("undo")}
           >
             Undo
           </button>
@@ -816,12 +1122,7 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.future.length === 0 || editorLocked}
-            onClick={() => {
-              if (!saveInFlight.current) {
-                persistence.discardAttempt();
-                dispatch({ type: "redo" });
-              }
-            }}
+            onClick={() => moveEditHistory("redo")}
           >
             Redo
           </button>
@@ -846,7 +1147,12 @@ export function ContentEditor({
         {state.status === "stale" ? (
           <span>Saved preview unavailable for the current production version</span>
         ) : (
-          <a href={previewUrl} target="_blank" rel="noreferrer">
+          <a
+            href={previewUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => setPreviewedRevision(state.persistedRevision)}
+          >
             Preview exact saved revision ↗
           </a>
         )}
@@ -874,6 +1180,67 @@ export function ContentEditor({
           </button>
         ) : null}
       </div>
+      {state.status !== "stale" ? (
+        <div
+          className="publication-actions"
+          aria-label="Approve and publish exact revision"
+        >
+          <div>
+            <strong>Publication</strong>
+            <span>
+              {publication === null
+                ? approvalId === null
+                  ? "Open and inspect the exact saved preview before approval."
+                  : "Ready to publish"
+                : publicationLabels[publication.status]}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="copy-button"
+            disabled={
+              publicationBusy ||
+              edits.length > 0 ||
+              state.status !== "saved" ||
+              previewedRevision !== state.persistedRevision
+            }
+            onClick={() => void approveRevision()}
+          >
+            {publicationBusy && approvalId === null
+              ? "Approving…"
+              : `Approve revision ${state.persistedRevision}`}
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={
+              publicationBusy ||
+              approvalId === null ||
+              (publication !== null && publicationIsActive(publication)) ||
+              (publication !== null &&
+                contentPublicationCanRetry(publication)) ||
+              edits.length > 0 ||
+              state.status !== "saved"
+            }
+            onClick={() => void publishRevision()}
+          >
+            {publicationBusy && approvalId !== null
+              ? "Publishing…"
+              : "Publish approved revision"}
+          </button>
+          {publication !== null &&
+          contentPublicationCanRetry(publication) ? (
+            <button
+              type="button"
+              className="copy-button"
+              disabled={publicationBusy}
+              onClick={() => void retryDeployment()}
+            >
+              {publicationBusy ? "Retrying…" : "Retry exact publication"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <p role="status" aria-live="polite" className="editor-message">
         {message}
       </p>
