@@ -26,6 +26,7 @@ import {
 const schemaVersion = "foundry.graphify-index/v1";
 const maximumQueryBudget = 3_000;
 const defaultQueryBudget = 1_200;
+const remoteRefreshLeaseMs = 4 * 60 * 60 * 1_000;
 
 function fail(message) {
   throw new Error(message);
@@ -225,9 +226,15 @@ function acquireRefreshLock(cacheRoot) {
         join(lock, "owner.json"),
         "Graphify refresh lock owner",
       );
-      const active =
-        owner.hostname !== hostname() ||
-        processIsAlive(owner.pid);
+      const sameHost = owner.hostname === hostname();
+      const age = Date.now() - Date.parse(owner.startedAt);
+      const remoteLeaseActive =
+        Number.isFinite(age) &&
+        age >= -60_000 &&
+        age < remoteRefreshLeaseMs;
+      const active = sameHost
+        ? processIsAlive(owner.pid)
+        : remoteLeaseActive;
       if (active) {
         fail("Another Graphify refresh is already running.");
       }

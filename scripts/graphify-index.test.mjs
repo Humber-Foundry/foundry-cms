@@ -483,4 +483,48 @@ describe("commit-pinned Graphify index", () => {
     );
     expect(existsSync(liveLock)).toBe(true);
   });
+
+  it("bounds locks owned by an unverifiable hostname", () => {
+    const { root } = createRepository();
+    const staleCache = mkdtempSync(
+      join(tmpdir(), "foundry-graphify-cache-"),
+    );
+    const staleLock = join(staleCache, "refresh.lock");
+    mkdirSync(staleLock);
+    writeFileSync(
+      join(staleLock, "owner.json"),
+      JSON.stringify({
+        pid: process.pid,
+        hostname: `${hostname()}-before-rename`,
+        startedAt: new Date(0).toISOString(),
+      }),
+    );
+
+    const reclaimed = runIndex(root, ["refresh"], {
+      cache: staleCache,
+    });
+    expect(reclaimed.status, reclaimed.output).toBe(0);
+
+    const recentCache = mkdtempSync(
+      join(tmpdir(), "foundry-graphify-cache-"),
+    );
+    const recentLock = join(recentCache, "refresh.lock");
+    mkdirSync(recentLock);
+    writeFileSync(
+      join(recentLock, "owner.json"),
+      JSON.stringify({
+        pid: 999_999,
+        hostname: `${hostname()}-other`,
+        startedAt: new Date().toISOString(),
+      }),
+    );
+
+    const blocked = runIndex(root, ["refresh"], {
+      cache: recentCache,
+    });
+    expect(blocked.status).not.toBe(0);
+    expect(blocked.output).toContain(
+      "Another Graphify refresh is already running",
+    );
+  });
 });

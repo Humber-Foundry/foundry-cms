@@ -53,7 +53,10 @@ pinned tree and rewritten repository-relative, so query output remains usable
 after the temporary archive is removed. It refuses feature commits and dirty
 worktrees. If the same snapshot already exists, it verifies that snapshot
 rather than rebuilding it. A later refresh reclaims a lock left by a process
-that no longer exists, but never takes or removes another live owner's lock.
+that no longer exists, but never takes or removes another confirmed live
+same-host owner's lock. An owner recorded under another hostname receives a
+four-hour lease so a machine rename or vanished shared-storage host cannot
+block AFK refreshes forever.
 
 Graphify's AST workers may be denied by an agent sandbox even when its process
 exits successfully. The wrapper rejects an empty graph. If the refresh reports
