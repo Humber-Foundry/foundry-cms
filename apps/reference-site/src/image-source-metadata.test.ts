@@ -40,7 +40,7 @@ describe("image source metadata", () => {
     });
   });
 
-  it("normalizes JPEG dimensions for EXIF orientation", () => {
+  it("preserves EXIF orientation when a later APP1 segment contains XMP", () => {
     const exif = new Uint8Array(32);
     exif.set(new TextEncoder().encode("Exif\u0000\u0000"), 0);
     exif.set([0x49, 0x49, 42, 0, 8, 0, 0, 0], 6);
@@ -54,6 +54,15 @@ describe("image source metadata", () => {
       0,
       34,
       ...exif,
+      0xff,
+      0xe1,
+      0,
+      7,
+      0x58,
+      0x4d,
+      0x50,
+      0,
+      0,
       0xff,
       0xc0,
       0,

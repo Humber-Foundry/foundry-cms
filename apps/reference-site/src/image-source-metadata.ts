@@ -79,12 +79,12 @@ function exifOrientation(
   source: Uint8Array,
   payloadOffset: number,
   payloadLength: number,
-) {
+): number | null {
   if (
     payloadLength < 14 ||
     ascii(source, payloadOffset, payloadOffset + 6) !== "Exif\u0000\u0000"
   ) {
-    return 1;
+    return null;
   }
   const tiff = payloadOffset + 6;
   const littleEndian =
@@ -93,26 +93,26 @@ function exifOrientation(
       : source[tiff] === 0x4d && source[tiff + 1] === 0x4d
         ? false
         : null;
-  if (littleEndian === null) return 1;
+  if (littleEndian === null) return null;
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
-  if (view.getUint16(tiff + 2, littleEndian) !== 42) return 1;
+  if (view.getUint16(tiff + 2, littleEndian) !== 42) return null;
   const directory = tiff + view.getUint32(tiff + 4, littleEndian);
   const payloadEnd = payloadOffset + payloadLength;
-  if (directory < tiff || directory + 2 > payloadEnd) return 1;
+  if (directory < tiff || directory + 2 > payloadEnd) return null;
   const count = view.getUint16(directory, littleEndian);
   for (let index = 0; index < count; index += 1) {
     const entry = directory + 2 + index * 12;
-    if (entry + 12 > payloadEnd) return 1;
+    if (entry + 12 > payloadEnd) return null;
     if (
       view.getUint16(entry, littleEndian) === 0x0112 &&
       view.getUint16(entry + 2, littleEndian) === 3 &&
       view.getUint32(entry + 4, littleEndian) === 1
     ) {
       const orientation = view.getUint16(entry + 8, littleEndian);
-      return orientation >= 1 && orientation <= 8 ? orientation : 1;
+      return orientation >= 1 && orientation <= 8 ? orientation : null;
     }
   }
-  return 1;
+  return null;
 }
 
 function jpeg(source: Uint8Array): ImageSourceMetadata | null {
@@ -125,6 +125,7 @@ function jpeg(source: Uint8Array): ImageSourceMetadata | null {
   let offset = 2;
   let metadata: ImageSourceMetadata | null = null;
   let orientation = 1;
+  let sawOrientation = false;
   let sawScan = false;
   while (offset < source.byteLength) {
     if (source[offset] !== 0xff) invalid();
@@ -142,8 +143,12 @@ function jpeg(source: Uint8Array): ImageSourceMetadata | null {
     if (offset + 2 > source.byteLength) invalid();
     const length = view.getUint16(offset);
     if (length < 2 || offset + length > source.byteLength) invalid();
-    if (marker === 0xe1) {
-      orientation = exifOrientation(source, offset + 2, length - 2);
+    if (marker === 0xe1 && !sawOrientation) {
+      const found = exifOrientation(source, offset + 2, length - 2);
+      if (found !== null) {
+        orientation = found;
+        sawOrientation = true;
+      }
     }
     if (frames.has(marker)) {
       if (length < 7 || metadata !== null) invalid();
