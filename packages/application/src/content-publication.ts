@@ -1051,18 +1051,13 @@ export function createContentPublicationApplication({
         ) {
           return recoverableCandidate;
         }
-        const base = parseProductionBase(
-          approval.fingerprint.productionBase,
-        );
-        if (approval.fingerprint.contentHash === base.contentHash) {
-          throw new ContentPublicationValidationError(
-            "publication_no_changes",
-          );
-        }
         const activePublication = await store.findActivePublication();
         if (activePublication !== null) {
           await refreshPublication(activePublication.id);
         }
+        const base = parseProductionBase(
+          approval.fingerprint.productionBase,
+        );
         const [headResult, baseIsLiveResult] = await Promise.allSettled([
           publisher.getProductionHead(),
           publisher.isReleaseLive({
@@ -1098,6 +1093,11 @@ export function createContentPublicationApplication({
         }
         if (baseIsLiveResult.status === "rejected") {
           throw baseIsLiveResult.reason;
+        }
+        if (approval.fingerprint.contentHash === base.contentHash) {
+          throw new ContentPublicationValidationError(
+            "publication_no_changes",
+          );
         }
         const head = headResult.value;
         const contributors = await revisions.listContributors(

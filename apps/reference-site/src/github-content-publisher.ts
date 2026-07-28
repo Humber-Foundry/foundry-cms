@@ -522,7 +522,10 @@ export function createGitHubContentPublisher({
         }
         createdCommitSha = commit.sha;
         if (!(await input.assertLease())) {
-          return { state: "blocked", detail: "publication_lease_lost" };
+          return {
+            state: "unknown",
+            detail: `git_reference_result_unknown:${commit.sha}`,
+          };
         }
         try {
           await request(

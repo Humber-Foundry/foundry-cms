@@ -654,7 +654,7 @@ describe("GitHub content publisher", () => {
     );
   });
 
-  it("does not advance the production ref after the publication lease is lost", async () => {
+  it("retains the candidate without advancing the ref after the lease is lost", async () => {
     const expectedHead = "a".repeat(40);
     const assertLease = vi
       .fn<() => Promise<boolean>>()
@@ -690,8 +690,8 @@ describe("GitHub content publisher", () => {
         assertLease,
       }),
     ).resolves.toEqual({
-      state: "blocked",
-      detail: "publication_lease_lost",
+      state: "unknown",
+      detail: `git_reference_result_unknown:${"c".repeat(40)}`,
     });
     expect(assertLease).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledTimes(6);

@@ -235,6 +235,29 @@ describe("content publication application", () => {
       new ContentPublicationValidationError("publication_no_changes"),
     );
     expect(createCommit).not.toHaveBeenCalled();
+
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("d".repeat(40));
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-no-op-stale-base",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("production_head_moved"),
+    );
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-no-op-invalidated",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+    expect(createCommit).not.toHaveBeenCalled();
   });
 
   it("invalidates approval when a later render-affecting revision exists", async () => {
