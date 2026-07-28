@@ -164,6 +164,13 @@ describe("reference Site Definition", () => {
         document.children[0].children[0].marks = ["italic", "bold"];
       },
     },
+    {
+      name: "marked edge whitespace",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = " marked";
+        document.children[0].children[0].marks = ["bold"];
+      },
+    },
     ...["https://?", "https://#", "http://[::1"].map((href) => ({
       name: `a malformed absolute link (${href})`,
       mutate(document: Record<string, any>) {

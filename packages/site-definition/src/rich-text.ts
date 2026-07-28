@@ -199,6 +199,16 @@ function validateText(text: RichTextText, path: string) {
   if (!Array.isArray(text.marks)) {
     issue("invalid_node", `${path}.marks`, "Expected a marks array.");
   }
+  if (
+    text.marks.some((mark) => mark === "bold" || mark === "italic") &&
+    (/^\s/u.test(text.text) || /\s$/u.test(text.text))
+  ) {
+    issue(
+      "serializer_ambiguity",
+      `${path}.text`,
+      "Bold and italic text cannot begin or end with whitespace in canonical CommonMark.",
+    );
+  }
   const seen = new Set<string>();
   text.marks.forEach((mark, index) => {
     const markPath = `${path}.marks[${index}]`;

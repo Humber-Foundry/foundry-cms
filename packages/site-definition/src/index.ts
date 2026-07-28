@@ -514,6 +514,27 @@ export const siteDefinitionSchema = {
           ],
         },
       },
+      allOf: [
+        {
+          if: {
+            properties: {
+              marks: {
+                type: "array",
+                contains: { enum: ["bold", "italic"] },
+              },
+            },
+            required: ["marks"],
+          },
+          then: {
+            properties: {
+              text: {
+                type: "string",
+                pattern: "^\\S(?:[^\\r\\n]*\\S)?$",
+              },
+            },
+          },
+        },
+      ],
     },
     richTextLink: {
       type: "object",

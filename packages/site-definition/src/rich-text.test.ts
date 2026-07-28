@@ -486,6 +486,46 @@ describe("rich text contract", () => {
     );
   });
 
+  it.each([" bold", "bold ", " "])(
+    "rejects marked edge whitespace without a valid CommonMark representation: %j",
+    (text) => {
+      expect(() =>
+        serializeRichTextToMarkdown({
+          version: "1.0.0",
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [{ type: "text", text, marks: ["bold"] }],
+            },
+          ],
+        }),
+      ).toThrow(
+        expect.objectContaining<Partial<RichTextValidationError>>({
+          issues: [
+            expect.objectContaining({
+              code: "serializer_ambiguity",
+              path: "$.children[0].children[0].text",
+            }),
+          ],
+        }),
+      );
+    },
+  );
+
+  it.each(["** **\n", "** bold **\n", "* italic *\n"])(
+    "rejects non-flanking CommonMark emphasis: %j",
+    (markdown) => {
+      expect(() => parseRichTextMarkdown(markdown)).toThrow(
+        expect.objectContaining<Partial<RichTextValidationError>>({
+          issues: expect.arrayContaining([
+            expect.objectContaining({ code: "serializer_ambiguity" }),
+          ]),
+        }),
+      );
+    },
+  );
+
   it.each([
     ["[run](javascript:alert\\(1\\))\n", "unsafe_link"],
     ["<script>alert(1)</script>\n", "serializer_ambiguity"],
