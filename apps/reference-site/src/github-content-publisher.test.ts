@@ -654,6 +654,59 @@ describe("GitHub content publisher", () => {
     );
   });
 
+  it("uses the repository SHA-256 object format for retained blobs", async () => {
+    const expectedHead = "a".repeat(64);
+    const commitSha = "c".repeat(64);
+    const bytes = "{}\n";
+    const blobSha = createHash("sha256")
+      .update(`blob ${Buffer.byteLength(bytes)}\0${bytes}`)
+      .digest("hex");
+    const publishId = createContentPublicationId(
+      `publish_${"6".repeat(32)}`,
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(
+        json({
+          message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+          parents: [{ sha: expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename:
+                "packages/site-definition/src/published-site.json",
+              status: "modified",
+              sha: blobSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(json({ object: { sha: commitSha } }));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.retryReference({
+        publishId,
+        candidateCommitSha: commitSha,
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({ state: "committed", commitSha });
+  });
+
   it("retains the candidate without advancing the ref after the lease is lost", async () => {
     const expectedHead = "a".repeat(40);
     const assertLease = vi

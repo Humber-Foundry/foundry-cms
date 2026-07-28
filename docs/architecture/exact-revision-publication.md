@@ -121,11 +121,14 @@ before attempting the non-force ref compare-and-swap again.
 The only accepted trigger deploy command is `npm run deploy`. That shipped
 script builds, then runs `scripts/deploy-exact-production.mjs`. The controller
 requires the local checkout, `WORKERS_CI_COMMIT_SHA`, and `origin`'s protected
-production ref to agree before launch, polls that fence throughout promotion,
-terminates the deployment if it changes, and verifies it again after success.
-This deployment-time fence prevents an exact retry of an older commit from
-rolling production back after an external merge. The build result is also
-rejected if Cloudflare reports a different commit hash.
+production ref to agree before upload. OpenNext uploads a non-serving,
+commit-tagged Worker version first. The controller then routes Wrangler's
+activation API calls through a loopback gate and rechecks the same fence on the
+actual Cloudflare `POST /deployments` request before forwarding it. It requires
+exactly one activation and verifies the fence again after success. This
+deployment-time fence prevents an exact retry of an older commit from rolling
+production back after an external merge. The build result is also rejected if
+Cloudflare reports a different commit hash.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory

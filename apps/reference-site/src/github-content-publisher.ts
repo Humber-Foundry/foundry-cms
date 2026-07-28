@@ -200,13 +200,22 @@ async function sha256(value: string) {
     .join("");
 }
 
-async function gitBlobSha(value: string) {
+async function gitBlobSha(value: string, repositoryObjectId: string) {
   const bytes = new TextEncoder().encode(value);
   const header = new TextEncoder().encode(`blob ${bytes.byteLength}\0`);
   const payload = new Uint8Array(header.byteLength + bytes.byteLength);
   payload.set(header);
   payload.set(bytes, header.byteLength);
-  const digest = await crypto.subtle.digest("SHA-1", payload);
+  const algorithm =
+    repositoryObjectId.length === 40
+      ? "SHA-1"
+      : repositoryObjectId.length === 64
+        ? "SHA-256"
+        : null;
+  if (algorithm === null) {
+    throw new Error("github_object_format_invalid");
+  }
+  const digest = await crypto.subtle.digest(algorithm, payload);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -625,7 +634,7 @@ export function createGitHubContentPublisher({
             token,
             `/compare/${input.expectedHead}...${input.candidateCommitSha}`,
           ),
-          gitBlobSha(input.bytes),
+          gitBlobSha(input.bytes, input.expectedHead),
         ]);
         const parents = Array.isArray(candidate.parents)
           ? candidate.parents
