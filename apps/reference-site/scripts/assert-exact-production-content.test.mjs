@@ -150,12 +150,32 @@ describe("exact production content authorization", () => {
         commitSha: liveCommit,
         contentHash,
       }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
     });
 
     await expect(
       assertExactProductionContent(options),
     ).resolves.toBeUndefined();
     expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("does not let equal JSON content bypass a managed Markdown delta", async () => {
+    await expect(
+      assertExactProductionContent(
+        inputs({
+          readLiveMarker: vi.fn().mockResolvedValue({
+            commitSha: liveCommit,
+            contentHash,
+          }),
+          readChangedPaths: vi.fn().mockReturnValue(`${richTextPath}\n`),
+          readCommitMessage: vi
+            .fn()
+            .mockReturnValue("Ordinary code commit\n"),
+        }),
+      ),
+    ).rejects.toThrow("exact_content_release_not_authorized");
   });
 
   it("allows one exact Foundry JSON and Markdown artifact commit on the live release", async () => {

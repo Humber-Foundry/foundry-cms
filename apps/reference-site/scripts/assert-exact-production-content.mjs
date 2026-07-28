@@ -207,15 +207,23 @@ export async function assertExactProductionContent({
   const expectedContentHash = contentHash(
     readPublishedContent(expectedCommit),
   );
-  if (marker.contentHash === expectedContentHash) {
-    return;
-  }
-
-  const parents = readCommitParents(expectedCommit).trim().split(/\s+/u);
   const changedPaths = readChangedPaths(liveCommit, expectedCommit)
     .trim()
     .split("\n")
     .filter((path) => path.length > 0);
+  const hasPublishedArtifactDelta = changedPaths.some(
+    (path) =>
+      path === publishedContentPath ||
+      managedRichTextPathPattern.test(path),
+  );
+  if (
+    marker.contentHash === expectedContentHash &&
+    !hasPublishedArtifactDelta
+  ) {
+    return;
+  }
+
+  const parents = readCommitParents(expectedCommit).trim().split(/\s+/u);
   const managedRichTextPaths = readManagedRichTextPaths(expectedCommit)
     .trim()
     .split("\n")
