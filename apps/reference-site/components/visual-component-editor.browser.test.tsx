@@ -282,8 +282,11 @@ describe("visual component editor browser acceptance", () => {
         restoreKeys.push(
           new Headers(init.headers).get("idempotency-key") ?? "",
         );
-        if (restoreKeys.length > 2) {
+        if (restoreKeys.length > 2 && restoreKeys.length <= 4) {
           throw new Error("transport_response_lost");
+        }
+        if (restoreKeys.length > 4) {
+          return Response.json({ draft: {} });
         }
         return Response.json(
           { error: "restore_source_not_live" },
@@ -428,6 +431,23 @@ describe("visual component editor browser acceptance", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 10));
     }
     expect(restoreKeys[3]).toBe(restoreKeys[2]);
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 5;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 6;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(restoreKeys[5]).toBe(restoreKeys[4]);
   });
 
   it("distinguishes unavailable publication history from an empty history", async () => {

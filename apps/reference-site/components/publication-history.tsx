@@ -96,7 +96,6 @@ export function PublicationHistory({
         !("workspaceId" in result.body.draft) ||
         typeof result.body.draft.workspaceId !== "string"
       ) {
-        restoreAttempts.current.delete(publicationId);
         throw new Error("content_publication_restore_failed");
       }
       const query = new URLSearchParams({
