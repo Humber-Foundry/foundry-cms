@@ -17,6 +17,7 @@ export default defineConfig({
       "packages/**/*.test.ts",
       "apps/**/*.test.ts",
       "apps/**/*.test.tsx",
+      "scripts/**/*.test.mjs",
     ],
     exclude: ["**/*.browser.test.tsx"],
   },

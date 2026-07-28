@@ -88,6 +88,37 @@ describe("page component composition", () => {
     });
   });
 
+  it("accepts semantically equal protected scaffolding regardless of object key order", () => {
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const hero = composition.components[0]!;
+    if (hero.type !== "hero") {
+      throw new Error("expected_hero_fixture");
+    }
+    const reordered = {
+      ...composition,
+      components: [
+        {
+          ...hero,
+          primaryAction: {
+            href: hero.primaryAction.href,
+            label: hero.primaryAction.label,
+            id: hero.primaryAction.id,
+          },
+        },
+        ...composition.components.slice(1),
+      ],
+    };
+
+    expect(
+      applyPageComposition(referenceSiteDefinition, reordered),
+    ).toEqual({
+      ok: true,
+      definition: referenceSiteDefinition,
+    });
+  });
+
   it("keeps components referenced by protected links outside removal", () => {
     const composition = {
       ...toPageComposition(referenceSiteDefinition),

@@ -19,6 +19,7 @@ import {
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
   clearStaleEdits,
+  excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
   preserveStaleEdits,
   recoveryToForward,
@@ -140,7 +141,10 @@ export function ContentEditor({
                 toPageComposition(state.persistedDefinition),
               ),
             },
-            ...fieldEdits,
+            ...excludeCompositionOwnedEdits(
+              fieldEdits,
+              composition.components,
+            ),
           ];
     },
     [composition, edits, persistedFields, state.persistedDefinition],
@@ -640,12 +644,19 @@ export function ContentEditor({
             state.workingDefinition,
             recoveredComposition,
           );
-          if (result.ok) {
-            pendingAttempt.current = null;
-            dispatch({ type: "compose", definition: result.definition });
+          if (!result.ok) {
+            setMessage(
+              "That structural recovery no longer fits the current Site Definition. It remains preserved until you keep the latest structure.",
+            );
+            return;
           }
+          pendingAttempt.current = null;
+          dispatch({ type: "compose", definition: result.definition });
         } catch {
-          // The unresolved recovery stays preserved until explicitly discarded.
+          setMessage(
+            "That structural recovery is malformed. It remains preserved until you keep the latest structure.",
+          );
+          return;
         }
       } else {
         edit(conflict.path, conflict.value);

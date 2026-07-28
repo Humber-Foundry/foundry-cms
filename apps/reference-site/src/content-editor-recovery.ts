@@ -1,4 +1,7 @@
-import type { SiteDefinitionEdit } from "@foundry/site-definition";
+import type {
+  PageSection,
+  SiteDefinitionEdit,
+} from "@foundry/site-definition";
 
 const staleEditRecoveryPrefix = "foundry-cms:stale-edit-recovery";
 const maximumRecoveredEdits = 500;
@@ -18,6 +21,38 @@ export type StaleRecoveryPointer = Readonly<{
   id: string;
   sourceWorkspaceId: string;
 }>;
+
+export function excludeCompositionOwnedEdits(
+  edits: ReadonlyArray<StaleRecoveryEdit>,
+  components: ReadonlyArray<PageSection>,
+): StaleRecoveryEdit[] {
+  const componentIds = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== "object" || value === null) {
+      return;
+    }
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === "id" && typeof nested === "string") {
+        componentIds.add(nested);
+      } else {
+        visit(nested);
+      }
+    }
+  };
+  visit(components);
+  return edits.filter(({ path }) => {
+    for (const id of componentIds) {
+      if (path.startsWith(`${id}.`)) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
 
 export function recoveryToForward(
   destinationIsStale: boolean,

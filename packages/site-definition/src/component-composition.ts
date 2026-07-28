@@ -202,9 +202,26 @@ function equalProtectedShape(
   right: PageSection,
   normalizeNestedIds = false,
 ): boolean {
+  const canonicalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(canonicalize);
+    }
+    if (isRecord(value)) {
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, nested]) => [key, canonicalize(nested)]),
+      );
+    }
+    return value;
+  };
   return (
-    JSON.stringify(protectedShape(left, normalizeNestedIds)) ===
-    JSON.stringify(protectedShape(right, normalizeNestedIds))
+    JSON.stringify(
+      canonicalize(protectedShape(left, normalizeNestedIds)),
+    ) ===
+    JSON.stringify(
+      canonicalize(protectedShape(right, normalizeNestedIds)),
+    )
   );
 }
 

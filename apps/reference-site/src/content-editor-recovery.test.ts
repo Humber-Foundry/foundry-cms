@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearStaleEdits,
+  excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
   synchronizeStaleEdits,
 } from "./content-editor-recovery";
+import { createDefaultPageSection } from "@foundry/site-definition";
 
 function createStorage() {
   const values = new Map<string, string>();
@@ -166,6 +168,37 @@ describe("stale edit recovery", () => {
         new Map([[composition.path, composition.baseValue]]),
       ).recovered,
     ).toEqual([composition]);
+  });
+
+  it("does not duplicate fields already owned by a structural recovery command", () => {
+    const section = createDefaultPageSection(
+      "callToAction",
+      "section_new_contact",
+    );
+    if (section.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const edits = [
+      {
+        path: "section_new_contact.title",
+        baseValue: "",
+        value: section.title,
+      },
+      {
+        path: "section_new_contact_action.label",
+        baseValue: "",
+        value: section.action.label,
+      },
+      {
+        path: "page_home.seo.title",
+        baseValue: "Old",
+        value: "New",
+      },
+    ];
+
+    expect(excludeCompositionOwnedEdits(edits, [section])).toEqual([
+      edits[2],
+    ]);
   });
 
   it("surfaces a same-path concurrent change as a three-way conflict", () => {
