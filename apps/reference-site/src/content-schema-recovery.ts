@@ -10,6 +10,7 @@ import {
 
 import {
   excludeCompositionOwnedEdits,
+  mergeRecoverySources,
   type StaleRecoveryEdit,
 } from "./content-editor-recovery";
 
@@ -97,17 +98,5 @@ export function mergeDurableAndOutboxRecoveryEdits(
   durableEdits: ReadonlyArray<StaleRecoveryEdit>,
   outboxEdits: ReadonlyArray<StaleRecoveryEdit>,
 ): StaleRecoveryEdit[] {
-  const merged = new Map(
-    durableEdits.map((edit) => [edit.path, edit] as const),
-  );
-  for (const edit of outboxEdits) {
-    const durable = merged.get(edit.path);
-    merged.set(
-      edit.path,
-      durable === undefined
-        ? edit
-        : { ...edit, baseValue: durable.baseValue },
-    );
-  }
-  return [...merged.values()];
+  return mergeRecoverySources(durableEdits, outboxEdits);
 }
