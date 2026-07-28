@@ -17,6 +17,26 @@ import {
   readContentEditorOutbox,
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
+import {
+  clearStaleEdits,
+  preserveStaleEdits,
+} from "../src/content-editor-recovery";
+
+function browserRevision(workspaceId: string) {
+  return {
+    workspaceId,
+    revision: 4,
+    definition: referenceSiteDefinition,
+    inputs: {
+      contentHash: "browser-content-hash",
+      schemaVersion: "1.0.0",
+      rendererVersion: "renderer-browser",
+      productionBase: "published-browser",
+    },
+    createdAt: "2026-07-27T00:00:00.000Z",
+    createdBy: "membership-browser",
+  } as never;
+}
 
 describe("visual component editor browser acceptance", () => {
   const mounted: Array<ReturnType<typeof createRoot>> = [];
@@ -179,19 +199,7 @@ describe("visual component editor browser acceptance", () => {
       root.render(
         createElement(ContentEditor, {
           csrfToken: "csrf-browser-test",
-          initialRevision: {
-            workspaceId,
-            revision: 4,
-            definition: referenceSiteDefinition,
-            inputs: {
-              contentHash: "browser-content-hash",
-              schemaVersion: "1.0.0",
-              rendererVersion: "renderer-browser",
-              productionBase: "published-browser",
-            },
-            createdAt: "2026-07-27T00:00:00.000Z",
-            createdBy: "membership-browser",
-          } as never,
+          initialRevision: browserRevision(workspaceId),
           initialPreviewUrl: "/preview/browser",
           activeWorkspaceUrl: "/dash?workspace=browser",
         }),
@@ -222,6 +230,77 @@ describe("visual component editor browser acceptance", () => {
         },
       ],
     });
+    await clearContentEditorOutbox(workspaceId);
+  });
+
+  it("keeps recovery controls inert in a duplicate workspace tab", async () => {
+    const workspaceId = "workspace_browser_lock";
+    const recoveryId = "recovery-browser-lock";
+    await clearContentEditorOutbox(workspaceId);
+    preserveStaleEdits(window.localStorage, recoveryId, workspaceId, [
+      {
+        path: "section_hero.title",
+        baseValue: "A title from another revision",
+        value: "Blocked tab value",
+      },
+    ]);
+
+    const ownerHost = document.createElement("div");
+    const duplicateHost = document.createElement("div");
+    document.body.append(ownerHost, duplicateHost);
+    const ownerRoot = createRoot(ownerHost);
+    const duplicateRoot = createRoot(duplicateHost);
+    mounted.push(ownerRoot, duplicateRoot);
+    flushSync(() => {
+      ownerRoot.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-owner",
+          initialRevision: browserRevision(workspaceId),
+          initialPreviewUrl: "/preview/owner",
+          activeWorkspaceUrl: "/dash?workspace=owner",
+        }),
+      );
+    });
+    let ownerReady = false;
+    for (let index = 0; index < 10 && !ownerReady; index += 1) {
+      const inputs = Array.from(ownerHost.querySelectorAll("input"));
+      ownerReady =
+        inputs.length > 0 && inputs.every((input) => !input.disabled);
+      if (ownerReady) {
+        break;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(ownerReady).toBe(true);
+    flushSync(() => {
+      duplicateRoot.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-duplicate",
+          initialRevision: browserRevision(workspaceId),
+          initialPreviewUrl: "/preview/duplicate",
+          activeWorkspaceUrl: "/dash?workspace=duplicate",
+          staleRecovery: {
+            id: recoveryId,
+            sourceWorkspaceId: workspaceId,
+          },
+        }),
+      );
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 60));
+
+    expect(duplicateHost.textContent).toContain(
+      "already open in another tab",
+    );
+    expect(duplicateHost.textContent).not.toContain("Use my value");
+    expect(
+      Array.from(
+        duplicateHost.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          ".editor-groups input, .editor-groups textarea",
+        ),
+      ).every((control) => control.disabled),
+    ).toBe(true);
+
+    clearStaleEdits(window.localStorage, recoveryId, workspaceId);
     await clearContentEditorOutbox(workspaceId);
   });
 });

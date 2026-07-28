@@ -29,6 +29,7 @@ import {
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
 import {
+  ContentEditorWorkspaceOwnershipError,
   outboxAttemptMatchesWorkspace,
   useContentEditorAutosave,
   useContentEditorPersistence,
@@ -279,8 +280,11 @@ export function ContentEditor({
           );
         }
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch((error) => {
+        if (
+          !cancelled &&
+          !(error instanceof ContentEditorWorkspaceOwnershipError)
+        ) {
           setMessage(
             "Browser recovery storage is unavailable. Keep this tab open until your edits are saved.",
           );
@@ -298,6 +302,7 @@ export function ContentEditor({
 
   useEffect(() => {
     if (
+      !persistence.owned ||
       staleRecovery === undefined ||
       recoveryApplied.current
     ) {
@@ -364,10 +369,16 @@ export function ContentEditor({
         "Unsaved edits were recovered in this fresh workspace. Review and save them when ready.",
       );
     }
-  }, [initialStale, staleRecovery, workingFields]);
+  }, [
+    initialStale,
+    persistence.owned,
+    staleRecovery,
+    workingFields,
+  ]);
 
   useEffect(() => {
     if (
+      !persistence.owned ||
       staleRecovery === undefined ||
       initialStale ||
       !recoveryApplied.current ||
@@ -412,13 +423,14 @@ export function ContentEditor({
     activeWorkspaceUrl,
     recoverableEdits,
     initialStale,
+    persistence.owned,
     persistedFields,
     recoveryConflicts,
     staleRecovery,
   ]);
 
   async function save() {
-    if (saveInFlight.current) {
+    if (saveInFlight.current || !persistence.owned) {
       return;
     }
     saveInFlight.current = true;
@@ -581,6 +593,9 @@ export function ContentEditor({
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
+    if (!persistence.owned) {
+      return;
+    }
     const forwardedRecovery =
       destination === "fresh"
         ? recoveryToForward(
@@ -653,6 +668,9 @@ export function ContentEditor({
     conflict: StaleRecoveryConflict,
     resolution: "latest" | "mine",
   ) {
+    if (!persistence.owned) {
+      return;
+    }
     if (resolution === "mine" && conflict.currentValue !== null) {
       if (conflict.path === pageCompositionContract.slot.id) {
         const result = applyStructuralRecovery(
@@ -788,7 +806,7 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={creatingWorkspace}
+            disabled={creatingWorkspace || !persistence.owned}
             onClick={() =>
               void recoverEdits(
                 state.status === "stale" ? "fresh" : "current",
@@ -821,6 +839,7 @@ export function ContentEditor({
                       <button
                         type="button"
                         className="copy-button"
+                        disabled={!persistence.owned}
                         onClick={() =>
                           resolveRecoveryConflict(edit, "latest")
                         }
@@ -830,6 +849,7 @@ export function ContentEditor({
                       <button
                         type="button"
                         className="copy-button"
+                        disabled={!persistence.owned}
                         onClick={() => resolveRecoveryConflict(edit, "mine")}
                       >
                         Use my value
@@ -845,6 +865,7 @@ export function ContentEditor({
                     <button
                       type="button"
                       className="copy-button"
+                      disabled={!persistence.owned}
                       onClick={() =>
                         resolveRecoveryConflict(edit, "latest")
                       }

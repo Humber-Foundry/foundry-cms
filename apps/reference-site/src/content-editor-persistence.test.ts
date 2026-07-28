@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   claimContentEditorWorkspace,
+  ContentEditorWorkspaceOwnershipError,
   contentEditorPersistenceTransition,
   outboxAttemptMatchesWorkspace,
+  withContentEditorWorkspaceOwnership,
   type ContentEditorPersistenceState,
 } from "./content-editor-persistence";
 
@@ -123,5 +125,19 @@ describe("content editor persistence lifecycle", () => {
     );
     expect(reopened.acquired).toBe(true);
     reopened.release();
+  });
+
+  it("does not invoke persistence for a denied workspace claimant", async () => {
+    let driverCalls = 0;
+
+    await expect(
+      withContentEditorWorkspaceOwnership(
+        Promise.resolve({ acquired: false, release() {} }),
+        async () => {
+          driverCalls += 1;
+        },
+      ),
+    ).rejects.toBeInstanceOf(ContentEditorWorkspaceOwnershipError);
+    expect(driverCalls).toBe(0);
   });
 });

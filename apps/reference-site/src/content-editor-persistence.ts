@@ -16,6 +16,23 @@ export type ContentEditorWorkspaceClaim = Readonly<{
   release(): void;
 }>;
 
+export class ContentEditorWorkspaceOwnershipError extends Error {
+  constructor() {
+    super("content_editor_workspace_not_owned");
+    this.name = "ContentEditorWorkspaceOwnershipError";
+  }
+}
+
+export async function withContentEditorWorkspaceOwnership<Value>(
+  claim: Promise<ContentEditorWorkspaceClaim>,
+  operation: () => Promise<Value>,
+): Promise<Value> {
+  if (!(await claim).acquired) {
+    throw new ContentEditorWorkspaceOwnershipError();
+  }
+  return operation();
+}
+
 export async function claimContentEditorWorkspace(
   workspaceId: string,
   locks: Pick<LockManager, "request"> | undefined =
@@ -144,6 +161,13 @@ export function useContentEditorPersistence({
     contentEditorPersistenceTransition,
     { phase: "loading", attempt: null },
   );
+  const withOwnership = <Value,>(
+    operation: () => Promise<Value>,
+  ): Promise<Value> =>
+    withContentEditorWorkspaceOwnership(
+      ownershipWaiter.current!.promise,
+      operation,
+    );
 
   useEffect(() => {
     let cancelled = false;
@@ -206,17 +230,14 @@ export function useContentEditorPersistence({
     blocked: ownership === "blocked",
     ready: lifecycle.phase !== "loading",
     attempt: lifecycle.attempt,
-    async read() {
-      const claim = await ownershipWaiter.current!.promise;
-      return claim.acquired ? controller.read() : null;
-    },
+    read: () => withOwnership(() => controller.read()),
     finishHydration: () => transition({ type: "hydrated" }),
     restoreAttempt: (attempt: SaveAttempt) =>
       transition({ type: "attempt", attempt }),
     discardAttempt: () => transition({ type: "snapshot" }),
     async preserveWithoutAttempt() {
       transition({ type: "snapshot" });
-      await controller.snapshot(baseRevision, edits);
+      await withOwnership(() => controller.snapshot(baseRevision, edits));
     },
     async beginAttempt(body: string) {
       const attempt =
@@ -226,8 +247,13 @@ export function useContentEditorPersistence({
       };
       transition({ type: "attempt", attempt });
       try {
-        await controller.saveAttempt(baseRevision, edits, attempt);
-      } catch {
+        await withOwnership(() =>
+          controller.saveAttempt(baseRevision, edits, attempt),
+        );
+      } catch (error) {
+        if (error instanceof ContentEditorWorkspaceOwnershipError) {
+          throw error;
+        }
         onStorageError(
           "Browser recovery storage is unavailable. This save will continue with its stable retry identity.",
         );
@@ -236,11 +262,13 @@ export function useContentEditorPersistence({
     },
     async acknowledge() {
       transition({ type: "acknowledged" });
-      await controller.clear();
+      await withOwnership(() => controller.clear());
     },
-    clear: () => controller.clear(),
+    clear: () => withOwnership(() => controller.clear()),
     snapshot: (snapshotEdits: ReadonlyArray<StaleRecoveryEdit>) =>
-      controller.snapshot(baseRevision, snapshotEdits),
+      withOwnership(() =>
+        controller.snapshot(baseRevision, snapshotEdits),
+      ),
   };
 }
 
