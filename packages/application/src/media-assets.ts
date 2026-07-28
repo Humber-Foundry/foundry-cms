@@ -66,6 +66,7 @@ export type MediaCrop = Readonly<{
 
 export type MediaOccurrenceRevision = Readonly<{
   siteId: SiteId;
+  workspaceId: ContentWorkspaceId;
   occurrenceId: MediaOccurrenceId;
   revision: number;
   assetId: MediaAssetId;
@@ -87,6 +88,7 @@ export type MediaAuditAction = (typeof mediaAuditActions)[number];
 
 export type MediaAuditEvent = Readonly<{
   siteId: SiteId;
+  workspaceId: ContentWorkspaceId | null;
   actorId: ContentActorId;
   action: MediaAuditAction;
   subjectId: string;
@@ -173,9 +175,11 @@ export type MediaAssetStore = Readonly<{
   listAssets(siteId: SiteId): Promise<ReadonlyArray<MediaAsset>>;
   listOccurrences(
     siteId: SiteId,
+    workspaceId: ContentWorkspaceId,
   ): Promise<ReadonlyArray<MediaOccurrenceRevision>>;
   auditRead(
     siteId: SiteId,
+    workspaceId: ContentWorkspaceId | null,
     actorId: ContentActorId,
     action: Extract<
       MediaAuditAction,
@@ -190,10 +194,12 @@ export type MediaAssetStore = Readonly<{
   ): Promise<MediaAsset>;
   getOccurrence(
     siteId: SiteId,
+    workspaceId: ContentWorkspaceId,
     occurrenceId: MediaOccurrenceId,
   ): Promise<MediaOccurrenceRevision | null>;
   getOccurrenceRevision(
     siteId: SiteId,
+    workspaceId: ContentWorkspaceId,
     occurrenceId: MediaOccurrenceId,
     revision: number,
   ): Promise<MediaOccurrenceRevision | null>;
@@ -502,6 +508,7 @@ export function createMediaAssetApplication({
           return await withMutationLease(context, async () => {
             const revision: MediaOccurrenceRevision = {
               siteId,
+              workspaceId: command.workspaceId,
               occurrenceId: command.occurrenceId,
               revision: command.baseRevision + 1,
               assetId: command.assetId,
@@ -549,6 +556,7 @@ export function createMediaAssetApplication({
           return await withMutationLease(context, async () => {
             const current = await assets.getOccurrence(
               siteId,
+              command.workspaceId,
               command.occurrenceId,
             );
             if (current === null) {
@@ -629,6 +637,7 @@ export function createMediaAssetApplication({
         const result = await assets.listAssets(siteId);
         await assets.auditRead(
           siteId,
+          null,
           actorId,
           "media.assets.listed",
           siteId,
@@ -636,10 +645,11 @@ export function createMediaAssetApplication({
         );
         return result;
       },
-      async listOccurrences() {
-        const result = await assets.listOccurrences(siteId);
+      async listOccurrences(workspaceId: ContentWorkspaceId) {
+        const result = await assets.listOccurrences(siteId, workspaceId);
         await assets.auditRead(
           siteId,
+          workspaceId,
           actorId,
           "media.occurrences.listed",
           siteId,
@@ -656,6 +666,7 @@ export function createMediaAssetApplication({
         });
         await assets.auditRead(
           siteId,
+          null,
           actorId,
           "media.source.read",
           assetId,
@@ -671,14 +682,23 @@ export function createMediaAssetApplication({
           sourceHash: asset.sourceHash,
         });
       },
-      getOccurrence(occurrenceId: MediaOccurrenceId) {
-        return assets.getOccurrence(siteId, occurrenceId);
+      getOccurrence(
+        workspaceId: ContentWorkspaceId,
+        occurrenceId: MediaOccurrenceId,
+      ) {
+        return assets.getOccurrence(siteId, workspaceId, occurrenceId);
       },
       getOccurrenceRevision(
+        workspaceId: ContentWorkspaceId,
         occurrenceId: MediaOccurrenceId,
         revision: number,
       ) {
-        return assets.getOccurrenceRevision(siteId, occurrenceId, revision);
+        return assets.getOccurrenceRevision(
+          siteId,
+          workspaceId,
+          occurrenceId,
+          revision,
+        );
       },
       audit() {
         return assets.audit(siteId);

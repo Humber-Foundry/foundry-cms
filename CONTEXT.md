@@ -54,9 +54,10 @@ does not silently republish an old revision.
 **Media asset** — A stable, site-scoped identity and metadata record for one
 immutable source image stored in the client's private R2 bucket.
 
-**Media occurrence** — One stable placement of a media asset in editable
-content. Replacing an occurrence changes that placement without changing other
-occurrences that reference the same asset.
+**Media occurrence** — One stable, draft-workspace-scoped placement of a media
+asset in editable content. Replacing an occurrence changes that placement
+without changing other occurrences or another workspace that uses the same
+occurrence identity.
 
 **Media occurrence revision** — An immutable snapshot of one occurrence's
 asset reference and optional normalized crop. A crop is presentation data; it

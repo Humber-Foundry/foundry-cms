@@ -237,46 +237,125 @@ function webp(source: Uint8Array): ImageSourceMetadata | null {
 function avif(source: Uint8Array): ImageSourceMetadata | null {
   if (source.byteLength < 16 || ascii(source, 4, 8) !== "ftyp") return null;
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
-  let offset = 0;
-  let validBrand = false;
-  let sawMeta = false;
-  let sawImagePayload = false;
-  while (offset + 8 <= source.byteLength) {
+  let boxCount = 0;
+  function boxAt(offset: number, limit: number) {
+    if (offset + 8 > limit) invalid();
     const size32 = view.getUint32(offset);
     const type = ascii(source, offset + 4, offset + 8);
     let headerSize = 8;
     let size = size32;
     if (size32 === 1) {
-      if (offset + 16 > source.byteLength) invalid();
+      if (offset + 16 > limit) invalid();
       const extended = view.getBigUint64(offset + 8);
       if (extended > BigInt(Number.MAX_SAFE_INTEGER)) invalid();
       size = Number(extended);
       headerSize = 16;
     } else if (size32 === 0) {
-      size = source.byteLength - offset;
+      size = limit - offset;
     }
-    if (size < headerSize || offset + size > source.byteLength) invalid();
-    if (type === "ftyp") {
-      const brands = ascii(source, offset + headerSize, offset + size);
-      validBrand = brands.includes("avif") || brands.includes("avis");
+    if (
+      size < headerSize ||
+      offset + size > limit ||
+      (boxCount += 1) > 4_096
+    ) {
+      invalid();
     }
-    if (type === "meta") sawMeta = size > headerSize + 4;
-    if (type === "mdat") sawImagePayload = size > headerSize;
-    offset += size;
+    return { type, headerSize, size, end: offset + size };
   }
-  if (offset !== source.byteLength || !validBrand || !sawMeta || !sawImagePayload) {
+
+  function findDimensions(
+    start: number,
+    end: number,
+    depth: number,
+  ): Readonly<{ width: number; height: number }> | null {
+    if (depth > 6) invalid();
+    let offset = start;
+    let foundDimensions: Readonly<{ width: number; height: number }> | null =
+      null;
+    while (offset < end) {
+      const box = boxAt(offset, end);
+      if (box.type === "ispe") {
+        if (box.size < box.headerSize + 12) invalid();
+        const candidate = dimensions(
+          view.getUint32(offset + box.headerSize + 4),
+          view.getUint32(offset + box.headerSize + 8),
+        );
+        if (
+          foundDimensions !== null &&
+          (foundDimensions.width !== candidate.width ||
+            foundDimensions.height !== candidate.height)
+        ) {
+          invalid();
+        }
+        foundDimensions = candidate;
+      }
+      if (box.type === "meta" || box.type === "iprp" || box.type === "ipco") {
+        const childStart =
+          offset + box.headerSize + (box.type === "meta" ? 4 : 0);
+        if (childStart > box.end) invalid();
+        const found: Readonly<{ width: number; height: number }> | null =
+          findDimensions(childStart, box.end, depth + 1);
+        if (
+          found !== null &&
+          foundDimensions !== null &&
+          (foundDimensions.width !== found.width ||
+            foundDimensions.height !== found.height)
+        ) {
+          invalid();
+        }
+        foundDimensions ??= found;
+      }
+      offset = box.end;
+    }
+    if (offset !== end) invalid();
+    return foundDimensions;
+  }
+
+  let offset = 0;
+  let validBrand = false;
+  let sawMeta = false;
+  let sawImagePayload = false;
+  let metadata: Pick<ImageSourceMetadata, "width" | "height"> | null = null;
+  while (offset + 8 <= source.byteLength) {
+    const box = boxAt(offset, source.byteLength);
+    if (box.type === "ftyp") {
+      if (box.size > 1_024 || (box.size - box.headerSize) % 4 !== 0) invalid();
+      for (
+        let brandOffset = offset + box.headerSize;
+        brandOffset + 4 <= box.end;
+        brandOffset += 4
+      ) {
+        const brand = ascii(source, brandOffset, brandOffset + 4);
+        if (brand === "avif" || brand === "avis") validBrand = true;
+      }
+    }
+    if (box.type === "meta") {
+      if (sawMeta) invalid();
+      sawMeta = box.size > box.headerSize + 4;
+      metadata = findDimensions(
+        offset + box.headerSize + 4,
+        box.end,
+        1,
+      );
+    }
+    if (box.type === "mdat") sawImagePayload = box.size > box.headerSize;
+    offset = box.end;
+  }
+  if (
+    offset !== source.byteLength ||
+    !validBrand ||
+    !sawMeta ||
+    !sawImagePayload
+  ) {
     invalid();
   }
-  for (let index = 0; index + 20 <= source.byteLength; index += 1) {
-    if (ascii(source, index + 4, index + 8) !== "ispe") continue;
-    const size = view.getUint32(index);
-    if (size < 20 || index + size > source.byteLength) continue;
-    return {
-      contentType: "image/avif",
-      ...dimensions(view.getUint32(index + 12), view.getUint32(index + 16)),
-    };
-  }
-  return invalid();
+  const avifMetadata = metadata;
+  if (avifMetadata === null) return invalid();
+  return {
+    contentType: "image/avif",
+    width: avifMetadata.width,
+    height: avifMetadata.height,
+  };
 }
 
 export function inspectImageSource(source: Uint8Array): ImageSourceMetadata {

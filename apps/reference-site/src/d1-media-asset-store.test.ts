@@ -105,13 +105,15 @@ describe("D1 media asset store", () => {
       idempotencyKey: "replace-d1-hero",
     });
 
-    await expect(app.queries.getOccurrence(occurrenceId)).resolves.toMatchObject({
+    await expect(
+      app.queries.getOccurrence(workspaceId, occurrenceId),
+    ).resolves.toMatchObject({
       revision: 3,
       assetId: replacementId,
       crop: null,
     });
     await expect(
-      app.queries.getOccurrenceRevision(occurrenceId, 2),
+      app.queries.getOccurrenceRevision(workspaceId, occurrenceId, 2),
     ).resolves.toMatchObject({
       assetId,
       crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
@@ -139,6 +141,36 @@ describe("D1 media asset store", () => {
     await expect(other.queries.getAsset(assetId)).resolves.toBeNull();
   });
 
+  it("keeps occurrence heads isolated by workspace", async () => {
+    const app = application();
+    await upload(app, assetId);
+    await upload(app, replacementId);
+    const otherWorkspace = createContentWorkspaceId("workspace_other");
+    await app.commands.replaceOccurrence({
+      actorId,
+      workspaceId,
+      occurrenceId,
+      assetId,
+      baseRevision: 0,
+      idempotencyKey: "place-d1-workspace-one",
+    });
+    await app.commands.replaceOccurrence({
+      actorId,
+      workspaceId: otherWorkspace,
+      occurrenceId,
+      assetId: replacementId,
+      baseRevision: 0,
+      idempotencyKey: "place-d1-workspace-two",
+    });
+
+    await expect(
+      app.queries.getOccurrence(workspaceId, occurrenceId),
+    ).resolves.toMatchObject({ revision: 1, assetId });
+    await expect(
+      app.queries.getOccurrence(otherWorkspace, occurrenceId),
+    ).resolves.toMatchObject({ revision: 1, assetId: replacementId });
+  });
+
   it("binds one D1 idempotency key to one request before mutation", async () => {
     const app = application();
     await upload(app, assetId);
@@ -163,7 +195,9 @@ describe("D1 media asset store", () => {
         idempotencyKey: "d1-bound-mutation-key",
       }),
     ).rejects.toThrow("media_site_access_denied");
-    await expect(app.queries.getOccurrence(otherOccurrence)).resolves.toBeNull();
+    await expect(
+      app.queries.getOccurrence(workspaceId, otherOccurrence),
+    ).resolves.toBeNull();
   });
 
   it("replays overlapping identical occurrence mutations", async () => {
@@ -184,9 +218,9 @@ describe("D1 media asset store", () => {
     ]);
 
     expect(duplicate).toEqual(first);
-    await expect(app.queries.getOccurrence(occurrenceId)).resolves.toEqual(
-      first,
-    );
+    await expect(
+      app.queries.getOccurrence(workspaceId, occurrenceId),
+    ).resolves.toEqual(first);
   });
 
   it("takes over an expired orphan mutation lease", async () => {

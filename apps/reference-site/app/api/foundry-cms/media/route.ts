@@ -50,7 +50,8 @@ export async function GET(request: Request) {
   try {
     const { actorId } = await authorized(request);
     const application = await loadMediaAssetApplication(actorId);
-    const requestedAsset = new URL(request.url).searchParams.get("assetId");
+    const searchParams = new URL(request.url).searchParams;
+    const requestedAsset = searchParams.get("assetId");
     if (requestedAsset !== null) {
       const source = await application.queries.getSource(
         createMediaAssetId(requestedAsset),
@@ -71,9 +72,15 @@ export async function GET(request: Request) {
         },
       );
     }
+    const workspaceId = createContentWorkspaceId(
+      searchParams.get("workspaceId") ?? "",
+    );
+    await (
+      await loadContentRevisionApplication(workspaceId, actorId)
+    ).queries.getCurrent();
     const [assets, occurrences] = await Promise.all([
       application.queries.listAssets(),
-      application.queries.listOccurrences(),
+      application.queries.listOccurrences(workspaceId),
     ]);
     return Response.json(
       { assets, occurrences },

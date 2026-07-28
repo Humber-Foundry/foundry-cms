@@ -434,12 +434,31 @@ describe("media endpoint", () => {
     ]);
 
     const response = await GET(
-      new Request("https://foundry.example/api/foundry-cms/media"),
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?workspaceId=workspace_editor",
+      ),
     );
 
     await expect(response.json()).resolves.toEqual({
       assets: [{ assetId: "asset_hero" }],
       occurrences: [{ occurrenceId: "occurrence_home_hero" }],
     });
+    expect(mocks.listOccurrences).toHaveBeenCalledWith("workspace_editor");
+  });
+
+  it("checks workspace access before listing occurrence state", async () => {
+    mocks.getCurrentContent.mockRejectedValueOnce(
+      new ContentWorkspaceAccessError(),
+    );
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?workspaceId=workspace_other",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.listAssets).not.toHaveBeenCalled();
+    expect(mocks.listOccurrences).not.toHaveBeenCalled();
   });
 });

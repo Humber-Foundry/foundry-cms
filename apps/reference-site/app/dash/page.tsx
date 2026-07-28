@@ -118,18 +118,6 @@ export default async function DashboardPage({
       : [];
   const mutationToken = await createHumanMutationToken(access.identity);
   const formOperations = await loadPublicFormOperationsDashboard(access);
-  let mediaAssets;
-  let mediaOccurrences;
-  try {
-    const mediaApplication = await loadMediaAssetApplication(actorId);
-    [mediaAssets, mediaOccurrences] = await Promise.all([
-      mediaApplication.queries.listAssets(),
-      mediaApplication.queries.listOccurrences(),
-    ]);
-  } catch (error) {
-    if (error instanceof MediaAssetConfigurationError) notFound();
-    throw error;
-  }
   let workspaceId;
   const requestedWorkspace =
     typeof requested.workspace === "string" ? requested.workspace : undefined;
@@ -173,6 +161,18 @@ export default async function DashboardPage({
     } else {
       throw error;
     }
+  }
+  let mediaAssets;
+  let mediaOccurrences;
+  try {
+    const mediaApplication = await loadMediaAssetApplication(actorId);
+    [mediaAssets, mediaOccurrences] = await Promise.all([
+      mediaApplication.queries.listAssets(),
+      mediaApplication.queries.listOccurrences(workspaceId),
+    ]);
+  } catch (error) {
+    if (error instanceof MediaAssetConfigurationError) notFound();
+    throw error;
   }
 
   return (

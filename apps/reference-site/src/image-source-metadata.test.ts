@@ -40,6 +40,26 @@ describe("image source metadata", () => {
     });
   });
 
+  it(
+    "rejects a large AVIF without dimensions through bounded box traversal",
+    () => {
+      const source = new Uint8Array(10 * 1024 * 1024);
+      const view = new DataView(source.buffer);
+      view.setUint32(0, 20);
+      source.set(
+        new TextEncoder().encode("ftypavif\u0000\u0000\u0000\u0000"),
+        4,
+      );
+      view.setUint32(20, 12);
+      source.set(new TextEncoder().encode("meta"), 24);
+      view.setUint32(32, source.byteLength - 32);
+      source.set(new TextEncoder().encode("mdat"), 36);
+
+      expect(() => inspectImageSource(source)).toThrow("invalid_image_source");
+    },
+    1_000,
+  );
+
   it("preserves EXIF orientation when a later APP1 segment contains XMP", () => {
     const exif = new Uint8Array(32);
     exif.set(new TextEncoder().encode("Exif\u0000\u0000"), 0);

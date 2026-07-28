@@ -123,7 +123,8 @@ Worker renderer version and bundled production-base content hash.
 
 Media sources are written to the private `FOUNDRY_MEDIA` R2 bucket under
 `media/<site-id>/<asset-id>/source`. D1 stores stable asset metadata and
-site-scoped occurrence references. Uploads verify the image format and
+site- and draft-workspace-scoped occurrence references. Uploads verify the image
+format and
 dimensions from the source bytes before recording caller-supplied metadata.
 Replacing one occurrence appends a revision
 only for that occurrence; cropping appends normalized crop data and never

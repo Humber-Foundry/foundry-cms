@@ -31,23 +31,25 @@ CREATE TABLE media_asset_deletions (
 
 CREATE TABLE media_occurrences (
   site_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
   occurrence_id TEXT NOT NULL,
   current_revision INTEGER NOT NULL,
   current_asset_id TEXT NOT NULL,
-  PRIMARY KEY (site_id, occurrence_id),
+  PRIMARY KEY (site_id, workspace_id, occurrence_id),
   FOREIGN KEY (site_id, current_asset_id)
     REFERENCES media_assets(site_id, asset_id)
 );
 
 CREATE TABLE media_occurrence_revisions (
   site_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
   occurrence_id TEXT NOT NULL,
   revision INTEGER NOT NULL,
   asset_id TEXT NOT NULL,
   crop_json TEXT,
   created_at TEXT NOT NULL,
   created_by TEXT NOT NULL,
-  PRIMARY KEY (site_id, occurrence_id, revision),
+  PRIMARY KEY (site_id, workspace_id, occurrence_id, revision),
   FOREIGN KEY (site_id, asset_id)
     REFERENCES media_assets(site_id, asset_id)
 );
@@ -55,6 +57,7 @@ CREATE TABLE media_occurrence_revisions (
 CREATE TABLE media_audit_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   site_id TEXT NOT NULL,
+  workspace_id TEXT,
   actor_id TEXT NOT NULL,
   action TEXT NOT NULL CHECK (
     action IN (
@@ -91,7 +94,9 @@ CREATE TABLE media_mutation_claims (
 );
 
 CREATE UNIQUE INDEX media_audit_occurrence_revision
-  ON media_audit_events(site_id, action, subject_id, subject_revision)
+  ON media_audit_events(
+    site_id, workspace_id, action, subject_id, subject_revision
+  )
   WHERE subject_revision IS NOT NULL;
 
 CREATE UNIQUE INDEX media_audit_asset_lifecycle
@@ -100,7 +105,7 @@ CREATE UNIQUE INDEX media_audit_asset_lifecycle
     AND action IN ('media.asset.uploaded', 'media.asset.deleted');
 
 CREATE INDEX media_occurrences_current_asset
-  ON media_occurrences(site_id, current_asset_id);
+  ON media_occurrences(site_id, workspace_id, current_asset_id);
 
 CREATE TRIGGER media_occurrence_revisions_prevent_update
 BEFORE UPDATE ON media_occurrence_revisions

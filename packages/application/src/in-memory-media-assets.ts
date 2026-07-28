@@ -1,4 +1,5 @@
 import type { SiteId } from "@foundry/site-definition";
+import type { ContentWorkspaceId } from "./content-revisions";
 
 import {
   MediaAssetReferencedError,
@@ -90,6 +91,11 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     siteId: SiteId,
     id: MediaAssetId | MediaOccurrenceId,
   ) => `${siteId}:${id}`;
+  const occurrenceKey = (
+    siteId: SiteId,
+    workspaceId: ContentWorkspaceId,
+    occurrenceId: MediaOccurrenceId,
+  ) => `${siteId}:${workspaceId}:${occurrenceId}`;
 
   const store: MediaAssetStore = {
     async claim(context) {
@@ -180,18 +186,32 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
         )
         .map(([, asset]) => asset);
     },
-    async listOccurrences(siteId) {
+    async listOccurrences(siteId, workspaceId) {
       const found: MediaOccurrenceRevision[] = [];
       for (const [key, revision] of current) {
-        if (!key.startsWith(`${siteId}:`)) continue;
+        if (!key.startsWith(`${siteId}:${workspaceId}:`)) continue;
         const occurrence = revisions.get(key)?.get(revision);
         if (occurrence !== undefined) found.push(occurrence);
       }
       return found;
     },
-    async auditRead(siteId, actorId, action, subjectId, occurredAt) {
+    async auditRead(
+      siteId,
+      workspaceId,
+      actorId,
+      action,
+      subjectId,
+      occurredAt,
+    ) {
       auditEvents.push(
-        immutable({ siteId, actorId, action, subjectId, occurredAt }),
+        immutable({
+          siteId,
+          workspaceId,
+          actorId,
+          action,
+          subjectId,
+          occurredAt,
+        }),
       );
     },
     async createAsset(asset, context) {
@@ -222,6 +242,7 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       auditEvents.push(
         immutable({
           siteId: asset.siteId,
+          workspaceId: null,
           actorId: asset.createdBy,
           action: "media.asset.uploaded",
           subjectId: asset.assetId,
@@ -231,16 +252,18 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       await store.record(context, { kind: "asset", value: saved });
       return saved;
     },
-    async getOccurrence(siteId, occurrenceId) {
-      const key = scopedKey(siteId, occurrenceId);
+    async getOccurrence(siteId, workspaceId, occurrenceId) {
+      const key = occurrenceKey(siteId, workspaceId, occurrenceId);
       const revision = current.get(key);
       return revision === undefined
         ? null
         : (revisions.get(key)?.get(revision) ?? null);
     },
-    async getOccurrenceRevision(siteId, occurrenceId, revision) {
+    async getOccurrenceRevision(siteId, workspaceId, occurrenceId, revision) {
       return (
-        revisions.get(scopedKey(siteId, occurrenceId))?.get(revision) ?? null
+        revisions
+          .get(occurrenceKey(siteId, workspaceId, occurrenceId))
+          ?.get(revision) ?? null
       );
     },
     async saveOccurrence(revision, baseRevision, action, context) {
@@ -252,11 +275,16 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       }
       if (
         !assets.has(scopedKey(revision.siteId, revision.assetId)) ||
-        deletionReservations.has(scopedKey(revision.siteId, revision.assetId))
+        deletionReservations.has(scopedKey(revision.siteId, revision.assetId)) ||
+        deletedAssetIds.has(scopedKey(revision.siteId, revision.assetId))
       ) {
         throw new MediaSiteAccessError();
       }
-      const key = scopedKey(revision.siteId, revision.occurrenceId);
+      const key = occurrenceKey(
+        revision.siteId,
+        revision.workspaceId,
+        revision.occurrenceId,
+      );
       const currentRevision = current.get(key) ?? 0;
       if (currentRevision !== baseRevision) {
         throw new MediaOccurrenceConflictError(currentRevision);
@@ -270,6 +298,7 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       auditEvents.push(
         immutable({
           siteId: saved.siteId,
+          workspaceId: saved.workspaceId,
           actorId: saved.createdBy,
           action,
           subjectId: saved.occurrenceId,
@@ -347,6 +376,7 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       auditEvents.push(
         immutable({
           siteId,
+          workspaceId: null,
           actorId,
           action: "media.asset.deleted",
           subjectId: assetId,

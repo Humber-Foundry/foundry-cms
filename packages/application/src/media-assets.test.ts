@@ -99,7 +99,7 @@ describe("media asset application", () => {
     await upload(application);
 
     await application.queries.listAssets();
-    await application.queries.listOccurrences();
+    await application.queries.listOccurrences(workspaceA);
     await application.queries.getSource(assetA);
 
     await expect(application.queries.audit()).resolves.toEqual(
@@ -163,12 +163,92 @@ describe("media asset application", () => {
       assetId: assetB,
     });
     await expect(
-      application.queries.getOccurrence(occurrenceB),
+      application.queries.getOccurrence(workspaceA, occurrenceB),
     ).resolves.toMatchObject({
       occurrenceId: occurrenceB,
       revision: 1,
       assetId: assetA,
     });
+  });
+
+  it("keeps the same occurrence identity isolated across workspaces", async () => {
+    const { application } = setup();
+    await upload(application, assetA);
+    await upload(application, assetB);
+    await application.commands.replaceOccurrence({
+      actorId: editor,
+      workspaceId: workspaceA,
+      occurrenceId: occurrenceA,
+      assetId: assetA,
+      baseRevision: 0,
+      idempotencyKey: "place-workspace-alpha",
+    });
+    await application.commands.replaceOccurrence({
+      actorId: editor,
+      workspaceId: workspaceB,
+      occurrenceId: occurrenceA,
+      assetId: assetB,
+      baseRevision: 0,
+      idempotencyKey: "place-workspace-beta",
+    });
+
+    await expect(
+      application.queries.getOccurrence(workspaceA, occurrenceA),
+    ).resolves.toMatchObject({ revision: 1, assetId: assetA });
+    await expect(
+      application.queries.getOccurrence(workspaceB, occurrenceA),
+    ).resolves.toMatchObject({ revision: 1, assetId: assetB });
+  });
+
+  it("rejects a save against an asset whose deletion already completed", async () => {
+    const { application, assets } = setup();
+    await upload(application, assetC);
+    const deletion = {
+      siteId: siteA,
+      idempotencyKey: "complete-before-raced-save",
+      requestHash: "delete-request",
+      claimToken: "delete-claim",
+    };
+    await expect(assets.claim(deletion)).resolves.toBe(true);
+    await assets.beginAssetDeletion(siteA, assetC, deletion);
+    await assets.tombstoneAssetDeletion(
+      siteA,
+      assetC,
+      editor,
+      "2026-07-27T12:00:00.000Z",
+      deletion,
+    );
+    await assets.completeAssetDeletion(
+      siteA,
+      assetC,
+      "2026-07-27T12:00:00.000Z",
+      deletion,
+    );
+    const save = {
+      siteId: siteA,
+      idempotencyKey: "save-after-completed-delete",
+      requestHash: "save-request",
+      claimToken: "save-claim",
+    };
+    await expect(assets.claim(save)).resolves.toBe(true);
+
+    await expect(
+      assets.saveOccurrence(
+        {
+          siteId: siteA,
+          workspaceId: workspaceA,
+          occurrenceId: occurrenceA,
+          revision: 1,
+          assetId: assetC,
+          crop: null,
+          createdAt: "2026-07-27T12:00:00.000Z",
+          createdBy: editor,
+        },
+        0,
+        "media.occurrence.replaced",
+        save,
+      ),
+    ).rejects.toEqual(new MediaSiteAccessError());
   });
 
   it("rejects occurrence identities that do not map to rendered Site Definition slots", async () => {
@@ -256,7 +336,9 @@ describe("media asset application", () => {
     ).rejects.toEqual(
       expect.objectContaining({ field: "idempotencyKey" }),
     );
-    await expect(application.queries.getOccurrence(occurrenceB)).resolves.toBeNull();
+    await expect(
+      application.queries.getOccurrence(workspaceB, occurrenceB),
+    ).resolves.toBeNull();
   });
 
   it("records crops as immutable occurrence revision data without changing the source", async () => {
@@ -286,7 +368,7 @@ describe("media asset application", () => {
       crop: { x: 0.1, y: 0.2, width: 0.6, height: 0.5 },
     });
     await expect(
-      application.queries.getOccurrenceRevision(occurrenceA, 1),
+      application.queries.getOccurrenceRevision(workspaceA, occurrenceA, 1),
     ).resolves.toMatchObject({ crop: null, assetId: assetA });
     await expect(sources.readForTest(asset.objectKey)).resolves.toEqual(
       source(assetA),

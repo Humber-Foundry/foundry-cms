@@ -13,6 +13,7 @@ import {
   type MediaOccurrenceId,
   type MediaOccurrenceRevision,
   type MediaMutationResult,
+  type ContentWorkspaceId,
 } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
 
@@ -35,6 +36,7 @@ type AssetRow = {
 
 type OccurrenceRow = {
   site_id: SiteId;
+  workspace_id: string;
   occurrence_id: string;
   revision: number;
   asset_id: string;
@@ -51,7 +53,7 @@ const assetProjection = `
 `;
 
 const occurrenceProjection = `
-  SELECT site_id, occurrence_id, revision, asset_id, crop_json,
+  SELECT site_id, workspace_id, occurrence_id, revision, asset_id, crop_json,
          created_at, created_by
   FROM media_occurrence_revisions
 `;
@@ -75,6 +77,7 @@ function toAsset(row: AssetRow): MediaAsset {
 function toOccurrence(row: OccurrenceRow): MediaOccurrenceRevision {
   return {
     siteId: row.site_id,
+    workspaceId: row.workspace_id as ContentWorkspaceId,
     occurrenceId: createMediaOccurrenceId(row.occurrence_id),
     revision: row.revision,
     assetId: createMediaAssetId(row.asset_id),
@@ -110,6 +113,7 @@ function restoreMutationResult(value: string): MediaMutationResult {
       kind: "occurrence",
       value: toOccurrence({
         site_id: parsed.value.siteId,
+        workspace_id: parsed.value.workspaceId,
         occurrence_id: parsed.value.occurrenceId,
         revision: parsed.value.revision,
         asset_id: parsed.value.assetId,
@@ -164,15 +168,17 @@ export function createD1MediaAssetStore(
 
   async function getOccurrenceRevision(
     siteId: SiteId,
+    workspaceId: ContentWorkspaceId,
     occurrenceId: MediaOccurrenceId,
     revision: number,
   ) {
     const row = await database
       .prepare(
         `${occurrenceProjection}
-         WHERE site_id = ?1 AND occurrence_id = ?2 AND revision = ?3`,
+         WHERE site_id = ?1 AND workspace_id = ?2
+           AND occurrence_id = ?3 AND revision = ?4`,
       )
-      .bind(siteId, occurrenceId, revision)
+      .bind(siteId, workspaceId, occurrenceId, revision)
       .first<OccurrenceRow>();
     return row === null ? null : toOccurrence(row);
   }
@@ -322,32 +328,40 @@ export function createD1MediaAssetStore(
         .all<AssetRow>();
       return rows.results.map(toAsset);
     },
-    async listOccurrences(siteId) {
+    async listOccurrences(siteId, workspaceId) {
       const rows = await database
         .prepare(
           `${occurrenceProjection}
-           WHERE site_id = ?1
+           WHERE site_id = ?1 AND workspace_id = ?2
              AND revision = (
                SELECT current_revision
                FROM media_occurrences
                WHERE site_id = ?1
+                 AND workspace_id = ?2
                  AND occurrence_id = media_occurrence_revisions.occurrence_id
              )
            ORDER BY occurrence_id`,
         )
-        .bind(siteId)
+        .bind(siteId, workspaceId)
         .all<OccurrenceRow>();
       return rows.results.map(toOccurrence);
     },
-    async auditRead(siteId, actorId, action, subjectId, occurredAt) {
+    async auditRead(
+      siteId,
+      workspaceId,
+      actorId,
+      action,
+      subjectId,
+      occurredAt,
+    ) {
       await database
         .prepare(
           `INSERT INTO media_audit_events (
-             site_id, actor_id, action, subject_id,
+             site_id, workspace_id, actor_id, action, subject_id,
              subject_revision, occurred_at
-           ) VALUES (?1, ?2, ?3, ?4, NULL, ?5)`,
+           ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)`,
         )
-        .bind(siteId, actorId, action, subjectId, occurredAt)
+        .bind(siteId, workspaceId, actorId, action, subjectId, occurredAt)
         .run();
     },
     async createAsset(asset, context) {
@@ -484,19 +498,21 @@ export function createD1MediaAssetStore(
       }
       return asset;
     },
-    async getOccurrence(siteId, occurrenceId) {
+    async getOccurrence(siteId, workspaceId, occurrenceId) {
       const row = await database
         .prepare(
           `${occurrenceProjection}
            WHERE site_id = ?1
-             AND occurrence_id = ?2
+             AND workspace_id = ?2
+             AND occurrence_id = ?3
              AND revision = (
                SELECT current_revision
                FROM media_occurrences
-               WHERE site_id = ?1 AND occurrence_id = ?2
+               WHERE site_id = ?1 AND workspace_id = ?2
+                 AND occurrence_id = ?3
              )`,
         )
-        .bind(siteId, occurrenceId)
+        .bind(siteId, workspaceId, occurrenceId)
         .first<OccurrenceRow>();
       return row === null ? null : toOccurrence(row);
     },
@@ -516,38 +532,40 @@ export function createD1MediaAssetStore(
         database
           .prepare(
             `INSERT INTO media_occurrence_revisions (
-               site_id, occurrence_id, revision, asset_id, crop_json,
-               created_at, created_by
+               site_id, workspace_id, occurrence_id, revision, asset_id,
+               crop_json, created_at, created_by
              )
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
              WHERE EXISTS (
                SELECT 1 FROM media_assets
-               WHERE site_id = ?1 AND asset_id = ?4
+               WHERE site_id = ?1 AND asset_id = ?5
                  AND deleted_at IS NULL
              )
                AND NOT EXISTS (
                  SELECT 1 FROM media_asset_deletions
-                 WHERE site_id = ?1 AND asset_id = ?4
+                 WHERE site_id = ?1 AND asset_id = ?5
                )
                AND (
-                 (?8 = 0 AND NOT EXISTS (
+                 (?9 = 0 AND NOT EXISTS (
                    SELECT 1 FROM media_occurrences
-                   WHERE site_id = ?1 AND occurrence_id = ?2
+                   WHERE site_id = ?1 AND workspace_id = ?2
+                     AND occurrence_id = ?3
                  ))
                  OR EXISTS (
                    SELECT 1 FROM media_occurrences
-                   WHERE site_id = ?1 AND occurrence_id = ?2
-                     AND current_revision = ?8
+                   WHERE site_id = ?1 AND workspace_id = ?2
+                     AND occurrence_id = ?3 AND current_revision = ?9
                  )
                )
                AND EXISTS (
                  SELECT 1 FROM media_mutation_claims
-                 WHERE site_id = ?1 AND idempotency_key = ?9
-                   AND request_hash = ?10 AND claim_token = ?11
+                 WHERE site_id = ?1 AND idempotency_key = ?10
+                   AND request_hash = ?11 AND claim_token = ?12
                )`,
           )
           .bind(
             revision.siteId,
+            revision.workspaceId,
             revision.occurrenceId,
             revision.revision,
             revision.assetId,
@@ -562,20 +580,23 @@ export function createD1MediaAssetStore(
         database
           .prepare(
             `INSERT INTO media_occurrences (
-               site_id, occurrence_id, current_revision, current_asset_id
+               site_id, workspace_id, occurrence_id,
+               current_revision, current_asset_id
              )
-             SELECT ?1, ?2, ?3, ?4
+             SELECT ?1, ?2, ?3, ?4, ?5
              WHERE EXISTS (
                SELECT 1 FROM media_occurrence_revisions
-               WHERE site_id = ?1 AND occurrence_id = ?2 AND revision = ?3
+               WHERE site_id = ?1 AND workspace_id = ?2
+                 AND occurrence_id = ?3 AND revision = ?4
              )
-             ON CONFLICT (site_id, occurrence_id) DO UPDATE SET
+             ON CONFLICT (site_id, workspace_id, occurrence_id) DO UPDATE SET
                current_revision = excluded.current_revision,
                current_asset_id = excluded.current_asset_id
-             WHERE media_occurrences.current_revision = ?5`,
+             WHERE media_occurrences.current_revision = ?6`,
           )
           .bind(
             revision.siteId,
+            revision.workspaceId,
             revision.occurrenceId,
             revision.revision,
             revision.assetId,
@@ -584,19 +605,19 @@ export function createD1MediaAssetStore(
         database
           .prepare(
             `INSERT OR IGNORE INTO media_audit_events (
-               site_id, actor_id, action, subject_id,
+               site_id, workspace_id, actor_id, action, subject_id,
                subject_revision, occurred_at
              )
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6
+             SELECT ?1, ?7, ?2, ?3, ?4, ?5, ?6
              WHERE EXISTS (
                SELECT 1 FROM media_occurrences
-               WHERE site_id = ?1 AND occurrence_id = ?4
-                 AND current_revision = ?5
+               WHERE site_id = ?1 AND workspace_id = ?7
+                 AND occurrence_id = ?4 AND current_revision = ?5
              )
                AND EXISTS (
                  SELECT 1 FROM media_mutation_claims
-                 WHERE site_id = ?1 AND idempotency_key = ?7
-                   AND request_hash = ?8 AND claim_token = ?9
+                 WHERE site_id = ?1 AND idempotency_key = ?8
+                   AND request_hash = ?9 AND claim_token = ?10
                )`,
           )
           .bind(
@@ -606,6 +627,7 @@ export function createD1MediaAssetStore(
             revision.occurrenceId,
             revision.revision,
             revision.createdAt,
+            revision.workspaceId,
             idempotencyKey,
             requestHash,
             context.claimToken,
@@ -618,13 +640,13 @@ export function createD1MediaAssetStore(
              SELECT ?1, ?2, ?3, ?4, ?5
              WHERE EXISTS (
                SELECT 1 FROM media_occurrences
-               WHERE site_id = ?1 AND occurrence_id = ?6
-                 AND current_revision = ?7
+               WHERE site_id = ?1 AND workspace_id = ?8
+                 AND occurrence_id = ?6 AND current_revision = ?7
              )
                AND EXISTS (
-                 SELECT 1 FROM media_mutation_claims
-                 WHERE site_id = ?1 AND idempotency_key = ?2
-                   AND request_hash = ?3 AND claim_token = ?8
+               SELECT 1 FROM media_mutation_claims
+               WHERE site_id = ?1 AND idempotency_key = ?2
+                   AND request_hash = ?3 AND claim_token = ?9
                )
              ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
           )
@@ -636,6 +658,7 @@ export function createD1MediaAssetStore(
             revision.createdAt,
             revision.occurrenceId,
             revision.revision,
+            revision.workspaceId,
             context.claimToken,
           ),
       ]);
@@ -649,9 +672,14 @@ export function createD1MediaAssetStore(
           .prepare(
             `SELECT current_revision
              FROM media_occurrences
-             WHERE site_id = ?1 AND occurrence_id = ?2`,
+             WHERE site_id = ?1 AND workspace_id = ?2
+               AND occurrence_id = ?3`,
           )
-          .bind(revision.siteId, revision.occurrenceId)
+          .bind(
+            revision.siteId,
+            revision.workspaceId,
+            revision.occurrenceId,
+          )
           .first<{ current_revision: number }>();
         throw new MediaOccurrenceConflictError(current?.current_revision ?? 0);
       }
@@ -696,9 +724,13 @@ export function createD1MediaAssetStore(
         if (reserved === null) {
           const references = await database
             .prepare(
-              `SELECT COUNT(DISTINCT occurrence_id) AS count
-               FROM media_occurrence_revisions
-               WHERE site_id = ?1 AND asset_id = ?2`,
+              `SELECT COUNT(*) AS count
+               FROM (
+                 SELECT workspace_id, occurrence_id
+                 FROM media_occurrence_revisions
+                 WHERE site_id = ?1 AND asset_id = ?2
+                 GROUP BY workspace_id, occurrence_id
+               )`,
             )
             .bind(siteId, assetId)
             .first<{ count: number }>();
@@ -853,7 +885,7 @@ export function createD1MediaAssetStore(
     async audit(siteId) {
       const rows = await database
         .prepare(
-          `SELECT site_id, actor_id, action, subject_id, occurred_at
+          `SELECT site_id, workspace_id, actor_id, action, subject_id, occurred_at
            FROM media_audit_events
            WHERE site_id = ?1
            ORDER BY id`,
@@ -861,6 +893,7 @@ export function createD1MediaAssetStore(
         .bind(siteId)
         .all<{
           site_id: SiteId;
+          workspace_id: string | null;
           actor_id: string;
           action: MediaAuditAction;
           subject_id: string;
@@ -869,6 +902,10 @@ export function createD1MediaAssetStore(
       return rows.results.map(
         (row): MediaAuditEvent => ({
           siteId: row.site_id,
+          workspaceId:
+            row.workspace_id === null
+              ? null
+              : (row.workspace_id as ContentWorkspaceId),
           actorId: restoreContentActorId(row.actor_id),
           action: row.action,
           subjectId: row.subject_id,
