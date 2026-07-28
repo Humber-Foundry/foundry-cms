@@ -17,6 +17,7 @@ import {
   createContentPublicationApplication,
   createContentPublicationId,
   createInMemoryContentPublicationStore,
+  hashPublishedSiteDefinition,
   parseProductionBase,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
@@ -184,6 +185,64 @@ describe("content publication application", () => {
         "channel-a",
       ),
     ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+  });
+
+  it("fingerprints tokens and variants as design while ignoring copy-only changes", async () => {
+    const base = revisionApplication.saved;
+    const hero = base.definition.home.sections[0]!;
+    if (hero.type !== "hero") {
+      throw new TypeError("expected_hero_fixture");
+    }
+    const revisionWith = async (
+      definition: typeof base.definition,
+    ): Promise<typeof base> => ({
+      ...base,
+      definition,
+      inputs: {
+        ...base.inputs,
+        contentHash: await hashPublishedSiteDefinition(definition),
+      },
+    });
+    const copyRevision = await revisionWith({
+      ...base.definition,
+      home: {
+        ...base.definition.home,
+        sections: [
+          { ...hero, title: "Copy-only fingerprint change" },
+          ...base.definition.home.sections.slice(1),
+        ],
+      },
+    });
+    const tokenRevision = await revisionWith({
+      ...base.definition,
+      design: {
+        ...base.definition.design,
+        colour: { accent: "clay" },
+      },
+    });
+    const variantRevision = await revisionWith({
+      ...base.definition,
+      home: {
+        ...base.definition.home,
+        sections: [
+          { ...hero, variant: "focused" },
+          ...base.definition.home.sections.slice(1),
+        ],
+      },
+    });
+
+    const [baseFingerprint, copyFingerprint, tokenFingerprint, variantFingerprint] =
+      await Promise.all(
+        [base, copyRevision, tokenRevision, variantRevision].map((revision) =>
+          createContentApprovalFingerprint(revision, "channel-a"),
+        ),
+      );
+
+    expect(copyFingerprint.designHash).toBe(baseFingerprint.designHash);
+    expect(tokenFingerprint.designHash).not.toBe(baseFingerprint.designHash);
+    expect(variantFingerprint.designHash).not.toBe(
+      baseFingerprint.designHash,
+    );
   });
 
   it("requires the human to confirm the exact canonical preview", async () => {

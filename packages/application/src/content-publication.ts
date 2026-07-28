@@ -350,13 +350,18 @@ export function hashPublishedSiteDefinition(
 function designProjection(definition: SiteDefinition) {
   return {
     definitionVersion: definition.definitionVersion,
+    design: definition.design,
     siteId: definition.site.id,
     navigation: definition.site.navigation.map(({ id, href }) => ({
       id,
       href,
     })),
     pageId: definition.home.id,
-    sections: definition.home.sections.map(({ id, type }) => ({ id, type })),
+    sections: definition.home.sections.map(({ id, type, variant }) => ({
+      id,
+      type,
+      variant,
+    })),
   };
 }
 
