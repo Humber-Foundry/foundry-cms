@@ -26,7 +26,7 @@ export async function GET(
     );
     if (!isPublished) return new Response(null, { status: 404 });
     const application = await loadMediaAssetApplication(publicRendererActorId);
-    const source = await application.queries.getSource(assetId);
+    const source = await application.queries.getPublishedSource(assetId);
     if (source === null) return new Response(null, { status: 404 });
     return new Response(
       source.body instanceof Uint8Array

@@ -663,6 +663,14 @@ export function createMediaAssetApplication({
         );
         return source;
       },
+      async getPublishedSource(assetId: MediaAssetId) {
+        const asset = await assets.getAsset(siteId, assetId);
+        if (asset === null) throw new MediaSiteAccessError();
+        return sources.get(asset.objectKey, {
+          contentType: asset.contentType,
+          sourceHash: asset.sourceHash,
+        });
+      },
       getOccurrence(occurrenceId: MediaOccurrenceId) {
         return assets.getOccurrence(siteId, occurrenceId);
       },

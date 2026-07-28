@@ -114,6 +114,19 @@ describe("media asset application", () => {
     );
   });
 
+  it("reads a published source without creating an audit row per visitor", async () => {
+    const { application } = setup();
+    await upload(application);
+
+    await expect(application.queries.getPublishedSource(assetA)).resolves.toEqual(
+      expect.objectContaining({ contentType: "image/png" }),
+    );
+
+    await expect(application.queries.audit()).resolves.toEqual([
+      expect.objectContaining({ action: "media.asset.uploaded" }),
+    ]);
+  });
+
   it("replaces only the selected occurrence", async () => {
     const { application } = setup();
     await upload(application, assetA);

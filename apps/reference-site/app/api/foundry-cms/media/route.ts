@@ -105,13 +105,6 @@ async function bindOccurrenceToContentRevision({
   let { contentBaseRevision } = binding;
   const asset = await application.queries.getAsset(occurrence.assetId);
   if (asset === null) throw new MediaSiteAccessError();
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(idempotencyKey),
-  );
-  const contentIdempotencyKey = `media-content-${[...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")}`;
   const boundOccurrence = {
     occurrenceId: requireRenderedMediaOccurrenceId(occurrence.occurrenceId),
     revision: occurrence.revision,
@@ -125,6 +118,14 @@ async function bindOccurrenceToContentRevision({
   } as const;
   let contentRevision;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${idempotencyKey}:${contentBaseRevision}`),
+    );
+    const contentIdempotencyKey =
+      `media-content-${[...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("")}`;
     try {
       contentRevision =
         await contentApplication.commands.saveMediaOccurrence({
@@ -174,15 +175,33 @@ async function bindOccurrenceToContentRevision({
   };
 }
 
+function nonnegativeSafeInteger(value: unknown, field: string) {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 0
+  ) {
+    throw new MediaValidationError(field);
+  }
+  return value;
+}
+
+function finiteNumber(value: unknown, field: string) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new MediaValidationError(field);
+  }
+  return value;
+}
+
 async function loadContentBinding(
   body: Record<string, unknown>,
   actorId: ReturnType<typeof createContentActorId>,
 ) {
   const workspaceId = createContentWorkspaceId(String(body.workspaceId ?? ""));
-  const contentBaseRevision = Number(body.contentBaseRevision);
-  if (!Number.isSafeInteger(contentBaseRevision) || contentBaseRevision < 0) {
-    throw new MediaValidationError("contentBaseRevision");
-  }
+  const contentBaseRevision = nonnegativeSafeInteger(
+    body.contentBaseRevision,
+    "contentBaseRevision",
+  );
   const contentApplication = await loadContentRevisionApplication(
     workspaceId,
     actorId,
@@ -231,12 +250,16 @@ export async function POST(request: Request) {
     }
     const body = (await request.json()) as Record<string, unknown>;
     if (body.operation === "replace") {
+      const baseRevision = nonnegativeSafeInteger(
+        body.baseRevision,
+        "baseRevision",
+      );
       const binding = await loadContentBinding(body, actorId);
       const occurrence = await application.commands.replaceOccurrence({
         actorId,
         occurrenceId: createMediaOccurrenceId(String(body.occurrenceId ?? "")),
         assetId: createMediaAssetId(String(body.assetId ?? "")),
-        baseRevision: Number(body.baseRevision),
+        baseRevision,
         workspaceId: binding.workspaceId,
         idempotencyKey,
       });
@@ -252,18 +275,22 @@ export async function POST(request: Request) {
       );
     }
     if (body.operation === "crop") {
+      const baseRevision = nonnegativeSafeInteger(
+        body.baseRevision,
+        "baseRevision",
+      );
       const binding = await loadContentBinding(body, actorId);
       const crop = body.crop as Record<string, unknown> | undefined;
       const occurrence = await application.commands.cropOccurrence({
         actorId,
         occurrenceId: createMediaOccurrenceId(String(body.occurrenceId ?? "")),
-        baseRevision: Number(body.baseRevision),
+        baseRevision,
         workspaceId: binding.workspaceId,
         crop: {
-          x: Number(crop?.x),
-          y: Number(crop?.y),
-          width: Number(crop?.width),
-          height: Number(crop?.height),
+          x: finiteNumber(crop?.x, "crop.x"),
+          y: finiteNumber(crop?.y, "crop.y"),
+          width: finiteNumber(crop?.width, "crop.width"),
+          height: finiteNumber(crop?.height, "crop.height"),
         },
         idempotencyKey,
       });

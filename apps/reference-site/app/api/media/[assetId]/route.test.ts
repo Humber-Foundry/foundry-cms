@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   published: vi.fn(),
   loadApplication: vi.fn(),
-  getSource: vi.fn(),
+  getPublishedSource: vi.fn(),
 }));
 vi.mock("../../../../src/reference-installation", () => ({
   referenceSiteApplication: {
@@ -22,7 +22,7 @@ describe("published media delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.loadApplication.mockResolvedValue({
-      queries: { getSource: mocks.getSource },
+      queries: { getPublishedSource: mocks.getPublishedSource },
     });
     mocks.published.mockResolvedValue({
       home: {
@@ -34,7 +34,7 @@ describe("published media delivery", () => {
         ],
       },
     });
-    mocks.getSource.mockResolvedValue({
+    mocks.getPublishedSource.mockResolvedValue({
       body: new Uint8Array([1, 2, 3]),
       contentType: "image/png",
     });
@@ -47,7 +47,7 @@ describe("published media delivery", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getSource).toHaveBeenCalledWith("asset_published");
+    expect(mocks.getPublishedSource).toHaveBeenCalledWith("asset_published");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(
       new Uint8Array([1, 2, 3]),
     );
@@ -61,6 +61,6 @@ describe("published media delivery", () => {
 
     expect(response.status).toBe(404);
     expect(mocks.loadApplication).not.toHaveBeenCalled();
-    expect(mocks.getSource).not.toHaveBeenCalled();
+    expect(mocks.getPublishedSource).not.toHaveBeenCalled();
   });
 });
