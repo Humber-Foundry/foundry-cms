@@ -183,6 +183,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
               disabled={false}
               invalid={false}
               describedBy={`${name}-help`}
+              label="Body"
               onChange={(nextValue) =>
                 onChange(parseSerializedRichTextDocument(nextValue))
               }

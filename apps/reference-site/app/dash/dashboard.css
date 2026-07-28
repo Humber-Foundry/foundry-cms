@@ -458,7 +458,8 @@
   font-weight: 700;
 }
 
-.editor-groups label {
+.editor-groups label,
+.editor-groups .editor-field {
   display: grid;
   gap: 0.35rem;
   color: var(--ink-soft);
@@ -466,7 +467,8 @@
   font-weight: 700;
 }
 
-.editor-groups label > span {
+.editor-groups label > span,
+.editor-groups .editor-field > span {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -502,7 +504,7 @@
   font-weight: 400;
 }
 
-.rich-text-editor[aria-invalid="true"] {
+.rich-text-editor[data-invalid="true"] {
   border-color: #a5453d;
 }
 

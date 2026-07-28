@@ -8,6 +8,10 @@ import {
 } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
+import {
+  projectPublishedSiteDefinition,
+} from "../../../packages/site-definition/src/site-definition-projection.mjs";
+
 const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 const contentHashPattern = /^[a-f0-9]{64}$/u;
 const publishedContentPath =
@@ -30,7 +34,11 @@ function canonicalJson(value) {
 
 function contentHash(bytes) {
   return createHash("sha256")
-    .update(canonicalJson(JSON.parse(bytes)))
+    .update(
+      canonicalJson(
+        projectPublishedSiteDefinition(JSON.parse(bytes)),
+      ),
+    )
     .digest("hex");
 }
 

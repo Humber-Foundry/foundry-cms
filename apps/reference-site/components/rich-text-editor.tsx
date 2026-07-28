@@ -22,11 +22,26 @@ import {
   supportedRichTextStarterKitOptions,
 } from "../src/rich-text-editor-state";
 
+type RichTextEditorAccessibleName =
+  | Readonly<{ label: string; labelledBy?: never }>
+  | Readonly<{ label?: never; labelledBy: string }>;
+
+function accessibleNameAttributes(
+  label: string | undefined,
+  labelledBy: string | undefined,
+): Record<string, string> {
+  return labelledBy === undefined
+    ? { "aria-label": label ?? "" }
+    : { "aria-labelledby": labelledBy };
+}
+
 export function RichTextEditor({
   id,
   value,
   disabled,
   describedBy,
+  label,
+  labelledBy,
   invalid,
   onChange,
 }: {
@@ -36,7 +51,7 @@ export function RichTextEditor({
   describedBy: string;
   invalid: boolean;
   onChange(value: SerializedRichTextDocument): void;
-}) {
+} & RichTextEditorAccessibleName) {
   const [validationMessage, setValidationMessage] = useState("");
   const validationMessageId = `${id}-validation`;
   const editorDescribedBy =
@@ -49,6 +64,10 @@ export function RichTextEditor({
     () => parseSerializedRichTextDocument(value),
     [value],
   );
+  const editorAccessibleName = useMemo(
+    () => accessibleNameAttributes(label, labelledBy),
+    [label, labelledBy],
+  );
   const editor = useEditor({
     extensions: [
       StarterKit.configure(supportedRichTextStarterKitOptions),
@@ -58,7 +77,7 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         id,
-        "aria-label": "Rendered rich text",
+        ...editorAccessibleName,
         "aria-describedby": editorDescribedBy,
         "aria-invalid": String(invalid || validationMessage !== ""),
       },
@@ -96,7 +115,7 @@ export function RichTextEditor({
         attributes: {
           ...editor.options.editorProps.attributes,
           id,
-          "aria-label": "Rendered rich text",
+          ...editorAccessibleName,
           "aria-describedby": editorDescribedBy,
           "aria-invalid": String(invalid || validationMessage !== ""),
         },
@@ -104,6 +123,7 @@ export function RichTextEditor({
     });
   }, [
     editor,
+    editorAccessibleName,
     editorDescribedBy,
     id,
     invalid,
@@ -156,8 +176,17 @@ export function RichTextEditor({
   }
 
   return (
-    <div className="rich-text-editor rendered-rich-text">
-      <div className="rich-text-toolbar" role="toolbar" aria-label="Text formatting">
+    <div
+      className="rich-text-editor rendered-rich-text"
+      data-invalid={invalid || validationMessage !== ""}
+    >
+      <div
+        className="rich-text-toolbar"
+        role="toolbar"
+        {...(labelledBy === undefined
+          ? { "aria-label": `Text formatting for ${label}` }
+          : { "aria-labelledby": labelledBy })}
+      >
         <button
           type="button"
           disabled={disabled}

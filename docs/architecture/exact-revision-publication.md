@@ -52,7 +52,9 @@ A code release may add an in-memory projection for an older stored Site
 Definition, but it keeps the tracked published bytes unchanged. The canonical
 JSON and managed Markdown advance to the new schema only through a later
 signature-verified Foundry publication. This prevents an ordinary code merge
-from being mistaken for an authorized content publication.
+from being mistaken for an authorized content publication. The release marker
+and build authorization gate hash the same shared versioned projection, so an
+unchanged legacy artifact remains deployable while its reader is upgraded.
 
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author

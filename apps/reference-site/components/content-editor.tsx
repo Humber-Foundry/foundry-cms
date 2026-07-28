@@ -1468,62 +1468,84 @@ export function ContentEditor({
             <legend>{group}</legend>
             {workingFields
               .filter((field) => field.group === group)
-              .map((field) => (
-                <label key={field.path}>
-                  <span>
+              .map((field) => {
+                const labelId = `${field.path}-label`;
+                const fieldLabel = (
+                  <span id={labelId}>
                     {field.label}
                     <code>{field.path}</code>
                   </span>
-                  {field.format === "richText" ? (
-                    <RichTextEditor
-                      id={`${field.path}-editor`}
-                      disabled={editorLocked}
-                      value={field.value}
-                      invalid={Boolean(state.errors[field.path])}
-                      describedBy={`${field.path}-error`}
-                      onChange={(value) =>
-                        edit({
-                          path: field.path,
-                          format: "richText",
-                          value,
-                        })
-                      }
-                    />
-                  ) : field.multiline ? (
-                    <textarea
-                      rows={3}
-                      disabled={editorLocked}
-                      value={field.value}
-                      aria-invalid={Boolean(state.errors[field.path])}
-                      aria-describedby={`${field.path}-error`}
-                      onChange={(event) =>
-                        edit({
-                          path: field.path,
-                          format: "plainText",
-                          value: event.target.value,
-                        })
-                      }
-                    />
-                  ) : (
-                    <input
-                      disabled={editorLocked}
-                      value={field.value}
-                      aria-invalid={Boolean(state.errors[field.path])}
-                      aria-describedby={`${field.path}-error`}
-                      onChange={(event) =>
-                        edit({
-                          path: field.path,
-                          format: "plainText",
-                          value: event.target.value,
-                        })
-                      }
-                    />
-                  )}
+                );
+                const fieldError = (
                   <small id={`${field.path}-error`}>
                     {state.errors[field.path] ?? ""}
                   </small>
-                </label>
-              ))}
+                );
+                if (field.format === "richText") {
+                  return (
+                    <div
+                      className="editor-field"
+                      key={field.path}
+                      role="group"
+                      aria-labelledby={labelId}
+                    >
+                      {fieldLabel}
+                      <RichTextEditor
+                        id={`${field.path}-editor`}
+                        disabled={editorLocked}
+                        value={field.value}
+                        invalid={Boolean(state.errors[field.path])}
+                        describedBy={`${field.path}-error`}
+                        labelledBy={labelId}
+                        onChange={(value) =>
+                          edit({
+                            path: field.path,
+                            format: "richText",
+                            value,
+                          })
+                        }
+                      />
+                      {fieldError}
+                    </div>
+                  );
+                }
+                return (
+                  <label key={field.path}>
+                    {fieldLabel}
+                    {field.multiline ? (
+                      <textarea
+                        rows={3}
+                        disabled={editorLocked}
+                        value={field.value}
+                        aria-invalid={Boolean(state.errors[field.path])}
+                        aria-describedby={`${field.path}-error`}
+                        onChange={(event) =>
+                          edit({
+                            path: field.path,
+                            format: "plainText",
+                            value: event.target.value,
+                          })
+                        }
+                      />
+                    ) : (
+                      <input
+                        disabled={editorLocked}
+                        value={field.value}
+                        aria-invalid={Boolean(state.errors[field.path])}
+                        aria-describedby={`${field.path}-error`}
+                        onChange={(event) =>
+                          edit({
+                            path: field.path,
+                            format: "plainText",
+                            value: event.target.value,
+                          })
+                        }
+                      />
+                    )}
+                    {fieldError}
+                  </label>
+                );
+              })}
           </fieldset>
         ))}
       </div>

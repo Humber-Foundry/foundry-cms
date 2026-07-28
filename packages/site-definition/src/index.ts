@@ -1,11 +1,14 @@
 import {
-  createRichTextDocumentFromPlainText,
   RICH_TEXT_VERSION,
   SAFE_RICH_TEXT_LINK_PATTERN,
   validateRichTextDocument,
   type RichTextDocument,
 } from "./rich-text";
 import publishedSite from "./published-site.json";
+import {
+  projectPublishedSiteDefinition,
+  projectSiteDefinitionSchema,
+} from "./site-definition-projection.mjs";
 
 export * from "./rich-text";
 
@@ -166,57 +169,22 @@ function isSiteDefinitionRecord(
 }
 
 export function upgradeSiteDefinition(value: unknown): SiteDefinition {
+  const upgraded = projectSiteDefinitionSchema(value);
   if (
-    !isSiteDefinitionRecord(value) ||
-    !isSiteDefinitionRecord(value.home) ||
-    !Array.isArray(value.home.sections)
-  ) {
-    throw new TypeError("site_definition_invalid");
-  }
-  if (
-    value.definitionVersion === "1.1.0" &&
-    value.schemaVersion === "1.1.0"
-  ) {
-    for (const section of value.home.sections) {
-      if (
-        isSiteDefinitionRecord(section) &&
-        section.type === "callToAction"
-      ) {
-        validateRichTextDocument(section.body as RichTextDocument);
-      }
-    }
-    return value as SiteDefinition;
-  }
-  if (
-    value.definitionVersion !== "1.0.0" ||
-    value.schemaVersion !== "1.0.0"
-  ) {
-    throw new TypeError("site_definition_version_unsupported");
-  }
-  const upgraded = structuredClone(value);
-  if (
+    !isSiteDefinitionRecord(upgraded) ||
     !isSiteDefinitionRecord(upgraded.home) ||
     !Array.isArray(upgraded.home.sections)
   ) {
     throw new TypeError("site_definition_invalid");
   }
-  upgraded.definitionVersion = "1.1.0";
-  upgraded.schemaVersion = "1.1.0";
-  upgraded.home.sections = upgraded.home.sections.map((section) => {
+  for (const section of upgraded.home.sections) {
     if (
-      !isSiteDefinitionRecord(section) ||
-      section.type !== "callToAction"
+      isSiteDefinitionRecord(section) &&
+      section.type === "callToAction"
     ) {
-      return section;
+      validateRichTextDocument(section.body as RichTextDocument);
     }
-    if (typeof section.body !== "string") {
-      throw new TypeError("site_definition_legacy_rich_text_invalid");
-    }
-    return {
-      ...section,
-      body: createRichTextDocumentFromPlainText(section.body),
-    };
-  });
+  }
   return upgraded as SiteDefinition;
 }
 
@@ -645,16 +613,14 @@ export const siteDefinitionSchema = {
 export function createReferenceSiteDefinition(
   published: unknown,
 ): SiteDefinition {
-  const current = upgradeSiteDefinition(published);
+  const current = upgradeSiteDefinition(
+    projectPublishedSiteDefinition(published),
+  );
   return {
     ...current,
     site: {
       ...current.site,
       id: createSiteId(current.site.id),
-    },
-    home: {
-      ...current.home,
-      media: current.home.media ?? [],
     },
   };
 }

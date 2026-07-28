@@ -1,4 +1,9 @@
-export const RICH_TEXT_VERSION = "1.0.0" as const;
+import {
+  projectPlainTextRichTextDocument,
+  projectedRichTextVersion,
+} from "./site-definition-projection.mjs";
+
+export const RICH_TEXT_VERSION = projectedRichTextVersion;
 export const SAFE_RICH_TEXT_LINK_PATTERN =
   "^(?:https?://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::[0-9]{1,4})?(?:[/?#][^\\u0000-\\u0020\\u007f\\\\]*)?|mailto:[^\\u0000-\\u0020\\u007f\\\\@]+@[^\\u0000-\\u0020\\u007f\\\\@]+\\.[^\\u0000-\\u0020\\u007f\\\\@]+|/(?!/)[^\\u0000-\\u0020\\u007f\\\\]*|#[A-Za-z][A-Za-z0-9_-]*)$";
 declare const serializedRichTextDocumentBrand: unique symbol;
@@ -88,17 +93,7 @@ export type RichTextDocument = Readonly<{
 export function createRichTextDocumentFromPlainText(
   value: string,
 ): RichTextDocument {
-  return {
-    version: RICH_TEXT_VERSION,
-    type: "document",
-    children: value.split(/\r\n?|\n/u).map((text) => ({
-      type: "paragraph",
-      children:
-        text === ""
-          ? []
-          : [{ type: "text", text, marks: [] }],
-    })),
-  };
+  return projectPlainTextRichTextDocument(value) as RichTextDocument;
 }
 
 export type SerializedRichTextDocument = string & {

@@ -65,6 +65,7 @@ describe("visual component editor browser acceptance", () => {
       value: serializeRichTextDocument(callToAction.body),
       disabled: false,
       describedBy: "rich-editor-help",
+      labelledBy: "rich-editor-label",
       onChange: () => undefined,
     };
 
@@ -84,12 +85,18 @@ describe("visual component editor browser acceptance", () => {
     );
     expect(editable).not.toBeNull();
     expect(editable!.getAttribute("id")).toBe("rich-editor-regression");
-    expect(editable!.getAttribute("aria-label")).toBe("Rendered rich text");
+    expect(editable!.getAttribute("aria-label")).toBeNull();
+    expect(editable!.getAttribute("aria-labelledby")).toBe("rich-editor-label");
     expect(editable!.getAttribute("aria-describedby")).toBe("rich-editor-help");
     expect(editable!.getAttribute("aria-invalid")).toBe("false");
     expect(
       host.querySelector(".rich-text-editor")?.getAttribute("aria-label"),
     ).toBeNull();
+    expect(
+      host.querySelector(".rich-text-toolbar")?.getAttribute(
+        "aria-labelledby",
+      ),
+    ).toBe("rich-editor-label");
 
     flushSync(() => {
       root.render(
@@ -129,6 +136,7 @@ describe("visual component editor browser acceptance", () => {
       id: "rich-editor-external-value",
       disabled: false,
       describedBy: "rich-editor-external-help",
+      labelledBy: "rich-editor-external-label",
       invalid: false,
       onChange: () => undefined,
     };
@@ -555,6 +563,18 @@ describe("visual component editor browser acceptance", () => {
     expect(host.textContent).toContain(
       "Unsaved browser edits were recovered.",
     );
+    const editable = host.querySelector<HTMLElement>(
+      '[id="section_contact.body-editor"]',
+    );
+    expect(editable?.closest("label")).toBeNull();
+    expect(editable?.getAttribute("aria-labelledby")).toBe(
+      "section_contact.body-label",
+    );
+    expect(
+      host.querySelector(".rich-text-toolbar")?.getAttribute(
+        "aria-labelledby",
+      ),
+    ).toBe("section_contact.body-label");
   });
 
   it("preserves an incompatible rich-text recovery conflict when use-my-value is rejected", async () => {

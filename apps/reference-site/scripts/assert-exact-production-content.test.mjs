@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHash, createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
   assertExactProductionContent,
@@ -10,12 +13,41 @@ const liveCommit = "a".repeat(40);
 const failedCommit = "b".repeat(40);
 const expectedCommit = "c".repeat(40);
 const publicationId = `publish_${"d".repeat(32)}`;
-const bytes = '{"definitionVersion":"1.0.0","site":{"name":"New"}}\n';
+const bytes =
+  '{"definitionVersion":"1.1.0","schemaVersion":"1.1.0",' +
+  '"site":{"name":"New"},"home":{"media":[],"sections":[]}}\n';
 const richTextPath = "content/rich-text/section_contact/body.md";
 const richTextBytes = "A deterministic **Markdown** artifact.\n";
-const contentHash =
-  "3dc0e81afff0e11bf535cfde86b19b872e73c87e6d0053829cdf9198399eb9f9";
 const signingSecret = "publication-signing-secret-32-bytes";
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalHash(value) {
+  return createHash("sha256")
+    .update(canonicalJson(value))
+    .digest("hex");
+}
+
+const contentHash = canonicalHash(JSON.parse(bytes));
+const trackedPublishedBytes = readFileSync(
+  new URL(
+    "../../../packages/site-definition/src/published-site.json",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
 
 function defaultArtifacts() {
   return [
@@ -153,6 +185,26 @@ describe("exact production content authorization", () => {
       readChangedPaths: vi
         .fn()
         .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes unchanged legacy bytes through the runtime schema projection", async () => {
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: runtimePublishedContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
     });
 
     await expect(
