@@ -35,6 +35,9 @@ export function WorkspaceEditors({
     revision: initialContentRevision,
     previewUrl: initialPreviewUrl,
   });
+  const [contentStale, setContentStale] = useState(
+    initialContentStale === true,
+  );
   const advanceRevisionHead = useCallback(
     (incoming: ContentRevision, previewUrl: string) => {
       setHead((current) =>
@@ -51,6 +54,7 @@ export function WorkspaceEditors({
         revisionHead={head.revision}
         revisionHeadPreviewUrl={head.previewUrl}
         onRevisionSaved={advanceRevisionHead}
+        onContentStale={() => setContentStale(true)}
         initialPreviewUrl={initialPreviewUrl}
         initialStale={initialContentStale}
         activeWorkspaceUrl={activeWorkspaceUrl}
@@ -61,8 +65,9 @@ export function WorkspaceEditors({
         initialAssets={mediaAssets}
         initialOccurrences={mediaOccurrences}
         contentRevision={head.revision}
-        contentStale={initialContentStale === true}
+        contentStale={contentStale}
         onRevisionSaved={advanceRevisionHead}
+        onContentStale={() => setContentStale(true)}
       />
     </>
   );

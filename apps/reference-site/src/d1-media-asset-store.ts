@@ -615,6 +615,13 @@ export function createD1MediaAssetStore(
                  AND occurrence_id = ?4 AND current_revision = ?5
              )
                AND EXISTS (
+                 SELECT 1 FROM media_occurrence_revisions
+                 WHERE site_id = ?1 AND workspace_id = ?7
+                   AND occurrence_id = ?4 AND revision = ?5
+                   AND asset_id = ?11 AND crop_json IS ?12
+                   AND created_at = ?6 AND created_by = ?2
+               )
+               AND EXISTS (
                  SELECT 1 FROM media_mutation_claims
                  WHERE site_id = ?1 AND idempotency_key = ?8
                    AND request_hash = ?9 AND claim_token = ?10
@@ -631,6 +638,8 @@ export function createD1MediaAssetStore(
             idempotencyKey,
             requestHash,
             context.claimToken,
+            revision.assetId,
+            revision.crop === null ? null : JSON.stringify(revision.crop),
           ),
         database
           .prepare(
@@ -643,6 +652,13 @@ export function createD1MediaAssetStore(
                WHERE site_id = ?1 AND workspace_id = ?8
                  AND occurrence_id = ?6 AND current_revision = ?7
              )
+               AND EXISTS (
+                 SELECT 1 FROM media_occurrence_revisions
+                 WHERE site_id = ?1 AND workspace_id = ?8
+                   AND occurrence_id = ?6 AND revision = ?7
+                   AND asset_id = ?10 AND crop_json IS ?11
+                   AND created_at = ?5 AND created_by = ?12
+               )
                AND EXISTS (
                SELECT 1 FROM media_mutation_claims
                WHERE site_id = ?1 AND idempotency_key = ?2
@@ -660,6 +676,9 @@ export function createD1MediaAssetStore(
             revision.revision,
             revision.workspaceId,
             context.claimToken,
+            revision.assetId,
+            revision.crop === null ? null : JSON.stringify(revision.crop),
+            revision.createdBy,
           ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {

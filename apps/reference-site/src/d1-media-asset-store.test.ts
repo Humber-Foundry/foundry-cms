@@ -224,6 +224,40 @@ describe("D1 media asset store", () => {
     ).resolves.toEqual(first);
   });
 
+  it("receipts only the winner when distinct mutations race for one revision", async () => {
+    const app = application();
+    await upload(app, assetId);
+    await upload(app, replacementId);
+    const results = await Promise.allSettled([
+      app.commands.replaceOccurrence({
+        actorId,
+        workspaceId,
+        occurrenceId,
+        assetId,
+        baseRevision: 0,
+        idempotencyKey: "d1-racing-first-occurrence",
+      }),
+      app.commands.replaceOccurrence({
+        actorId,
+        workspaceId,
+        occurrenceId,
+        assetId: replacementId,
+        baseRevision: 0,
+        idempotencyKey: "d1-racing-second-occurrence",
+      }),
+    ]);
+    const fulfilled = results.filter(
+      (result) => result.status === "fulfilled",
+    );
+    const rejected = results.filter((result) => result.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    await expect(
+      app.queries.getOccurrence(workspaceId, occurrenceId),
+    ).resolves.toEqual(fulfilled[0]!.value);
+  });
+
   it("takes over an expired orphan mutation lease", async () => {
     const store = createD1MediaAssetStore(database);
     const orphan = {

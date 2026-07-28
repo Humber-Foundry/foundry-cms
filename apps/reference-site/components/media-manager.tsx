@@ -42,6 +42,7 @@ export function MediaManager({
   contentRevision,
   contentStale = false,
   onRevisionSaved,
+  onContentStale = () => undefined,
 }: {
   csrfToken: string;
   initialAssets: ReadonlyArray<MediaAsset>;
@@ -49,6 +50,7 @@ export function MediaManager({
   contentRevision?: ContentRevision;
   contentStale?: boolean;
   onRevisionSaved(revision: ContentRevision, previewUrl: string): void;
+  onContentStale?(): void;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
   const [occurrences, setOccurrences] = useState([...initialOccurrences]);
@@ -92,7 +94,18 @@ export function MediaManager({
       mutationToken,
     });
     setMutationToken(result.mutationToken);
-    if (!result.response.ok) throw new Error("media_mutation_failed");
+    if (!result.response.ok) {
+      if (
+        result.response.status === 409 &&
+        typeof result.body === "object" &&
+        result.body !== null &&
+        "error" in result.body &&
+        result.body.error === "content_revision_stale"
+      ) {
+        onContentStale();
+      }
+      throw new Error("media_mutation_failed");
+    }
     return result.body;
   }
 

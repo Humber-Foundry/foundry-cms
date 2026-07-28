@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import type { ContentRevision } from "@foundry/application";
@@ -24,5 +25,22 @@ describe("workspace revision head", () => {
     expect(
       advanceWorkspaceRevisionHead(current, older, "/preview/2"),
     ).toBe(current);
+  });
+
+  it("shares runtime stale transitions with both workspace editors", async () => {
+    const [workspaceEditors, mediaManager] = await Promise.all([
+      readFile(new URL("./workspace-editors.tsx", import.meta.url), "utf8"),
+      readFile(new URL("./media-manager.tsx", import.meta.url), "utf8"),
+    ]);
+
+    expect(workspaceEditors).toContain(
+      "const [contentStale, setContentStale] = useState(",
+    );
+    expect(workspaceEditors.match(/onContentStale=/gu)).toHaveLength(2);
+    expect(workspaceEditors).toContain("contentStale={contentStale}");
+    expect(mediaManager).toContain(
+      'result.body.error === "content_revision_stale"',
+    );
+    expect(mediaManager).toContain("onContentStale();");
   });
 });

@@ -102,6 +102,7 @@ export function ContentEditor({
   revisionHead,
   revisionHeadPreviewUrl,
   onRevisionSaved,
+  onContentStale,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
@@ -115,6 +116,7 @@ export function ContentEditor({
   revisionHead: ContentRevision;
   revisionHeadPreviewUrl: string;
   onRevisionSaved(revision: ContentRevision, previewUrl: string): void;
+  onContentStale(): void;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -705,6 +707,7 @@ export function ContentEditor({
           acknowledgedRevision,
           errors: {},
         });
+        onContentStale();
         setMessage(
           acknowledgedRevision === undefined
             ? "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved."
