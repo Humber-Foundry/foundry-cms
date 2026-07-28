@@ -81,6 +81,7 @@ function createFakeGraphify() {
   writeFileSync(
     executable,
     `#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -93,6 +94,27 @@ if (args[0] === "extract") {
   const delay = Number(process.env.GRAPHIFY_FAKE_DELAY_MS ?? "0");
   if (delay > 0) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+  }
+  if (process.env.GRAPHIFY_FAKE_REPLACE_LOCK === "1") {
+    const replacement = execFileSync(
+      "git",
+      ["hash-object", "-w", "--stdin"],
+      {
+        cwd: process.env.GRAPHIFY_FAKE_REPOSITORY_ROOT,
+        encoding: "utf8",
+        input: JSON.stringify({
+          pid: process.pid,
+          hostname: "replacement-owner",
+          token: "replacement-owner",
+          startedAt: new Date().toISOString(),
+        }),
+      },
+    ).trim();
+    execFileSync(
+      "git",
+      ["update-ref", "${refreshLockRef}", replacement],
+      { cwd: process.env.GRAPHIFY_FAKE_REPOSITORY_ROOT },
+    );
   }
   const sourceRoot = args[1];
   const output = args[args.indexOf("--out") + 1];
@@ -235,6 +257,7 @@ function runIndex(repository, arguments_, options = {}) {
                   ? "1"
                   : "0",
             GRAPHIFY_FAKE_DELAY_MS: String(options.delayMs ?? 0),
+            GRAPHIFY_FAKE_REPLACE_LOCK: options.replaceLock ? "1" : "0",
             GRAPHIFY_INDEX_CACHE_DIR: cache,
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -270,6 +293,7 @@ function runIndexAsync(repository, arguments_, options) {
           GRAPHIFY_FAKE_MUTATE_REPOSITORY: "0",
           GRAPHIFY_FAKE_WARNING: "0",
           GRAPHIFY_FAKE_DELAY_MS: String(options.delayMs ?? 0),
+          GRAPHIFY_FAKE_REPLACE_LOCK: "0",
           GRAPHIFY_INDEX_CACHE_DIR: options.cache,
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -901,6 +925,25 @@ describe("commit-pinned Graphify index", () => {
       "Could not atomically acquire the Graphify refresh lock",
     );
     expect(result.output).toContain("cannot lock ref");
+  });
+
+  it("fences a refresher that loses its lock during extraction", () => {
+    const { root, main } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+
+    const result = runIndex(root, ["refresh"], {
+      cache,
+      replaceLock: true,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain(
+      "Graphify refresh lock ownership was lost before publication",
+    );
+    expect(
+      existsSync(join(cache, "snapshots", main)),
+    ).toBe(false);
+    expect(getRefreshLock(root)).not.toBeNull();
   });
 
   it("atomically serializes concurrent stale-lock reclamation", async () => {

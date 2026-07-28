@@ -260,13 +260,14 @@ function compareAndSwapRefreshLock(
 
 function acquireRefreshLock(repositoryRoot) {
   const ownerToken = randomUUID();
-  const owner = {
+  let owner = {
     pid: process.pid,
     hostname: hostname(),
     token: ownerToken,
     startedAt: new Date().toISOString(),
+    renewal: randomUUID(),
   };
-  const ownerOid = writeLockOwner(repositoryRoot, owner);
+  let ownerOid = writeLockOwner(repositoryRoot, owner);
   let failedAttempts = 0;
   let lastError = "";
   while (true) {
@@ -315,7 +316,34 @@ function acquireRefreshLock(repositoryRoot) {
       );
     }
   }
-  return () => {
+  const renew = () => {
+    const current = currentRefreshLock(repositoryRoot);
+    if (current?.oid !== ownerOid) {
+      fail("Graphify refresh lock ownership was lost before publication.");
+    }
+    owner = {
+      ...owner,
+      startedAt: new Date().toISOString(),
+      renewal: randomUUID(),
+    };
+    const renewedOid = writeLockOwner(repositoryRoot, owner);
+    const renewal = compareAndSwapRefreshLock(
+      repositoryRoot,
+      renewedOid,
+      ownerOid,
+    );
+    if (!renewal.updated) {
+      fail(
+        "Could not renew the Graphify refresh lock before publication: " +
+          renewal.error,
+      );
+    }
+    ownerOid = renewedOid;
+  };
+  const release = () => {
+    if (currentRefreshLock(repositoryRoot)?.oid !== ownerOid) {
+      return;
+    }
     const result = spawnSync(
       "git",
       ["update-ref", "-d", refreshLockRef, ownerOid],
@@ -330,6 +358,7 @@ function acquireRefreshLock(repositoryRoot) {
       );
     }
   };
+  return { renew, release };
 }
 
 function graphifyExecutable() {
@@ -576,7 +605,7 @@ function refresh() {
   assertRefreshWorktree(context);
 
   const existing = snapshotDirectory(context.cacheRoot, context.head);
-  const releaseLock = acquireRefreshLock(context.repositoryRoot);
+  const refreshLock = acquireRefreshLock(context.repositoryRoot);
   const staging = join(
     context.cacheRoot,
     "staging",
@@ -588,6 +617,7 @@ function refresh() {
   try {
     if (existsSync(existing)) {
       verifySnapshot(context, context.head);
+      refreshLock.renew();
       garbageCollectSnapshots(context);
       console.log(`Graph snapshot already exists: ${context.head}`);
       return;
@@ -649,6 +679,7 @@ function refresh() {
       `${JSON.stringify(metadata, null, 2)}\n`,
     );
     mkdirSync(dirname(existing), { recursive: true });
+    refreshLock.renew();
     renameSync(staging, existing);
 
     const pointer = join(context.cacheRoot, "current.json");
@@ -661,13 +692,15 @@ function refresh() {
         2,
       )}\n`,
     );
+    refreshLock.renew();
     renameSync(pointerStaging, pointer);
+    refreshLock.renew();
     garbageCollectSnapshots(context);
     console.log(`Published immutable Graphify snapshot: ${context.head}`);
   } finally {
     rmSync(staging, { recursive: true, force: true });
     rmSync(sourceRoot, { recursive: true, force: true });
-    releaseLock();
+    refreshLock.release();
   }
 }
 

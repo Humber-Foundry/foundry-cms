@@ -61,7 +61,10 @@ removal; this bounds the shared cache without deleting a base after one racy
 observation. Every refresh owner receives a four-hour lock lease. Atomic
 ownership swaps serialize simultaneous stale-lock reclaimers, while the bounded
 lease prevents a crashed process, reused PID, renamed machine, or vanished
-shared-storage host from blocking AFK refreshes forever.
+shared-storage host from blocking AFK refreshes forever. The owner atomically
+renews and verifies its lease immediately before snapshot publication, pointer
+updates, and garbage collection; an expired owner that has been replaced is
+fenced from every shared mutation.
 
 Graphify's AST workers may be denied by an agent sandbox even when its process
 exits successfully. The wrapper rejects an empty graph and rejects extraction
