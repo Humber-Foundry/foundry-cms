@@ -1,6 +1,6 @@
 {
-  "definitionVersion": "1.1.0",
-  "schemaVersion": "1.1.0",
+  "definitionVersion": "1.0.0",
+  "schemaVersion": "1.0.0",
   "site": {
     "id": "site_foundry_reference",
     "name": "Foundry Reference",
@@ -103,22 +103,7 @@
         "type": "callToAction",
         "eyebrow": "Begin with the real question",
         "title": "What should exist when this work is done?",
-        "body": {
-          "version": "1.0.0",
-          "type": "document",
-          "children": [
-            {
-              "type": "paragraph",
-              "children": [
-                {
-                  "type": "text",
-                  "text": "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
-                  "marks": []
-                }
-              ]
-            }
-          ]
-        },
+        "body": "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
         "action": {
           "id": "action_email",
           "label": "Write the first note",

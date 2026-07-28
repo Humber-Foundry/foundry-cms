@@ -578,12 +578,23 @@ export function fromTipTapDocument(value: unknown): RichTextDocument {
           if (!isObject(block.attrs)) {
             issue("invalid_structure", `${path}.attrs`, "Expected list attributes.");
           }
-          assertOnlyKeys(block.attrs, ["start"], `${path}.attrs`);
+          assertOnlyKeys(block.attrs, ["start", "type"], `${path}.attrs`);
           if (block.attrs.start !== 1) {
             issue(
               "unsupported_attribute",
               `${path}.attrs.start`,
               "Only ordered lists beginning at 1 have a canonical representation.",
+            );
+          }
+          if (
+            block.attrs.type !== undefined &&
+            block.attrs.type !== null &&
+            block.attrs.type !== "1"
+          ) {
+            issue(
+              "unsupported_attribute",
+              `${path}.attrs.type`,
+              'Only the default numeric ordered-list type ("1") has a canonical representation.',
             );
           }
         }
@@ -687,7 +698,7 @@ export function toTipTapDocument(document: RichTextDocument): JsonObject {
                 }),
               orderedList: (list) => ({
                 type: "orderedList",
-                attrs: { start: 1 },
+                attrs: { start: 1, type: null },
                 content: list.children.map((item) => ({
                   type: "listItem",
                   content: item.children.map(toTipTapParagraph),
@@ -700,7 +711,7 @@ export function toTipTapDocument(document: RichTextDocument): JsonObject {
 }
 
 function escapeMarkdownText(value: string): string {
-  return value.replace(/([\\`*{}[\]()<>#+\-.!_|>&])/gu, "\\$1");
+  return value.replace(/([\\`*{}[\]()<>#+\-.!_|>&~])/gu, "\\$1");
 }
 
 function escapeMarkdownDestination(value: string): string {
@@ -728,7 +739,14 @@ function serializeText(node: RichTextText): string {
 }
 
 function serializeParagraph(paragraph: RichTextParagraph): string {
-  return paragraph.children.map(serializeText).join("");
+  const serialized = paragraph.children.map(serializeText).join("");
+  if (serialized.startsWith("\t")) {
+    return `&#9;${serialized.slice(1)}`;
+  }
+  if (serialized.startsWith("    ")) {
+    return `&#32;${serialized.slice(1)}`;
+  }
+  return serialized;
 }
 
 export function serializeRichTextToMarkdown(
@@ -787,6 +805,16 @@ function findUnescaped(value: string, needle: string, from: number): number {
 function unescapeMarkdown(value: string, path: string): string {
   let result = "";
   for (let index = 0; index < value.length; index += 1) {
+    if (value.startsWith("&#32;", index)) {
+      result += " ";
+      index += "&#32;".length - 1;
+      continue;
+    }
+    if (value.startsWith("&#9;", index)) {
+      result += "\t";
+      index += "&#9;".length - 1;
+      continue;
+    }
     if (value[index] !== "\\") {
       result += value[index];
       continue;
@@ -794,7 +822,7 @@ function unescapeMarkdown(value: string, path: string): string {
     const escaped = value[index + 1];
     if (
       escaped === undefined ||
-      !"\\`*{}[]()<>#+-.!_|>&".includes(escaped)
+      !"\\`*{}[]()<>#+-.!_|>&~".includes(escaped)
     ) {
       issue(
         "serializer_ambiguity",

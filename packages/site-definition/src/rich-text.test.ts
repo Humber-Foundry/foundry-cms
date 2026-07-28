@@ -144,7 +144,7 @@ describe("rich text contract", () => {
         },
         {
           type: "orderedList",
-          attrs: { start: 1 },
+          attrs: { start: 1, type: null },
           content: [
             {
               type: "listItem",
@@ -169,6 +169,63 @@ describe("rich text contract", () => {
       ],
     });
     expect(fromTipTapDocument(tipTap)).toEqual(supportedDocument);
+  });
+
+  it("normalizes TipTap ordered-list defaults and rejects nonnumeric styles", () => {
+    const tipTap = {
+      type: "doc",
+      content: [
+        {
+          type: "orderedList",
+          attrs: { start: 1, type: null },
+          content: [
+            {
+              type: "listItem",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "First" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const document = fromTipTapDocument(tipTap);
+
+    expect(
+      fromTipTapDocument({
+        ...tipTap,
+        content: [
+          {
+            ...tipTap.content[0],
+            attrs: { start: 1, type: "1" },
+          },
+        ],
+      }),
+    ).toEqual(document);
+    expect(toTipTapDocument(document)).toEqual(tipTap);
+    expect(() =>
+      fromTipTapDocument({
+        ...tipTap,
+        content: [
+          {
+            ...tipTap.content[0],
+            attrs: { start: 1, type: "a" },
+          },
+        ],
+      }),
+    ).toThrow(
+      expect.objectContaining<Partial<RichTextValidationError>>({
+        issues: [
+          expect.objectContaining({
+            code: "unsupported_attribute",
+            path: "$.content[0].attrs.type",
+          }),
+        ],
+      }),
+    );
   });
 
   it("serializes supported content to stable Markdown", () => {
@@ -388,6 +445,29 @@ describe("rich text contract", () => {
     expect(serializeRichTextToMarkdown(document)).toBe("1\\. item\n");
     expect(parseRichTextMarkdown("1\\. item\n")).toEqual(document);
   });
+
+  it.each([
+    ["~~~ code fence", "\\~\\~\\~ code fence\n"],
+    ["    indented code", "&#32;   indented code\n"],
+    ["\tindented code", "&#9;indented code\n"],
+  ])(
+    "round-trips paragraph text beginning with a CommonMark block marker: %s",
+    (text, expectedMarkdown) => {
+      const document: RichTextDocument = {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text, marks: [] }],
+          },
+        ],
+      };
+
+      expect(serializeRichTextToMarkdown(document)).toBe(expectedMarkdown);
+      expect(parseRichTextMarkdown(expectedMarkdown)).toEqual(document);
+    },
+  );
 
   it("round-trips text ending in a backslash inside formatting", () => {
     const document: RichTextDocument = {

@@ -169,6 +169,21 @@ describe("content publication application", () => {
     ).rejects.toThrow("content_publication_artifacts_invalid");
   });
 
+  it("hashes an empty managed Markdown artifact for valid empty rich text", async () => {
+    await expect(
+      hashContentPublicationArtifacts([
+        {
+          path: "packages/site-definition/src/published-site.json",
+          bytes: "{}\n",
+        },
+        {
+          path: "content/rich-text/section_contact/body.md",
+          bytes: "",
+        },
+      ]),
+    ).resolves.toMatch(/^[a-f0-9]{64}$/u);
+  });
+
   function application() {
     return createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),

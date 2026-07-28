@@ -60,16 +60,19 @@ describe("visual component editor browser acceptance", () => {
     if (callToAction.type !== "callToAction") {
       throw new Error("expected_call_to_action_fixture");
     }
+    const editorProps = {
+      id: "rich-editor-regression",
+      value: serializeRichTextDocument(callToAction.body),
+      disabled: false,
+      describedBy: "rich-editor-help",
+      onChange: () => undefined,
+    };
 
     flushSync(() => {
       root.render(
         createElement(RichTextEditor, {
-          id: "rich-editor-regression",
-          value: serializeRichTextDocument(callToAction.body),
-          disabled: false,
-          describedBy: "rich-editor-help",
+          ...editorProps,
           invalid: false,
-          onChange: () => undefined,
         }),
       );
     });
@@ -80,8 +83,31 @@ describe("visual component editor browser acceptance", () => {
       '[contenteditable="true"]',
     );
     expect(editable).not.toBeNull();
+    expect(editable!.getAttribute("id")).toBe("rich-editor-regression");
+    expect(editable!.getAttribute("aria-label")).toBe("Rendered rich text");
+    expect(editable!.getAttribute("aria-describedby")).toBe("rich-editor-help");
+    expect(editable!.getAttribute("aria-invalid")).toBe("false");
+    expect(
+      host.querySelector(".rich-text-editor")?.getAttribute("aria-label"),
+    ).toBeNull();
 
-    editable!.focus();
+    flushSync(() => {
+      root.render(
+        createElement(RichTextEditor, {
+          ...editorProps,
+          invalid: true,
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    const invalidEditable = host.querySelector<HTMLElement>(
+      '[contenteditable="true"]',
+    );
+    expect(invalidEditable?.getAttribute("aria-invalid")).toBe("true");
+
+    invalidEditable!.focus();
     await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
 
     expect(host.querySelector("#rich-editor-regression")).not.toBeNull();

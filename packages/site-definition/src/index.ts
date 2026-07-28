@@ -643,23 +643,24 @@ export const siteDefinitionSchema = {
 } as const;
 
 export function createReferenceSiteDefinition(
-  published: SiteDefinition,
+  published: unknown,
 ): SiteDefinition {
+  const current = upgradeSiteDefinition(published);
   return {
-    ...published,
+    ...current,
     site: {
-      ...published.site,
-      id: createSiteId(published.site.id),
+      ...current.site,
+      id: createSiteId(current.site.id),
     },
     home: {
-      ...published.home,
-      media: published.home.media ?? [],
+      ...current.home,
+      media: current.home.media ?? [],
     },
   };
 }
 
 export const referenceSiteDefinition = createReferenceSiteDefinition(
-  publishedSite as unknown as SiteDefinition,
+  publishedSite,
 );
 
 export * from "./editable-fields";

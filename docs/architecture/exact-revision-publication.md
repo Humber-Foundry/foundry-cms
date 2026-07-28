@@ -47,6 +47,13 @@ longer exist in the approved definition. It then creates one commit whose sole
 parent is the approved head and updates the configured production ref with
 `force: false`. A moved ref is blocked and is never silently rebased.
 
+Schema reader upgrades are staged separately from published-content migration.
+A code release may add an in-memory projection for an older stored Site
+Definition, but it keeps the tracked published bytes unchanged. The canonical
+JSON and managed Markdown advance to the new schema only through a later
+signature-verified Foundry publication. This prevents an ordinary code merge
+from being mistaken for an authorized content publication.
+
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author
 or committer fields. Attribution uses the non-secret `Foundry-*` trailers

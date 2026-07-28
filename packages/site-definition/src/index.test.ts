@@ -18,6 +18,7 @@ import {
   siteDefinitionValidationKeywords,
   type SiteDefinition,
 } from "./index";
+import publishedSite from "./published-site.json";
 
 describe("reference Site Definition", () => {
   const ajv = new Ajv2020({ allErrors: true });
@@ -38,6 +39,29 @@ describe("reference Site Definition", () => {
     expect(
       siteDefinitionSchema.$defs.richTextDocument.$comment,
     ).toContain("validateRichTextDocument");
+  });
+
+  it("stages the rich-text schema upgrade without rewriting published bytes", () => {
+    const stored = publishedSite as unknown as Record<string, any>;
+    const storedCallToAction = stored.home.sections.find(
+      (section: Record<string, unknown>) =>
+        section.type === "callToAction",
+    );
+    const runtimeCallToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    );
+
+    expect(stored.definitionVersion).toBe("1.0.0");
+    expect(stored.schemaVersion).toBe("1.0.0");
+    expect(typeof storedCallToAction?.body).toBe("string");
+    expect(runtimeCallToAction).toEqual(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          version: "1.0.0",
+          type: "document",
+        }),
+      }),
+    );
   });
 
   it("uses unique stable identifiers for every page section", () => {

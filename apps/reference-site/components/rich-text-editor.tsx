@@ -38,6 +38,11 @@ export function RichTextEditor({
   onChange(value: SerializedRichTextDocument): void;
 }) {
   const [validationMessage, setValidationMessage] = useState("");
+  const validationMessageId = `${id}-validation`;
+  const editorDescribedBy =
+    validationMessage === ""
+      ? describedBy
+      : `${describedBy} ${validationMessageId}`;
   const latestValue = useRef(value);
   latestValue.current = value;
   const document = useMemo(
@@ -50,6 +55,14 @@ export function RichTextEditor({
     ],
     content: toTipTapDocument(document),
     editable: !disabled,
+    editorProps: {
+      attributes: {
+        id,
+        "aria-label": "Rendered rich text",
+        "aria-describedby": editorDescribedBy,
+        "aria-invalid": String(invalid || validationMessage !== ""),
+      },
+    },
     immediatelyRender: false,
     onUpdate: ({ editor: currentEditor }) => {
       const serialized = serializeSupportedTipTapDocument(
@@ -72,6 +85,30 @@ export function RichTextEditor({
   useEffect(() => {
     editor?.setEditable(!disabled);
   }, [disabled, editor]);
+
+  useEffect(() => {
+    if (editor === null) {
+      return;
+    }
+    editor.setOptions({
+      editorProps: {
+        ...editor.options.editorProps,
+        attributes: {
+          ...editor.options.editorProps.attributes,
+          id,
+          "aria-label": "Rendered rich text",
+          "aria-describedby": editorDescribedBy,
+          "aria-invalid": String(invalid || validationMessage !== ""),
+        },
+      },
+    });
+  }, [
+    editor,
+    editorDescribedBy,
+    id,
+    invalid,
+    validationMessage,
+  ]);
 
   useLayoutEffect(() => {
     if (editor === null) {
@@ -119,13 +156,7 @@ export function RichTextEditor({
   }
 
   return (
-    <div
-      id={id}
-      className="rich-text-editor rendered-rich-text"
-      aria-invalid={invalid || validationMessage !== ""}
-      aria-describedby={describedBy}
-      aria-label="Rendered rich text"
-    >
+    <div className="rich-text-editor rendered-rich-text">
       <div className="rich-text-toolbar" role="toolbar" aria-label="Text formatting">
         <button
           type="button"
@@ -188,7 +219,7 @@ export function RichTextEditor({
       </div>
       <EditorContent editor={editor} />
       {validationMessage === "" ? null : (
-        <small role="alert">{validationMessage}</small>
+        <small id={validationMessageId} role="alert">{validationMessage}</small>
       )}
     </div>
   );

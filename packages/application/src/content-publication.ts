@@ -383,7 +383,8 @@ export async function hashContentPublicationArtifacts(
     !sorted.some(({ path }) => path === publishedSiteDefinitionPath) ||
     sorted.some(
       (artifact, index) =>
-        artifact.bytes.length === 0 ||
+        (artifact.path === publishedSiteDefinitionPath &&
+          artifact.bytes.length === 0) ||
         (artifact.path !== publishedSiteDefinitionPath &&
           !/^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u.test(
             artifact.path,
