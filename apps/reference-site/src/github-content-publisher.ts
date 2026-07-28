@@ -1169,7 +1169,7 @@ export function createGitHubContentPublisher({
             if (
               build.build_trigger_metadata?.commit_hash !== commitSha
             ) {
-              return "failed";
+              return "unknown";
             }
             return build.build_outcome === "success"
               ? "deployed"

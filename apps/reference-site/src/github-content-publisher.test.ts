@@ -905,7 +905,7 @@ describe("GitHub content publisher", () => {
     );
   });
 
-  it("fails a skipped or wrong-commit manual build", async () => {
+  it("fails an exact skipped build but keeps mismatched build evidence unknown", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -942,7 +942,26 @@ describe("GitHub content publisher", () => {
     ).resolves.toBe("failed");
     await expect(
       publisher.getDeploymentStatus("c".repeat(40), "build-wrong"),
-    ).resolves.toBe("failed");
+    ).resolves.toBe("unknown");
+  });
+
+  it("keeps stopped manual build evidence without commit metadata unknown", async () => {
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(
+        json({
+          success: true,
+          result: {
+            status: "stopped",
+            build_outcome: "fail",
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      publisher.getDeploymentStatus("c".repeat(40), "build-metadata-missing"),
+    ).resolves.toBe("unknown");
   });
 
   it("classifies an atomic expected-head rejection as a moved head", async () => {

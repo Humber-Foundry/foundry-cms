@@ -1941,7 +1941,7 @@ describe("content publication application", () => {
     );
   });
 
-  it("never resends a known manual build after its exact UUID times out", async () => {
+  it("never resends a known manual build after timeout without exact failure evidence", async () => {
     let currentTime = "2026-07-27T10:01:00.000Z";
     const app = createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),
@@ -1984,6 +1984,21 @@ describe("content publication application", () => {
         status: "failed",
         detail: "deployment_retry_timeout",
       }),
+    );
+    getDeploymentStatus.mockClear();
+    getDeploymentStatus.mockResolvedValue("unknown");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+        deploymentId: "build-123",
+      }),
+    );
+    expect(getDeploymentStatus).toHaveBeenCalledWith(
+      "c".repeat(40),
+      "build-123",
     );
     expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
   });
