@@ -1,6 +1,7 @@
 import type { CloudflareAccessConfiguration } from "./access-identity";
 import { createCloudflareAccessEligibilitySynchronizer } from "./cloudflare-access-eligibility";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+import type { PrivateMediaBucket } from "./r2-media-source-store";
 
 export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_ACCESS_ISSUER?: string;
@@ -31,6 +32,7 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID?: string;
   FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
   FOUNDRY_PUBLICATION_SIGNING_SECRET?: string;
+  FOUNDRY_MEDIA?: PrivateMediaBucket;
 }>;
 
 export class HumanAccessConfigurationError extends Error {

@@ -29,6 +29,7 @@ Production installation supplies:
 
 - a D1 database through the `FOUNDRY_DB` binding, after replacing the
   provisioning placeholder in `apps/reference-site/wrangler.jsonc`;
+- a private, client-owned R2 bucket through the `FOUNDRY_MEDIA` binding;
 - `FOUNDRY_ACCESS_ISSUER`, set to the exact HTTPS Cloudflare Access team
   domain;
 - `FOUNDRY_ACCESS_AUDIENCE`, set to the audience of the one Access application
@@ -117,6 +118,30 @@ by the public route. The short-lived preview capability is bound to the current
 actor, workspace and revision, and its D1 bookmark preserves read-your-write
 consistency. The preview identifies its exact content hash, schema version,
 Worker renderer version and bundled production-base content hash.
+
+### Client-owned media
+
+Media sources are written to the private `FOUNDRY_MEDIA` R2 bucket under
+`media/<site-id>/<asset-id>/source`. D1 stores stable asset metadata and
+site- and draft-workspace-scoped occurrence references. Uploads verify the image
+format and
+dimensions from the source bytes before recording caller-supplied metadata.
+Replacing one occurrence appends a revision
+only for that occurrence; cropping appends normalized crop data and never
+rewrites the R2 source. The selected occurrence revision and asset presentation
+metadata are then fingerprinted into the Editor's immutable content revision;
+the exact preview renders that bound manifest, while the public route continues
+to render only the Git-published Site Definition. Published source delivery
+checks the requested asset against that Git manifest before reading private R2.
+The media and content receipts share a stable retry key bound to the workspace,
+so a raced content head is reconciled against the latest revision and an
+ambiguous response can be retried without appending another occurrence. All
+mutations are idempotent and audited. Deletion first reserves an unreferenced
+asset in D1, fences new references, and durably tombstones its stable identity
+before removing its source. The reservation remains recoverable until the
+source removal and mutation receipt complete. Any current or historical
+occurrence revision rejects deletion so immutable previews never acquire a
+broken media reference.
 
 Build and verify the Cloudflare Workers artifact:
 

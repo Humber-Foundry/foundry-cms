@@ -3,12 +3,36 @@ import type {
   SiteDefinition,
 } from "@foundry/site-definition";
 
+import { MediaOccurrence } from "./media-occurrence";
 import { sectionAnchor } from "@/src/section-anchor";
 import { RichTextRenderer } from "@/components/rich-text-renderer";
 
-export function SiteSection({ section }: { section: PageSection }) {
+function occurrenceFor(
+  definition: SiteDefinition | undefined,
+  occurrenceId: string,
+) {
+  return (definition?.home.media ?? []).find(
+    (candidate) => candidate.occurrenceId === occurrenceId,
+  ) ?? null;
+}
+
+export function SiteSection({
+  section,
+  definition,
+  mediaDelivery = "published",
+  mediaAccessToken,
+}: {
+  section: PageSection;
+  definition?: SiteDefinition;
+  mediaDelivery?: "authenticated" | "published";
+  mediaAccessToken?: string;
+}) {
   switch (section.type) {
-    case "hero":
+    case "hero": {
+      const occurrence =
+        section.id === "section_hero"
+          ? occurrenceFor(definition, "occurrence_home_hero")
+          : null;
       return (
         <section
           className="hero"
@@ -18,6 +42,14 @@ export function SiteSection({ section }: { section: PageSection }) {
           <p className="eyebrow">{section.eyebrow}</p>
           <h1 id={`${section.id}_title`}>{section.title}</h1>
           <p className="hero-summary">{section.summary}</p>
+          {occurrence === null ? null : (
+            <MediaOccurrence
+              className="site-media site-media-hero"
+              occurrence={occurrence}
+              delivery={mediaDelivery}
+              accessToken={mediaAccessToken}
+            />
+          )}
           <div className="action-row">
             <a className="button button-primary" href={section.primaryAction.href}>
               {section.primaryAction.label}
@@ -29,8 +61,13 @@ export function SiteSection({ section }: { section: PageSection }) {
           </div>
         </section>
       );
+    }
 
-    case "services":
+    case "services": {
+      const occurrence =
+        section.id === "section_services"
+          ? occurrenceFor(definition, "occurrence_home_detail")
+          : null;
       return (
         <section
           className="services"
@@ -42,6 +79,14 @@ export function SiteSection({ section }: { section: PageSection }) {
             <h2 id={`${section.id}_title`}>{section.title}</h2>
             <p>{section.introduction}</p>
           </div>
+          {occurrence === null ? null : (
+            <MediaOccurrence
+              className="site-media site-media-detail"
+              occurrence={occurrence}
+              delivery={mediaDelivery}
+              accessToken={mediaAccessToken}
+            />
+          )}
           <ol className="service-list">
             {section.items.map((item) => (
               <li key={item.id}>
@@ -57,6 +102,7 @@ export function SiteSection({ section }: { section: PageSection }) {
           </ol>
         </section>
       );
+    }
 
     case "proof":
       return (
@@ -107,8 +153,12 @@ export function SiteSection({ section }: { section: PageSection }) {
 
 export function SiteRenderer({
   definition,
+  mediaDelivery = "published",
+  mediaAccessToken,
 }: {
   definition: SiteDefinition;
+  mediaDelivery?: "authenticated" | "published";
+  mediaAccessToken?: string;
 }) {
   return (
     <>
@@ -127,7 +177,13 @@ export function SiteRenderer({
       </header>
       <main>
         {definition.home.sections.map((section) => (
-          <SiteSection key={section.id} section={section} />
+          <SiteSection
+            key={section.id}
+            section={section}
+            definition={definition}
+            mediaDelivery={mediaDelivery}
+            mediaAccessToken={mediaAccessToken}
+          />
         ))}
       </main>
       <footer className="site-footer">

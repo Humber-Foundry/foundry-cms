@@ -8,6 +8,7 @@ import {
 
 import {
   contentEditorReducer,
+  contentEditorStatusLocked,
   createContentEditorState,
 } from "./content-editor-history";
 
@@ -58,6 +59,14 @@ describe("content editor history", () => {
       ),
     ).toEqual(expect.objectContaining({ body }));
     expect(missingDiscriminator).toBe(initial);
+  });
+
+  it("locks mutation controls until a structural conflict is recovered", () => {
+    expect(contentEditorStatusLocked("conflict")).toBe(true);
+    expect(contentEditorStatusLocked("stale")).toBe(true);
+    expect(contentEditorStatusLocked("saving")).toBe(true);
+    expect(contentEditorStatusLocked("dirty")).toBe(false);
+    expect(contentEditorStatusLocked("saved")).toBe(false);
   });
 
   it("undoes and redoes working copy without mutating the persisted revision", () => {
@@ -280,5 +289,343 @@ describe("content editor history", () => {
 
     expect(stale.status).toBe("stale");
     expect(stale.persistedRevision).toBe(4);
+  });
+
+  it("advances a shared media revision head without discarding unsaved copy", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const edited = contentEditorReducer(initial, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Unsaved headline",
+    });
+    const definition = {
+      ...structuredClone(referenceSiteDefinition),
+      site: {
+        ...structuredClone(referenceSiteDefinition.site),
+        footer: "Concurrent footer",
+      },
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        media: [
+          {
+            occurrenceId: "occurrence_home_hero" as const,
+            revision: 1,
+            asset: {
+              assetId: "asset_hero",
+              width: 1600,
+              height: 900,
+              contentType: "image/png" as const,
+            },
+            crop: null,
+          },
+        ],
+      },
+    };
+
+    const synchronized = contentEditorReducer(edited, {
+      type: "externalRevision",
+      definition,
+      revision: 2,
+    });
+
+    expect(synchronized.persistedRevision).toBe(2);
+    expect(synchronized.workingDefinition.home.media).toEqual(
+      definition.home.media,
+    );
+    expect(synchronized.workingDefinition.home.sections[0]).toMatchObject({
+      title: "Unsaved headline",
+    });
+    expect(synchronized.workingDefinition.site.footer).toBe(
+      "Concurrent footer",
+    );
+    expect(synchronized.status).toBe("dirty");
+  });
+
+  it("conflicts when an external media revision overlaps a local copy edit", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const edited = contentEditorReducer(initial, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Local headline",
+    });
+    const incoming = {
+      ...structuredClone(referenceSiteDefinition),
+      site: {
+        ...structuredClone(referenceSiteDefinition.site),
+        footer: "Concurrent footer",
+      },
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        sections: referenceSiteDefinition.home.sections.map((section) =>
+          section.id === "section_hero"
+            ? { ...section, title: "Concurrent headline" }
+            : section,
+        ),
+      },
+    };
+
+    const synchronized = contentEditorReducer(edited, {
+      type: "externalRevision",
+      definition: incoming,
+      revision: 2,
+    });
+
+    expect(synchronized.persistedDefinition).toEqual(incoming);
+    expect(synchronized.persistedRevision).toBe(2);
+    expect(synchronized.workingDefinition.home.sections[0]).toEqual(
+      expect.objectContaining({ title: "Local headline" }),
+    );
+    expect(synchronized.status).toBe("conflict");
+    expect(synchronized.errors).toEqual({
+      "section_hero.title":
+        "This field changed elsewhere. Reload latest to reconcile your unsaved value.",
+    });
+  });
+
+  it("preserves a local field edit when the incoming revision removes its section", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const edited = contentEditorReducer(initial, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Local headline",
+    });
+    const incoming = {
+      ...structuredClone(referenceSiteDefinition),
+      site: {
+        ...structuredClone(referenceSiteDefinition.site),
+        footer: "Concurrent footer",
+      },
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        sections: referenceSiteDefinition.home.sections.filter(
+          (section) => section.id !== "section_hero",
+        ),
+      },
+    };
+
+    const synchronized = contentEditorReducer(edited, {
+      type: "externalRevision",
+      definition: incoming,
+      revision: 2,
+    });
+
+    expect(synchronized.status).toBe("conflict");
+    expect(
+      synchronized.persistedDefinition.home.sections.some(
+        (section) => section.id === "section_hero",
+      ),
+    ).toBe(false);
+    expect(synchronized.workingDefinition.home.sections[0]).toEqual(
+      expect.objectContaining({
+        id: "section_hero",
+        title: "Local headline",
+      }),
+    );
+    expect(synchronized.workingDefinition.site.footer).toBe(
+      "Concurrent footer",
+    );
+  });
+
+  it("conflicts when a locally removed section is edited externally", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const locallyRemoved = {
+      ...structuredClone(referenceSiteDefinition),
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        sections: referenceSiteDefinition.home.sections.filter(
+          (section) => section.id !== "section_hero",
+        ),
+      },
+    };
+    const edited = contentEditorReducer(initial, {
+      type: "compose",
+      definition: locallyRemoved,
+    });
+    const incoming = {
+      ...structuredClone(referenceSiteDefinition),
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        sections: referenceSiteDefinition.home.sections.map((section) =>
+          section.id === "section_hero"
+            ? { ...section, title: "Concurrent headline" }
+            : section,
+        ),
+      },
+    };
+
+    const synchronized = contentEditorReducer(edited, {
+      type: "externalRevision",
+      definition: incoming,
+      revision: 2,
+    });
+
+    expect(synchronized.status).toBe("conflict");
+    expect(
+      synchronized.workingDefinition.home.sections.some(
+        (section) => section.id === "section_hero",
+      ),
+    ).toBe(false);
+    expect(synchronized.persistedDefinition.home.sections[0]).toEqual(
+      expect.objectContaining({
+        id: "section_hero",
+        title: "Concurrent headline",
+      }),
+    );
+  });
+
+  it("advances a shared media revision without discarding unsaved composition", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const reordered = {
+      ...structuredClone(referenceSiteDefinition),
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        sections: [...referenceSiteDefinition.home.sections].reverse(),
+      },
+    };
+    const edited = contentEditorReducer(initial, {
+      type: "compose",
+      definition: reordered,
+    });
+    const incoming = {
+      ...structuredClone(referenceSiteDefinition),
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        sections: referenceSiteDefinition.home.sections.map((section) =>
+          section.id === "section_services"
+            ? { ...section, title: "Concurrent services title" }
+            : section,
+        ),
+        media: [
+          {
+            occurrenceId: "occurrence_home_hero" as const,
+            revision: 1,
+            asset: {
+              assetId: "asset_hero",
+              width: 1600,
+              height: 900,
+              contentType: "image/png" as const,
+            },
+            crop: null,
+          },
+        ],
+      },
+    };
+
+    const synchronized = contentEditorReducer(edited, {
+      type: "externalRevision",
+      definition: incoming,
+      revision: 2,
+    });
+
+    expect(
+      synchronized.workingDefinition.home.sections.map(({ id }) => id),
+    ).toEqual(reordered.home.sections.map(({ id }) => id));
+    expect(synchronized.workingDefinition.home.media).toEqual(
+      incoming.home.media,
+    );
+    expect(
+      synchronized.workingDefinition.home.sections.find(
+        ({ id }) => id === "section_services",
+      ),
+    ).toMatchObject({ title: "Concurrent services title" });
+    expect(synchronized.persistedDefinition).toEqual(incoming);
+    expect(synchronized.status).toBe("dirty");
+  });
+
+  it.each(["addition", "removal"] as const)(
+    "surfaces a conflict for concurrent structural %s",
+    (incomingChange) => {
+      const initial = createContentEditorState({
+        definition: referenceSiteDefinition,
+        revision: 1,
+      });
+      const locallyReordered = {
+        ...structuredClone(referenceSiteDefinition),
+        home: {
+          ...structuredClone(referenceSiteDefinition.home),
+          sections: [...referenceSiteDefinition.home.sections].reverse(),
+        },
+      };
+      const edited = contentEditorReducer(initial, {
+        type: "compose",
+        definition: locallyReordered,
+      });
+      const incomingSections =
+        incomingChange === "addition"
+          ? [
+              ...referenceSiteDefinition.home.sections,
+              {
+                ...structuredClone(referenceSiteDefinition.home.sections[0]!),
+                id: "section_concurrent_hero",
+              },
+            ]
+          : referenceSiteDefinition.home.sections.slice(1);
+      const incoming = {
+        ...structuredClone(referenceSiteDefinition),
+        home: {
+          ...structuredClone(referenceSiteDefinition.home),
+          sections: incomingSections,
+        },
+      } as SiteDefinition;
+
+      const synchronized = contentEditorReducer(edited, {
+        type: "externalRevision",
+        definition: incoming,
+        revision: 2,
+      });
+
+      expect(synchronized.persistedDefinition).toEqual(incoming);
+      expect(synchronized.status).toBe("conflict");
+      expect(synchronized.errors).toHaveProperty("slot_home_sections");
+      expect(
+        contentEditorReducer(synchronized, {
+          type: "compose",
+          definition: referenceSiteDefinition,
+        }),
+      ).toBe(synchronized);
+    },
+  );
+
+  it("adopts all concurrent fields when a clean editor receives a media revision", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const incoming = {
+      ...structuredClone(referenceSiteDefinition),
+      site: {
+        ...structuredClone(referenceSiteDefinition.site),
+        footer: "Concurrent footer",
+      },
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        media: [],
+      },
+    };
+
+    const synchronized = contentEditorReducer(initial, {
+      type: "externalRevision",
+      definition: incoming,
+      revision: 2,
+    });
+
+    expect(synchronized.persistedDefinition).toEqual(incoming);
+    expect(synchronized.workingDefinition).toEqual(incoming);
+    expect(synchronized.status).toBe("saved");
   });
 });

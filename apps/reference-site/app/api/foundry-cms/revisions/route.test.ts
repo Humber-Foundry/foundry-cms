@@ -6,11 +6,13 @@ import {
   ContentRevisionStaleError,
   ContentRevisionValidationError,
   ContentWorkspaceAccessError,
+  MediaValidationError,
 } from "@foundry/application";
 import {
   referenceSiteDefinition,
   serializeRichTextDocument,
 } from "@foundry/site-definition";
+import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
@@ -21,6 +23,10 @@ const mocks = vi.hoisted(() => ({
   loadApplication: vi.fn(),
   requireExistingAccess: vi.fn(),
   createMutationToken: vi.fn(),
+  createMediaAccessToken: vi.fn(),
+  verifyMediaAccessToken: vi.fn(),
+  grantRevisionAccess: vi.fn(),
+  loadMediaApplication: vi.fn(),
   getRevisionWithBookmark: vi.fn(),
   isRevisionCurrent: vi.fn(),
   verifyMutation: vi.fn(),
@@ -30,7 +36,9 @@ vi.mock("../../../../src/human-access-runtime", () => ({
   loadHumanIdentityRequestContext: mocks.loadIdentity,
 }));
 vi.mock("../../../../src/human-mutation-runtime", () => ({
+  createHumanMediaAccessToken: mocks.createMediaAccessToken,
   createHumanMutationToken: mocks.createMutationToken,
+  verifyHumanMediaAccessToken: mocks.verifyMediaAccessToken,
   verifyHumanMutation: mocks.verifyMutation,
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
@@ -38,6 +46,10 @@ vi.mock("../../../../src/content-revision-runtime", () => ({
   contentWorkspaceIdForMutation: async () => "workspace_created",
   loadContentRevisionApplication: mocks.loadApplication,
   requireExistingContentWorkspaceAccess: mocks.requireExistingAccess,
+}));
+vi.mock("../../../../src/media-asset-runtime", () => ({
+  MediaAssetConfigurationError: class extends Error {},
+  loadMediaAssetApplication: mocks.loadMediaApplication,
 }));
 vi.mock("../../../../src/preview-capability-runtime", () => ({
   createRevisionPreviewCapability: async () => "preview-capability",
@@ -60,6 +72,18 @@ describe("content revision endpoint", () => {
     });
     mocks.verifyMutation.mockResolvedValue(undefined);
     mocks.createMutationToken.mockResolvedValue("fresh-mutation-token");
+    mocks.createMediaAccessToken.mockResolvedValue({
+      token: "revision-media-access",
+      expiresAt: 1_785_124_800,
+    });
+    mocks.verifyMediaAccessToken.mockResolvedValue(undefined);
+    mocks.grantRevisionAccess.mockResolvedValue({
+      assetIds: ["asset_historical"],
+      accessGrantedAt: "2026-07-27T12:00:00.000Z",
+    });
+    mocks.loadMediaApplication.mockResolvedValue({
+      commands: { grantRevisionAccess: mocks.grantRevisionAccess },
+    });
     mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.requireExistingAccess.mockResolvedValue(undefined);
     mocks.loadApplication.mockResolvedValue({
@@ -374,11 +398,21 @@ describe("content revision endpoint", () => {
       workspaceId: "workspace_home",
       revision: 3,
       bookmark: "fresh-d1-bookmark",
+      definition: {
+        home: {
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              asset: { assetId: "asset_historical" },
+            },
+          ],
+        },
+      },
     });
     const response = await GET(
       new Request(
         "https://foundry.example/api/foundry-cms/revisions" +
-          "?workspaceId=workspace_home&revision=3",
+          "?workspaceId=workspace_home&revision=3&accessToken=exact-media-access",
       ),
     );
 
@@ -389,8 +423,158 @@ describe("content revision endpoint", () => {
     );
     expect(response.headers.get("location")).toBe(
       "https://foundry.example/__foundry/preview/workspace_home/3" +
-        "?capability=preview-capability&bookmark=fresh-d1-bookmark",
+        "?capability=preview-capability&bookmark=fresh-d1-bookmark" +
+        "&accessToken=exact-media-access",
     );
+    expect(mocks.verifyMediaAccessToken).toHaveBeenCalledWith(
+      "exact-media-access",
+      expect.objectContaining({
+        binding: { issuer: "issuer", subject: "subject" },
+      }),
+      "asset_historical",
+    );
+    expect(mocks.createMediaAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("audits exact revision media before returning a fresh preview URL", async () => {
+    mocks.getRevisionWithBookmark.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 2,
+      bookmark: "historical-bookmark",
+      definition: {
+        home: {
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              asset: { assetId: "asset_historical" },
+            },
+          ],
+        },
+      },
+    });
+
+    const response = await POST(
+      request(
+        {
+          operation: "open_preview",
+          workspaceId: "workspace_home",
+          revision: 2,
+        },
+        "open-historical-preview-0001",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.grantRevisionAccess).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      workspaceId: "workspace_home",
+      assetIds: ["asset_historical"],
+      idempotencyKey: "open-historical-preview-0001",
+    });
+    expect(mocks.createMediaAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: { issuer: "issuer", subject: "subject" },
+      }),
+      ["asset_historical"],
+      "2026-07-27T12:00:00.000Z",
+    );
+    await expect(response.json()).resolves.toEqual({
+      previewUrl:
+        "/__foundry/preview/workspace_home/2" +
+        "?capability=preview-capability&bookmark=historical-bookmark" +
+        "&accessToken=revision-media-access",
+    });
+  });
+
+  it("rejects a preview token that does not cover the exact revision asset", async () => {
+    mocks.getRevisionWithBookmark.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 2,
+      bookmark: "historical-bookmark",
+      definition: {
+        home: {
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              asset: { assetId: "asset_historical" },
+            },
+          ],
+        },
+      },
+    });
+    mocks.verifyMediaAccessToken.mockRejectedValue(
+      new HumanRequestIntegrityError(),
+    );
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/revisions" +
+          "?workspaceId=workspace_home&revision=2&accessToken=current-only",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects malformed preview grant keys before media access", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "open_preview",
+          workspaceId: "workspace_home",
+          revision: 2,
+        },
+        "short",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.grantRevisionAccess).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed preview workspace IDs as client errors", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "open_preview",
+          workspaceId: "invalid",
+          revision: 2,
+        },
+        "invalid-preview-workspace-0001",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.loadApplication).not.toHaveBeenCalled();
+    expect(mocks.grantRevisionAccess).not.toHaveBeenCalled();
+  });
+
+  it("maps a conflicting exact-preview grant replay to 409", async () => {
+    mocks.getRevisionWithBookmark.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 2,
+      bookmark: "historical-bookmark",
+      definition: { home: { media: [] } },
+    });
+    mocks.grantRevisionAccess.mockRejectedValue(
+      new MediaValidationError("idempotencyKey"),
+    );
+
+    const response = await POST(
+      request(
+        {
+          operation: "open_preview",
+          workspaceId: "workspace_home",
+          revision: 2,
+        },
+        "conflicting-preview-grant-0001",
+      ),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "idempotency_key_conflict",
+    });
   });
 
   it("does not initialize a missing workspace during preview lookup", async () => {

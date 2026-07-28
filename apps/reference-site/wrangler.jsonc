@@ -21,6 +21,10 @@
   ],
   "r2_buckets": [
     {
+      "binding": "FOUNDRY_MEDIA",
+      "bucket_name": "foundry-reference-site-media"
+    },
+    {
       "binding": "FOUNDRY_FORM_BACKUPS",
       "bucket_name": "foundry-reference-site-form-backups"
     }

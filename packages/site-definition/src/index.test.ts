@@ -3,6 +3,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 import {
   applySiteDefinitionEdits,
+  createReferenceSiteDefinition,
   DuplicateEditableSiteFieldPathError,
   createSiteId,
   listEditableSiteFields,
@@ -14,13 +15,16 @@ import {
   type RichTextDocument,
   referenceSiteDefinition,
   siteDefinitionSchema,
+  siteDefinitionValidationKeywords,
   type SiteDefinition,
 } from "./index";
 
 describe("reference Site Definition", () => {
-  const validate = new Ajv2020({ allErrors: true }).compile(
-    siteDefinitionSchema,
-  );
+  const ajv = new Ajv2020({ allErrors: true });
+  for (const keyword of siteDefinitionValidationKeywords) {
+    ajv.addKeyword(keyword);
+  }
+  const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
     expect(referenceSiteDefinition.definitionVersion).toBe("1.1.0");
@@ -160,6 +164,41 @@ describe("reference Site Definition", () => {
     },
   );
 
+  it("preserves the Git-published media manifest at runtime", () => {
+    const published = {
+      ...structuredClone(referenceSiteDefinition),
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        media: [
+          {
+            occurrenceId: "occurrence_home_hero",
+            revision: 4,
+            asset: {
+              assetId: "asset_published",
+              width: 1200,
+              height: 800,
+              contentType: "image/png",
+            },
+            crop: null,
+          },
+        ],
+      },
+    } satisfies SiteDefinition;
+
+    expect(createReferenceSiteDefinition(published).home.media).toEqual(
+      published.home.media,
+    );
+  });
+
+  it("continues to validate saved 1.0 definitions created before media manifests", () => {
+    const legacy = structuredClone(referenceSiteDefinition) as unknown as Record<
+      string,
+      any
+    >;
+    delete legacy.home.media;
+    expect(validate(legacy), validate.errors?.toString()).toBe(true);
+  });
+
   it.each([
     {
       name: "a non-string site identifier",
@@ -195,6 +234,45 @@ describe("reference Site Definition", () => {
       name: "an arbitrary off-site link target",
       change: (definition: Record<string, any>) => {
         definition.site.navigation[0].href = "https://example.com";
+      },
+    },
+    {
+      name: "a crop that extends beyond the source",
+      change: (definition: Record<string, any>) => {
+        definition.home.media = [{
+          occurrenceId: "occurrence_home_hero",
+          revision: 1,
+          asset: {
+            assetId: "asset_hero",
+            width: 1600,
+            height: 900,
+            contentType: "image/png",
+          },
+          crop: { x: 0.8, y: 0, width: 0.5, height: 1 },
+        }];
+      },
+    },
+    {
+      name: "duplicate media occurrence identities",
+      change: (definition: Record<string, any>) => {
+        const occurrence = {
+          occurrenceId: "occurrence_home_hero",
+          revision: 1,
+          asset: {
+            assetId: "asset_hero",
+            width: 1600,
+            height: 900,
+            contentType: "image/png",
+          },
+          crop: null,
+        };
+        definition.home.media = [
+          occurrence,
+          {
+            ...occurrence,
+            asset: { ...occurrence.asset, assetId: "asset_other" },
+          },
+        ];
       },
     },
   ])("rejects $name", ({ change }) => {

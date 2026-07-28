@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   HumanRequestIntegrityError,
   createHumanCsrfToken,
+  verifyHumanCsrfToken,
   verifyHumanMutationRequest,
 } from "./human-request-integrity";
 
@@ -39,7 +40,10 @@ async function mutationRequest(overrides: {
       "content-type": overrides.contentType ?? "application/json",
       "x-foundry-csrf": token,
     },
-    body: "{}",
+    body:
+      overrides.contentType?.startsWith("multipart/form-data") === true
+        ? "--foundry-test--"
+        : "{}",
   });
 }
 
@@ -48,6 +52,21 @@ describe("human mutation request integrity", () => {
     await expect(
       verifyHumanMutationRequest({
         request: await mutationRequest({}),
+        identity,
+        audience,
+        canonicalOrigin,
+        secret,
+        now,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("accepts same-origin multipart uploads with a current identity-bound token", async () => {
+    await expect(
+      verifyHumanMutationRequest({
+        request: await mutationRequest({
+          contentType: "multipart/form-data; boundary=foundry-test",
+        }),
         identity,
         audience,
         canonicalOrigin,
@@ -89,6 +108,46 @@ describe("human mutation request integrity", () => {
         canonicalOrigin,
         secret,
         now,
+      }),
+    ).rejects.toBeInstanceOf(HumanRequestIntegrityError);
+  });
+
+  it("keeps a media capability bound to its distinct audience", async () => {
+    const token = await createHumanCsrfToken({
+      identity,
+      audience: `${audience}:media-access`,
+      secret,
+      now,
+      scope: ["asset_hero"],
+    });
+
+    await expect(
+      verifyHumanCsrfToken({
+        token,
+        identity,
+        audience: `${audience}:media-access`,
+        secret,
+        now,
+        requiredScope: "asset_hero",
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      verifyHumanCsrfToken({
+        token,
+        identity,
+        audience,
+        secret,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(HumanRequestIntegrityError);
+    await expect(
+      verifyHumanCsrfToken({
+        token,
+        identity,
+        audience: `${audience}:media-access`,
+        secret,
+        now,
+        requiredScope: "asset_future",
       }),
     ).rejects.toBeInstanceOf(HumanRequestIntegrityError);
   });

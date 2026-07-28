@@ -65,6 +65,17 @@
   line-height: 1.5;
 }
 
+.site-media {
+  margin: 1.5rem 0;
+  overflow: hidden;
+}
+
+.site-media img {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
 .action-row {
   display: flex;
   align-items: center;
