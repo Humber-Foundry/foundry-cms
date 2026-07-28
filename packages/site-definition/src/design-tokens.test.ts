@@ -124,4 +124,21 @@ describe("controlled design tokens", () => {
       }),
     ).toBeNull();
   });
+
+  it("allows a transient blank in ordinary copy until save validation", () => {
+    expect(
+      updateEditableSiteField(referenceSiteDefinition, {
+        path: "section_hero.title",
+        value: "",
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        home: expect.objectContaining({
+          sections: expect.arrayContaining([
+            expect.objectContaining({ id: "section_hero", title: "" }),
+          ]),
+        }),
+      }),
+    );
+  });
 });

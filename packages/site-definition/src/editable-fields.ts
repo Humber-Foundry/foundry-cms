@@ -403,9 +403,8 @@ export function updateEditableSiteField(
     return null;
   }
   if (
-    edit.value.trim() === "" ||
-    (binding.field.values !== undefined &&
-      !binding.field.values.includes(edit.value))
+    binding.field.values !== undefined &&
+    !binding.field.values.includes(edit.value)
   ) {
     return null;
   }

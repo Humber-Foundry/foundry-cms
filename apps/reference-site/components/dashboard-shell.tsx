@@ -118,6 +118,7 @@ export function DashboardShell({
                 schemaVersion: contentRevision.inputs.schemaVersion,
               }}
               durableRecoveryEdits={durableSchemaRecovery}
+              staleRecovery={staleRecovery}
             />
           ) : (
             <ContentEditor

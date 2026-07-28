@@ -101,4 +101,74 @@ describe("content workspace schema recovery", () => {
       expect.stringContaining("Saved legacy draft"),
     );
   });
+
+  it("fails closed when an older outbox overlaps a newer saved revision", async () => {
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision: { ...preservedRevision, revision: 5 },
+        durableRecoveryEdits: [
+          {
+            path: "site_foundry_reference.name",
+            baseValue: "Foundry Reference",
+            value: "Newer saved draft",
+          },
+        ],
+        readOutbox: async () => ({
+          workspaceId: preservedRevision.workspaceId,
+          baseRevision: 4,
+          edits: [
+            {
+              path: "site_foundry_reference.name",
+              baseValue: "Older saved draft",
+              value: "Older browser edit",
+            },
+          ],
+        }),
+        storage: {
+          getItem: () => null,
+          removeItem: vi.fn(),
+          setItem: vi.fn(),
+        },
+      }),
+    ).rejects.toThrow("content_editor_recovery_revision_conflict");
+  });
+
+  it("copies an active recovery record through another schema transition", async () => {
+    const recoveryId = "12345678-1234-4123-8123-123456789abc";
+    const sourceWorkspaceId = "workspace_original";
+    const setItem = vi.fn();
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision,
+        activeRecovery: { id: recoveryId, sourceWorkspaceId },
+        readOutbox: async () => null,
+        storage: {
+          getItem: (key) =>
+            key.includes(sourceWorkspaceId)
+              ? JSON.stringify({
+                  sourceWorkspaceId,
+                  edits: [
+                    {
+                      path: "section_hero.title",
+                      baseValue: "Published title",
+                      value: "Recovered title",
+                    },
+                  ],
+                })
+              : null,
+          removeItem: vi.fn(),
+          setItem,
+        },
+        createRecoveryId: () =>
+          "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      }),
+    ).resolves.toEqual({
+      id: "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      sourceWorkspaceId: "workspace_legacy",
+    });
+    expect(setItem).toHaveBeenCalledWith(
+      expect.stringContaining("workspace_legacy"),
+      expect.stringContaining("Recovered title"),
+    );
+  });
 });

@@ -11,6 +11,7 @@ import {
 } from "../src/content-editor-outbox";
 import {
   preserveStaleEdits,
+  recoverStaleEdits,
   type StaleRecoveryPointer,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
@@ -36,6 +37,7 @@ export function workspaceCreationOperation(
 export async function preparePreservedRevisionRecovery({
   preservedRevision,
   durableRecoveryEdits = [],
+  activeRecovery,
   readOutbox = async (workspaceId) =>
     createContentEditorOutboxController(workspaceId).read(
       async () => false,
@@ -45,6 +47,7 @@ export async function preparePreservedRevisionRecovery({
 }: {
   preservedRevision: PreservedContentRevision | undefined;
   durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
+  activeRecovery?: StaleRecoveryPointer;
   readOutbox?: (
     workspaceId: string,
   ) => Promise<ContentEditorOutboxRecord | null>;
@@ -55,9 +58,63 @@ export async function preparePreservedRevisionRecovery({
     return undefined;
   }
   const record = await readOutbox(preservedRevision.workspaceId);
+  const chainedRecoveryEdits =
+    activeRecovery === undefined
+      ? []
+      : (() => {
+          const chained = recoverStaleEdits(
+            storage,
+            activeRecovery.id,
+            activeRecovery.sourceWorkspaceId,
+            new Map(),
+          );
+          if (!chained.available) {
+            throw new Error("stale_edit_recovery_unavailable");
+          }
+          return [...chained.recovered, ...chained.conflicts].map(
+            ({ path, value, baseValue }) => ({
+              path,
+              value,
+              baseValue,
+            }),
+          );
+        })();
+  const durableByPath = new Map(
+    durableRecoveryEdits.map((edit) => [edit.path, edit] as const),
+  );
+  const rebaseOverlay = (
+    edits: ReadonlyArray<StaleRecoveryEdit>,
+  ): StaleRecoveryEdit[] =>
+    edits.filter((edit) => {
+      const durable = durableByPath.get(edit.path);
+      if (durable === undefined) {
+        return true;
+      }
+      if (edit.value === durable.value) {
+        return false;
+      }
+      if (edit.baseValue !== durable.value) {
+        throw new Error("content_editor_recovery_revision_conflict");
+      }
+      return true;
+    });
+  if (
+    record !== null &&
+    record.baseRevision > preservedRevision.revision
+  ) {
+    throw new Error("content_editor_outbox_revision_conflict");
+  }
+  const safeOutboxEdits =
+    record === null ||
+    record.baseRevision === preservedRevision.revision
+      ? (record?.edits ?? [])
+      : rebaseOverlay(record.edits);
   const recoveryEdits = mergeDurableAndOutboxRecoveryEdits(
-    durableRecoveryEdits,
-    record?.edits ?? [],
+    mergeDurableAndOutboxRecoveryEdits(
+      durableRecoveryEdits,
+      rebaseOverlay(chainedRecoveryEdits),
+    ),
+    safeOutboxEdits,
   );
   if (recoveryEdits.length === 0) {
     return undefined;
@@ -117,6 +174,7 @@ export function ContentWorkspaceStarter({
       pendingRecovery.current ??= preparePreservedRevisionRecovery({
         preservedRevision,
         durableRecoveryEdits,
+        activeRecovery: staleRecovery,
       }).catch((error: unknown) => {
         pendingRecovery.current = undefined;
         throw error;
@@ -138,15 +196,15 @@ export function ContentWorkspaceStarter({
         throw new Error("content_workspace_creation_invalid");
       }
       const query = new URLSearchParams({ workspace: created.workspaceId });
-      if (staleRecovery !== undefined) {
-        query.set("recovery", staleRecovery.id);
-        query.set("recoverFrom", staleRecovery.sourceWorkspaceId);
-      } else if (preservedOutboxRecovery !== undefined) {
+      if (preservedOutboxRecovery !== undefined) {
         query.set("recovery", preservedOutboxRecovery.id);
         query.set(
           "recoverFrom",
           preservedOutboxRecovery.sourceWorkspaceId,
         );
+      } else if (staleRecovery !== undefined) {
+        query.set("recovery", staleRecovery.id);
+        query.set("recoverFrom", staleRecovery.sourceWorkspaceId);
       }
       window.location.assign(`/dash?${query.toString()}`);
     } catch {
