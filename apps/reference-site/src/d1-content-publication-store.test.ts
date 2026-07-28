@@ -713,6 +713,48 @@ describe("D1 content publication store", () => {
     ).resolves.toBe(false);
   });
 
+  it("renews only the exact claimed deployment retry at the provider boundary", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-retry-boundary-1");
+    await store.claimPublication(requested);
+    const dispatching = {
+      ...requested,
+      status: "committed" as const,
+      commitSha: "c".repeat(40),
+      detail: "deployment_retry_dispatching",
+      deploymentId: "retry-dispatch:exact",
+      updatedAt: "2026-07-27T10:02:00.000Z",
+    };
+    await store.updatePublication(dispatching, {
+      expectedLeaseToken: "lease-1",
+      expectedLeaseValidAt: "2026-07-27T10:02:00.000Z",
+    });
+
+    await expect(
+      store.renewPublicationLease({
+        publicationId: requested.id,
+        leaseToken: "lease-1",
+        now: "2026-07-27T10:02:30.000Z",
+        leaseExpiresAt: "2026-07-27T10:04:30.000Z",
+        expectedStatus: "committed",
+        expectedDetail: "deployment_retry_dispatching",
+        expectedDeploymentId: "retry-dispatch:other",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      store.renewPublicationLease({
+        publicationId: requested.id,
+        leaseToken: "lease-1",
+        now: "2026-07-27T10:02:30.000Z",
+        leaseExpiresAt: "2026-07-27T10:04:30.000Z",
+        expectedStatus: "committed",
+        expectedDetail: "deployment_retry_dispatching",
+        expectedDeploymentId: "retry-dispatch:exact",
+      }),
+    ).resolves.toBe(true);
+  });
+
   it("keeps the meaningful publication discoverable ahead of a blocked contender", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);

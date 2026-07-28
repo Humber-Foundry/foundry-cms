@@ -12,7 +12,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { assertExactProductionContent } from "./assert-exact-production-content.mjs";
-import { assertExactProductionHead } from "./assert-exact-production-head.mjs";
+import {
+  assertExactProductionHead,
+  assertExactProductionSource,
+} from "./assert-exact-production-head.mjs";
 
 const cloudflareApiBaseUrl =
   "https://api.cloudflare.com/client/v4";
@@ -26,6 +29,8 @@ const cloudflareRequestTimeoutMs = 30_000;
 const deploymentHistoryReconciliationMs = 30_000;
 const deploymentHistoryPollMs = 250;
 const loopbackRequestArrivalMs = 250;
+const loopbackRequestBodyTimeoutMs = 5_000;
+const loopbackShutdownTimeoutMs = 5_000;
 const hopByHopHeaders = new Set([
   "connection",
   "content-length",
@@ -129,18 +134,36 @@ function copyResponseHeaders(upstream, response) {
   }
 }
 
-async function readRequestBody(request) {
+async function readRequestBody(
+  request,
+  timeoutMs = loopbackRequestBodyTimeoutMs,
+) {
   const chunks = [];
   let bytesRead = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytesRead += bytes.byteLength;
-    if (bytesRead > maximumActivationBodyBytes) {
-      throw new Error("exact_activation_body_too_large");
+  let timeout;
+  const body = (async () => {
+    for await (const chunk of request) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytesRead += bytes.byteLength;
+      if (bytesRead > maximumActivationBodyBytes) {
+        throw new Error("exact_activation_body_too_large");
+      }
+      chunks.push(bytes);
     }
-    chunks.push(bytes);
+    return chunks.length === 0 ? undefined : Buffer.concat(chunks);
+  })();
+  const deadline = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      const error = new Error("exact_activation_body_timeout");
+      request.destroy(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([body, deadline]);
+  } finally {
+    clearTimeout(timeout);
   }
-  return chunks.length === 0 ? undefined : Buffer.concat(chunks);
 }
 
 function activationPayloadIsExact(body, versionId) {
@@ -247,6 +270,7 @@ function deploymentId(result) {
 }
 
 async function readDeploymentList({
+  abortSignal,
   activationPath,
   headers,
   requestTimeoutMs = cloudflareRequestTimeoutMs,
@@ -258,11 +282,16 @@ async function readDeploymentList({
       method: "GET",
       headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(
-        Math.max(
-          1,
-          Math.min(cloudflareRequestTimeoutMs, requestTimeoutMs),
-        ),
+      signal: AbortSignal.any(
+        [
+          AbortSignal.timeout(
+            Math.max(
+              1,
+              Math.min(cloudflareRequestTimeoutMs, requestTimeoutMs),
+            ),
+          ),
+          abortSignal,
+        ].filter((signal) => signal !== undefined),
       ),
     },
   );
@@ -383,6 +412,16 @@ function deploymentsAreEquivalent(left, right) {
         version.version_id === right.versions[index]?.version_id &&
         version.percentage === right.versions[index]?.percentage,
     )
+  );
+}
+
+function rollbackResponseMayHaveApplied(status) {
+  return (
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    status === 499 ||
+    status >= 500
   );
 }
 
@@ -589,7 +628,16 @@ async function restorePreviousDeployment({
         continue;
       }
       if (!rollbackResponse.ok) {
-        throw new Error("exact_activation_rollback_request_failed");
+        if (rollbackResponseMayHaveApplied(rollbackResponse.status)) {
+          if (await reconcileUnknownRollback()) {
+            return;
+          }
+          continue;
+        }
+        // Redirects and definitive client rejections did not apply. They
+        // still fail closed: operators must correct the request or
+        // credentials rather than blindly retrying the rollback.
+        throw new Error("exact_activation_rollback_request_rejected");
       }
       let rollbackDeploymentId;
       try {
@@ -635,7 +683,10 @@ async function restorePreviousDeployment({
         throw new Error("exact_activation_rollback_history_invalid");
       }
     } catch (error) {
-      if (error?.message === "exact_activation_rollback_ambiguous") {
+      if (
+        error?.message === "exact_activation_rollback_ambiguous" ||
+        error?.message === "exact_activation_rollback_request_rejected"
+      ) {
         throw error;
       }
       lastError = error;
@@ -650,11 +701,21 @@ export async function activateExactVersion({
   versionId,
   assertHead = assertExactProductionHead,
   environment = process.env,
+  loopbackBodyTimeoutMs = loopbackRequestBodyTimeoutMs,
+  loopbackDrainTimeoutMs = loopbackShutdownTimeoutMs,
   startActivation,
   upstreamBaseUrl = cloudflareApiBaseUrl,
 } = {}) {
   if (typeof versionId !== "string" || !versionIdPattern.test(versionId)) {
     throw new Error("exact_version_id_invalid");
+  }
+  if (
+    !Number.isSafeInteger(loopbackBodyTimeoutMs) ||
+    loopbackBodyTimeoutMs <= 0 ||
+    !Number.isSafeInteger(loopbackDrainTimeoutMs) ||
+    loopbackDrainTimeoutMs <= 0
+  ) {
+    throw new Error("exact_activation_proxy_timeout_invalid");
   }
   const expectedActivationPath = productionActivationPath(environment);
 
@@ -663,9 +724,11 @@ export async function activateExactVersion({
   let activationError;
   let activationRecord;
   let activationRequest;
-  let baseline;
+  let activationBaseline;
   let requestHandlerError;
+  const handlerAbortController = new AbortController();
   const inFlightRequests = new Set();
+  const loopbackSockets = new Set();
   const server = createServer((request, response) => {
     const handler = (async () => {
       try {
@@ -680,10 +743,10 @@ export async function activateExactVersion({
           request.method === "POST" &&
           activationPathPattern.test(requestUrl.pathname) &&
           !isActivation;
-        const isDeploymentLookup =
-          request.method === "GET" &&
-          requestUrl.pathname === expectedActivationPath;
-        const body = await readRequestBody(request);
+        const body = await readRequestBody(
+          request,
+          loopbackBodyTimeoutMs,
+        );
         const headers = new Headers();
         for (const [name, value] of Object.entries(request.headers)) {
           if (
@@ -717,12 +780,13 @@ export async function activateExactVersion({
           try {
             assertHead();
             const deployments = await readDeploymentList({
+              abortSignal: handlerAbortController.signal,
               activationPath: expectedActivationPath,
               headers,
               upstreamBaseUrl,
             });
-            baseline = deployments[0];
-            if (baseline === undefined) {
+            activationBaseline = deployments[0];
+            if (activationBaseline === undefined) {
               activationError = new Error(
                 "exact_activation_baseline_unavailable",
               );
@@ -754,15 +818,13 @@ export async function activateExactVersion({
             headers,
             body,
             redirect: "manual",
-            signal: AbortSignal.timeout(cloudflareRequestTimeoutMs),
+            signal: AbortSignal.any([
+              AbortSignal.timeout(cloudflareRequestTimeoutMs),
+              handlerAbortController.signal,
+            ]),
           },
         );
         const upstreamBody = Buffer.from(await upstream.arrayBuffer());
-        if (isDeploymentLookup && upstream.ok) {
-          baseline = deploymentList(
-            parseCloudflareResult(upstreamBody),
-          )[0];
-        }
         if (isActivation && upstream.ok) {
           const activatedDeploymentId = deploymentId(
             parseCloudflareResult(upstreamBody),
@@ -801,23 +863,66 @@ export async function activateExactVersion({
       },
     );
   });
+  server.on("connection", (socket) => {
+    loopbackSockets.add(socket);
+    socket.once("close", () => {
+      loopbackSockets.delete(socket);
+    });
+  });
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
-  let serverClosePromise;
-  const closeActivationServer = () => {
-    serverClosePromise ??= new Promise((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
+  let serverShutdownPromise;
+  const shutdownActivationServer = () => {
+    serverShutdownPromise ??= (async () => {
+      let forceCloseTimer;
+      const closePromise = new Promise((resolve, reject) => {
+        forceCloseTimer = setTimeout(() => {
+          handlerAbortController.abort(
+            new Error("exact_activation_proxy_shutdown_timeout"),
+          );
+          for (const socket of loopbackSockets) {
+            socket.destroy();
+          }
+        }, loopbackDrainTimeoutMs);
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
       });
-    });
-    return serverClosePromise;
+      try {
+        await closePromise;
+      } finally {
+        clearTimeout(forceCloseTimer);
+      }
+
+      const handlers = Promise.all([...inFlightRequests]);
+      let handlerDrainTimer;
+      const handlerDrainDeadline = new Promise((_, reject) => {
+        handlerDrainTimer = setTimeout(() => {
+          handlerAbortController.abort(
+            new Error("exact_activation_proxy_shutdown_timeout"),
+          );
+          for (const socket of loopbackSockets) {
+            socket.destroy();
+          }
+          reject(
+            new Error("exact_activation_proxy_shutdown_timeout"),
+          );
+        }, loopbackDrainTimeoutMs);
+      });
+      try {
+        await Promise.race([handlers, handlerDrainDeadline]);
+      } finally {
+        clearTimeout(handlerDrainTimer);
+      }
+    })();
+    return serverShutdownPromise;
   };
   try {
     const address = server.address();
@@ -866,18 +971,17 @@ export async function activateExactVersion({
     ) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    await closeActivationServer();
-    await Promise.all([...inFlightRequests]);
+    await shutdownActivationServer();
     activationError ??= requestHandlerError;
     if (
       activationCount === 0 &&
       activationRequest !== undefined &&
-      baseline !== undefined
+      activationBaseline !== undefined
     ) {
       try {
         const reconciled = await reconcileActivationAttempt({
           ...activationRequest,
-          baseline,
+          baseline: activationBaseline,
           upstreamBaseUrl,
           versionId,
         });
@@ -943,13 +1047,13 @@ export async function activateExactVersion({
       );
     }
   } finally {
-    await closeActivationServer();
-    await Promise.all([...inFlightRequests]);
+    await shutdownActivationServer();
   }
 }
 
 export async function deployExactProduction({
   assertHead = assertExactProductionHead,
+  assertSource = assertExactProductionSource,
   authorizeContent = assertExactProductionContent,
   assertBaseline = assertProductionDeploymentBaseline,
   uploadVersion = uploadExactVersion,
@@ -958,6 +1062,7 @@ export async function deployExactProduction({
   assertHead();
   await authorizeContent();
   await assertBaseline();
+  assertSource({ assertHead });
   const versionId = await uploadVersion();
   assertHead();
   await activateVersion({ versionId, assertHead });

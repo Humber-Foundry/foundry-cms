@@ -183,6 +183,58 @@ function sortedStrings(value: unknown): string[] {
     : [];
 }
 
+function isDocumentedCloudflareWatchPattern(pattern: string) {
+  if (pattern === "") {
+    return false;
+  }
+  const wildcardIndexes = [...pattern.matchAll(/\*/gu)].map(
+    (match) => match.index,
+  );
+  return !wildcardIndexes.some(
+    (index) => index !== 0 && index !== pattern.length - 1,
+  );
+}
+
+function matchesCloudflareWatchPattern(pattern: string, value: string) {
+  const startsWithWildcard = pattern.startsWith("*");
+  const endsWithWildcard = pattern.endsWith("*");
+  const literal = pattern.slice(
+    startsWithWildcard ? 1 : 0,
+    endsWithWildcard ? -1 : undefined,
+  );
+  const escapedLiteral = literal.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(
+    `^${startsWithWildcard ? ".*" : ""}${escapedLiteral}${
+      endsWithWildcard ? ".*" : ""
+    }$`,
+    "u",
+  ).test(value);
+}
+
+function cloudflareWatchFilterAllows(
+  value: string,
+  includes: unknown,
+  excludes: unknown,
+) {
+  if (
+    !Array.isArray(includes) ||
+    !includes.every((entry): entry is string => typeof entry === "string") ||
+    !Array.isArray(excludes) ||
+    !excludes.every((entry): entry is string => typeof entry === "string") ||
+    !includes.every(isDocumentedCloudflareWatchPattern) ||
+    !excludes.every(isDocumentedCloudflareWatchPattern)
+  ) {
+    return false;
+  }
+  // Workers Builds ignores exclusions first, then requires one include match.
+  return (
+    !excludes.some((pattern) =>
+      matchesCloudflareWatchPattern(pattern, value),
+    ) &&
+    includes.some((pattern) => matchesCloudflareWatchPattern(pattern, value))
+  );
+}
+
 function buildEnvironmentProjection(value: unknown) {
   if (typeof value !== "object" || value === null) {
     throw new Error("cloudflare_build_environment_invalid");
@@ -490,15 +542,32 @@ export function createGitHubContentPublisher({
               configuration.cloudflareBuildTriggerId,
           )
         : undefined;
+      const repository = trigger?.repo_connection;
       if (
         typeof trigger !== "object" ||
         trigger === null ||
         trigger.external_script_id !== configuration.cloudflareScriptTag ||
-        trigger.deploy_command !== "npm run deploy"
+        trigger.deploy_command !== "npm run deploy" ||
+        repository?.provider_type !== "github" ||
+        typeof repository.provider_account_name !== "string" ||
+        repository.provider_account_name.toLowerCase() !==
+          configuration.owner.toLowerCase() ||
+        typeof repository.repo_name !== "string" ||
+        repository.repo_name.toLowerCase() !==
+          configuration.repository.toLowerCase() ||
+        !cloudflareWatchFilterAllows(
+          configuration.productionBranch,
+          trigger.branch_includes,
+          trigger.branch_excludes,
+        ) ||
+        !cloudflareWatchFilterAllows(
+          "packages/site-definition/src/published-site.json",
+          trigger.path_includes,
+          trigger.path_excludes,
+        )
       ) {
         throw new Error("cloudflare_build_configuration_invalid");
       }
-      const repository = trigger.repo_connection;
       return sha256(
         JSON.stringify({
           appId: configuration.appId,
@@ -695,7 +764,11 @@ export function createGitHubContentPublisher({
           return { state: "blocked", detail: "publication_lease_lost" };
         }
         const token = await installationToken();
-        if ((await productionHead(token)) !== input.expectedHead) {
+        const currentHead = await productionHead(token);
+        if (
+          currentHead !== input.expectedHead &&
+          currentHead !== input.candidateCommitSha
+        ) {
           return { state: "blocked", detail: "production_head_moved" };
         }
         const [candidate, comparison, expectedBlobSha] = await Promise.all([
@@ -725,6 +798,12 @@ export function createGitHubContentPublisher({
           return {
             state: "failed",
             detail: "git_reference_candidate_invalid",
+          };
+        }
+        if (currentHead === input.candidateCommitSha) {
+          return {
+            state: "committed",
+            commitSha: input.candidateCommitSha,
           };
         }
         if (!(await input.assertLease())) {
@@ -859,7 +938,13 @@ export function createGitHubContentPublisher({
         return "unknown";
       }
     },
-    async retryDeployment(commitSha) {
+    async retryDeployment({ commitSha, assertDispatch }) {
+      if (!(await assertDispatch())) {
+        return {
+          state: "blocked" as const,
+          detail: "deployment_retry_claim_lost" as const,
+        };
+      }
       try {
         const response = await fetchImplementation(
           `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(

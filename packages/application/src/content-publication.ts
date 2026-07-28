@@ -165,6 +165,9 @@ export type ContentPublicationStore = Readonly<{
     leaseToken: string;
     now: string;
     leaseExpiresAt: string;
+    expectedStatus?: "requested" | "committed";
+    expectedDetail?: string;
+    expectedDeploymentId?: string;
   }): Promise<boolean>;
   updatePublication(
     publication: ContentPublication,
@@ -245,10 +248,12 @@ export type ContentPublisher = Readonly<{
     commitSha: string,
     deploymentId?: string,
   ): Promise<"requested" | "building" | "deployed" | "failed" | "unknown">;
-  retryDeployment(
-    commitSha: string,
-  ): Promise<
+  retryDeployment(input: {
+    commitSha: string;
+    assertDispatch(): Promise<boolean>;
+  }): Promise<
     | Readonly<{ state: "requested"; deploymentId: string }>
+    | Readonly<{ state: "blocked"; detail: "deployment_retry_claim_lost" }>
     | Readonly<{ state: "failed" | "unknown" }>
   >;
 }>;
@@ -566,6 +571,9 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
       leaseToken,
       now,
       leaseExpiresAt,
+      expectedStatus = "requested",
+      expectedDetail,
+      expectedDeploymentId,
     }) {
       const publication = publications.get(publicationId);
       const approval =
@@ -573,11 +581,15 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
           ? undefined
           : approvals.get(publication.approvalId);
       if (
-        publication?.status !== "requested" ||
+        publication?.status !== expectedStatus ||
         publication.leaseToken !== leaseToken ||
         publication.leaseExpiresAt === null ||
         publication.leaseExpiresAt <= now ||
-        approval?.invalidatedAt !== null
+        approval?.invalidatedAt !== null ||
+        (expectedDetail !== undefined &&
+          publication.detail !== expectedDetail) ||
+        (expectedDeploymentId !== undefined &&
+          publication.deploymentId !== expectedDeploymentId)
       ) {
         return false;
       }
@@ -1646,16 +1658,109 @@ export function createContentPublicationApplication({
             },
           );
         }
+        const renewDeploymentRetryClaim = async () => {
+          const leaseNow = now();
+          return store.renewPublicationLease({
+            publicationId: publication.id,
+            leaseToken,
+            now: leaseNow,
+            leaseExpiresAt: new Date(
+              new Date(leaseNow).getTime() + publicationLeaseDurationMs,
+            ).toISOString(),
+            expectedStatus: "committed",
+            expectedDetail: "deployment_retry_dispatching",
+            expectedDeploymentId: dispatchToken,
+          });
+        };
+        const assertDispatch = async () => {
+          if (!(await renewDeploymentRetryClaim())) {
+            return false;
+          }
+          try {
+            await requireApproval(publication.approvalId, requestedBy);
+          } catch {
+            return false;
+          }
+          let releaseIsLive = false;
+          try {
+            releaseIsLive = await publisher.isReleaseLive({
+              commitSha,
+              contentHash: approval.fingerprint.contentHash,
+              schemaVersion: approval.fingerprint.schemaVersion,
+            });
+          } catch {
+            // A missing marker does not consume the explicit retry authority.
+          }
+          if (releaseIsLive) {
+            try {
+              const verifiedAt = now();
+              await store.updatePublication(
+                nextPublication(dispatching, {
+                  status: "verified-live",
+                  detail: null,
+                  deploymentId: null,
+                  leaseToken: null,
+                  leaseExpiresAt: null,
+                  updatedAt: verifiedAt,
+                }),
+                {
+                  expectedLeaseToken: leaseToken,
+                  expectedLeaseValidAt: verifiedAt,
+                  expectedStatus: "committed",
+                  expectedUpdatedAt: dispatching.updatedAt,
+                },
+              );
+            } catch {
+              // The exact live observation still vetoes a duplicate dispatch.
+            }
+            return false;
+          }
+          let boundaryHead: string;
+          try {
+            boundaryHead = await publisher.getProductionHead();
+          } catch {
+            return false;
+          }
+          if (boundaryHead !== commitSha) {
+            const invalidatedAt = now();
+            await store.invalidateApproval({
+              approvalId: approval.id,
+              invalidatedAt,
+              reason: "production_changed",
+            });
+            await store.updatePublication(
+              nextPublication(dispatching, {
+                status: "failed",
+                detail: "deployment_retry_head_moved",
+                deploymentId: null,
+                leaseToken: null,
+                leaseExpiresAt: null,
+                updatedAt: invalidatedAt,
+              }),
+              {
+                expectedLeaseToken: leaseToken,
+                expectedLeaseValidAt: invalidatedAt,
+                expectedStatus: "committed",
+                expectedUpdatedAt: dispatching.updatedAt,
+              },
+            );
+            return false;
+          }
+          return renewDeploymentRetryClaim();
+        };
         let result: Awaited<
           ReturnType<ContentPublisher["retryDeployment"]>
         >;
         try {
-          result = await publisher.retryDeployment(commitSha);
+          result = await publisher.retryDeployment({
+            commitSha,
+            assertDispatch,
+          });
         } catch {
           result = { state: "unknown" };
         }
         const status =
-          result.state === "failed"
+          result.state === "failed" || result.state === "blocked"
             ? "failed"
             : result.state === "unknown"
               ? "unknown"
@@ -1664,8 +1769,10 @@ export function createContentPublicationApplication({
           nextPublication(dispatching, {
             status,
             detail:
-              result.state === "failed"
-                ? "deployment_retry_failed"
+              result.state === "failed" || result.state === "blocked"
+                ? result.state === "blocked"
+                  ? result.detail
+                  : "deployment_retry_failed"
                 : result.state === "unknown"
                   ? "deployment_retry_result_unknown"
                   : "deployment_retry_requested",

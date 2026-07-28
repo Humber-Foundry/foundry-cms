@@ -529,6 +529,9 @@ export function createD1ContentPublicationStore(
       leaseToken,
       now,
       leaseExpiresAt,
+      expectedStatus = "requested",
+      expectedDetail,
+      expectedDeploymentId,
     }) {
       const result = await database
         .prepare(
@@ -536,9 +539,11 @@ export function createD1ContentPublicationStore(
            SET lease_expires_at = ?1,
                mutation_token = ?5
            WHERE id = ?2
-             AND status = 'requested'
+             AND status = ?6
              AND lease_token = ?3
              AND lease_expires_at > ?4
+             AND (?7 IS NULL OR detail = ?7)
+             AND (?8 IS NULL OR deployment_id = ?8)
              AND NOT EXISTS (
                SELECT 1 FROM content_approval_invalidations
                WHERE approval_id = content_publications.approval_id
@@ -555,6 +560,9 @@ export function createD1ContentPublicationStore(
           leaseToken,
           now,
           crypto.randomUUID(),
+          expectedStatus,
+          expectedDetail ?? null,
+          expectedDeploymentId ?? null,
         )
         .run();
       return (result.meta.changes ?? 0) === 1;

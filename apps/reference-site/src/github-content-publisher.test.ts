@@ -300,16 +300,18 @@ describe("GitHub content publisher", () => {
           build_command: "npm run build",
           deploy_command: "npm run deploy",
           root_directory: "/",
-          branch_includes: ["main"],
-          branch_excludes: [],
-          path_includes: ["**"],
+          branch_includes: ["*"],
+          branch_excludes: ["release/*"],
+          path_includes: ["packages/site-definition/*"],
           path_excludes: [],
           build_caching_enabled: true,
           repo_connection: {
             repo_connection_uuid: "connection-1",
             provider_type: "github",
             provider_account_id: "account-owner",
+            provider_account_name: "client-owner",
             repo_id: "repository-1",
+            repo_name: "client-site",
           },
         },
       ],
@@ -386,6 +388,19 @@ describe("GitHub content publisher", () => {
           ),
         ),
     });
+    const publisherForBuildTrigger = (trigger: Record<string, unknown>) =>
+      createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: vi
+          .fn<typeof fetch>()
+          .mockImplementation(async (input) =>
+            json(
+              String(input).endsWith("/environment_variables")
+                ? environmentConfiguration
+                : { ...buildConfiguration, result: [trigger] },
+            ),
+          ),
+      });
 
     await expect(publisher.getChannelConfigurationHash()).resolves.toBe(
       await rotatedSecretPublisher.getChannelConfigurationHash(),
@@ -403,6 +418,50 @@ describe("GitHub content publisher", () => {
     await expect(
       changedBuildPublisher.getChannelConfigurationHash(),
     ).rejects.toThrow("cloudflare_build_configuration_invalid");
+    await expect(
+      publisherForBuildTrigger({
+        ...buildConfiguration.result[0],
+        repo_connection: {
+          ...buildConfiguration.result[0].repo_connection,
+          repo_name: "another-site",
+        },
+      }).getChannelConfigurationHash(),
+    ).rejects.toThrow("cloudflare_build_configuration_invalid");
+    await expect(
+      publisherForBuildTrigger({
+        ...buildConfiguration.result[0],
+        branch_includes: ["preview/*"],
+        branch_excludes: [],
+      }).getChannelConfigurationHash(),
+    ).rejects.toThrow("cloudflare_build_configuration_invalid");
+    await expect(
+      publisherForBuildTrigger({
+        ...buildConfiguration.result[0],
+        branch_includes: ["*"],
+        branch_excludes: ["main"],
+      }).getChannelConfigurationHash(),
+    ).rejects.toThrow("cloudflare_build_configuration_invalid");
+    await expect(
+      publisherForBuildTrigger({
+        ...buildConfiguration.result[0],
+        path_includes: ["docs/*"],
+        path_excludes: [],
+      }).getChannelConfigurationHash(),
+    ).rejects.toThrow("cloudflare_build_configuration_invalid");
+    await expect(
+      publisherForBuildTrigger({
+        ...buildConfiguration.result[0],
+        path_includes: ["*"],
+        path_excludes: ["packages/site-definition/*"],
+      }).getChannelConfigurationHash(),
+    ).rejects.toThrow("cloudflare_build_configuration_invalid");
+    await expect(
+      publisherForBuildTrigger({
+        ...buildConfiguration.result[0],
+        path_includes: ["*"],
+        path_excludes: ["packages/*/published-site.json"],
+      }).getChannelConfigurationHash(),
+    ).rejects.toThrow("cloudflare_build_configuration_invalid");
   });
 
   it("retries a Cloudflare build for the exact committed revision", async () => {
@@ -418,7 +477,10 @@ describe("GitHub content publisher", () => {
     });
 
     await expect(
-      publisher.retryDeployment("c".repeat(40)),
+      publisher.retryDeployment({
+        commitSha: "c".repeat(40),
+        assertDispatch: vi.fn().mockResolvedValue(true),
+      }),
     ).resolves.toEqual({
       state: "requested",
       deploymentId: "build-123",
@@ -438,6 +500,28 @@ describe("GitHub content publisher", () => {
         }),
       }),
     );
+  });
+
+  it("does not contact Cloudflare after losing the exact retry claim", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const assertDispatch = vi.fn().mockResolvedValue(false);
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.retryDeployment({
+        commitSha: "c".repeat(40),
+        assertDispatch,
+      }),
+    ).resolves.toEqual({
+      state: "blocked",
+      detail: "deployment_retry_claim_lost",
+    });
+
+    expect(assertDispatch).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("polls an exact manual build through the Cloudflare Builds API", async () => {
@@ -687,6 +771,119 @@ describe("GitHub content publisher", () => {
         body: JSON.stringify({ sha: commitSha, force: false }),
       }),
     );
+  });
+
+  it("reconciles an exact retained commit that already advanced the ref", async () => {
+    const expectedHead = "a".repeat(40);
+    const commitSha = "c".repeat(40);
+    const bytes = "{}\n";
+    const blobSha = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(bytes)}\0${bytes}`)
+      .digest("hex");
+    const publishId = createContentPublicationId(
+      `publish_${"7".repeat(32)}`,
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: commitSha } }))
+      .mockResolvedValueOnce(
+        json({
+          message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+          parents: [{ sha: expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename:
+                "packages/site-definition/src/published-site.json",
+              status: "modified",
+              sha: blobSha,
+            },
+          ],
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.retryReference({
+        publishId,
+        candidateCommitSha: commitSha,
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({ state: "committed", commitSha });
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
+  });
+
+  it("rejects an invalid retained commit even when it is already the ref head", async () => {
+    const expectedHead = "a".repeat(40);
+    const commitSha = "c".repeat(40);
+    const bytes = "{}\n";
+    const blobSha = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(bytes)}\0${bytes}`)
+      .digest("hex");
+    const publishId = createContentPublicationId(
+      `publish_${"8".repeat(32)}`,
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: commitSha } }))
+      .mockResolvedValueOnce(
+        json({
+          message: "Publish\n\nFoundry-Publish-Id: publish_other",
+          parents: [{ sha: expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename:
+                "packages/site-definition/src/published-site.json",
+              status: "modified",
+              sha: blobSha,
+            },
+          ],
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.retryReference({
+        publishId,
+        candidateCommitSha: commitSha,
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "failed",
+      detail: "git_reference_candidate_invalid",
+    });
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
   });
 
   it("uses the repository SHA-256 object format for retained blobs", async () => {

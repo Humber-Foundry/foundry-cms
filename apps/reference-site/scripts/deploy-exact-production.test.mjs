@@ -12,6 +12,7 @@ import {
   deployExactProduction,
   uploadExactVersion,
 } from "./deploy-exact-production.mjs";
+import { assertExactProductionSource } from "./assert-exact-production-head.mjs";
 
 const versionId = "12345678-1234-1234-1234-123456789abc";
 const previousVersionId =
@@ -164,6 +165,9 @@ describe("guarded exact production deployment", () => {
 
   it("uploads without serving, then activates the exact version", async () => {
     const assertHead = vi.fn();
+    const assertSource = vi.fn(({ assertHead: recheckHead }) => {
+      recheckHead();
+    });
     const authorizeContent = vi.fn().mockResolvedValue(undefined);
     const assertBaseline = vi.fn().mockResolvedValue(undefined);
     const uploadVersion = vi.fn().mockResolvedValue(versionId);
@@ -171,6 +175,7 @@ describe("guarded exact production deployment", () => {
 
     await deployExactProduction({
       assertHead,
+      assertSource,
       authorizeContent,
       assertBaseline,
       uploadVersion,
@@ -180,11 +185,41 @@ describe("guarded exact production deployment", () => {
     expect(uploadVersion).toHaveBeenCalledOnce();
     expect(authorizeContent).toHaveBeenCalledOnce();
     expect(assertBaseline).toHaveBeenCalledOnce();
+    expect(assertSource).toHaveBeenCalledWith({ assertHead });
     expect(activateVersion).toHaveBeenCalledWith({
       versionId,
       assertHead,
     });
-    expect(assertHead).toHaveBeenCalledTimes(2);
+    expect(assertHead).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects a source mutation introduced after preflight before upload", async () => {
+    const assertHead = vi.fn();
+    const uploadVersion = vi.fn().mockResolvedValue(versionId);
+    const activateVersion = vi.fn().mockResolvedValue(undefined);
+    let sourceDirty = false;
+
+    await expect(
+      deployExactProduction({
+        assertHead,
+        authorizeContent: vi.fn(async () => {
+          sourceDirty = true;
+        }),
+        assertBaseline: vi.fn().mockResolvedValue(undefined),
+        assertSource: ({ assertHead: recheckHead }) =>
+          assertExactProductionSource({
+            assertHead: recheckHead,
+            readSourceStatus: () =>
+              sourceDirty ? " M tracked-source.ts\n" : "",
+          }),
+        uploadVersion,
+        activateVersion,
+      }),
+    ).rejects.toThrow("exact_build_source_dirty");
+
+    expect(uploadVersion).not.toHaveBeenCalled();
+    expect(activateVersion).not.toHaveBeenCalled();
+    expect(assertHead).toHaveBeenCalledOnce();
   });
 
   it("fails before upload when no production deployment baseline exists", async () => {
@@ -659,6 +694,56 @@ describe("guarded exact production deployment", () => {
     await close(upstream);
   });
 
+  it("bounds a partial activation body and forces the loopback proxy to shut down", async () => {
+    let upstreamRequests = 0;
+    const upstream = createServer((_request, response) => {
+      upstreamRequests += 1;
+      response.writeHead(500);
+      response.end();
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    const startedAt = Date.now();
+
+    await expect(
+      activate({
+        versionId,
+        assertHead: vi.fn(),
+        loopbackBodyTimeoutMs: 50,
+        loopbackDrainTimeoutMs: 200,
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) => {
+          const process = new EventEmitter();
+          queueMicrotask(() => {
+            const target = new URL(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+            );
+            const request = createHttpRequest(target, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+            });
+            request.once("error", () => undefined);
+            request.once("socket", (socket) => {
+              const sendPartialBody = () => {
+                request.write('{"strategy":"percentage","versions":[');
+                process.emit("exit", 1, null);
+              };
+              if (socket.connecting) {
+                socket.once("connect", sendPartialBody);
+              } else {
+                sendPartialBody();
+              }
+            });
+          });
+          return process;
+        },
+      }),
+    ).rejects.toThrow("exact_activation_body_timeout");
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(upstreamRequests).toBe(0);
+    await close(upstream);
+  });
+
   it("rejects a repeated activation before forwarding it", async () => {
     let upstreamRequests = 0;
     const upstream = createServer((request, response) => {
@@ -869,6 +954,85 @@ describe("guarded exact production deployment", () => {
     await close(upstream);
   });
 
+  it("keeps the pre-activation baseline after a lost response and later deployment lookup", async () => {
+    let now = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      // Advance quickly enough to keep the stale-baseline failure bounded,
+      // while leaving a full request budget for the first reconciliation read.
+      now += 5_000;
+      return now;
+    });
+    const deployments = [
+      { id: "deployment-before", versionId: previousVersionId },
+    ];
+    let postCount = 0;
+    const upstream = createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const body = Buffer.concat(chunks).toString("utf8");
+      if (request.method === "GET") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify(deploymentHistoryResult(deployments)),
+        );
+        return;
+      }
+      postCount += 1;
+      if (postCount === 1) {
+        deployments.unshift({
+          id: "deployment-accepted-without-response",
+          versionId,
+        });
+        response.destroy();
+        return;
+      }
+      deployments.unshift({
+        id: "deployment-rollback",
+        versionId: JSON.parse(body).versions[0].version_id,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(activationResult("deployment-rollback")));
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    let headCheck = 0;
+
+    try {
+      await expect(
+        activate({
+          versionId,
+          assertHead: vi.fn(() => {
+            headCheck += 1;
+            if (headCheck === 3) {
+              throw new Error("exact_production_head_moved");
+            }
+          }),
+          upstreamBaseUrl,
+          startActivation: ({ localApiBaseUrl }) =>
+            activationProcess(async () => {
+              await loadDeploymentBaseline(localApiBaseUrl);
+              const response = await fetch(
+                `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+                { method: "POST", body: exactActivationBody },
+              );
+              expect(response.status).toBe(502);
+              await loadDeploymentBaseline(localApiBaseUrl);
+            }),
+        }),
+      ).rejects.toThrow("exact_production_head_moved");
+
+      expect(postCount).toBe(2);
+      expect(deployments[0]).toEqual({
+        id: "deployment-rollback",
+        versionId: previousVersionId,
+      });
+    } finally {
+      nowSpy.mockRestore();
+      await close(upstream);
+    }
+  });
+
   it("does not retry a lost rollback response after a newer deployment wins during delayed history visibility", async () => {
     const deployments = [
       { id: "deployment-before", versionId: previousVersionId },
@@ -953,6 +1117,103 @@ describe("guarded exact production deployment", () => {
     expect(delayedHistoryReads).toBe(2);
     expect(deployments[0]).toEqual({
       id: "deployment-race-compensation",
+      versionId: newerVersionId,
+    });
+    await close(upstream);
+  });
+
+  it("reconciles an applied 5xx rollback before compensating a newer racing deployment", async () => {
+    const deployments = [
+      { id: "deployment-before", versionId: previousVersionId },
+    ];
+    const newerVersionId =
+      "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    let postCount = 0;
+    let delayedHistoryReads = 0;
+    const upstream = createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const body = Buffer.concat(chunks).toString("utf8");
+      if (request.method === "GET") {
+        const visibleDeployments =
+          postCount === 2 && delayedHistoryReads < 2
+            ? (delayedHistoryReads += 1, deployments.slice(2))
+            : deployments;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify(deploymentHistoryResult(visibleDeployments)),
+        );
+        return;
+      }
+      postCount += 1;
+      if (postCount === 1) {
+        deployments.unshift({
+          id: "deployment-activated",
+          versionId,
+        });
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(activationResult()));
+        return;
+      }
+      if (postCount === 2) {
+        deployments.unshift({
+          id: "deployment-newer",
+          versionId: newerVersionId,
+        });
+        deployments.unshift({
+          id: "deployment-rollback-returned-5xx",
+          versionId: JSON.parse(body).versions[0].version_id,
+        });
+        response.writeHead(500, {
+          "content-type": "application/json",
+        });
+        response.end(
+          JSON.stringify({
+            success: false,
+            errors: [{ code: 10000, message: "Unknown result." }],
+          }),
+        );
+        return;
+      }
+      const compensationId = "deployment-5xx-race-compensation";
+      deployments.unshift({
+        id: compensationId,
+        versionId: JSON.parse(body).versions[0].version_id,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(activationResult(compensationId)));
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    let headCheck = 0;
+
+    await expect(
+      activate({
+        versionId,
+        assertHead: vi.fn(() => {
+          headCheck += 1;
+          if (headCheck === 3) {
+            throw new Error("exact_production_head_moved");
+          }
+        }),
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) =>
+          activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(200);
+          }),
+      }),
+    ).rejects.toThrow("exact_production_head_moved");
+
+    expect(postCount).toBe(3);
+    expect(delayedHistoryReads).toBe(2);
+    expect(deployments[0]).toEqual({
+      id: "deployment-5xx-race-compensation",
       versionId: newerVersionId,
     });
     await close(upstream);

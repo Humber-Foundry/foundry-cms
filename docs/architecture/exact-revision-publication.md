@@ -138,9 +138,11 @@ only by the CMS publisher and Workers Builds, so an ordinary pull request
 cannot forge the Foundry trailers and enter the exact content deployment path.
 The only accepted trigger deploy command is `npm run deploy`. Before building,
 that shipped command rejects staged, unstaged, or non-ignored untracked source,
-then runs `scripts/deploy-exact-production.mjs`. The controller requires the
+then runs `scripts/deploy-exact-production.mjs`. The controller repeats that
+clean-source check immediately before upload so a generator or concurrent
+mutation during the build cannot enter the deployed bundle. It requires the
 local checkout, `WORKERS_CI_COMMIT_SHA`, and `origin`'s protected production
-ref to agree before upload. OpenNext uploads a non-serving, commit-tagged
+ref to agree at that boundary. OpenNext uploads a non-serving, commit-tagged
 Worker version first. The controller then routes Wrangler's
 activation API calls through a loopback gate and rechecks the same fence on the
 actual Cloudflare `POST /deployments` request before forwarding it. It requires
@@ -148,9 +150,11 @@ exactly one bounded activation payload naming only the uploaded version at 100
 percent, checks the fence after receiving that payload, and verifies the fence
 again after success. The gate forwards token-bearing production requests only
 to the fixed Cloudflare API origin; an ambient base-URL variable cannot redirect
-them. After Wrangler exits, the controller closes request acceptance and drains
-every in-flight handler before classifying the result. Before promotion it
-records the currently serving deployment and traffic allocation. If an
+them. Request-body reads and shutdown draining have hard deadlines; after
+Wrangler exits, the controller closes request acceptance, aborts overdue
+upstream work, and drains every in-flight handler before classifying the
+result. Before promotion it records and freezes the currently serving
+deployment and traffic allocation. If an
 activation response is lost, the
 controller polls deployment history for up to 30 seconds before deciding
 whether the promotion succeeded. Delayed history visibility is not treated as
@@ -159,9 +163,10 @@ moves after Cloudflare accepts the promotion, including an activation
 recovered from a lost response, the controller restores the prior allocation
 only when deployment history proves its stale deployment has been superseded.
 Because Cloudflare does not expose a conditional deployment write, the
-controller reconciles a lost rollback response before any retry. It also waits
-for the compensating deployment to become visible and restores any newer
-deployment that raced its rollback. Once the controller has recorded the one
+controller reconciles a lost or ambiguous rollback response, including
+timeouts, rate limits, and server failures, before any retry. It also waits for
+the compensating deployment to become visible and restores any newer deployment
+that raced its rollback. Once the controller has recorded the one
 permitted activation and the final production-head fence passes, a later
 non-zero Wrangler exit cannot turn that observed activation into an ambiguous
 failure. Every direct Cloudflare request and reconciliation loop uses its
@@ -221,7 +226,17 @@ environment-variable metadata. The channel fingerprint covers repository
 identity, branch/path filters, build and deploy commands, root directory,
 caching, and sorted non-secret environment values. Secret values remain
 hidden; their Cloudflare creation timestamps act as rotation versions. A
-missing trigger or unreadable configuration fails closed.
+missing or unreadable trigger fails closed. The trigger must also identify the
+configured GitHub owner/repository and its documented exclude-first branch and
+path filters must permit both the production branch and
+`packages/site-definition/src/published-site.json`; otherwise Foundry refuses
+to approve a channel that cannot observe the publication commit.
+
+An explicit deployment retry claims one durable dispatch token. At the provider
+boundary, immediately before contacting Cloudflare, Foundry renews that exact
+claim, revalidates the approval and channel, probes the exact live marker,
+rechecks the production head, and renews the claim again. An exact live marker,
+a lost claim, or any changed approval, channel, or head vetoes the build request.
 
 Cloudflare requires `wrangler deploy` for a Worker's first upload; its Versions
 API cannot create that initial deployment. During installation, before enabling

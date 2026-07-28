@@ -100,10 +100,17 @@ describe("content publication application", () => {
         commitSha: "c".repeat(40),
       }),
       getDeploymentStatus,
-      retryDeployment: vi.fn().mockResolvedValue({
-        state: "requested",
-        deploymentId: "build-123",
-      }),
+      retryDeployment: vi.fn(async ({ assertDispatch }) =>
+        (await assertDispatch())
+          ? {
+              state: "requested" as const,
+              deploymentId: "build-123",
+            }
+          : {
+              state: "blocked" as const,
+              detail: "deployment_retry_claim_lost" as const,
+            },
+      ),
     };
     repository = {
       getRevision: async (_workspaceId, revision) =>
@@ -992,9 +999,10 @@ describe("content publication application", () => {
       candidateCommitSha,
     );
     expect(publisher.retryReference).not.toHaveBeenCalled();
-    expect(publisher.retryDeployment).toHaveBeenCalledWith(
-      candidateCommitSha,
-    );
+    expect(publisher.retryDeployment).toHaveBeenCalledWith({
+      commitSha: candidateCommitSha,
+      assertDispatch: expect.any(Function),
+    });
   });
 
   it("preserves a retained candidate through a channel-configuration timeout", async () => {
@@ -1219,7 +1227,10 @@ describe("content publication application", () => {
         deploymentId: "build-123",
       }),
     );
-    expect(publisher.retryDeployment).toHaveBeenCalledWith("c".repeat(40));
+    expect(publisher.retryDeployment).toHaveBeenCalledWith({
+      commitSha: "c".repeat(40),
+      assertDispatch: expect.any(Function),
+    });
     expect(createCommit).toHaveBeenCalledTimes(1);
 
     getDeploymentStatus.mockResolvedValue("building");
@@ -1296,6 +1307,202 @@ describe("content publication application", () => {
     );
     expect(publisher.getProductionHead).toHaveBeenCalledTimes(3);
     expect(publisher.retryDeployment).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the production head changes at the provider boundary", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-provider-head-race",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    let atProviderBoundary = false;
+    vi.mocked(publisher.getProductionHead).mockImplementation(
+      async () => (atProviderBoundary ? "d".repeat(40) : "c".repeat(40)),
+    );
+    let providerDispatched = false;
+    vi.mocked(publisher.retryDeployment).mockImplementation(
+      async ({ assertDispatch }) => {
+        atProviderBoundary = true;
+        if (await assertDispatch()) {
+          providerDispatched = true;
+          return { state: "requested", deploymentId: "build-raced" };
+        }
+        return {
+          state: "blocked",
+          detail: "deployment_retry_claim_lost",
+        };
+      },
+    );
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_head_moved",
+        deploymentId: null,
+      }),
+    );
+    expect(providerDispatched).toBe(false);
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+  });
+
+  it("fails closed when approval becomes invalid at the provider boundary", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const { approval } = await approve(app);
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-provider-approval-race",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    let providerDispatched = false;
+    vi.mocked(publisher.retryDeployment).mockImplementation(
+      async ({ assertDispatch }) => {
+        await store.invalidateApproval({
+          approvalId: approval.id,
+          invalidatedAt: "2026-07-27T10:04:30.000Z",
+          reason: "production_changed",
+        });
+        if (await assertDispatch()) {
+          providerDispatched = true;
+          return { state: "requested", deploymentId: "build-raced" };
+        }
+        return {
+          state: "blocked",
+          detail: "deployment_retry_claim_lost",
+        };
+      },
+    );
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_claim_lost",
+      }),
+    );
+    expect(providerDispatched).toBe(false);
+  });
+
+  it("revalidates the publication channel at the provider boundary", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-provider-channel-race",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    let channelHash = "channel-a";
+    vi.mocked(publisher.getChannelConfigurationHash).mockImplementation(
+      async () => channelHash,
+    );
+    let providerDispatched = false;
+    vi.mocked(publisher.retryDeployment).mockImplementation(
+      async ({ assertDispatch }) => {
+        channelHash = "channel-b";
+        if (await assertDispatch()) {
+          providerDispatched = true;
+          return { state: "requested", deploymentId: "build-raced" };
+        }
+        return {
+          state: "blocked",
+          detail: "deployment_retry_claim_lost",
+        };
+      },
+    );
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_claim_lost",
+      }),
+    );
+    expect(providerDispatched).toBe(false);
+  });
+
+  it("does not dispatch when the exact marker appears but its live CAS races", async () => {
+    const underlyingStore = createInMemoryContentPublicationStore();
+    let rejectLiveCas = false;
+    const store = {
+      ...underlyingStore,
+      async updatePublication(
+        ...args: Parameters<typeof underlyingStore.updatePublication>
+      ) {
+        if (rejectLiveCas && args[0].status === "verified-live") {
+          throw new Error("live_cas_raced");
+        }
+        return underlyingStore.updatePublication(...args);
+      },
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const { approval } = await approve(app);
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-live-cas-race",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    let providerDispatched = false;
+    vi.mocked(publisher.retryDeployment).mockImplementation(
+      async ({ assertDispatch }) => {
+        rejectLiveCas = true;
+        isReleaseLive.mockResolvedValue(true);
+        if (await assertDispatch()) {
+          providerDispatched = true;
+          return { state: "requested", deploymentId: "build-duplicate" };
+        }
+        return {
+          state: "blocked",
+          detail: "deployment_retry_claim_lost",
+        };
+      },
+    );
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_claim_lost",
+      }),
+    );
+    expect(providerDispatched).toBe(false);
   });
 
   it("dispatches only one exact build when deployment retries race", async () => {
