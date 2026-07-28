@@ -309,6 +309,66 @@ describe("content revision application", () => {
     }
   });
 
+  it("combines authoritative variant edits with structural composition", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(
+      application,
+      "create-workspace-compose-variant",
+    );
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const originalHero = composition.components[0]!;
+    if (originalHero.type !== "hero") {
+      throw new Error("expected_hero_fixture");
+    }
+    const hero = { ...originalHero, variant: "focused" as const };
+    const added = createDefaultPageSection(
+      "proof",
+      "section_added_proof",
+      referenceSiteDefinition,
+    );
+    if (added.type !== "proof") {
+      throw new Error("expected_proof_fixture");
+    }
+    const nonDefaultAdded = { ...added, variant: "plain" as const };
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [{ path: "section_hero.variant", value: "focused" }],
+      composition: {
+        ...composition,
+        components: [
+          composition.components[1]!,
+          hero,
+          ...composition.components.slice(2),
+          nonDefaultAdded,
+        ],
+      },
+      idempotencyKey: "compose-with-variants",
+    });
+
+    expect(saved.definition.home.sections[0]?.id).toBe(
+      "section_services",
+    );
+    expect(
+      saved.definition.home.sections.find(
+        ({ id }) => id === "section_hero",
+      )?.variant,
+    ).toBe("focused");
+    expect(
+      saved.definition.home.sections.find(
+        ({ id }) => id === "section_added_proof",
+      )?.variant,
+    ).toBe("plain");
+  });
+
   it("rejects composition outside the registered slot before persistence", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,

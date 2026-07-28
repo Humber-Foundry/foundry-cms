@@ -33,9 +33,8 @@ type MediaRecoveryPlan =
       target: SiteMediaOccurrence;
     }>
   | Readonly<{
-      operation: "crop";
+      operation: "resume-crop";
       target: SiteMediaOccurrence;
-      baseRevision: number;
     }>;
 
 function parseMediaRecoveryManifest(
@@ -193,9 +192,8 @@ export async function restorePreservedMedia({
       current.crop === null;
     if (replaceAlreadyApplied) {
       plan.push({
-        operation: "crop",
+        operation: "resume-crop",
         target: occurrence,
-        baseRevision: current.revision,
       });
       continue;
     }
@@ -208,7 +206,30 @@ export async function restorePreservedMedia({
   let contentRevision = created.revision;
   for (const step of plan) {
     const occurrence = step.target;
-    if (step.operation === "crop") {
+    if (step.operation === "resume-crop") {
+      const replacementProof = await send(
+        {
+          contentType: "application/json",
+          idempotencyKey:
+            `${idempotencyKey}:media:${occurrence.occurrenceId}:replace`,
+          body: JSON.stringify({
+            operation: "replace",
+            occurrenceId: occurrence.occurrenceId,
+            assetId: occurrence.asset.assetId,
+            baseRevision: 0,
+            workspaceId: created.workspaceId,
+            contentBaseRevision: contentRevision,
+          }),
+        },
+        mutationToken,
+      );
+      mutationToken = replacementProof.mutationToken;
+      onMutationToken(mutationToken);
+      const provenReplacement = mediaMutationRevisions(
+        replacementProof,
+        true,
+      );
+      contentRevision = provenReplacement.contentRevision;
       const crop = await send(
         {
           contentType: "application/json",
@@ -217,7 +238,7 @@ export async function restorePreservedMedia({
           body: JSON.stringify({
             operation: "crop",
             occurrenceId: occurrence.occurrenceId,
-            baseRevision: step.baseRevision,
+            baseRevision: provenReplacement.occurrenceRevision,
             workspaceId: created.workspaceId,
             contentBaseRevision: contentRevision,
             crop: occurrence.crop,

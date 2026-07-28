@@ -436,6 +436,7 @@ export function referencedPageComponentIds(
 function protectedShape(
   section: PageSection,
   normalizeNestedIds = false,
+  protectVariant = true,
 ): Record<string, unknown> {
   const registration = pageCompositionContract.components[section.type];
   const protectedSection = structuredClone(section) as unknown as Record<
@@ -446,6 +447,9 @@ function protectedShape(
   // Variants are owned by the outer controlled-design fields. Composition
   // submissions carry them for rendering, so the domain boundary must protect
   // them from stale or direct composition writes.
+  if (!protectVariant) {
+    delete protectedSection.variant;
+  }
   for (const property of registration.editableProps) {
     delete protectedSection[property];
   }
@@ -487,6 +491,7 @@ function equalProtectedShape(
   left: PageSection,
   right: PageSection,
   normalizeNestedIds = false,
+  protectVariant = true,
 ): boolean {
   const canonicalize = (value: unknown): unknown => {
     if (Array.isArray(value)) {
@@ -503,10 +508,14 @@ function equalProtectedShape(
   };
   return (
     JSON.stringify(
-      canonicalize(protectedShape(left, normalizeNestedIds)),
+      canonicalize(
+        protectedShape(left, normalizeNestedIds, protectVariant),
+      ),
     ) ===
     JSON.stringify(
-      canonicalize(protectedShape(right, normalizeNestedIds)),
+      canonicalize(
+        protectedShape(right, normalizeNestedIds, protectVariant),
+      ),
     )
   );
 }
@@ -688,10 +697,14 @@ export function applyPageComposition(
         equalProtectedShape(
           createDefaultPageSection(section.type, id, definition),
           section,
+          false,
+          false,
         ) ||
         equalProtectedShape(
           createDefaultPageSection(section.type, id, submittedContext),
           section,
+          false,
+          false,
         )
       );
     const duplicateScaffold =
@@ -699,7 +712,9 @@ export function applyPageComposition(
       hasCanonicalDuplicateIds(section) &&
       [...definition.home.sections, ...accepted]
         .filter((source) => source.type === section.type)
-        .some((source) => equalProtectedShape(source, section, true));
+        .some((source) =>
+          equalProtectedShape(source, section, true, false),
+        );
     const scaffoldAllowed =
       existing === undefined
         ? defaultScaffold || duplicateScaffold

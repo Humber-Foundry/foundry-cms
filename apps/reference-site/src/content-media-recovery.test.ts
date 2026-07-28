@@ -290,14 +290,24 @@ describe("content media schema recovery", () => {
         media: [confirmedReplacement],
       },
     };
-    const send = vi.fn().mockResolvedValue({
-      response: { ok: true },
-      body: {
-        occurrence: { revision: 2 },
-        contentRevision: { revision: 2 },
-      },
-      mutationToken: "csrf-after-crop",
-    });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        response: { ok: true },
+        body: {
+          occurrence: { revision: 1 },
+          contentRevision: { revision: 1 },
+        },
+        mutationToken: "csrf-after-proof",
+      })
+      .mockResolvedValueOnce({
+        response: { ok: true },
+        body: {
+          occurrence: { revision: 2 },
+          contentRevision: { revision: 2 },
+        },
+        mutationToken: "csrf-after-crop",
+      });
 
     await expect(
       restorePreservedMedia({
@@ -316,8 +326,16 @@ describe("content media schema recovery", () => {
         send,
       }),
     ).resolves.toBe("csrf-after-crop");
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(2);
     expect(JSON.parse(send.mock.calls[0]![0].body)).toEqual({
+      operation: "replace",
+      occurrenceId: "occurrence_home_hero",
+      assetId: "asset_replacement",
+      baseRevision: 0,
+      workspaceId: "workspace_fresh",
+      contentBaseRevision: 1,
+    });
+    expect(JSON.parse(send.mock.calls[1]![0].body)).toEqual({
       operation: "crop",
       occurrenceId: "occurrence_home_hero",
       baseRevision: 1,
@@ -325,5 +343,53 @@ describe("content media schema recovery", () => {
       contentBaseRevision: 1,
       crop: replacement.crop,
     });
+  });
+
+  it("does not crop a same-asset destination without a replacement receipt", async () => {
+    const replacement = {
+      occurrenceId: "occurrence_home_hero",
+      revision: 4,
+      asset: {
+        assetId: "asset_replacement",
+        width: 1200,
+        height: 800,
+        contentType: "image/jpeg",
+      },
+      crop: { x: 0.1, y: 0.2, width: 0.7, height: 0.6 },
+    } as const;
+    const destination = { ...replacement, revision: 1, crop: null };
+    const send = vi.fn().mockResolvedValue({
+      response: { ok: false },
+      body: { error: "content_revision_conflict" },
+      mutationToken: "csrf-after-proof",
+    });
+
+    await expect(
+      restorePreservedMedia({
+        edit: {
+          path: mediaManifestRecoveryPath,
+          baseValue: "[]",
+          value: canonicalJson([replacement]),
+        },
+        created: {
+          workspaceId: "workspace_fresh",
+          revision: 1,
+          definition: {
+            ...referenceSiteDefinition,
+            home: {
+              ...referenceSiteDefinition.home,
+              media: [destination],
+            },
+          },
+        },
+        mutationToken: "csrf-retry",
+        idempotencyKey: "workspace-create-0001",
+        send,
+      }),
+    ).rejects.toThrow("content_media_recovery_failed");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![0].idempotencyKey).toBe(
+      "workspace-create-0001:media:occurrence_home_hero:replace",
+    );
   });
 });

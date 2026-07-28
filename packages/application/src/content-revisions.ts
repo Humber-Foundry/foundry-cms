@@ -72,6 +72,52 @@ export type SaveContentRevisionCommand = Readonly<{
   idempotencyKey: string;
 }>;
 
+function compositionWithAuthoritativeVariants(
+  definition: SiteDefinition,
+  composition: PageComposition,
+  edits: ReadonlyArray<SiteDefinitionEdit>,
+): PageComposition {
+  const existingById = new Map(
+    definition.home.sections.map((section) => [section.id, section]),
+  );
+  const variantEdits = new Map(
+    edits
+      .filter(({ path }) => path.endsWith(".variant"))
+      .map(({ path, value }) => [path, value]),
+  );
+  return {
+    ...composition,
+    components: composition.components.map((component) => {
+      const existing = existingById.get(component.id);
+      if (
+        existing === undefined ||
+        variantEdits.get(`${component.id}.variant`) !== component.variant
+      ) {
+        return component;
+      }
+      if (component.type === "hero" && existing.type === "hero") {
+        return { ...component, variant: existing.variant };
+      }
+      if (
+        component.type === "services" &&
+        existing.type === "services"
+      ) {
+        return { ...component, variant: existing.variant };
+      }
+      if (component.type === "proof" && existing.type === "proof") {
+        return { ...component, variant: existing.variant };
+      }
+      if (
+        component.type === "callToAction" &&
+        existing.type === "callToAction"
+      ) {
+        return { ...component, variant: existing.variant };
+      }
+      return component;
+    }),
+  };
+}
+
 export type CreateContentWorkspaceCommand = Readonly<{
   actorId: ContentActorId;
   workspaceId: ContentWorkspaceId;
@@ -522,7 +568,14 @@ export function createContentRevisionApplication({
         const composed =
           command.composition === undefined
             ? { ok: true as const, definition: base.definition }
-            : applyPageComposition(base.definition, command.composition);
+            : applyPageComposition(
+                base.definition,
+                compositionWithAuthoritativeVariants(
+                  base.definition,
+                  command.composition,
+                  command.edits,
+                ),
+              );
         if (!composed.ok) {
           throw new ContentRevisionValidationError(composed.errors);
         }
