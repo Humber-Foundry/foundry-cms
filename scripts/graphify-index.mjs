@@ -93,7 +93,12 @@ function canonicalRepositoryIdentity(remote, repositoryRoot) {
     }
     if (url.hostname) {
       const host = url.hostname.toLowerCase();
-      const port = url.port ? `:${url.port}` : "";
+      const port =
+        url.protocol === "ssh:" && url.port === "22"
+          ? ""
+          : url.port
+            ? `:${url.port}`
+            : "";
       return `remote:${host}${port}/${canonicalRepositoryPath(url.pathname)}`;
     }
   } catch {

@@ -401,7 +401,7 @@ describe("commit-pinned Graphify index", () => {
       "remote",
       "set-url",
       "origin",
-      "ssh://git@example.test/foundry/cms.git",
+      "ssh://git@example.test:22/foundry/cms.git",
     );
     const sshStatus = runIndex(root, ["status"], { cache: result.cache });
 
