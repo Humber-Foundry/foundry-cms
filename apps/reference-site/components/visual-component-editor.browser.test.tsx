@@ -329,7 +329,19 @@ describe("visual component editor browser acceptance", () => {
         ),
       );
     });
-    await new Promise((resolve) => window.setTimeout(resolve, 60));
+    let duplicateReady = false;
+    for (let index = 0; index < 100 && !duplicateReady; index += 1) {
+      const controls = Array.from(
+        duplicateHost.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          ".editor-groups input, .editor-groups textarea",
+        ),
+      );
+      duplicateReady =
+        controls.length > 0 && controls.every((control) => !control.disabled);
+      if (!duplicateReady) {
+        await new Promise((resolve) => window.setTimeout(resolve, 20));
+      }
+    }
 
     expect(duplicateHost.textContent).not.toContain(
       "already open in another tab",
@@ -337,13 +349,7 @@ describe("visual component editor browser acceptance", () => {
     expect(duplicateHost.textContent).not.toContain(
       "Unsaved browser edits were recovered",
     );
-    expect(
-      Array.from(
-        duplicateHost.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-          ".editor-groups input, .editor-groups textarea",
-        ),
-      ).every((control) => !control.disabled),
-    ).toBe(true);
+    expect(duplicateReady).toBe(true);
     expect(
       (await readContentEditorOutbox(workspaceId))?.edits,
     ).toContainEqual({
