@@ -102,6 +102,7 @@ export function ContentEditor({
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
   const outboxQueue = useRef<Promise<void>>(Promise.resolve());
   const lastAutosaveFingerprint = useRef<string | null>(null);
+  const saveInFlight = useRef(false);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
@@ -153,10 +154,30 @@ export function ContentEditor({
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked = state.status === "saving" || state.status === "stale";
 
+  useEffect(() => {
+    if (state.status !== "saving") {
+      saveInFlight.current = false;
+    }
+  }, [state.status]);
+
   function queueOutbox(operation: () => Promise<void>): Promise<void> {
     const queued = outboxQueue.current.catch(() => undefined).then(operation);
     outboxQueue.current = queued.catch(() => undefined);
     return queued;
+  }
+
+  function preserveOutboxWithoutAttempt(): void {
+    void queueOutbox(() =>
+      writeContentEditorOutbox({
+        workspaceId: initialRevision.workspaceId,
+        baseRevision: state.persistedRevision,
+        edits: recoverableEdits,
+      }),
+    ).catch(() => {
+      setMessage(
+        "Browser recovery storage could not be updated. Keep this tab open until these edits are resolved.",
+      );
+    });
   }
 
   function outboxAttemptMatchesCurrentWorkspace(
@@ -415,6 +436,10 @@ export function ContentEditor({
   ]);
 
   async function save() {
+    if (saveInFlight.current) {
+      return;
+    }
+    saveInFlight.current = true;
     lastAutosaveFingerprint.current = JSON.stringify(recoverableEdits);
     if (pendingAttempt.current === null) {
       pendingAttempt.current = {
@@ -429,6 +454,7 @@ export function ContentEditor({
       };
     }
     const attempt = pendingAttempt.current;
+    dispatch({ type: "saving" });
     try {
       await queueOutbox(() =>
         writeContentEditorOutbox({
@@ -443,7 +469,6 @@ export function ContentEditor({
         "Browser recovery storage is unavailable. This save will continue with its stable retry identity.",
       );
     }
-    dispatch({ type: "saving" });
     try {
       const result = await sendContentRevisionAttempt({
         attempt,
@@ -460,13 +485,7 @@ export function ContentEditor({
         body.fields !== null
       ) {
         pendingAttempt.current = null;
-        void queueOutbox(() =>
-          writeContentEditorOutbox({
-            workspaceId: initialRevision.workspaceId,
-            baseRevision: state.persistedRevision,
-            edits: recoverableEdits,
-          }),
-        );
+        preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
           errors: body.fields as Record<string, string>,
@@ -482,13 +501,7 @@ export function ContentEditor({
         body.error === "revision_conflict"
       ) {
         pendingAttempt.current = null;
-        void queueOutbox(() =>
-          writeContentEditorOutbox({
-            workspaceId: initialRevision.workspaceId,
-            baseRevision: state.persistedRevision,
-            edits: recoverableEdits,
-          }),
-        );
+        preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
           conflict: "conflict",
@@ -513,13 +526,7 @@ export function ContentEditor({
             ? (body.acknowledgedRevision as number)
             : undefined;
         pendingAttempt.current = null;
-        void queueOutbox(() =>
-          writeContentEditorOutbox({
-            workspaceId: initialRevision.workspaceId,
-            baseRevision: state.persistedRevision,
-            edits: recoverableEdits,
-          }),
-        );
+        preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
           conflict: "stale",
@@ -628,6 +635,9 @@ export function ContentEditor({
   ]);
 
   function edit(path: string, value: string) {
+    if (saveInFlight.current) {
+      return;
+    }
     pendingAttempt.current = null;
     dispatch({ type: "edit", path, value });
   }
@@ -790,7 +800,11 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.past.length === 0 || editorLocked}
-            onClick={() => dispatch({ type: "undo" })}
+            onClick={() => {
+              if (!saveInFlight.current) {
+                dispatch({ type: "undo" });
+              }
+            }}
           >
             Undo
           </button>
@@ -798,7 +812,11 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.future.length === 0 || editorLocked}
-            onClick={() => dispatch({ type: "redo" })}
+            onClick={() => {
+              if (!saveInFlight.current) {
+                dispatch({ type: "redo" });
+              }
+            }}
           >
             Redo
           </button>
@@ -906,6 +924,9 @@ export function ContentEditor({
         definition={state.workingDefinition}
         disabled={editorLocked}
         onChange={(definition) => {
+          if (saveInFlight.current) {
+            return;
+          }
           pendingAttempt.current = null;
           dispatch({ type: "compose", definition });
         }}
