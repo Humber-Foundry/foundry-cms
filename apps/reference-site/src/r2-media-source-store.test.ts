@@ -52,7 +52,10 @@ describe("R2 media source store", () => {
         return null;
       },
       async head() {
-        return { customMetadata: { sourceHash: "a".repeat(64) } };
+        return {
+          httpMetadata: { contentType: "image/png" },
+          customMetadata: { sourceHash: "a".repeat(64) },
+        };
       },
       async get() {
         return null;
@@ -72,6 +75,33 @@ describe("R2 media source store", () => {
         "media/site_reference/asset_hero/source",
         new Uint8Array([2]),
         { contentType: "image/png", sourceHash: "b".repeat(64) },
+      ),
+    ).rejects.toThrow("media_source_identity_conflict");
+  });
+
+  it("rejects an existing source with matching bytes but conflicting content metadata", async () => {
+    const bucket: PrivateMediaBucket = {
+      async put() {
+        return null;
+      },
+      async head() {
+        return {
+          httpMetadata: { contentType: "image/jpeg" },
+          customMetadata: { sourceHash: "a".repeat(64) },
+        };
+      },
+      async get() {
+        return null;
+      },
+      async delete() {},
+    };
+    const store = createR2MediaSourceStore(bucket);
+
+    await expect(
+      store.put(
+        "media/site_reference/asset_hero/source",
+        new Uint8Array([1]),
+        { contentType: "image/png", sourceHash: "a".repeat(64) },
       ),
     ).rejects.toThrow("media_source_identity_conflict");
   });

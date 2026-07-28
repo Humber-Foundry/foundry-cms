@@ -14,7 +14,10 @@ export interface PrivateMediaBucket {
     }>,
   ): Promise<unknown | null>;
   head(key: string): Promise<
-    | Readonly<{ customMetadata?: Readonly<Record<string, string>> }>
+    | Readonly<{
+        httpMetadata?: Readonly<{ contentType?: string }>;
+        customMetadata?: Readonly<Record<string, string>>;
+      }>
     | null
   >;
   get(key: string): Promise<
@@ -46,7 +49,10 @@ export function createR2MediaSourceStore(
       });
       if (stored === null) {
         const existing = await bucket.head(objectKey);
-        if (existing?.customMetadata?.sourceHash !== metadata.sourceHash) {
+        if (
+          existing?.customMetadata?.sourceHash !== metadata.sourceHash ||
+          existing.httpMetadata?.contentType !== metadata.contentType
+        ) {
           throw new Error("media_source_identity_conflict");
         }
       }
