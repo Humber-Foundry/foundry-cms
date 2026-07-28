@@ -699,11 +699,17 @@ function refresh() {
     garbageCollectSnapshots(context);
     console.log(`Published immutable Graphify snapshot: ${context.head}`);
   } finally {
-    rmSync(staging, { recursive: true, force: true });
-    if (sourceRoot) {
-      rmSync(sourceRoot, { recursive: true, force: true });
+    try {
+      try {
+        rmSync(staging, { recursive: true, force: true });
+      } finally {
+        if (sourceRoot) {
+          rmSync(sourceRoot, { recursive: true, force: true });
+        }
+      }
+    } finally {
+      refreshLock.release();
     }
-    refreshLock.release();
   }
 }
 

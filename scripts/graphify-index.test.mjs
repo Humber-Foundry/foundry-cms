@@ -875,6 +875,42 @@ describe("commit-pinned Graphify index", () => {
     expect(getRefreshLock(root)).toBeNull();
   });
 
+  it("releases the refresh lock when temporary source cleanup fails", () => {
+    const { root } = createRepository();
+    const preload = join(
+      mkdtempSync(join(tmpdir(), "foundry-graphify-fs-hook-")),
+      "fail-source-cleanup.cjs",
+    );
+    writeFileSync(
+      preload,
+      `const fs = require("node:fs");
+const { syncBuiltinESMExports } = require("node:module");
+const originalRmSync = fs.rmSync;
+fs.rmSync = (path, options) => {
+  if (String(path).includes("foundry-graphify-source-")) {
+    throw new Error("simulated temporary source cleanup failure");
+  }
+  return originalRmSync(path, options);
+};
+syncBuiltinESMExports();
+`,
+    );
+
+    const result = runIndex(root, ["refresh"], {
+      env: {
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require=${preload}`]
+          .filter(Boolean)
+          .join(" "),
+      },
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain(
+      "simulated temporary source cleanup failure",
+    );
+    expect(getRefreshLock(root)).toBeNull();
+  });
+
   it("bounds locks owned by an unverifiable hostname", () => {
     const { root } = createRepository();
     const staleCache = mkdtempSync(
