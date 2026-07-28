@@ -633,6 +633,7 @@ export function ContentEditor({
         attempt: pendingDeploymentRetryAttempt.current,
         mutationToken,
       });
+      pendingDeploymentRetryAttempt.current = null;
       setMutationToken(result.mutationToken);
       if (
         !result.response.ok ||
@@ -647,7 +648,6 @@ export function ContentEditor({
       const recorded = result.body.publication as PublicationRecord;
       setPublicationPollAttempt(0);
       setPublication(recorded);
-      pendingDeploymentRetryAttempt.current = null;
       setMessage("The exact committed revision is queued for another build.");
     } catch {
       setMessage(

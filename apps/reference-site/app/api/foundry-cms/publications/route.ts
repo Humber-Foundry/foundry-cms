@@ -282,7 +282,10 @@ export async function POST(request: Request) {
             const publication =
               command.operation === "refresh"
                 ? await application.commands.refresh(existing.id)
-                : await application.commands.retryDeployment(existing.id);
+                : await application.commands.retryDeployment(
+                    existing.id,
+                    access.membership.id,
+                  );
             return Response.json({ publication });
           }
           const publication = await application.commands.publish({

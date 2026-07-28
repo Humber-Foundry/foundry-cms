@@ -700,6 +700,7 @@ export function createContentPublicationApplication({
       return store.updatePublication(
         nextPublication(publication, {
           status: "unknown",
+          deploymentId: null,
           detail: "deployment_retry_result_unknown",
           updatedAt: observedAt,
         }),
@@ -790,6 +791,34 @@ export function createContentPublicationApplication({
       const retryStartedAt =
         currentPublication.deploymentRequestedAt ??
         currentPublication.updatedAt;
+      const approval = await store.findApproval(
+        currentPublication.approvalId,
+      );
+      if (approval !== null) {
+        try {
+          if (
+            await publisher.isReleaseLive({
+              commitSha,
+              contentHash: approval.fingerprint.contentHash,
+              schemaVersion: approval.fingerprint.schemaVersion,
+            })
+          ) {
+            return store.updatePublication(
+              nextPublication(currentPublication, {
+                status: "verified-live",
+                detail: null,
+                updatedAt: observedAt,
+              }),
+              {
+                expectedStatus: currentPublication.status,
+                expectedUpdatedAt: currentPublication.updatedAt,
+              },
+            );
+          }
+        } catch {
+          // Marker unavailability remains uncertain until the bounded deadline.
+        }
+      }
       return new Date(observedAt).getTime() -
         new Date(retryStartedAt).getTime() >=
         deploymentSignalTimeoutMs
@@ -835,9 +864,6 @@ export function createContentPublicationApplication({
         },
       );
 
-    if (deployment === "failed") {
-      return update("failed", "cloudflare_build_failed");
-    }
     if (
       deployment === "deployed" ||
       currentPublication.status === "deployed"
@@ -869,6 +895,9 @@ export function createContentPublicationApplication({
         timedOut ? "failed" : "deployed",
         timedOut ? "release_marker_timeout" : "release_marker_pending",
       );
+    }
+    if (deployment === "failed") {
+      return update("failed", "cloudflare_build_failed");
     }
     if (timedOut && activeStatuses.has(currentPublication.status)) {
       return update("failed", "deployment_signal_timeout");
@@ -1146,7 +1175,10 @@ export function createContentPublicationApplication({
       async refresh(publicationId: ContentPublicationId) {
         return refreshPublication(publicationId);
       },
-      async retryDeployment(publicationId: ContentPublicationId) {
+      async retryDeployment(
+        publicationId: ContentPublicationId,
+        requestedBy: HumanMembershipId,
+      ) {
         const publication = await store.findPublication(publicationId);
         if (
           publication !== null &&
@@ -1165,13 +1197,11 @@ export function createContentPublicationApplication({
             "deployment_retry_not_available",
           );
         }
-        const approval = await store.findApproval(publication.approvalId);
-        if (
-          approval === null ||
-          approval.fingerprint.value !== publication.fingerprint ||
-          approval.fingerprint.channelConfigurationHash !==
-            (await publisher.getChannelConfigurationHash())
-        ) {
+        const { approval } = await requireApproval(
+          publication.approvalId,
+          requestedBy,
+        );
+        if (approval.fingerprint.value !== publication.fingerprint) {
           throw new ContentApprovalInvalidError("approval_stale");
         }
         if ((await publisher.getProductionHead()) !== publication.commitSha) {
@@ -1186,11 +1216,12 @@ export function createContentPublicationApplication({
           );
         }
         const retryRequestedAt = now();
+        const dispatchToken = `retry-dispatch:${crypto.randomUUID()}`;
         const dispatching = await store.updatePublication(
           nextPublication(publication, {
             status: "committed",
             detail: "deployment_retry_dispatching",
-            deploymentId: null,
+            deploymentId: dispatchToken,
             deploymentRequestedAt: retryRequestedAt,
             updatedAt: retryRequestedAt,
           }),
@@ -1201,7 +1232,8 @@ export function createContentPublicationApplication({
         );
         if (
           dispatching.status !== "committed" ||
-          dispatching.detail !== "deployment_retry_dispatching"
+          dispatching.detail !== "deployment_retry_dispatching" ||
+          dispatching.deploymentId !== dispatchToken
         ) {
           return dispatching;
         }

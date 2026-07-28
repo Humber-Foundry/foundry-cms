@@ -294,7 +294,10 @@ describe("content publication endpoint", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.verifyMutation).toHaveBeenCalled();
-    expect(mocks.retryDeployment).toHaveBeenCalledWith(existing.id);
+    expect(mocks.retryDeployment).toHaveBeenCalledWith(
+      existing.id,
+      "membership-editor",
+    );
   });
 
   it("does not expose a workspace publication to an unauthorized actor", async () => {

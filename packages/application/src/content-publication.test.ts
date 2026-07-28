@@ -857,7 +857,7 @@ describe("content publication application", () => {
     vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
 
     await expect(
-      app.commands.retryDeployment(publication.id),
+      app.commands.retryDeployment(publication.id, membershipId),
     ).resolves.toEqual(
       expect.objectContaining({
         status: "committed",
@@ -882,6 +882,54 @@ describe("content publication application", () => {
     );
   });
 
+  it("dispatches only one exact build when deployment retries race", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-concurrent-deployment-retries",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    let headReads = 0;
+    let releaseHeadReads: (() => void) | undefined;
+    const headReadBarrier = new Promise<void>((resolve) => {
+      releaseHeadReads = resolve;
+    });
+    vi.mocked(publisher.getProductionHead).mockImplementation(async () => {
+      headReads += 1;
+      if (headReads === 2) {
+        releaseHeadReads?.();
+      }
+      await headReadBarrier;
+      return "c".repeat(40);
+    });
+
+    const results = await Promise.all([
+      app.commands.retryDeployment(publication.id, membershipId),
+      app.commands.retryDeployment(publication.id, membershipId),
+    ]);
+
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "committed",
+          commitSha: "c".repeat(40),
+          detail: "deployment_retry_requested",
+          deploymentId: "build-123",
+        }),
+        expect.objectContaining({
+          status: "committed",
+          commitSha: "c".repeat(40),
+          detail: "deployment_retry_dispatching",
+          deploymentId: expect.stringMatching(/^retry-dispatch:/u),
+        }),
+      ]),
+    );
+  });
+
   it("does not poll the failed build while an exact retry is dispatching", async () => {
     let resolveRetry:
       | ((value: { state: "requested"; deploymentId: string }) => void)
@@ -902,7 +950,7 @@ describe("content publication application", () => {
     getDeploymentStatus.mockResolvedValue("failed");
     await app.commands.refresh(publication.id);
     vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
-    const retry = app.commands.retryDeployment(publication.id);
+    const retry = app.commands.retryDeployment(publication.id, membershipId);
     await vi.waitFor(() => {
       expect(publisher.retryDeployment).toHaveBeenCalled();
     });
@@ -952,8 +1000,9 @@ describe("content publication application", () => {
     getDeploymentStatus.mockResolvedValue("failed");
     await app.commands.refresh(publication.id);
     vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
     currentTime = "2026-07-27T10:03:00.000Z";
-    const retry = app.commands.retryDeployment(publication.id);
+    const retry = app.commands.retryDeployment(publication.id, membershipId);
     await vi.waitFor(() => {
       expect(publisher.retryDeployment).toHaveBeenCalled();
     });
@@ -996,9 +1045,105 @@ describe("content publication application", () => {
     );
 
     await expect(
-      app.commands.retryDeployment(publication.id),
+      app.commands.retryDeployment(publication.id, membershipId),
     ).rejects.toEqual(new ContentApprovalInvalidError("approval_stale"));
     expect(publisher.retryDeployment).not.toHaveBeenCalled();
+  });
+
+  it("rejects deployment retry after a newer revision supersedes approval", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-superseded-revision",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    await revisionApplication.application.commands.save({
+      actorId: editorId,
+      workspaceId,
+      schemaVersion: "1.0.0",
+      baseRevision: 1,
+      edits: [{ path: "section_hero.title", value: "Newer headline" }],
+      idempotencyKey: "save-publish-workspace-0002",
+    });
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_not_current"));
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
+  });
+
+  it("reconciles an ambiguous deployment retry from the exact live marker", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-ambiguous-live",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    vi.mocked(publisher.retryDeployment).mockResolvedValue({
+      state: "unknown",
+    });
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "unknown",
+        detail: "deployment_retry_result_unknown",
+      }),
+    );
+    isReleaseLive.mockResolvedValue(true);
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "verified-live",
+        detail: null,
+      }),
+    );
+    expect(isReleaseLive).toHaveBeenLastCalledWith({
+      commitSha: "c".repeat(40),
+      contentHash: approval.fingerprint.contentHash,
+      schemaVersion: approval.fingerprint.schemaVersion,
+    });
+  });
+
+  it("keeps a deployed publication in marker verification after a later failed signal", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-deployed-later-failed-signal",
+    });
+    getDeploymentStatus.mockResolvedValueOnce("deployed");
+    isReleaseLive.mockResolvedValueOnce(false);
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "deployed",
+        detail: "release_marker_pending",
+      }),
+    );
+    getDeploymentStatus.mockResolvedValueOnce("failed");
+    isReleaseLive.mockResolvedValueOnce(true);
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "verified-live",
+        detail: null,
+      }),
+    );
+    expect(isReleaseLive).toHaveBeenLastCalledWith({
+      commitSha: "c".repeat(40),
+      contentHash: approval.fingerprint.contentHash,
+      schemaVersion: approval.fingerprint.schemaVersion,
+    });
   });
 
   it("times out a deployment whose exact release marker never appears", async () => {
