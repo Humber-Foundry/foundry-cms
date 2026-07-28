@@ -140,10 +140,11 @@ Set these non-secret values for each installation:
 - `FOUNDRY_PRODUCTION_BASE` (a bootstrap fallback Git object ID)
 
 Store `FOUNDRY_GITHUB_PRIVATE_KEY` and `FOUNDRY_CLOUDFLARE_API_TOKEN` only as
-Worker secrets. The Cloudflare token needs the narrow Workers Builds
-Configuration Edit permission used to trigger an exact manual build. Never put
-either secret, the GitHub App JWT, or an installation token in D1, logs, build
-output, or client bundles.
+Worker secrets. The Cloudflare token needs the narrow account-scoped Workers CI
+Edit permission (called Workers CI Write in Cloudflare's newer permission
+vocabulary) used to trigger and inspect an exact manual build. Never put either
+secret, the GitHub App JWT, or an installation token in D1, logs, build output,
+or client bundles.
 
 Workers Builds must expose `WORKERS_CI_COMMIT_SHA` during the build. Next
 embeds it as `FOUNDRY_RELEASE_COMMIT_SHA` in the release marker. A build without
