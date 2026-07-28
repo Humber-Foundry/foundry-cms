@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  referenceSiteDefinition,
+  type SiteDefinition,
+} from "@foundry/site-definition";
 
 import {
   contentEditorReducer,
@@ -28,6 +31,105 @@ describe("content editor history", () => {
     expect(redone.workingDefinition.home.sections[0]).toEqual(
       expect.objectContaining({ title: "Working headline" }),
     );
+  });
+
+  it("undoes visual composition as one editor action", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const definition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections].reverse(),
+      },
+    } as SiteDefinition;
+    const composed = contentEditorReducer(initial, {
+      type: "compose",
+      definition,
+    });
+    const undone = contentEditorReducer(composed, { type: "undo" });
+
+    expect(composed.workingDefinition.home.sections[0]?.id).toBe(
+      "section_contact",
+    );
+    expect(composed.projectionVersion).toBe(initial.projectionVersion);
+    expect(undone.projectionVersion).toBe(initial.projectionVersion + 1);
+    expect(undone.workingDefinition).toEqual(referenceSiteDefinition);
+    expect(undone.persistedRevision).toBe(4);
+  });
+
+  it("marks a semantically restored composition as saved", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const changed = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections].reverse(),
+      },
+    } as SiteDefinition;
+    const dirty = contentEditorReducer(initial, {
+      type: "compose",
+      definition: changed,
+    });
+    const restored = contentEditorReducer(dirty, {
+      type: "compose",
+      definition: structuredClone(referenceSiteDefinition),
+    });
+
+    expect(restored.status).toBe("saved");
+  });
+
+  it("marks semantically persisted clones as saved after undo and redo", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const cloned = contentEditorReducer(initial, {
+      type: "compose",
+      definition: structuredClone(referenceSiteDefinition),
+    });
+    const edited = contentEditorReducer(cloned, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Working headline",
+    });
+    const undoneToClone = contentEditorReducer(edited, { type: "undo" });
+    const undoneToOriginal = contentEditorReducer(undoneToClone, {
+      type: "undo",
+    });
+    const redoneToClone = contentEditorReducer(undoneToOriginal, {
+      type: "redo",
+    });
+
+    expect(undoneToClone.status).toBe("saved");
+    expect(redoneToClone.status).toBe("saved");
+  });
+
+  it("refreshes the Puck projection for externally recovered composition", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const recovered = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections].reverse(),
+      },
+    } as SiteDefinition;
+
+    const next = contentEditorReducer(initial, {
+      type: "compose",
+      definition: recovered,
+      refreshProjection: true,
+    });
+
+    expect(next.projectionVersion).toBe(initial.projectionVersion + 1);
   });
 
   it("can undo after save while preserving the newly persisted revision", () => {

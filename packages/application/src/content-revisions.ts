@@ -1,5 +1,7 @@
 import {
+  applyPageComposition,
   applySiteDefinitionEdits,
+  type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
@@ -62,6 +64,7 @@ export type SaveContentRevisionCommand = Readonly<{
   schemaVersion: SiteDefinition["schemaVersion"];
   baseRevision: number;
   edits: ReadonlyArray<SiteDefinitionEdit>;
+  composition?: PageComposition;
   idempotencyKey: string;
 }>;
 
@@ -434,6 +437,9 @@ export function createContentRevisionApplication({
           schemaVersion: command.schemaVersion,
           baseRevision: command.baseRevision,
           edits: command.edits,
+          ...(command.composition === undefined
+            ? {}
+            : { composition: command.composition }),
         });
         const replay = await store.replay(
           command.idempotencyKey,
@@ -469,7 +475,17 @@ export function createContentRevisionApplication({
         ) {
           throw new ContentRevisionStaleError();
         }
-        const edited = applySiteDefinitionEdits(base.definition, command.edits);
+        const composed =
+          command.composition === undefined
+            ? { ok: true as const, definition: base.definition }
+            : applyPageComposition(base.definition, command.composition);
+        if (!composed.ok) {
+          throw new ContentRevisionValidationError(composed.errors);
+        }
+        const edited = applySiteDefinitionEdits(
+          composed.definition,
+          command.edits,
+        );
         if (!edited.ok) {
           throw new ContentRevisionValidationError(edited.errors);
         }

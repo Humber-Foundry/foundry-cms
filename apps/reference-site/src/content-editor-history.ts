@@ -9,12 +9,18 @@ export type ContentEditorState = Readonly<{
   workingDefinition: SiteDefinition;
   past: ReadonlyArray<SiteDefinition>;
   future: ReadonlyArray<SiteDefinition>;
+  projectionVersion: number;
   status: "saved" | "dirty" | "saving" | "conflict" | "stale";
   errors: Readonly<Record<string, string>>;
 }>;
 
 export type ContentEditorAction =
   | Readonly<{ type: "edit"; path: string; value: string }>
+  | Readonly<{
+      type: "compose";
+      definition: SiteDefinition;
+      refreshProjection?: boolean;
+    }>
   | Readonly<{ type: "undo" }>
   | Readonly<{ type: "redo" }>
   | Readonly<{ type: "saving" }>
@@ -45,9 +51,17 @@ export function createContentEditorState({
     workingDefinition: definition,
     past: [],
     future: [],
+    projectionVersion: 0,
     status: stale ? "stale" : "saved",
     errors: {},
   };
+}
+
+function definitionsAreEqual(
+  first: SiteDefinition,
+  second: SiteDefinition,
+): boolean {
+  return JSON.stringify(first) === JSON.stringify(second);
 }
 
 export function contentEditorReducer(
@@ -71,10 +85,29 @@ export function contentEditorReducer(
         workingDefinition,
         past: [...state.past, state.workingDefinition],
         future: [],
+        projectionVersion: state.projectionVersion + 1,
         status: "dirty",
         errors: { ...state.errors, [action.path]: "" },
       };
     }
+    case "compose":
+      return {
+        ...state,
+        workingDefinition: action.definition,
+        past: [...state.past, state.workingDefinition],
+        future: [],
+        projectionVersion:
+          state.projectionVersion +
+          (action.refreshProjection ? 1 : 0),
+        status:
+          definitionsAreEqual(
+            action.definition,
+            state.persistedDefinition,
+          )
+            ? "saved"
+            : "dirty",
+        errors: {},
+      };
     case "undo": {
       const workingDefinition = state.past.at(-1);
       if (workingDefinition === undefined) {
@@ -85,8 +118,14 @@ export function contentEditorReducer(
         workingDefinition,
         past: state.past.slice(0, -1),
         future: [state.workingDefinition, ...state.future],
+        projectionVersion: state.projectionVersion + 1,
         status:
-          workingDefinition === state.persistedDefinition ? "saved" : "dirty",
+          definitionsAreEqual(
+            workingDefinition,
+            state.persistedDefinition,
+          )
+            ? "saved"
+            : "dirty",
         errors: {},
       };
     }
@@ -100,8 +139,14 @@ export function contentEditorReducer(
         workingDefinition,
         past: [...state.past, state.workingDefinition],
         future,
+        projectionVersion: state.projectionVersion + 1,
         status:
-          workingDefinition === state.persistedDefinition ? "saved" : "dirty",
+          definitionsAreEqual(
+            workingDefinition,
+            state.persistedDefinition,
+          )
+            ? "saved"
+            : "dirty",
         errors: {},
       };
     }
@@ -113,6 +158,7 @@ export function contentEditorReducer(
         persistedDefinition: action.definition,
         persistedRevision: action.revision,
         workingDefinition: action.definition,
+        projectionVersion: state.projectionVersion + 1,
         status: "saved",
         errors: {},
       };

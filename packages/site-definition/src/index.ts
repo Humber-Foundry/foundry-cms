@@ -282,3 +282,4 @@ export const referenceSiteDefinition = {
 } as SiteDefinition;
 
 export * from "./editable-fields";
+export * from "./component-composition";
