@@ -131,74 +131,26 @@ describe("production deployment baseline provisioning", () => {
   });
 
   it("acquires, verifies, and releases the GitHub branch lock", async () => {
+    const ruleset = {
+      id: 42,
+      name: "Foundry production baseline lock: main",
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+        ref_name: {
+          include: ["refs/heads/main"],
+          exclude: [],
+        },
+      },
+      rules: [{ type: "update" }],
+    };
     const fetchImplementation = vi
       .fn()
-      .mockResolvedValueOnce(
-        json({
-          data: {
-            repository: {
-              ref: {
-                branchProtectionRule: {
-                  id: "rule-id",
-                  lockBranch: false,
-                },
-              },
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          data: {
-            updateBranchProtectionRule: {
-              branchProtectionRule: {
-                id: "rule-id",
-                lockBranch: true,
-              },
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          data: {
-            repository: {
-              ref: {
-                branchProtectionRule: {
-                  id: "rule-id",
-                  lockBranch: true,
-                },
-              },
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          data: {
-            updateBranchProtectionRule: {
-              branchProtectionRule: {
-                id: "rule-id",
-                lockBranch: false,
-              },
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          data: {
-            repository: {
-              ref: {
-                branchProtectionRule: {
-                  id: "rule-id",
-                  lockBranch: false,
-                },
-              },
-            },
-          },
-        }),
-      );
+      .mockResolvedValueOnce(json({ id: 42 }, 201))
+      .mockResolvedValueOnce(json(ruleset))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(json({ message: "Not Found" }, 404));
 
     const release = await acquireProductionBranchLock({
       environment: {
@@ -211,40 +163,69 @@ describe("production deployment baseline provisioning", () => {
     });
     await release();
 
-    expect(fetchImplementation).toHaveBeenCalledTimes(5);
-    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
-      "https://api.github.com/graphql",
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/owner/repo/rulesets",
     );
     expect(
-      JSON.parse(fetchImplementation.mock.calls[1]?.[1]?.body),
-    ).toEqual(
-      expect.objectContaining({
-        variables: {
-          input: {
-            branchProtectionRuleId: "rule-id",
-            lockBranch: true,
-          },
+      JSON.parse(fetchImplementation.mock.calls[0]?.[1]?.body),
+    ).toEqual({
+      name: "Foundry production baseline lock: main",
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+        ref_name: {
+          include: ["refs/heads/main"],
+          exclude: [],
         },
-      }),
-    );
-    expect(
-      JSON.parse(fetchImplementation.mock.calls[3]?.[1]?.body),
-    ).toEqual(
-      expect.objectContaining({
-        variables: {
-          input: {
-            branchProtectionRuleId: "rule-id",
-            lockBranch: false,
+      },
+      rules: [{ type: "update" }],
+    });
+    expect(fetchImplementation.mock.calls.map(([url, init]) => [
+      url,
+      init?.method,
+    ])).toEqual([
+      ["https://api.github.com/repos/owner/repo/rulesets", "POST"],
+      ["https://api.github.com/repos/owner/repo/rulesets/42", "GET"],
+      ["https://api.github.com/repos/owner/repo/rulesets/42", "DELETE"],
+      ["https://api.github.com/repos/owner/repo/rulesets/42", "GET"],
+    ]);
+  });
+
+  it("fails closed when the temporary ruleset has a bypass actor", async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(json({ id: 42 }, 201))
+      .mockResolvedValueOnce(
+        json({
+          id: 42,
+          name: "Foundry production baseline lock: main",
+          target: "branch",
+          enforcement: "active",
+          bypass_actors: [{ actor_id: 1, actor_type: "OrganizationAdmin" }],
+          conditions: {
+            ref_name: {
+              include: ["refs/heads/main"],
+              exclude: [],
+            },
           },
+          rules: [{ type: "update" }],
+        }),
+      );
+
+    await expect(
+      acquireProductionBranchLock({
+        environment: {
+          FOUNDRY_GITHUB_OWNER: "owner",
+          FOUNDRY_GITHUB_REPOSITORY: "repo",
+          FOUNDRY_PRODUCTION_BRANCH: "main",
+          FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN: "token",
         },
+        fetchImplementation,
       }),
-    );
-    expect(
-      fetchImplementation.mock.calls.every(
-        ([url, init]) =>
-          url === "https://api.github.com/graphql" &&
-          init?.method === "POST",
-      ),
-    ).toBe(true);
+    ).rejects.toThrow("production_baseline_branch_lock_failed");
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
   });
 });

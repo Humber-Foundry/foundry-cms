@@ -40,110 +40,26 @@ function githubHeaders(token) {
   };
 }
 
-const branchProtectionQuery = `
-  query FoundryProductionBranchProtection(
-    $owner: String!
-    $repository: String!
-    $qualifiedName: String!
-  ) {
-    repository(owner: $owner, name: $repository) {
-      ref(qualifiedName: $qualifiedName) {
-        branchProtectionRule {
-          id
-          lockBranch
-        }
-      }
-    }
-  }
-`;
-
-const updateBranchLockMutation = `
-  mutation FoundryUpdateProductionBranchLock(
-    $input: UpdateBranchProtectionRuleInput!
-  ) {
-    updateBranchProtectionRule(input: $input) {
-      branchProtectionRule {
-        id
-        lockBranch
-      }
-    }
-  }
-`;
-
-async function githubGraphql({
-  fetchImplementation,
-  headers,
-  query,
-  variables,
-}) {
-  const response = await fetchImplementation("https://api.github.com/graphql", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  const payload = await response.json().catch(() => null);
-  if (
-    !response.ok ||
-    typeof payload !== "object" ||
-    payload === null ||
-    !("data" in payload) ||
-    payload.data === null ||
-    ("errors" in payload &&
-      Array.isArray(payload.errors) &&
-      payload.errors.length > 0)
-  ) {
-    throw new Error("production_baseline_branch_lock_unavailable");
-  }
-  return payload.data;
-}
-
-async function readBranchLock({
-  fetchImplementation,
-  headers,
-  owner,
-  qualifiedName,
-  repository,
-}) {
-  const data = await githubGraphql({
-    fetchImplementation,
-    headers,
-    query: branchProtectionQuery,
-    variables: { owner, repository, qualifiedName },
-  });
-  const protection = data.repository?.ref?.branchProtectionRule;
-  if (
-    typeof protection !== "object" ||
-    protection === null ||
-    typeof protection.id !== "string" ||
-    protection.id.length === 0 ||
-    typeof protection.lockBranch !== "boolean"
-  ) {
-    throw new Error("production_baseline_branch_lock_invalid");
-  }
-  return {
-    id: protection.id,
-    locked: protection.lockBranch,
-  };
-}
-
-async function updateBranchLock({
-  fetchImplementation,
-  headers,
-  lockBranch,
-  ruleId,
-}) {
-  await githubGraphql({
-    fetchImplementation,
-    headers,
-    query: updateBranchLockMutation,
-    variables: {
-      input: {
-        branchProtectionRuleId: ruleId,
-        lockBranch,
-      },
-    },
-  });
+function isExactProductionLockRuleset(ruleset, { name, qualifiedName }) {
+  return (
+    typeof ruleset === "object" &&
+    ruleset !== null &&
+    Number.isSafeInteger(ruleset.id) &&
+    ruleset.id > 0 &&
+    ruleset.name === name &&
+    ruleset.target === "branch" &&
+    ruleset.enforcement === "active" &&
+    Array.isArray(ruleset.bypass_actors) &&
+    ruleset.bypass_actors.length === 0 &&
+    Array.isArray(ruleset.conditions?.ref_name?.include) &&
+    ruleset.conditions.ref_name.include.length === 1 &&
+    ruleset.conditions.ref_name.include[0] === qualifiedName &&
+    Array.isArray(ruleset.conditions.ref_name.exclude) &&
+    ruleset.conditions.ref_name.exclude.length === 0 &&
+    Array.isArray(ruleset.rules) &&
+    ruleset.rules.length === 1 &&
+    ruleset.rules[0]?.type === "update"
+  );
 }
 
 export async function acquireProductionBranchLock({
@@ -169,48 +85,68 @@ export async function acquireProductionBranchLock({
   }
   const headers = githubHeaders(token);
   const qualifiedName = `refs/heads/${branch}`;
-  const initial = await readBranchLock({
-    fetchImplementation,
-    headers,
+  const name = `Foundry production baseline lock: ${branch}`;
+  const rulesetsUrl = `https://api.github.com/repos/${encodeURIComponent(
     owner,
-    qualifiedName,
-    repository,
+  )}/${encodeURIComponent(repository)}/rulesets`;
+  const createResponse = await fetchImplementation(rulesetsUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      name,
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+        ref_name: {
+          include: [qualifiedName],
+          exclude: [],
+        },
+      },
+      rules: [{ type: "update" }],
+    }),
+    signal: AbortSignal.timeout(30_000),
   });
-  if (initial.locked) {
-    throw new Error("production_baseline_branch_already_locked");
+  const created = await createResponse.json().catch(() => null);
+  if (
+    createResponse.status !== 201 ||
+    typeof created !== "object" ||
+    created === null ||
+    !Number.isSafeInteger(created.id) ||
+    created.id <= 0
+  ) {
+    throw new Error("production_baseline_branch_lock_unavailable");
   }
-  await updateBranchLock({
-    fetchImplementation,
+  const rulesetUrl = `${rulesetsUrl}/${created.id}`;
+  const verifyResponse = await fetchImplementation(rulesetUrl, {
+    method: "GET",
     headers,
-    lockBranch: true,
-    ruleId: initial.id,
+    signal: AbortSignal.timeout(30_000),
   });
-  const locked = await readBranchLock({
-    fetchImplementation,
-    headers,
-    owner,
-    qualifiedName,
-    repository,
-  });
-  if (locked.id !== initial.id || !locked.locked) {
+  const verified = await verifyResponse.json().catch(() => null);
+  if (
+    !verifyResponse.ok ||
+    !isExactProductionLockRuleset(verified, { name, qualifiedName }) ||
+    verified.id !== created.id
+  ) {
     throw new Error("production_baseline_branch_lock_failed");
   }
 
   return async function releaseBranchLock() {
-    await updateBranchLock({
-      fetchImplementation,
+    const deleteResponse = await fetchImplementation(rulesetUrl, {
+      method: "DELETE",
       headers,
-      lockBranch: false,
-      ruleId: initial.id,
+      signal: AbortSignal.timeout(30_000),
     });
-    const unlocked = await readBranchLock({
-      fetchImplementation,
+    if (deleteResponse.status !== 204) {
+      throw new Error("production_baseline_branch_unlock_failed");
+    }
+    const absentResponse = await fetchImplementation(rulesetUrl, {
+      method: "GET",
       headers,
-      owner,
-      qualifiedName,
-      repository,
+      signal: AbortSignal.timeout(30_000),
     });
-    if (unlocked.id !== initial.id || unlocked.locked) {
+    if (absentResponse.status !== 404) {
       throw new Error("production_baseline_branch_unlock_failed");
     }
   };
