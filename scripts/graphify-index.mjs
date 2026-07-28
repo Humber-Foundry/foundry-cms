@@ -31,6 +31,7 @@ const remoteRefreshLeaseMs = 4 * 60 * 60 * 1_000;
 const recentSnapshotRetention = 20;
 const snapshotGcGraceMs = 24 * 60 * 60 * 1_000;
 const refreshLockRef = "refs/graphify/refresh-lock";
+const maximumRefreshLockRetries = 20;
 
 function fail(message) {
   throw new Error(message);
@@ -248,7 +249,13 @@ function compareAndSwapRefreshLock(
       encoding: "utf8",
     },
   );
-  return !result.error && result.status === 0;
+  return {
+    updated: !result.error && result.status === 0,
+    error:
+      result.error?.message ||
+      result.stderr?.trim() ||
+      `git update-ref exited with status ${result.status}`,
+  };
 }
 
 function acquireRefreshLock(repositoryRoot) {
@@ -260,11 +267,26 @@ function acquireRefreshLock(repositoryRoot) {
     startedAt: new Date().toISOString(),
   };
   const ownerOid = writeLockOwner(repositoryRoot, owner);
+  let failedAttempts = 0;
+  let lastError = "";
   while (true) {
     const existing = currentRefreshLock(repositoryRoot);
     if (existing === null) {
-      if (compareAndSwapRefreshLock(repositoryRoot, ownerOid, null)) {
+      const acquisition = compareAndSwapRefreshLock(
+        repositoryRoot,
+        ownerOid,
+        null,
+      );
+      if (acquisition.updated) {
         break;
+      }
+      failedAttempts += 1;
+      lastError = acquisition.error;
+      if (failedAttempts >= maximumRefreshLockRetries) {
+        fail(
+          "Could not atomically acquire the Graphify refresh lock: " +
+            lastError,
+        );
       }
       continue;
     }
@@ -276,22 +298,37 @@ function acquireRefreshLock(repositoryRoot) {
     if (leaseActive) {
       fail("Another Graphify refresh is already running.");
     }
-    if (
-      compareAndSwapRefreshLock(
-        repositoryRoot,
-        ownerOid,
-        existing.oid,
-      )
-    ) {
+    const takeover = compareAndSwapRefreshLock(
+      repositoryRoot,
+      ownerOid,
+      existing.oid,
+    );
+    if (takeover.updated) {
       break;
+    }
+    failedAttempts += 1;
+    lastError = takeover.error;
+    if (failedAttempts >= maximumRefreshLockRetries) {
+      fail(
+        "Could not atomically reclaim the Graphify refresh lock: " +
+          lastError,
+      );
     }
   }
   return () => {
-    spawnSync(
+    const result = spawnSync(
       "git",
       ["update-ref", "-d", refreshLockRef, ownerOid],
       { cwd: repositoryRoot, encoding: "utf8" },
     );
+    if (result.error || result.status !== 0) {
+      fail(
+        "Could not release the Graphify refresh lock: " +
+          (result.error?.message ||
+            result.stderr?.trim() ||
+            `git update-ref exited with status ${result.status}`),
+      );
+    }
   };
 }
 

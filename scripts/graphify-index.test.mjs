@@ -884,6 +884,25 @@ describe("commit-pinned Graphify index", () => {
     expect(getRefreshLock(root)).toBeNull();
   });
 
+  it("fails closed when Git cannot update the refresh lock ref", () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const lockPath = resolve(
+      root,
+      git(root, "rev-parse", "--git-path", `${refreshLockRef}.lock`),
+    );
+    mkdirSync(resolve(lockPath, ".."), { recursive: true });
+    writeFileSync(lockPath, "simulated stale Git ref lock\n");
+
+    const result = runIndex(root, ["refresh"], { cache });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain(
+      "Could not atomically acquire the Graphify refresh lock",
+    );
+    expect(result.output).toContain("cannot lock ref");
+  });
+
   it("atomically serializes concurrent stale-lock reclamation", async () => {
     const { root } = createRepository();
     const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
