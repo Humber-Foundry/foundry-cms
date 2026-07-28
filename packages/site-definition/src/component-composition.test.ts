@@ -471,6 +471,22 @@ describe("page component composition", () => {
         ],
       },
     },
+    ...[
+      ["a variation-selector-only paragraph", "\uFE0F"],
+      ["a grapheme-joiner-only paragraph", "\u034F"],
+    ].map(([name, text]) => ({
+      name,
+      body: {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text, marks: [] }],
+          },
+        ],
+      },
+    })),
   ])("rejects required rich text with $name", ({ body }) => {
     const composition = structuredClone(
       toPageComposition(referenceSiteDefinition),

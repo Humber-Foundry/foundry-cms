@@ -533,7 +533,12 @@ function inlineChildrenHaveVisibleText(
 ): boolean {
   return children.some(
     (child) =>
-      child.text.replace(/[\p{Cc}\p{Cf}]/gu, "").trim() !== "",
+      child.text
+        .replace(
+          /[\p{Cc}\p{Default_Ignorable_Code_Point}]/gu,
+          "",
+        )
+        .trim() !== "",
   );
 }
 

@@ -647,7 +647,7 @@ describe("rich text contract", () => {
     );
   });
 
-  it.each(["\u200B", "\u2060", "\u0007"])(
+  it.each(["\u200B", "\u2060", "\uFE0F", "\u034F", "\u0007"])(
     "does not count format/control-only text as visible: %j",
     (text) => {
       expect(

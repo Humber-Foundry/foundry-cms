@@ -556,6 +556,25 @@ describe("reference Site Definition", () => {
         ],
       },
     ],
+    ...[
+      ["variation selector", "\uFE0F"],
+      ["combining grapheme joiner", "\u034F"],
+    ].map(
+      ([name, text]) =>
+        [
+          name,
+          {
+            version: "1.0.0",
+            type: "document",
+            children: [
+              {
+                type: "paragraph",
+                children: [{ type: "text", text, marks: [] }],
+              },
+            ],
+          },
+        ] as const,
+    ),
   ] satisfies ReadonlyArray<readonly [string, RichTextDocument]>)(
     "requires visible text instead of nonempty serialized JSON for $name",
     (_name, body) => {
