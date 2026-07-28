@@ -164,6 +164,27 @@ describe("page component composition", () => {
     });
   });
 
+  it("accepts component identifiers allowed by the published Site Definition schema", () => {
+    const hero = referenceSiteDefinition.home.sections[0]!;
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          { ...hero, id: "hero" },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    };
+
+    expect(
+      applyPageComposition(definition, toPageComposition(definition)),
+    ).toEqual({
+      ok: true,
+      definition,
+    });
+  });
+
   it("derives inserted Hero links from the active Site Definition", () => {
     const proof = referenceSiteDefinition.home.sections[2];
     const clientDefinition = {
@@ -301,6 +322,51 @@ describe("page component composition", () => {
       ok: false,
       errors: {
         "section_contact.id":
+          "This component is referenced by protected page scaffolding.",
+      },
+    });
+  });
+
+  it("protects schema-valid component IDs referenced by fragment links", () => {
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      site: {
+        ...referenceSiteDefinition.site,
+        navigation: referenceSiteDefinition.site.navigation.map((link) =>
+          link.href === "#section_contact"
+            ? { ...link, href: "#contact" }
+            : link,
+        ),
+      },
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: referenceSiteDefinition.home.sections.map((section) => {
+          if (section.type === "hero") {
+            return {
+              ...section,
+              primaryAction: {
+                ...section.primaryAction,
+                href: "#contact",
+              },
+            };
+          }
+          return section.type === "callToAction"
+            ? { ...section, id: "contact" }
+            : section;
+        }),
+      },
+    };
+    const composition = {
+      ...toPageComposition(definition),
+      components: definition.home.sections.filter(
+        ({ id }) => id !== "contact",
+      ),
+    };
+
+    expect(applyPageComposition(definition, composition)).toEqual({
+      ok: false,
+      errors: {
+        "contact.id":
           "This component is referenced by protected page scaffolding.",
       },
     });

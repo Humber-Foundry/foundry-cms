@@ -364,7 +364,7 @@ export function referencedPageComponentIds(
       if (
         key === "href" &&
         typeof nested === "string" &&
-        /^#section_[a-z0-9_]+$/u.test(nested)
+        /^#[a-z][a-z0-9_]*$/u.test(nested)
       ) {
         referenced.add(nested.slice(1));
       } else {
@@ -580,7 +580,7 @@ export function applyPageComposition(
     }
     const id =
       typeof candidate.id === "string" ? candidate.id : "component";
-    if (!/^section_[a-z0-9_]+$/u.test(id)) {
+    if (!/^[a-z][a-z0-9_]*$/u.test(id)) {
       errors[`${id}.id`] = "Use a stable section identifier.";
       continue;
     }

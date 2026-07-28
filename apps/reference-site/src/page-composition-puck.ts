@@ -40,7 +40,7 @@ function stableComponentId(
 ): string | null {
   if (
     typeof candidate === "string" &&
-    /^section_[a-z0-9_]+$/u.test(candidate)
+    /^[a-z][a-z0-9_]*$/u.test(candidate)
   ) {
     return candidate;
   }

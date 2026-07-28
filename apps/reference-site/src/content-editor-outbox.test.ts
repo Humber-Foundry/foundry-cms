@@ -241,6 +241,42 @@ describe("content editor outbox controller", () => {
     ]);
   });
 
+  it("preserves a conflicting orphaned tab record for later resolution", async () => {
+    const { driver, records } = memoryDriver();
+    const first = createContentEditorOutboxController(
+      "workspace_conflicting_orphans",
+      driver,
+      "tab_first",
+    );
+    const second = createContentEditorOutboxController(
+      "workspace_conflicting_orphans",
+      driver,
+      "tab_second",
+    );
+    const reopened = createContentEditorOutboxController(
+      "workspace_conflicting_orphans",
+      driver,
+      "tab_reopened",
+    );
+    await first.snapshot(2, [edit]);
+    await second.snapshot(2, [{ ...edit, value: "Second tab value" }]);
+
+    await expect(reopened.read(async () => false)).resolves.toEqual({
+      workspaceId: "workspace_conflicting_orphans",
+      baseRevision: 2,
+      edits: [edit],
+    });
+    expect(
+      records.get("workspace_conflicting_orphans::tab_reopened")?.edits,
+    ).toEqual([edit]);
+    expect(
+      records.get("workspace_conflicting_orphans::tab_second")?.edits,
+    ).toEqual([{ ...edit, value: "Second tab value" }]);
+    expect(records.has("workspace_conflicting_orphans::tab_first")).toBe(
+      false,
+    );
+  });
+
   it("replays one orphaned attempt without discarding the others", async () => {
     const { driver, records } = memoryDriver();
     const first = createContentEditorOutboxController(

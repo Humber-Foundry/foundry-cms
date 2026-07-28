@@ -24,6 +24,27 @@ describe("Puck page-composition adapter", () => {
     ]);
   });
 
+  it("preserves component identifiers allowed by the published schema", () => {
+    const hero = referenceSiteDefinition.home.sections[0]!;
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          { ...hero, id: "hero" },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    };
+
+    const result = puckDataToDefinition(
+      definition,
+      definitionToPuckData(definition),
+    );
+
+    expect(result).toEqual({ ok: true, definition });
+  });
+
   it("maps a Puck insert, reorder, duplicate, remove, and field change to a valid definition", () => {
     const data = structuredClone(
       definitionToPuckData(referenceSiteDefinition),

@@ -316,8 +316,40 @@ export function createContentEditorOutboxController(
       const attempted = recoverable.filter(
         ({ attempt }) => attempt !== undefined,
       );
-      const selected =
-        attempted.length === 0 ? recoverable : [attempted.at(-1)!];
+      const selected: ContentEditorOutboxRecord[] =
+        attempted.length === 0 ? [] : [attempted.at(-1)!];
+      if (attempted.length === 0) {
+        const ownCandidate = recoverable.find(
+          ({ workspaceId: id }) => id === storageId,
+        );
+        const candidates =
+          ownCandidate === undefined
+            ? recoverable
+            : [
+                ownCandidate,
+                ...recoverable.filter(
+                  ({ workspaceId: id }) => id !== storageId,
+                ),
+              ];
+        const claimedEdits = new Map<string, StaleRecoveryEdit>();
+        for (const candidate of candidates) {
+          const conflicts = candidate.edits.some((edit) => {
+            const claimed = claimedEdits.get(edit.path);
+            return (
+              claimed !== undefined &&
+              (claimed.baseValue !== edit.baseValue ||
+                claimed.value !== edit.value)
+            );
+          });
+          if (conflicts) {
+            continue;
+          }
+          selected.push(candidate);
+          candidate.edits.forEach((edit) =>
+            claimedEdits.set(edit.path, edit),
+          );
+        }
+      }
       const editsByPath = new Map<string, StaleRecoveryEdit>();
       for (const candidate of selected) {
         for (const edit of candidate.edits) {
