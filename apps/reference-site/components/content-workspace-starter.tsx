@@ -2,9 +2,16 @@
 
 import { useRef, useState } from "react";
 
+import type { ContentRevision } from "@foundry/application";
+
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 
 type CreatedWorkspace = Readonly<{ workspaceId: string }>;
+type PreservedContentRevision = Readonly<{
+  workspaceId: ContentRevision["workspaceId"];
+  revision: ContentRevision["revision"];
+  schemaVersion: ContentRevision["inputs"]["schemaVersion"];
+}>;
 
 export function ContentWorkspaceStarter({
   csrfToken,
@@ -16,11 +23,7 @@ export function ContentWorkspaceStarter({
     id: string;
     sourceWorkspaceId: string;
   }>;
-  preservedRevision?: Readonly<{
-    workspaceId: string;
-    revision: number;
-    schemaVersion: string;
-  }>;
+  preservedRevision?: PreservedContentRevision;
 }) {
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
