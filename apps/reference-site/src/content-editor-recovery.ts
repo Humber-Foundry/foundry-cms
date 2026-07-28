@@ -63,6 +63,12 @@ export function comparableRecoveryValue(edit: StaleRecoveryEdit): string {
   }
 }
 
+export function comparableRecoveryBaseValue(
+  edit: StaleRecoveryEdit,
+): string {
+  return comparableRecoveryValue({ ...edit, value: edit.baseValue });
+}
+
 export function applyStructuralRecovery(
   definition: SiteDefinition,
   edit: StaleRecoveryEdit,
@@ -81,6 +87,49 @@ export function applyStructuralRecovery(
       !Array.isArray(composition.components)
     ) {
       return { ok: false };
+    }
+    let baseComposition: unknown = null;
+    try {
+      baseComposition = JSON.parse(edit.baseValue);
+    } catch {
+      // Identity-only records from older editor sessions remain recoverable.
+    }
+    if (
+      typeof baseComposition === "object" &&
+      baseComposition !== null &&
+      "components" in baseComposition &&
+      Array.isArray(baseComposition.components)
+    ) {
+      const targetIds = new Set(
+        composition.components.flatMap((candidate) =>
+          typeof candidate === "object" &&
+          candidate !== null &&
+          "id" in candidate &&
+          typeof candidate.id === "string"
+            ? [candidate.id]
+            : [],
+        ),
+      );
+      const baseById = new Map(
+        baseComposition.components.flatMap((candidate) =>
+          typeof candidate === "object" &&
+          candidate !== null &&
+          "id" in candidate &&
+          typeof candidate.id === "string"
+            ? [[candidate.id, candidate] as const]
+            : [],
+        ),
+      );
+      for (const current of definition.home.sections) {
+        const base = baseById.get(current.id);
+        if (
+          base !== undefined &&
+          !targetIds.has(current.id) &&
+          JSON.stringify(current) !== JSON.stringify(base)
+        ) {
+          return { ok: false };
+        }
+      }
     }
     const currentById = new Map(
       definition.home.sections.map((section) => [section.id, section]),
@@ -284,7 +333,7 @@ export function recoverStaleEdits(
         conflicts.push({ ...edit, currentValue: null, reason: "missing" });
       } else if (currentValue === comparableRecoveryValue(edit)) {
         continue;
-      } else if (currentValue === edit.baseValue) {
+      } else if (currentValue === comparableRecoveryBaseValue(edit)) {
         recovered.push(edit);
       } else {
         conflicts.push({ ...edit, currentValue, reason: "changed" });

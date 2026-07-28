@@ -375,6 +375,37 @@ describe("stale edit recovery", () => {
     }
   });
 
+  it("rejects removal of a component with concurrent copy changes", () => {
+    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(sourceComposition),
+      value: JSON.stringify({
+        ...sourceComposition,
+        components: sourceComposition.components.filter(
+          ({ id }) => id !== "section_hero",
+        ),
+      }),
+    };
+    const concurrent = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          {
+            ...referenceSiteDefinition.home.sections[0]!,
+            title: "Concurrent headline that must survive",
+          },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    };
+
+    expect(applyStructuralRecovery(concurrent, edit)).toEqual({
+      ok: false,
+    });
+  });
+
   it("surfaces a same-path concurrent change as a three-way conflict", () => {
     const storage = createStorage();
     preserveStaleEdits(storage, "recovery-overlap", "workspace-shared", [edit]);

@@ -20,6 +20,7 @@ import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
   applyStructuralRecovery,
   clearStaleEdits,
+  comparableRecoveryBaseValue,
   comparableRecoveryValue,
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
@@ -136,7 +137,7 @@ export function ContentEditor({
               path: pageCompositionContract.slot.id,
               value: JSON.stringify(composition),
               baseValue: JSON.stringify(
-                toPageCompositionIdentity(state.persistedDefinition),
+                toPageComposition(state.persistedDefinition),
               ),
             },
             ...excludeCompositionOwnedEdits(
@@ -227,7 +228,7 @@ export function ContentEditor({
             alreadyAppliedCount += 1;
             continue;
           }
-          if (currentValue !== edit.baseValue) {
+          if (currentValue !== comparableRecoveryBaseValue(edit)) {
             conflicts.push({
               ...edit,
               currentValue,
