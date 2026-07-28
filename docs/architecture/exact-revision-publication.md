@@ -125,10 +125,11 @@ production ref to agree before upload. OpenNext uploads a non-serving,
 commit-tagged Worker version first. The controller then routes Wrangler's
 activation API calls through a loopback gate and rechecks the same fence on the
 actual Cloudflare `POST /deployments` request before forwarding it. It requires
-exactly one activation and verifies the fence again after success. This
-deployment-time fence prevents an exact retry of an older commit from rolling
-production back after an external merge. The build result is also rejected if
-Cloudflare reports a different commit hash.
+exactly one bounded activation payload naming only the uploaded version at 100
+percent, checks the fence after receiving that payload, and verifies the fence
+again after success. This deployment-time fence prevents an exact retry of an
+older commit from rolling production back after an external merge. The build
+result is also rejected if Cloudflare reports a different commit hash.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory

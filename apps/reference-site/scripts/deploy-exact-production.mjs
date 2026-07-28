@@ -20,6 +20,7 @@ const versionIdPattern =
   /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const activationPathPattern =
   /^\/client\/v4\/accounts\/[^/]+\/workers\/scripts\/[^/]+\/deployments$/u;
+const maximumActivationBodyBytes = 64 * 1024;
 const hopByHopHeaders = new Set([
   "connection",
   "content-length",
@@ -125,10 +126,50 @@ function copyResponseHeaders(upstream, response) {
 
 async function readRequestBody(request) {
   const chunks = [];
+  let bytesRead = 0;
   for await (const chunk of request) {
-    chunks.push(chunk);
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytesRead += bytes.byteLength;
+    if (bytesRead > maximumActivationBodyBytes) {
+      throw new Error("exact_activation_body_too_large");
+    }
+    chunks.push(bytes);
   }
   return chunks.length === 0 ? undefined : Buffer.concat(chunks);
+}
+
+function activationPayloadIsExact(body, versionId) {
+  if (body === undefined) {
+    return false;
+  }
+  try {
+    const payload = JSON.parse(body.toString("utf8"));
+    return (
+      typeof payload === "object" &&
+      payload !== null &&
+      payload.strategy === "percentage" &&
+      Array.isArray(payload.versions) &&
+      payload.versions.length === 1 &&
+      typeof payload.versions[0] === "object" &&
+      payload.versions[0] !== null &&
+      payload.versions[0].version_id === versionId &&
+      payload.versions[0].percentage === 100
+    );
+  } catch {
+    return false;
+  }
+}
+
+function rejectActivation(response, message) {
+  response.writeHead(409, {
+    "content-type": "application/json",
+  });
+  response.end(
+    JSON.stringify({
+      success: false,
+      errors: [{ code: 10000, message }],
+    }),
+  );
 }
 
 export async function activateExactVersion({
@@ -144,7 +185,8 @@ export async function activateExactVersion({
   }
 
   let activationCount = 0;
-  let fenceError;
+  let activationAttempted = false;
+  let activationError;
   const server = createServer(async (request, response) => {
     try {
       const requestUrl = new URL(
@@ -154,21 +196,25 @@ export async function activateExactVersion({
       const isActivation =
         request.method === "POST" &&
         activationPathPattern.test(requestUrl.pathname);
+      const body = await readRequestBody(request);
       if (isActivation) {
+        if (activationAttempted) {
+          activationError = new Error("exact_activation_repeated");
+          rejectActivation(response, "Activation already attempted.");
+          return;
+        }
+        activationAttempted = true;
+        if (!activationPayloadIsExact(body, versionId)) {
+          activationError = new Error("exact_activation_payload_invalid");
+          rejectActivation(response, "Exact activation payload required.");
+          return;
+        }
         try {
           assertHead();
           activationCount += 1;
         } catch (error) {
-          fenceError = error;
-          response.writeHead(409, {
-            "content-type": "application/json",
-          });
-          response.end(
-            JSON.stringify({
-              success: false,
-              errors: [{ code: 10000, message: "Production head moved." }],
-            }),
-          );
+          activationError = error;
+          rejectActivation(response, "Production head moved.");
           return;
         }
       }
@@ -183,7 +229,6 @@ export async function activateExactVersion({
           headers.set(name, Array.isArray(value) ? value.join(", ") : value);
         }
       }
-      const body = await readRequestBody(request);
       const upstream = await fetch(
         new URL(
           `${requestUrl.pathname}${requestUrl.search}`,
@@ -250,8 +295,8 @@ export async function activateExactVersion({
         },
       );
     await waitForProcess(activation, "exact_version_activation_failed");
-    if (fenceError !== undefined) {
-      throw fenceError;
+    if (activationError !== undefined) {
+      throw activationError;
     }
     if (activationCount !== 1) {
       throw new Error(
