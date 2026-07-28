@@ -64,6 +64,17 @@ describe("reference Site Definition", () => {
     );
   });
 
+  it("rejects unpaired UTF-16 surrogates in the text schema without rejecting scalar pairs", () => {
+    const textPattern = new RegExp(
+      siteDefinitionSchema.$defs.richTextText.properties.text.pattern,
+      "u",
+    );
+
+    expect(textPattern.test("\uD800")).toBe(false);
+    expect(textPattern.test("\uDFFF")).toBe(false);
+    expect(textPattern.test("Visible 😀 text")).toBe(true);
+  });
+
   it("uses unique stable identifiers for every page section", () => {
     const identifiers = referenceSiteDefinition.home.sections.map(
       (section) => section.id,
@@ -175,6 +186,20 @@ describe("reference Site Definition", () => {
       name: "a NUL text character",
       mutate(document: Record<string, any>) {
         document.children[0].children[0].text = "before\u0000after";
+      },
+    },
+    {
+      name: "an unpaired UTF-16 surrogate",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].text = "before\uD800after";
+      },
+    },
+    {
+      name: "an unpaired UTF-16 surrogate in a link",
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href: "https://example.com/\uD800" },
+        ];
       },
     },
     {
@@ -514,6 +539,19 @@ describe("reference Site Definition", () => {
           {
             type: "paragraph",
             children: [{ type: "text", text: " \t ", marks: [] }],
+          },
+        ],
+      },
+    ],
+    [
+      "zero-width format text",
+      {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [{ type: "text", text: "\u200B", marks: [] }],
           },
         ],
       },

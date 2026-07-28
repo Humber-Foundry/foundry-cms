@@ -5,7 +5,7 @@ import {
 
 export const RICH_TEXT_VERSION = projectedRichTextVersion;
 export const SAFE_RICH_TEXT_LINK_PATTERN =
-  "^(?:https?://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::[0-9]{1,4})?(?:[/?#][^\\u0000-\\u0020\\u007f\\\\]*)?|mailto:[^\\u0000-\\u0020\\u007f\\\\@]+@[^\\u0000-\\u0020\\u007f\\\\@]+\\.[^\\u0000-\\u0020\\u007f\\\\@]+|/(?!/)[^\\u0000-\\u0020\\u007f\\\\]*|#[A-Za-z][A-Za-z0-9_-]*)$";
+  "^(?:https?://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::[0-9]{1,4})?(?:[/?#][^\\u0000-\\u0020\\u007f\\uD800-\\uDFFF\\\\]*)?|mailto:[^\\u0000-\\u0020\\u007f\\uD800-\\uDFFF\\\\@]+@[^\\u0000-\\u0020\\u007f\\uD800-\\uDFFF\\\\@]+\\.[^\\u0000-\\u0020\\u007f\\uD800-\\uDFFF\\\\@]+|/(?!/)[^\\u0000-\\u0020\\u007f\\uD800-\\uDFFF\\\\]*|#[A-Za-z][A-Za-z0-9_-]*)$";
 declare const serializedRichTextDocumentBrand: unique symbol;
 
 export type RichTextLinkMark = Readonly<{
@@ -166,6 +166,7 @@ function isSafeLink(href: string): boolean {
     href.length === 0 ||
     href.length > 2_048 ||
     /[\u0000-\u0020\u007f]/u.test(href) ||
+    /[\uD800-\uDFFF]/u.test(href) ||
     href.includes("\\")
   ) {
     return false;
@@ -194,6 +195,13 @@ function validateText(text: RichTextText, path: string) {
       "ambiguous_text",
       `${path}.text`,
       "Text nodes cannot contain NUL because CommonMark replaces it with U+FFFD.",
+    );
+  }
+  if (/[\uD800-\uDFFF]/u.test(text.text)) {
+    issue(
+      "ambiguous_text",
+      `${path}.text`,
+      "Text nodes cannot contain unpaired UTF-16 surrogates because byte encoding replaces them with U+FFFD.",
     );
   }
   if (text.text.length === 0) {
@@ -523,7 +531,10 @@ export function validateRichTextDocument(
 function inlineChildrenHaveVisibleText(
   children: ReadonlyArray<RichTextText>,
 ): boolean {
-  return children.some((child) => child.text.trim() !== "");
+  return children.some(
+    (child) =>
+      child.text.replace(/[\p{Cc}\p{Cf}]/gu, "").trim() !== "",
+  );
 }
 
 export function richTextDocumentHasVisibleText(

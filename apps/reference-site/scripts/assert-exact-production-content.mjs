@@ -48,6 +48,21 @@ function storedContentHash(bytes) {
     .digest("hex");
 }
 
+function fixedBaseRuntimeContentHash(bytes) {
+  const definition = JSON.parse(bytes);
+  return createHash("sha256")
+    .update(
+      canonicalJson({
+        ...definition,
+        home: {
+          ...definition.home,
+          media: definition.home.media ?? [],
+        },
+      }),
+    )
+    .digest("hex");
+}
+
 function publicationArtifactHash(artifacts) {
   const manifest = [...artifacts]
     .sort((left, right) => left.path.localeCompare(right.path))
@@ -227,6 +242,7 @@ export async function assertExactProductionContent({
   const compatibleExpectedContentHashes = new Set([
     expectedContentHash,
     storedContentHash(expectedPublishedContent),
+    fixedBaseRuntimeContentHash(expectedPublishedContent),
   ]);
   const changedPaths = readChangedPaths(liveCommit, expectedCommit)
     .trim()

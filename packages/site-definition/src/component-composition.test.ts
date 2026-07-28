@@ -456,6 +456,21 @@ describe("page component composition", () => {
         ],
       },
     },
+    {
+      name: "a zero-width-only paragraph",
+      body: {
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              { type: "text", text: "\u200B", marks: [] },
+            ],
+          },
+        ],
+      },
+    },
   ])("rejects required rich text with $name", ({ body }) => {
     const composition = structuredClone(
       toPageComposition(referenceSiteDefinition),

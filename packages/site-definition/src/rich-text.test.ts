@@ -5,6 +5,7 @@ import {
   RichTextValidationError,
   fromTipTapDocument,
   parseRichTextMarkdown,
+  richTextDocumentHasVisibleText,
   serializeRichTextToMarkdown,
   toTipTapDocument,
   validateRichTextDocument,
@@ -574,6 +575,113 @@ describe("rich text contract", () => {
       }),
     );
   });
+
+  it.each(["\uD800", "\uDFFF"])(
+    "rejects an unpaired UTF-16 surrogate before byte encoding: %j",
+    (surrogate) => {
+      expect([...new TextEncoder().encode(surrogate)]).toEqual([
+        0xef, 0xbf, 0xbd,
+      ]);
+      expect(JSON.stringify(surrogate)).not.toBe(JSON.stringify("�"));
+      expect(() =>
+        serializeRichTextToMarkdown({
+          version: "1.0.0",
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [
+                {
+                  type: "text",
+                  text: surrogate,
+                  marks: [],
+                },
+              ],
+            },
+          ],
+        }),
+      ).toThrow(
+        expect.objectContaining<Partial<RichTextValidationError>>({
+          issues: [
+            expect.objectContaining({
+              code: "ambiguous_text",
+              path: "$.children[0].children[0].text",
+            }),
+          ],
+        }),
+      );
+    },
+  );
+
+  it("rejects an unpaired UTF-16 surrogate in a link before byte encoding", () => {
+    const href = "https://example.com/\uD800";
+    expect(new TextDecoder().decode(new TextEncoder().encode(href))).toBe(
+      "https://example.com/�",
+    );
+    expect(() =>
+      serializeRichTextToMarkdown({
+        version: "1.0.0",
+        type: "document",
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                type: "text",
+                text: "link",
+                marks: [{ type: "link", href }],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(
+      expect.objectContaining<Partial<RichTextValidationError>>({
+        issues: [
+          expect.objectContaining({
+            code: "unsafe_link",
+            path: "$.children[0].children[0].marks[0].href",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it.each(["\u200B", "\u2060", "\u0007"])(
+    "does not count format/control-only text as visible: %j",
+    (text) => {
+      expect(
+        richTextDocumentHasVisibleText({
+          version: "1.0.0",
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [{ type: "text", text, marks: [] }],
+            },
+          ],
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["a\u200Bb", "👩‍💻"])(
+    "preserves visible sequences containing format controls: %j",
+    (text) => {
+      expect(
+        richTextDocumentHasVisibleText({
+          version: "1.0.0",
+          type: "document",
+          children: [
+            {
+              type: "paragraph",
+              children: [{ type: "text", text, marks: [] }],
+            },
+          ],
+        }),
+      ).toBe(true);
+    },
+  );
 
   it.each([
     {

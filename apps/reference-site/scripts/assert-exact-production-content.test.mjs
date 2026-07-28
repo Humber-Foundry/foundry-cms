@@ -47,9 +47,15 @@ const trackedPublishedBytes = readFileSync(
   ),
   "utf8",
 );
-const trackedPublishedContentHash = canonicalHash(
-  JSON.parse(trackedPublishedBytes),
-);
+const trackedPublishedDefinition = JSON.parse(trackedPublishedBytes);
+const trackedPublishedContentHash = canonicalHash(trackedPublishedDefinition);
+const fixedBaseRuntimeContentHash = canonicalHash({
+  ...trackedPublishedDefinition,
+  home: {
+    ...trackedPublishedDefinition.home,
+    media: trackedPublishedDefinition.home.media ?? [],
+  },
+});
 const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
 
 function defaultArtifacts() {
@@ -221,6 +227,35 @@ describe("exact production content authorization", () => {
       readLiveMarker: vi.fn().mockResolvedValue({
         commitSha: liveCommit,
         contentHash: trackedPublishedContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes the first code-only reader upgrade against the fixed-base runtime hash", async () => {
+    expect(fixedBaseRuntimeContentHash).toBe(
+      "19e5a86c6331fd0882880f8cbdabd8e62b2c557167b314b84ab0f195b69771d5",
+    );
+    expect(fixedBaseRuntimeContentHash).not.toBe(
+      trackedPublishedContentHash,
+    );
+    expect(fixedBaseRuntimeContentHash).not.toBe(
+      runtimePublishedContentHash,
+    );
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: fixedBaseRuntimeContentHash,
       }),
       readChangedPaths: vi
         .fn()
