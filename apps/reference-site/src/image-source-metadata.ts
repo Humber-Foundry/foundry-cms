@@ -75,6 +75,46 @@ function png(source: Uint8Array): ImageSourceMetadata | null {
   return invalid();
 }
 
+function exifOrientation(
+  source: Uint8Array,
+  payloadOffset: number,
+  payloadLength: number,
+) {
+  if (
+    payloadLength < 14 ||
+    ascii(source, payloadOffset, payloadOffset + 6) !== "Exif\u0000\u0000"
+  ) {
+    return 1;
+  }
+  const tiff = payloadOffset + 6;
+  const littleEndian =
+    source[tiff] === 0x49 && source[tiff + 1] === 0x49
+      ? true
+      : source[tiff] === 0x4d && source[tiff + 1] === 0x4d
+        ? false
+        : null;
+  if (littleEndian === null) return 1;
+  const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  if (view.getUint16(tiff + 2, littleEndian) !== 42) return 1;
+  const directory = tiff + view.getUint32(tiff + 4, littleEndian);
+  const payloadEnd = payloadOffset + payloadLength;
+  if (directory < tiff || directory + 2 > payloadEnd) return 1;
+  const count = view.getUint16(directory, littleEndian);
+  for (let index = 0; index < count; index += 1) {
+    const entry = directory + 2 + index * 12;
+    if (entry + 12 > payloadEnd) return 1;
+    if (
+      view.getUint16(entry, littleEndian) === 0x0112 &&
+      view.getUint16(entry + 2, littleEndian) === 3 &&
+      view.getUint32(entry + 4, littleEndian) === 1
+    ) {
+      const orientation = view.getUint16(entry + 8, littleEndian);
+      return orientation >= 1 && orientation <= 8 ? orientation : 1;
+    }
+  }
+  return 1;
+}
+
 function jpeg(source: Uint8Array): ImageSourceMetadata | null {
   if (source[0] !== 0xff || source[1] !== 0xd8) return null;
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
@@ -84,6 +124,7 @@ function jpeg(source: Uint8Array): ImageSourceMetadata | null {
   ]);
   let offset = 2;
   let metadata: ImageSourceMetadata | null = null;
+  let orientation = 1;
   let sawScan = false;
   while (offset < source.byteLength) {
     if (source[offset] !== 0xff) invalid();
@@ -91,13 +132,19 @@ function jpeg(source: Uint8Array): ImageSourceMetadata | null {
     const marker = source[offset++];
     if (marker === undefined) invalid();
     if (marker === 0xd9) {
-      if (!sawScan || metadata === null || offset !== source.byteLength) invalid();
-      return metadata;
+      if (!sawScan || offset !== source.byteLength) invalid();
+      if (metadata === null) throw new TypeError("invalid_image_source");
+      return orientation >= 5 && orientation <= 8
+        ? { ...metadata, width: metadata.height, height: metadata.width }
+        : metadata;
     }
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
     if (offset + 2 > source.byteLength) invalid();
     const length = view.getUint16(offset);
     if (length < 2 || offset + length > source.byteLength) invalid();
+    if (marker === 0xe1) {
+      orientation = exifOrientation(source, offset + 2, length - 2);
+    }
     if (frames.has(marker)) {
       if (length < 7 || metadata !== null) invalid();
       metadata = {

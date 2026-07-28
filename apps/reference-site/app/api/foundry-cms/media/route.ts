@@ -201,6 +201,14 @@ export async function POST(request: Request) {
     const application = await loadMediaAssetApplication(actorId);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
     if (request.headers.get("content-type")?.startsWith("multipart/form-data")) {
+      const contentLength = Number(request.headers.get("content-length"));
+      if (
+        !Number.isSafeInteger(contentLength) ||
+        contentLength <= 0 ||
+        contentLength > 20 * 1024 * 1024 + 64 * 1024
+      ) {
+        throw new MediaValidationError("source");
+      }
       const form = await request.formData();
       const source = form.get("source");
       if (!(source instanceof File) || source.size > 20 * 1024 * 1024) {

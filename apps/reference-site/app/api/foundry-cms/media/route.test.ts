@@ -304,7 +304,10 @@ describe("media endpoint", () => {
     const response = await POST(
       new Request("https://foundry.example/api/foundry-cms/media", {
         method: "POST",
-        headers: { "idempotency-key": "upload-without-mime-0001" },
+        headers: {
+          "content-length": String(png.byteLength + 1024),
+          "idempotency-key": "upload-without-mime-0001",
+        },
         body: form,
       }),
     );
@@ -318,6 +321,36 @@ describe("media endpoint", () => {
         height: 1,
       }),
     );
+  });
+
+  it("rejects oversized or unbounded multipart requests before parsing", async () => {
+    const oversized = new Request(
+      "https://foundry.example/api/foundry-cms/media",
+      {
+        method: "POST",
+        headers: {
+          "content-length": String(21 * 1024 * 1024),
+          "content-type": "multipart/form-data; boundary=unused",
+          "idempotency-key": "oversized-upload-0001",
+        },
+        body: "--unused--",
+      },
+    );
+    const unknownLength = new Request(
+      "https://foundry.example/api/foundry-cms/media",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=unused",
+          "idempotency-key": "unbounded-upload-0001",
+        },
+        body: "--unused--",
+      },
+    );
+
+    await expect(POST(oversized)).resolves.toMatchObject({ status: 422 });
+    await expect(POST(unknownLength)).resolves.toMatchObject({ status: 422 });
+    expect(mocks.upload).not.toHaveBeenCalled();
   });
 
   it("serves a private source only through the authenticated site application", async () => {
