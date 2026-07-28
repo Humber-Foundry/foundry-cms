@@ -14,6 +14,7 @@ import {
   createContentEditorState,
 } from "../src/content-editor-history";
 import {
+  contentPublicationPollDelay,
   loadContentPublication,
   refreshContentPublication,
   sendContentPublicationAttempt,
@@ -221,7 +222,7 @@ export function ContentEditor({
           setPublicationPollAttempt((attempt) => attempt + 1);
         }
       }
-    }, 2_500);
+    }, contentPublicationPollDelay(publicationPollAttempt));
     return () => {
       cancelled = true;
       window.clearTimeout(timer);

@@ -5,6 +5,14 @@ export type ContentPublicationAttempt = Readonly<{
 
 type Fetcher = typeof fetch;
 
+export function contentPublicationPollDelay(attempt: number) {
+  const boundedAttempt = Math.min(
+    Math.max(0, Number.isSafeInteger(attempt) ? attempt : 0),
+    4,
+  );
+  return Math.min(2_500 * 2 ** boundedAttempt, 30_000);
+}
+
 async function send(
   attempt: ContentPublicationAttempt,
   mutationToken: string,

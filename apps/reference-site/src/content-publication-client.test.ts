@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  contentPublicationPollDelay,
   loadContentPublication,
   refreshContentPublication,
   sendContentPublicationAttempt,
@@ -14,6 +15,12 @@ function json(body: unknown, status = 200) {
 }
 
 describe("content publication client", () => {
+  it("backs active publication polling off to a bounded interval", () => {
+    expect(
+      [0, 1, 2, 3, 4, 20].map(contentPublicationPollDelay),
+    ).toEqual([2_500, 5_000, 10_000, 20_000, 30_000, 30_000]);
+  });
+
   it("retries the exact mutation once with a refreshed human token", async () => {
     const fetcher = vi
       .fn<typeof fetch>()

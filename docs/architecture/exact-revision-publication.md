@@ -52,8 +52,10 @@ new revision inserts in that workspace until the Git result releases that
 lease, while other workspaces remain editable. The five-minute lease covers
 the complete bounded GitHub request sequence. Its holder renews the matching
 token before Git work and again immediately before the bounded, non-force
-production ref update. A stale holder cannot advance the ref or persist its
-result. An expired lease is reconciled by publish ID before it can
+production ref update. Every renewal rechecks that the exact approval remains
+uninvalidated and its revision remains current. A stale holder cannot advance
+the ref or persist its result. An expired lease is reconciled by publish ID
+before it can
 become failed; a recovered exact commit is durably recorded and releases the
 lease before deployment polling. The stable publication key and commit
 trailers support replay and ambiguous-result reconciliation without creating
@@ -91,13 +93,15 @@ retryable unavailability, not evidence that the approval's production base
 mismatches; it is retried until the same bounded release-marker deadline, then
 becomes `failed`. Each GitHub and marker request also has a 30-second transport
 timeout.
-The dashboard continues polling after transient refresh failures and keeps an
-active publication visible while the editor starts a new draft. Editor inputs
-are locked while an approval request is in flight so its response cannot be
-attached to a changed local draft.
+The dashboard backs active polling off from 2.5 to 30 seconds, continues after
+transient refresh failures, and keeps an active publication visible while the
+editor starts a new draft. GitHub installation tokens are reused in memory
+until shortly before expiry. Editor inputs are locked while an approval request
+is in flight so its response cannot be attached to a changed local draft.
 
 Publication GET requests only read the durable state and remain side-effect
-free. Cloudflare/GitHub reconciliation is a protected, idempotent POST mutation
+free, including during GitHub credential rotation. Cloudflare/GitHub
+reconciliation is a protected, idempotent POST mutation
 with the same Origin and CSRF boundary as approval and publish.
 
 ## Runtime configuration

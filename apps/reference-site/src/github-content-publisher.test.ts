@@ -411,6 +411,44 @@ describe("GitHub content publisher", () => {
     ).resolves.toBe("building");
   });
 
+  it("reuses an unexpired installation token across status poll runtimes", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json({
+          token: "installation-token",
+          expires_at: "2026-07-27T11:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(json({ check_runs: [] }))
+      .mockResolvedValueOnce(json({ statuses: [] }))
+      .mockResolvedValueOnce(json({ check_runs: [] }))
+      .mockResolvedValueOnce(json({ statuses: [] }));
+    const inputs = {
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00.000Z"),
+    };
+
+    await expect(
+      createGitHubContentPublisher(inputs).getDeploymentStatus(
+        "c".repeat(40),
+      ),
+    ).resolves.toBe("requested");
+    await expect(
+      createGitHubContentPublisher(inputs).getDeploymentStatus(
+        "c".repeat(40),
+      ),
+    ).resolves.toBe("requested");
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes("/access_tokens"),
+      ),
+    ).toHaveLength(1);
+  });
+
   it("reconciles an ambiguous publish by its exact commit trailer", async () => {
     const publishId = createContentPublicationId(
       `publish_${"1".repeat(32)}`,

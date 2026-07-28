@@ -444,6 +444,34 @@ describe("D1 content publication store", () => {
     ).resolves.toEqual(committed);
   });
 
+  it("refuses to renew a lease after its exact approval is invalidated", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-invalid-approval-lease");
+    await store.claimPublication(requested);
+    await store.invalidateApproval({
+      approvalId: approval.id,
+      invalidatedAt: "2026-07-27T10:05:00.000Z",
+      reason: "production_changed",
+    });
+
+    await expect(
+      store.renewPublicationLease({
+        publicationId: requested.id,
+        leaseToken: "lease-1",
+        now: "2026-07-27T10:06:00.000Z",
+        leaseExpiresAt: "2026-07-27T10:15:00.000Z",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      store.hasPublicationLease({
+        publicationId: requested.id,
+        leaseToken: "lease-1",
+        now: "2026-07-27T10:06:00.000Z",
+      }),
+    ).resolves.toBe(false);
+  });
+
   it("keeps the meaningful publication discoverable ahead of a blocked contender", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);

@@ -435,7 +435,16 @@ export function createD1ContentPublicationStore(
            WHERE id = ?1
              AND status = 'requested'
              AND lease_token = ?2
-             AND lease_expires_at > ?3`,
+             AND lease_expires_at > ?3
+             AND NOT EXISTS (
+               SELECT 1 FROM content_approval_invalidations
+               WHERE approval_id = content_publications.approval_id
+             )
+             AND EXISTS (
+               SELECT 1 FROM content_workspaces
+               WHERE workspace_id = content_publications.workspace_id
+                 AND current_revision = content_publications.revision
+             )`,
         )
         .bind(publicationId, leaseToken, now)
         .first<{ held: number }>();
@@ -454,7 +463,16 @@ export function createD1ContentPublicationStore(
            WHERE id = ?2
              AND status = 'requested'
              AND lease_token = ?3
-             AND lease_expires_at > ?4`,
+             AND lease_expires_at > ?4
+             AND NOT EXISTS (
+               SELECT 1 FROM content_approval_invalidations
+               WHERE approval_id = content_publications.approval_id
+             )
+             AND EXISTS (
+               SELECT 1 FROM content_workspaces
+               WHERE workspace_id = content_publications.workspace_id
+                 AND current_revision = content_publications.revision
+             )`,
         )
         .bind(leaseExpiresAt, publicationId, leaseToken, now)
         .run();

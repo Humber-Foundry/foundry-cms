@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   verifyMutation: vi.fn(),
   executeMutation: vi.fn(),
   loadApplication: vi.fn(),
+  loadQueries: vi.fn(),
   approve: vi.fn(),
   publish: vi.fn(),
   refresh: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock("../../../../src/human-mutation-runtime", async () => {
 });
 vi.mock("../../../../src/content-publication-runtime", () => ({
   loadContentPublicationApplication: mocks.loadApplication,
+  loadContentPublicationQueries: mocks.loadQueries,
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
   requireExistingContentWorkspaceAccess: mocks.requireExistingAccess,
@@ -76,6 +78,10 @@ describe("content publication endpoint", () => {
         refresh: mocks.refresh,
       },
       queries: { getLatest: mocks.getLatest, get: mocks.get },
+    });
+    mocks.loadQueries.mockResolvedValue({
+      getLatest: mocks.getLatest,
+      get: mocks.get,
     });
   });
 
@@ -223,6 +229,8 @@ describe("content publication endpoint", () => {
     expect(mocks.get).toHaveBeenCalledWith(
       `publish_${"2".repeat(32)}`,
     );
+    expect(mocks.loadApplication).not.toHaveBeenCalled();
+    expect(mocks.loadQueries).toHaveBeenCalledTimes(1);
     expect(mocks.refresh).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       publication: {

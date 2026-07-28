@@ -5,6 +5,7 @@ import {
   createContentPublicationApplication,
   createInMemoryContentPublicationStore,
   type ContentActorId,
+  type ContentPublicationStore,
   type ContentPublisher,
   type ContentWorkspaceId,
 } from "@foundry/application";
@@ -43,6 +44,28 @@ const localPublisher: ContentPublisher = {
     return "unknown";
   },
 };
+
+function publicationQueries(store: ContentPublicationStore) {
+  return Object.freeze({
+    getLatest: store.findLatestPublication,
+    get: store.findPublication,
+  });
+}
+
+export async function loadContentPublicationQueries() {
+  if (process.env.NODE_ENV === "development") {
+    return publicationQueries(
+      localRuntime.__foundryContentPublicationStore!,
+    );
+  }
+  const environment = await loadHumanAccessEnvironment();
+  if (environment.FOUNDRY_DB === undefined) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return publicationQueries(
+    createD1ContentPublicationStore(environment.FOUNDRY_DB),
+  );
+}
 
 export async function loadContentPublicationApplication(
   workspaceId: ContentWorkspaceId,

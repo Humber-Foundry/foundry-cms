@@ -14,7 +14,10 @@ import {
   AccessIdentityError,
   AccessIdentityUnavailableError,
 } from "../../../../src/access-identity";
-import { loadContentPublicationApplication } from "../../../../src/content-publication-runtime";
+import {
+  loadContentPublicationApplication,
+  loadContentPublicationQueries,
+} from "../../../../src/content-publication-runtime";
 import {
   requireExistingContentWorkspaceAccess,
 } from "../../../../src/content-revision-runtime";
@@ -143,13 +146,10 @@ export async function GET(request: Request) {
     const workspaceId = createContentWorkspaceId(workspaceParameter);
     const actorId = createContentActorId(access.membership.id);
     await requireExistingContentWorkspaceAccess(workspaceId, actorId);
-    const application = await loadContentPublicationApplication(
-      workspaceId,
-      actorId,
-    );
+    const queries = await loadContentPublicationQueries();
     let publication;
     if (publicationParameter !== null) {
-      publication = await application.queries.get(
+      publication = await queries.get(
         createContentPublicationId(publicationParameter),
       );
       if (
@@ -159,7 +159,7 @@ export async function GET(request: Request) {
         throw new ContentWorkspaceAccessError();
       }
     } else {
-      publication = await application.queries.getLatest(workspaceId);
+      publication = await queries.getLatest(workspaceId);
     }
     return Response.json(
       { publication },

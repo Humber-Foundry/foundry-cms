@@ -466,11 +466,16 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
     },
     async hasPublicationLease({ publicationId, leaseToken, now }) {
       const publication = publications.get(publicationId);
+      const approval =
+        publication === undefined
+          ? undefined
+          : approvals.get(publication.approvalId);
       return (
         publication?.status === "requested" &&
         publication.leaseToken === leaseToken &&
         publication.leaseExpiresAt !== null &&
-        publication.leaseExpiresAt > now
+        publication.leaseExpiresAt > now &&
+        approval?.invalidatedAt === null
       );
     },
     async renewPublicationLease({
@@ -480,11 +485,16 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
       leaseExpiresAt,
     }) {
       const publication = publications.get(publicationId);
+      const approval =
+        publication === undefined
+          ? undefined
+          : approvals.get(publication.approvalId);
       if (
         publication?.status !== "requested" ||
         publication.leaseToken !== leaseToken ||
         publication.leaseExpiresAt === null ||
-        publication.leaseExpiresAt <= now
+        publication.leaseExpiresAt <= now ||
+        approval?.invalidatedAt !== null
       ) {
         return false;
       }

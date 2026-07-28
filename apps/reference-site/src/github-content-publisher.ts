@@ -81,6 +81,14 @@ export function readGitHubContentPublisherConfiguration(
 }
 
 type GitHubFetch = typeof fetch;
+type CachedInstallationToken = Readonly<{
+  token: string;
+  usableUntil: number;
+}>;
+const tokenCaches = new WeakMap<
+  GitHubFetch,
+  Map<string, Promise<CachedInstallationToken>>
+>();
 
 function githubHeaders(token: string) {
   return {
@@ -142,9 +150,20 @@ export function createGitHubContentPublisher({
     `/repos/${encodeURIComponent(configuration.owner)}` +
     `/${encodeURIComponent(configuration.repository)}`;
   const api = (path: string) => `https://api.github.com${path}`;
+  const tokenCache =
+    tokenCaches.get(fetchImplementation) ??
+    new Map<string, Promise<CachedInstallationToken>>();
+  tokenCaches.set(fetchImplementation, tokenCache);
+  const tokenCacheKey = [
+    configuration.appId,
+    configuration.installationId,
+    configuration.owner,
+    configuration.repository,
+  ].join(":");
 
-  async function installationToken() {
-    const current = now();
+  async function mintInstallationToken(
+    current: Date,
+  ): Promise<CachedInstallationToken> {
     const key = await importPKCS8(configuration.privateKey, "RS256");
     const jwt = await new SignJWT({})
       .setProtectedHeader({ alg: "RS256" })
@@ -176,7 +195,44 @@ export function createGitHubContentPublisher({
     if (typeof body.token !== "string" || body.token === "") {
       throw new Error("github_installation_token_invalid");
     }
-    return body.token;
+    const reportedExpiry =
+      typeof body.expires_at === "string"
+        ? Date.parse(body.expires_at)
+        : Number.NaN;
+    return {
+      token: body.token,
+      usableUntil: Number.isFinite(reportedExpiry)
+        ? reportedExpiry - 60_000
+        : current.getTime() + 5 * 60 * 1_000,
+    };
+  }
+
+  async function installationToken() {
+    const current = now();
+    const cachedPromise = tokenCache.get(tokenCacheKey);
+    if (cachedPromise !== undefined) {
+      try {
+        const cached = await cachedPromise;
+        if (cached.usableUntil > current.getTime()) {
+          return cached.token;
+        }
+      } catch {
+        // A failed mint is never retained.
+      }
+      if (tokenCache.get(tokenCacheKey) === cachedPromise) {
+        tokenCache.delete(tokenCacheKey);
+      }
+    }
+    const mintedPromise = mintInstallationToken(current);
+    tokenCache.set(tokenCacheKey, mintedPromise);
+    try {
+      return (await mintedPromise).token;
+    } catch (error) {
+      if (tokenCache.get(tokenCacheKey) === mintedPromise) {
+        tokenCache.delete(tokenCacheKey);
+      }
+      throw error;
+    }
   }
 
   async function request(
