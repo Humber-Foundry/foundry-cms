@@ -5,6 +5,7 @@ import { Miniflare } from "miniflare";
 
 import {
   MediaAssetReferencedError,
+  MediaSiteAccessError,
   createContentActorId,
   createContentWorkspaceId,
   createInMemoryMediaSourceStore,
@@ -209,6 +210,46 @@ describe("D1 media asset store", () => {
     await expect(
       store.claim({ ...orphan, claimToken: "recovery-worker" }),
     ).resolves.toBe(true);
+  });
+
+  it("fences an expired lease owner after a takeover", async () => {
+    const store = createD1MediaAssetStore(database);
+    const staleOwner = {
+      siteId,
+      idempotencyKey: "d1-stale-owner-mutation-key",
+      requestHash: "same-stale-owner-request",
+      claimToken: "paused-worker",
+    };
+    await expect(store.claim(staleOwner)).resolves.toBe(true);
+    await database
+      .prepare(
+        `UPDATE media_mutation_claims
+         SET claimed_at = datetime('now', '-31 seconds')
+         WHERE site_id = ?1 AND idempotency_key = ?2`,
+      )
+      .bind(siteId, staleOwner.idempotencyKey)
+      .run();
+    const successor = { ...staleOwner, claimToken: "successor-worker" };
+    await expect(store.claim(successor)).resolves.toBe(true);
+    const asset = {
+      siteId,
+      assetId,
+      objectKey: `media/${siteId}/${assetId}/source`,
+      sourceHash: "a".repeat(64),
+      fileName: "hero.png",
+      contentType: "image/png" as const,
+      byteLength: 3,
+      width: 1200,
+      height: 800,
+      createdAt: "2026-07-27T12:00:00.000Z",
+      createdBy: actorId,
+    };
+
+    await expect(store.createAsset(asset, staleOwner)).rejects.toEqual(
+      new MediaSiteAccessError(),
+    );
+    await expect(store.createAsset(asset, successor)).resolves.toEqual(asset);
+    await expect(store.getAsset(siteId, assetId)).resolves.toEqual(asset);
   });
 
   it("replays a receipt instead of taking over its expired claim", async () => {

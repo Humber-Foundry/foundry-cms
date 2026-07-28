@@ -125,6 +125,15 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
         claims.delete(key);
       }
     },
+    async renewClaim(context) {
+      const key = `${context.siteId}:${context.idempotencyKey}`;
+      const claim = claims.get(key);
+      if (claim?.claimToken !== context.claimToken || receipts.has(key)) {
+        return false;
+      }
+      claim.claimedAt = Date.now();
+      return true;
+    },
     async record(context, result) {
       const key = `${context.siteId}:${context.idempotencyKey}`;
       const receipt = receipts.get(key);
@@ -133,6 +142,9 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
         receipt.requestHash !== context.requestHash
       ) {
         throw new MediaValidationError("idempotencyKey");
+      }
+      if (claims.get(key)?.claimToken !== context.claimToken) {
+        throw new MediaSiteAccessError();
       }
       receipts.set(
         key,
@@ -173,6 +185,12 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       );
     },
     async createAsset(asset, context) {
+      if (
+        claims.get(`${context.siteId}:${context.idempotencyKey}`)
+          ?.claimToken !== context.claimToken
+      ) {
+        throw new MediaSiteAccessError();
+      }
       const key = scopedKey(asset.siteId, asset.assetId);
       const existing = assets.get(key);
       if (deletedAssetIds.has(key)) {
@@ -217,6 +235,12 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     },
     async saveOccurrence(revision, baseRevision, action, context) {
       if (
+        claims.get(`${context.siteId}:${context.idempotencyKey}`)
+          ?.claimToken !== context.claimToken
+      ) {
+        throw new MediaSiteAccessError();
+      }
+      if (
         !assets.has(scopedKey(revision.siteId, revision.assetId)) ||
         deletionReservations.has(scopedKey(revision.siteId, revision.assetId))
       ) {
@@ -245,7 +269,13 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       await store.record(context, { kind: "occurrence", value: saved });
       return saved;
     },
-    async beginAssetDeletion(siteId, assetId) {
+    async beginAssetDeletion(siteId, assetId, context) {
+      if (
+        claims.get(`${context.siteId}:${context.idempotencyKey}`)
+          ?.claimToken !== context.claimToken
+      ) {
+        throw new MediaSiteAccessError();
+      }
       const key = scopedKey(siteId, assetId);
       const asset = assets.get(key);
       if (asset === undefined) throw new MediaSiteAccessError();
@@ -268,7 +298,19 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       deletionReservations.add(key);
       return asset;
     },
-    async tombstoneAssetDeletion(siteId, assetId, actorId, occurredAt) {
+    async tombstoneAssetDeletion(
+      siteId,
+      assetId,
+      actorId,
+      occurredAt,
+      context,
+    ) {
+      if (
+        claims.get(`${context.siteId}:${context.idempotencyKey}`)
+          ?.claimToken !== context.claimToken
+      ) {
+        throw new MediaSiteAccessError();
+      }
       const key = scopedKey(siteId, assetId);
       if (!deletionReservations.has(key) || !assets.has(key)) {
         throw new MediaSiteAccessError();
@@ -293,6 +335,12 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     ) {
       const key = scopedKey(siteId, assetId);
       if (!deletionReservations.has(key) || !assets.has(key)) {
+        throw new MediaSiteAccessError();
+      }
+      if (
+        claims.get(`${context.siteId}:${context.idempotencyKey}`)
+          ?.claimToken !== context.claimToken
+      ) {
         throw new MediaSiteAccessError();
       }
       deletionReservations.delete(key);

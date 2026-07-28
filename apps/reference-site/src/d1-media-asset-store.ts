@@ -251,16 +251,44 @@ export function createD1MediaAssetStore(
         .bind(siteId, idempotencyKey, requestHash, claimToken)
         .run();
     },
+    async renewClaim({ siteId, idempotencyKey, requestHash, claimToken }) {
+      const renewed = await database
+        .prepare(
+          `UPDATE media_mutation_claims
+           SET claimed_at = datetime('now')
+           WHERE site_id = ?1 AND idempotency_key = ?2
+             AND request_hash = ?3 AND claim_token = ?4
+             AND NOT EXISTS (
+               SELECT 1 FROM media_mutation_receipts
+               WHERE site_id = ?1 AND idempotency_key = ?2
+             )`,
+        )
+        .bind(siteId, idempotencyKey, requestHash, claimToken)
+        .run();
+      return (renewed.meta.changes ?? 0) > 0;
+    },
     async record(context, result) {
       const { siteId, idempotencyKey, requestHash } = context;
       const saved = await database
         .prepare(
           `INSERT INTO media_mutation_receipts (
              site_id, idempotency_key, request_hash, result_json, created_at
-           ) VALUES (?1, ?2, ?3, ?4, datetime('now'))
+           )
+           SELECT ?1, ?2, ?3, ?4, datetime('now')
+           WHERE EXISTS (
+             SELECT 1 FROM media_mutation_claims
+             WHERE site_id = ?1 AND idempotency_key = ?2
+               AND request_hash = ?3 AND claim_token = ?5
+           )
            ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
         )
-        .bind(siteId, idempotencyKey, requestHash, JSON.stringify(result))
+        .bind(
+          siteId,
+          idempotencyKey,
+          requestHash,
+          JSON.stringify(result),
+          context.claimToken,
+        )
         .run();
       if ((saved.meta.changes ?? 0) === 0) {
         const replay = await this.replay(context);
@@ -331,7 +359,13 @@ export function createD1MediaAssetStore(
             `INSERT INTO media_assets (
                site_id, asset_id, object_key, source_hash, file_name, content_type,
                byte_length, width, height, created_at, created_by
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+             WHERE EXISTS (
+               SELECT 1 FROM media_mutation_claims
+               WHERE site_id = ?1 AND idempotency_key = ?12
+                 AND request_hash = ?13 AND claim_token = ?14
+             )
              ON CONFLICT (site_id, asset_id) DO NOTHING`,
           )
           .bind(
@@ -346,19 +380,31 @@ export function createD1MediaAssetStore(
             asset.height,
             asset.createdAt,
             asset.createdBy,
+            idempotencyKey,
+            requestHash,
+            context.claimToken,
           ),
         database
           .prepare(
             `INSERT OR IGNORE INTO media_audit_events (
                site_id, actor_id, action, subject_id,
                subject_revision, occurred_at
-             ) VALUES (?1, ?2, 'media.asset.uploaded', ?3, NULL, ?4)`,
+             )
+             SELECT ?1, ?2, 'media.asset.uploaded', ?3, NULL, ?4
+             WHERE EXISTS (
+               SELECT 1 FROM media_mutation_claims
+               WHERE site_id = ?1 AND idempotency_key = ?5
+                 AND request_hash = ?6 AND claim_token = ?7
+             )`,
           )
           .bind(
             asset.siteId,
             asset.createdBy,
             asset.assetId,
             asset.createdAt,
+            idempotencyKey,
+            requestHash,
+            context.claimToken,
           ),
         database
           .prepare(
@@ -381,6 +427,11 @@ export function createD1MediaAssetStore(
                  AND created_at = ?14
                  AND created_by = ?15
              )
+               AND EXISTS (
+                 SELECT 1 FROM media_mutation_claims
+                 WHERE site_id = ?1 AND idempotency_key = ?2
+                   AND request_hash = ?3 AND claim_token = ?16
+               )
              ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
           )
           .bind(
@@ -399,6 +450,7 @@ export function createD1MediaAssetStore(
             asset.height,
             asset.createdAt,
             asset.createdBy,
+            context.claimToken,
           ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
@@ -487,6 +539,11 @@ export function createD1MediaAssetStore(
                    WHERE site_id = ?1 AND occurrence_id = ?2
                      AND current_revision = ?8
                  )
+               )
+               AND EXISTS (
+                 SELECT 1 FROM media_mutation_claims
+                 WHERE site_id = ?1 AND idempotency_key = ?9
+                   AND request_hash = ?10 AND claim_token = ?11
                )`,
           )
           .bind(
@@ -498,6 +555,9 @@ export function createD1MediaAssetStore(
             revision.createdAt,
             revision.createdBy,
             baseRevision,
+            idempotencyKey,
+            requestHash,
+            context.claimToken,
           ),
         database
           .prepare(
@@ -532,7 +592,12 @@ export function createD1MediaAssetStore(
                SELECT 1 FROM media_occurrences
                WHERE site_id = ?1 AND occurrence_id = ?4
                  AND current_revision = ?5
-             )`,
+             )
+               AND EXISTS (
+                 SELECT 1 FROM media_mutation_claims
+                 WHERE site_id = ?1 AND idempotency_key = ?7
+                   AND request_hash = ?8 AND claim_token = ?9
+               )`,
           )
           .bind(
             revision.siteId,
@@ -541,6 +606,9 @@ export function createD1MediaAssetStore(
             revision.occurrenceId,
             revision.revision,
             revision.createdAt,
+            idempotencyKey,
+            requestHash,
+            context.claimToken,
           ),
         database
           .prepare(
@@ -553,6 +621,11 @@ export function createD1MediaAssetStore(
                WHERE site_id = ?1 AND occurrence_id = ?6
                  AND current_revision = ?7
              )
+               AND EXISTS (
+                 SELECT 1 FROM media_mutation_claims
+                 WHERE site_id = ?1 AND idempotency_key = ?2
+                   AND request_hash = ?3 AND claim_token = ?8
+               )
              ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
           )
           .bind(
@@ -563,9 +636,12 @@ export function createD1MediaAssetStore(
             revision.createdAt,
             revision.occurrenceId,
             revision.revision,
+            context.claimToken,
           ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
+        const replay = await this.replay(context);
+        if (replay?.kind === "occurrence") return replay.value;
         if ((await getAsset(revision.siteId, revision.assetId)) === null) {
           throw new MediaSiteAccessError();
         }
@@ -581,7 +657,7 @@ export function createD1MediaAssetStore(
       }
       return revision;
     },
-    async beginAssetDeletion(siteId, assetId) {
+    async beginAssetDeletion(siteId, assetId, context) {
       const existing = await getStoredAsset(siteId, assetId);
       if (existing === null) throw new MediaSiteAccessError();
       const result = await database
@@ -592,9 +668,20 @@ export function createD1MediaAssetStore(
              SELECT 1 FROM media_occurrence_revisions
              WHERE site_id = ?1 AND asset_id = ?2
            )
+             AND EXISTS (
+               SELECT 1 FROM media_mutation_claims
+               WHERE site_id = ?1 AND idempotency_key = ?3
+                 AND request_hash = ?4 AND claim_token = ?5
+             )
            ON CONFLICT (site_id, asset_id) DO NOTHING`,
         )
-        .bind(siteId, assetId)
+        .bind(
+          siteId,
+          assetId,
+          context.idempotencyKey,
+          context.requestHash,
+          context.claimToken,
+        )
         .run();
       if ((result.meta.changes ?? 0) === 0) {
         const reserved = await database
@@ -618,7 +705,13 @@ export function createD1MediaAssetStore(
       }
       return existing;
     },
-    async tombstoneAssetDeletion(siteId, assetId, actorId, occurredAt) {
+    async tombstoneAssetDeletion(
+      siteId,
+      assetId,
+      actorId,
+      occurredAt,
+      context,
+    ) {
       const results = await database.batch([
         database
           .prepare(
@@ -628,9 +721,21 @@ export function createD1MediaAssetStore(
                AND EXISTS (
                  SELECT 1 FROM media_asset_deletions
                  WHERE site_id = ?1 AND asset_id = ?2
+               )
+               AND EXISTS (
+                 SELECT 1 FROM media_mutation_claims
+                 WHERE site_id = ?1 AND idempotency_key = ?4
+                   AND request_hash = ?5 AND claim_token = ?6
                )`,
           )
-          .bind(siteId, assetId, occurredAt),
+          .bind(
+            siteId,
+            assetId,
+            occurredAt,
+            context.idempotencyKey,
+            context.requestHash,
+            context.claimToken,
+          ),
         database
           .prepare(
             `INSERT OR IGNORE INTO media_audit_events (
@@ -641,9 +746,22 @@ export function createD1MediaAssetStore(
              WHERE EXISTS (
                SELECT 1 FROM media_asset_deletions
                WHERE site_id = ?1 AND asset_id = ?3
-             )`,
+             )
+               AND EXISTS (
+                 SELECT 1 FROM media_mutation_claims
+                 WHERE site_id = ?1 AND idempotency_key = ?5
+                   AND request_hash = ?6 AND claim_token = ?7
+               )`,
           )
-          .bind(siteId, actorId, assetId, occurredAt),
+          .bind(
+            siteId,
+            actorId,
+            assetId,
+            occurredAt,
+            context.idempotencyKey,
+            context.requestHash,
+            context.claimToken,
+          ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
         throw new MediaSiteAccessError();
@@ -665,14 +783,31 @@ export function createD1MediaAssetStore(
                  SELECT 1 FROM media_assets
                  WHERE site_id = ?1 AND asset_id = ?2
                    AND deleted_at IS NOT NULL
+               )
+               AND EXISTS (
+                 SELECT 1 FROM media_mutation_claims
+                 WHERE site_id = ?1 AND idempotency_key = ?3
+                   AND request_hash = ?4 AND claim_token = ?5
                )`,
           )
-          .bind(siteId, assetId),
+          .bind(
+            siteId,
+            assetId,
+            context.idempotencyKey,
+            context.requestHash,
+            context.claimToken,
+          ),
         database
           .prepare(
             `INSERT INTO media_mutation_receipts (
                site_id, idempotency_key, request_hash, result_json, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5
+             WHERE EXISTS (
+               SELECT 1 FROM media_mutation_claims
+               WHERE site_id = ?1 AND idempotency_key = ?2
+                 AND request_hash = ?3 AND claim_token = ?6
+             )
              ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
           )
           .bind(
@@ -681,9 +816,12 @@ export function createD1MediaAssetStore(
             requestHash,
             JSON.stringify({ kind: "deleted", assetId }),
             occurredAt,
+            context.claimToken,
           ),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 0) {
+        const replay = await this.replay(context);
+        if (replay?.kind === "deleted") return;
         throw new MediaSiteAccessError();
       }
     },
