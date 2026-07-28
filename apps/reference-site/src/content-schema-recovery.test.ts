@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { canonicalJson } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
   durableSchemaRecoveryEdits,
+  mediaManifestRecoveryPath,
   mergeDurableAndOutboxRecoveryEdits,
 } from "./content-schema-recovery";
 import { applyStructuralRecovery } from "./content-editor-recovery";
@@ -45,6 +47,45 @@ describe("content schema recovery", () => {
         legacyDefinition(),
       ),
     ).toEqual([]);
+  });
+
+  it("preserves a durable media replacement and crop for fresh-workspace migration", () => {
+    const base = legacyDefinition();
+    base.home.media = [
+      {
+        occurrenceId: "occurrence_home_hero",
+        revision: 1,
+        asset: {
+          assetId: "asset_original",
+          width: 1600,
+          height: 900,
+          contentType: "image/png",
+        },
+        crop: null,
+      },
+    ];
+    const current = structuredClone(base);
+    current.home.media = [
+      {
+        occurrenceId: "occurrence_home_hero",
+        revision: 3,
+        asset: {
+          assetId: "asset_replacement",
+          width: 1200,
+          height: 800,
+          contentType: "image/jpeg",
+        },
+        crop: { x: 0.1, y: 0.2, width: 0.7, height: 0.6 },
+      },
+    ];
+
+    expect(durableSchemaRecoveryEdits(base, current)).toEqual([
+      {
+        path: mediaManifestRecoveryPath,
+        baseValue: canonicalJson(base.home.media),
+        value: canonicalJson(current.home.media),
+      },
+    ]);
   });
 
   it("recovers a legacy component removal independent of upgraded key order", () => {

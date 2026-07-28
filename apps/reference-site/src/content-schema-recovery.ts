@@ -1,4 +1,7 @@
 import {
+  canonicalJson,
+} from "@foundry/application";
+import {
   defaultSiteDesign,
   designContract,
   listEditableSiteFields,
@@ -13,6 +16,8 @@ import {
   mergeRecoverySources,
   type StaleRecoveryEdit,
 } from "./content-editor-recovery";
+
+export const mediaManifestRecoveryPath = "home.media";
 
 function upgradeLegacyPageComponent(component: unknown): PageSection {
   if (
@@ -90,10 +95,22 @@ export function durableSchemaRecoveryEdits(
   );
   const baseComposition = toPageComposition(base);
   const currentComposition = toPageComposition(current);
+  const baseMedia = canonicalJson(base.home.media ?? []);
+  const currentMedia = canonicalJson(current.home.media ?? []);
+  const mediaEdits =
+    baseMedia === currentMedia
+      ? []
+      : [
+          {
+            path: mediaManifestRecoveryPath,
+            baseValue: baseMedia,
+            value: currentMedia,
+          },
+        ];
   if (
     JSON.stringify(baseComposition) === JSON.stringify(currentComposition)
   ) {
-    return fieldEdits;
+    return [...mediaEdits, ...fieldEdits];
   }
   const baseComponentIds = new Set(
     baseComposition.components.map(({ id }) => id),
@@ -104,6 +121,7 @@ export function durableSchemaRecoveryEdits(
       baseValue: JSON.stringify(baseComposition),
       value: JSON.stringify(currentComposition),
     },
+    ...mediaEdits,
     ...excludeCompositionOwnedEdits(
       fieldEdits,
       currentComposition.components.filter(

@@ -156,14 +156,9 @@ describe("visual component editor browser acceptance", () => {
     expect(
       visualComponentConfig.components.hero.fields!.primaryAction,
     ).toEqual(expect.objectContaining({ visible: false }));
-    expect(visualComponentConfig.components.hero.fields!.variant).toEqual({
-      type: "select",
-      label: "Variant",
-      options: [
-        { label: "Editorial", value: "editorial" },
-        { label: "Focused", value: "focused" },
-      ],
-    });
+    expect(
+      visualComponentConfig.components.hero.fields!.variant,
+    ).toEqual(expect.objectContaining({ visible: false }));
     expect(visualComponentConfig.components.services.fields!.items).toEqual(
       expect.objectContaining({ visible: false }),
     );

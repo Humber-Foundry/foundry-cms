@@ -6,9 +6,14 @@ import {
   canonicalJson,
   type ContentRevision,
 } from "@foundry/application";
-import { pageCompositionContract } from "@foundry/site-definition";
+import {
+  isSiteDefinition,
+  pageCompositionContract,
+  type SiteDefinition,
+} from "@foundry/site-definition";
 
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
+import { restorePreservedMedia } from "../src/content-media-recovery";
 import {
   createContentEditorOutboxController,
   type ContentEditorOutboxRecord,
@@ -22,11 +27,16 @@ import {
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
 import {
+  mediaManifestRecoveryPath,
   mergeDurableAndOutboxRecoveryEdits,
   upgradeLegacyRecoveryEdits,
 } from "../src/content-schema-recovery";
 
-type CreatedWorkspace = Readonly<{ workspaceId: string }>;
+type CreatedWorkspace = Readonly<{
+  workspaceId: string;
+  revision: number;
+  definition: SiteDefinition;
+}>;
 type PreservedContentRevision = Readonly<{
   workspaceId: ContentRevision["workspaceId"];
   revision: ContentRevision["revision"];
@@ -226,9 +236,14 @@ export function ContentWorkspaceStarter({
     setStarting(true);
     setMessage("");
     try {
+      const mediaRecovery = durableRecoveryEdits?.find(
+        ({ path }) => path === mediaManifestRecoveryPath,
+      );
       pendingRecovery.current ??= preparePreservedRevisionRecovery({
         preservedRevision,
-        durableRecoveryEdits,
+        durableRecoveryEdits: durableRecoveryEdits?.filter(
+          ({ path }) => path !== mediaManifestRecoveryPath,
+        ),
         activeRecovery: staleRecovery,
       }).catch((error: unknown) => {
         pendingRecovery.current = undefined;
@@ -246,10 +261,20 @@ export function ContentWorkspaceStarter({
       const created = result.body as CreatedWorkspace;
       if (
         typeof created.workspaceId !== "string" ||
-        !/^workspace_[a-z0-9_]+$/u.test(created.workspaceId)
+        !/^workspace_[a-z0-9_]+$/u.test(created.workspaceId) ||
+        !Number.isSafeInteger(created.revision) ||
+        !isSiteDefinition(created.definition)
       ) {
         throw new Error("content_workspace_creation_invalid");
       }
+      const restoredMutationToken = await restorePreservedMedia({
+        edit: mediaRecovery,
+        created,
+        mutationToken: result.mutationToken,
+        idempotencyKey: pendingAttempt.current.idempotencyKey,
+        onMutationToken: setMutationToken,
+      });
+      setMutationToken(restoredMutationToken);
       const query = new URLSearchParams({ workspace: created.workspaceId });
       if (preservedOutboxRecovery !== undefined) {
         query.set("recovery", preservedOutboxRecovery.id);

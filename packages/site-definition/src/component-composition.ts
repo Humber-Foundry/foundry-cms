@@ -38,7 +38,6 @@ export const pageCompositionContract = Object.freeze({
     hero: Object.freeze({
       label: "Hero",
       editableProps: Object.freeze([
-        "variant",
         "eyebrow",
         "title",
         "summary",
@@ -47,7 +46,6 @@ export const pageCompositionContract = Object.freeze({
     services: Object.freeze({
       label: "Services",
       editableProps: Object.freeze([
-        "variant",
         "eyebrow",
         "title",
         "introduction",
@@ -55,11 +53,11 @@ export const pageCompositionContract = Object.freeze({
     }),
     proof: Object.freeze({
       label: "Proof",
-      editableProps: Object.freeze(["variant", "quote", "attribution"]),
+      editableProps: Object.freeze(["quote", "attribution"]),
     }),
     callToAction: Object.freeze({
       label: "Call to action",
-      editableProps: Object.freeze(["variant", "eyebrow", "title", "body"]),
+      editableProps: Object.freeze(["eyebrow", "title", "body"]),
     }),
   } satisfies Readonly<Record<PageComponentType, ComponentRegistration>>),
 });
@@ -445,6 +443,10 @@ function protectedShape(
     unknown
   >;
   delete protectedSection.id;
+  // Variants are owned by the outer controlled-design fields. Composition
+  // submissions carry them for rendering, but they are not protected scaffold
+  // and the Puck adapter does not copy them back onto existing components.
+  delete protectedSection.variant;
   for (const property of registration.editableProps) {
     delete protectedSection[property];
   }

@@ -10,7 +10,6 @@ import {
 
 import {
   createDefaultPageSection,
-  designContract,
   pageCompositionContract,
   referencedPageComponentIds,
   siteDesignAttributes,
@@ -32,13 +31,6 @@ import { SiteSection } from "./site-renderer";
 type RegisteredComponents = {
   [Type in PageComponentType]: Extract<PageSection, { type: Type }>;
 };
-
-function selectOptions(values: ReadonlyArray<string>) {
-  return values.map((value) => ({
-    label: `${value[0]!.toUpperCase()}${value.slice(1)}`,
-    value,
-  }));
-}
 
 function DesignScopedSection({
   definition,
@@ -107,11 +99,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
-        variant: {
-          type: "select",
-          label: "Variant",
-          options: selectOptions(designContract.variants.hero.values),
-        },
+        variant: { type: "custom", visible: false, render: () => <></> },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
         summary: { type: "textarea", label: "Summary" },
@@ -159,11 +147,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
-        variant: {
-          type: "select",
-          label: "Variant",
-          options: selectOptions(designContract.variants.services.values),
-        },
+        variant: { type: "custom", visible: false, render: () => <></> },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
         introduction: { type: "textarea", label: "Introduction" },
@@ -200,11 +184,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
-        variant: {
-          type: "select",
-          label: "Variant",
-          options: selectOptions(designContract.variants.proof.values),
-        },
+        variant: { type: "custom", visible: false, render: () => <></> },
         quote: { type: "textarea", label: "Quote" },
         attribution: { type: "text", label: "Attribution" },
         metrics: { type: "custom", visible: false, render: () => <></> },
@@ -224,13 +204,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
-        variant: {
-          type: "select",
-          label: "Variant",
-          options: selectOptions(
-            designContract.variants.callToAction.values,
-          ),
-        },
+        variant: { type: "custom", visible: false, render: () => <></> },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
         body: { type: "textarea", label: "Body" },
