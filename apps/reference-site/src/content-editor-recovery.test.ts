@@ -23,6 +23,7 @@ import {
   recoverStaleEdits,
   resolveStructuralRecovery,
   synchronizeStaleEdits,
+  upgradeLegacyRichTextRecoveryEdit,
 } from "./content-editor-recovery";
 
 function createStorage() {
@@ -152,6 +153,31 @@ describe("stale edit recovery", () => {
         ),
       },
     ]);
+  });
+
+  it("recognizes serialized rich text when an older chain lost its format", () => {
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const serialized = serializeRichTextDocument(callToAction.body);
+    const editWithoutDiscriminator = {
+      path: `${callToAction.id}.body`,
+      baseValue: serialized,
+      value: serialized,
+    };
+
+    expect(
+      upgradeLegacyRichTextRecoveryEdit(
+        editWithoutDiscriminator,
+        new Set([editWithoutDiscriminator.path]),
+      ),
+    ).toEqual({
+      ...editWithoutDiscriminator,
+      format: "richText",
+    });
   });
 
   it("compares a structural command by stable composition identity", () => {

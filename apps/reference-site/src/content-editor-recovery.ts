@@ -1,6 +1,7 @@
 import {
   applyPageComposition,
   createRichTextDocumentFromPlainText,
+  createSerializedRichTextDocument,
   listEditableSiteFields,
   pageCompositionContract,
   serializeRichTextDocument,
@@ -93,15 +94,20 @@ export function upgradeLegacyRichTextRecoveryEdit(
   if (!richTextPaths.has(edit.path) || edit.format !== undefined) {
     return edit;
   }
+  const normalizeValue = (value: string) => {
+    try {
+      return createSerializedRichTextDocument(value);
+    } catch {
+      return serializeRichTextDocument(
+        createRichTextDocumentFromPlainText(value),
+      );
+    }
+  };
   return {
     path: edit.path,
     format: "richText",
-    value: serializeRichTextDocument(
-      createRichTextDocumentFromPlainText(edit.value),
-    ),
-    baseValue: serializeRichTextDocument(
-      createRichTextDocumentFromPlainText(edit.baseValue),
-    ),
+    value: normalizeValue(edit.value),
+    baseValue: normalizeValue(edit.baseValue),
   };
 }
 

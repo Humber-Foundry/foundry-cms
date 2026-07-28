@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createContentWorkspaceId } from "@foundry/application";
+import {
+  createRichTextDocumentFromPlainText,
+  referenceSiteDefinition,
+  serializeRichTextDocument,
+} from "@foundry/site-definition";
 
 import {
   preparePreservedRevisionRecovery,
@@ -162,6 +167,64 @@ describe("content workspace schema recovery", () => {
         },
       }),
     ).rejects.toThrow("content_editor_recovery_revision_conflict");
+  });
+
+  it("rebases a legacy plain rich-text outbox over its saved rich-text edit", async () => {
+    const baseValue = serializeRichTextDocument(
+      createRichTextDocumentFromPlainText("Published body"),
+    );
+    const durableValue = serializeRichTextDocument(
+      createRichTextDocumentFromPlainText("Saved legacy body"),
+    );
+    const expectedValue = serializeRichTextDocument(
+      createRichTextDocumentFromPlainText(
+        "Unsaved legacy browser body",
+      ),
+    );
+    const setItem = vi.fn();
+
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision: { ...preservedRevision, revision: 5 },
+        durableRecoveryEdits: [
+          {
+            path: "section_contact.body",
+            format: "richText",
+            baseValue,
+            value: durableValue,
+          },
+        ],
+        readOutbox: async () => ({
+          workspaceId: preservedRevision.workspaceId,
+          baseRevision: 5,
+          edits: [
+            {
+              path: "section_contact.body",
+              baseValue: "Saved legacy body",
+              value: "Unsaved legacy browser body",
+            },
+          ],
+        }),
+        storage: {
+          getItem: () => null,
+          removeItem: vi.fn(),
+          setItem,
+        },
+        createRecoveryId: () =>
+          "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      }),
+    ).resolves.toEqual({
+      id: "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      sourceWorkspaceId: "workspace_legacy",
+    });
+    expect(JSON.parse(setItem.mock.calls[0]![1]).edits).toEqual([
+      {
+        path: "section_contact.body",
+        format: "richText",
+        baseValue,
+        value: expectedValue,
+      },
+    ]);
   });
 
   it("normalizes legacy structural ancestry before rebasing it", async () => {
@@ -369,5 +432,60 @@ describe("content workspace schema recovery", () => {
       expect.stringContaining("workspace_legacy"),
       expect.stringContaining("Recovered title"),
     );
+  });
+
+  it("preserves rich-text format through an otherwise unchanged recovery hop", async () => {
+    const recoveryId = "12345678-1234-4123-8123-123456789abc";
+    const sourceWorkspaceId = "workspace_original";
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const richEdit = {
+      path: `${callToAction.id}.body`,
+      format: "richText" as const,
+      baseValue: serializeRichTextDocument(callToAction.body),
+      value: serializeRichTextDocument({
+        ...callToAction.body,
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                type: "text",
+                text: "Recovered through two schema transitions",
+                marks: ["italic"],
+              },
+            ],
+          },
+        ],
+      }),
+    };
+    const setItem = vi.fn();
+
+    await preparePreservedRevisionRecovery({
+      preservedRevision,
+      activeRecovery: { id: recoveryId, sourceWorkspaceId },
+      readOutbox: async () => null,
+      storage: {
+        getItem: (key) =>
+          key.includes(sourceWorkspaceId)
+            ? JSON.stringify({
+                sourceWorkspaceId,
+                edits: [richEdit],
+              })
+            : null,
+        removeItem: vi.fn(),
+        setItem,
+      },
+      createRecoveryId: () =>
+        "abcdefab-cdef-4abc-8def-abcdefabcdef",
+    });
+
+    expect(JSON.parse(setItem.mock.calls[0]![1]).edits).toEqual([
+      richEdit,
+    ]);
   });
 });
