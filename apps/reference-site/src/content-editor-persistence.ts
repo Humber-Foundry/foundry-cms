@@ -37,6 +37,57 @@ export async function createContentEditorWorkspaceCoordinator(
   };
 }
 
+type ContentEditorTabLease = Readonly<{
+  ready: Promise<void>;
+  isScopeLive(scopeId: string): Promise<boolean>;
+  release(): void;
+}>;
+
+function createContentEditorTabLease(
+  workspaceId: string,
+  scopeId: string,
+  locks: LockManager | undefined =
+    typeof navigator === "undefined" ? undefined : navigator.locks,
+): ContentEditorTabLease {
+  let release!: () => void;
+  let markReady!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
+  const lockName = (candidateScopeId: string) =>
+    `foundry-cms:content-editor:${workspaceId}:scope:${candidateScopeId}`;
+  if (locks !== undefined) {
+    void locks.request(lockName(scopeId), () => {
+      markReady();
+      return held;
+    });
+  } else {
+    markReady();
+  }
+  return {
+    ready,
+    async isScopeLive(candidateScopeId: string) {
+      if (candidateScopeId === scopeId) {
+        return true;
+      }
+      if (locks === undefined) {
+        // Without a liveness primitive, preserve foreign records instead of
+        // risking another open tab's durable edits.
+        return true;
+      }
+      return locks.request(
+        lockName(candidateScopeId),
+        { ifAvailable: true },
+        (lock) => lock === null,
+      );
+    },
+    release,
+  };
+}
+
 export type ContentEditorPersistenceState = Readonly<{
   phase: "loading" | "ready" | "snapshot" | "attempt";
   attempt: SaveAttempt | null;
@@ -104,20 +155,24 @@ export function useContentEditorPersistence({
   recoveryBlocked: boolean;
   onStorageError(message: string): void;
 }) {
-  const controller = useMemo(
+  const scopedPersistence = useMemo(
     () => {
       // A document-local identity is intentionally not stored in
       // sessionStorage: browsers copy that storage when a tab is duplicated.
       // A reload claims any previous durable record into this fresh scope.
       const tabId = crypto.randomUUID();
-      return createContentEditorOutboxController(
-        workspaceId,
-        undefined,
-        tabId,
-      );
+      return {
+        controller: createContentEditorOutboxController(
+          workspaceId,
+          undefined,
+          tabId,
+        ),
+        lease: createContentEditorTabLease(workspaceId, tabId),
+      };
     },
     [workspaceId],
   );
+  const { controller, lease } = scopedPersistence;
   const coordinationWaiter = useRef<{
     promise: Promise<ContentEditorWorkspaceCoordinator>;
     resolve(coordinator: ContentEditorWorkspaceCoordinator): void;
@@ -144,8 +199,11 @@ export function useContentEditorPersistence({
 
   useEffect(() => {
     let cancelled = false;
-    void createContentEditorWorkspaceCoordinator(workspaceId).then(
-      (coordinator) => {
+    void Promise.all([
+      createContentEditorWorkspaceCoordinator(workspaceId),
+      lease.ready,
+    ]).then(
+      ([coordinator]) => {
         if (cancelled) {
           return;
         }
@@ -156,7 +214,9 @@ export function useContentEditorPersistence({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [lease, workspaceId]);
+
+  useEffect(() => () => lease.release(), [lease]);
 
   useEffect(() => {
     if (
@@ -195,7 +255,8 @@ export function useContentEditorPersistence({
     coordinated,
     ready: lifecycle.phase !== "loading",
     attempt: lifecycle.attempt,
-    read: () => coordinate(() => controller.read()),
+    read: () =>
+      coordinate(() => controller.read((scopeId) => lease.isScopeLive(scopeId))),
     finishHydration: () => transition({ type: "hydrated" }),
     restoreAttempt: (attempt: SaveAttempt) =>
       transition({ type: "attempt", attempt }),

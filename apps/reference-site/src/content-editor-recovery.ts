@@ -282,6 +282,8 @@ export function recoverStaleEdits(
       const currentValue = destinationValues.get(edit.path);
       if (currentValue === undefined) {
         conflicts.push({ ...edit, currentValue: null, reason: "missing" });
+      } else if (currentValue === comparableRecoveryValue(edit)) {
+        continue;
       } else if (currentValue === edit.baseValue) {
         recovered.push(edit);
       } else {

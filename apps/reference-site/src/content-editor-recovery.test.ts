@@ -70,6 +70,28 @@ describe("stale edit recovery", () => {
     );
   });
 
+  it("acknowledges stale-workspace edits already present at the destination", () => {
+    const storage = createStorage();
+    expect(
+      preserveStaleEdits(storage, "already-applied", "workspace-old", [
+        edit,
+      ]),
+    ).toBe(true);
+
+    expect(
+      recoverStaleEdits(
+        storage,
+        "already-applied",
+        "workspace-old",
+        new Map([[edit.path, edit.value]]),
+      ),
+    ).toEqual({
+      available: true,
+      recovered: [],
+      conflicts: [],
+    });
+  });
+
   it("forwards an active recovery when its destination later becomes stale", () => {
     const active = {
       id: "recovery-chain",

@@ -23,8 +23,26 @@ function memoryDriver() {
       async write(record: ContentEditorOutboxRecord) {
         records.set(record.workspaceId, structuredClone(record));
       },
+      async list(workspaceId: string) {
+        return structuredClone(
+          [...records.values()].filter(
+            ({ workspaceId: candidate }) =>
+              candidate === workspaceId ||
+              candidate.startsWith(`${workspaceId}::`),
+          ),
+        );
+      },
       async clear(workspaceId: string) {
         records.delete(workspaceId);
+      },
+      async replace(
+        record: ContentEditorOutboxRecord,
+        sourceWorkspaceIds: ReadonlyArray<string>,
+      ) {
+        records.set(record.workspaceId, structuredClone(record));
+        sourceWorkspaceIds
+          .filter((sourceWorkspaceId) => sourceWorkspaceId !== record.workspaceId)
+          .forEach((sourceWorkspaceId) => records.delete(sourceWorkspaceId));
       },
     },
   };
@@ -122,7 +140,7 @@ describe("content editor outbox controller", () => {
       driver,
       "tab_reopened",
     );
-    await expect(reopenedTab.read()).resolves.toEqual({
+    await expect(reopenedTab.read(async () => false)).resolves.toEqual({
       workspaceId: "workspace_shared",
       baseRevision: 2,
       edits: [edit],
@@ -164,5 +182,62 @@ describe("content editor outbox controller", () => {
     expect(
       records.get("workspace_shared::tab_second")?.attempt?.idempotencyKey,
     ).toBe("stable-attempt-second-0001");
+  });
+
+  it("does not claim a live tab's durable record", async () => {
+    const { driver, records } = memoryDriver();
+    const first = createContentEditorOutboxController(
+      "workspace_live",
+      driver,
+      "tab_first",
+    );
+    const duplicate = createContentEditorOutboxController(
+      "workspace_live",
+      driver,
+      "tab_duplicate",
+    );
+    await first.snapshot(2, [edit]);
+
+    await expect(
+      duplicate.read(async (scopeId) => scopeId === "tab_first"),
+    ).resolves.toBeNull();
+    expect(records.get("workspace_live::tab_first")?.edits).toEqual([
+      edit,
+    ]);
+  });
+
+  it("atomically reconciles every orphaned tab record", async () => {
+    const { driver, records } = memoryDriver();
+    const first = createContentEditorOutboxController(
+      "workspace_orphans",
+      driver,
+      "tab_first",
+    );
+    const second = createContentEditorOutboxController(
+      "workspace_orphans",
+      driver,
+      "tab_second",
+    );
+    const reopened = createContentEditorOutboxController(
+      "workspace_orphans",
+      driver,
+      "tab_reopened",
+    );
+    await first.snapshot(2, [edit]);
+    await second.snapshot(3, [
+      { ...edit, path: "section_proof.quote", value: "Second tab" },
+    ]);
+
+    await expect(reopened.read(async () => false)).resolves.toEqual({
+      workspaceId: "workspace_orphans",
+      baseRevision: 3,
+      edits: [
+        edit,
+        { ...edit, path: "section_proof.quote", value: "Second tab" },
+      ],
+    });
+    expect([...records.keys()]).toEqual([
+      "workspace_orphans::tab_reopened",
+    ]);
   });
 });

@@ -14,10 +14,20 @@ export type ContentEditorOutboxRecord = Readonly<{
   }>;
 }>;
 
+type StoredContentEditorOutboxRecord = ContentEditorOutboxRecord &
+  Readonly<{ updatedAt?: number }>;
+
 type ContentEditorOutboxDriver = Readonly<{
   read(workspaceId: string): Promise<ContentEditorOutboxRecord | null>;
+  list?(
+    workspaceId: string,
+  ): Promise<ReadonlyArray<ContentEditorOutboxRecord>>;
   write(record: ContentEditorOutboxRecord): Promise<void>;
   clear(workspaceId: string): Promise<void>;
+  replace?(
+    record: ContentEditorOutboxRecord,
+    sourceWorkspaceIds: ReadonlyArray<string>,
+  ): Promise<void>;
 }>;
 
 function openOutbox(): Promise<IDBDatabase> {
@@ -72,63 +82,74 @@ function isOutboxAttempt(
   );
 }
 
-async function readContentEditorOutboxEntry(
+function parseOutboxCandidate(
+  candidate: unknown,
   workspaceId: string,
-): Promise<ContentEditorOutboxRecord | null> {
+): ContentEditorOutboxRecord | null {
+  if (
+    typeof candidate !== "object" ||
+    candidate === null ||
+    !("workspaceId" in candidate) ||
+    (candidate.workspaceId !== workspaceId &&
+      !(
+        !workspaceId.includes("::") &&
+        typeof candidate.workspaceId === "string" &&
+        candidate.workspaceId.startsWith(`${workspaceId}::`)
+      )) ||
+    !("baseRevision" in candidate) ||
+    !Number.isSafeInteger(candidate.baseRevision) ||
+    !("edits" in candidate) ||
+    !Array.isArray(candidate.edits) ||
+    candidate.edits.length > maximumOutboxEdits ||
+    !candidate.edits.every(isOutboxEdit) ||
+    new Set(
+      candidate.edits.map((edit: unknown) =>
+        isOutboxEdit(edit) ? edit.path : "",
+      ),
+    ).size !== candidate.edits.length ||
+    ("attempt" in candidate &&
+      candidate.attempt !== undefined &&
+      !isOutboxAttempt(candidate.attempt))
+  ) {
+    return null;
+  }
+  return candidate as ContentEditorOutboxRecord;
+}
+
+async function listContentEditorOutboxEntries(
+  workspaceId: string,
+): Promise<ReadonlyArray<ContentEditorOutboxRecord>> {
   const database = await openOutbox();
   try {
     const transaction = database.transaction(storeName, "readonly");
-    const request = workspaceId.includes("::")
-      ? transaction.objectStore(storeName).get(workspaceId)
-      : transaction.objectStore(storeName).getAll();
+    const request = transaction.objectStore(storeName).getAll();
     const result = await new Promise<unknown>((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
     await complete(transaction);
-    const candidate = Array.isArray(result)
-      ? result.find(
-          (record) =>
-            typeof record === "object" &&
-            record !== null &&
-            "workspaceId" in record &&
-            (record.workspaceId === workspaceId ||
-              (typeof record.workspaceId === "string" &&
-                record.workspaceId.startsWith(`${workspaceId}::`))),
-        ) ?? null
-      : result;
-    if (
-      typeof candidate !== "object" ||
-      candidate === null ||
-      !("workspaceId" in candidate) ||
-      (candidate.workspaceId !== workspaceId &&
-        !(
-          !workspaceId.includes("::") &&
-          typeof candidate.workspaceId === "string" &&
-          candidate.workspaceId.startsWith(`${workspaceId}::`)
-        )) ||
-      !("baseRevision" in candidate) ||
-      !Number.isSafeInteger(candidate.baseRevision) ||
-      !("edits" in candidate) ||
-      !Array.isArray(candidate.edits) ||
-      candidate.edits.length > maximumOutboxEdits ||
-      !candidate.edits.every(isOutboxEdit) ||
-      new Set(
-        candidate.edits.map((edit: unknown) =>
-          isOutboxEdit(edit) ? edit.path : "",
-        ),
-      ).size !==
-        candidate.edits.length ||
-      ("attempt" in candidate &&
-        candidate.attempt !== undefined &&
-        !isOutboxAttempt(candidate.attempt))
-    ) {
-      return null;
-    }
-    return candidate as ContentEditorOutboxRecord;
+    return Array.isArray(result)
+      ? result
+          .map((candidate) =>
+            parseOutboxCandidate(candidate, workspaceId),
+          )
+          .filter(
+            (candidate): candidate is ContentEditorOutboxRecord =>
+              candidate !== null,
+          )
+      : [];
   } finally {
     database.close();
   }
+}
+
+async function readContentEditorOutboxEntry(
+  workspaceId: string,
+): Promise<ContentEditorOutboxRecord | null> {
+  const entries = await listContentEditorOutboxEntries(workspaceId);
+  return workspaceId.includes("::")
+    ? entries.find(({ workspaceId: id }) => id === workspaceId) ?? null
+    : entries[0] ?? null;
 }
 
 export async function readContentEditorOutbox(
@@ -138,8 +159,12 @@ export async function readContentEditorOutbox(
   return record === null
     ? null
     : {
-        ...record,
         workspaceId: workspaceId.split("::")[0]!,
+        baseRevision: record.baseRevision,
+        edits: record.edits,
+        ...(record.attempt === undefined
+          ? {}
+          : { attempt: record.attempt }),
       };
 }
 
@@ -149,7 +174,27 @@ export async function writeContentEditorOutbox(
   const database = await openOutbox();
   try {
     const transaction = database.transaction(storeName, "readwrite");
-    transaction.objectStore(storeName).put(structuredClone(record));
+    transaction.objectStore(storeName).put(
+      structuredClone({ ...record, updatedAt: Date.now() }),
+    );
+    await complete(transaction);
+  } finally {
+    database.close();
+  }
+}
+
+async function replaceContentEditorOutboxEntries(
+  record: ContentEditorOutboxRecord,
+  sourceWorkspaceIds: ReadonlyArray<string>,
+): Promise<void> {
+  const database = await openOutbox();
+  try {
+    const transaction = database.transaction(storeName, "readwrite");
+    const store = transaction.objectStore(storeName);
+    store.put(structuredClone({ ...record, updatedAt: Date.now() }));
+    sourceWorkspaceIds
+      .filter((sourceWorkspaceId) => sourceWorkspaceId !== record.workspaceId)
+      .forEach((sourceWorkspaceId) => store.delete(sourceWorkspaceId));
     await complete(transaction);
   } finally {
     database.close();
@@ -190,8 +235,10 @@ export function createContentEditorOutboxController(
   workspaceId: string,
   driver: ContentEditorOutboxDriver = {
     read: readContentEditorOutboxEntry,
+    list: listContentEditorOutboxEntries,
     write: writeContentEditorOutbox,
     clear: clearContentEditorOutbox,
+    replace: replaceContentEditorOutboxEntries,
   },
   scopeId = workspaceId,
 ) {
@@ -220,19 +267,83 @@ export function createContentEditorOutboxController(
     );
 
   return Object.freeze({
-    read: async () => {
-      const stored =
-        (await driver.read(storageId)) ??
-        (storageId === workspaceId
-          ? null
-          : await driver.read(workspaceId));
-      if (stored === null) {
+    read: async (
+      isScopeLive: (scopeId: string) => Promise<boolean> = async () =>
+        true,
+    ) => {
+      const own = await driver.read(storageId);
+      const candidates =
+        driver.list === undefined
+          ? own === null && storageId !== workspaceId
+            ? [await driver.read(workspaceId)].filter(
+                (
+                  candidate,
+                ): candidate is ContentEditorOutboxRecord =>
+                  candidate !== null,
+              )
+            : own === null
+              ? []
+              : [own]
+          : await driver.list(workspaceId);
+      const recoverable: ContentEditorOutboxRecord[] = [];
+      for (const candidate of candidates) {
+        if (candidate.workspaceId === storageId) {
+          recoverable.push(candidate);
+          continue;
+        }
+        const separator = `${workspaceId}::`;
+        if (
+          !candidate.workspaceId.startsWith(separator) ||
+          !(await isScopeLive(candidate.workspaceId.slice(separator.length)))
+        ) {
+          recoverable.push(candidate);
+        }
+      }
+      if (recoverable.length === 0) {
         return null;
       }
-      if (stored.workspaceId !== storageId) {
+      recoverable.sort(
+        (first, second) =>
+          ((first as StoredContentEditorOutboxRecord).updatedAt ?? 0) -
+          ((second as StoredContentEditorOutboxRecord).updatedAt ?? 0),
+      );
+      const editsByPath = new Map<string, StaleRecoveryEdit>();
+      for (const candidate of recoverable) {
+        for (const edit of candidate.edits) {
+          editsByPath.set(edit.path, edit);
+        }
+      }
+      const latest = recoverable.at(-1)!;
+      const stored: ContentEditorOutboxRecord = {
+        workspaceId: storageId,
+        baseRevision: Math.max(
+          ...recoverable.map(({ baseRevision }) => baseRevision),
+        ),
+        edits: [...editsByPath.values()],
+        ...(recoverable.length === 1 && latest.attempt !== undefined
+          ? { attempt: latest.attempt }
+          : {}),
+      };
+      if (stored.edits.length > maximumOutboxEdits) {
+        throw new Error("content_editor_outbox_too_large");
+      }
+      if (
+        recoverable.some(({ workspaceId: id }) => id !== storageId)
+      ) {
         await serialize(async () => {
-          await driver.write({ ...stored, workspaceId: storageId });
-          await driver.clear(stored.workspaceId);
+          if (driver.replace === undefined) {
+            await driver.write(stored);
+            for (const candidate of recoverable) {
+              if (candidate.workspaceId !== storageId) {
+                await driver.clear(candidate.workspaceId);
+              }
+            }
+          } else {
+            await driver.replace(
+              stored,
+              recoverable.map(({ workspaceId: id }) => id),
+            );
+          }
         });
       }
       return { ...stored, workspaceId };
