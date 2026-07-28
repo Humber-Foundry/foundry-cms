@@ -126,11 +126,36 @@ function restoreMutationResult(value: string): MediaMutationResult {
 export function createD1MediaAssetStore(
   database: D1DatabaseBinding,
 ): MediaAssetStore {
+  async function getStoredAsset(siteId: SiteId, assetId: MediaAssetId) {
+    const row = await database
+      .prepare(
+        `${assetProjection} WHERE site_id = ?1 AND asset_id = ?2`,
+      )
+      .bind(siteId, assetId)
+      .first<AssetRow>();
+    if (row === null) return null;
+    if (row.deleted_at !== null) {
+      const deletion = await database
+        .prepare(
+          `SELECT 1 AS reserved FROM media_asset_deletions
+           WHERE site_id = ?1 AND asset_id = ?2`,
+        )
+        .bind(siteId, assetId)
+        .first<{ reserved: number }>();
+      if (deletion === null) return null;
+    }
+    return toAsset(row);
+  }
+
   async function getAsset(siteId: SiteId, assetId: MediaAssetId) {
     const row = await database
       .prepare(
         `${assetProjection}
-         WHERE site_id = ?1 AND asset_id = ?2 AND deleted_at IS NULL`,
+         WHERE site_id = ?1 AND asset_id = ?2 AND deleted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM media_asset_deletions
+             WHERE site_id = ?1 AND asset_id = ?2
+           )`,
       )
       .bind(siteId, assetId)
       .first<AssetRow>();
@@ -226,6 +251,11 @@ export function createD1MediaAssetStore(
         .prepare(
           `${assetProjection}
            WHERE site_id = ?1 AND deleted_at IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM media_asset_deletions
+               WHERE media_asset_deletions.site_id = media_assets.site_id
+                 AND media_asset_deletions.asset_id = media_assets.asset_id
+             )
            ORDER BY created_at, asset_id`,
         )
         .bind(siteId)
@@ -520,7 +550,7 @@ export function createD1MediaAssetStore(
       return revision;
     },
     async beginAssetDeletion(siteId, assetId) {
-      const existing = await getAsset(siteId, assetId);
+      const existing = await getStoredAsset(siteId, assetId);
       if (existing === null) throw new MediaSiteAccessError();
       const result = await database
         .prepare(
@@ -556,15 +586,19 @@ export function createD1MediaAssetStore(
       }
       return existing;
     },
-    async completeAssetDeletion(
-      siteId,
-      assetId,
-      actorId,
-      occurredAt,
-      context,
-    ) {
-      const { idempotencyKey, requestHash } = context;
+    async tombstoneAssetDeletion(siteId, assetId, actorId, occurredAt) {
       const results = await database.batch([
+        database
+          .prepare(
+            `UPDATE media_assets
+             SET deleted_at = COALESCE(deleted_at, ?3)
+             WHERE site_id = ?1 AND asset_id = ?2
+               AND EXISTS (
+                 SELECT 1 FROM media_asset_deletions
+                 WHERE site_id = ?1 AND asset_id = ?2
+               )`,
+          )
+          .bind(siteId, assetId, occurredAt),
         database
           .prepare(
             `INSERT OR IGNORE INTO media_audit_events (
@@ -578,20 +612,30 @@ export function createD1MediaAssetStore(
              )`,
           )
           .bind(siteId, actorId, assetId, occurredAt),
+      ]);
+      if ((results[0]?.meta.changes ?? 0) === 0) {
+        throw new MediaSiteAccessError();
+      }
+    },
+    async completeAssetDeletion(
+      siteId,
+      assetId,
+      occurredAt,
+      context,
+    ) {
+      const { idempotencyKey, requestHash } = context;
+      const results = await database.batch([
         database
           .prepare(
             `DELETE FROM media_asset_deletions
-             WHERE site_id = ?1 AND asset_id = ?2`,
+             WHERE site_id = ?1 AND asset_id = ?2
+               AND EXISTS (
+                 SELECT 1 FROM media_assets
+                 WHERE site_id = ?1 AND asset_id = ?2
+                   AND deleted_at IS NOT NULL
+               )`,
           )
           .bind(siteId, assetId),
-        database
-          .prepare(
-            `UPDATE media_assets
-             SET deleted_at = ?3
-             WHERE site_id = ?1 AND asset_id = ?2
-               AND deleted_at IS NULL`,
-          )
-          .bind(siteId, assetId, occurredAt),
         database
           .prepare(
             `INSERT INTO media_mutation_receipts (
@@ -607,7 +651,7 @@ export function createD1MediaAssetStore(
             occurredAt,
           ),
       ]);
-      if ((results[2]?.meta.changes ?? 0) === 0) {
+      if ((results[0]?.meta.changes ?? 0) === 0) {
         throw new MediaSiteAccessError();
       }
     },

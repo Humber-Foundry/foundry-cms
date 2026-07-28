@@ -6,6 +6,7 @@ import {
   MediaAssetReferencedError,
   MediaSiteAccessError,
   createContentActorId,
+  createContentWorkspaceId,
   createInMemoryMediaAssetStore,
   createInMemoryMediaSourceStore,
   createMediaAssetApplication,
@@ -16,6 +17,8 @@ import {
 const siteA = createSiteId("site_alpha");
 const siteB = createSiteId("site_beta");
 const editor = createContentActorId("membership-editor");
+const workspaceA = createContentWorkspaceId("workspace_alpha");
+const workspaceB = createContentWorkspaceId("workspace_beta");
 const assetA = createMediaAssetId("asset_hero");
 const assetB = createMediaAssetId("asset_detail");
 const assetC = createMediaAssetId("asset_unused");
@@ -117,6 +120,7 @@ describe("media asset application", () => {
     await upload(application, assetB);
     await application.commands.replaceOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       assetId: assetA,
       baseRevision: 0,
@@ -124,6 +128,7 @@ describe("media asset application", () => {
     });
     await application.commands.replaceOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceB,
       assetId: assetA,
       baseRevision: 0,
@@ -132,6 +137,7 @@ describe("media asset application", () => {
 
     const replaced = await application.commands.replaceOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       assetId: assetB,
       baseRevision: 1,
@@ -159,6 +165,7 @@ describe("media asset application", () => {
     await expect(
       application.commands.replaceOccurrence({
         actorId: editor,
+        workspaceId: workspaceB,
         occurrenceId: createMediaOccurrenceId("occurrence_unmapped"),
         assetId: assetA,
         baseRevision: 0,
@@ -172,6 +179,7 @@ describe("media asset application", () => {
     const uploaded = await upload(application);
     const command = {
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       assetId: assetA,
       baseRevision: 0,
@@ -216,6 +224,7 @@ describe("media asset application", () => {
     await upload(application, assetB);
     await application.commands.replaceOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       assetId: assetA,
       baseRevision: 0,
@@ -225,6 +234,7 @@ describe("media asset application", () => {
     await expect(
       application.commands.replaceOccurrence({
         actorId: editor,
+        workspaceId: workspaceB,
         occurrenceId: occurrenceB,
         assetId: assetB,
         baseRevision: 0,
@@ -241,6 +251,7 @@ describe("media asset application", () => {
     const asset = await upload(application);
     await application.commands.replaceOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       assetId: assetA,
       baseRevision: 0,
@@ -249,6 +260,7 @@ describe("media asset application", () => {
 
     const cropped = await application.commands.cropOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       baseRevision: 1,
       crop: { x: 0.1, y: 0.2, width: 0.6, height: 0.5 },
@@ -275,6 +287,7 @@ describe("media asset application", () => {
     const unused = await upload(application, assetC);
     await application.commands.replaceOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       assetId: assetA,
       baseRevision: 0,
@@ -291,6 +304,7 @@ describe("media asset application", () => {
 
     await application.commands.replaceOccurrence({
       actorId: editor,
+      workspaceId: workspaceA,
       occurrenceId: occurrenceA,
       assetId: assetB,
       baseRevision: 1,
@@ -333,6 +347,52 @@ describe("media asset application", () => {
     );
   });
 
+  it("keeps an interrupted source deletion hidden and recoverable", async () => {
+    const baseAssets = createInMemoryMediaAssetStore();
+    let failCompletion = true;
+    const assets = {
+      ...baseAssets,
+      async completeAssetDeletion(
+        ...args: Parameters<typeof baseAssets.completeAssetDeletion>
+      ) {
+        if (failCompletion) {
+          failCompletion = false;
+          throw new Error("simulated_d1_completion_failure");
+        }
+        return baseAssets.completeAssetDeletion(...args);
+      },
+    };
+    const sources = createInMemoryMediaSourceStore();
+    const application = createMediaAssetApplication({
+      siteId: siteA,
+      actorId: editor,
+      assets,
+      sources,
+      now: () => "2026-07-27T12:00:00.000Z",
+    });
+    const uploaded = await upload(application, assetC);
+    const command = {
+      actorId: editor,
+      assetId: assetC,
+      idempotencyKey: "recover-interrupted-delete",
+    } as const;
+
+    await expect(application.commands.delete(command)).rejects.toThrow(
+      "simulated_d1_completion_failure",
+    );
+    await expect(application.queries.getAsset(assetC)).resolves.toBeNull();
+    await expect(sources.readForTest(uploaded.objectKey)).resolves.toBeNull();
+    await expect(application.commands.delete(command)).resolves.toBeUndefined();
+    await expect(application.queries.audit()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "media.asset.deleted",
+          subjectId: assetC,
+        }),
+      ]),
+    );
+  });
+
   it("fails closed across sites even when identifiers overlap", async () => {
     const assets = createInMemoryMediaAssetStore();
     const sources = createInMemoryMediaSourceStore();
@@ -354,6 +414,7 @@ describe("media asset application", () => {
     await expect(
       beta.commands.replaceOccurrence({
         actorId: editor,
+        workspaceId: workspaceA,
         occurrenceId: occurrenceA,
         assetId: assetA,
         baseRevision: 0,

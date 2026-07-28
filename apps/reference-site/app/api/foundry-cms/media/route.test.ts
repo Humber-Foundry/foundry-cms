@@ -238,6 +238,7 @@ describe("media endpoint", () => {
       occurrenceId: "occurrence_home_hero",
       assetId: "asset_replacement",
       baseRevision: 1,
+      workspaceId: "workspace_editor",
       idempotencyKey: "replace-media-route-0001",
     });
     expect(mocks.verifyMutation).toHaveBeenCalledOnce();

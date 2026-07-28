@@ -1,6 +1,6 @@
 import type { SiteId } from "@foundry/site-definition";
 
-import type { ContentActorId } from "./content-revisions";
+import type { ContentActorId, ContentWorkspaceId } from "./content-revisions";
 import { sha256CanonicalJson } from "./deterministic-hash";
 
 declare const mediaAssetIdBrand: unique symbol;
@@ -201,10 +201,15 @@ export type MediaAssetStore = Readonly<{
     siteId: SiteId,
     assetId: MediaAssetId,
   ): Promise<MediaAsset>;
-  completeAssetDeletion(
+  tombstoneAssetDeletion(
     siteId: SiteId,
     assetId: MediaAssetId,
     actorId: ContentActorId,
+    occurredAt: string,
+  ): Promise<void>;
+  completeAssetDeletion(
+    siteId: SiteId,
+    assetId: MediaAssetId,
     occurredAt: string,
     context: MediaMutationContext,
   ): Promise<void>;
@@ -225,6 +230,7 @@ type UploadMediaAssetCommand = Readonly<{
 
 type ReplaceMediaOccurrenceCommand = Readonly<{
   actorId: ContentActorId;
+  workspaceId: ContentWorkspaceId;
   occurrenceId: MediaOccurrenceId;
   assetId: MediaAssetId;
   baseRevision: number;
@@ -233,6 +239,7 @@ type ReplaceMediaOccurrenceCommand = Readonly<{
 
 type CropMediaOccurrenceCommand = Readonly<{
   actorId: ContentActorId;
+  workspaceId: ContentWorkspaceId;
   occurrenceId: MediaOccurrenceId;
   crop: MediaCrop;
   baseRevision: number;
@@ -493,12 +500,18 @@ export function createMediaAssetApplication({
           siteId,
           command.assetId,
         );
+        const occurredAt = now();
+        await assets.tombstoneAssetDeletion(
+          siteId,
+          command.assetId,
+          command.actorId,
+          occurredAt,
+        );
         await sources.delete(asset.objectKey);
         await assets.completeAssetDeletion(
           siteId,
           command.assetId,
-          command.actorId,
-          now(),
+          occurredAt,
           context,
         );
       },

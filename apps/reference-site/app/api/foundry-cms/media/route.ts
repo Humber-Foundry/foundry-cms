@@ -32,6 +32,7 @@ import {
 } from "../../../../src/media-asset-runtime";
 import { loadContentRevisionApplication } from "../../../../src/content-revision-runtime";
 import { revisionPreviewGatewayUrl } from "../../../../src/content-revision-links";
+import { inspectImageSource } from "../../../../src/image-source-metadata";
 
 async function authorized(request: Request) {
   const authenticated = await loadHumanIdentityRequestContext(request.headers);
@@ -202,6 +203,15 @@ export async function POST(request: Request) {
       if (!(source instanceof File) || source.size > 20 * 1024 * 1024) {
         throw new MediaValidationError("source");
       }
+      const sourceBytes = new Uint8Array(await source.arrayBuffer());
+      const metadata = inspectImageSource(sourceBytes);
+      if (
+        source.type !== metadata.contentType ||
+        numberField(form, "width") !== metadata.width ||
+        numberField(form, "height") !== metadata.height
+      ) {
+        throw new MediaValidationError("source");
+      }
       const asset = await application.commands.upload({
         actorId,
         assetId: createMediaAssetId(String(form.get("assetId") ?? "")),
@@ -210,7 +220,7 @@ export async function POST(request: Request) {
         byteLength: source.size,
         width: numberField(form, "width"),
         height: numberField(form, "height"),
-        source: new Uint8Array(await source.arrayBuffer()),
+        source: sourceBytes,
         idempotencyKey,
       });
       return Response.json(asset, { status: 201 });
@@ -223,6 +233,7 @@ export async function POST(request: Request) {
         occurrenceId: createMediaOccurrenceId(String(body.occurrenceId ?? "")),
         assetId: createMediaAssetId(String(body.assetId ?? "")),
         baseRevision: Number(body.baseRevision),
+        workspaceId: binding.workspaceId,
         idempotencyKey,
       });
       return Response.json(
@@ -243,6 +254,7 @@ export async function POST(request: Request) {
         actorId,
         occurrenceId: createMediaOccurrenceId(String(body.occurrenceId ?? "")),
         baseRevision: Number(body.baseRevision),
+        workspaceId: binding.workspaceId,
         crop: {
           x: Number(crop?.x),
           y: Number(crop?.y),

@@ -123,21 +123,24 @@ Worker renderer version and bundled production-base content hash.
 
 Media sources are written to the private `FOUNDRY_MEDIA` R2 bucket under
 `media/<site-id>/<asset-id>/source`. D1 stores stable asset metadata and
-site-scoped occurrence references. Replacing one occurrence appends a revision
+site-scoped occurrence references. Uploads verify the image format and
+dimensions from the source bytes before recording caller-supplied metadata.
+Replacing one occurrence appends a revision
 only for that occurrence; cropping appends normalized crop data and never
 rewrites the R2 source. The selected occurrence revision and asset presentation
 metadata are then fingerprinted into the Editor's immutable content revision;
 the exact preview renders that bound manifest, while the public route continues
 to render only the Git-published Site Definition. Published source delivery
 checks the requested asset against that Git manifest before reading private R2.
-The media and content receipts share a stable retry key, so a raced content head
-is reconciled against the latest revision and an ambiguous response can be
-retried without appending another occurrence. All mutations are idempotent and
-audited. Deletion first
-reserves an unreferenced asset in D1, fences new references, removes its source,
-and then tombstones its stable identity. Any current or historical occurrence
-revision rejects deletion so immutable previews never acquire a broken media
-reference.
+The media and content receipts share a stable retry key bound to the workspace,
+so a raced content head is reconciled against the latest revision and an
+ambiguous response can be retried without appending another occurrence. All
+mutations are idempotent and audited. Deletion first reserves an unreferenced
+asset in D1, fences new references, and durably tombstones its stable identity
+before removing its source. The reservation remains recoverable until the
+source removal and mutation receipt complete. Any current or historical
+occurrence revision rejects deletion so immutable previews never acquire a
+broken media reference.
 
 Build and verify the Cloudflare Workers artifact:
 

@@ -113,7 +113,9 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     },
     async getAsset(siteId, assetId) {
       const key = scopedKey(siteId, assetId);
-      return deletedAssetIds.has(key) ? null : (assets.get(key) ?? null);
+      return deletedAssetIds.has(key) || deletionReservations.has(key)
+        ? null
+        : (assets.get(key) ?? null);
     },
     async isAssetIdReserved(siteId, assetId) {
       return assets.has(scopedKey(siteId, assetId));
@@ -122,7 +124,9 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       return [...assets.entries()]
         .filter(
           ([key, asset]) =>
-            asset.siteId === siteId && !deletedAssetIds.has(key),
+            asset.siteId === siteId &&
+              !deletedAssetIds.has(key) &&
+              !deletionReservations.has(key),
         )
         .map(([, asset]) => asset);
     },
@@ -218,6 +222,7 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       const asset = assets.get(key);
       if (asset === undefined) throw new MediaSiteAccessError();
       if (deletionReservations.has(key)) return asset;
+      if (deletedAssetIds.has(key)) throw new MediaSiteAccessError();
       let referenceCount = 0;
       for (const [occurrenceKey, history] of revisions) {
         if (
@@ -235,19 +240,13 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       deletionReservations.add(key);
       return asset;
     },
-    async completeAssetDeletion(
-      siteId,
-      assetId,
-      actorId,
-      occurredAt,
-      context,
-    ) {
+    async tombstoneAssetDeletion(siteId, assetId, actorId, occurredAt) {
       const key = scopedKey(siteId, assetId);
       if (!deletionReservations.has(key) || !assets.has(key)) {
         throw new MediaSiteAccessError();
       }
+      if (deletedAssetIds.has(key)) return;
       deletedAssetIds.add(key);
-      deletionReservations.delete(key);
       auditEvents.push(
         immutable({
           siteId,
@@ -257,6 +256,18 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
           occurredAt,
         }),
       );
+    },
+    async completeAssetDeletion(
+      siteId,
+      assetId,
+      occurredAt,
+      context,
+    ) {
+      const key = scopedKey(siteId, assetId);
+      if (!deletionReservations.has(key) || !assets.has(key)) {
+        throw new MediaSiteAccessError();
+      }
+      deletionReservations.delete(key);
       await store.record(context, { kind: "deleted", assetId });
     },
     async audit(siteId) {

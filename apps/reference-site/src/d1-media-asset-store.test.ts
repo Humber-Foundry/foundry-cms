@@ -6,6 +6,7 @@ import { Miniflare } from "miniflare";
 import {
   MediaAssetReferencedError,
   createContentActorId,
+  createContentWorkspaceId,
   createInMemoryMediaSourceStore,
   createMediaAssetApplication,
   createMediaAssetId,
@@ -18,6 +19,7 @@ import { createD1MediaAssetStore } from "./d1-media-asset-store";
 describe("D1 media asset store", () => {
   const siteId = createSiteId("site_reference");
   const actorId = createContentActorId("membership-editor");
+  const workspaceId = createContentWorkspaceId("workspace_editor");
   const assetId = createMediaAssetId("asset_hero");
   const replacementId = createMediaAssetId("asset_replacement");
   const occurrenceId = createMediaOccurrenceId("occurrence_home_hero");
@@ -79,6 +81,7 @@ describe("D1 media asset store", () => {
     await upload(app, replacementId);
     await app.commands.replaceOccurrence({
       actorId,
+      workspaceId,
       occurrenceId,
       assetId,
       baseRevision: 0,
@@ -86,6 +89,7 @@ describe("D1 media asset store", () => {
     });
     await app.commands.cropOccurrence({
       actorId,
+      workspaceId,
       occurrenceId,
       baseRevision: 1,
       crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
@@ -93,6 +97,7 @@ describe("D1 media asset store", () => {
     });
     await app.commands.replaceOccurrence({
       actorId,
+      workspaceId,
       occurrenceId,
       assetId: replacementId,
       baseRevision: 2,
@@ -139,6 +144,7 @@ describe("D1 media asset store", () => {
     await upload(app, replacementId);
     await app.commands.replaceOccurrence({
       actorId,
+      workspaceId,
       occurrenceId,
       assetId,
       baseRevision: 0,
@@ -149,6 +155,7 @@ describe("D1 media asset store", () => {
     await expect(
       app.commands.replaceOccurrence({
         actorId,
+        workspaceId,
         occurrenceId: otherOccurrence,
         assetId: replacementId,
         baseRevision: 0,
