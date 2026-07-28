@@ -35,6 +35,12 @@ jobs:
       - name: Run application-seam tests
         run: npm test
 
+      - name: Install browser acceptance runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Run thin browser acceptance tests
+        run: npm run test:browser
+
       - name: Type-check workspaces
         run: npm run typecheck
 

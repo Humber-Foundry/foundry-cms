@@ -29,6 +29,8 @@ import { referenceSiteApplication } from "@/src/reference-installation";
 import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
 
 import "./dashboard.css";
+import "../public.css";
+import "@puckeditor/core/puck.css";
 
 export const dynamic = "force-dynamic";
 

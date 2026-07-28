@@ -12,3 +12,16 @@ export function publicScriptPaths(html) {
 
   return [...new Set([...scriptSources, ...preloadSources])];
 }
+
+export function publicStylePaths(html) {
+  return [
+    ...new Set(
+      Array.from(
+        html.matchAll(
+          /<link\b(?=[^>]*\brel="stylesheet")[^>]*\bhref="([^"]+\.css)"[^>]*>/g,
+        ),
+        (match) => match[1],
+      ),
+    ),
+  ];
+}

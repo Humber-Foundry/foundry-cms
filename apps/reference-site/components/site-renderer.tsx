@@ -5,7 +5,7 @@ import type {
 
 import { sectionAnchor } from "@/src/section-anchor";
 
-function Section({ section }: { section: PageSection }) {
+export function SiteSection({ section }: { section: PageSection }) {
   switch (section.type) {
     case "hero":
       return (
@@ -124,7 +124,7 @@ export function SiteRenderer({
       </header>
       <main>
         {definition.home.sections.map((section) => (
-          <Section key={section.id} section={section} />
+          <SiteSection key={section.id} section={section} />
         ))}
       </main>
       <footer className="site-footer">
