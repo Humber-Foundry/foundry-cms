@@ -1,6 +1,9 @@
-import type {
-  PageSection,
-  SiteDefinitionEdit,
+import {
+  applyPageComposition,
+  pageCompositionContract,
+  type PageSection,
+  type SiteDefinition,
+  type SiteDefinitionEdit,
 } from "@foundry/site-definition";
 
 const staleEditRecoveryPrefix = "foundry-cms:stale-edit-recovery";
@@ -21,6 +24,26 @@ export type StaleRecoveryPointer = Readonly<{
   id: string;
   sourceWorkspaceId: string;
 }>;
+
+export function applyStructuralRecovery(
+  definition: SiteDefinition,
+  edit: StaleRecoveryEdit,
+):
+  | Readonly<{ ok: true; definition: SiteDefinition }>
+  | Readonly<{ ok: false }> {
+  if (edit.path !== pageCompositionContract.slot.id) {
+    return { ok: false };
+  }
+  try {
+    const composition: unknown = JSON.parse(edit.value);
+    const result = applyPageComposition(definition, composition);
+    return result.ok
+      ? { ok: true, definition: result.definition }
+      : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
 
 export function excludeCompositionOwnedEdits(
   edits: ReadonlyArray<StaleRecoveryEdit>,

@@ -8,6 +8,10 @@ export type ContentEditorOutboxRecord = Readonly<{
   workspaceId: string;
   baseRevision: number;
   edits: ReadonlyArray<StaleRecoveryEdit>;
+  attempt?: Readonly<{
+    body: string;
+    idempotencyKey: string;
+  }>;
 }>;
 
 function openOutbox(): Promise<IDBDatabase> {
@@ -48,6 +52,20 @@ function isOutboxEdit(
   );
 }
 
+function isOutboxAttempt(
+  value: unknown,
+): value is NonNullable<ContentEditorOutboxRecord["attempt"]> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "body" in value &&
+    typeof value.body === "string" &&
+    "idempotencyKey" in value &&
+    typeof value.idempotencyKey === "string" &&
+    /^[A-Za-z0-9._:-]{16,128}$/u.test(value.idempotencyKey)
+  );
+}
+
 export async function readContentEditorOutbox(
   workspaceId: string,
 ): Promise<ContentEditorOutboxRecord | null> {
@@ -72,7 +90,10 @@ export async function readContentEditorOutbox(
       result.edits.length > maximumOutboxEdits ||
       !result.edits.every(isOutboxEdit) ||
       new Set(result.edits.map((edit) => edit.path)).size !==
-        result.edits.length
+        result.edits.length ||
+      ("attempt" in result &&
+        result.attempt !== undefined &&
+        !isOutboxAttempt(result.attempt))
     ) {
       return null;
     }

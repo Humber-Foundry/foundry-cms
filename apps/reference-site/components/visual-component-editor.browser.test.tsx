@@ -55,31 +55,39 @@ describe("visual component editor browser acceptance", () => {
     expect(iframe?.getAttribute("src")).toBeNull();
     expect(iframe?.contentDocument).not.toBeNull();
 
-    const keyboardControls = [
-      ...host.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
-      ),
-    ];
-    expect(keyboardControls.length).toBeGreaterThan(0);
-    await userEvent.click(keyboardControls[0]!);
-    expect(document.activeElement).toBe(keyboardControls[0]);
-    expect(keyboardControls[0]!.closest(".puck-editor-frame")).not.toBeNull();
-    await userEvent.tab();
-    expect(document.activeElement).not.toBe(keyboardControls[0]);
-    expect(document.activeElement).not.toBe(document.body);
+    (document.activeElement as HTMLElement | null)?.blur();
+    let categoryToggle: HTMLButtonElement | null = null;
+    for (let index = 0; index < 30 && categoryToggle === null; index += 1) {
+      await userEvent.tab();
+      const focused = document.activeElement;
+      if (
+        focused instanceof HTMLButtonElement &&
+        focused.getAttribute("aria-controls")?.startsWith(
+          "puck-drawer-category-",
+        )
+      ) {
+        categoryToggle = focused;
+      }
+    }
+    expect(categoryToggle).not.toBeNull();
+    const initiallyExpanded = categoryToggle!.getAttribute("aria-expanded");
+    await userEvent.keyboard("{Enter}");
+    expect(categoryToggle!.getAttribute("aria-expanded")).not.toBe(
+      initiallyExpanded,
+    );
 
-    await userEvent.click(iframe!);
+    for (
+      let index = 0;
+      index < 30 && document.activeElement !== iframe;
+      index += 1
+    ) {
+      await userEvent.tab();
+    }
     expect(document.activeElement).toBe(iframe);
-    const iframeControls = [
-      ...iframe!.contentDocument!.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex="0"]',
-      ),
-    ];
-    expect(iframeControls.length).toBeGreaterThan(0);
-    iframeControls[0]!.focus();
-    expect(iframe!.contentDocument!.activeElement).toBe(iframeControls[0]);
+    const firstIframeControl = iframe!.contentDocument!.activeElement;
+    expect(firstIframeControl).not.toBe(iframe!.contentDocument!.body);
     await userEvent.tab();
-    expect(iframe!.contentDocument!.activeElement).not.toBe(iframeControls[0]);
+    expect(iframe!.contentDocument!.activeElement).not.toBe(firstIframeControl);
     expect(iframe!.contentDocument!.activeElement).not.toBe(
       iframe!.contentDocument!.body,
     );
@@ -132,6 +140,10 @@ describe("visual component editor browser acceptance", () => {
             '{"slotId":"slot_home_sections","components":[{"id":"section_hero","type":"hero"}]}',
         },
       ],
+      attempt: {
+        body: '{"workspaceId":"workspace_browser_acceptance"}',
+        idempotencyKey: "browser-outbox-attempt-0001",
+      },
     });
 
     expect(await readContentEditorOutbox(workspaceId)).toEqual({
@@ -145,6 +157,10 @@ describe("visual component editor browser acceptance", () => {
             '{"slotId":"slot_home_sections","components":[{"id":"section_hero","type":"hero"}]}',
         },
       ],
+      attempt: {
+        body: '{"workspaceId":"workspace_browser_acceptance"}',
+        idempotencyKey: "browser-outbox-attempt-0001",
+      },
     });
     await clearContentEditorOutbox(workspaceId);
     expect(await readContentEditorOutbox(workspaceId)).toBeNull();

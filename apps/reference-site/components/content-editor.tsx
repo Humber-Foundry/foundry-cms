@@ -4,7 +4,6 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type { ContentRevision } from "@foundry/application";
 import {
-  applyPageComposition,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
@@ -18,6 +17,7 @@ import {
 } from "../src/content-editor-history";
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
+  applyStructuralRecovery,
   clearStaleEdits,
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
@@ -101,6 +101,7 @@ export function ContentEditor({
   const recoverySyncReady = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
   const outboxQueue = useRef<Promise<void>>(Promise.resolve());
+  const lastAutosaveFingerprint = useRef<string | null>(null);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
@@ -158,6 +159,29 @@ export function ContentEditor({
     return queued;
   }
 
+  function outboxAttemptMatchesCurrentWorkspace(
+    record: NonNullable<
+      Awaited<ReturnType<typeof readContentEditorOutbox>>
+    >,
+  ): boolean {
+    if (record.attempt === undefined) {
+      return false;
+    }
+    try {
+      const body: unknown = JSON.parse(record.attempt.body);
+      return (
+        typeof body === "object" &&
+        body !== null &&
+        "workspaceId" in body &&
+        body.workspaceId === initialRevision.workspaceId &&
+        "baseRevision" in body &&
+        body.baseRevision === record.baseRevision
+      );
+    } catch {
+      return false;
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     void readContentEditorOutbox(initialRevision.workspaceId)
@@ -183,6 +207,7 @@ export function ContentEditor({
         ]);
         const conflicts: StaleRecoveryConflict[] = [];
         let recoveredCount = 0;
+        let alreadyAppliedCount = 0;
         for (const edit of record.edits) {
           const currentValue = currentValues.get(edit.path);
           if (currentValue === undefined) {
@@ -191,6 +216,10 @@ export function ContentEditor({
               currentValue: null,
               reason: "missing",
             });
+            continue;
+          }
+          if (currentValue === edit.value) {
+            alreadyAppliedCount += 1;
             continue;
           }
           if (currentValue !== edit.baseValue) {
@@ -202,18 +231,14 @@ export function ContentEditor({
             continue;
           }
           if (edit.path === pageCompositionContract.slot.id) {
-            try {
-              const recoveredComposition: unknown = JSON.parse(edit.value);
-              const result = applyPageComposition(
-                initialRevision.definition,
-                recoveredComposition,
-              );
-              if (!result.ok) {
-                throw new Error("invalid_recovered_composition");
-              }
+            const result = applyStructuralRecovery(
+              initialRevision.definition,
+              edit,
+            );
+            if (result.ok) {
               dispatch({ type: "compose", definition: result.definition });
               recoveredCount += 1;
-            } catch {
+            } else {
               conflicts.push({
                 ...edit,
                 currentValue,
@@ -225,7 +250,24 @@ export function ContentEditor({
             recoveredCount += 1;
           }
         }
+        if (alreadyAppliedCount === record.edits.length) {
+          recoveryPending.current = [];
+          void queueOutbox(() =>
+            clearContentEditorOutbox(initialRevision.workspaceId),
+          );
+          setMessage(
+            `Revision ${state.persistedRevision} already contains the browser's last autosave.`,
+          );
+          return;
+        }
         setRecoveryConflicts(conflicts);
+        if (
+          conflicts.length === 0 &&
+          record.baseRevision === state.persistedRevision &&
+          outboxAttemptMatchesCurrentWorkspace(record)
+        ) {
+          pendingAttempt.current = record.attempt!;
+        }
         if (conflicts.length > 0) {
           setMessage(
             "Unsaved browser edits were recovered, but some overlap newer values. Resolve each one before saving.",
@@ -254,39 +296,6 @@ export function ContentEditor({
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!outboxReady || state.status === "stale") {
-      return;
-    }
-    const persist = () => {
-      void queueOutbox(() =>
-        recoverableEdits.length === 0
-          ? clearContentEditorOutbox(initialRevision.workspaceId)
-          : writeContentEditorOutbox({
-              workspaceId: initialRevision.workspaceId,
-              baseRevision: state.persistedRevision,
-              edits: recoverableEdits,
-            }),
-      ).catch(() => {
-        setMessage(
-          "Browser recovery storage could not be updated. Keep this tab open until your edits are saved.",
-        );
-      });
-    };
-    const timer = window.setTimeout(persist, 250);
-    window.addEventListener("blur", persist);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("blur", persist);
-    };
-  }, [
-    initialRevision.workspaceId,
-    outboxReady,
-    recoverableEdits,
-    state.persistedRevision,
-    state.status,
-  ]);
 
   useEffect(() => {
     if (
@@ -331,17 +340,12 @@ export function ContentEditor({
     }
     for (const edit of recovered) {
       if (edit.path === pageCompositionContract.slot.id) {
-        try {
-          const recoveredComposition: unknown = JSON.parse(edit.value);
-          const result = applyPageComposition(
-            initialRevision.definition,
-            recoveredComposition,
-          );
-          if (result.ok) {
-            dispatch({ type: "compose", definition: result.definition });
-          }
-        } catch {
-          // Malformed browser data remains available for explicit resolution.
+        const result = applyStructuralRecovery(
+          initialRevision.definition,
+          edit,
+        );
+        if (result.ok) {
+          dispatch({ type: "compose", definition: result.definition });
         }
       } else {
         dispatch({ type: "edit", ...edit });
@@ -411,6 +415,7 @@ export function ContentEditor({
   ]);
 
   async function save() {
+    lastAutosaveFingerprint.current = JSON.stringify(recoverableEdits);
     if (pendingAttempt.current === null) {
       pendingAttempt.current = {
         body: JSON.stringify({
@@ -423,9 +428,22 @@ export function ContentEditor({
         idempotencyKey: crypto.randomUUID(),
       };
     }
-    dispatch({ type: "saving" });
-    setMessage("");
     const attempt = pendingAttempt.current;
+    try {
+      await queueOutbox(() =>
+        writeContentEditorOutbox({
+          workspaceId: initialRevision.workspaceId,
+          baseRevision: state.persistedRevision,
+          edits: recoverableEdits,
+          attempt,
+        }),
+      );
+    } catch {
+      setMessage(
+        "Browser recovery storage is unavailable. This save will continue with its stable retry identity.",
+      );
+    }
+    dispatch({ type: "saving" });
     try {
       const result = await sendContentRevisionAttempt({
         attempt,
@@ -442,6 +460,13 @@ export function ContentEditor({
         body.fields !== null
       ) {
         pendingAttempt.current = null;
+        void queueOutbox(() =>
+          writeContentEditorOutbox({
+            workspaceId: initialRevision.workspaceId,
+            baseRevision: state.persistedRevision,
+            edits: recoverableEdits,
+          }),
+        );
         dispatch({
           type: "failed",
           errors: body.fields as Record<string, string>,
@@ -457,6 +482,13 @@ export function ContentEditor({
         body.error === "revision_conflict"
       ) {
         pendingAttempt.current = null;
+        void queueOutbox(() =>
+          writeContentEditorOutbox({
+            workspaceId: initialRevision.workspaceId,
+            baseRevision: state.persistedRevision,
+            edits: recoverableEdits,
+          }),
+        );
         dispatch({
           type: "failed",
           conflict: "conflict",
@@ -481,6 +513,13 @@ export function ContentEditor({
             ? (body.acknowledgedRevision as number)
             : undefined;
         pendingAttempt.current = null;
+        void queueOutbox(() =>
+          writeContentEditorOutbox({
+            workspaceId: initialRevision.workspaceId,
+            baseRevision: state.persistedRevision,
+            edits: recoverableEdits,
+          }),
+        );
         dispatch({
           type: "failed",
           conflict: "stale",
@@ -557,6 +596,36 @@ export function ContentEditor({
       );
     }
   }
+
+  useEffect(() => {
+    if (
+      !outboxReady ||
+      state.status !== "dirty" ||
+      recoverableEdits.length === 0 ||
+      recoveryConflicts.length > 0
+    ) {
+      return;
+    }
+    const autosave = () => {
+      const fingerprint = JSON.stringify(recoverableEdits);
+      if (lastAutosaveFingerprint.current === fingerprint) {
+        return;
+      }
+      lastAutosaveFingerprint.current = fingerprint;
+      void save();
+    };
+    const timer = window.setTimeout(autosave, 250);
+    window.addEventListener("blur", autosave);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("blur", autosave);
+    };
+  }, [
+    outboxReady,
+    recoverableEdits,
+    recoveryConflicts,
+    state.status,
+  ]);
 
   function edit(path: string, value: string) {
     pendingAttempt.current = null;
@@ -638,23 +707,16 @@ export function ContentEditor({
   ) {
     if (resolution === "mine" && conflict.currentValue !== null) {
       if (conflict.path === pageCompositionContract.slot.id) {
-        try {
-          const recoveredComposition: unknown = JSON.parse(conflict.value);
-          const result = applyPageComposition(
-            state.workingDefinition,
-            recoveredComposition,
-          );
-          if (!result.ok) {
-            setMessage(
-              "That structural recovery no longer fits the current Site Definition. It remains preserved until you keep the latest structure.",
-            );
-            return;
-          }
+        const result = applyStructuralRecovery(
+          state.workingDefinition,
+          conflict,
+        );
+        if (result.ok) {
           pendingAttempt.current = null;
           dispatch({ type: "compose", definition: result.definition });
-        } catch {
+        } else {
           setMessage(
-            "That structural recovery is malformed. It remains preserved until you keep the latest structure.",
+            "That structural recovery no longer fits the current Site Definition. It remains preserved until you keep the latest structure.",
           );
           return;
         }
@@ -669,6 +731,19 @@ export function ContentEditor({
       (candidate) =>
         candidate.path !== conflict.path || resolution === "mine",
     );
+    void queueOutbox(() =>
+      recoveryPending.current.length === 0
+        ? clearContentEditorOutbox(initialRevision.workspaceId)
+        : writeContentEditorOutbox({
+            workspaceId: initialRevision.workspaceId,
+            baseRevision: state.persistedRevision,
+            edits: recoveryPending.current,
+          }),
+    ).catch(() => {
+      setMessage(
+        "That choice is active in this tab, but browser recovery storage could not be updated.",
+      );
+    });
     setRecoveryConflicts(remaining);
     if (staleRecovery !== undefined) {
       try {
@@ -732,7 +807,8 @@ export function ContentEditor({
             className="button button-primary"
             disabled={
               (edits.length === 0 && composition === undefined) ||
-              editorLocked
+              editorLocked ||
+              recoveryConflicts.length > 0
             }
             onClick={save}
           >

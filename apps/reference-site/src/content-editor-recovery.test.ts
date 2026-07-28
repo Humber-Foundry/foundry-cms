@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createDefaultPageSection,
+  referenceSiteDefinition,
+  toPageComposition,
+} from "@foundry/site-definition";
+
+import {
+  applyStructuralRecovery,
   clearStaleEdits,
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
@@ -9,7 +16,6 @@ import {
   recoverStaleEdits,
   synchronizeStaleEdits,
 } from "./content-editor-recovery";
-import { createDefaultPageSection } from "@foundry/site-definition";
 
 function createStorage() {
   const values = new Map<string, string>();
@@ -199,6 +205,27 @@ describe("stale edit recovery", () => {
     expect(excludeCompositionOwnedEdits(edits, [section])).toEqual([
       edits[2],
     ]);
+  });
+
+  it("uses one fail-closed structural recovery path", () => {
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: "",
+      value: JSON.stringify(toPageComposition(referenceSiteDefinition)),
+    };
+
+    expect(
+      applyStructuralRecovery(referenceSiteDefinition, edit),
+    ).toEqual({
+      ok: true,
+      definition: referenceSiteDefinition,
+    });
+    expect(
+      applyStructuralRecovery(referenceSiteDefinition, {
+        ...edit,
+        value: "{malformed",
+      }),
+    ).toEqual({ ok: false });
   });
 
   it("surfaces a same-path concurrent change as a three-way conflict", () => {
