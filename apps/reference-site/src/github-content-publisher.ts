@@ -207,13 +207,13 @@ function isDefiniteGraphQlMutationRejection(error: unknown) {
     typeof error.extensions.code === "string"
       ? error.extensions.code
       : null;
+  const structuredCode = directCode ?? extensionCode;
+  if (structuredCode !== null) {
+    return definiteGraphQlMutationErrorCodes.has(structuredCode);
+  }
   return (
     isExpectedHeadMismatch({ responseMessage: message }) ||
-    /\bvalidation failed\b/iu.test(message) ||
-    (directCode !== null &&
-      definiteGraphQlMutationErrorCodes.has(directCode)) ||
-    (extensionCode !== null &&
-      definiteGraphQlMutationErrorCodes.has(extensionCode))
+    /\bvalidation failed\b/iu.test(message)
   );
 }
 
@@ -995,7 +995,10 @@ export function createGitHubContentPublisher({
         }
         return { state: "committed", commitSha };
       } catch (error) {
-        if (isExpectedHeadMismatch(error)) {
+        if (
+          isDefiniteHttpRejection(error) &&
+          isExpectedHeadMismatch(error)
+        ) {
           return { state: "blocked", detail: "production_head_moved" };
         }
         if (isDefiniteHttpRejection(error)) {
