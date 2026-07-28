@@ -54,21 +54,24 @@ after the temporary archive is removed. It refuses feature commits and dirty
 worktrees. If the same snapshot already exists, it verifies that snapshot
 while still applying cache retention rather than rebuilding it. Each refresh
 retains the 20 most recent snapshots plus the merge-base snapshot of every
-active worktree; older snapshots are removed so the shared Git directory cannot
-grow without bound. A later refresh reclaims a lock left by a process
-that no longer exists, but never takes or removes another confirmed live
-same-host owner's lock. An owner recorded under another hostname receives a
-four-hour lease so a machine rename or vanished shared-storage host cannot
-block AFK refreshes forever.
+active, non-prunable worktree. Overflow snapshots must remain inactive across
+refreshes and a 24-hour grace period, followed by a fresh active-worktree check,
+before removal; this bounds the shared cache without deleting a base after one
+racy observation. A later refresh reclaims a lock left by a process that no
+longer exists, but never takes or removes another confirmed live same-host
+owner's lock. An owner recorded under another hostname receives a four-hour
+lease so a machine rename or vanished shared-storage host cannot block AFK
+refreshes forever.
 
 Graphify's AST workers may be denied by an agent sandbox even when its process
 exits successfully. The wrapper rejects an empty graph and rejects extraction
 diagnostics that prove skipped files, failed workers, missing extractors or
 dependencies, or incomplete relationship resolution. A source that legitimately
-produces no graph nodes may still be reported by Graphify without blocking the
-otherwise complete snapshot. If the refresh reports an AST permission error,
-incomplete result, or empty graph, rerun the same command with approved local
-execution; never publish or rely on the incomplete result.
+produces no graph nodes must be excluded explicitly in `.graphifyignore`;
+Foundry's published Site Definition JSON is excluded there because it is data,
+not code. If the refresh reports an AST permission error, incomplete result, or
+empty graph, rerun the same command with approved local execution; never publish
+or rely on the incomplete result.
 
 Do not install Graphify's generic post-commit hook in this repository. It runs
 independently in each worktree and does not enforce this commit-pinned
@@ -96,8 +99,9 @@ The wrapper:
 3. verifies every metadata and content hash;
 4. finds committed, staged, unstaged, deleted, and untracked branch paths;
 5. removes graph nodes and edges sourced from those paths;
-6. removes all relationships when a new file or resolver configuration change
-   could invalidate relationships sourced from otherwise unchanged files; and
+6. removes all relationships when a new file, an indexed source change, or a
+   resolver-consumed configuration change could invalidate relationships
+   sourced from otherwise unchanged files; and
 7. runs a budget-capped Graphify query against a temporary filtered graph.
 
 Every result begins with the graph base, branch head, scope, and number of

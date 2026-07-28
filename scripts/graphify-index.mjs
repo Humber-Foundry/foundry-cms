@@ -29,6 +29,7 @@ const maximumQueryBudget = 3_000;
 const defaultQueryBudget = 1_200;
 const remoteRefreshLeaseMs = 4 * 60 * 60 * 1_000;
 const recentSnapshotRetention = 20;
+const snapshotGcGraceMs = 24 * 60 * 60 * 1_000;
 
 function fail(message) {
   throw new Error(message);
@@ -305,7 +306,7 @@ function runGraphify(arguments_, options = {}) {
       .filter(Boolean)
       .filter(
         (line) =>
-          /warning:\s+(?:worker failed for|skipped )|classified as code but graphify has no AST extractor|contributed nothing to the graph because a dependency is missing|(?:cross-file .*resolution|type-reference resolution) failed/iu.test(
+          /warning:\s+(?:worker failed for|skipped |could not read |failed to parse |\d+ source file\(s\) produced zero nodes)|classified as code but graphify has no AST extractor|contributed nothing to the graph because a dependency is missing|(?:cross-file .*resolution|type-reference resolution) failed/iu.test(
             line,
           ),
       );
@@ -403,6 +404,9 @@ function activeWorktreeBases(context) {
     .filter(Boolean);
   const bases = new Set([context.originMain]);
   for (const record of records) {
+    if (record.split("\0").some((line) => line.startsWith("prunable "))) {
+      continue;
+    }
     const head = record
       .split("\0")
       .find((line) => line.startsWith("HEAD "))
@@ -459,14 +463,54 @@ function garbageCollectSnapshots(context) {
   for (const snapshot of snapshots.slice(0, recentSnapshotRetention)) {
     retained.add(snapshot.commitSha);
   }
-  for (const snapshot of snapshots) {
-    if (!retained.has(snapshot.commitSha)) {
-      rmSync(join(snapshotsRoot, snapshot.commitSha), {
-        recursive: true,
-        force: true,
-      });
+  const candidatesPath = join(context.cacheRoot, "gc-candidates.json");
+  let previousCandidates = {};
+  try {
+    const stored = JSON.parse(readFileSync(candidatesPath, "utf8"));
+    if (
+      stored.schemaVersion === schemaVersion &&
+      typeof stored.candidates === "object" &&
+      stored.candidates !== null
+    ) {
+      previousCandidates = stored.candidates;
     }
+  } catch {
+    // Missing or invalid advisory GC state starts a fresh grace period.
   }
+  const now = Date.now();
+  const candidates = {};
+  for (const snapshot of snapshots) {
+    if (retained.has(snapshot.commitSha)) continue;
+    const firstSeenInactive = Date.parse(
+      previousCandidates[snapshot.commitSha],
+    );
+    if (
+      !Number.isFinite(firstSeenInactive) ||
+      now - firstSeenInactive < snapshotGcGraceMs
+    ) {
+      candidates[snapshot.commitSha] = Number.isFinite(firstSeenInactive)
+        ? previousCandidates[snapshot.commitSha]
+        : new Date(now).toISOString();
+      continue;
+    }
+    if (activeWorktreeBases(context).has(snapshot.commitSha)) {
+      continue;
+    }
+    rmSync(join(snapshotsRoot, snapshot.commitSha), {
+      recursive: true,
+      force: true,
+    });
+  }
+  const candidatesStaging = `${candidatesPath}.${process.pid}.${randomUUID()}`;
+  writeFileSync(
+    candidatesStaging,
+    `${JSON.stringify(
+      { schemaVersion, updatedAt: new Date(now).toISOString(), candidates },
+      null,
+      2,
+    )}\n`,
+  );
+  renameSync(candidatesStaging, candidatesPath);
 }
 
 function refresh() {
@@ -607,7 +651,7 @@ function changedPaths(context, baseSha) {
   );
 }
 
-function relationshipInvalidators(context, baseSha, changed) {
+function relationshipInvalidators(context, baseSha, changed, graph) {
   const addedCommands = [
     [
       "diff",
@@ -639,10 +683,21 @@ function relationshipInvalidators(context, baseSha, changed) {
       splitNullDelimited(runGit(context.repositoryRoot, arguments_)),
     ),
   );
+  const indexedSources = new Set(
+    [...graph.nodes, ...(graph.links ?? graph.edges)]
+      .map((item) =>
+        item.source_file
+          ? repositoryRelativeSource(item.source_file)
+          : null,
+      )
+      .filter(Boolean),
+  );
   const configurationPattern =
-    /(^|\/)(?:tsconfig(?:\.[^/]+)?\.json|jsconfig(?:\.[^/]+)?\.json|package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|yarn\.lock|bun\.lockb?|deno\.jsonc?|nx\.json|turbo\.json|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|pyproject\.toml|\.gitignore|\.graphifyignore)$/u;
+    /(?:\.jsonc?$|(^|\/)(?:package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|yarn\.lock|bun\.lockb?|nx\.json|turbo\.json|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|pyproject\.toml|\.gitignore|\.graphifyignore)$)/u;
   for (const path of changed) {
-    if (configurationPattern.test(path)) invalidators.add(path);
+    if (indexedSources.has(path) || configurationPattern.test(path)) {
+      invalidators.add(path);
+    }
   }
   return invalidators;
 }
@@ -748,6 +803,7 @@ function query(arguments_) {
     context,
     snapshot.baseSha,
     changed,
+    snapshot.graph,
   );
   const filtered = filterGraph(
     snapshot.graph,

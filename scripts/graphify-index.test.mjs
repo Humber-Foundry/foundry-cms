@@ -93,6 +93,11 @@ if (args[0] === "extract") {
   if (process.env.GRAPHIFY_FAKE_WARNING === "1") {
     console.error("  warning: worker failed for src/changed.ts: simulated failure");
   }
+  if (process.env.GRAPHIFY_FAKE_WARNING === "zero-nodes") {
+    console.error(
+      "  warning: 1 source file(s) produced zero nodes and are absent from the graph: changed.ts.",
+    );
+  }
   if (process.env.GRAPHIFY_FAKE_MUTATE_REPOSITORY === "1") {
     writeFileSync(
       join(
@@ -158,6 +163,12 @@ function writeFakeGraph(repository) {
           relation: "imports",
           source_file: join(canonicalRepository, "src", "stable.ts"),
         },
+        {
+          source: "stable",
+          target: "external",
+          relation: "imports",
+          source_file: join(canonicalRepository, "src", "stable.ts"),
+        },
       ],
     }),
   );
@@ -190,7 +201,12 @@ function runIndex(repository, arguments_, options = {}) {
             GRAPHIFY_FAKE_MUTATE_REPOSITORY: options.mutateRepository
               ? "1"
               : "0",
-            GRAPHIFY_FAKE_WARNING: options.warning ? "1" : "0",
+            GRAPHIFY_FAKE_WARNING:
+              typeof options.warning === "string"
+                ? options.warning
+                : options.warning
+                  ? "1"
+                  : "0",
             GRAPHIFY_INDEX_CACHE_DIR: cache,
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -375,6 +391,42 @@ describe("commit-pinned Graphify index", () => {
     expect(result.output).not.toContain("EDGE stable -> changed");
   });
 
+  it("drops all relationships when indexed code or an extended JSON config changes", () => {
+    const { root } = createRepository();
+    mkdirSync(join(root, "config"));
+    writeFileSync(
+      join(root, "config", "aliases.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@lib/*": ["src/*"] } } }),
+    );
+    const main = commitAll(root, "add extended resolver config");
+    git(root, "update-ref", "refs/remotes/origin/main", main);
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const graphify = createFakeGraphify();
+    const graph = writeFakeGraph(root);
+    expect(
+      runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+    ).toBe(0);
+
+    git(root, "checkout", "-b", "feature");
+    writeFileSync(join(root, "src", "changed.ts"), "export const changed = 2;\n");
+    writeFileSync(
+      join(root, "config", "aliases.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@lib/*": ["other/*"] } } }),
+    );
+
+    const result = runIndex(root, ["query", "stable"], {
+      cache,
+      graphify,
+      graph,
+    });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toContain("Graph relationships excluded");
+    expect(result.output).toContain("config/aliases.json");
+    expect(result.output).toContain("src/changed.ts");
+    expect(result.output).not.toContain("EDGE stable -> external");
+  });
+
   it("fails closed when a branch has integrated main without a matching snapshot", () => {
     const { root } = createRepository();
     const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
@@ -488,6 +540,22 @@ describe("commit-pinned Graphify index", () => {
     ).toBe(false);
   });
 
+  it("rejects a successful extractor process that reports zero-node sources", () => {
+    const { root, main } = createRepository();
+    const result = runIndex(root, ["refresh"], {
+      warning: "zero-nodes",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain(
+      "Graphify extraction reported incomplete results",
+    );
+    expect(result.output).toContain("produced zero nodes");
+    expect(
+      existsSync(join(result.cache, "snapshots", main)),
+    ).toBe(false);
+  });
+
   it("retains active and recent snapshots while pruning older cache entries", () => {
     const { root, main } = createRepository();
     const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
@@ -504,6 +572,18 @@ describe("commit-pinned Graphify index", () => {
         }),
       );
     }
+    writeFileSync(
+      join(cache, "gc-candidates.json"),
+      JSON.stringify({
+        schemaVersion: "foundry.graphify-index/v1",
+        candidates: Object.fromEntries(
+          Array.from({ length: 24 }, (_, index) => [
+            index.toString(16).padStart(40, "0"),
+            new Date(0).toISOString(),
+          ]),
+        ),
+      }),
+    );
 
     const result = runIndex(root, ["refresh"], { cache });
 
@@ -512,6 +592,36 @@ describe("commit-pinned Graphify index", () => {
     expect(retained).toContain(main);
     expect(retained.length).toBe(20);
     expect(retained).not.toContain("0".repeat(40));
+  });
+
+  it("marks inactive overflow snapshots before deleting them on a later refresh", () => {
+    const { root, main } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const snapshots = join(cache, "snapshots");
+    mkdirSync(snapshots, { recursive: true });
+    for (let index = 0; index < 24; index += 1) {
+      const directory = join(
+        snapshots,
+        index.toString(16).padStart(40, "0"),
+      );
+      mkdirSync(directory);
+      writeFileSync(
+        join(directory, "metadata.json"),
+        JSON.stringify({
+          generatedAt: new Date(index * 1_000).toISOString(),
+        }),
+      );
+    }
+
+    const result = runIndex(root, ["refresh"], { cache });
+
+    expect(result.status, result.output).toBe(0);
+    expect(readdirSync(snapshots)).toHaveLength(25);
+    expect(readdirSync(snapshots)).toContain(main);
+    const gcState = JSON.parse(
+      readFileSync(join(cache, "gc-candidates.json"), "utf8"),
+    );
+    expect(Object.keys(gcState.candidates)).toHaveLength(5);
   });
 
   it("preserves an older snapshot used as an active worktree merge base", () => {
@@ -546,6 +656,21 @@ describe("commit-pinned Graphify index", () => {
         }),
       );
     }
+    writeFileSync(
+      join(cache, "gc-candidates.json"),
+      JSON.stringify({
+        schemaVersion: "foundry.graphify-index/v1",
+        candidates: {
+          [oldMain]: new Date(0).toISOString(),
+          ...Object.fromEntries(
+            Array.from({ length: 24 }, (_, index) => [
+              (index + 1).toString(16).padStart(40, "0"),
+              new Date(0).toISOString(),
+            ]),
+          ),
+        },
+      }),
+    );
 
     const result = runIndex(root, ["refresh"], { cache });
 
