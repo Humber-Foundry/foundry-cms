@@ -465,6 +465,16 @@ export function applyPageComposition(
     errors[slotId] = "This slot is not registered by the Site Definition.";
     return { ok: false, errors };
   }
+  if (
+    !validateObjectKeys(
+      value,
+      ["slotId", "components"],
+      pageCompositionContract.slot.id,
+      errors,
+    )
+  ) {
+    return { ok: false, errors };
+  }
   if (!Array.isArray(value.components)) {
     return {
       ok: false,

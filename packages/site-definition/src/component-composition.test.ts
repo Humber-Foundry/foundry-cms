@@ -344,6 +344,13 @@ describe("page component composition", () => {
       path: "slot_routes",
     },
     {
+      name: "an unregistered composition field",
+      change: (composition: Record<string, any>) => {
+        composition.unregistered = "executable boundary";
+      },
+      path: "slot_home_sections",
+    },
+    {
       name: "an unregistered component",
       change: (composition: Record<string, any>) => {
         composition.components[0].type = "script";
