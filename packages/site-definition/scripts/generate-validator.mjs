@@ -1,11 +1,11 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import standaloneCode from "ajv/dist/standalone/index.js";
 import { createServer } from "vite";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, "../../..");
 const vite = await createServer({
   root,
   appType: "custom",
@@ -34,14 +34,21 @@ try {
     generatedValidator,
     "",
   ].join("\n");
-  await writeFile(
-    resolve(
-      root,
-      "packages/site-definition/src/site-definition-validator.mjs",
-    ),
-    generated,
-    "utf8",
+  const output = resolve(
+    root,
+    "packages/site-definition/src/site-definition-validator.mjs",
   );
+  if (process.argv.includes("--check")) {
+    const current = await readFile(output, "utf8");
+    if (current !== generated) {
+      throw new Error(
+        "site_definition_validator_out_of_date: run npm run generate:site-validator",
+      );
+    }
+    console.log("Verified the generated Site Definition validator is current.");
+  } else {
+    await writeFile(output, generated, "utf8");
+  }
 } finally {
   await vite.close();
 }
