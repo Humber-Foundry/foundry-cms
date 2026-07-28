@@ -10,8 +10,6 @@ import {
   type ContentEditorOutboxRecord,
 } from "../src/content-editor-outbox";
 import {
-  comparableRecoveryBaseValue,
-  comparableRecoveryValue,
   preserveStaleEdits,
   recoverStaleEdits,
   type StaleRecoveryPointer,
@@ -28,6 +26,33 @@ type PreservedContentRevision = Readonly<{
   revision: ContentRevision["revision"];
   schemaVersion: ContentRevision["inputs"]["schemaVersion"];
 }>;
+
+function fullRecoveryValue(
+  edit: StaleRecoveryEdit,
+  property: "baseValue" | "value",
+): string {
+  if (edit.path !== "slot_home_sections") {
+    return edit[property];
+  }
+  const canonicalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(canonicalize);
+    }
+    if (typeof value === "object" && value !== null) {
+      return Object.fromEntries(
+        Object.entries(value)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, nested]) => [key, canonicalize(nested)]),
+      );
+    }
+    return value;
+  };
+  try {
+    return JSON.stringify(canonicalize(JSON.parse(edit[property])));
+  } catch {
+    return edit[property];
+  }
+}
 
 export function workspaceCreationOperation(
   preservedRevision: PreservedContentRevision | undefined,
@@ -94,14 +119,14 @@ export async function preparePreservedRevisionRecovery({
         return true;
       }
       if (
-        comparableRecoveryValue(edit) ===
-        comparableRecoveryValue(durable)
+        fullRecoveryValue(edit, "value") ===
+        fullRecoveryValue(durable, "value")
       ) {
         return false;
       }
       if (
-        comparableRecoveryBaseValue(edit) !==
-        comparableRecoveryValue(durable)
+        fullRecoveryValue(edit, "baseValue") !==
+        fullRecoveryValue(durable, "value")
       ) {
         throw new Error("content_editor_recovery_revision_conflict");
       }

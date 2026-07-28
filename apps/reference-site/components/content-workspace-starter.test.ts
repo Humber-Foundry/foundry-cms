@@ -235,6 +235,7 @@ describe("content workspace schema recovery", () => {
     };
     const composition = (components: ReadonlyArray<unknown>) =>
       JSON.stringify({ slotId: "slot_home_sections", components });
+    const setItem = vi.fn();
     await expect(
       preparePreservedRevisionRecovery({
         preservedRevision: { ...preservedRevision, revision: 5 },
@@ -261,7 +262,7 @@ describe("content workspace schema recovery", () => {
         storage: {
           getItem: () => null,
           removeItem: vi.fn(),
-          setItem: vi.fn(),
+          setItem,
         },
         createRecoveryId: () =>
           "abcdefab-cdef-4abc-8def-abcdefabcdef",
@@ -270,6 +271,10 @@ describe("content workspace schema recovery", () => {
       id: "abcdefab-cdef-4abc-8def-abcdefabcdef",
       sourceWorkspaceId: "workspace_legacy",
     });
+    expect(setItem).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("Unsaved proof"),
+    );
   });
 
   it("copies an active recovery record through another schema transition", async () => {
