@@ -314,7 +314,9 @@ describe("reference Site Definition", () => {
     ).toMatchObject({
       format: "richText",
       value: serializeRichTextDocument(
-        referenceSiteDefinition.home.sections[3]!.body,
+        referenceSiteDefinition.home.sections.find(
+          (section) => section.type === "callToAction",
+        )!.body,
       ),
     });
   });

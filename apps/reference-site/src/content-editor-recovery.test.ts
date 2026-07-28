@@ -127,7 +127,9 @@ describe("stale edit recovery", () => {
       [legacyEdit],
     );
     const currentBody = serializeRichTextDocument(
-      referenceSiteDefinition.home.sections[3]!.body,
+      referenceSiteDefinition.home.sections.find(
+        (section) => section.type === "callToAction",
+      )!.body,
     );
 
     const result = recoverStaleEdits(

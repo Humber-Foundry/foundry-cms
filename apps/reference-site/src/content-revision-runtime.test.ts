@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
+  ContentRevisionConfigurationError,
   createContentActorId,
 } from "@foundry/application";
 
@@ -10,6 +11,7 @@ import {
   contentWorkspaceIdForActor,
   contentWorkspaceIdForMutation,
   isGitObjectId,
+  resolveContentReleaseInputs,
 } from "./content-revision-runtime";
 
 describe("content revision workspace routing", () => {
@@ -58,5 +60,38 @@ describe("production base validation", () => {
     expect(isGitObjectId("b".repeat(64))).toBe(true);
     expect(isGitObjectId("c".repeat(41))).toBe(false);
     expect(isGitObjectId("d".repeat(63))).toBe(false);
+  });
+
+  it("uses the embedded Workers build commit as both renderer and production base", () => {
+    expect(
+      resolveContentReleaseInputs(
+        {
+          FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+          CF_VERSION_METADATA: { id: "cloudflare-version" },
+        },
+        "b".repeat(40),
+      ),
+    ).toEqual({
+      productionBaseCommit: "b".repeat(40),
+      rendererVersion: "b".repeat(40),
+    });
+  });
+
+  it("uses configured production base only as a bootstrap fallback", () => {
+    expect(
+      resolveContentReleaseInputs(
+        {
+          FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+          CF_VERSION_METADATA: { id: "cloudflare-version" },
+        },
+        "",
+      ),
+    ).toEqual({
+      productionBaseCommit: "a".repeat(40),
+      rendererVersion: "a".repeat(40),
+    });
+    expect(() => resolveContentReleaseInputs({}, "")).toThrow(
+      ContentRevisionConfigurationError,
+    );
   });
 });
