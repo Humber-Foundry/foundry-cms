@@ -178,9 +178,11 @@ function isSameOptionalContentOccurrence(
     : right !== undefined && isSameContentOccurrence(left, right);
 }
 
-function assertContentOccurrenceUnchanged(
+function assertContentOccurrenceMutationSafe(
   binding: Awaited<ReturnType<typeof loadContentBinding>>,
   occurrenceId: string,
+  baseRevision: number,
+  workspaceOccurrence: Readonly<{ revision: number }> | null,
 ) {
   const selected = (revision: typeof binding.current) =>
     (revision.definition.home.media ?? []).find(
@@ -192,6 +194,16 @@ function assertContentOccurrenceUnchanged(
       selected(binding.current),
     )
   ) {
+    // A completed attempt has already advanced the workspace head, so invoking
+    // the command can only replay its receipt or fail optimistic concurrency.
+    // A head at or behind the requested base could still mutate, so reject it
+    // before the media command when the content slot has diverged.
+    if (
+      workspaceOccurrence !== null &&
+      workspaceOccurrence.revision > baseRevision
+    ) {
+      return;
+    }
     throw new ContentRevisionConflictError(binding.current.revision);
   }
 }
@@ -385,7 +397,16 @@ export async function POST(request: Request) {
       const occurrenceId = createMediaOccurrenceId(
         String(body.occurrenceId ?? ""),
       );
-      assertContentOccurrenceUnchanged(binding, occurrenceId);
+      const workspaceOccurrence = await application.queries.getOccurrence(
+        binding.workspaceId,
+        occurrenceId,
+      );
+      assertContentOccurrenceMutationSafe(
+        binding,
+        occurrenceId,
+        baseRevision,
+        workspaceOccurrence,
+      );
       const occurrence = await application.commands.replaceOccurrence({
         actorId,
         occurrenceId,
@@ -415,10 +436,15 @@ export async function POST(request: Request) {
       const occurrenceId = createMediaOccurrenceId(
         String(body.occurrenceId ?? ""),
       );
-      assertContentOccurrenceUnchanged(binding, occurrenceId);
       const workspaceOccurrence = await application.queries.getOccurrence(
         binding.workspaceId,
         occurrenceId,
+      );
+      assertContentOccurrenceMutationSafe(
+        binding,
+        occurrenceId,
+        baseRevision,
+        workspaceOccurrence,
       );
       const inheritedOccurrence = (
         binding.current.definition.home.media ?? []

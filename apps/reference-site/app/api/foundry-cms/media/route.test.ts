@@ -153,6 +153,112 @@ describe("media endpoint", () => {
     expect(rebasedContentKey).not.toBe(firstContentKey);
   });
 
+  it("replays a completed replace after its success response was lost", async () => {
+    const completedOccurrence = {
+      occurrenceId: "occurrence_home_hero",
+      revision: 2,
+      assetId: "asset_replacement",
+      crop: null,
+    } as const;
+    mocks.getOccurrence.mockResolvedValue(completedOccurrence);
+    mocks.replace.mockResolvedValue(completedOccurrence);
+    mocks.getCurrentContent.mockResolvedValue({
+      revision: 3,
+      definition: {
+        home: {
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 2,
+              asset: {
+                assetId: "asset_replacement",
+                width: 1600,
+                height: 900,
+                contentType: "image/png",
+              },
+              crop: null,
+            },
+          ],
+        },
+      },
+    });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "lost-replace-response-0001",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.replace).toHaveBeenCalledOnce();
+    expect(mocks.saveMediaOccurrence).toHaveBeenCalledOnce();
+  });
+
+  it("replays a completed crop after its success response was lost", async () => {
+    const completedOccurrence = {
+      occurrenceId: "occurrence_home_hero",
+      revision: 2,
+      assetId: "asset_replacement",
+      crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+    } as const;
+    mocks.getOccurrence.mockResolvedValue(completedOccurrence);
+    mocks.crop.mockResolvedValue(completedOccurrence);
+    mocks.getCurrentContent.mockResolvedValue({
+      revision: 3,
+      definition: {
+        home: {
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 2,
+              asset: {
+                assetId: "asset_replacement",
+                width: 1600,
+                height: 900,
+                contentType: "image/png",
+              },
+              crop: completedOccurrence.crop,
+            },
+          ],
+        },
+      },
+    });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "lost-crop-response-0001",
+        },
+        body: JSON.stringify({
+          operation: "crop",
+          occurrenceId: "occurrence_home_hero",
+          baseRevision: 1,
+          crop: completedOccurrence.crop,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.crop).toHaveBeenCalledOnce();
+    expect(mocks.saveMediaOccurrence).toHaveBeenCalledOnce();
+  });
+
   it.each([null, "1", 1.5, -1])(
     "rejects malformed occurrence base revision %j",
     async (baseRevision) => {
@@ -279,6 +385,7 @@ describe("media endpoint", () => {
   });
 
   it("does not rebind an older occurrence over a newer same-slot revision", async () => {
+    mocks.getOccurrence.mockResolvedValue(null);
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
       definition: {
