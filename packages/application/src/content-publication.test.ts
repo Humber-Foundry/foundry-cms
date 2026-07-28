@@ -89,11 +89,16 @@ describe("content publication application", () => {
     isReleaseLive =
       vi.fn<ContentPublisher["isReleaseLive"]>().mockResolvedValue(true);
     publisher = {
+      getChannelConfigurationHash: vi.fn().mockResolvedValue("channel-a"),
       getProductionHead: vi.fn().mockResolvedValue(productionCommit),
       isReleaseLive,
       createCommit,
       reconcileCommit: vi.fn().mockResolvedValue({ state: "not-found" }),
       getDeploymentStatus,
+      retryDeployment: vi.fn().mockResolvedValue({
+        state: "requested",
+        deploymentId: "build-123",
+      }),
     };
     repository = {
       getRevision: async (_workspaceId, revision) =>
@@ -139,6 +144,7 @@ describe("content publication application", () => {
         fingerprint: {
           value: expect.stringMatching(/^[a-f0-9]{64}$/u),
           channel: "site",
+          channelConfigurationHash: "channel-a",
           contentHash: revisionApplication.saved.inputs.contentHash,
           designHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           schemaVersion: "1.0.0",
@@ -166,6 +172,23 @@ describe("content publication application", () => {
         "preview_confirmation_required",
       ),
     );
+  });
+
+  it("invalidates approval when the publication channel changes", async () => {
+    const { app, approval } = await approve();
+    vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+      "channel-b",
+    );
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-channel-changed",
+      }),
+    ).rejects.toEqual(new ContentApprovalInvalidError("approval_stale"));
+    expect(createCommit).not.toHaveBeenCalled();
   });
 
   it("invalidates approval when a later render-affecting revision exists", async () => {
@@ -526,6 +549,32 @@ describe("content publication application", () => {
     );
   });
 
+  it("loses the lease when channel configuration changes during Git work", async () => {
+    createCommit.mockImplementation(async (input) => {
+      vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+        "channel-b",
+      );
+      return (await input.assertLease())
+        ? { state: "committed", commitSha: "c".repeat(40) }
+        : { state: "blocked", detail: "publication_lease_lost" };
+    });
+    const { app, approval } = await approve();
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-channel-changed-during-git",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        detail: "publication_lease_lost",
+      }),
+    );
+  });
+
   it("replays the recorded operation even after its own commit advanced production", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
@@ -779,6 +828,179 @@ describe("content publication application", () => {
     );
   });
 
+  it("keeps a failed publication terminal until an explicit retry", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-terminal-failure",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    const failed = await app.commands.refresh(publication.id);
+    getDeploymentStatus.mockResolvedValue("building");
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(failed);
+    expect(getDeploymentStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries the exact failed commit without creating another commit", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-exact-commit",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+
+    await expect(
+      app.commands.retryDeployment(publication.id),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+        detail: "deployment_retry_requested",
+        deploymentId: "build-123",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledWith("c".repeat(40));
+    expect(createCommit).toHaveBeenCalledTimes(1);
+
+    getDeploymentStatus.mockResolvedValue("building");
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "building",
+        deploymentId: "build-123",
+      }),
+    );
+    expect(getDeploymentStatus).toHaveBeenLastCalledWith(
+      "c".repeat(40),
+      "build-123",
+    );
+  });
+
+  it("does not poll the failed build while an exact retry is dispatching", async () => {
+    let resolveRetry:
+      | ((value: { state: "requested"; deploymentId: string }) => void)
+      | undefined;
+    vi.mocked(publisher.retryDeployment).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRetry = resolve;
+        }),
+    );
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-dispatch-fence",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    const retry = app.commands.retryDeployment(publication.id);
+    await vi.waitFor(() => {
+      expect(publisher.retryDeployment).toHaveBeenCalled();
+    });
+    getDeploymentStatus.mockClear();
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        detail: "deployment_retry_dispatching",
+      }),
+    );
+    expect(getDeploymentStatus).not.toHaveBeenCalled();
+    resolveRetry?.({ state: "requested", deploymentId: "build-456" });
+    await retry;
+  });
+
+  it("bounds recovery when a Worker abandons deployment retry dispatch", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    let resolveRetry:
+      | ((value: { state: "requested"; deploymentId: string }) => void)
+      | undefined;
+    vi.mocked(publisher.retryDeployment).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRetry = resolve;
+        }),
+    );
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-abandoned-retry-dispatch",
+    });
+    currentTime = "2026-07-27T10:02:00.000Z";
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    currentTime = "2026-07-27T10:03:00.000Z";
+    const retry = app.commands.retryDeployment(publication.id);
+    await vi.waitFor(() => {
+      expect(publisher.retryDeployment).toHaveBeenCalled();
+    });
+
+    currentTime = "2026-07-27T10:04:01.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "unknown",
+        detail: "deployment_retry_result_unknown",
+      }),
+    );
+    currentTime = "2026-07-27T10:18:01.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    resolveRetry?.({ state: "requested", deploymentId: "late-build" });
+    await expect(retry).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+  });
+
+  it("rejects deployment retry after the bound channel changes", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-channel-change",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+      "channel-b",
+    );
+
+    await expect(
+      app.commands.retryDeployment(publication.id),
+    ).rejects.toEqual(new ContentApprovalInvalidError("approval_stale"));
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
+  });
+
   it("times out a deployment whose exact release marker never appears", async () => {
     let currentTime = "2026-07-27T10:01:00.000Z";
     const app = createContentPublicationApplication({
@@ -885,6 +1107,8 @@ describe("content publication application", () => {
       expectedHead: productionCommit,
       status: "requested" as const,
       commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
       detail: null,
       leaseToken: "expired-lease",
       leaseExpiresAt: "2026-07-27T10:05:00.000Z",
@@ -940,6 +1164,8 @@ describe("content publication application", () => {
       expectedHead: productionCommit,
       status: "requested" as const,
       commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
       detail: null,
       leaseToken: "expired-lease",
       leaseExpiresAt: "2026-07-27T10:05:00.000Z",
@@ -1002,6 +1228,8 @@ describe("content publication application", () => {
       expectedHead: productionCommit,
       status: "requested" as const,
       commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
       detail: null,
       leaseToken: "expired-lease",
       leaseExpiresAt: "2026-07-27T10:05:00.000Z",
@@ -1048,6 +1276,8 @@ describe("content publication application", () => {
       expectedHead: productionCommit,
       status: "requested" as const,
       commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
       detail: null,
       leaseToken: "expired-lease",
       leaseExpiresAt: "2026-07-27T10:05:00.000Z",

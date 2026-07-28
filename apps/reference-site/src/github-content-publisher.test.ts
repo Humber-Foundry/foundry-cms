@@ -37,6 +37,9 @@ const configurationInputs = {
   productionBranch: "main",
   publicOrigin: "https://site.example",
   deploymentCheckName: "Cloudflare Workers",
+  cloudflareAccountId: "account-123",
+  cloudflareBuildTriggerId: "trigger-456",
+  cloudflareApiToken: "cloudflare-api-token",
 };
 
 describe("GitHub content publisher", () => {
@@ -52,6 +55,9 @@ describe("GitHub content publisher", () => {
         FOUNDRY_GITHUB_OWNER: "client-owner",
         FOUNDRY_GITHUB_REPOSITORY: "client-site",
         FOUNDRY_PUBLIC_ORIGIN: "https://site.example/path",
+        FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "account-123",
+        FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
+        FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
       }),
     ).toEqual({
       ...configurationInputs,
@@ -66,6 +72,9 @@ describe("GitHub content publisher", () => {
         FOUNDRY_GITHUB_OWNER: "client-owner",
         FOUNDRY_GITHUB_REPOSITORY: "client-site",
         FOUNDRY_PUBLIC_ORIGIN: "http://site.example",
+        FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "account-123",
+        FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
+        FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
       }),
     ).toThrow(GitHubContentPublisherConfigurationError);
   });
@@ -183,7 +192,7 @@ describe("GitHub content publisher", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("does not misclassify Git object validation failures as a moved head", async () => {
+  it("reports an explicit pre-commit Git rejection as failed", async () => {
     const expectedHead = "a".repeat(40);
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -213,9 +222,141 @@ describe("GitHub content publisher", () => {
         assertLease: async () => true,
       }),
     ).resolves.toEqual({
+      state: "failed",
+      detail: "git_operation_failed",
+    });
+  });
+
+  it("keeps a lost commit response unknown for reconciliation", async () => {
+    const expectedHead = "a".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"4".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: "Publish",
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
       state: "unknown",
       detail: "git_result_unknown",
     });
+  });
+
+  it("binds approvals to non-secret destination and deployment configuration", async () => {
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi.fn<typeof fetch>(),
+    });
+    const rotatedSecretPublisher = createGitHubContentPublisher({
+      configuration: {
+        ...configurationInputs,
+        privateKey: `${privateKey}\n`,
+        cloudflareApiToken: "rotated-secret",
+      },
+      fetch: vi.fn<typeof fetch>(),
+    });
+    const differentDestinationPublisher = createGitHubContentPublisher({
+      configuration: {
+        ...configurationInputs,
+        privateKey,
+        productionBranch: "production",
+      },
+      fetch: vi.fn<typeof fetch>(),
+    });
+
+    await expect(publisher.getChannelConfigurationHash()).resolves.toBe(
+      await rotatedSecretPublisher.getChannelConfigurationHash(),
+    );
+    await expect(
+      differentDestinationPublisher.getChannelConfigurationHash(),
+    ).resolves.not.toBe(
+      await publisher.getChannelConfigurationHash(),
+    );
+  });
+
+  it("retries a Cloudflare build for the exact committed revision", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        success: true,
+        result: { build_uuid: "build-123" },
+      }),
+    );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.retryDeployment("c".repeat(40)),
+    ).resolves.toEqual({
+      state: "requested",
+      deploymentId: "build-123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.cloudflare.com/client/v4/accounts/account-123/builds/triggers/trigger-456/builds",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          authorization: "Bearer cloudflare-api-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          branch: "main",
+          commit_hash: "c".repeat(40),
+        }),
+      }),
+    );
+  });
+
+  it("polls an exact manual build through the Cloudflare Builds API", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      json({
+        success: true,
+        result: {
+          status: "stopped",
+          build_outcome: "success",
+        },
+      }),
+    );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.getDeploymentStatus("c".repeat(40), "build-123"),
+    ).resolves.toBe("deployed");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.cloudflare.com/client/v4/accounts/account-123/builds/builds/build-123",
+      expect.objectContaining({
+        headers: {
+          authorization: "Bearer cloudflare-api-token",
+        },
+      }),
+    );
   });
 
   it("classifies an explicit non-fast-forward ref rejection as a moved head", async () => {

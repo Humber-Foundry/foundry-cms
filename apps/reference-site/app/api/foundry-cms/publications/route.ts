@@ -61,9 +61,20 @@ type RefreshCommand = Readonly<{
   publicationId: string;
 }>;
 
+type RetryDeploymentCommand = Readonly<{
+  operation: "retry_deployment";
+  workspaceId: string;
+  publicationId: string;
+}>;
+
 function readCommand(
   value: unknown,
-): ApproveCommand | PublishCommand | RefreshCommand | null {
+):
+  | ApproveCommand
+  | PublishCommand
+  | RefreshCommand
+  | RetryDeploymentCommand
+  | null {
   if (
     typeof value !== "object" ||
     value === null ||
@@ -91,11 +102,12 @@ function readCommand(
     return value as PublishCommand;
   }
   if (
-    value.operation === "refresh" &&
+    (value.operation === "refresh" ||
+      value.operation === "retry_deployment") &&
     "publicationId" in value &&
     typeof value.publicationId === "string"
   ) {
-    return value as RefreshCommand;
+    return value as RefreshCommand | RetryDeploymentCommand;
   }
   return null;
 }
@@ -208,7 +220,10 @@ export async function POST(request: Request) {
       workspaceId = createContentWorkspaceId(command.workspaceId);
       if (command.operation === "publish") {
         createContentApprovalId(command.approvalId);
-      } else if (command.operation === "refresh") {
+      } else if (
+        command.operation === "refresh" ||
+        command.operation === "retry_deployment"
+      ) {
         createContentPublicationId(command.publicationId);
       }
     } catch {
@@ -251,7 +266,10 @@ export async function POST(request: Request) {
             });
             return Response.json({ approval }, { status: 201 });
           }
-          if (command.operation === "refresh") {
+          if (
+            command.operation === "refresh" ||
+            command.operation === "retry_deployment"
+          ) {
             const existing = await application.queries.get(
               createContentPublicationId(command.publicationId),
             );
@@ -261,7 +279,10 @@ export async function POST(request: Request) {
             ) {
               throw new ContentWorkspaceAccessError();
             }
-            const publication = await application.commands.refresh(existing.id);
+            const publication =
+              command.operation === "refresh"
+                ? await application.commands.refresh(existing.id)
+                : await application.commands.retryDeployment(existing.id);
             return Response.json({ publication });
           }
           const publication = await application.commands.publish({

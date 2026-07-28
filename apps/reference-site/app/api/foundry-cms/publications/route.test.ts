@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   approve: vi.fn(),
   publish: vi.fn(),
   refresh: vi.fn(),
+  retryDeployment: vi.fn(),
   getLatest: vi.fn(),
   get: vi.fn(),
   requireExistingAccess: vi.fn(),
@@ -76,6 +77,7 @@ describe("content publication endpoint", () => {
         approve: mocks.approve,
         publish: mocks.publish,
         refresh: mocks.refresh,
+        retryDeployment: mocks.retryDeployment,
       },
       queries: { getLatest: mocks.getLatest, get: mocks.get },
     });
@@ -267,6 +269,32 @@ describe("content publication endpoint", () => {
       "membership-editor",
     );
     expect(mocks.refresh).toHaveBeenCalledWith(existing.id);
+  });
+
+  it("retries deployment only through the protected human mutation route", async () => {
+    const existing = {
+      id: `publish_${"2".repeat(32)}`,
+      workspaceId: "workspace_publish",
+      status: "failed",
+      commitSha: "c".repeat(40),
+    };
+    mocks.get.mockResolvedValue(existing);
+    mocks.retryDeployment.mockResolvedValue({
+      ...existing,
+      status: "committed",
+    });
+
+    const response = await POST(
+      request({
+        operation: "retry_deployment",
+        workspaceId: "workspace_publish",
+        publicationId: existing.id,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifyMutation).toHaveBeenCalled();
+    expect(mocks.retryDeployment).toHaveBeenCalledWith(existing.id);
   });
 
   it("does not expose a workspace publication to an unauthorized actor", async () => {

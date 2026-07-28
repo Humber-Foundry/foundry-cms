@@ -4,6 +4,7 @@ CREATE TABLE content_approvals (
   revision INTEGER NOT NULL,
   fingerprint TEXT NOT NULL,
   channel TEXT NOT NULL CHECK (channel = 'site'),
+  channel_configuration_hash TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   design_hash TEXT NOT NULL,
   schema_version TEXT NOT NULL,
@@ -42,6 +43,8 @@ CREATE TABLE content_publications (
     )
   ),
   commit_sha TEXT,
+  deployment_id TEXT,
+  deployment_requested_at TEXT,
   detail TEXT,
   lease_token TEXT,
   lease_expires_at TEXT,

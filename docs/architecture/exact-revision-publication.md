@@ -20,12 +20,17 @@ preview for the current saved revision. The approval fingerprint binds:
 - schema and renderer versions;
 - the exact production Git base and published-content hash;
 - the deterministic serialized artifact;
-- the `site` publication channel and serialization version.
+- the `site` publication channel and serialization version; and
+- a non-secret channel-configuration hash covering the GitHub App
+  installation, repository, production ref, public origin, deployment signal,
+  Cloudflare account, and build trigger.
 
-Any later revision or production-base change makes that evidence unusable
-before Git is contacted. D1 inserts the approval only while the workspace
-still points to that revision, and publication requires the command workspace
-to equal the approval workspace.
+Any later revision, production-base, or channel-configuration change makes
+that evidence unusable before Git is contacted. The private keys and API
+tokens are deliberately excluded so credential rotation does not invalidate
+content evidence. D1 inserts the approval only while the workspace still
+points to that revision, and publication requires the command workspace to
+equal the approval workspace.
 
 ## Deterministic Git publication
 
@@ -81,6 +86,10 @@ The status vocabulary is:
 `requested → committed → building → deployed → verified-live`
 
 `blocked`, `failed`, and `unknown` preserve terminal or uncertain outcomes.
+A definite GitHub rejection before an ambiguous commit or ref result becomes
+`failed`; only a transport outcome that may have created the commit or moved
+the ref becomes `unknown`. Terminal publications never re-enter the active
+state machine through ordinary status refresh.
 A successful configured Cloudflare check reports only `deployed`. Foundry
 reports `verified-live` only after two uncached reads of
 `/.well-known/foundry-release.json` both exactly match the expected commit,
@@ -93,6 +102,17 @@ retryable unavailability, not evidence that the approval's production base
 mismatches; it is retried until the same bounded release-marker deadline, then
 becomes `failed`. Each GitHub and marker request also has a 30-second transport
 timeout.
+An Editor or Owner can explicitly retry a failed deployment whose commit
+remains the production head. Foundry first claims that retry durably, then asks
+the Cloudflare Workers Builds API to build that exact branch and commit hash;
+it does not create or move a Git commit. The returned build UUID is stored
+with the publication and polled through the Builds API, so an earlier failed
+GitHub check cannot be mistaken for the new attempt. The stable publication
+and protected human-mutation receipt prevent a repeated request from
+dispatching a second build. If a Worker disappears while dispatching, the
+durable attempt becomes uncertain after one minute and terminal after the
+same bounded 15-minute recovery window rather than holding the global
+publication slot indefinitely.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory
@@ -115,11 +135,15 @@ Set these non-secret values for each installation:
 - `FOUNDRY_PRODUCTION_BRANCH` (defaults to `main`)
 - `FOUNDRY_PUBLIC_ORIGIN` (the canonical HTTPS public-site origin)
 - `FOUNDRY_DEPLOYMENT_CHECK_NAME` (defaults to `Cloudflare`)
+- `FOUNDRY_CLOUDFLARE_ACCOUNT_ID`
+- `FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID`
 - `FOUNDRY_PRODUCTION_BASE` (a bootstrap fallback Git object ID)
 
-Store `FOUNDRY_GITHUB_PRIVATE_KEY` only as a Worker secret. Never put the
-private key, GitHub App JWT, or installation token in D1, logs, build output, or
-client bundles.
+Store `FOUNDRY_GITHUB_PRIVATE_KEY` and `FOUNDRY_CLOUDFLARE_API_TOKEN` only as
+Worker secrets. The Cloudflare token needs the narrow Workers Builds
+Configuration Edit permission used to trigger an exact manual build. Never put
+either secret, the GitHub App JWT, or an installation token in D1, logs, build
+output, or client bundles.
 
 Workers Builds must expose `WORKERS_CI_COMMIT_SHA` during the build. Next
 embeds it as `FOUNDRY_RELEASE_COMMIT_SHA` in the release marker. A build without

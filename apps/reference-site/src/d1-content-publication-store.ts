@@ -27,6 +27,7 @@ type ApprovalRow = {
   revision: number;
   fingerprint: string;
   channel: "site";
+  channel_configuration_hash: string;
   content_hash: string;
   design_hash: string;
   schema_version: "1.0.0";
@@ -52,6 +53,8 @@ type PublicationRow = {
   expected_head: string;
   status: ContentPublicationStatus;
   commit_sha: string | null;
+  deployment_id: string | null;
+  deployment_requested_at: string | null;
   detail: string | null;
   lease_token: string | null;
   lease_expires_at: string | null;
@@ -66,6 +69,7 @@ const approvalProjection = `
     approval.revision,
     approval.fingerprint,
     approval.channel,
+    approval.channel_configuration_hash,
     approval.content_hash,
     approval.design_hash,
     approval.schema_version,
@@ -94,6 +98,8 @@ const publicationProjection = `
     expected_head,
     status,
     commit_sha,
+    deployment_id,
+    deployment_requested_at,
     detail,
     lease_token,
     lease_expires_at,
@@ -106,6 +112,7 @@ function toApproval(row: ApprovalRow): ContentApproval {
   const fingerprint: ContentApprovalFingerprint = {
     value: row.fingerprint,
     channel: row.channel,
+    channelConfigurationHash: row.channel_configuration_hash,
     contentHash: row.content_hash,
     designHash: row.design_hash,
     schemaVersion: row.schema_version,
@@ -145,6 +152,8 @@ function toPublication(row: PublicationRow): ContentPublication {
     expectedHead: row.expected_head,
     status: row.status,
     commitSha: row.commit_sha,
+    deploymentId: row.deployment_id,
+    deploymentRequestedAt: row.deployment_requested_at,
     detail: row.detail,
     leaseToken: row.lease_token,
     leaseExpiresAt: row.lease_expires_at,
@@ -198,12 +207,12 @@ export function createD1ContentPublicationStore(
       `INSERT INTO content_publications (
            id, workspace_id, revision, approval_id, fingerprint,
            idempotency_key, requested_by, contributors_json, expected_head,
-           status, commit_sha, detail, lease_token, lease_expires_at,
-           requested_at, updated_at
+           status, commit_sha, deployment_id, deployment_requested_at, detail,
+           lease_token, lease_expires_at, requested_at, updated_at
          )
          SELECT
            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-           ?15, ?16
+           ?15, ?16, ?17, ?18
          ${requireCurrentApproval
            ? `WHERE EXISTS (
                 SELECT 1
@@ -235,6 +244,8 @@ export function createD1ContentPublicationStore(
         publication.expectedHead,
         publication.status,
         publication.commitSha,
+        publication.deploymentId,
+        publication.deploymentRequestedAt,
         publication.detail,
         publication.leaseToken,
         publication.leaseExpiresAt,
@@ -330,12 +341,13 @@ export function createD1ContentPublicationStore(
           .prepare(
             `INSERT INTO content_approvals (
                id, workspace_id, revision, fingerprint, channel,
-               content_hash, design_hash, schema_version, renderer_version,
-               production_base, artifact_hash, serialization_version,
-               approved_by, approved_at
+               channel_configuration_hash, content_hash, design_hash,
+               schema_version, renderer_version, production_base,
+               artifact_hash, serialization_version, approved_by, approved_at
              )
              SELECT
-               ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+               ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+               ?14, ?15
              WHERE EXISTS (
                SELECT 1
                FROM content_workspaces
@@ -349,6 +361,7 @@ export function createD1ContentPublicationStore(
             approval.revision,
             approval.fingerprint.value,
             approval.fingerprint.channel,
+            approval.fingerprint.channelConfigurationHash,
             approval.fingerprint.contentHash,
             approval.fingerprint.designHash,
             approval.fingerprint.schemaVersion,
@@ -491,19 +504,21 @@ export function createD1ContentPublicationStore(
              SET
                status = ?1,
                commit_sha = ?2,
-               detail = ?3,
-               lease_token = ?4,
-               lease_expires_at = ?5,
-               updated_at = ?6
-             WHERE id = ?7
+               deployment_id = ?3,
+               deployment_requested_at = ?4,
+               detail = ?5,
+               lease_token = ?6,
+               lease_expires_at = ?7,
+               updated_at = ?8
+             WHERE id = ?9
                AND status <> 'verified-live'
                AND (
-                 ?8 IS NULL
-                 OR (status = 'requested' AND lease_token = ?8)
+                 ?10 IS NULL
+                 OR (status = 'requested' AND lease_token = ?10)
                )
-               AND (?9 IS NULL OR lease_expires_at > ?9)
-               AND (?10 IS NULL OR status = ?10)
-               AND (?11 IS NULL OR updated_at = ?11)
+               AND (?11 IS NULL OR lease_expires_at > ?11)
+               AND (?12 IS NULL OR status = ?12)
+               AND (?13 IS NULL OR updated_at = ?13)
                AND NOT (commit_sha IS NOT NULL AND ?2 IS NULL)
                AND NOT (
                  status = 'deployed'
@@ -516,11 +531,17 @@ export function createD1ContentPublicationStore(
                AND NOT (
                  status = 'committed'
                  AND ?1 IN ('requested', 'unknown')
+                 AND NOT (
+                   detail = 'deployment_retry_dispatching'
+                   AND ?1 = 'unknown'
+                 )
                )`,
           )
           .bind(
             publication.status,
             publication.commitSha,
+            publication.deploymentId,
+            publication.deploymentRequestedAt,
             publication.detail,
             publication.leaseToken,
             publication.leaseExpiresAt,

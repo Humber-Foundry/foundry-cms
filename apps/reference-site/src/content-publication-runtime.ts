@@ -28,6 +28,9 @@ localRuntime.__foundryContentPublicationStore ??=
   createInMemoryContentPublicationStore();
 
 const localPublisher: ContentPublisher = {
+  async getChannelConfigurationHash() {
+    return "local-publication-disabled";
+  },
   async getProductionHead() {
     throw new ContentRevisionConfigurationError();
   },
@@ -42,6 +45,9 @@ const localPublisher: ContentPublisher = {
   },
   async getDeploymentStatus() {
     return "unknown";
+  },
+  async retryDeployment() {
+    throw new ContentRevisionConfigurationError();
   },
 };
 

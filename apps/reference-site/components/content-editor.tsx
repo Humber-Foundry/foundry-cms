@@ -136,6 +136,10 @@ export function ContentEditor({
     body: string;
     idempotencyKey: string;
   } | null>(null);
+  const pendingDeploymentRetryAttempt = useRef<{
+    body: string;
+    idempotencyKey: string;
+  } | null>(null);
   const activeRecovery = useRef(staleRecovery);
   const recoveryApplied = useRef(false);
   const recoverySyncReady = useRef(false);
@@ -181,6 +185,10 @@ export function ContentEditor({
       cancelled = true;
     };
   }, [initialRevision.workspaceId]);
+
+  useEffect(() => {
+    pendingDeploymentRetryAttempt.current = null;
+  }, [publication?.id]);
 
   useEffect(() => {
     if (
@@ -536,6 +544,7 @@ export function ContentEditor({
       }
       setApprovalId(result.body.approval.id);
       pendingPublicationAttempt.current = null;
+      pendingDeploymentRetryAttempt.current = null;
       setPublication((current) =>
         current !== null && publicationIsActive(current) ? current : null,
       );
@@ -599,6 +608,50 @@ export function ContentEditor({
         error instanceof Error
           ? `Publish was not started: ${error.message}.`
           : "Publish was not started.",
+      );
+    } finally {
+      setPublicationBusy(false);
+    }
+  }
+
+  async function retryDeployment() {
+    if (publication?.status !== "failed" || publication.commitSha === null) {
+      return;
+    }
+    pendingDeploymentRetryAttempt.current ??= {
+      body: JSON.stringify({
+        operation: "retry_deployment",
+        workspaceId: initialRevision.workspaceId,
+        publicationId: publication.id,
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    setPublicationBusy(true);
+    setMessage("");
+    try {
+      const result = await sendContentPublicationAttempt({
+        attempt: pendingDeploymentRetryAttempt.current,
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("publication" in result.body) ||
+        typeof result.body.publication !== "object" ||
+        result.body.publication === null
+      ) {
+        throw new Error("deployment_retry_failed");
+      }
+      const recorded = result.body.publication as PublicationRecord;
+      setPublicationPollAttempt(0);
+      setPublication(recorded);
+      pendingDeploymentRetryAttempt.current = null;
+      setMessage("The exact committed revision is queued for another build.");
+    } catch {
+      setMessage(
+        "The deployment retry could not be confirmed. Retry the same request.",
       );
     } finally {
       setPublicationBusy(false);
@@ -841,6 +894,8 @@ export function ContentEditor({
               publicationBusy ||
               approvalId === null ||
               (publication !== null && publicationIsActive(publication)) ||
+              (publication?.status === "failed" &&
+                publication.commitSha !== null) ||
               edits.length > 0 ||
               state.status !== "saved"
             }
@@ -850,6 +905,17 @@ export function ContentEditor({
               ? "Publishing…"
               : "Publish approved revision"}
           </button>
+          {publication?.status === "failed" &&
+          publication.commitSha !== null ? (
+            <button
+              type="button"
+              className="copy-button"
+              disabled={publicationBusy}
+              onClick={() => void retryDeployment()}
+            >
+              {publicationBusy ? "Retrying…" : "Retry exact commit"}
+            </button>
+          ) : null}
         </div>
       ) : null}
       <p role="status" aria-live="polite" className="editor-message">

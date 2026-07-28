@@ -15,6 +15,9 @@ export type GitHubContentPublisherConfiguration = Readonly<{
   productionBranch: string;
   publicOrigin: string;
   deploymentCheckName: string;
+  cloudflareAccountId: string;
+  cloudflareBuildTriggerId: string;
+  cloudflareApiToken: string;
 }>;
 
 export class GitHubContentPublisherConfigurationError extends Error {
@@ -33,6 +36,9 @@ export type GitHubContentPublisherEnvironment = Readonly<{
   FOUNDRY_PRODUCTION_BRANCH?: string;
   FOUNDRY_PUBLIC_ORIGIN?: string;
   FOUNDRY_DEPLOYMENT_CHECK_NAME?: string;
+  FOUNDRY_CLOUDFLARE_ACCOUNT_ID?: string;
+  FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID?: string;
+  FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
 }>;
 
 function requireValue(value: string | undefined): string {
@@ -77,6 +83,15 @@ export function readGitHubContentPublisherConfiguration(
     publicOrigin,
     deploymentCheckName:
       environment.FOUNDRY_DEPLOYMENT_CHECK_NAME?.trim() || "Cloudflare",
+    cloudflareAccountId: requireValue(
+      environment.FOUNDRY_CLOUDFLARE_ACCOUNT_ID,
+    ),
+    cloudflareBuildTriggerId: requireValue(
+      environment.FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID,
+    ),
+    cloudflareApiToken: requireValue(
+      environment.FOUNDRY_CLOUDFLARE_API_TOKEN,
+    ),
   };
 }
 
@@ -126,6 +141,27 @@ function isNonFastForwardRefError(error: unknown) {
     typeof error.responseMessage === "string" &&
     /not a fast forward|non-fast-forward/iu.test(error.responseMessage)
   );
+}
+
+function isExplicitHttpRejection(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof error.status === "number" &&
+    error.status >= 400 &&
+    error.status < 500
+  );
+}
+
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function trailerMatches(message: unknown, publishId: ContentPublicationId) {
@@ -305,6 +341,22 @@ export function createGitHubContentPublisher({
   }
 
   return {
+    getChannelConfigurationHash() {
+      return sha256(
+        JSON.stringify({
+          appId: configuration.appId,
+          installationId: configuration.installationId,
+          owner: configuration.owner,
+          repository: configuration.repository,
+          productionBranch: configuration.productionBranch,
+          publicOrigin: configuration.publicOrigin,
+          deploymentCheckName: configuration.deploymentCheckName,
+          cloudflareAccountId: configuration.cloudflareAccountId,
+          cloudflareBuildTriggerId:
+            configuration.cloudflareBuildTriggerId,
+        }),
+      );
+    },
     getProductionHead() {
       return productionHead();
     },
@@ -316,6 +368,7 @@ export function createGitHubContentPublisher({
     },
     async createCommit(input): Promise<PublicationCommitResult> {
       let createdCommitSha: string | undefined;
+      let gitSideEffectStarted = false;
       try {
         if (!(await input.assertLease())) {
           return { state: "blocked", detail: "publication_lease_lost" };
@@ -349,6 +402,7 @@ export function createGitHubContentPublisher({
             ],
           }),
         });
+        gitSideEffectStarted = true;
         const commit = await request(token, "/git/commits", {
           method: "POST",
           body: JSON.stringify({
@@ -384,6 +438,9 @@ export function createGitHubContentPublisher({
         }
         return { state: "committed", commitSha: commit.sha };
       } catch (error) {
+        if (!gitSideEffectStarted || isExplicitHttpRejection(error)) {
+          return { state: "failed", detail: "git_operation_failed" };
+        }
         return {
           state: "unknown",
           detail:
@@ -437,8 +494,40 @@ export function createGitHubContentPublisher({
         return { state: "unknown" };
       }
     },
-    async getDeploymentStatus(commitSha) {
+    async getDeploymentStatus(commitSha, deploymentId) {
       try {
+        if (deploymentId !== undefined) {
+          const response = await fetchImplementation(
+            `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+              configuration.cloudflareAccountId,
+            )}/builds/builds/${encodeURIComponent(deploymentId)}`,
+            {
+              signal: AbortSignal.timeout(30_000),
+              headers: {
+                authorization: `Bearer ${configuration.cloudflareApiToken}`,
+              },
+            },
+          );
+          const body = await readJson(response);
+          const build = body.result;
+          if (
+            build?.status === "queued" ||
+            build?.status === "initializing" ||
+            build?.status === "running"
+          ) {
+            return "building";
+          }
+          if (build?.status === "stopped") {
+            return build.build_outcome === "success"
+              ? "deployed"
+              : ["fail", "cancelled", "terminated"].includes(
+                    build.build_outcome,
+                  )
+                ? "failed"
+                : "unknown";
+          }
+          return "unknown";
+        }
         const token = await installationToken();
         const [checks, statuses] = await Promise.all([
           request(token, `/commits/${commitSha}/check-runs?per_page=100`),
@@ -483,6 +572,38 @@ export function createGitHubContentPublisher({
         return "requested";
       } catch {
         return "unknown";
+      }
+    },
+    async retryDeployment(commitSha) {
+      try {
+        const response = await fetchImplementation(
+          `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+            configuration.cloudflareAccountId,
+          )}/builds/triggers/${encodeURIComponent(
+            configuration.cloudflareBuildTriggerId,
+          )}/builds`,
+          {
+            method: "POST",
+            signal: AbortSignal.timeout(30_000),
+            headers: {
+              authorization: `Bearer ${configuration.cloudflareApiToken}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              branch: configuration.productionBranch,
+              commit_hash: commitSha,
+            }),
+          },
+        );
+        const body = await readJson(response);
+        return body.success === true &&
+          typeof body.result?.build_uuid === "string"
+          ? { state: "requested" as const, deploymentId: body.result.build_uuid }
+          : { state: "failed" as const };
+      } catch (error) {
+        return isExplicitHttpRejection(error)
+          ? { state: "failed" as const }
+          : { state: "unknown" as const };
       }
     },
   };
