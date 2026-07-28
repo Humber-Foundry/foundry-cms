@@ -2,15 +2,21 @@ import "server-only";
 
 import {
   ContentRevisionConfigurationError,
+  ContentPublicationValidationError,
   createContentPublicationApplication,
   createInMemoryContentPublicationStore,
   type ContentActorId,
+  type ContentPublication,
+  type ContentPublicationId,
   type ContentPublicationStore,
   type ContentPublisher,
   type ContentWorkspaceId,
 } from "@foundry/application";
 
-import { loadContentRevisionApplication } from "./content-revision-runtime";
+import {
+  loadContentRevisionApplication,
+  loadRestoredContentRevisionApplication,
+} from "./content-revision-runtime";
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import { listContentRevisionContributors } from "./d1-content-revision-store";
 import {
@@ -58,6 +64,7 @@ function publicationQueries(store: ContentPublicationStore) {
   return Object.freeze({
     getLatest: store.findLatestPublication,
     get: store.findPublication,
+    listHistory: () => store.listPublicationHistory(50),
   });
 }
 
@@ -79,6 +86,7 @@ export async function loadContentPublicationQueries() {
 export async function loadContentPublicationApplication(
   workspaceId: ContentWorkspaceId,
   actorId: ContentActorId,
+  restoreSourcePublication?: ContentPublication,
 ) {
   const revisionApplication = await loadContentRevisionApplication(
     workspaceId,
@@ -103,14 +111,19 @@ export async function loadContentPublicationApplication(
         },
       },
       publisher: localPublisher,
+      restoreSourcePublication,
     });
   }
   const environment = await loadHumanAccessEnvironment();
   if (environment.FOUNDRY_DB === undefined) {
     throw new ContentRevisionConfigurationError();
   }
+  const store = createD1ContentPublicationStore(environment.FOUNDRY_DB);
+  const publisher = createGitHubContentPublisher({
+    configuration: readGitHubContentPublisherConfiguration(environment),
+  });
   return createContentPublicationApplication({
-    store: createD1ContentPublicationStore(environment.FOUNDRY_DB),
+    store,
     revisions: {
       getRevision: (_workspaceId, revision) =>
         revisionApplication.queries.getRevision(revision),
@@ -124,8 +137,45 @@ export async function loadContentPublicationApplication(
           revision,
         ),
     },
-    publisher: createGitHubContentPublisher({
-      configuration: readGitHubContentPublisherConfiguration(environment),
-    }),
+    publisher,
+    publishedRevisions: publisher,
+    restoreSourcePublication,
+    draftRestorer: {
+      async restore(input) {
+        const restored = await loadRestoredContentRevisionApplication(
+          input.workspaceId,
+          input.actorId,
+          input.definition,
+        );
+        const revision = await restored.commands.create({
+          actorId: input.actorId,
+          workspaceId: input.workspaceId,
+          idempotencyKey: input.idempotencyKey,
+        });
+        return {
+          workspaceId: revision.workspaceId,
+          revision: revision.revision,
+          sourcePublicationId: input.sourcePublicationId,
+        };
+      },
+    },
   });
+}
+
+export async function loadContentPublicationRestoreApplication(
+  sourcePublicationId: ContentPublicationId,
+  actorId: ContentActorId,
+) {
+  const queries = await loadContentPublicationQueries();
+  const sourcePublication = await queries.get(sourcePublicationId);
+  if (sourcePublication === null) {
+    throw new ContentPublicationValidationError(
+      "restore_source_not_found",
+    );
+  }
+  return loadContentPublicationApplication(
+    sourcePublication.workspaceId,
+    actorId,
+    sourcePublication,
+  );
 }

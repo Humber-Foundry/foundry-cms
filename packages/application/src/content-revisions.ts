@@ -133,6 +133,12 @@ export type SaveContentMediaOccurrenceCommand = Readonly<{
   idempotencyKey: string;
 }>;
 
+export function isValidContentMutationIdempotencyKey(
+  value: string,
+): boolean {
+  return /^[A-Za-z0-9._:-]{16,128}$/u.test(value);
+}
+
 type PersistContentRevisionCommand = Readonly<{
   baseRevision: number;
   idempotencyKey: string;
@@ -411,6 +417,8 @@ export function createInMemoryContentRevisionStore({
 
 export function createContentRevisionApplication({
   siteDefinition,
+  initialDefinition = siteDefinition,
+  initialCreatedBy = publishedBaseContentActorId,
   store,
   workspaceId,
   actorId,
@@ -419,6 +427,8 @@ export function createContentRevisionApplication({
   now = () => new Date().toISOString(),
 }: {
   siteDefinition: SiteDefinition;
+  initialDefinition?: SiteDefinition;
+  initialCreatedBy?: ContentActorId;
   store: ContentRevisionStore;
   workspaceId: ContentWorkspaceId;
   actorId: ContentActorId;
@@ -439,12 +449,13 @@ export function createContentRevisionApplication({
   };
   const initialize = () => {
     initialization ??= (async () => {
-      const publishedContentHash = await sha256CanonicalJson(siteDefinition);
+      const publishedContentHash =
+        await sha256CanonicalJson(initialDefinition);
       const resolvedProductionBase = await resolveProductionBase();
       const initial = immutableRevision({
         workspaceId,
         revision: 0,
-        definition: siteDefinition,
+        definition: initialDefinition,
         inputs: {
           contentHash: publishedContentHash,
           schemaVersion: siteDefinition.schemaVersion,
@@ -452,7 +463,7 @@ export function createContentRevisionApplication({
           productionBase: resolvedProductionBase,
         },
         createdAt: now(),
-        createdBy: publishedBaseContentActorId,
+        createdBy: initialCreatedBy,
       });
       await store.initialize(initial, actorId);
       await store.requireAccess(actorId);
@@ -490,7 +501,9 @@ export function createContentRevisionApplication({
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
         }
-        if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
+        if (
+          !isValidContentMutationIdempotencyKey(command.idempotencyKey)
+        ) {
           throw new ContentRevisionValidationError({
             idempotencyKey: "Use a 16–128 character idempotency key.",
           });
@@ -507,7 +520,9 @@ export function createContentRevisionApplication({
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
         }
-        if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
+        if (
+          !isValidContentMutationIdempotencyKey(command.idempotencyKey)
+        ) {
           throw new ContentRevisionValidationError({
             idempotencyKey: "Use a 16–128 character idempotency key.",
           });

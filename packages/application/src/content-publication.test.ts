@@ -21,6 +21,8 @@ import {
   parseProductionBase,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
+  type ContentPublicationDraftRestorer,
+  type ContentPublishedRevisionReader,
   type ContentPublisher,
 } from "./content-publication";
 
@@ -606,6 +608,164 @@ describe("content publication application", () => {
     );
   });
 
+  it("starts a new publication after a definite Git rejection is repaired", async () => {
+    createCommit
+      .mockResolvedValueOnce({
+        state: "failed",
+        detail: "git_operation_failed",
+      })
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      });
+    const { app, approval } = await approve();
+
+    const failed = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-definite-git-failure",
+    });
+    expect(failed).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: null,
+        detail: "git_operation_failed",
+      }),
+    );
+
+    const retried = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-after-git-repair",
+    });
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(retried.id).not.toBe(failed.id);
+    expect(createCommit).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts a new publication after a lease is lost before Git mutation", async () => {
+    createCommit
+      .mockResolvedValueOnce({
+        state: "blocked",
+        detail: "publication_lease_lost",
+      })
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      });
+    const { app, approval } = await approve();
+
+    const blocked = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-lease-loss",
+    });
+    expect(blocked).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        commitSha: null,
+        detail: "publication_lease_lost",
+      }),
+    );
+
+    const retried = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-after-lease-loss",
+    });
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(retried.id).not.toBe(blocked.id);
+    expect(createCommit).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts a new publication after its competing global claim ends", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const competing = {
+      id: createContentPublicationId(`publish_${"8".repeat(32)}`),
+      workspaceId: createContentWorkspaceId("workspace_competing"),
+      revision: 1,
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+      idempotencyKey: "competing-publication-claim",
+      requestedBy: membershipId,
+      contributors: [editorId],
+      expectedHead: productionCommit,
+      status: "requested" as const,
+      commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
+      detail: null,
+      leaseToken: "competing-lease",
+      leaseExpiresAt: "2026-07-27T11:00:00.000Z",
+      requestedAt: "2026-07-27T09:00:00.000Z",
+      updatedAt: "2026-07-27T09:00:00.000Z",
+    };
+    await store.claimPublication(competing);
+
+    const blocked = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-while-competing",
+    });
+    expect(blocked).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        detail: "publication_in_progress",
+      }),
+    );
+
+    await store.updatePublication({
+      ...competing,
+      status: "failed",
+      detail: "git_operation_failed",
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:03:30.000Z",
+    });
+    const retried = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-after-competing",
+    });
+
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(retried.id).not.toBe(blocked.id);
+    expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
   it("does not publish an approval through a different workspace boundary", async () => {
     const { app, approval } = await approve();
 
@@ -658,6 +818,174 @@ describe("content publication application", () => {
     });
     expect(replay).toEqual(publication);
     expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes release history with immutable approval and state evidence", async () => {
+    getDeploymentStatus
+      .mockResolvedValueOnce("deployed")
+      .mockResolvedValueOnce("deployed");
+    isReleaseLive
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const app = application();
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-history-evidence-1",
+    });
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+
+    await expect(app.queries.listHistory()).resolves.toEqual([
+      expect.objectContaining({
+        publication: expect.objectContaining({
+          id: publication.id,
+          status: "verified-live",
+          commitSha: "c".repeat(40),
+        }),
+        approval: expect.objectContaining({
+          id: approval.id,
+          fingerprint: expect.objectContaining({
+            contentHash: revisionApplication.saved.inputs.contentHash,
+            artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          }),
+        }),
+        events: [
+          expect.objectContaining({ status: "requested" }),
+          expect.objectContaining({ status: "committed" }),
+          expect.objectContaining({ status: "deployed" }),
+          expect.objectContaining({ status: "verified-live" }),
+        ],
+      }),
+    ]);
+  });
+
+  it("restores a verified historical Git artifact into one new draft without publishing it", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const historicalBytes = serializePublishedSiteDefinition(
+      revisionApplication.saved.definition,
+    );
+    const reader: ContentPublishedRevisionReader = {
+      readPublishedArtifact: vi.fn().mockResolvedValue(historicalBytes),
+    };
+    const restoredWorkspaceId =
+      createContentWorkspaceId("workspace_restored");
+    const restorer: ContentPublicationDraftRestorer = {
+      restore: vi.fn().mockResolvedValue({
+        workspaceId: restoredWorkspaceId,
+        revision: 0,
+        sourcePublicationId: createContentPublicationId(
+          `publish_${"0".repeat(32)}`,
+        ),
+      }),
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      publishedRevisions: reader,
+      draftRestorer: restorer,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-restore-1",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+    vi.mocked(restorer.restore).mockResolvedValue({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+
+    const restored = await app.commands.restore({
+      sourcePublicationId: publication.id,
+      actorId: editorId,
+      workspaceId: restoredWorkspaceId,
+      idempotencyKey: "restore-published-version-1",
+    });
+
+    expect(reader.readPublishedArtifact).toHaveBeenCalledWith({
+      commitSha: "c".repeat(40),
+      path: "packages/site-definition/src/published-site.json",
+    });
+    expect(restorer.restore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        definition: revisionApplication.saved.definition,
+        sourcePublicationId: publication.id,
+        workspaceId: restoredWorkspaceId,
+      }),
+    );
+    expect(restored).toEqual({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+    expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when historical Git bytes do not match the published evidence", async () => {
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      publishedRevisions: {
+        readPublishedArtifact: vi.fn().mockResolvedValue(
+          serializePublishedSiteDefinition(referenceSiteDefinition),
+        ),
+      },
+      draftRestorer: {
+        restore: vi.fn(),
+      },
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-invalid-restore",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+
+    await expect(
+      app.commands.restore({
+        sourcePublicationId: publication.id,
+        actorId: editorId,
+        workspaceId: createContentWorkspaceId("workspace_invalid_restore"),
+        idempotencyKey: "restore-invalid-artifact-1",
+      }),
+    ).rejects.toEqual(
+      new ContentPublicationValidationError(
+        "restore_artifact_mismatch",
+      ),
+    );
   });
 
   it("rejects a publication idempotency key reused by another requester", async () => {
@@ -941,12 +1269,23 @@ describe("content publication application", () => {
 
   it("times out an ambiguous Git result when reconciliation stays unavailable", async () => {
     let currentTime = "2026-07-27T10:01:00.000Z";
-    createCommit.mockRejectedValue(new Error("network lost"));
-    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
-      state: "unknown",
-    });
+    createCommit
+      .mockRejectedValueOnce(new Error("network lost"))
+      .mockResolvedValueOnce({
+        state: "blocked",
+        detail: "production_head_moved",
+      });
+    vi.mocked(publisher.reconcileCommit)
+      .mockResolvedValueOnce({ state: "unknown" })
+      .mockResolvedValueOnce({ state: "unknown" })
+      .mockResolvedValueOnce({ state: "unknown" })
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      });
+    const store = createInMemoryContentPublicationStore();
     const app = createContentPublicationApplication({
-      store: createInMemoryContentPublicationStore(),
+      store,
       revisions: repository,
       publisher,
       now: () => currentTime,
@@ -966,12 +1305,72 @@ describe("content publication application", () => {
     expect(publication.status).toBe("unknown");
 
     currentTime = "2026-07-27T10:16:00.000Z";
-    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+    const failed = await app.commands.refresh(publication.id);
+    expect(failed).toEqual(
       expect.objectContaining({
         status: "failed",
         detail: "git_reconciliation_timeout",
       }),
     );
+    const retried = await app.commands.retryDeployment(
+      publication.id,
+      membershipId,
+    );
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "unknown",
+        commitSha: null,
+        detail: "git_result_unknown",
+      }),
+    );
+    await expect(store.findApproval(approval.id)).resolves.toEqual(
+      expect.objectContaining({ invalidatedAt: null }),
+    );
+    const reconciled = await app.commands.refresh(publication.id);
+    expect(reconciled).toEqual(
+      expect.objectContaining({
+        commitSha: "c".repeat(40),
+      }),
+    );
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-after-no-sha-timeout",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: reconciled!.id,
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(createCommit).toHaveBeenCalledTimes(2);
+    expect(
+      createCommit.mock.calls.map(([input]) => ({
+        publishId: input.publishId,
+        expectedHead: input.expectedHead,
+        message: input.message,
+        bytes: input.bytes,
+      })),
+    ).toEqual([
+      expect.objectContaining({
+        publishId: publication.id,
+        expectedHead: productionCommit,
+      }),
+      expect.objectContaining({
+        publishId: publication.id,
+        expectedHead: productionCommit,
+      }),
+    ]);
+    expect(createCommit.mock.calls[1]![0].message).toBe(
+      createCommit.mock.calls[0]![0].message,
+    );
+    expect(createCommit.mock.calls[1]![0].bytes).toBe(
+      createCommit.mock.calls[0]![0].bytes,
+    );
+    expect(publisher.reconcileCommit).toHaveBeenCalledTimes(4);
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
   it("keeps a missed ambiguous commit active until the reconciliation deadline", async () => {
@@ -1166,16 +1565,17 @@ describe("content publication application", () => {
     vi.mocked(publisher.getProductionHead).mockResolvedValue(
       candidateCommitSha,
     );
+    getDeploymentStatus.mockResolvedValue("building");
     isReleaseLive.mockResolvedValue(false);
 
     await expect(
       app.commands.retryDeployment(publication.id, membershipId),
     ).resolves.toEqual(
       expect.objectContaining({
-        status: "committed",
+        status: "building",
         commitSha: candidateCommitSha,
-        detail: "deployment_retry_requested",
-        deploymentId: "build-123",
+        detail: "deployment_retry_reconciled",
+        deploymentId: null,
       }),
     );
     expect(publisher.reconcileCommit).toHaveBeenLastCalledWith(
@@ -1188,10 +1588,11 @@ describe("content publication application", () => {
       }),
     );
     expect(publisher.retryReference).not.toHaveBeenCalled();
-    expect(publisher.retryDeployment).toHaveBeenCalledWith({
-      commitSha: candidateCommitSha,
-      assertDispatch: expect.any(Function),
-    });
+    expect(getDeploymentStatus).toHaveBeenCalledWith(
+      candidateCommitSha,
+      undefined,
+    );
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
   it("preserves a retained candidate through a channel-configuration timeout", async () => {
@@ -1247,11 +1648,59 @@ describe("content publication application", () => {
       app.commands.retryDeployment(publication.id, membershipId),
     ).resolves.toEqual(
       expect.objectContaining({
-        status: "committed",
+        status: "building",
         commitSha: candidateCommitSha,
-        detail: "deployment_retry_requested",
+        detail: "deployment_retry_reconciled",
       }),
     );
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
+  });
+
+  it("preserves a no-SHA Git outcome through a channel-configuration timeout", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    createCommit.mockRejectedValue(new Error("atomic_response_lost"));
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-no-sha-channel-timeout",
+    });
+    vi.mocked(publisher.getChannelConfigurationHash).mockRejectedValue(
+      new Error("channel_unavailable"),
+    );
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: null,
+        detail: "git_result_unknown",
+      }),
+    );
+
+    vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+      "channel-a",
+    );
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    await app.commands.retryDeployment(publication.id, membershipId);
+    expect(publisher.reconcileCommit).toHaveBeenCalled();
   });
 
   it("invalidates a retained candidate before ref retry when its live base changes", async () => {
@@ -1493,6 +1942,68 @@ describe("content publication application", () => {
       "c".repeat(40),
       "build-123",
     );
+  });
+
+  it("never resends a known manual build after timeout without exact failure evidence", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-known-build-timeout",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    await app.commands.retryDeployment(publication.id, membershipId);
+
+    currentTime = "2026-07-27T10:18:00.000Z";
+    getDeploymentStatus.mockResolvedValue("building");
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+        deploymentId: "build-123",
+      }),
+    );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    getDeploymentStatus.mockClear();
+    getDeploymentStatus.mockResolvedValue("unknown");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+        deploymentId: "build-123",
+      }),
+    );
+    expect(getDeploymentStatus).toHaveBeenCalledWith(
+      "c".repeat(40),
+      "build-123",
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
   });
 
   it("invalidates retry authority when the initial production-head check mismatches", async () => {
@@ -1803,6 +2314,53 @@ describe("content publication application", () => {
     );
   });
 
+  it("permits another manual retry after a definitive dispatch rejection", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-definitive-retry-rejection",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    vi.mocked(publisher.retryDeployment)
+      .mockImplementationOnce(async ({ assertDispatch }) => {
+        expect(await assertDispatch()).toBe(true);
+        return { state: "failed" };
+      })
+      .mockImplementationOnce(async ({ assertDispatch }) =>
+        (await assertDispatch())
+          ? { state: "requested", deploymentId: "build-after-rejection" }
+          : {
+              state: "blocked",
+              detail: "deployment_retry_claim_lost",
+            },
+      );
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_failed",
+        deploymentId: null,
+      }),
+    );
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        detail: "deployment_retry_requested",
+        deploymentId: "build-after-rejection",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a global deployment retry claim conflict without dispatching", async () => {
     const underlyingStore = createInMemoryContentPublicationStore();
     let conflictPublication:
@@ -1967,6 +2525,88 @@ describe("content publication application", () => {
         detail: "deployment_retry_timeout",
       }),
     );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    getDeploymentStatus.mockResolvedValue("building");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "building",
+        detail: "deployment_retry_reconciled",
+      }),
+    );
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves an ambiguous manual-dispatch fence through channel unavailability", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-channel-ambiguous-build",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.retryDeployment).mockResolvedValue({
+      state: "unknown",
+    });
+    await app.commands.retryDeployment(publication.id, membershipId);
+
+    vi.mocked(publisher.getChannelConfigurationHash).mockRejectedValue(
+      new Error("channel temporarily unavailable"),
+    );
+    currentTime = "2026-07-27T10:18:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+      "channel-a",
+    );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await app.commands.retryDeployment(publication.id, membershipId);
+
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
   });
 
   it("rejects deployment retry after the bound channel changes", async () => {
@@ -2075,6 +2715,15 @@ describe("content publication application", () => {
         detail: "deployment_retry_result_unknown",
       }),
     );
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "unknown",
+        detail: "deployment_retry_result_unknown",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
     isReleaseLive.mockResolvedValue(true);
 
     await expect(app.commands.refresh(publication.id)).resolves.toEqual(
@@ -2289,20 +2938,199 @@ describe("content publication application", () => {
     });
 
     currentTime = "2026-07-27T10:19:00.000Z";
+    const recovered = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-after-stranded-1",
+    });
+    expect(recovered).toEqual(
+      expect.objectContaining({
+        id: stranded.id,
+        status: "failed",
+        detail: "publication_lease_expired",
+      }),
+    );
+    await expect(
+      app.commands.retryDeployment(stranded.id, membershipId),
+    ).resolves.toEqual(expect.objectContaining({ id: stranded.id }));
     await expect(
       app.commands.publish({
         workspaceId,
         approvalId: approval.id,
         requestedBy: membershipId,
-        idempotencyKey: "publish-after-stranded-1",
+        idempotencyKey: "another-key-after-stranded",
       }),
-    ).resolves.toEqual(expect.objectContaining({ status: "committed" }));
-    await expect(store.findPublication(stranded.id)).resolves.toEqual(
+    ).resolves.toEqual(expect.objectContaining({ id: stranded.id }));
+    expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not mistake a legacy Git-repair timestamp for manual build dispatch", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-legacy-repair-row",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    const failed = await app.commands.refresh(publication.id);
+    expect(failed).not.toBeNull();
+    if (failed === null) {
+      throw new Error("publication_missing");
+    }
+    await store.updatePublication({
+      ...failed,
+      deploymentRequestedAt: "2026-07-27T10:03:00.000Z",
+      detail: "git_commit_reconciled",
+      updatedAt: "2026-07-27T10:03:00.000Z",
+    });
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
       expect.objectContaining({
-        status: "failed",
-        detail: "publication_lease_expired",
+        detail: "deployment_retry_requested",
+        deploymentId: "build-123",
       }),
     );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles a manual build retry by its recorded deployment id", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-manual-build-id",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    await app.commands.retryDeployment(publication.id, membershipId);
+
+    currentTime = "2026-07-27T10:18:00.000Z";
+    getDeploymentStatus.mockResolvedValue("requested");
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+        deploymentId: "build-123",
+      }),
+    );
+
+    getDeploymentStatus.mockClear();
+    getDeploymentStatus.mockResolvedValue("building");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "building",
+        detail: "deployment_retry_reconciled",
+      }),
+    );
+    expect(getDeploymentStatus).toHaveBeenCalledWith(
+      "c".repeat(40),
+      "build-123",
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches a new manual build after the recorded build definitively fails", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-recorded-build-failed",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        detail: "deployment_retry_requested",
+        deploymentId: "build-123",
+      }),
+    );
+    currentTime = "2026-07-27T10:06:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        deploymentId: "build-123",
+      }),
+    );
+    vi.mocked(publisher.retryDeployment).mockImplementationOnce(
+      async ({ assertDispatch }) =>
+        (await assertDispatch())
+          ? {
+              state: "requested",
+              deploymentId: "build-after-failure",
+            }
+          : {
+              state: "blocked",
+              detail: "deployment_retry_claim_lost",
+            },
+    );
+    getDeploymentStatus.mockClear();
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        detail: "deployment_retry_requested",
+        deploymentId: "build-after-failure",
+      }),
+    );
+    expect(getDeploymentStatus).toHaveBeenCalledWith(
+      "c".repeat(40),
+      "build-123",
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(2);
   });
 
   it("reconciles a landed commit before rejecting a new stale-base approval", async () => {
@@ -2359,8 +3187,12 @@ describe("content publication application", () => {
         requestedBy: membershipId,
         idempotencyKey: "publish-after-landed-ref-1",
       }),
-    ).rejects.toEqual(
-      new ContentApprovalInvalidError("production_head_moved"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: stranded.id,
+        status: "verified-live",
+        commitSha: "c".repeat(40),
+      }),
     );
     await expect(store.findPublication(stranded.id)).resolves.toEqual(
       expect.objectContaining({

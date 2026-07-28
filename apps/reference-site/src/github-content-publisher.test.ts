@@ -48,8 +48,8 @@ const configurationInputs = {
 
 function publicationReconciliationInput(
   publishId: ReturnType<typeof createContentPublicationId>,
+  bytes = "{\"schemaVersion\":\"1.0.0\"}\n",
 ) {
-  const bytes = "{\"schemaVersion\":\"1.0.0\"}\n";
   return {
     publishId,
     expectedHead: "a".repeat(40),
@@ -158,17 +158,112 @@ describe("GitHub content publisher", () => {
     }
   });
 
-  it("creates one tree and bot commit before a non-force production ref update", async () => {
+  it("reads the exact historical published artifact by immutable commit", async () => {
+    const bytes = "{\"schemaVersion\":\"1.0.0\"}\n";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(new Response(bytes));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00Z"),
+    });
+    const commitSha = "c".repeat(40);
+
+    await expect(
+      publisher.readPublishedArtifact({
+        commitSha,
+        path: "packages/site-definition/src/published-site.json",
+      }),
+    ).resolves.toBe(bytes);
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      "https://api.github.com/repos/client-owner/client-site/contents/" +
+        `packages/site-definition/src/published-site.json?ref=${commitSha}`,
+    );
+    expect(fetchMock.mock.calls[1]![1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          accept: "application/vnd.github.raw+json",
+        }),
+      }),
+    );
+  });
+
+  it("reads historical published artifacts larger than the JSON contents limit", async () => {
+    const bytes = JSON.stringify({ content: "x".repeat(1_100_000) });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(new Response(bytes));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00Z"),
+    });
+
+    await expect(
+      publisher.readPublishedArtifact({
+        commitSha: "c".repeat(40),
+        path: "packages/site-definition/src/published-site.json",
+      }),
+    ).resolves.toBe(bytes);
+  });
+
+  it("cancels a raw historical artifact stream that exceeds the safe limit", async () => {
+    let chunksSent = 0;
+    let cancelled = false;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          chunksSent += 1;
+          controller.enqueue(new Uint8Array(1024 * 1024));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      {
+        headers: {
+          // A provider-supplied length cannot be trusted as the only bound.
+          "content-length": "1",
+        },
+      },
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(response);
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00Z"),
+    });
+
+    const artifact = await publisher.readPublishedArtifact({
+      commitSha: "c".repeat(40),
+      path: "packages/site-definition/src/published-site.json",
+    });
+
+    expect(cancelled).toBe(true);
+    expect(artifact).toBeNull();
+  });
+
+  it("atomically creates one bot commit on the expected production head", async () => {
     const expectedHead = "a".repeat(40);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
-      .mockResolvedValueOnce(json({ sha: "c".repeat(40) }))
-      .mockResolvedValueOnce(json({ object: { sha: "c".repeat(40) } }));
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            createCommitOnBranch: {
+              commit: { oid: "c".repeat(40) },
+            },
+          },
+        }),
+      );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -196,60 +291,57 @@ describe("GitHub content publisher", () => {
       commitSha: "c".repeat(40),
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[0]![1]).toEqual(
       expect.objectContaining({
         method: "POST",
         signal: expect.any(AbortSignal),
       }),
     );
-    expect(fetchMock.mock.calls[4]![1]).toEqual(
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          base_tree: "base-tree-sha",
-          tree: [
-            {
-              path: "packages/site-definition/src/published-site.json",
-              mode: "100644",
-              type: "blob",
-              sha: "blob-sha",
-            },
-          ],
-        }),
-      }),
+    expect(fetchMock.mock.calls[2]![0]).toBe(
+      "https://api.github.com/graphql",
     );
-    expect(fetchMock.mock.calls[5]![1]).toEqual(
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          message:
-            "Publish\n\nFoundry-Publish-Id: publish_11111111111111111111111111111111\n" +
-            `Foundry-Publication-Signature: v1=${createHmac(
-              "sha256",
-              configurationInputs.publicationSigningSecret,
-            )
-              .update(
-                [
-                  "foundry-publication-signature-v1",
-                  expectedHead,
-                  "packages/site-definition/src/published-site.json",
-                  "b".repeat(64),
-                  "Publish\n\nFoundry-Publish-Id: publish_11111111111111111111111111111111",
-                ].join("\0"),
-              )
-              .digest("hex")}`,
-          tree: "tree-sha",
-          parents: [expectedHead],
-        }),
-      }),
-    );
-    expect(fetchMock.mock.calls[6]![1]).toEqual(
-      expect.objectContaining({
-        method: "PATCH",
-        body: JSON.stringify({ sha: "c".repeat(40), force: false }),
-      }),
-    );
+    const mutation = JSON.parse(
+      fetchMock.mock.calls[2]![1]!.body as string,
+    ) as {
+      variables: {
+        input: {
+          expectedHeadOid: string;
+          message: { headline: string; body: string };
+          fileChanges: {
+            additions: Array<{ path: string; contents: string }>;
+          };
+        };
+      };
+    };
+    expect(mutation.variables.input.expectedHeadOid).toBe(expectedHead);
+    expect(mutation.variables.input.message).toEqual({
+      headline: "Publish",
+      body:
+        "Foundry-Publish-Id: publish_11111111111111111111111111111111\n" +
+        `Foundry-Publication-Signature: v1=${createHmac(
+          "sha256",
+          configurationInputs.publicationSigningSecret,
+        )
+          .update(
+            [
+              "foundry-publication-signature-v1",
+              expectedHead,
+              "packages/site-definition/src/published-site.json",
+              "b".repeat(64),
+              "Publish\n\nFoundry-Publish-Id: publish_11111111111111111111111111111111",
+            ].join("\0"),
+          )
+          .digest("hex")}`,
+    });
+    expect(mutation.variables.input.fileChanges.additions).toEqual([
+      {
+        path: "packages/site-definition/src/published-site.json",
+        contents: Buffer.from(
+          "{\"schemaVersion\":\"1.0.0\"}\n",
+        ).toString("base64"),
+      },
+    ]);
   });
 
   it("fails closed before creating Git objects when the expected head moved", async () => {
@@ -285,14 +377,15 @@ describe("GitHub content publisher", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("reports an explicit pre-commit Git rejection as failed", async () => {
+  it("reports an explicit atomic commit rejection as failed", async () => {
     const expectedHead = "a".repeat(40);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ message: "Validation Failed" }, 422));
+      .mockResolvedValueOnce(
+        json({ errors: [{ message: "Validation Failed" }] }),
+      );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -320,15 +413,86 @@ describe("GitHub content publisher", () => {
     });
   });
 
+  it.each([
+    {
+      label: "an internal execution error",
+      errors: [
+        {
+          type: "INTERNAL",
+          message: "Something went wrong while executing your query",
+        },
+      ],
+    },
+    {
+      label: "an internal error with validation and head-like text",
+      errors: [
+        {
+          type: "INTERNAL",
+          message:
+            "Validation Failed after the expected head branch changed",
+        },
+      ],
+    },
+    {
+      label: "mixed definite and transient errors",
+      errors: [
+        {
+          type: "UNPROCESSABLE",
+          message: "Validation Failed",
+        },
+        {
+          type: "INTERNAL",
+          message: "Expected head OID check timed out",
+        },
+      ],
+    },
+  ])(
+    "keeps $label unknown for reconciliation",
+    async ({ errors }) => {
+      const expectedHead = "a".repeat(40);
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(json({ token: "installation-token" }))
+        .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+        .mockResolvedValueOnce(
+          json({
+            errors,
+          }),
+        );
+      const publisher = createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: fetchMock,
+      });
+
+      await expect(
+        publisher.createCommit({
+          publishId: createContentPublicationId(
+            `publish_${"2".repeat(32)}`,
+          ),
+          workspaceId: createContentWorkspaceId("workspace_publish"),
+          revision: 3,
+          approvedBy: createHumanMembershipId("membership-editor"),
+          contributors: [],
+          contentHash: "b".repeat(64),
+          expectedHead,
+          path: "packages/site-definition/src/published-site.json",
+          bytes: "{}\n",
+          message: "Publish",
+          assertLease: async () => true,
+        }),
+      ).resolves.toEqual({
+        state: "unknown",
+        detail: "git_result_unknown",
+      });
+    },
+  );
+
   it("keeps a lost commit response unknown for reconciliation", async () => {
     const expectedHead = "a".repeat(40);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
       .mockRejectedValueOnce(new TypeError("connection reset"));
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
@@ -363,9 +527,6 @@ describe("GitHub content publisher", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
       .mockResolvedValueOnce(json({ message: "Request Timeout" }, 408));
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
@@ -727,6 +888,44 @@ describe("GitHub content publisher", () => {
     },
   );
 
+  it.each([
+    { success: true, result: {} },
+    { success: true, result: { build_uuid: "" } },
+    { success: true, result: { build_uuid: "   " } },
+    { result: { build_uuid: "build-without-success" } },
+  ])(
+    "keeps an incomplete successful Cloudflare build response unknown",
+    async (body) => {
+      const publisher = createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(json(body)),
+      });
+
+      await expect(
+        publisher.retryDeployment({
+          commitSha: "c".repeat(40),
+          assertDispatch: vi.fn().mockResolvedValue(true),
+        }),
+      ).resolves.toEqual({ state: "unknown" });
+    },
+  );
+
+  it("classifies an explicit Cloudflare build rejection as failed", async () => {
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(json({ success: false, errors: [] })),
+    });
+
+    await expect(
+      publisher.retryDeployment({
+        commitSha: "c".repeat(40),
+        assertDispatch: vi.fn().mockResolvedValue(true),
+      }),
+    ).resolves.toEqual({ state: "failed" });
+  });
+
   it("does not contact Cloudflare after losing the exact retry claim", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     const assertDispatch = vi.fn().mockResolvedValue(false);
@@ -780,7 +979,7 @@ describe("GitHub content publisher", () => {
     );
   });
 
-  it("fails a skipped or wrong-commit manual build", async () => {
+  it("fails an exact skipped build but keeps mismatched build evidence unknown", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -817,22 +1016,95 @@ describe("GitHub content publisher", () => {
     ).resolves.toBe("failed");
     await expect(
       publisher.getDeploymentStatus("c".repeat(40), "build-wrong"),
-    ).resolves.toBe("failed");
+    ).resolves.toBe("unknown");
   });
 
-  it("classifies an explicit non-fast-forward ref rejection as a moved head", async () => {
+  it("keeps stopped manual build evidence without commit metadata unknown", async () => {
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(
+        json({
+          success: true,
+          result: {
+            status: "stopped",
+            build_outcome: "fail",
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      publisher.getDeploymentStatus("c".repeat(40), "build-metadata-missing"),
+    ).resolves.toBe("unknown");
+  });
+
+  it.each([
+    {
+      status: "queued",
+      build_trigger_metadata: { commit_hash: "d".repeat(40) },
+    },
+    {
+      status: "running",
+    },
+  ])(
+    "keeps active manual build evidence without the exact commit unknown",
+    async (result) => {
+      const publisher = createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(
+          json({
+            success: true,
+            result,
+          }),
+        ),
+      });
+
+      await expect(
+        publisher.getDeploymentStatus(
+          "c".repeat(40),
+          "build-active-mismatch",
+        ),
+      ).resolves.toBe("unknown");
+    },
+  );
+
+  it("reports an active manual build only when its commit is exact", async () => {
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(
+        json({
+          success: true,
+          result: {
+            status: "running",
+            build_trigger_metadata: {
+              commit_hash: "c".repeat(40),
+            },
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      publisher.getDeploymentStatus("c".repeat(40), "build-active-exact"),
+    ).resolves.toBe("building");
+  });
+
+  it("classifies an atomic expected-head rejection as a moved head", async () => {
     const expectedHead = "a".repeat(40);
     const commitSha = "c".repeat(40);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
-      .mockResolvedValueOnce(json({ sha: commitSha }))
       .mockResolvedValueOnce(
-        json({ message: "Update is not a fast forward" }, 422),
+        json({
+          errors: [
+            {
+              message:
+                "Expected head oid does not match because the branch was updated",
+            },
+          ],
+        }),
       );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
@@ -867,10 +1139,9 @@ describe("GitHub content publisher", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
-      .mockResolvedValueOnce(json({ message: "Validation Failed" }, 422));
+      .mockResolvedValueOnce(
+        json({ errors: [{ message: "Validation Failed" }] }),
+      );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -898,7 +1169,7 @@ describe("GitHub content publisher", () => {
     });
   });
 
-  it("preserves an exact candidate after another explicit ref rejection", async () => {
+  it("classifies an explicit atomic mutation rejection as failed", async () => {
     const expectedHead = "a".repeat(40);
     const commitSha = "c".repeat(40);
     const publishId = createContentPublicationId(
@@ -908,11 +1179,7 @@ describe("GitHub content publisher", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
-      .mockResolvedValueOnce(json({ sha: commitSha }))
-      .mockResolvedValueOnce(json({ message: "Reference rejected" }, 403));
+      .mockResolvedValueOnce(json({ message: "Mutation rejected" }, 403));
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -933,12 +1200,12 @@ describe("GitHub content publisher", () => {
         assertLease: async () => true,
       }),
     ).resolves.toEqual({
-      state: "unknown",
-      detail: `git_reference_result_unknown:${commitSha}`,
+      state: "failed",
+      detail: "git_operation_failed",
     });
   });
 
-  it("preserves an exact candidate after an ambiguous ref HTTP response", async () => {
+  it("keeps an ambiguous atomic mutation response recoverable from the branch", async () => {
     const expectedHead = "a".repeat(40);
     const commitSha = "c".repeat(40);
     const publishId = createContentPublicationId(
@@ -948,10 +1215,6 @@ describe("GitHub content publisher", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
-      .mockResolvedValueOnce(json({ sha: commitSha }))
       .mockResolvedValueOnce(json({ message: "Too Early" }, 425));
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
@@ -974,7 +1237,7 @@ describe("GitHub content publisher", () => {
       }),
     ).resolves.toEqual({
       state: "unknown",
-      detail: `git_reference_result_unknown:${commitSha}`,
+      detail: "git_result_unknown",
     });
   });
 
@@ -1204,7 +1467,7 @@ describe("GitHub content publisher", () => {
     ).resolves.toEqual({ state: "committed", commitSha });
   });
 
-  it("retains the candidate without advancing the ref after the lease is lost", async () => {
+  it("checks the lease before the atomic commit-and-ref mutation", async () => {
     const expectedHead = "a".repeat(40);
     const assertLease = vi
       .fn<() => Promise<boolean>>()
@@ -1214,10 +1477,15 @@ describe("GitHub content publisher", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
-      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
-      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
-      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
-      .mockResolvedValueOnce(json({ sha: "c".repeat(40) }));
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            createCommitOnBranch: {
+              commit: { oid: "c".repeat(40) },
+            },
+          },
+        }),
+      );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -1240,13 +1508,15 @@ describe("GitHub content publisher", () => {
         assertLease,
       }),
     ).resolves.toEqual({
-      state: "unknown",
-      detail: `git_reference_result_unknown:${"c".repeat(40)}`,
+      state: "blocked",
+      detail: "publication_lease_lost",
     });
     expect(assertLease).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(
-      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/graphql"),
+      ),
     ).toBe(false);
   });
 
@@ -1465,6 +1735,65 @@ describe("GitHub content publisher", () => {
     expect(tokenMints).toBe(2);
   });
 
+  it("reconciles a large exact publication after an ambiguous commit response", async () => {
+    const publishId = createContentPublicationId(
+      `publish_${"9".repeat(32)}`,
+    );
+    const bytes = JSON.stringify({ content: "x".repeat(1_600_000) });
+    const input = publicationReconciliationInput(publishId, bytes);
+    const commitSha = "c".repeat(40);
+    const fileSha = "f".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(
+        json([
+          {
+            sha: commitSha,
+            commit: { message: signedPublicationMessage(input) },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        json({
+          sha: commitSha,
+          message: signedPublicationMessage(input),
+          parents: [{ sha: input.expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename: input.path,
+              status: "modified",
+              sha: fileSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(new Response(bytes));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(publisher.reconcileCommit(input)).resolves.toEqual({
+      state: "committed",
+      commitSha,
+    });
+    expect(fetchMock.mock.calls[4]![1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          accept: "application/vnd.github.raw+json",
+        }),
+      }),
+    );
+  });
+
   it("rejects a copied trailer and reconciles the exact signed publication commit", async () => {
     const publishId = createContentPublicationId(
       `publish_${"1".repeat(32)}`,
@@ -1535,12 +1864,7 @@ describe("GitHub content publisher", () => {
         }),
       )
       .mockResolvedValueOnce(
-        json({
-          encoding: "base64",
-          content: Buffer.from(
-            "{\"schemaVersion\":\"1.0.0\"}\n",
-          ).toString("base64"),
-        }),
+        new Response("{\"schemaVersion\":\"1.0.0\"}\n"),
       );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
@@ -1595,12 +1919,7 @@ describe("GitHub content publisher", () => {
         }),
       )
       .mockResolvedValueOnce(
-        json({
-          encoding: "base64",
-          content: Buffer.from(
-            "{\"schemaVersion\":\"1.0.0\"}\n",
-          ).toString("base64"),
-        }),
+        new Response("{\"schemaVersion\":\"1.0.0\"}\n"),
       )
       .mockResolvedValueOnce(json({ object: { sha: currentHead } }))
       .mockResolvedValueOnce(

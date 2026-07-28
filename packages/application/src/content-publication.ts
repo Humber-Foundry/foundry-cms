@@ -3,10 +3,11 @@ import {
   type SiteDefinition,
 } from "@foundry/site-definition";
 
-import type {
-  ContentActorId,
-  ContentRevision,
-  ContentWorkspaceId,
+import {
+  isValidContentMutationIdempotencyKey,
+  type ContentActorId,
+  type ContentRevision,
+  type ContentWorkspaceId,
 } from "./content-revisions";
 import { canonicalJson } from "./deterministic-hash";
 import type { HumanMembershipId } from "./human-access";
@@ -103,6 +104,44 @@ export type ContentPublication = Readonly<{
   updatedAt: string;
 }>;
 
+export type ContentPublicationEvent = Readonly<{
+  status: ContentPublicationStatus;
+  detail: string | null;
+  commitSha: string | null;
+  deploymentId: string | null;
+  approvalFingerprint: string;
+  occurredAt: string;
+}>;
+
+export type ContentPublicationHistoryEntry = Readonly<{
+  publication: ContentPublication;
+  approval: ContentApproval;
+  events: ReadonlyArray<ContentPublicationEvent>;
+}>;
+
+export type ContentPublishedRevisionReader = Readonly<{
+  readPublishedArtifact(input: {
+    commitSha: string;
+    path: typeof publishedSiteDefinitionPath;
+  }): Promise<string | null>;
+}>;
+
+export type RestoredContentDraft = Readonly<{
+  workspaceId: ContentWorkspaceId;
+  revision: number;
+  sourcePublicationId: ContentPublicationId;
+}>;
+
+export type ContentPublicationDraftRestorer = Readonly<{
+  restore(input: {
+    sourcePublicationId: ContentPublicationId;
+    workspaceId: ContentWorkspaceId;
+    definition: SiteDefinition;
+    actorId: ContentActorId;
+    idempotencyKey: string;
+  }): Promise<RestoredContentDraft>;
+}>;
+
 export type ContentPublicationCommandIdentity = Readonly<
   Pick<
     ContentPublication,
@@ -136,6 +175,15 @@ export function assertContentPublicationIdempotency(
   ) {
     throw new ContentPublicationIdempotencyError();
   }
+}
+
+export function serializeContentRestoreIdentity(input: {
+  sourcePublicationId: ContentPublicationId;
+  workspaceId: ContentWorkspaceId;
+  actorId: ContentActorId;
+  idempotencyKey: string;
+}) {
+  return canonicalJson(input);
 }
 
 export type ContentPublicationClaim =
@@ -191,6 +239,15 @@ export type ContentPublicationStore = Readonly<{
   findLatestPublication(
     workspaceId: ContentWorkspaceId,
   ): Promise<ContentPublication | null>;
+  claimRestoreIdentity(input: {
+    sourcePublicationId: ContentPublicationId;
+    workspaceId: ContentWorkspaceId;
+    actorId: ContentActorId;
+    idempotencyKey: string;
+  }): Promise<void>;
+  listPublicationHistory(limit?: number): Promise<
+    ReadonlyArray<ContentPublicationHistoryEntry>
+  >;
 }>;
 
 export type ContentPublicationRevisionRepository = Readonly<{
@@ -274,6 +331,43 @@ function reconciliationCandidate(detail: string | null): string | undefined {
   return candidate;
 }
 
+export function contentPublicationHasUnresolvedGitOutcome(publication: {
+  commitSha: string | null;
+  detail: string | null;
+}): boolean {
+  return (
+    publication.commitSha === null &&
+    (reconciliationCandidate(publication.detail) !== undefined ||
+      [
+        "git_commit_not_found",
+        "git_reconciliation_timeout",
+        "git_result_unknown",
+        "publication_lease_expired",
+      ].includes(publication.detail ?? ""))
+  );
+}
+
+const deploymentRetryDispatchEvidence = new Set([
+  "deployment_retry_dispatching",
+  "deployment_retry_reconciled",
+  "deployment_retry_requested",
+  "deployment_retry_result_unknown",
+  "deployment_retry_timeout",
+]);
+
+function deploymentRetryDispatchWasAttempted(publication: {
+  deploymentRequestedAt: string | null;
+  deploymentId: string | null;
+  detail: string | null;
+}) {
+  return (
+    publication.deploymentRequestedAt !== null &&
+    (deploymentRetryDispatchEvidence.has(publication.detail ?? "") ||
+      (publication.deploymentId !== null &&
+        !publication.deploymentId.startsWith("retry-dispatch:")))
+  );
+}
+
 export class ContentApprovalInvalidError extends Error {
   readonly code:
     | "revision_not_current"
@@ -307,7 +401,12 @@ export class ContentPublicationValidationError extends Error {
     | "deployment_retry_not_available"
     | "deployment_retry_head_moved"
     | "deployment_retry_release_marker_mismatch"
-    | "deployment_retry_in_progress";
+    | "deployment_retry_in_progress"
+    | "restore_source_not_found"
+    | "restore_source_not_live"
+    | "restore_artifact_unavailable"
+    | "restore_artifact_mismatch"
+    | "restore_not_configured";
 
   constructor(code: ContentPublicationValidationError["code"]) {
     super(code);
@@ -488,6 +587,24 @@ const deploymentDispatchTimeoutMs = 60 * 1_000;
 export function createInMemoryContentPublicationStore(): ContentPublicationStore {
   const approvals = new Map<ContentApprovalId, ContentApproval>();
   const publications = new Map<ContentPublicationId, ContentPublication>();
+  const events = new Map<
+    ContentPublicationId,
+    Array<ContentPublicationEvent>
+  >();
+  const restoreIdentities = new Map<ContentWorkspaceId, string>();
+
+  function recordEvent(publication: ContentPublication) {
+    const history = events.get(publication.id) ?? [];
+    history.push({
+      status: publication.status,
+      detail: publication.detail,
+      commitSha: publication.commitSha,
+      deploymentId: publication.deploymentId,
+      approvalFingerprint: publication.fingerprint,
+      occurredAt: publication.updatedAt,
+    });
+    events.set(publication.id, history);
+  }
 
   return {
     async saveApproval(approval) {
@@ -555,9 +672,11 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
           updatedAt: publication.updatedAt,
         });
         publications.set(blocked.id, blocked);
+        recordEvent(blocked);
         return { state: "blocked", publication: blocked };
       }
       publications.set(publication.id, publication);
+      recordEvent(publication);
       return { state: "claimed", publication };
     },
     async hasPublicationLease({ publicationId, leaseToken, now }) {
@@ -646,6 +765,7 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
         return current;
       }
       publications.set(publication.id, Object.freeze({ ...publication }));
+      recordEvent(publication);
       return publication;
     },
     async findPublication(id) {
@@ -690,6 +810,32 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
           })[0] ?? null
       );
     },
+    async claimRestoreIdentity(input) {
+      const identity = serializeContentRestoreIdentity(input);
+      const recorded = restoreIdentities.get(input.workspaceId);
+      if (recorded !== undefined && recorded !== identity) {
+        throw new ContentPublicationIdempotencyError();
+      }
+      restoreIdentities.set(input.workspaceId, identity);
+    },
+    async listPublicationHistory(limit = 50) {
+      const history: ContentPublicationHistoryEntry[] = [];
+      for (const publication of [...publications.values()]
+        .sort((left, right) =>
+          right.requestedAt.localeCompare(left.requestedAt)
+        )
+        .slice(0, Math.min(Math.max(limit, 1), 100))) {
+        const approval = approvals.get(publication.approvalId);
+        if (approval !== undefined) {
+          history.push({
+            publication,
+            approval,
+            events: Object.freeze([...(events.get(publication.id) ?? [])]),
+          });
+        }
+      }
+      return history;
+    },
   };
 }
 
@@ -697,11 +843,17 @@ export function createContentPublicationApplication({
   store,
   revisions,
   publisher,
+  publishedRevisions,
+  draftRestorer,
+  restoreSourcePublication,
   now = () => new Date().toISOString(),
 }: {
   store: ContentPublicationStore;
   revisions: ContentPublicationRevisionRepository;
   publisher: ContentPublisher;
+  publishedRevisions?: ContentPublishedRevisionReader;
+  draftRestorer?: ContentPublicationDraftRestorer;
+  restoreSourcePublication?: ContentPublication;
   now?: () => string;
 }) {
   async function requireExactRevision(
@@ -788,6 +940,111 @@ export function createContentPublicationApplication({
     };
   }
 
+  function createPublicationCommitLeaseGuard(input: {
+    publication: ContentPublication;
+    leaseToken: string;
+    requestedBy: HumanMembershipId;
+  }) {
+    return async () => {
+      let currentApproval: ContentApproval;
+      try {
+        ({ approval: currentApproval } = await requireApproval(
+          input.publication.approvalId,
+          input.requestedBy,
+        ));
+      } catch (error) {
+        if (error instanceof ContentApprovalInvalidError) {
+          return false;
+        }
+        throw error;
+      }
+      if (!(await approvedBaseIsLive(currentApproval))) {
+        await invalidateForProductionChange(currentApproval);
+        return false;
+      }
+      const leaseNow = now();
+      return store.renewPublicationLease({
+        publicationId: input.publication.id,
+        leaseToken: input.leaseToken,
+        now: leaseNow,
+        leaseExpiresAt: new Date(
+          new Date(leaseNow).getTime() + publicationLeaseDurationMs,
+        ).toISOString(),
+      });
+    };
+  }
+
+  async function attemptAtomicPublicationCommit(input: {
+    publication: ContentPublication;
+    approval: ContentApproval;
+    revision: ContentRevision;
+    assertLease(): Promise<boolean>;
+  }): Promise<PublicationCommitResult> {
+    try {
+      return await publisher.createCommit({
+        publishId: input.publication.id,
+        workspaceId: input.publication.workspaceId,
+        revision: input.publication.revision,
+        approvedBy: input.approval.approvedBy,
+        contributors: input.publication.contributors,
+        contentHash: input.approval.fingerprint.contentHash,
+        expectedHead: input.publication.expectedHead,
+        path: publishedSiteDefinitionPath,
+        bytes: serializePublishedSiteDefinition(input.revision.definition),
+        message: commitMessage({
+          publication: input.publication,
+          approval: input.approval,
+        }),
+        assertLease: input.assertLease,
+      });
+    } catch {
+      return {
+        state: "unknown",
+        detail: "git_result_unknown",
+      };
+    }
+  }
+
+  async function claimFailedPublicationRetry(
+    publication: ContentPublication,
+    detail: string,
+  ) {
+    if ((await store.findActivePublication()) !== null) {
+      throw new ContentPublicationValidationError(
+        "deployment_retry_in_progress",
+      );
+    }
+    const retryRequestedAt = now();
+    const leaseToken = crypto.randomUUID();
+    let dispatching: ContentPublication;
+    try {
+      dispatching = await store.updatePublication(
+        nextPublication(publication, {
+          status: "requested",
+          detail,
+          leaseToken,
+          leaseExpiresAt: new Date(
+            new Date(retryRequestedAt).getTime() +
+              publicationLeaseDurationMs,
+          ).toISOString(),
+          updatedAt: retryRequestedAt,
+        }),
+        {
+          expectedStatus: "failed",
+          expectedUpdatedAt: publication.updatedAt,
+        },
+      );
+    } catch (error) {
+      if ((await store.findActivePublication()) !== null) {
+        throw new ContentPublicationValidationError(
+          "deployment_retry_in_progress",
+        );
+      }
+      throw error;
+    }
+    return { dispatching, leaseToken };
+  }
+
   async function refreshPublication(publicationId: ContentPublicationId) {
     const publication = await store.findPublication(publicationId);
     if (publication === null) {
@@ -828,7 +1085,9 @@ export function createContentPublicationApplication({
           nextPublication(publication, {
             status: "failed",
             detail:
-              reconciliationCandidate(publication.detail) !== undefined
+              deploymentRetryDispatchWasAttempted(publication)
+                ? "deployment_retry_timeout"
+                : contentPublicationHasUnresolvedGitOutcome(publication)
                 ? publication.detail
                 : channelFailure === "changed"
                   ? "publication_channel_changed"
@@ -1012,6 +1271,17 @@ export function createContentPublicationApplication({
             currentPublication.requestedAt,
         ).getTime() >=
       deploymentSignalTimeoutMs;
+    const manualDispatchFenced =
+      deploymentRetryDispatchWasAttempted(currentPublication);
+    const preserveManualDispatchFence = (
+      detail: string | null,
+      failed = false,
+    ) =>
+      manualDispatchFenced
+        ? failed
+          ? "deployment_retry_timeout"
+          : "deployment_retry_reconciled"
+        : detail;
     const update = (
       status: ContentPublicationStatus,
       detail: string | null,
@@ -1037,7 +1307,10 @@ export function createContentPublicationApplication({
       if (approval === null) {
         return update(
           timedOut ? "failed" : "unknown",
-          "approval_record_missing",
+          preserveManualDispatchFence(
+            "approval_record_missing",
+            timedOut,
+          ),
         );
       }
       let live: boolean;
@@ -1050,7 +1323,12 @@ export function createContentPublicationApplication({
       } catch {
         return update(
           timedOut ? "failed" : "deployed",
-          timedOut ? "release_marker_timeout" : "release_marker_unavailable",
+          preserveManualDispatchFence(
+            timedOut
+              ? "release_marker_timeout"
+              : "release_marker_unavailable",
+            timedOut,
+          ),
         );
       }
       if (live) {
@@ -1058,14 +1336,23 @@ export function createContentPublicationApplication({
       }
       return update(
         timedOut ? "failed" : "deployed",
-        timedOut ? "release_marker_timeout" : "release_marker_pending",
+        preserveManualDispatchFence(
+          timedOut ? "release_marker_timeout" : "release_marker_pending",
+          timedOut,
+        ),
       );
     }
     if (deployment === "failed") {
-      return update("failed", "cloudflare_build_failed");
+      return update(
+        "failed",
+        preserveManualDispatchFence("cloudflare_build_failed", true),
+      );
     }
     if (timedOut && activeStatuses.has(currentPublication.status)) {
-      return update("failed", "deployment_signal_timeout");
+      return update(
+        "failed",
+        preserveManualDispatchFence("deployment_signal_timeout", true),
+      );
     }
     if (deployment === "unknown") {
       return currentPublication;
@@ -1079,7 +1366,10 @@ export function createContentPublicationApplication({
     ) {
       return currentPublication;
     }
-    return update(deployment, null);
+    return update(
+      deployment,
+      preserveManualDispatchFence(null),
+    );
   }
 
   return Object.freeze({
@@ -1121,7 +1411,7 @@ export function createContentPublicationApplication({
         requestedBy: HumanMembershipId;
         idempotencyKey: string;
       }) {
-        if (!/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) {
+        if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
           throw new ContentPublicationValidationError(
             "idempotency_key_invalid",
           );
@@ -1159,14 +1449,24 @@ export function createContentPublicationApplication({
         const recoverableCandidate = await store.findLatestPublication(
           approval.workspaceId,
         );
+        const terminalAttemptCanBeRestarted =
+          recoverableCandidate?.commitSha === null &&
+          ((recoverableCandidate.status === "failed" &&
+            recoverableCandidate.detail === "git_operation_failed") ||
+            (recoverableCandidate.status === "blocked" &&
+              (recoverableCandidate.detail === "publication_in_progress" ||
+                recoverableCandidate.detail ===
+                  "publication_lease_lost")));
         if (
           recoverableCandidate !== null &&
-          recoverableCandidate.status === "failed" &&
           recoverableCandidate.approvalId === approval.id &&
           recoverableCandidate.fingerprint === approval.fingerprint.value &&
-          reconciliationCandidate(recoverableCandidate.detail) !== undefined
+          !terminalAttemptCanBeRestarted
         ) {
-          return recoverableCandidate;
+          return activeStatuses.has(recoverableCandidate.status)
+            ? (await refreshPublication(recoverableCandidate.id)) ??
+                recoverableCandidate
+            : recoverableCandidate;
         }
         const activePublication = await store.findActivePublication();
         if (activePublication !== null) {
@@ -1249,33 +1549,11 @@ export function createContentPublicationApplication({
         if (leaseToken === null) {
           return blockForLostLease();
         }
-        const renewLease = async () => {
-          let currentApproval: ContentApproval;
-          try {
-            ({ approval: currentApproval } = await requireApproval(
-              input.approvalId,
-              input.requestedBy,
-            ));
-          } catch (error) {
-            if (error instanceof ContentApprovalInvalidError) {
-              return false;
-            }
-            throw error;
-          }
-          if (!(await approvedBaseIsLive(currentApproval))) {
-            await invalidateForProductionChange(currentApproval);
-            return false;
-          }
-          const leaseNow = now();
-          return store.renewPublicationLease({
-            publicationId: publication.id,
-            leaseToken,
-            now: leaseNow,
-            leaseExpiresAt: new Date(
-              new Date(leaseNow).getTime() + publicationLeaseDurationMs,
-            ).toISOString(),
-          });
-        };
+        const renewLease = createPublicationCommitLeaseGuard({
+          publication,
+          leaseToken,
+          requestedBy: input.requestedBy,
+        });
         if (!(await renewLease())) {
           return blockForLostLease();
         }
@@ -1296,27 +1574,12 @@ export function createContentPublicationApplication({
           }
           throw error;
         }
-        let result: PublicationCommitResult;
-        try {
-          result = await publisher.createCommit({
-            publishId: publication.id,
-            workspaceId: publication.workspaceId,
-            revision: publication.revision,
-            approvedBy: approval.approvedBy,
-            contributors,
-            contentHash: approval.fingerprint.contentHash,
-            expectedHead: head,
-            path: publishedSiteDefinitionPath,
-            bytes: serializePublishedSiteDefinition(revision.definition),
-            message: commitMessage({ publication, approval }),
-            assertLease: renewLease,
-          });
-        } catch {
-          result = {
-            state: "unknown",
-            detail: "git_result_ambiguous",
-          };
-        }
+        const result = await attemptAtomicPublicationCommit({
+          publication,
+          approval,
+          revision,
+          assertLease: renewLease,
+        });
         const updatedAt = now();
         if (result.state === "committed") {
           return store.updatePublication(
@@ -1380,7 +1643,8 @@ export function createContentPublicationApplication({
           publication === null ||
           publication.status !== "failed" ||
           (publication.commitSha === null &&
-            candidateCommitSha === undefined)
+            candidateCommitSha === undefined &&
+            !contentPublicationHasUnresolvedGitOutcome(publication))
         ) {
           throw new ContentPublicationValidationError(
             "deployment_retry_not_available",
@@ -1394,6 +1658,129 @@ export function createContentPublicationApplication({
           approval.fingerprint.value !== publication.fingerprint
         ) {
           throw new ContentApprovalInvalidError("approval_stale");
+        }
+        if (
+          publication.commitSha === null &&
+          candidateCommitSha === undefined &&
+          contentPublicationHasUnresolvedGitOutcome(publication)
+        ) {
+          const reconciled = await publisher.reconcileCommit(
+            commitReconciliationInput(publication, approval),
+          );
+          if (reconciled.state === "committed") {
+            publication = await store.updatePublication(
+              nextPublication(publication, {
+                status: "failed",
+                commitSha: reconciled.commitSha,
+                detail: "git_commit_reconciled",
+                updatedAt: now(),
+              }),
+              {
+                expectedStatus: "failed",
+                expectedUpdatedAt: publication.updatedAt,
+              },
+            );
+          } else {
+            const [currentHead, baseIsLive] = await Promise.all([
+              publisher.getProductionHead(),
+              approvedBaseIsLive(approval),
+            ]);
+            if (currentHead !== publication.expectedHead) {
+              const retryReconciliation = await publisher.reconcileCommit(
+                commitReconciliationInput(publication, approval),
+              );
+              if (retryReconciliation.state !== "committed") {
+                return publication;
+              }
+              publication = await store.updatePublication(
+                nextPublication(publication, {
+                  status: "failed",
+                  commitSha: retryReconciliation.commitSha,
+                  detail: "git_commit_reconciled",
+                  updatedAt: now(),
+                }),
+                {
+                  expectedStatus: "failed",
+                  expectedUpdatedAt: publication.updatedAt,
+                },
+              );
+            } else {
+              if (!baseIsLive) {
+                await invalidateForProductionChange(approval);
+                throw new ContentPublicationValidationError(
+                  "deployment_retry_release_marker_mismatch",
+                );
+              }
+              const { dispatching, leaseToken } =
+                await claimFailedPublicationRetry(
+                  publication,
+                  "git_result_unknown",
+                );
+              if (
+                dispatching.status !== "requested" ||
+                dispatching.leaseToken !== leaseToken
+              ) {
+                return dispatching;
+              }
+              const retryPublication = publication;
+              const assertLease = createPublicationCommitLeaseGuard({
+                publication: retryPublication,
+                leaseToken,
+                requestedBy,
+              });
+              let result = await attemptAtomicPublicationCommit({
+                publication: retryPublication,
+                approval,
+                revision,
+                assertLease,
+              });
+              if (
+                result.state === "blocked" &&
+                result.detail === "production_head_moved"
+              ) {
+                const afterCas = await publisher.reconcileCommit(
+                  commitReconciliationInput(retryPublication, approval),
+                );
+                if (afterCas.state === "committed") {
+                  result = afterCas;
+                } else if (afterCas.state === "unknown") {
+                  result = {
+                    state: "unknown",
+                    detail: "git_result_unknown",
+                  };
+                } else {
+                  await invalidateForProductionChange(approval);
+                }
+              }
+              const updatedAt = now();
+              return store.updatePublication(
+                nextPublication(dispatching, {
+                  status:
+                    result.state === "blocked" &&
+                    result.detail === "publication_lease_lost"
+                      ? "failed"
+                      : result.state,
+                  commitSha:
+                    result.state === "committed"
+                      ? result.commitSha
+                      : null,
+                  detail:
+                    result.state === "committed"
+                      ? null
+                      : result.state === "unknown"
+                        ? "git_result_unknown"
+                        : result.detail,
+                  leaseToken: null,
+                  leaseExpiresAt: null,
+                  updatedAt,
+                }),
+                {
+                  expectedLeaseToken: leaseToken,
+                  expectedLeaseValidAt: updatedAt,
+                },
+              );
+            }
+          }
         }
         if (
           publication.commitSha === null &&
@@ -1443,70 +1830,22 @@ export function createContentPublicationApplication({
                 : "deployment_retry_release_marker_mismatch",
             );
           }
-          if ((await store.findActivePublication()) !== null) {
-            throw new ContentPublicationValidationError(
-              "deployment_retry_in_progress",
+          const { dispatching, leaseToken } =
+            await claimFailedPublicationRetry(
+              publication,
+              `git_reference_result_unknown:${candidateCommitSha}`,
             );
-          }
-          const retryRequestedAt = now();
-          const leaseToken = crypto.randomUUID();
-          let dispatching: ContentPublication;
-          try {
-            dispatching = await store.updatePublication(
-              nextPublication(publication, {
-                status: "requested",
-                detail: `git_reference_result_unknown:${candidateCommitSha}`,
-                deploymentRequestedAt: retryRequestedAt,
-                leaseToken,
-                leaseExpiresAt: new Date(
-                  new Date(retryRequestedAt).getTime() +
-                    publicationLeaseDurationMs,
-                ).toISOString(),
-                updatedAt: retryRequestedAt,
-              }),
-              {
-                expectedStatus: "failed",
-                expectedUpdatedAt: publication.updatedAt,
-              },
-            );
-          } catch (error) {
-            if ((await store.findActivePublication()) !== null) {
-              throw new ContentPublicationValidationError(
-                "deployment_retry_in_progress",
-              );
-            }
-            throw error;
-          }
           if (
             dispatching.status !== "requested" ||
             dispatching.leaseToken !== leaseToken
           ) {
             return dispatching;
           }
-          const assertLease = async () => {
-            let currentApproval: ContentApproval;
-            try {
-              ({ approval: currentApproval } = await requireApproval(
-                publication.approvalId,
-                requestedBy,
-              ));
-            } catch {
-              return false;
-            }
-            if (!(await approvedBaseIsLive(currentApproval))) {
-              await invalidateForProductionChange(currentApproval);
-              return false;
-            }
-            const leaseNow = now();
-            return store.renewPublicationLease({
-              publicationId: publication.id,
-              leaseToken,
-              now: leaseNow,
-              leaseExpiresAt: new Date(
-                new Date(leaseNow).getTime() + publicationLeaseDurationMs,
-              ).toISOString(),
-            });
-          };
+          const assertLease = createPublicationCommitLeaseGuard({
+            publication,
+            leaseToken,
+            requestedBy,
+          });
           const result = await publisher.retryReference({
             publishId: publication.id,
             candidateCommitSha,
@@ -1580,6 +1919,46 @@ export function createContentPublicationApplication({
           }
         } catch {
           // A missing marker still permits one explicitly requested retry.
+        }
+        const reconciledCommitNeedsDeploymentCheck =
+          publication.detail === "git_commit_reconciled" &&
+          publication.deploymentRequestedAt === null;
+        if (
+          reconciledCommitNeedsDeploymentCheck ||
+          deploymentRetryDispatchWasAttempted(publication)
+        ) {
+          const recordedDeploymentId =
+            publication.deploymentId !== null &&
+            !publication.deploymentId.startsWith("retry-dispatch:")
+              ? publication.deploymentId
+              : undefined;
+          const observed = await publisher.getDeploymentStatus(
+            commitSha,
+            recordedDeploymentId,
+          );
+          if (
+            observed === "building" ||
+            observed === "deployed"
+          ) {
+            return store.updatePublication(
+              nextPublication(publication, {
+                status: observed,
+                detail: "deployment_retry_reconciled",
+                updatedAt: now(),
+              }),
+              {
+                expectedStatus: "failed",
+                expectedUpdatedAt: publication.updatedAt,
+              },
+            );
+          }
+          if (
+            observed !== "failed" ||
+            (recordedDeploymentId === undefined &&
+              !reconciledCommitNeedsDeploymentCheck)
+          ) {
+            return publication;
+          }
         }
         if ((await publisher.getProductionHead()) !== commitSha) {
           await store.invalidateApproval({
@@ -1829,6 +2208,96 @@ export function createContentPublicationApplication({
           },
         );
       },
+      async restore(input: {
+        sourcePublicationId: ContentPublicationId;
+        workspaceId: ContentWorkspaceId;
+        actorId: ContentActorId;
+        idempotencyKey: string;
+      }) {
+        if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
+          throw new ContentPublicationValidationError(
+            "idempotency_key_invalid",
+          );
+        }
+        if (
+          publishedRevisions === undefined ||
+          draftRestorer === undefined
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_not_configured",
+          );
+        }
+        const publication =
+          restoreSourcePublication?.id === input.sourcePublicationId
+            ? restoreSourcePublication
+            : await store.findPublication(input.sourcePublicationId);
+        if (publication === null) {
+          throw new ContentPublicationValidationError(
+            "restore_source_not_found",
+          );
+        }
+        if (
+          publication.status !== "verified-live" ||
+          publication.commitSha === null
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_source_not_live",
+          );
+        }
+        await store.claimRestoreIdentity(input);
+        const approval = await store.findApproval(publication.approvalId);
+        if (approval === null) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_unavailable",
+          );
+        }
+        const bytes = await publishedRevisions.readPublishedArtifact({
+          commitSha: publication.commitSha,
+          path: publishedSiteDefinitionPath,
+        });
+        if (bytes === null) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_unavailable",
+          );
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(bytes);
+        } catch {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_mismatch",
+          );
+        }
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed) ||
+          !("schemaVersion" in parsed)
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_mismatch",
+          );
+        }
+        const definition = parsed as SiteDefinition;
+        const [artifactHash, contentHash] = await Promise.all([
+          sha256(bytes),
+          hashPublishedSiteDefinition(definition),
+        ]);
+        if (
+          artifactHash !== approval.fingerprint.artifactHash ||
+          contentHash !== approval.fingerprint.contentHash ||
+          serializePublishedSiteDefinition(definition) !== bytes ||
+          definition.schemaVersion !== approval.fingerprint.schemaVersion
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_mismatch",
+          );
+        }
+        return draftRestorer.restore({
+          ...input,
+          definition,
+        });
+      },
     }),
     queries: Object.freeze({
       getLatest(workspaceId: ContentWorkspaceId) {
@@ -1836,6 +2305,9 @@ export function createContentPublicationApplication({
       },
       get(publicationId: ContentPublicationId) {
         return store.findPublication(publicationId);
+      },
+      listHistory() {
+        return store.listPublicationHistory(50);
       },
     }),
   });

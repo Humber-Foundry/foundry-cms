@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   contentPublicationCanRetry,
+  contentPublicationHistoryRefreshKey,
   contentPublicationPollDelay,
   loadContentPublication,
+  loadContentPublicationHistory,
   refreshContentPublication,
+  restoreContentPublication,
   sendContentPublicationAttempt,
 } from "./content-publication-client";
 
@@ -52,6 +55,21 @@ describe("content publication client", () => {
     expect(
       [0, 1, 2, 3, 4, 20].map(contentPublicationPollDelay),
     ).toEqual([2_500, 5_000, 10_000, 20_000, 30_000, 30_000]);
+  });
+
+  it("refreshes history when publication evidence changes without a status change", () => {
+    const publication = {
+      id: "publish_evidence",
+      status: "building",
+      updatedAt: "2026-07-27T10:01:00.000Z",
+    } as const;
+
+    expect(
+      contentPublicationHistoryRefreshKey({
+        ...publication,
+        updatedAt: "2026-07-27T10:02:00.000Z",
+      }),
+    ).not.toBe(contentPublicationHistoryRefreshKey(publication));
   });
 
   it("retries the exact mutation once with a refreshed human token", async () => {
@@ -126,6 +144,73 @@ describe("content publication client", () => {
     expect(fetcher).toHaveBeenCalledWith(
       "/api/foundry-cms/publications?workspaceId=workspace_publish",
       { cache: "no-store" },
+    );
+  });
+
+  it("loads published history without a workspace-scoped query", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(json({ history: [] }));
+
+    await expect(
+      loadContentPublicationHistory({ fetcher }),
+    ).resolves.toEqual({ history: [] });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/foundry-cms/publications?view=history",
+      { cache: "no-store" },
+    );
+  });
+
+  it("rejects incomplete publication history evidence", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        json({ history: [{ publication: { status: "verified-live" } }] }),
+      );
+
+    await expect(
+      loadContentPublicationHistory({ fetcher }),
+    ).rejects.toThrow("content_publication_history_invalid");
+  });
+
+  it("restores a published version through the protected mutation path", async () => {
+    const publicationId = `publish_${"2".repeat(32)}`;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        json(
+          {
+            draft: {
+              workspaceId: "workspace_restored",
+              revision: 0,
+              sourcePublicationId: publicationId,
+            },
+          },
+          201,
+        ),
+      );
+
+    await restoreContentPublication({
+      publicationId,
+      mutationToken: "mutation-token",
+      idempotencyKey: "restore-client-history-1",
+      fetcher,
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/foundry-cms/publications",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "idempotency-key": "restore-client-history-1",
+          "x-foundry-csrf": "mutation-token",
+        }),
+        body: JSON.stringify({
+          operation: "restore",
+          sourcePublicationId: publicationId,
+        }),
+      }),
     );
   });
 

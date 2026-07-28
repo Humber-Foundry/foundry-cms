@@ -11,11 +11,15 @@ import {
   type ContentWorkspaceId,
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
+import type { SiteDefinition } from "@foundry/site-definition";
 
 import {
   createD1ContentRevisionStore,
   findLatestContentWorkspaceIdForActor,
 } from "./d1-content-revision-store";
+import {
+  upgradeSiteDefinitionForCurrentSchema,
+} from "./content-schema-recovery";
 import {
   loadHumanAccessEnvironment,
   type HumanAccessEnvironment,
@@ -147,15 +151,21 @@ function applicationFor({
   store,
   rendererVersion,
   productionBaseCommit,
+  initialDefinition,
+  initialCreatedBy,
 }: {
   workspaceId: ContentWorkspaceId;
   actorId: ContentActorId;
   store: LocalContentRevisionStore;
   rendererVersion: string;
   productionBaseCommit: string;
+  initialDefinition?: SiteDefinition;
+  initialCreatedBy?: ContentActorId;
 }) {
   return createContentRevisionApplication({
     siteDefinition: referenceSiteDefinition,
+    initialDefinition,
+    initialCreatedBy,
     store,
     workspaceId,
     actorId,
@@ -237,6 +247,65 @@ export async function loadContentRevisionApplication(
     ),
     rendererVersion,
     productionBaseCommit: `git:${productionBaseCommit}`,
+  });
+}
+
+export async function loadRestoredContentRevisionApplication(
+  workspaceId: ContentWorkspaceId,
+  actorId: ContentActorId,
+  definition: SiteDefinition,
+) {
+  let currentDefinition: SiteDefinition;
+  try {
+    currentDefinition =
+      upgradeSiteDefinitionForCurrentSchema(definition);
+  } catch {
+    throw new ContentRevisionConfigurationError();
+  }
+  if (
+    currentDefinition.site.id !== referenceSiteDefinition.site.id ||
+    currentDefinition.schemaVersion !== referenceSiteDefinition.schemaVersion ||
+    currentDefinition.definitionVersion !==
+      referenceSiteDefinition.definitionVersion
+  ) {
+    throw new ContentRevisionConfigurationError();
+  }
+  if (process.env.NODE_ENV === "development") {
+    let store =
+      localRuntime.__foundryContentRevisionStores!.get(workspaceId);
+    if (store === undefined) {
+      store = createInMemoryContentRevisionStore();
+      localRuntime.__foundryContentRevisionStores!.set(workspaceId, store);
+    }
+    return applicationFor({
+      workspaceId,
+      actorId,
+      store,
+      rendererVersion: localRuntime.__foundryLocalRendererVersion!,
+      productionBaseCommit:
+        `local-source:${localRuntime.__foundryLocalRendererVersion}`,
+      initialDefinition: currentDefinition,
+      initialCreatedBy: actorId,
+    });
+  }
+  const environment = await loadHumanAccessEnvironment();
+  if (environment.FOUNDRY_DB === undefined) {
+    throw new ContentRevisionConfigurationError();
+  }
+  const { rendererVersion, productionBaseCommit } =
+    resolveContentReleaseInputs(environment);
+  return applicationFor({
+    workspaceId,
+    actorId,
+    store: createD1ContentRevisionStore(
+      environment.FOUNDRY_DB,
+      referenceSiteDefinition.site.id,
+      workspaceId,
+    ),
+    rendererVersion,
+    productionBaseCommit: `git:${productionBaseCommit}`,
+    initialDefinition: currentDefinition,
+    initialCreatedBy: actorId,
   });
 }
 

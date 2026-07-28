@@ -284,6 +284,98 @@ describe("D1 content revision store", () => {
     });
   });
 
+  it.each(["before", "after"] as const)(
+    "converges on one restored revision when the D1 response is lost %s commit",
+    async (faultBoundary) => {
+      const restoredDefinition = structuredClone(referenceSiteDefinition);
+      (
+        restoredDefinition.home.sections[0] as {
+          title: string;
+        }
+      ).title = "Historical D1 release";
+      let injected = false;
+      const faultingDatabase = {
+        prepare: database.prepare.bind(database),
+        withSession: database.withSession?.bind(database),
+        async batch(
+          statements: Parameters<typeof database.batch>[0],
+        ) {
+          if (!injected && faultBoundary === "before") {
+            injected = true;
+            throw new Error("injected_response_loss_before_d1_commit");
+          }
+          const result = await database.batch(statements);
+          if (!injected && faultBoundary === "after") {
+            injected = true;
+            throw new Error("injected_response_loss_after_d1_commit");
+          }
+          return result;
+        },
+      } as typeof database;
+      const applicationInputs = {
+        siteDefinition: referenceSiteDefinition,
+        initialDefinition: restoredDefinition,
+        initialCreatedBy: editorActorId,
+        workspaceId,
+        actorId: editorActorId,
+        rendererVersion: "renderer-test-commit",
+        productionBase: "published:site_foundry_reference@1.0.0",
+        now: () => "2026-07-27T12:00:00.000Z",
+      } as const;
+      const command = {
+        actorId: editorActorId,
+        workspaceId,
+        idempotencyKey: `d1-restore-${faultBoundary}-commit`,
+      };
+      const interrupted = createContentRevisionApplication({
+        ...applicationInputs,
+        store: createD1ContentRevisionStore(
+          faultingDatabase,
+          referenceSiteDefinition.site.id,
+          workspaceId,
+        ),
+      });
+
+      await expect(interrupted.commands.create(command)).rejects.toThrow(
+        `injected_response_loss_${faultBoundary}_d1_commit`,
+      );
+      const retried = await createContentRevisionApplication({
+        ...applicationInputs,
+        store: createD1ContentRevisionStore(
+          database,
+          referenceSiteDefinition.site.id,
+          workspaceId,
+        ),
+      }).commands.create(command);
+
+      expect(retried).toEqual(
+        expect.objectContaining({
+          revision: 0,
+          createdBy: editorActorId,
+          definition: expect.objectContaining({
+            home: expect.objectContaining({
+              sections: expect.arrayContaining([
+                expect.objectContaining({
+                  title: "Historical D1 release",
+                }),
+              ]),
+            }),
+          }),
+        }),
+      );
+      expect(
+        await database
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM content_revisions
+             WHERE workspace_id = ?1`,
+          )
+          .bind(workspaceId)
+          .first<{ count: number }>(),
+      ).toEqual({ count: 1 });
+    },
+  );
+
   it("allows explicit collaborators and rejects outsiders", async () => {
     const owner = createApplication();
     await createWorkspace(owner, "d1-content-create-collaborator");
