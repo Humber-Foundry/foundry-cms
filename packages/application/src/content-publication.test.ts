@@ -2700,6 +2700,52 @@ describe("content publication application", () => {
     expect(createCommit).toHaveBeenCalledTimes(1);
   });
 
+  it("does not mistake a legacy Git-repair timestamp for manual build dispatch", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-legacy-repair-row",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    const failed = await app.commands.refresh(publication.id);
+    expect(failed).not.toBeNull();
+    if (failed === null) {
+      throw new Error("publication_missing");
+    }
+    await store.updatePublication({
+      ...failed,
+      deploymentRequestedAt: "2026-07-27T10:03:00.000Z",
+      detail: "git_commit_reconciled",
+      updatedAt: "2026-07-27T10:03:00.000Z",
+    });
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        detail: "deployment_retry_requested",
+        deploymentId: "build-123",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
+  });
+
   it("reconciles a landed commit before rejecting a new stale-base approval", async () => {
     let currentTime = "2026-07-27T10:10:00.000Z";
     const store = createInMemoryContentPublicationStore();

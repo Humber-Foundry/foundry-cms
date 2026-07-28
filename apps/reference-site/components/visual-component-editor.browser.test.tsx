@@ -275,8 +275,21 @@ describe("visual component editor browser acceptance", () => {
 
   it("shows verified publication evidence with a restore-as-draft action", async () => {
     const publicationId = `publish_${"2".repeat(32)}`;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const restoreKeys: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
+      if (init?.method === "POST") {
+        restoreKeys.push(
+          new Headers(init.headers).get("idempotency-key") ?? "",
+        );
+        if (restoreKeys.length > 2) {
+          throw new Error("transport_response_lost");
+        }
+        return Response.json(
+          { error: "restore_source_not_live" },
+          { status: 422 },
+        );
+      }
       return Response.json(
         url.includes("view=history")
           ? {
@@ -377,6 +390,44 @@ describe("visual component editor browser acceptance", () => {
     expect(
       page.getByRole("button", { name: "Restore as new draft" }),
     ).toBeDefined();
+    const restoreButton = page.getByRole("button", {
+      name: "Restore as new draft",
+    });
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 1;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 2;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(restoreKeys).toHaveLength(2);
+    expect(restoreKeys[1]).not.toBe(restoreKeys[0]);
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 3;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 4;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(restoreKeys[3]).toBe(restoreKeys[2]);
   });
 
   it("distinguishes unavailable publication history from an empty history", async () => {

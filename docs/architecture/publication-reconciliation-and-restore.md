@@ -15,6 +15,8 @@ uncached release-marker reads.
 History reads are side-effect free. Reconciliation and deployment retries
 remain protected human POST mutations so loading the dashboard cannot repeat a
 Git, Cloudflare, or D1 write.
+Approval and event evidence for the bounded page is fetched in one D1 batch,
+so history size does not create a per-entry subrequest fan-out.
 
 ## Restore boundary
 
@@ -42,6 +44,10 @@ The target workspace ID is derived from the authenticated actor and the
 protected mutation's idempotency key. D1 workspace initialization is
 insert-if-absent, so a lost response after commit and a retry converge on the
 same workspace and revision instead of copying the historical release twice.
+Before initialization, an immutable restore-identity claim binds that workspace
+to the source publication, actor, and request key. A hash collision or
+conflicting replay therefore fails closed instead of returning an existing
+workspace under the wrong historical source.
 
 ## Fault boundaries
 

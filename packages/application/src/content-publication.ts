@@ -175,6 +175,15 @@ export function assertContentPublicationIdempotency(
   }
 }
 
+export function serializeContentRestoreIdentity(input: {
+  sourcePublicationId: ContentPublicationId;
+  workspaceId: ContentWorkspaceId;
+  actorId: ContentActorId;
+  idempotencyKey: string;
+}) {
+  return canonicalJson(input);
+}
+
 export type ContentPublicationClaim =
   | Readonly<{
       state: "claimed" | "replayed";
@@ -228,6 +237,12 @@ export type ContentPublicationStore = Readonly<{
   findLatestPublication(
     workspaceId: ContentWorkspaceId,
   ): Promise<ContentPublication | null>;
+  claimRestoreIdentity(input: {
+    sourcePublicationId: ContentPublicationId;
+    workspaceId: ContentWorkspaceId;
+    actorId: ContentActorId;
+    idempotencyKey: string;
+  }): Promise<void>;
   listPublicationHistory(limit?: number): Promise<
     ReadonlyArray<ContentPublicationHistoryEntry>
   >;
@@ -330,10 +345,26 @@ export function contentPublicationHasUnresolvedGitOutcome(publication: {
   );
 }
 
+const deploymentRetryDispatchEvidence = new Set([
+  "deployment_retry_dispatching",
+  "deployment_retry_failed",
+  "deployment_retry_reconciled",
+  "deployment_retry_requested",
+  "deployment_retry_result_unknown",
+  "deployment_retry_timeout",
+]);
+
 function deploymentRetryDispatchWasAttempted(publication: {
   deploymentRequestedAt: string | null;
+  deploymentId: string | null;
+  detail: string | null;
 }) {
-  return publication.deploymentRequestedAt !== null;
+  return (
+    publication.deploymentRequestedAt !== null &&
+    (deploymentRetryDispatchEvidence.has(publication.detail ?? "") ||
+      (publication.deploymentId !== null &&
+        !publication.deploymentId.startsWith("retry-dispatch:")))
+  );
 }
 
 export class ContentApprovalInvalidError extends Error {
@@ -561,6 +592,7 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
     ContentPublicationId,
     Array<ContentPublicationEvent>
   >();
+  const restoreIdentities = new Map<ContentWorkspaceId, string>();
 
   function recordEvent(publication: ContentPublication) {
     const history = events.get(publication.id) ?? [];
@@ -778,6 +810,14 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
             return right.requestedAt.localeCompare(left.requestedAt);
           })[0] ?? null
       );
+    },
+    async claimRestoreIdentity(input) {
+      const identity = serializeContentRestoreIdentity(input);
+      const recorded = restoreIdentities.get(input.workspaceId);
+      if (recorded !== undefined && recorded !== identity) {
+        throw new ContentPublicationIdempotencyError();
+      }
+      restoreIdentities.set(input.workspaceId, identity);
     },
     async listPublicationHistory(limit = 50) {
       const history: ContentPublicationHistoryEntry[] = [];
@@ -2185,6 +2225,7 @@ export function createContentPublicationApplication({
             "restore_source_not_live",
           );
         }
+        await store.claimRestoreIdentity(input);
         const approval = await store.findApproval(publication.approvalId);
         if (approval === null) {
           throw new ContentPublicationValidationError(

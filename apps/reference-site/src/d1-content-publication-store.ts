@@ -14,6 +14,7 @@ import type {
 } from "@foundry/application";
 import {
   assertContentPublicationIdempotency,
+  ContentPublicationIdempotencyError,
   ContentApprovalInvalidError,
   createContentActorId,
   createContentApprovalId,
@@ -21,6 +22,7 @@ import {
   createContentWorkspaceId,
   createHumanMembershipId,
   serializeContentPublicationCommandIdentity,
+  serializeContentRestoreIdentity,
 } from "@foundry/application";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
@@ -698,6 +700,39 @@ export function createD1ContentPublicationStore(
         .first<PublicationRow>();
       return row === null ? null : toPublication(row);
     },
+    async claimRestoreIdentity(input) {
+      const requestIdentity = serializeContentRestoreIdentity(input);
+      await database
+        .prepare(
+          `INSERT INTO content_publication_restore_identities (
+             workspace_id, source_publication_id, actor_id,
+             idempotency_key, request_identity
+           ) VALUES (?1, ?2, ?3, ?4, ?5)
+           ON CONFLICT (workspace_id) DO NOTHING`,
+        )
+        .bind(
+          input.workspaceId,
+          input.sourcePublicationId,
+          input.actorId,
+          input.idempotencyKey,
+          requestIdentity,
+        )
+        .run();
+      const recorded = await database
+        .prepare(
+          `SELECT request_identity
+           FROM content_publication_restore_identities
+           WHERE workspace_id = ?1`,
+        )
+        .bind(input.workspaceId)
+        .first<{ request_identity: string }>();
+      if (
+        recorded === null ||
+        recorded.request_identity !== requestIdentity
+      ) {
+        throw new ContentPublicationIdempotencyError();
+      }
+    },
     async listPublicationHistory(limit = 50) {
       const boundedLimit = Math.min(Math.max(limit, 1), 100);
       const rows = await database
@@ -708,27 +743,36 @@ export function createD1ContentPublicationStore(
         )
         .bind(boundedLimit)
         .all<PublicationRow>();
+      const statements = rows.results.flatMap((row) => [
+        database
+          .prepare(`${approvalProjection} WHERE approval.id = ?1`)
+          .bind(row.approval_id),
+        database
+          .prepare(
+            `SELECT
+               status, detail, commit_sha, deployment_id,
+               approval_fingerprint, occurred_at
+             FROM content_publication_audit_events
+             WHERE publication_id = ?1
+             ORDER BY id`,
+          )
+          .bind(row.id),
+      ]);
+      const evidence =
+        statements.length === 0 ? [] : await database.batch(statements);
       const history: ContentPublicationHistoryEntry[] = [];
-      for (const row of rows.results) {
+      for (const [index, row] of rows.results.entries()) {
         const publication = toPublication(row);
-        const [approval, eventRows] = await Promise.all([
-          findApproval(publication.approvalId),
-          database
-            .prepare(
-              `SELECT
-                 status, detail, commit_sha, deployment_id,
-                 approval_fingerprint, occurred_at
-               FROM content_publication_audit_events
-               WHERE publication_id = ?1
-               ORDER BY id`,
-            )
-            .bind(publication.id)
-            .all<PublicationEventRow>(),
-        ]);
-        if (approval === null) {
+        const approvalRow = evidence[index * 2]?.results?.[0] as
+          | ApprovalRow
+          | undefined;
+        if (approvalRow === undefined) {
           continue;
         }
-        const events: ContentPublicationEvent[] = eventRows.results.map(
+        const approval = toApproval(approvalRow);
+        const eventRows = (evidence[index * 2 + 1]?.results ??
+          []) as PublicationEventRow[];
+        const events: ContentPublicationEvent[] = eventRows.map(
           (event) => ({
             status: event.status,
             detail: event.detail,

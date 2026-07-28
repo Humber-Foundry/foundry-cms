@@ -45,6 +45,7 @@ describe("D1 content publication store", () => {
       "0007_content_publication.sql",
       "0008_media_assets.sql",
       "0009_content_publication_history_evidence.sql",
+      "0010_content_publication_restore_identity.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -539,7 +540,48 @@ describe("D1 content publication store", () => {
     };
     await store.updatePublication(live);
 
-    await expect(store.listPublicationHistory()).resolves.toEqual([
+    let subrequests = 0;
+    const rawStatements = new WeakMap<object, object>();
+    const wrapStatement = (statement: any): any => {
+      const wrapped = {
+        bind(...values: unknown[]) {
+          return wrapStatement(statement.bind(...values));
+        },
+        async all() {
+          subrequests += 1;
+          return statement.all();
+        },
+        async first() {
+          subrequests += 1;
+          return statement.first();
+        },
+        async run() {
+          subrequests += 1;
+          return statement.run();
+        },
+      };
+      rawStatements.set(wrapped, statement);
+      return wrapped;
+    };
+    const countedDatabase = {
+      prepare(query: string) {
+        return wrapStatement(database.prepare(query));
+      },
+      async batch(statements: readonly object[]) {
+        subrequests += 1;
+        return database.batch(
+          statements.map(
+            (statement) => rawStatements.get(statement) ?? statement,
+          ) as Parameters<typeof database.batch>[0],
+        );
+      },
+    } as unknown as typeof database;
+
+    await expect(
+      createD1ContentPublicationStore(
+        countedDatabase,
+      ).listPublicationHistory(),
+    ).resolves.toEqual([
       {
         publication: live,
         approval,
@@ -563,6 +605,40 @@ describe("D1 content publication store", () => {
         ],
       },
     ]);
+    expect(subrequests).toBe(2);
+  });
+
+  it("persists and verifies restore source identity for a derived workspace", async () => {
+    const store = createD1ContentPublicationStore(database);
+    const identity = {
+      sourcePublicationId: createContentPublicationId(
+        `publish_${"1".repeat(32)}`,
+      ),
+      workspaceId: createContentWorkspaceId("workspace_restore_identity"),
+      actorId,
+      idempotencyKey: "restore-identity-command-1",
+    };
+
+    await expect(store.claimRestoreIdentity(identity)).resolves.toBeUndefined();
+    await expect(store.claimRestoreIdentity(identity)).resolves.toBeUndefined();
+    await expect(
+      store.claimRestoreIdentity({
+        ...identity,
+        sourcePublicationId: createContentPublicationId(
+          `publish_${"2".repeat(32)}`,
+        ),
+      }),
+    ).rejects.toEqual(new ContentPublicationIdempotencyError());
+    expect(
+      await database
+        .prepare(
+          `SELECT source_publication_id
+           FROM content_publication_restore_identities
+           WHERE workspace_id = ?1`,
+        )
+        .bind(identity.workspaceId)
+        .first<{ source_publication_id: string }>(),
+    ).toEqual({ source_publication_id: identity.sourcePublicationId });
   });
 
   it("audits only the winning lease-fenced update when contenders share a clock", async () => {

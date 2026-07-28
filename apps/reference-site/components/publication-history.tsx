@@ -83,8 +83,11 @@ export function PublicationHistory({
         idempotencyKey,
       });
       onMutationToken(result.mutationToken);
+      if (!result.response.ok) {
+        restoreAttempts.current.delete(publicationId);
+        throw new Error("content_publication_restore_failed");
+      }
       if (
-        !result.response.ok ||
         typeof result.body !== "object" ||
         result.body === null ||
         !("draft" in result.body) ||
@@ -93,6 +96,7 @@ export function PublicationHistory({
         !("workspaceId" in result.body.draft) ||
         typeof result.body.draft.workspaceId !== "string"
       ) {
+        restoreAttempts.current.delete(publicationId);
         throw new Error("content_publication_restore_failed");
       }
       const query = new URLSearchParams({
