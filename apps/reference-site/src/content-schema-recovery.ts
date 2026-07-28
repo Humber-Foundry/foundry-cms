@@ -14,6 +14,34 @@ import {
   type StaleRecoveryEdit,
 } from "./content-editor-recovery";
 
+function upgradeLegacyPageComponent(component: unknown): PageSection {
+  if (
+    typeof component !== "object" ||
+    component === null ||
+    !("type" in component) ||
+    typeof component.type !== "string" ||
+    !(component.type in designContract.variants)
+  ) {
+    throw new Error("unsupported_legacy_page_component");
+  }
+  const type = component.type as PageSection["type"];
+  if ("variant" in component) {
+    if (
+      typeof component.variant !== "string" ||
+      !designContract.variants[type].values.includes(
+        component.variant as never,
+      )
+    ) {
+      throw new Error("unsupported_legacy_component_variant");
+    }
+    return component as PageSection;
+  }
+  return {
+    ...component,
+    variant: designContract.variants[type].values[0],
+  } as PageSection;
+}
+
 function upgradeLegacyDefinition(
   definition: SiteDefinition,
 ): SiteDefinition {
@@ -38,16 +66,7 @@ function upgradeLegacyDefinition(
     design: defaultSiteDesign,
     home: {
       ...legacy.home,
-      sections: legacy.home.sections.map((section) => {
-        if (!(section.type in designContract.variants)) {
-          throw new Error("unsupported_page_component");
-        }
-        const type = section.type as PageSection["type"];
-        return {
-          ...section,
-          variant: designContract.variants[type].values[0],
-        } as PageSection;
-      }),
+      sections: legacy.home.sections.map(upgradeLegacyPageComponent),
     },
   };
 }
@@ -118,33 +137,7 @@ function upgradeLegacyComposition(encoded: string): string {
   }
   return JSON.stringify({
     ...composition,
-    components: composition.components.map((component) => {
-      if (
-        typeof component !== "object" ||
-        component === null ||
-        !("type" in component) ||
-        typeof component.type !== "string" ||
-        !(component.type in designContract.variants)
-      ) {
-        throw new Error("unsupported_legacy_page_component");
-      }
-      const type = component.type as PageSection["type"];
-      if ("variant" in component) {
-        if (
-          typeof component.variant !== "string" ||
-          !designContract.variants[type].values.includes(
-            component.variant as never,
-          )
-        ) {
-          throw new Error("unsupported_legacy_component_variant");
-        }
-        return component;
-      }
-      return {
-        ...component,
-        variant: designContract.variants[type].values[0],
-      };
-    }),
+    components: composition.components.map(upgradeLegacyPageComponent),
   });
 }
 

@@ -132,4 +132,29 @@ describe("content schema recovery", () => {
       ]),
     ).toThrow("unsupported_legacy_component_variant");
   });
+
+  it("preserves a registered non-default structural outbox variant", () => {
+    const base = legacyDefinition();
+    const focusedHero = {
+      ...base.home.sections[0],
+      variant: "focused",
+    };
+    const [recovered] = mergeDurableAndOutboxRecoveryEdits([], [
+      {
+        path: "slot_home_sections",
+        baseValue: JSON.stringify({
+          slotId: "slot_home_sections",
+          components: base.home.sections,
+        }),
+        value: JSON.stringify({
+          slotId: "slot_home_sections",
+          components: [focusedHero],
+        }),
+      },
+    ]);
+
+    expect(JSON.parse(recovered!.value).components[0].variant).toBe(
+      "focused",
+    );
+  });
 });
