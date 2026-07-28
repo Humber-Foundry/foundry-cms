@@ -328,10 +328,14 @@ export function createMediaAssetApplication({
     context: MediaMutationContext,
     expectedKind: MediaMutationResult["kind"],
   ) {
-    for (let attempt = 0; attempt < 600; attempt += 1) {
-      if (await assets.claim(context)) return null;
+    for (let attempt = 0; attempt < 620; attempt += 1) {
       const replay = await replayMutation(context, expectedKind);
       if (replay !== null) return replay;
+      if (await assets.claim(context)) {
+        const racedReceipt = await replayMutation(context, expectedKind);
+        if (racedReceipt !== null) return racedReceipt;
+        return null;
+      }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new MediaSiteAccessError();

@@ -211,6 +211,33 @@ describe("D1 media asset store", () => {
     ).resolves.toBe(true);
   });
 
+  it("replays a receipt instead of taking over its expired claim", async () => {
+    const store = createD1MediaAssetStore(database);
+    const completed = {
+      siteId,
+      idempotencyKey: "d1-completed-expired-claim",
+      requestHash: "same-completed-request",
+      claimToken: "completed-worker",
+    };
+    await expect(store.claim(completed)).resolves.toBe(true);
+    await database
+      .prepare(
+        `UPDATE media_mutation_claims
+         SET claimed_at = datetime('now', '-31 seconds')
+         WHERE site_id = ?1 AND idempotency_key = ?2`,
+      )
+      .bind(siteId, completed.idempotencyKey)
+      .run();
+    await store.record(completed, { kind: "deleted", assetId });
+
+    const duplicate = { ...completed, claimToken: "duplicate-worker" };
+    await expect(store.claim(duplicate)).resolves.toBe(false);
+    await expect(store.replay(duplicate)).resolves.toEqual({
+      kind: "deleted",
+      assetId,
+    });
+  });
+
   it("retains a tombstone so a deleted stable asset identity cannot be reused", async () => {
     const app = application();
     await upload(app);

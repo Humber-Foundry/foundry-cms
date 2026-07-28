@@ -84,6 +84,7 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
   const store: MediaAssetStore = {
     async claim(context) {
       const key = `${context.siteId}:${context.idempotencyKey}`;
+      if (receipts.has(key)) return false;
       const existing = claims.get(key);
       if (
         existing !== undefined &&

@@ -205,7 +205,11 @@ export function createD1MediaAssetStore(
              SET claim_token = ?4, claimed_at = datetime('now')
              WHERE site_id = ?1 AND idempotency_key = ?2
                AND request_hash = ?3
-               AND claimed_at <= datetime('now', '-30 seconds')`,
+               AND claimed_at <= datetime('now', '-30 seconds')
+               AND NOT EXISTS (
+                 SELECT 1 FROM media_mutation_receipts
+                 WHERE site_id = ?1 AND idempotency_key = ?2
+               )`,
           )
           .bind(siteId, idempotencyKey, requestHash, claimToken)
           .run();
