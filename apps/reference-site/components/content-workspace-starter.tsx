@@ -12,7 +12,11 @@ import {
 import {
   preserveStaleEdits,
   type StaleRecoveryPointer,
+  type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
+import {
+  mergeDurableAndOutboxRecoveryEdits,
+} from "../src/content-schema-recovery";
 
 type CreatedWorkspace = Readonly<{ workspaceId: string }>;
 type PreservedContentRevision = Readonly<{
@@ -31,6 +35,7 @@ export function workspaceCreationOperation(
 
 export async function preparePreservedRevisionRecovery({
   preservedRevision,
+  durableRecoveryEdits = [],
   readOutbox = async (workspaceId) =>
     createContentEditorOutboxController(workspaceId).read(
       async () => false,
@@ -39,6 +44,7 @@ export async function preparePreservedRevisionRecovery({
   createRecoveryId = () => crypto.randomUUID(),
 }: {
   preservedRevision: PreservedContentRevision | undefined;
+  durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
   readOutbox?: (
     workspaceId: string,
   ) => Promise<ContentEditorOutboxRecord | null>;
@@ -49,7 +55,11 @@ export async function preparePreservedRevisionRecovery({
     return undefined;
   }
   const record = await readOutbox(preservedRevision.workspaceId);
-  if (record === null || record.edits.length === 0) {
+  const recoveryEdits = mergeDurableAndOutboxRecoveryEdits(
+    durableRecoveryEdits,
+    record?.edits ?? [],
+  );
+  if (recoveryEdits.length === 0) {
     return undefined;
   }
   const recovery = {
@@ -61,7 +71,7 @@ export async function preparePreservedRevisionRecovery({
       storage,
       recovery.id,
       recovery.sourceWorkspaceId,
-      record.edits,
+      recoveryEdits,
     )
   ) {
     throw new Error("stale_edit_recovery_unavailable");
@@ -73,6 +83,7 @@ export function ContentWorkspaceStarter({
   csrfToken,
   staleRecovery,
   preservedRevision,
+  durableRecoveryEdits,
 }: {
   csrfToken: string;
   staleRecovery?: Readonly<{
@@ -80,6 +91,7 @@ export function ContentWorkspaceStarter({
     sourceWorkspaceId: string;
   }>;
   preservedRevision?: PreservedContentRevision;
+  durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
 }) {
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
@@ -104,6 +116,7 @@ export function ContentWorkspaceStarter({
     try {
       pendingRecovery.current ??= preparePreservedRevisionRecovery({
         preservedRevision,
+        durableRecoveryEdits,
       }).catch((error: unknown) => {
         pendingRecovery.current = undefined;
         throw error;

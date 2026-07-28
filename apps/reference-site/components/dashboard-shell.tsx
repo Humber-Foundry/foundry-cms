@@ -6,6 +6,7 @@ import type {
   SuspectedSpamSubmission,
 } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
+import type { StaleRecoveryEdit } from "../src/content-editor-recovery";
 
 import { ContentEditor } from "./content-editor";
 import { ContentWorkspaceStarter } from "./content-workspace-starter";
@@ -30,6 +31,7 @@ export function DashboardShell({
   initialPreviewUrl,
   initialContentStale,
   staleRecovery,
+  durableSchemaRecovery,
   formDeliveryHealth,
   failedFormDeliveries,
   suspectedSpam,
@@ -46,6 +48,7 @@ export function DashboardShell({
     id: string;
     sourceWorkspaceId: string;
   }>;
+  durableSchemaRecovery?: ReadonlyArray<StaleRecoveryEdit>;
   formDeliveryHealth: PublicFormDeliveryHealth;
   failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
@@ -114,6 +117,7 @@ export function DashboardShell({
                 revision: contentRevision.revision,
                 schemaVersion: contentRevision.inputs.schemaVersion,
               }}
+              durableRecoveryEdits={durableSchemaRecovery}
             />
           ) : (
             <ContentEditor

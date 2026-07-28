@@ -70,4 +70,35 @@ describe("content workspace schema recovery", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it("forwards a saved legacy edit when the browser outbox is empty", async () => {
+    const setItem = vi.fn();
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision,
+        durableRecoveryEdits: [
+          {
+            path: "site_foundry_reference.name",
+            baseValue: "Foundry Reference",
+            value: "Saved legacy draft",
+          },
+        ],
+        readOutbox: async () => null,
+        storage: {
+          getItem: () => null,
+          removeItem: vi.fn(),
+          setItem,
+        },
+        createRecoveryId: () =>
+          "12345678-1234-4123-8123-123456789abc",
+      }),
+    ).resolves.toEqual({
+      id: "12345678-1234-4123-8123-123456789abc",
+      sourceWorkspaceId: "workspace_legacy",
+    });
+    expect(setItem).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("Saved legacy draft"),
+    );
+  });
 });
