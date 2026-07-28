@@ -75,4 +75,43 @@ describe("R2 media source store", () => {
       ),
     ).rejects.toThrow("media_source_identity_conflict");
   });
+
+  it("streams a source only when its immutable metadata matches", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.close();
+      },
+    });
+    const bucket: PrivateMediaBucket = {
+      async put() {
+        return {};
+      },
+      async head() {
+        return null;
+      },
+      async get() {
+        return {
+          body,
+          httpMetadata: { contentType: "image/png" },
+          customMetadata: { sourceHash: "a".repeat(64) },
+        };
+      },
+      async delete() {},
+    };
+    const store = createR2MediaSourceStore(bucket);
+
+    await expect(
+      store.get("media/site_reference/asset_hero/source", {
+        contentType: "image/png",
+        sourceHash: "a".repeat(64),
+      }),
+    ).resolves.toEqual({ body, contentType: "image/png" });
+    await expect(
+      store.get("media/site_reference/asset_hero/source", {
+        contentType: "image/png",
+        sourceHash: "b".repeat(64),
+      }),
+    ).rejects.toThrow("media_source_identity_conflict");
+  });
 });

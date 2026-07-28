@@ -58,13 +58,18 @@ export async function GET(request: Request) {
       if (source === null) {
         return Response.json({ error: "media_not_found" }, { status: 404 });
       }
-      return new Response(source.body.slice().buffer as ArrayBuffer, {
-        headers: {
-          "cache-control": "private, no-store",
-          "content-type": source.contentType,
-          "x-content-type-options": "nosniff",
+      return new Response(
+        source.body instanceof Uint8Array
+          ? (source.body.slice().buffer as ArrayBuffer)
+          : source.body,
+        {
+          headers: {
+            "cache-control": "private, no-store",
+            "content-type": source.contentType,
+            "x-content-type-options": "nosniff",
+          },
         },
-      });
+      );
     }
     const [assets, occurrences] = await Promise.all([
       application.queries.listAssets(),
@@ -203,14 +208,11 @@ export async function POST(request: Request) {
       }
       const sourceBytes = new Uint8Array(await source.arrayBuffer());
       const metadata = inspectImageSource(sourceBytes);
-      if (source.type !== metadata.contentType) {
-        throw new MediaValidationError("source");
-      }
       const asset = await application.commands.upload({
         actorId,
         assetId: createMediaAssetId(String(form.get("assetId") ?? "")),
         fileName: source.name,
-        contentType: source.type,
+        contentType: metadata.contentType,
         byteLength: source.size,
         width: metadata.width,
         height: metadata.height,

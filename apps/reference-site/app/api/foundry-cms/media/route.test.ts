@@ -288,6 +288,38 @@ describe("media endpoint", () => {
     );
   });
 
+  it("derives upload content type from validated bytes when the browser omits it", async () => {
+    const png = Uint8Array.from(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+    const source = new File([png], "pixel.png");
+    const form = new FormData();
+    form.set("assetId", "asset_pixel");
+    form.set("source", source);
+    mocks.upload.mockResolvedValue({ assetId: "asset_pixel" });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: { "idempotency-key": "upload-without-mime-0001" },
+        body: form,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset_pixel",
+        contentType: "image/png",
+        width: 1,
+        height: 1,
+      }),
+    );
+  });
+
   it("serves a private source only through the authenticated site application", async () => {
     mocks.getSource.mockResolvedValue({
       body: new Uint8Array([1, 2, 3]),

@@ -28,13 +28,18 @@ export async function GET(
     const application = await loadMediaAssetApplication(publicRendererActorId);
     const source = await application.queries.getSource(assetId);
     if (source === null) return new Response(null, { status: 404 });
-    return new Response(source.body.slice().buffer as ArrayBuffer, {
-      headers: {
-        "cache-control": "public, max-age=300",
-        "content-type": source.contentType,
-        "x-content-type-options": "nosniff",
+    return new Response(
+      source.body instanceof Uint8Array
+        ? (source.body.slice().buffer as ArrayBuffer)
+        : source.body,
+      {
+        headers: {
+          "cache-control": "public, max-age=300",
+          "content-type": source.contentType,
+          "x-content-type-options": "nosniff",
+        },
       },
-    });
+    );
   } catch (error) {
     if (error instanceof TypeError || error instanceof MediaSiteAccessError) {
       return new Response(null, { status: 404 });

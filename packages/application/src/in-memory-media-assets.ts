@@ -43,8 +43,15 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
         contentType: metadata.contentType,
       });
     },
-    async get(objectKey) {
+    async get(objectKey, expected) {
       const object = objects.get(objectKey);
+      if (
+        object !== undefined &&
+        (object.sourceHash !== expected.sourceHash ||
+          object.contentType !== expected.contentType)
+      ) {
+        throw new MediaSiteAccessError();
+      }
       return object === undefined
         ? null
         : {

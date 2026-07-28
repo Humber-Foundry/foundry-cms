@@ -142,8 +142,14 @@ export type MediaSourceStore = Readonly<{
     source: Uint8Array,
     metadata: Readonly<{ contentType: string; sourceHash: string }>,
   ): Promise<void>;
-  get(objectKey: string): Promise<
-    | Readonly<{ body: Uint8Array; contentType: string }>
+  get(
+    objectKey: string,
+    expected: Readonly<{ contentType: string; sourceHash: string }>,
+  ): Promise<
+    | Readonly<{
+        body: Uint8Array | ReadableStream<Uint8Array>;
+        contentType: string;
+      }>
     | null
   >;
   delete(objectKey: string): Promise<void>;
@@ -644,7 +650,10 @@ export function createMediaAssetApplication({
       async getSource(assetId: MediaAssetId) {
         const asset = await assets.getAsset(siteId, assetId);
         if (asset === null) throw new MediaSiteAccessError();
-        const source = await sources.get(asset.objectKey);
+        const source = await sources.get(asset.objectKey, {
+          contentType: asset.contentType,
+          sourceHash: asset.sourceHash,
+        });
         await assets.auditRead(
           siteId,
           actorId,

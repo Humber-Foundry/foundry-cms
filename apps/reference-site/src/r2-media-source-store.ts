@@ -19,8 +19,9 @@ export interface PrivateMediaBucket {
   >;
   get(key: string): Promise<
     | Readonly<{
+        body: ReadableStream<Uint8Array>;
         httpMetadata?: Readonly<{ contentType?: string }>;
-        arrayBuffer(): Promise<ArrayBuffer>;
+        customMetadata?: Readonly<Record<string, string>>;
       }>
     | null
   >;
@@ -53,13 +54,18 @@ export function createR2MediaSourceStore(
     async delete(objectKey) {
       await bucket.delete(objectKey);
     },
-    async get(objectKey) {
+    async get(objectKey, expected) {
       const object = await bucket.get(objectKey);
       if (object === null) return null;
+      if (
+        object.customMetadata?.sourceHash !== expected.sourceHash ||
+        object.httpMetadata?.contentType !== expected.contentType
+      ) {
+        throw new Error("media_source_identity_conflict");
+      }
       return {
-        body: new Uint8Array(await object.arrayBuffer()),
-        contentType:
-          object.httpMetadata?.contentType ?? "application/octet-stream",
+        body: object.body,
+        contentType: expected.contentType,
       };
     },
   });
