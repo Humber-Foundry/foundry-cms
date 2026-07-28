@@ -1592,6 +1592,53 @@ describe("content publication application", () => {
     );
   });
 
+  it("never resends a known manual build after its exact UUID times out", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-known-build-timeout",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    await app.commands.retryDeployment(publication.id, membershipId);
+
+    currentTime = "2026-07-27T10:18:00.000Z";
+    getDeploymentStatus.mockResolvedValue("building");
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+        deploymentId: "build-123",
+      }),
+    );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
+  });
+
   it("invalidates retry authority when the initial production-head check mismatches", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
@@ -2097,6 +2144,54 @@ describe("content publication application", () => {
         detail: "deployment_retry_timeout",
       }),
     );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves an ambiguous manual-dispatch fence through channel unavailability", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-channel-ambiguous-build",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.retryDeployment).mockResolvedValue({
+      state: "unknown",
+    });
+    await app.commands.retryDeployment(publication.id, membershipId);
+
+    vi.mocked(publisher.getChannelConfigurationHash).mockRejectedValue(
+      new Error("channel temporarily unavailable"),
+    );
+    currentTime = "2026-07-27T10:18:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_timeout",
+      }),
+    );
+    vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+      "channel-a",
+    );
+    getDeploymentStatus.mockResolvedValue("requested");
+    await app.commands.retryDeployment(publication.id, membershipId);
+
     expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
   });
 

@@ -330,12 +330,10 @@ export function contentPublicationHasUnresolvedGitOutcome(publication: {
   );
 }
 
-function deploymentRetryDispatchIsUncertain(detail: string | null) {
-  return (
-    detail === "deployment_retry_result_unknown" ||
-    detail === "deployment_retry_timeout" ||
-    detail === "deployment_retry_reconciled"
-  );
+function deploymentRetryDispatchWasAttempted(publication: {
+  deploymentRequestedAt: string | null;
+}) {
+  return publication.deploymentRequestedAt !== null;
 }
 
 export class ContentApprovalInvalidError extends Error {
@@ -985,7 +983,6 @@ export function createContentPublicationApplication({
         nextPublication(publication, {
           status: "requested",
           detail,
-          deploymentRequestedAt: retryRequestedAt,
           leaseToken,
           leaseExpiresAt: new Date(
             new Date(retryRequestedAt).getTime() +
@@ -1049,7 +1046,9 @@ export function createContentPublicationApplication({
           nextPublication(publication, {
             status: "failed",
             detail:
-              reconciliationCandidate(publication.detail) !== undefined
+              deploymentRetryDispatchWasAttempted(publication)
+                ? "deployment_retry_timeout"
+                : reconciliationCandidate(publication.detail) !== undefined
                 ? publication.detail
                 : channelFailure === "changed"
                   ? "publication_channel_changed"
@@ -1233,9 +1232,8 @@ export function createContentPublicationApplication({
             currentPublication.requestedAt,
         ).getTime() >=
       deploymentSignalTimeoutMs;
-    const manualDispatchFenced = deploymentRetryDispatchIsUncertain(
-      currentPublication.detail,
-    );
+    const manualDispatchFenced =
+      deploymentRetryDispatchWasAttempted(currentPublication);
     const preserveManualDispatchFence = (
       detail: string | null,
       failed = false,
@@ -1874,7 +1872,7 @@ export function createContentPublicationApplication({
         } catch {
           // A missing marker still permits one explicitly requested retry.
         }
-        if (deploymentRetryDispatchIsUncertain(publication.detail)) {
+        if (deploymentRetryDispatchWasAttempted(publication)) {
           const observed = await publisher.getDeploymentStatus(commitSha);
           if (
             observed === "building" ||

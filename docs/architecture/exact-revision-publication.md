@@ -147,6 +147,9 @@ indefinitely. A timed-out ambiguous manual build request is never sent again:
 an explicit retry only checks the exact live marker and commit-bound deployment
 signals. Evidence can resume polling the original build, while absence remains
 an explicit failed/uncertain record rather than authority for a duplicate POST.
+The non-null manual `deploymentRequestedAt` timestamp is the durable dispatch
+fence; status detail, channel failures and later provider observations cannot
+erase it. Git commit-repair attempts do not set that deployment field.
 Any later edit invalidates that retry authority; the newer revision must be
 previewed and approved instead. A retained historical candidate whose ref
 update was ambiguous can be retried through the same explicit action. Foundry
