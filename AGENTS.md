@@ -27,10 +27,12 @@ this repository wrapper—never a mutable `graphify-out/` directory or a direct
 `graphify query` invocation.
 
 The wrapper binds the graph to the branch's exact `origin/main` merge base,
-checks its metadata and content hash, and removes every node and edge sourced
-from a branch-modified or uncommitted file. If an exact snapshot is unavailable
-or invalid, do not use another graph; inspect current source with `rg` and
-targeted reads instead.
+checks its metadata, content hash, and query executable, and removes every node
+and edge sourced from a branch-modified or uncommitted file. A branch change to
+`.gitignore` or `.graphifyignore` makes the snapshot unavailable because those
+rules could change the indexed corpus. If an exact snapshot is unavailable or
+invalid, do not use another graph; inspect current source with `rg` and targeted
+reads instead.
 
 Graphify is navigation evidence, not current-state proof. Current source,
 schemas, generated artifacts, executable tests, and runtime behavior remain

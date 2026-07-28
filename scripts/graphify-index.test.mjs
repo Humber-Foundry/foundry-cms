@@ -538,6 +538,59 @@ describe("commit-pinned Graphify index", () => {
     expect(result.output).not.toContain("EDGE stable -> changed");
   });
 
+  it.each([".graphifyignore", "src/.gitignore"])(
+    "fails closed when branch ignore rules differ at %s",
+    (ignorePath) => {
+      const { root } = createRepository();
+      const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+      const graphify = createFakeGraphify();
+      const graph = writeFakeGraph(root);
+      expect(
+        runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+      ).toBe(0);
+
+      git(root, "checkout", "-b", "feature");
+      writeFileSync(join(root, ignorePath), "/stable.ts\n");
+
+      const query = runIndex(root, ["query", "stable"], {
+        cache,
+        graphify,
+        graph,
+      });
+      const status = runIndex(root, ["status"], {
+        cache,
+        graphify,
+        graph,
+      });
+
+      expect(query.status).not.toBe(0);
+      expect(query.output).toContain(
+        "Graph snapshot is unavailable because branch ignore rules changed",
+      );
+      expect(status.status).not.toBe(0);
+      expect(status.output).toContain(
+        "Graph snapshot is unavailable because branch ignore rules changed",
+      );
+    },
+  );
+
+  it("reports status unavailable when the Graphify executable cannot start", () => {
+    const { root } = createRepository();
+    const result = runIndex(root, ["refresh"]);
+    expect(result.status, result.output).toBe(0);
+
+    const status = runIndex(root, ["status"], {
+      cache: result.cache,
+      env: { GRAPHIFY_BIN: "/definitely/missing/graphify" },
+    });
+
+    expect(status.status).not.toBe(0);
+    expect(status.output).toContain(
+      "Graphify is not installed or did not report its version",
+    );
+    expect(status.output).not.toContain("Graph snapshot: verified");
+  });
+
   it("drops all relationships when an added file can become a resolution target", () => {
     const { root } = createRepository();
     const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));

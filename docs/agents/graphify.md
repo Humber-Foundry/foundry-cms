@@ -93,6 +93,10 @@ Check availability before broad exploration:
 npm run graphify:status
 ```
 
+Status verifies both the exact snapshot and that the configured Graphify
+executable can start. A verified snapshot is not reported as available when the
+query executable is missing.
+
 Query through the repository wrapper:
 
 ```bash
@@ -106,11 +110,14 @@ The wrapper:
 2. requires the immutable snapshot for that exact commit;
 3. verifies every metadata and content hash;
 4. finds committed, staged, unstaged, deleted, and untracked branch paths;
-5. removes graph nodes and edges sourced from those paths;
-6. removes all relationships when a new file, an indexed source change, or a
+5. fails closed when any `.gitignore` or `.graphifyignore` differs from the
+   snapshot, because branch rules could hide existing nodes or reveal files the
+   snapshot never indexed;
+6. removes graph nodes and edges sourced from other changed paths;
+7. removes all relationships when a new file, an indexed source change, or a
    resolver-consumed configuration change could invalidate relationships
    sourced from otherwise unchanged files; and
-7. runs a budget-capped Graphify query against a temporary filtered graph.
+8. runs a budget-capped Graphify query against a temporary filtered graph.
 
 Every result begins with the graph base, branch head, scope, and number of
 branch-modified files excluded. When all relationships are excluded, the result

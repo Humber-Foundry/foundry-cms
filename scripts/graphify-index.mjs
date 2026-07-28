@@ -818,6 +818,20 @@ function changedPaths(context, baseSha) {
   );
 }
 
+function assertBranchIgnoreRulesMatchSnapshot(changed) {
+  const ignoreRuleChanges = [...changed]
+    .filter((path) =>
+      /(^|\/)\.(?:gitignore|graphifyignore)$/u.test(path),
+    )
+    .sort();
+  if (ignoreRuleChanges.length === 0) return;
+  fail(
+    "Graph snapshot is unavailable because branch ignore rules changed: " +
+      `${ignoreRuleChanges.join(", ")}. Inspect source directly until ` +
+      "those rules are merged and Foreman publishes the matching snapshot.",
+  );
+}
+
 function relationshipInvalidators(context, baseSha, changed, graph) {
   const addedCommands = [
     [
@@ -966,6 +980,7 @@ function query(arguments_) {
   const context = repositoryContext();
   const snapshot = branchSnapshot(context);
   const changed = changedPaths(context, snapshot.baseSha);
+  assertBranchIgnoreRulesMatchSnapshot(changed);
   const invalidators = relationshipInvalidators(
     context,
     snapshot.baseSha,
@@ -1039,11 +1054,13 @@ function status() {
     return;
   }
   const snapshot = verifySnapshot(context, baseSha);
+  const changed = changedPaths(context, baseSha);
+  assertBranchIgnoreRulesMatchSnapshot(changed);
+  const availableGraphifyVersion = graphifyVersion(context);
+  console.log(`Graphify executable: ${availableGraphifyVersion}`);
   console.log(`Graph snapshot: verified (${snapshot.metadata.scope})`);
   console.log(
-    `Branch-modified files excluded on query: ${
-      changedPaths(context, baseSha).size
-    }`,
+    `Branch-modified files excluded on query: ${changed.size}`,
   );
 }
 
