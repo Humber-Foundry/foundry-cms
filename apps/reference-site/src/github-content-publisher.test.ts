@@ -964,6 +964,57 @@ describe("GitHub content publisher", () => {
     ).resolves.toBe("unknown");
   });
 
+  it.each([
+    {
+      status: "queued",
+      build_trigger_metadata: { commit_hash: "d".repeat(40) },
+    },
+    {
+      status: "running",
+    },
+  ])(
+    "keeps active manual build evidence without the exact commit unknown",
+    async (result) => {
+      const publisher = createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(
+          json({
+            success: true,
+            result,
+          }),
+        ),
+      });
+
+      await expect(
+        publisher.getDeploymentStatus(
+          "c".repeat(40),
+          "build-active-mismatch",
+        ),
+      ).resolves.toBe("unknown");
+    },
+  );
+
+  it("reports an active manual build only when its commit is exact", async () => {
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(
+        json({
+          success: true,
+          result: {
+            status: "running",
+            build_trigger_metadata: {
+              commit_hash: "c".repeat(40),
+            },
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      publisher.getDeploymentStatus("c".repeat(40), "build-active-exact"),
+    ).resolves.toBe("building");
+  });
+
   it("classifies an atomic expected-head rejection as a moved head", async () => {
     const expectedHead = "a".repeat(40);
     const commitSha = "c".repeat(40);

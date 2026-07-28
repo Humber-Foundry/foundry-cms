@@ -1159,6 +1159,11 @@ export function createGitHubContentPublisher({
           const body = await readJson(response);
           const build = body.result;
           if (
+            build?.build_trigger_metadata?.commit_hash !== commitSha
+          ) {
+            return "unknown";
+          }
+          if (
             build?.status === "queued" ||
             build?.status === "initializing" ||
             build?.status === "running"
@@ -1166,11 +1171,6 @@ export function createGitHubContentPublisher({
             return "building";
           }
           if (build?.status === "stopped") {
-            if (
-              build.build_trigger_metadata?.commit_hash !== commitSha
-            ) {
-              return "unknown";
-            }
             return build.build_outcome === "success"
               ? "deployed"
               : ["fail", "skipped", "cancelled", "terminated"].includes(
