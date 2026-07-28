@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   ContentRevision,
@@ -11,11 +11,20 @@ import { createMediaOccurrenceId } from "@foundry/application";
 import { requireRenderedMediaOccurrenceId } from "@foundry/application";
 
 import { MediaOccurrence } from "./media-occurrence";
+import { createMediaCatalogFence } from "./media-catalog-fence";
 import {
+  cropBaseRevisionForEdit,
+  cropForCatalogRefresh,
   cropForOccurrence,
   cropForSelectedRevision,
+  mediaAssetSelection,
+  mediaAssetSelectionForCatalog,
+  mediaDeleteFailureMessage,
+  mediaOccurrenceAttemptAfterFailure,
   mediaOccurrenceMutationsEnabled,
+  mergeMediaOccurrenceState,
   type MediaOccurrenceState,
+  upsertMediaAsset,
 } from "./media-manager-state";
 import {
   mediaUploadAttemptAfterResult,
@@ -35,22 +44,36 @@ async function imageDimensions(file: File) {
   }
 }
 
+class MediaMutationRequestError extends Error {
+  constructor(
+    readonly response: Response,
+    readonly body: unknown,
+  ) {
+    super("media_mutation_failed");
+    this.name = "MediaMutationRequestError";
+  }
+}
+
 export function MediaManager({
   csrfToken,
+  workspaceId,
   initialAssets,
   initialOccurrences,
   contentRevision,
   contentStale = false,
-  onRevisionSaved,
+  onRevisionSaved = () => undefined,
   onContentStale = () => undefined,
+  onAccessGranted = () => undefined,
 }: {
   csrfToken: string;
+  workspaceId: string;
   initialAssets: ReadonlyArray<MediaAsset>;
   initialOccurrences: ReadonlyArray<MediaOccurrenceState>;
   contentRevision?: ContentRevision;
   contentStale?: boolean;
-  onRevisionSaved(revision: ContentRevision, previewUrl: string): void;
+  onRevisionSaved?(revision: ContentRevision, previewUrl: string): void;
   onContentStale?(): void;
+  onAccessGranted?(accessToken: string): void;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
   const [occurrences, setOccurrences] = useState([...initialOccurrences]);
@@ -65,12 +88,21 @@ export function MediaManager({
   );
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [uploadPending, setUploadPending] = useState(false);
-  const [mutationToken, setMutationToken] = useState(csrfToken);
+  const [mediaAccessToken, setMediaAccessToken] = useState<string>();
+  const [accessGeneration, setAccessGeneration] = useState(0);
+  const mutationTokenRef = useRef(csrfToken);
+  const selectedAssetId = useRef(selectedAsset);
   const selectedOccurrenceId = useRef(occurrenceId);
   const uploadAttempt = useRef<MediaUploadAttempt | null>(null);
+  const accessAttempt = useRef<{
+    workspaceId: string;
+    idempotencyKey: string;
+  } | null>(null);
   const replaceAttempt = useRef<JsonAttempt | null>(null);
   const cropAttempt = useRef<JsonAttempt | null>(null);
+  const cropBaseRevision = useRef<number | null>(null);
   const deleteAttempt = useRef<JsonAttempt | null>(null);
+  const catalogFence = useRef(createMediaCatalogFence()).current;
   const occurrenceMutationsEnabled = mediaOccurrenceMutationsEnabled(
     contentStale,
     contentRevision,
@@ -78,10 +110,119 @@ export function MediaManager({
 
   type JsonAttempt = Readonly<{ body: unknown; idempotencyKey: string }>;
 
+  useEffect(() => {
+    let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const catalogSnapshot = catalogFence.snapshot();
+    if (accessAttempt.current?.workspaceId !== workspaceId) {
+      accessAttempt.current = {
+        workspaceId,
+        idempotencyKey: crypto.randomUUID(),
+      };
+    }
+    const idempotencyKey = accessAttempt.current.idempotencyKey;
+    void sendMediaMutationAttempt({
+      attempt: {
+        body: JSON.stringify({ operation: "access", workspaceId }),
+        contentType: "application/json",
+        idempotencyKey,
+      },
+      mutationToken: mutationTokenRef.current,
+    })
+      .then((result) => {
+        if (
+          cancelled ||
+          !result.response.ok ||
+          typeof result.body !== "object" ||
+          result.body === null ||
+          !("assets" in result.body) ||
+          !Array.isArray(result.body.assets) ||
+          !("occurrences" in result.body) ||
+          !Array.isArray(result.body.occurrences) ||
+          !("accessToken" in result.body) ||
+          typeof result.body.accessToken !== "string" ||
+          !("accessTokenExpiresAt" in result.body) ||
+          typeof result.body.accessTokenExpiresAt !== "number"
+        ) {
+          throw new Error("media_access_grant_failed");
+        }
+        const grantedAssets = result.body.assets as ReadonlyArray<MediaAsset>;
+        const grantedOccurrences =
+          result.body.occurrences as ReadonlyArray<MediaOccurrenceState>;
+        if (accessAttempt.current?.idempotencyKey === idempotencyKey) {
+          accessAttempt.current = null;
+        }
+        mutationTokenRef.current = result.mutationToken;
+        setMediaAccessToken(result.body.accessToken);
+        onAccessGranted(result.body.accessToken);
+        if (catalogFence.isCurrent(catalogSnapshot)) {
+          const mergedOccurrences = mergeMediaOccurrenceState(
+            grantedOccurrences,
+            contentRevision?.definition.home.media ?? [],
+          );
+          setAssets([...grantedAssets]);
+          setOccurrences([...mergedOccurrences]);
+          setCrop((current) =>
+            cropForCatalogRefresh(
+              current,
+              cropBaseRevision.current,
+              mergedOccurrences,
+              selectedOccurrenceId.current,
+            ),
+          );
+          const catalogSelection = mediaAssetSelectionForCatalog(
+            selectedAssetId.current,
+            grantedAssets,
+            deleteAttempt.current,
+          );
+          if (catalogSelection.assetId !== selectedAssetId.current) {
+            replaceAttempt.current = catalogSelection.replaceAttempt;
+            deleteAttempt.current = catalogSelection.deleteAttempt;
+            selectedAssetId.current = catalogSelection.assetId;
+            setSelectedAsset(catalogSelection.assetId);
+          }
+        }
+        refreshTimer = setTimeout(
+          () => setAccessGeneration((generation) => generation + 1),
+          Math.max(
+            1_000,
+            result.body.accessTokenExpiresAt * 1_000 -
+              Date.now() -
+              30_000,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMessage("Private media access could not be granted. Retrying…");
+          refreshTimer = setTimeout(
+            () => setAccessGeneration((generation) => generation + 1),
+            5_000,
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+    };
+  }, [accessGeneration, csrfToken, workspaceId]);
+
+  function beginCatalogMutation(): void {
+    catalogFence.beginMutation();
+  }
+
+  function finishCatalogMutation(): void {
+    catalogFence.endMutation();
+    accessAttempt.current = null;
+    setAccessGeneration((generation) => generation + 1);
+  }
+
   function selectAsset(assetId: string) {
-    replaceAttempt.current = null;
-    deleteAttempt.current = null;
-    setSelectedAsset(assetId);
+    const selection = mediaAssetSelection(assetId);
+    replaceAttempt.current = selection.replaceAttempt;
+    deleteAttempt.current = selection.deleteAttempt;
+    selectedAssetId.current = selection.assetId;
+    setSelectedAsset(selection.assetId);
   }
 
   async function mutateJson(attempt: JsonAttempt) {
@@ -91,9 +232,9 @@ export function MediaManager({
         contentType: "application/json",
         idempotencyKey: attempt.idempotencyKey,
       },
-      mutationToken,
+      mutationToken: mutationTokenRef.current,
     });
-    setMutationToken(result.mutationToken);
+    mutationTokenRef.current = result.mutationToken;
     if (!result.response.ok) {
       if (
         result.response.status === 409 &&
@@ -104,12 +245,13 @@ export function MediaManager({
       ) {
         onContentStale();
       }
-      throw new Error("media_mutation_failed");
+      throw new MediaMutationRequestError(result.response, result.body);
     }
     return result.body;
   }
 
   async function upload(file?: File) {
+    beginCatalogMutation();
     setBusy(true);
     setMessage("");
     try {
@@ -134,14 +276,14 @@ export function MediaManager({
           body: attempt.body,
           idempotencyKey: attempt.idempotencyKey,
         },
-        mutationToken,
+        mutationToken: mutationTokenRef.current,
       });
-      setMutationToken(result.mutationToken);
+      mutationTokenRef.current = result.mutationToken;
       if (!result.response.ok) throw new Error("media_upload_failed");
       const asset = result.body as MediaAsset;
       uploadAttempt.current = mediaUploadAttemptAfterResult(attempt, true);
       setUploadPending(false);
-      setAssets((current) => [...current, asset]);
+      setAssets((current) => [...upsertMediaAsset(current, asset)]);
       selectAsset(asset.assetId);
       setMessage("Source stored in client-owned media.");
     } catch {
@@ -156,6 +298,7 @@ export function MediaManager({
         "The upload result could not be confirmed. Retry the same upload.",
       );
     } finally {
+      finishCatalogMutation();
       setBusy(false);
     }
   }
@@ -165,6 +308,7 @@ export function MediaManager({
     const current = occurrences.find(
       (occurrence) => occurrence.occurrenceId === occurrenceId,
     );
+    beginCatalogMutation();
     setBusy(true);
     try {
     if (contentRevision === undefined) return;
@@ -195,12 +339,21 @@ export function MediaManager({
       );
       if (nextCrop !== undefined) setCrop(nextCrop);
       replaceAttempt.current = null;
+      cropBaseRevision.current = null;
       onRevisionSaved(result.contentRevision, result.previewUrl);
       setPreviewUrl(result.previewUrl);
       setMessage("Only the selected occurrence was replaced.");
-    } catch {
+    } catch (error) {
+      replaceAttempt.current = mediaOccurrenceAttemptAfterFailure(
+        replaceAttempt.current,
+        error instanceof MediaMutationRequestError
+          ? error.response.status
+          : undefined,
+        error instanceof MediaMutationRequestError ? error.body : undefined,
+      );
       setMessage("The occurrence changed elsewhere or could not be replaced.");
     } finally {
+      finishCatalogMutation();
       setBusy(false);
     }
   }
@@ -216,6 +369,7 @@ export function MediaManager({
     ) {
       return;
     }
+    beginCatalogMutation();
     setBusy(true);
     try {
       cropAttempt.current ??= {
@@ -223,7 +377,8 @@ export function MediaManager({
         body: {
           operation: "crop",
           occurrenceId,
-          baseRevision: current.revision,
+          baseRevision:
+            cropBaseRevision.current ?? current.revision,
           crop,
           workspaceId: contentRevision.workspaceId,
           contentBaseRevision: contentRevision.revision,
@@ -240,18 +395,30 @@ export function MediaManager({
         revision,
       ]);
       cropAttempt.current = null;
+      cropBaseRevision.current = null;
       onRevisionSaved(result.contentRevision, result.previewUrl);
       setPreviewUrl(result.previewUrl);
       setMessage("Crop saved as revision data; the source is unchanged.");
-    } catch {
+    } catch (error) {
+      const nextAttempt = mediaOccurrenceAttemptAfterFailure(
+        cropAttempt.current,
+        error instanceof MediaMutationRequestError
+          ? error.response.status
+          : undefined,
+        error instanceof MediaMutationRequestError ? error.body : undefined,
+      );
+      cropAttempt.current = nextAttempt;
+      if (nextAttempt === null) cropBaseRevision.current = null;
       setMessage("The crop could not be saved.");
     } finally {
+      finishCatalogMutation();
       setBusy(false);
     }
   }
 
   async function deleteSelected() {
     if (selectedAsset === "") return;
+    beginCatalogMutation();
     setBusy(true);
     try {
       deleteAttempt.current ??= {
@@ -266,11 +433,17 @@ export function MediaManager({
       setAssets(remaining);
       selectAsset(remaining[0]?.assetId ?? "");
       setMessage("Unused source and metadata deleted.");
-    } catch {
+    } catch (error) {
       setMessage(
-        "This asset is still referenced by revision history and cannot be deleted.",
+        error instanceof MediaMutationRequestError
+          ? mediaDeleteFailureMessage(
+              error.body,
+              error.response.headers.get("retry-after"),
+            )
+          : "The asset could not be deleted. Retry the same request.",
       );
     } finally {
+      finishCatalogMutation();
       setBusy(false);
     }
   }
@@ -287,7 +460,7 @@ export function MediaManager({
           <input
             hidden
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/avif"
+            accept="image/jpeg,image/png,image/webp"
             disabled={busy}
             onChange={(event) => {
               const file = event.currentTarget.files?.[0];
@@ -306,15 +479,17 @@ export function MediaManager({
           </button>
         ) : null}
       </div>
-      {assets.length > 0 ? (
+      {assets.length > 0 || deleteAttempt.current !== null ? (
         <div className="editor-fields">
           <label>
             Occurrence ID
             <select
+              disabled={busy}
               value={occurrenceId}
               onChange={(event) => {
                 replaceAttempt.current = null;
                 cropAttempt.current = null;
+                cropBaseRevision.current = null;
                 const nextOccurrenceId = event.target.value;
                 selectedOccurrenceId.current = nextOccurrenceId;
                 setOccurrenceId(nextOccurrenceId);
@@ -333,11 +508,18 @@ export function MediaManager({
           <label>
             Source asset
             <select
+              disabled={busy}
               value={selectedAsset}
               onChange={(event) => {
                 selectAsset(event.target.value);
               }}
             >
+              {deleteAttempt.current !== null &&
+              !assets.some((asset) => asset.assetId === selectedAsset) ? (
+                <option value={selectedAsset}>
+                  Finishing deletion of {selectedAsset}
+                </option>
+              ) : null}
               {assets.map((asset) => (
                 <option key={asset.assetId} value={asset.assetId}>
                   {asset.fileName} · {asset.width}×{asset.height}
@@ -353,7 +535,8 @@ export function MediaManager({
                 busy ||
                 !occurrenceMutationsEnabled ||
                 occurrenceId === "" ||
-                selectedAsset === ""
+                selectedAsset === "" ||
+                !assets.some((asset) => asset.assetId === selectedAsset)
               }
               onClick={() => void replaceSelected()}
             >
@@ -389,6 +572,7 @@ export function MediaManager({
                 {field}
                 <input
                   type="number"
+                  disabled={busy}
                   min={field === "width" || field === "height" ? 0.01 : 0}
                   max={1}
                   step={0.01}
@@ -396,6 +580,15 @@ export function MediaManager({
                   onChange={(event) =>
                     {
                       cropAttempt.current = null;
+                      const currentRevision =
+                        occurrences.find(
+                          (occurrence) =>
+                            occurrence.occurrenceId === occurrenceId,
+                        )?.revision ?? 0;
+                      cropBaseRevision.current = cropBaseRevisionForEdit(
+                        cropBaseRevision.current,
+                        currentRevision,
+                      );
                       setCrop((current) => ({
                         ...current,
                         [field]: Number(event.target.value),
@@ -410,7 +603,9 @@ export function MediaManager({
             const asset = assets.find(
               (candidate) => candidate.assetId === occurrence.assetId,
             );
-            if (asset === undefined) return null;
+            if (asset === undefined || mediaAccessToken === undefined) {
+              return null;
+            }
             return (
               <MediaOccurrence
                 key={occurrence.occurrenceId}
@@ -428,6 +623,7 @@ export function MediaManager({
                   },
                   crop: occurrence.crop,
                 }}
+                accessToken={mediaAccessToken}
               >
               <figcaption>
                 {occurrence.occurrenceId} · revision {occurrence.revision}
@@ -437,7 +633,13 @@ export function MediaManager({
           })}
           {previewUrl === undefined ? null : (
             <p>
-              <a href={previewUrl}>Preview this exact media revision</a>
+              <a
+                href={`${previewUrl}&accessToken=${encodeURIComponent(
+                  mediaAccessToken ?? "",
+                )}`}
+              >
+                Preview this exact media revision
+              </a>
             </p>
           )}
         </div>

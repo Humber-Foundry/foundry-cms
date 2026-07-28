@@ -8,11 +8,13 @@ export function MediaOccurrence({
   className,
   children,
   delivery = "authenticated",
+  accessToken,
 }: {
   occurrence: SiteMediaOccurrence;
   className?: string;
   children?: ReactNode;
   delivery?: "authenticated" | "published";
+  accessToken?: string;
 }) {
   const crop =
     occurrence.crop === null
@@ -30,7 +32,7 @@ export function MediaOccurrence({
               ? `/api/media/${encodeURIComponent(occurrence.asset.assetId)}`
               : `/api/foundry-cms/media?assetId=${encodeURIComponent(
                   occurrence.asset.assetId,
-                )}`
+                )}&accessToken=${encodeURIComponent(accessToken ?? "")}`
           }
           alt=""
           style={crop?.image}

@@ -80,9 +80,7 @@ export const mediaAuditActions = [
   "media.occurrence.replaced",
   "media.occurrence.cropped",
   "media.asset.deleted",
-  "media.assets.listed",
-  "media.occurrences.listed",
-  "media.source.read",
+  "media.access.granted",
 ] as const;
 export type MediaAuditAction = (typeof mediaAuditActions)[number];
 
@@ -184,17 +182,31 @@ export type MediaAssetStore = Readonly<{
     siteId: SiteId,
     workspaceId: ContentWorkspaceId,
   ): Promise<ReadonlyArray<MediaOccurrenceRevision>>;
-  auditRead(
+  listCatalog(
     siteId: SiteId,
-    workspaceId: ContentWorkspaceId | null,
+    workspaceId: ContentWorkspaceId,
+  ): Promise<
+    Readonly<{
+      assets: ReadonlyArray<MediaAsset>;
+      occurrences: ReadonlyArray<MediaOccurrenceRevision>;
+    }>
+  >;
+  auditAccessGrant(
+    siteId: SiteId,
+    workspaceId: ContentWorkspaceId,
     actorId: ContentActorId,
-    action: Extract<
-      MediaAuditAction,
-      "media.assets.listed" | "media.occurrences.listed" | "media.source.read"
-    >,
-    subjectId: string,
+    availableAssets: ReadonlyArray<MediaAsset>,
+    availableOccurrences: ReadonlyArray<MediaOccurrenceRevision>,
     occurredAt: string,
-  ): Promise<void>;
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<
+    Readonly<{
+      assets: ReadonlyArray<MediaAsset>;
+      occurrences: ReadonlyArray<MediaOccurrenceRevision>;
+      occurredAt: string;
+    }>
+  >;
   createAsset(
     asset: MediaAsset,
     context: MediaMutationContext,
@@ -275,7 +287,6 @@ const allowedContentTypes = new Set<MediaAsset["contentType"]>([
   "image/jpeg",
   "image/png",
   "image/webp",
-  "image/avif",
 ]);
 
 function assertIdempotencyKey(value: string): void {
@@ -646,51 +657,86 @@ export function createMediaAssetApplication({
           throw error;
         }
       },
+      async grantAccess(command: {
+        actorId: ContentActorId;
+        workspaceId: ContentWorkspaceId;
+        idempotencyKey: string;
+      }) {
+        if (command.actorId !== actorId) throw new MediaSiteAccessError();
+        assertIdempotencyKey(command.idempotencyKey);
+        const {
+          assets: availableAssets,
+          occurrences: availableOccurrences,
+        } = await assets.listCatalog(siteId, command.workspaceId);
+        const requestHash = await sha256CanonicalJson(command);
+        const grant = await assets.auditAccessGrant(
+          siteId,
+          command.workspaceId,
+          actorId,
+          availableAssets,
+          availableOccurrences,
+          now(),
+          command.idempotencyKey,
+          requestHash,
+        );
+        return {
+          assets: grant.assets,
+          occurrences: grant.occurrences,
+          accessGrantedAt: grant.occurredAt,
+        };
+      },
+      async grantRevisionAccess(command: {
+        actorId: ContentActorId;
+        workspaceId: ContentWorkspaceId;
+        assetIds: ReadonlyArray<MediaAssetId>;
+        idempotencyKey: string;
+      }) {
+        if (command.actorId !== actorId) throw new MediaSiteAccessError();
+        assertIdempotencyKey(command.idempotencyKey);
+        const assetIds = [...new Set(command.assetIds)].sort();
+        const availableAssets = await Promise.all(
+          assetIds.map((assetId) => assets.getAsset(siteId, assetId)),
+        );
+        if (availableAssets.some((asset) => asset === null)) {
+          throw new MediaSiteAccessError();
+        }
+        const requestHash = await sha256CanonicalJson({
+          ...command,
+          assetIds,
+        });
+        const grant = await assets.auditAccessGrant(
+          siteId,
+          command.workspaceId,
+          actorId,
+          availableAssets as ReadonlyArray<MediaAsset>,
+          [],
+          now(),
+          command.idempotencyKey,
+          requestHash,
+        );
+        return {
+          assetIds: grant.assets.map((asset) => asset.assetId),
+          accessGrantedAt: grant.occurredAt,
+        };
+      },
     }),
     queries: Object.freeze({
       getAsset(assetId: MediaAssetId) {
         return assets.getAsset(siteId, assetId);
       },
-      async listAssets() {
-        const result = await assets.listAssets(siteId);
-        await assets.auditRead(
-          siteId,
-          null,
-          actorId,
-          "media.assets.listed",
-          siteId,
-          now(),
-        );
-        return result;
+      listAssets() {
+        return assets.listAssets(siteId);
       },
-      async listOccurrences(workspaceId: ContentWorkspaceId) {
-        const result = await assets.listOccurrences(siteId, workspaceId);
-        await assets.auditRead(
-          siteId,
-          workspaceId,
-          actorId,
-          "media.occurrences.listed",
-          siteId,
-          now(),
-        );
-        return result;
+      listOccurrences(workspaceId: ContentWorkspaceId) {
+        return assets.listOccurrences(siteId, workspaceId);
       },
       async getSource(assetId: MediaAssetId) {
         const asset = await assets.getAsset(siteId, assetId);
         if (asset === null) throw new MediaSiteAccessError();
-        const source = await sources.get(asset.objectKey, {
+        return sources.get(asset.objectKey, {
           contentType: asset.contentType,
           sourceHash: asset.sourceHash,
         });
-        await assets.auditRead(
-          siteId,
-          null,
-          actorId,
-          "media.source.read",
-          assetId,
-          now(),
-        );
-        return source;
       },
       async getPublishedSource(assetId: MediaAssetId) {
         const asset = await assets.getAsset(siteId, assetId);

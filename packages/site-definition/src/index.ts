@@ -391,17 +391,25 @@ export const siteDefinitionSchema = {
   },
 } as const;
 
-export const referenceSiteDefinition = {
-  ...publishedSite,
-  site: {
-    ...publishedSite.site,
-    id: createSiteId(publishedSite.site.id),
-  },
-  home: {
-    ...publishedSite.home,
-    media: [],
-  },
-} as const satisfies SiteDefinition;
+export function createReferenceSiteDefinition(
+  published: SiteDefinition,
+): SiteDefinition {
+  return {
+    ...published,
+    site: {
+      ...published.site,
+      id: createSiteId(published.site.id),
+    },
+    home: {
+      ...published.home,
+      media: published.home.media ?? [],
+    },
+  };
+}
+
+export const referenceSiteDefinition = createReferenceSiteDefinition(
+  publishedSite as unknown as SiteDefinition,
+);
 
 export * from "./editable-fields";
 export * from "./component-composition";

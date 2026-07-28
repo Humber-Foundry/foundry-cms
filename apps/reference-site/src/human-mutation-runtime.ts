@@ -10,6 +10,9 @@ import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import {
   createHumanCsrfToken,
+  HumanRequestIntegrityError,
+  humanTokenLifetimeSeconds,
+  verifyHumanCsrfToken,
   verifyHumanMutationRequest,
 } from "./human-request-integrity";
 
@@ -316,6 +319,46 @@ export async function verifyHumanMutation(
     audience: configuration.audience,
     canonicalOrigin: configuration.canonicalOrigin,
     secret: configuration.secret,
+  });
+}
+
+const mediaAccessAudienceSuffix = ":media-access";
+
+export async function createHumanMediaAccessToken(
+  identity: ExternalHumanIdentity,
+  assetIds: ReadonlyArray<string>,
+  issuedAt: string,
+) {
+  const configuration = await loadHumanMutationConfiguration();
+  const now = new Date(issuedAt);
+  if (!Number.isFinite(now.getTime())) {
+    throw new HumanRequestIntegrityError();
+  }
+  return {
+    token: await createHumanCsrfToken({
+      identity,
+      audience: `${configuration.audience}${mediaAccessAudienceSuffix}`,
+      secret: configuration.secret,
+      now,
+      scope: assetIds,
+    }),
+    expiresAt:
+      Math.floor(now.getTime() / 1_000) + humanTokenLifetimeSeconds,
+  };
+}
+
+export async function verifyHumanMediaAccessToken(
+  token: string | null,
+  identity: ExternalHumanIdentity,
+  assetId: string,
+) {
+  const configuration = await loadHumanMutationConfiguration();
+  await verifyHumanCsrfToken({
+    token,
+    identity,
+    audience: `${configuration.audience}${mediaAccessAudienceSuffix}`,
+    secret: configuration.secret,
+    requiredScope: assetId,
   });
 }
 

@@ -9,6 +9,18 @@ import {
 } from "./workspace-revision";
 
 describe("workspace revision head", () => {
+  it("does not pass a server callback into the pre-workspace media client", async () => {
+    const dashboardShell = await readFile(
+      new URL("./dashboard-shell.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(dashboardShell).not.toContain(
+      "onRevisionSaved={() => undefined}",
+    );
+    expect(dashboardShell).not.toContain("<MediaManager");
+  });
+
   it("does not regress when an older response arrives last", () => {
     const newer = { revision: 3 } as ContentRevision;
     const older = { revision: 2 } as ContentRevision;
@@ -42,5 +54,30 @@ describe("workspace revision head", () => {
       'result.body.error === "content_revision_stale"',
     );
     expect(mediaManager).toContain("onContentStale();");
+  });
+
+  it("invalidates revision-bound publication state when media advances the head", async () => {
+    const editor = await readFile(
+      new URL("./content-editor.tsx", import.meta.url),
+      "utf8",
+    );
+    const externalRevisionEffect = editor.slice(
+      editor.indexOf("if (revisionHead.revision > state.persistedRevision)"),
+      editor.indexOf(
+        "}, [persistence, revisionHead, state.persistedRevision]);",
+      ),
+    );
+
+    expect(externalRevisionEffect).toContain("setApprovalId(null)");
+    expect(externalRevisionEffect).toContain("setPreviewedRevision(null)");
+    expect(externalRevisionEffect).toContain(
+      "pendingPublicationAttempt.current = null",
+    );
+    expect(externalRevisionEffect).toContain(
+      "pendingDeploymentRetryAttempt.current = null",
+    );
+    expect(editor).toContain(
+      "if (latestRevisionHead.current !== attempt.revision)",
+    );
   });
 });

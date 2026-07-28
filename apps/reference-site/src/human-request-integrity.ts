@@ -1,6 +1,6 @@
 import type { ExternalHumanIdentity } from "@foundry/application";
 
-const csrfLifetimeSeconds = 5 * 60;
+export const humanTokenLifetimeSeconds = 5 * 60;
 
 export class HumanRequestIntegrityError extends Error {
   constructor() {
@@ -15,6 +15,7 @@ type CsrfClaims = Readonly<{
   audience: string;
   nonce: string;
   expiresAt: number;
+  scope?: ReadonlyArray<string>;
 }>;
 
 function encodeBase64Url(bytes: Uint8Array): string {
@@ -52,10 +53,12 @@ function claimsFor({
   identity,
   audience,
   expiresAt,
+  scope,
 }: {
   identity: ExternalHumanIdentity;
   audience: string;
   expiresAt: number;
+  scope?: ReadonlyArray<string>;
 }): CsrfClaims {
   return {
     issuer: identity.binding.issuer,
@@ -63,6 +66,7 @@ function claimsFor({
     audience,
     nonce: identity.nonce,
     expiresAt,
+    ...(scope === undefined ? {} : { scope: [...scope].sort() }),
   };
 }
 
@@ -71,11 +75,13 @@ export async function createHumanCsrfToken({
   audience,
   secret,
   now = new Date(),
+  scope,
 }: {
   identity: ExternalHumanIdentity;
   audience: string;
   secret: string;
   now?: Date;
+  scope?: ReadonlyArray<string>;
 }): Promise<string> {
   const encodedClaims = encodeBase64Url(
     new TextEncoder().encode(
@@ -84,7 +90,8 @@ export async function createHumanCsrfToken({
           identity,
           audience,
           expiresAt:
-            Math.floor(now.getTime() / 1_000) + csrfLifetimeSeconds,
+            Math.floor(now.getTime() / 1_000) + humanTokenLifetimeSeconds,
+          scope,
         }),
       ),
     ),
@@ -123,6 +130,30 @@ export async function verifyHumanMutationRequest({
     throw new HumanRequestIntegrityError();
   }
   const token = request.headers.get("x-foundry-csrf");
+  await verifyHumanCsrfToken({
+    token,
+    identity,
+    audience,
+    secret,
+    now,
+  });
+}
+
+export async function verifyHumanCsrfToken({
+  token,
+  identity,
+  audience,
+  secret,
+  now = new Date(),
+  requiredScope,
+}: {
+  token: string | null;
+  identity: ExternalHumanIdentity;
+  audience: string;
+  secret: string;
+  now?: Date;
+  requiredScope?: string;
+}): Promise<void> {
   const [encodedClaims, encodedSignature, unexpected] =
     token?.split(".") ?? [];
   if (
@@ -153,13 +184,23 @@ export async function verifyHumanMutationRequest({
         typeof claims.expiresAt === "number"
           ? claims.expiresAt
           : 0,
+      scope:
+        typeof claims === "object" &&
+        claims !== null &&
+        "scope" in claims &&
+        Array.isArray(claims.scope) &&
+        claims.scope.every((entry) => typeof entry === "string")
+          ? claims.scope
+          : undefined,
     });
     if (
       !verified ||
       typeof claims !== "object" ||
       claims === null ||
       JSON.stringify(claims) !== JSON.stringify(expected) ||
-      expected.expiresAt < Math.floor(now.getTime() / 1_000)
+      expected.expiresAt < Math.floor(now.getTime() / 1_000) ||
+      (requiredScope !== undefined &&
+        !expected.scope?.includes(requiredScope))
     ) {
       throw new HumanRequestIntegrityError();
     }

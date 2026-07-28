@@ -12,7 +12,6 @@ import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
-import { MediaManager } from "./media-manager";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { WorkspaceEditors } from "./workspace-editors";
 
@@ -31,6 +30,7 @@ export function DashboardShell({
   suspectedSpam,
   mediaAssets,
   mediaOccurrences,
+  mediaWorkspaceId,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -49,6 +49,7 @@ export function DashboardShell({
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
   mediaAssets: ReadonlyArray<MediaAsset>;
   mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
+  mediaWorkspaceId: string;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined
@@ -99,18 +100,10 @@ export function DashboardShell({
           </div>
           {contentRevision === undefined ||
           initialPreviewUrl === undefined ? (
-            <>
-              <ContentWorkspaceStarter
-                csrfToken={contentMutationToken}
-                staleRecovery={staleRecovery}
-              />
-              <MediaManager
-                csrfToken={mutationToken}
-                initialAssets={mediaAssets}
-                initialOccurrences={mediaOccurrences}
-                onRevisionSaved={() => undefined}
-              />
-            </>
+            <ContentWorkspaceStarter
+              csrfToken={contentMutationToken}
+              staleRecovery={staleRecovery}
+            />
           ) : (
             <WorkspaceEditors
               csrfToken={contentMutationToken}
@@ -121,6 +114,7 @@ export function DashboardShell({
               staleRecovery={staleRecovery}
               mediaAssets={mediaAssets}
               mediaOccurrences={mediaOccurrences}
+              mediaWorkspaceId={mediaWorkspaceId}
             />
           )}
           <section aria-labelledby="foundation-status">

@@ -6,9 +6,11 @@ import {
   MediaAssetReferencedError,
   MediaMutationInProgressError,
   MediaSiteAccessError,
+  MediaValidationError,
   createContentActorId,
   createContentWorkspaceId,
   createInMemoryMediaAssetStore,
+  createInMemoryMediaContentCoordinator,
   createInMemoryMediaSourceStore,
   createMediaAssetApplication,
   createMediaAssetId,
@@ -95,7 +97,46 @@ describe("media asset application", () => {
     ]);
   });
 
-  it("audits authenticated catalog and private-source reads", async () => {
+  it("models the production identity predicate for raced asset creates", async () => {
+    const { assets } = setup();
+    const firstClaim = {
+      siteId: siteA,
+      idempotencyKey: "raced-asset-create-first",
+      requestHash: "first-request",
+      claimToken: "first-claim",
+    };
+    const secondClaim = {
+      siteId: siteA,
+      idempotencyKey: "raced-asset-create-second",
+      requestHash: "second-request",
+      claimToken: "second-claim",
+    };
+    const asset = {
+      siteId: siteA,
+      assetId: assetA,
+      objectKey: `media/${siteA}/${assetA}/source`,
+      sourceHash: "a".repeat(64),
+      fileName: "hero.png",
+      contentType: "image/png" as const,
+      byteLength: 128,
+      width: 1600,
+      height: 900,
+      createdAt: "2026-07-27T12:00:00.000Z",
+      createdBy: editor,
+    };
+    await expect(assets.claim(firstClaim)).resolves.toBe(true);
+    await assets.createAsset(asset, firstClaim);
+    await expect(assets.claim(secondClaim)).resolves.toBe(true);
+
+    await expect(
+      assets.createAsset(
+        { ...asset, fileName: "other.png", width: 800, height: 450 },
+        secondClaim,
+      ),
+    ).rejects.toBeInstanceOf(MediaValidationError);
+  });
+
+  it("keeps authenticated GET-style reads side-effect free", async () => {
     const { application } = setup();
     await upload(application);
 
@@ -103,16 +144,83 @@ describe("media asset application", () => {
     await application.queries.listOccurrences(workspaceA);
     await application.queries.getSource(assetA);
 
+    await expect(application.queries.audit()).resolves.toEqual([
+      expect.objectContaining({ action: "media.asset.uploaded" }),
+    ]);
+  });
+
+  it("audits private media capabilities on an explicit access grant", async () => {
+    const { application } = setup();
+    await upload(application);
+
+    await expect(
+      application.commands.grantAccess({
+        actorId: editor,
+        workspaceId: workspaceA,
+        idempotencyKey: "grant-media-access-0001",
+      }),
+    ).resolves.toMatchObject({
+      assets: [expect.objectContaining({ assetId: assetA })],
+      occurrences: [],
+    });
     await expect(application.queries.audit()).resolves.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ action: "media.assets.listed" }),
-        expect.objectContaining({ action: "media.occurrences.listed" }),
         expect.objectContaining({
-          action: "media.source.read",
-          subjectId: assetA,
+          action: "media.access.granted",
+          subjectId: siteA,
         }),
       ]),
     );
+  });
+
+  it("replays one access grant with its original audited asset scope", async () => {
+    const { application } = setup();
+    await upload(application, assetA);
+    const command = {
+      actorId: editor,
+      workspaceId: workspaceA,
+      idempotencyKey: "grant-media-access-replay-0001",
+    } as const;
+
+    const first = await application.commands.grantAccess(command);
+    await application.commands.delete({
+      actorId: editor,
+      assetId: assetA,
+      idempotencyKey: "delete-after-access-grant",
+    });
+    const replay = await application.commands.grantAccess(command);
+
+    expect(first.assets.map((asset) => asset.assetId)).toEqual([assetA]);
+    expect(replay.assets.map((asset) => asset.assetId)).toEqual([assetA]);
+    const audits = await application.queries.audit();
+    expect(
+      audits.filter((event) => event.action === "media.access.granted"),
+    ).toHaveLength(1);
+  });
+
+  it("audits and replays an exact immutable-revision media grant", async () => {
+    const { application } = setup();
+    await upload(application, assetA);
+    await upload(application, assetB);
+    const command = {
+      actorId: editor,
+      workspaceId: workspaceA,
+      assetIds: [assetA],
+      idempotencyKey: "grant-revision-media-0001",
+    } as const;
+
+    const first = await application.commands.grantRevisionAccess(command);
+    const replay = await application.commands.grantRevisionAccess(command);
+
+    expect(first).toEqual({
+      assetIds: [assetA],
+      accessGrantedAt: "2026-07-27T12:00:00.000Z",
+    });
+    expect(replay).toEqual(first);
+    const audits = await application.queries.audit();
+    expect(
+      audits.filter((event) => event.action === "media.access.granted"),
+    ).toHaveLength(1);
   });
 
   it("reads a published source without creating an audit row per visitor", async () => {
@@ -126,6 +234,24 @@ describe("media asset application", () => {
     await expect(application.queries.audit()).resolves.toEqual([
       expect.objectContaining({ action: "media.asset.uploaded" }),
     ]);
+  });
+
+  it("rejects AVIF uploads until a bounded frame decoder is available", async () => {
+    const { application } = setup();
+
+    await expect(
+      application.commands.upload({
+        actorId: editor,
+        assetId: assetA,
+        fileName: "source.avif",
+        contentType: "image/avif",
+        byteLength: 8,
+        width: 120,
+        height: 80,
+        source: new Uint8Array(8),
+        idempotencyKey: "reject-avif-upload",
+      }),
+    ).rejects.toEqual(expect.objectContaining({ field: "contentType" }));
   });
 
   it("replaces only the selected occurrence", async () => {
@@ -273,6 +399,69 @@ describe("media asset application", () => {
         save,
       ),
     ).rejects.toEqual(new MediaSiteAccessError());
+  });
+
+  it("serializes local occurrence head mutations through the media-content coordinator", async () => {
+    const coordinator = createInMemoryMediaContentCoordinator();
+    const assets = createInMemoryMediaAssetStore({
+      mediaContentCoordinator: coordinator,
+    });
+    const application = createMediaAssetApplication({
+      siteId: siteA,
+      actorId: editor,
+      assets,
+      sources: createInMemoryMediaSourceStore(),
+      now: () => "2026-07-27T12:00:00.000Z",
+    });
+    await upload(application);
+    const mutation = {
+      siteId: siteA,
+      idempotencyKey: "coordinated-occurrence-save",
+      requestHash: "coordinated-request",
+      claimToken: "coordinated-claim",
+    };
+    await expect(assets.claim(mutation)).resolves.toBe(true);
+
+    let releaseCoordinator = () => {};
+    let signalCoordinator = () => {};
+    const coordinatorHeld = new Promise<void>((resolve) => {
+      signalCoordinator = resolve;
+    });
+    const coordinatorMayRelease = new Promise<void>((resolve) => {
+      releaseCoordinator = resolve;
+    });
+    const held = coordinator.runExclusive(async () => {
+      signalCoordinator();
+      await coordinatorMayRelease;
+    });
+    await coordinatorHeld;
+
+    const save = assets.saveOccurrence(
+      {
+        siteId: siteA,
+        workspaceId: workspaceA,
+        occurrenceId: occurrenceA,
+        revision: 1,
+        assetId: assetA,
+        crop: null,
+        createdAt: "2026-07-27T12:00:00.000Z",
+        createdBy: editor,
+      },
+      0,
+      "media.occurrence.replaced",
+      mutation,
+    );
+    await Promise.resolve();
+    await expect(
+      assets.getOccurrence(siteA, workspaceA, occurrenceA),
+    ).resolves.toBeNull();
+
+    releaseCoordinator();
+    await held;
+    await save;
+    await expect(
+      assets.getOccurrence(siteA, workspaceA, occurrenceA),
+    ).resolves.toMatchObject({ revision: 1, assetId: assetA });
   });
 
   it("rejects occurrence identities that do not map to rendered Site Definition slots", async () => {

@@ -21,6 +21,7 @@ export function WorkspaceEditors({
   staleRecovery,
   mediaAssets,
   mediaOccurrences,
+  mediaWorkspaceId,
 }: {
   csrfToken: string;
   contentRevision: ContentRevision;
@@ -30,6 +31,7 @@ export function WorkspaceEditors({
   staleRecovery?: Readonly<{ id: string; sourceWorkspaceId: string }>;
   mediaAssets: ReadonlyArray<MediaAsset>;
   mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
+  mediaWorkspaceId: string;
 }) {
   const [head, setHead] = useState({
     revision: initialContentRevision,
@@ -38,6 +40,7 @@ export function WorkspaceEditors({
   const [contentStale, setContentStale] = useState(
     initialContentStale === true,
   );
+  const [mediaAccessToken, setMediaAccessToken] = useState<string>();
   const advanceRevisionHead = useCallback(
     (incoming: ContentRevision, previewUrl: string) => {
       setHead((current) =>
@@ -59,15 +62,18 @@ export function WorkspaceEditors({
         initialStale={initialContentStale}
         activeWorkspaceUrl={activeWorkspaceUrl}
         staleRecovery={staleRecovery}
+        mediaAccessToken={mediaAccessToken}
       />
       <MediaManager
         csrfToken={csrfToken}
+        workspaceId={mediaWorkspaceId}
         initialAssets={mediaAssets}
         initialOccurrences={mediaOccurrences}
         contentRevision={head.revision}
         contentStale={contentStale}
         onRevisionSaved={advanceRevisionHead}
         onContentStale={() => setContentStale(true)}
+        onAccessGranted={setMediaAccessToken}
       />
     </>
   );

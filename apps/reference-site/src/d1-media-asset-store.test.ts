@@ -36,7 +36,7 @@ describe("D1 media asset store", () => {
     });
     database = await miniflare.getD1Database("FOUNDRY_DB");
     const migration = await readFile(
-      new URL("../migrations/0007_media_assets.sql", import.meta.url),
+      new URL("../migrations/0008_media_assets.sql", import.meta.url),
       "utf8",
     );
     for (const statement of migration.trim().split(/\n\n+/u)) {
@@ -114,6 +114,21 @@ describe("D1 media asset store", () => {
       crop: null,
     });
     await expect(
+      createD1MediaAssetStore(database).listCatalog(siteId, workspaceId),
+    ).resolves.toMatchObject({
+      assets: [
+        expect.objectContaining({ assetId }),
+        expect.objectContaining({ assetId: replacementId }),
+      ],
+      occurrences: [
+        expect.objectContaining({
+          occurrenceId,
+          revision: 3,
+          assetId: replacementId,
+        }),
+      ],
+    });
+    await expect(
       app.queries.getOccurrenceRevision(workspaceId, occurrenceId, 2),
     ).resolves.toMatchObject({
       assetId,
@@ -127,6 +142,44 @@ describe("D1 media asset store", () => {
         idempotencyKey: "delete-d1-referenced",
       }),
     ).rejects.toEqual(new MediaAssetReferencedError(assetId, 1));
+  });
+
+  it("replays an access grant with one durable original scope", async () => {
+    const app = application();
+    await upload(app, assetId);
+    const command = {
+      actorId,
+      workspaceId,
+      idempotencyKey: "grant-media-access-d1-0001",
+    } as const;
+
+    const first = await app.commands.grantAccess(command);
+    await app.commands.delete({
+      actorId,
+      assetId,
+      idempotencyKey: "delete-after-d1-access-grant",
+    });
+    const replay = await app.commands.grantAccess(command);
+
+    expect(first.assets.map((asset) => asset.assetId)).toEqual([assetId]);
+    expect(replay.assets.map((asset) => asset.assetId)).toEqual([assetId]);
+    const recordedScope = await database
+      .prepare(
+        `SELECT scope_json
+         FROM media_audit_events
+         WHERE action = 'media.access.granted'`,
+      )
+      .first<{ scope_json: string }>();
+    expect(JSON.parse(recordedScope!.scope_json)).toEqual({
+      assetIds: [assetId],
+      occurrences: [],
+    });
+    expect(recordedScope!.scope_json).not.toContain("hero.png");
+    expect(recordedScope!.scope_json).not.toContain("sourceHash");
+    const audits = await app.queries.audit();
+    expect(
+      audits.filter((event) => event.action === "media.access.granted"),
+    ).toHaveLength(1);
   });
 
   it("keeps overlapping identifiers isolated by site", async () => {

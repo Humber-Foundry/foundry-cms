@@ -91,6 +91,12 @@ type PersistContentRevisionCommand = Readonly<{
   idempotencyKey: string;
   requestHash: string;
   revision: ContentRevision;
+  mediaOccurrence?: Readonly<{
+    occurrenceId: SiteMediaOccurrence["occurrenceId"];
+    revision: number;
+    assetId: string;
+    crop: SiteMediaOccurrence["crop"];
+  }>;
 }>;
 
 export type ContentRevisionStore = Readonly<{
@@ -230,7 +236,39 @@ function immutableRevision(revision: ContentRevision): ContentRevision {
   return deepFreeze(structuredClone(revision));
 }
 
-export function createInMemoryContentRevisionStore(): ContentRevisionStore {
+export type InMemoryMediaContentCoordinator = Readonly<{
+  runExclusive<Value>(operation: () => Promise<Value>): Promise<Value>;
+}>;
+
+export function createInMemoryMediaContentCoordinator(): InMemoryMediaContentCoordinator {
+  let tail = Promise.resolve();
+
+  return Object.freeze({
+    async runExclusive<Value>(operation: () => Promise<Value>): Promise<Value> {
+      const previous = tail;
+      let release = () => {};
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await operation();
+      } finally {
+        release();
+      }
+    },
+  });
+}
+
+export function createInMemoryContentRevisionStore({
+  isMediaOccurrenceCurrent = async () => true,
+  mediaContentCoordinator,
+}: {
+  isMediaOccurrenceCurrent?: (
+    occurrence: NonNullable<PersistContentRevisionCommand["mediaOccurrence"]>,
+  ) => Promise<boolean>;
+  mediaContentCoordinator?: InMemoryMediaContentCoordinator;
+} = {}): ContentRevisionStore {
   const revisions = new Map<number, ContentRevision>();
   const receipts = new Map<
     string,
@@ -283,30 +321,41 @@ export function createInMemoryContentRevisionStore(): ContentRevisionStore {
       assertContentRevisionIdempotency(receipt.requestHash, requestHash);
       return receipt.revision;
     },
-    async persist(command) {
-      const receipt = receipts.get(command.idempotencyKey);
-      if (receipt !== undefined) {
-        assertContentRevisionIdempotency(
-          receipt.requestHash,
-          command.requestHash,
+    persist(command) {
+      const operation = async () => {
+        const receipt = receipts.get(command.idempotencyKey);
+        if (receipt !== undefined) {
+          assertContentRevisionIdempotency(
+            receipt.requestHash,
+            command.requestHash,
+          );
+          return receipt.revision;
+        }
+        assertContentRevisionBase(command.baseRevision, currentRevision);
+        if (
+          command.mediaOccurrence !== undefined &&
+          !(await isMediaOccurrenceCurrent(command.mediaOccurrence))
+        ) {
+          throw new ContentRevisionConflictError(currentRevision);
+        }
+        const revision = immutableRevision(command.revision);
+        const saved = deepFreeze(
+          withContentRevisionBookmark(
+            revision,
+            `local:${revision.workspaceId}:${revision.revision}`,
+          ),
         );
-        return receipt.revision;
-      }
-      assertContentRevisionBase(command.baseRevision, currentRevision);
-      const revision = immutableRevision(command.revision);
-      const saved = deepFreeze(
-        withContentRevisionBookmark(
-          revision,
-          `local:${revision.workspaceId}:${revision.revision}`,
-        ),
-      );
-      revisions.set(revision.revision, revision);
-      currentRevision = revision.revision;
-      receipts.set(command.idempotencyKey, {
-        requestHash: command.requestHash,
-        revision: saved,
-      });
-      return saved;
+        revisions.set(revision.revision, revision);
+        currentRevision = revision.revision;
+        receipts.set(command.idempotencyKey, {
+          requestHash: command.requestHash,
+          revision: saved,
+        });
+        return saved;
+      };
+      return mediaContentCoordinator !== undefined
+        ? mediaContentCoordinator.runExclusive(operation)
+        : operation();
     },
   };
 }
@@ -571,6 +620,12 @@ export function createContentRevisionApplication({
           idempotencyKey: command.idempotencyKey,
           requestHash,
           revision: nextRevision,
+          mediaOccurrence: {
+            occurrenceId: command.occurrence.occurrenceId,
+            revision: command.occurrence.revision,
+            assetId: command.occurrence.asset.assetId,
+            crop: command.occurrence.crop,
+          },
         });
       },
       async addCollaborator(collaboratorActorId: ContentActorId) {

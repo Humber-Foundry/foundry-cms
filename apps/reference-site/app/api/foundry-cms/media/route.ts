@@ -17,7 +17,10 @@ import {
   requireRenderedMediaOccurrenceId,
 } from "@foundry/application";
 
-import { AccessIdentityError } from "../../../../src/access-identity";
+import {
+  AccessIdentityError,
+  AccessIdentityUnavailableError,
+} from "../../../../src/access-identity";
 import {
   authorizeAuthenticatedHumanIdentity,
   loadHumanIdentityRequestContext,
@@ -25,7 +28,11 @@ import {
 import {
   HumanAccessConfigurationError,
 } from "../../../../src/human-access-configuration";
-import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
+import {
+  createHumanMediaAccessToken,
+  verifyHumanMediaAccessToken,
+  verifyHumanMutation,
+} from "../../../../src/human-mutation-runtime";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
 import {
   MediaAssetConfigurationError,
@@ -49,11 +56,16 @@ async function authorized(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const { actorId } = await authorized(request);
+    const { authenticated, actorId } = await authorized(request);
     const application = await loadMediaAssetApplication(actorId);
     const searchParams = new URL(request.url).searchParams;
     const requestedAsset = searchParams.get("assetId");
     if (requestedAsset !== null) {
+      await verifyHumanMediaAccessToken(
+        searchParams.get("accessToken"),
+        authenticated.identity,
+        requestedAsset,
+      );
       const source = await application.queries.getSource(
         createMediaAssetId(requestedAsset),
       );
@@ -73,20 +85,7 @@ export async function GET(request: Request) {
         },
       );
     }
-    const workspaceId = createContentWorkspaceId(
-      searchParams.get("workspaceId") ?? "",
-    );
-    await (
-      await loadContentRevisionApplication(workspaceId, actorId)
-    ).queries.getCurrent();
-    const [assets, occurrences] = await Promise.all([
-      application.queries.listAssets(),
-      application.queries.listOccurrences(workspaceId),
-    ]);
-    return Response.json(
-      { assets, occurrences },
-      { headers: { "cache-control": "no-store" } },
-    );
+    return Response.json({ error: "invalid_query" }, { status: 400 });
   } catch (error) {
     return mediaError(error);
   }
@@ -241,6 +240,27 @@ async function bindOccurrenceToContentRevision({
     },
     crop: occurrence.crop,
   } as const;
+  const currentBinding = (binding.current.definition.home.media ?? []).find(
+    (candidate) =>
+      candidate.occurrenceId === boundOccurrence.occurrenceId,
+  );
+  const mediaHead = await application.queries.getOccurrence(
+    workspaceId,
+    occurrence.occurrenceId,
+  );
+  if (!isSameWorkspaceOccurrence(mediaHead, occurrence)) {
+    throw new ContentRevisionConflictError(binding.current.revision);
+  }
+  if (isSameContentOccurrence(currentBinding, boundOccurrence)) {
+    return {
+      occurrence,
+      contentRevision: binding.current,
+      previewUrl: revisionPreviewGatewayUrl(
+        binding.current.workspaceId,
+        binding.current.revision,
+      ),
+    };
+  }
   let contentRevision;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const digest = await crypto.subtle.digest(
@@ -374,7 +394,7 @@ export async function POST(request: Request) {
         throw new MediaValidationError("source");
       }
       const sourceBytes = new Uint8Array(await source.arrayBuffer());
-      const metadata = inspectImageSource(sourceBytes);
+      const metadata = await inspectImageSource(sourceBytes);
       const asset = await application.commands.upload({
         actorId,
         assetId: createMediaAssetId(String(form.get("assetId") ?? "")),
@@ -389,6 +409,41 @@ export async function POST(request: Request) {
       return Response.json(asset, { status: 201 });
     }
     const body = (await request.json()) as Record<string, unknown>;
+    if (body.operation === "access") {
+      const workspaceId = createContentWorkspaceId(
+        String(body.workspaceId ?? ""),
+      );
+      const currentContent = await (
+        await loadContentRevisionApplication(workspaceId, actorId)
+      ).queries.getCurrent();
+      const { accessGrantedAt, ...catalog } =
+        await application.commands.grantAccess({
+          actorId,
+          workspaceId,
+          idempotencyKey,
+        });
+      const capability = await createHumanMediaAccessToken(
+        authenticated.identity,
+        [
+          ...new Set(
+            [
+              ...catalog.occurrences.map(
+                (occurrence) => occurrence.assetId,
+              ),
+              ...(currentContent.definition.home.media ?? []).map(
+                (occurrence) => occurrence.asset.assetId,
+              ),
+            ],
+          ),
+        ],
+        accessGrantedAt,
+      );
+      return Response.json({
+        ...catalog,
+        accessToken: capability.token,
+        accessTokenExpiresAt: capability.expiresAt,
+      });
+    }
     if (body.operation === "replace") {
       const baseRevision = nonnegativeSafeInteger(
         body.baseRevision,
@@ -523,6 +578,7 @@ function mediaError(error: unknown) {
     return Response.json({ error: "request_check_failed" }, { status: 403 });
   }
   if (
+    error instanceof AccessIdentityUnavailableError ||
     error instanceof HumanAccessConfigurationError ||
     error instanceof ContentRevisionConfigurationError ||
     error instanceof MediaAssetConfigurationError

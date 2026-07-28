@@ -1,5 +1,8 @@
 import type { SiteId } from "@foundry/site-definition";
-import type { ContentWorkspaceId } from "./content-revisions";
+import type {
+  ContentWorkspaceId,
+  InMemoryMediaContentCoordinator,
+} from "./content-revisions";
 
 import {
   MediaAssetReferencedError,
@@ -69,12 +72,25 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
   };
 }
 
-export function createInMemoryMediaAssetStore(): MediaAssetStore {
+export function createInMemoryMediaAssetStore({
+  mediaContentCoordinator,
+}: {
+  mediaContentCoordinator?: InMemoryMediaContentCoordinator;
+} = {}): MediaAssetStore {
   const assets = new Map<string, MediaAsset>();
   const deletedAssetIds = new Set<string>();
   const revisions = new Map<string, Map<number, MediaOccurrenceRevision>>();
   const current = new Map<string, number>();
   const auditEvents: MediaAuditEvent[] = [];
+  const accessGrants = new Map<
+    string,
+    Readonly<{
+      requestHash: string;
+      assets: ReadonlyArray<MediaAsset>;
+      occurrences: ReadonlyArray<MediaOccurrenceRevision>;
+      occurredAt: string;
+    }>
+  >();
   const deletionReservations = new Map<
     string,
     Readonly<{ idempotencyKey: string; requestHash: string }>
@@ -195,24 +211,71 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       }
       return found;
     },
-    async auditRead(
+    async listCatalog(siteId, workspaceId) {
+      const availableAssets = [...assets.entries()]
+        .filter(
+          ([key, asset]) =>
+            asset.siteId === siteId &&
+            !deletedAssetIds.has(key) &&
+            !deletionReservations.has(key),
+        )
+        .map(([, asset]) => asset);
+      const availableOccurrences: MediaOccurrenceRevision[] = [];
+      for (const [key, revision] of current) {
+        if (!key.startsWith(`${siteId}:${workspaceId}:`)) continue;
+        const occurrence = revisions.get(key)?.get(revision);
+        if (occurrence !== undefined) availableOccurrences.push(occurrence);
+      }
+      return {
+        assets: availableAssets,
+        occurrences: availableOccurrences,
+      };
+    },
+    async auditAccessGrant(
       siteId,
       workspaceId,
       actorId,
-      action,
-      subjectId,
+      availableAssets,
+      availableOccurrences,
       occurredAt,
+      idempotencyKey,
+      requestHash,
     ) {
+      const key = `${siteId}:${actorId}:${idempotencyKey}`;
+      const existing = accessGrants.get(key);
+      if (existing !== undefined) {
+        if (existing.requestHash !== requestHash) {
+          throw new MediaValidationError("idempotencyKey");
+        }
+        return {
+          assets: existing.assets,
+          occurrences: existing.occurrences,
+          occurredAt: existing.occurredAt,
+        };
+      }
+      const grantedAssets = immutable(availableAssets);
+      const grantedOccurrences = immutable(availableOccurrences);
+      accessGrants.set(key, {
+        requestHash,
+        assets: grantedAssets,
+        occurrences: grantedOccurrences,
+        occurredAt,
+      });
       auditEvents.push(
         immutable({
           siteId,
           workspaceId,
           actorId,
-          action,
-          subjectId,
+          action: "media.access.granted",
+          subjectId: siteId,
           occurredAt,
         }),
       );
+      return {
+        assets: grantedAssets,
+        occurrences: grantedOccurrences,
+        occurredAt,
+      };
     },
     async createAsset(asset, context) {
       if (
@@ -231,7 +294,10 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
           existing.objectKey === asset.objectKey &&
           existing.sourceHash === asset.sourceHash &&
           existing.byteLength === asset.byteLength &&
-          existing.contentType === asset.contentType
+          existing.contentType === asset.contentType &&
+          existing.fileName === asset.fileName &&
+          existing.width === asset.width &&
+          existing.height === asset.height
         ) {
           return existing;
         }
@@ -266,47 +332,54 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
           ?.get(revision) ?? null
       );
     },
-    async saveOccurrence(revision, baseRevision, action, context) {
-      if (
-        claims.get(`${context.siteId}:${context.idempotencyKey}`)
-          ?.claimToken !== context.claimToken
-      ) {
-        throw new MediaSiteAccessError();
-      }
-      if (
-        !assets.has(scopedKey(revision.siteId, revision.assetId)) ||
-        deletionReservations.has(scopedKey(revision.siteId, revision.assetId)) ||
-        deletedAssetIds.has(scopedKey(revision.siteId, revision.assetId))
-      ) {
-        throw new MediaSiteAccessError();
-      }
-      const key = occurrenceKey(
-        revision.siteId,
-        revision.workspaceId,
-        revision.occurrenceId,
-      );
-      const currentRevision = current.get(key) ?? 0;
-      if (currentRevision !== baseRevision) {
-        throw new MediaOccurrenceConflictError(currentRevision);
-      }
-      const saved = immutable(revision);
-      const history =
-        revisions.get(key) ?? new Map<number, MediaOccurrenceRevision>();
-      revisions.set(key, history);
-      history.set(saved.revision, saved);
-      current.set(key, saved.revision);
-      auditEvents.push(
-        immutable({
-          siteId: saved.siteId,
-          workspaceId: saved.workspaceId,
-          actorId: saved.createdBy,
-          action,
-          subjectId: saved.occurrenceId,
-          occurredAt: saved.createdAt,
-        }),
-      );
-      await store.record(context, { kind: "occurrence", value: saved });
-      return saved;
+    saveOccurrence(revision, baseRevision, action, context) {
+      const operation = async () => {
+        if (
+          claims.get(`${context.siteId}:${context.idempotencyKey}`)
+            ?.claimToken !== context.claimToken
+        ) {
+          throw new MediaSiteAccessError();
+        }
+        if (
+          !assets.has(scopedKey(revision.siteId, revision.assetId)) ||
+          deletionReservations.has(
+            scopedKey(revision.siteId, revision.assetId),
+          ) ||
+          deletedAssetIds.has(scopedKey(revision.siteId, revision.assetId))
+        ) {
+          throw new MediaSiteAccessError();
+        }
+        const key = occurrenceKey(
+          revision.siteId,
+          revision.workspaceId,
+          revision.occurrenceId,
+        );
+        const currentRevision = current.get(key) ?? 0;
+        if (currentRevision !== baseRevision) {
+          throw new MediaOccurrenceConflictError(currentRevision);
+        }
+        const saved = immutable(revision);
+        const history =
+          revisions.get(key) ?? new Map<number, MediaOccurrenceRevision>();
+        revisions.set(key, history);
+        history.set(saved.revision, saved);
+        current.set(key, saved.revision);
+        auditEvents.push(
+          immutable({
+            siteId: saved.siteId,
+            workspaceId: saved.workspaceId,
+            actorId: saved.createdBy,
+            action,
+            subjectId: saved.occurrenceId,
+            occurredAt: saved.createdAt,
+          }),
+        );
+        await store.record(context, { kind: "occurrence", value: saved });
+        return saved;
+      };
+      return mediaContentCoordinator === undefined
+        ? operation()
+        : mediaContentCoordinator.runExclusive(operation);
     },
     async beginAssetDeletion(siteId, assetId, context) {
       if (

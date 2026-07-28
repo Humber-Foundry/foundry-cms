@@ -1,10 +1,12 @@
 import "server-only";
 
 import {
+  createInMemoryMediaContentCoordinator,
   createInMemoryMediaAssetStore,
   createInMemoryMediaSourceStore,
   createMediaAssetApplication,
   type ContentActorId,
+  type InMemoryMediaContentCoordinator,
   type MediaAssetStore,
   type MediaSourceStore,
 } from "@foundry/application";
@@ -24,9 +26,22 @@ export class MediaAssetConfigurationError extends Error {
 const localRuntime = globalThis as typeof globalThis & {
   __foundryMediaAssets?: MediaAssetStore;
   __foundryMediaSources?: MediaSourceStore;
+  __foundryMediaContentCoordinator?: InMemoryMediaContentCoordinator;
 };
-localRuntime.__foundryMediaAssets ??= createInMemoryMediaAssetStore();
+localRuntime.__foundryMediaContentCoordinator ??=
+  createInMemoryMediaContentCoordinator();
+localRuntime.__foundryMediaAssets ??= createInMemoryMediaAssetStore({
+  mediaContentCoordinator: localRuntime.__foundryMediaContentCoordinator,
+});
 localRuntime.__foundryMediaSources ??= createInMemoryMediaSourceStore();
+
+export function localMediaAssetStore(): MediaAssetStore {
+  return localRuntime.__foundryMediaAssets!;
+}
+
+export function localMediaContentCoordinator(): InMemoryMediaContentCoordinator {
+  return localRuntime.__foundryMediaContentCoordinator!;
+}
 
 export async function loadMediaAssetApplication(actorId: ContentActorId) {
   if (process.env.NODE_ENV === "development") {

@@ -2,6 +2,7 @@ import {
   MediaAssetReferencedError,
   MediaOccurrenceConflictError,
   MediaSiteAccessError,
+  MediaValidationError,
   createMediaAssetId,
   createMediaOccurrenceId,
   restoreContentActorId,
@@ -43,6 +44,11 @@ type OccurrenceRow = {
   crop_json: string | null;
   created_at: string;
   created_by: string;
+};
+
+type CatalogRow = {
+  kind: "asset" | "occurrence";
+  payload_json: string;
 };
 
 const assetProjection = `
@@ -149,6 +155,16 @@ export function createD1MediaAssetStore(
       if (deletion === null) return null;
     }
     return toAsset(row);
+  }
+
+  async function getRecordedAsset(siteId: SiteId, assetId: MediaAssetId) {
+    const row = await database
+      .prepare(
+        `${assetProjection} WHERE site_id = ?1 AND asset_id = ?2`,
+      )
+      .bind(siteId, assetId)
+      .first<AssetRow>();
+    return row === null ? null : toAsset(row);
   }
 
   async function getAsset(siteId: SiteId, assetId: MediaAssetId) {
@@ -346,23 +362,173 @@ export function createD1MediaAssetStore(
         .all<OccurrenceRow>();
       return rows.results.map(toOccurrence);
     },
-    async auditRead(
+    async listCatalog(siteId, workspaceId) {
+      const rows = await database
+        .prepare(
+          `SELECT 'asset' AS kind, json_object(
+             'site_id', site_id,
+             'asset_id', asset_id,
+             'object_key', object_key,
+             'source_hash', source_hash,
+             'file_name', file_name,
+             'content_type', content_type,
+             'byte_length', byte_length,
+             'width', width,
+             'height', height,
+             'created_at', created_at,
+             'created_by', created_by,
+             'deleted_at', deleted_at
+           ) AS payload_json
+           FROM media_assets
+           WHERE site_id = ?1 AND deleted_at IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM media_asset_deletions
+               WHERE media_asset_deletions.site_id = media_assets.site_id
+                 AND media_asset_deletions.asset_id = media_assets.asset_id
+             )
+           UNION ALL
+           SELECT 'occurrence' AS kind, json_object(
+             'site_id', site_id,
+             'workspace_id', workspace_id,
+             'occurrence_id', occurrence_id,
+             'revision', revision,
+             'asset_id', asset_id,
+             'crop_json', crop_json,
+             'created_at', created_at,
+             'created_by', created_by
+           ) AS payload_json
+           FROM media_occurrence_revisions
+           WHERE site_id = ?1 AND workspace_id = ?2
+             AND revision = (
+               SELECT current_revision
+               FROM media_occurrences
+               WHERE site_id = ?1
+                 AND workspace_id = ?2
+                 AND occurrence_id =
+                   media_occurrence_revisions.occurrence_id
+             )
+           ORDER BY kind, payload_json`,
+        )
+        .bind(siteId, workspaceId)
+        .all<CatalogRow>();
+      return {
+        assets: rows.results
+          .filter((row) => row.kind === "asset")
+          .map((row) => toAsset(JSON.parse(row.payload_json) as AssetRow)),
+        occurrences: rows.results
+          .filter((row) => row.kind === "occurrence")
+          .map((row) =>
+            toOccurrence(JSON.parse(row.payload_json) as OccurrenceRow),
+          ),
+      };
+    },
+    async auditAccessGrant(
       siteId,
       workspaceId,
       actorId,
-      action,
-      subjectId,
+      availableAssets,
+      availableOccurrences,
       occurredAt,
+      idempotencyKey,
+      requestHash,
     ) {
       await database
         .prepare(
-          `INSERT INTO media_audit_events (
+          `INSERT OR IGNORE INTO media_audit_events (
              site_id, workspace_id, actor_id, action, subject_id,
-             subject_revision, occurred_at
-           ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)`,
+             subject_revision, idempotency_key, request_hash, scope_json,
+             occurred_at
+           ) VALUES (
+             ?1, ?2, ?3, 'media.access.granted', ?1, NULL, ?4, ?5, ?6, ?7
+           )`,
         )
-        .bind(siteId, workspaceId, actorId, action, subjectId, occurredAt)
+        .bind(
+          siteId,
+          workspaceId,
+          actorId,
+          idempotencyKey,
+          requestHash,
+          JSON.stringify({
+            assetIds: availableAssets.map((asset) => asset.assetId),
+            occurrences: availableOccurrences.map((occurrence) => ({
+              occurrenceId: occurrence.occurrenceId,
+              revision: occurrence.revision,
+            })),
+          }),
+          occurredAt,
+        )
         .run();
+      const recorded = await database
+        .prepare(
+          `SELECT request_hash, scope_json, occurred_at
+           FROM media_audit_events
+           WHERE site_id = ?1 AND actor_id = ?2
+             AND idempotency_key = ?3
+             AND action = 'media.access.granted'`,
+        )
+        .bind(siteId, actorId, idempotencyKey)
+        .first<{
+          request_hash: string;
+          scope_json: string;
+          occurred_at: string;
+        }>();
+      if (recorded === null || recorded.request_hash !== requestHash) {
+        throw new MediaValidationError("idempotencyKey");
+      }
+      const scope: unknown = JSON.parse(recorded.scope_json);
+      if (
+        typeof scope !== "object" ||
+        scope === null ||
+        !("assetIds" in scope) ||
+        !Array.isArray(scope.assetIds) ||
+        !scope.assetIds.every((value) => typeof value === "string") ||
+        !("occurrences" in scope) ||
+        !Array.isArray(scope.occurrences) ||
+        !scope.occurrences.every(
+          (value) =>
+            typeof value === "object" &&
+            value !== null &&
+            "occurrenceId" in value &&
+            typeof value.occurrenceId === "string" &&
+            "revision" in value &&
+            typeof value.revision === "number" &&
+            Number.isSafeInteger(value.revision) &&
+            value.revision > 0,
+        )
+      ) {
+        throw new MediaSiteAccessError();
+      }
+      const grantedAssets = await Promise.all(
+        scope.assetIds.map((value) =>
+          getRecordedAsset(siteId, createMediaAssetId(value)),
+        ),
+      );
+      const grantedOccurrences = await Promise.all(
+        scope.occurrences.map((value) => {
+          const occurrence = value as {
+            occurrenceId: string;
+            revision: number;
+          };
+          return getOccurrenceRevision(
+            siteId,
+            workspaceId,
+            createMediaOccurrenceId(occurrence.occurrenceId),
+            occurrence.revision,
+          );
+        }),
+      );
+      if (
+        grantedAssets.some((asset) => asset === null) ||
+        grantedOccurrences.some((occurrence) => occurrence === null)
+      ) {
+        throw new MediaSiteAccessError();
+      }
+      return {
+        assets: grantedAssets as ReadonlyArray<MediaAsset>,
+        occurrences:
+          grantedOccurrences as ReadonlyArray<MediaOccurrenceRevision>,
+        occurredAt: recorded.occurred_at,
+      };
     },
     async createAsset(asset, context) {
       const { idempotencyKey, requestHash } = context;

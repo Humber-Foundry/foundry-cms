@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import {
   AccessDeniedError,
   type ContentRevision,
+  type MediaAsset,
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   createContentActorId,
@@ -28,10 +29,6 @@ import {
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
 import { referenceSiteApplication } from "@/src/reference-installation";
 import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
-import {
-  MediaAssetConfigurationError,
-  loadMediaAssetApplication,
-} from "@/src/media-asset-runtime";
 
 import "./dashboard.css";
 import "../public.css";
@@ -163,20 +160,9 @@ export default async function DashboardPage({
       throw error;
     }
   }
-  let mediaAssets;
-  let mediaOccurrences;
-  try {
-    const mediaApplication = await loadMediaAssetApplication(actorId);
-    [mediaAssets, mediaOccurrences] = await Promise.all([
-      mediaApplication.queries.listAssets(),
-      mediaApplication.queries.listOccurrences(workspaceId),
-    ]);
-  } catch (error) {
-    if (error instanceof MediaAssetConfigurationError) notFound();
-    throw error;
-  }
-  mediaOccurrences = mergeMediaOccurrenceState(
-    mediaOccurrences,
+  const mediaAssets: ReadonlyArray<MediaAsset> = [];
+  const mediaOccurrences = mergeMediaOccurrenceState(
+    [],
     contentRevision?.definition.home.media ?? [],
   );
 
@@ -196,6 +182,7 @@ export default async function DashboardPage({
       suspectedSpam={formOperations.suspectedSpam}
       mediaAssets={mediaAssets}
       mediaOccurrences={mediaOccurrences}
+      mediaWorkspaceId={workspaceId}
     />
   );
 }

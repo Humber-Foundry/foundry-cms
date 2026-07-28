@@ -3,6 +3,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 import {
   applySiteDefinitionEdits,
+  createReferenceSiteDefinition,
   DuplicateEditableSiteFieldPathError,
   createSiteId,
   listEditableSiteFields,
@@ -51,8 +52,30 @@ describe("reference Site Definition", () => {
     );
   });
 
-  it("keeps the Git-published reference media manifest explicit and empty", () => {
-    expect(referenceSiteDefinition.home.media).toEqual([]);
+  it("preserves the Git-published media manifest at runtime", () => {
+    const published = {
+      ...structuredClone(referenceSiteDefinition),
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        media: [
+          {
+            occurrenceId: "occurrence_home_hero",
+            revision: 4,
+            asset: {
+              assetId: "asset_published",
+              width: 1200,
+              height: 800,
+              contentType: "image/png",
+            },
+            crop: null,
+          },
+        ],
+      },
+    } satisfies SiteDefinition;
+
+    expect(createReferenceSiteDefinition(published).home.media).toEqual(
+      published.home.media,
+    );
   });
 
   it("continues to validate saved 1.0 definitions created before media manifests", () => {

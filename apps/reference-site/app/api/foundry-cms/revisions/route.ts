@@ -6,8 +6,11 @@ import {
   ContentRevisionConfigurationError,
   ContentRevisionStaleError,
   ContentWorkspaceAccessError,
+  MediaSiteAccessError,
+  MediaValidationError,
   createContentActorId,
   createContentWorkspaceId,
+  createMediaAssetId,
 } from "@foundry/application";
 import type {
   PageComposition,
@@ -29,10 +32,16 @@ import {
   loadHumanIdentityRequestContext,
 } from "../../../../src/human-access-runtime";
 import {
+  createHumanMediaAccessToken,
   createHumanMutationToken,
+  verifyHumanMediaAccessToken,
   verifyHumanMutation,
 } from "../../../../src/human-mutation-runtime";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
+import {
+  MediaAssetConfigurationError,
+  loadMediaAssetApplication,
+} from "../../../../src/media-asset-runtime";
 import { revisionPreviewGatewayUrl } from "../../../../src/content-revision-links";
 import { createRevisionPreviewCapability } from "../../../../src/preview-capability-runtime";
 
@@ -56,6 +65,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceParameter = url.searchParams.get("workspaceId");
     const revisionParameter = url.searchParams.get("revision");
+    const mediaAccessToken = url.searchParams.get("accessToken");
     if (workspaceParameter === null && revisionParameter === null) {
       return Response.json(
         {
@@ -96,9 +106,28 @@ export async function GET(request: Request) {
       workspaceId,
       revision: revisionNumber,
     });
+    const revisionAssetIds = [
+      ...new Set(
+        (revision.definition.home.media ?? []).map(
+          (occurrence) => occurrence.asset.assetId,
+        ),
+      ),
+    ];
+    await Promise.all(
+      revisionAssetIds.map((assetId) =>
+        verifyHumanMediaAccessToken(
+          mediaAccessToken,
+          access.identity,
+          assetId,
+        ),
+      ),
+    );
     const previewQuery = new URLSearchParams({
       capability,
       bookmark: revision.bookmark,
+      ...(mediaAccessToken === null
+        ? {}
+        : { accessToken: mediaAccessToken }),
     });
     const previewUrl =
       `/__foundry/preview/${workspaceId}/${revisionNumber}?${previewQuery.toString()}`;
@@ -107,13 +136,15 @@ export async function GET(request: Request) {
     if (
       error instanceof AccessIdentityError ||
       error instanceof AccessDeniedError ||
-      error instanceof ContentWorkspaceAccessError
+      error instanceof ContentWorkspaceAccessError ||
+      error instanceof HumanRequestIntegrityError
     ) {
       return Response.json({ error: "request_check_failed" }, { status: 403 });
     }
     if (
       error instanceof HumanAccessConfigurationError ||
-      error instanceof ContentRevisionConfigurationError
+      error instanceof ContentRevisionConfigurationError ||
+      error instanceof MediaAssetConfigurationError
     ) {
       return Response.json(
         { error: "request_check_unavailable" },
@@ -227,6 +258,78 @@ export async function POST(request: Request) {
         submitted.operation === "create_workspace")
         ? submitted.operation
         : undefined;
+    if (
+      typeof submitted === "object" &&
+      submitted !== null &&
+      "operation" in submitted &&
+      submitted.operation === "open_preview"
+    ) {
+      const candidate = submitted as Record<string, unknown>;
+      if (
+        typeof candidate.workspaceId !== "string" ||
+        !Number.isSafeInteger(candidate.revision) ||
+        (candidate.revision as number) < 0 ||
+        !/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)
+      ) {
+        return Response.json({ error: "invalid_command" }, { status: 400 });
+      }
+      let workspaceId;
+      try {
+        workspaceId = createContentWorkspaceId(candidate.workspaceId);
+      } catch {
+        return Response.json({ error: "invalid_command" }, { status: 400 });
+      }
+      await requireExistingContentWorkspaceAccess(workspaceId, actorId);
+      const application = await loadContentRevisionApplication(
+        workspaceId,
+        actorId,
+      );
+      const revision = await application.queries.getRevisionWithBookmark(
+        candidate.revision as number,
+      );
+      if (
+        revision === null ||
+        !(await application.queries.isRevisionCurrent(revision))
+      ) {
+        return Response.json(
+          { error: "preview_unavailable" },
+          { status: 409 },
+        );
+      }
+      const requestedAssetIds = [
+        ...new Set(
+          (revision.definition.home.media ?? []).map((occurrence) =>
+            createMediaAssetId(occurrence.asset.assetId),
+          ),
+        ),
+      ];
+      const mediaApplication = await loadMediaAssetApplication(actorId);
+      const grant = await mediaApplication.commands.grantRevisionAccess({
+        actorId,
+        workspaceId,
+        assetIds: requestedAssetIds,
+        idempotencyKey,
+      });
+      const mediaCapability = await createHumanMediaAccessToken(
+        access.identity,
+        grant.assetIds,
+        grant.accessGrantedAt,
+      );
+      const previewCapability = await createRevisionPreviewCapability({
+        identity: access.identity,
+        workspaceId,
+        revision: revision.revision,
+      });
+      const previewQuery = new URLSearchParams({
+        capability: previewCapability,
+        bookmark: revision.bookmark,
+        accessToken: mediaCapability.token,
+      });
+      return Response.json({
+        previewUrl:
+          `/__foundry/preview/${workspaceId}/${revision.revision}?${previewQuery.toString()}`,
+      });
+    }
     if (operation !== undefined) {
       const workspaceId =
         operation === "create_default_workspace"
@@ -310,6 +413,12 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    if (error instanceof MediaValidationError) {
+      return Response.json(
+        { error: "idempotency_key_conflict" },
+        { status: 409 },
+      );
+    }
     if (error instanceof ContentRevisionStaleError) {
       return Response.json(
         {
@@ -321,7 +430,10 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    if (error instanceof ContentWorkspaceAccessError) {
+    if (
+      error instanceof ContentWorkspaceAccessError ||
+      error instanceof MediaSiteAccessError
+    ) {
       return Response.json({ error: "workspace_access_denied" }, { status: 403 });
     }
     if (
@@ -333,7 +445,8 @@ export async function POST(request: Request) {
     }
     if (
       error instanceof HumanAccessConfigurationError ||
-      error instanceof ContentRevisionConfigurationError
+      error instanceof ContentRevisionConfigurationError ||
+      error instanceof MediaAssetConfigurationError
     ) {
       return Response.json(
         { error: "request_check_unavailable" },

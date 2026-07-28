@@ -7,10 +7,10 @@ import { MediaOccurrence } from "./media-occurrence";
 import { sectionAnchor } from "@/src/section-anchor";
 
 function occurrenceFor(
-  definition: SiteDefinition,
+  definition: SiteDefinition | undefined,
   occurrenceId: string,
 ) {
-  return (definition.home.media ?? []).find(
+  return (definition?.home.media ?? []).find(
     (candidate) => candidate.occurrenceId === occurrenceId,
   ) ?? null;
 }
@@ -18,15 +18,20 @@ function occurrenceFor(
 export function SiteSection({
   section,
   definition,
-  mediaDelivery,
+  mediaDelivery = "published",
+  mediaAccessToken,
 }: {
   section: PageSection;
-  definition: SiteDefinition;
-  mediaDelivery: "authenticated" | "published";
+  definition?: SiteDefinition;
+  mediaDelivery?: "authenticated" | "published";
+  mediaAccessToken?: string;
 }) {
   switch (section.type) {
     case "hero": {
-      const occurrence = occurrenceFor(definition, "occurrence_home_hero");
+      const occurrence =
+        section.id === "section_hero"
+          ? occurrenceFor(definition, "occurrence_home_hero")
+          : null;
       return (
         <section
           className="hero"
@@ -41,6 +46,7 @@ export function SiteSection({
               className="site-media site-media-hero"
               occurrence={occurrence}
               delivery={mediaDelivery}
+              accessToken={mediaAccessToken}
             />
           )}
           <div className="action-row">
@@ -57,7 +63,10 @@ export function SiteSection({
     }
 
     case "services": {
-      const occurrence = occurrenceFor(definition, "occurrence_home_detail");
+      const occurrence =
+        section.id === "section_services"
+          ? occurrenceFor(definition, "occurrence_home_detail")
+          : null;
       return (
         <section
           className="services"
@@ -74,6 +83,7 @@ export function SiteSection({
               className="site-media site-media-detail"
               occurrence={occurrence}
               delivery={mediaDelivery}
+              accessToken={mediaAccessToken}
             />
           )}
           <ol className="service-list">
@@ -141,9 +151,11 @@ export function SiteSection({
 export function SiteRenderer({
   definition,
   mediaDelivery = "published",
+  mediaAccessToken,
 }: {
   definition: SiteDefinition;
   mediaDelivery?: "authenticated" | "published";
+  mediaAccessToken?: string;
 }) {
   return (
     <>
@@ -167,6 +179,7 @@ export function SiteRenderer({
             section={section}
             definition={definition}
             mediaDelivery={mediaDelivery}
+            mediaAccessToken={mediaAccessToken}
           />
         ))}
       </main>
