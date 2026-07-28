@@ -218,12 +218,18 @@ describe("commit-pinned Graphify index", () => {
       graphifyVersion: "graphify 9.9.9-test",
       scope: "code",
     });
-    expect(
+    const graph = JSON.parse(
       readFileSync(
         join(result.cache, "snapshots", main, "graphify-out", "graph.json"),
         "utf8",
       ),
-    ).toContain('"stable"');
+    );
+    expect(graph.nodes).toContainEqual(
+      expect.objectContaining({
+        id: "stable",
+        source_file: "src/stable.ts",
+      }),
+    );
   });
 
   it("uses the branch merge-base snapshot and excludes branch-modified files", () => {
@@ -356,7 +362,7 @@ describe("commit-pinned Graphify index", () => {
     expect(query.output).toContain("Graph snapshot integrity check failed");
   });
 
-  it("rejects snapshot source-root metadata that does not match tracked paths", () => {
+  it("rejects snapshot source-path metadata that is not repository-relative", () => {
     const { root, main } = createRepository();
     const result = runIndex(root, ["refresh"]);
     expect(result.status, result.output).toBe(0);
@@ -367,7 +373,7 @@ describe("commit-pinned Graphify index", () => {
       "metadata.json",
     );
     const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-    metadata.sourceRoot = tmpdir();
+    metadata.sourcePathFormat = "absolute";
     writeFileSync(metadataPath, JSON.stringify(metadata));
 
     const query = runIndex(root, ["query", "stable"], {
@@ -375,9 +381,7 @@ describe("commit-pinned Graphify index", () => {
     });
 
     expect(query.status).not.toBe(0);
-    expect(query.output).toContain(
-      "Graph snapshot source path does not match",
-    );
+    expect(query.output).toContain("Graph snapshot integrity check failed");
   });
 
   it("rejects a successful extractor process that emits an empty graph", () => {

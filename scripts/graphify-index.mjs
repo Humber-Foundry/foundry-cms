@@ -26,7 +26,6 @@ import {
 const schemaVersion = "foundry.graphify-index/v1";
 const maximumQueryBudget = 3_000;
 const defaultQueryBudget = 1_200;
-const maximumRefreshLockAgeMs = 4 * 60 * 60 * 1_000;
 
 function fail(message) {
   throw new Error(message);
@@ -128,17 +127,19 @@ function validateGraph(graph, path) {
   }
 }
 
-function verifySnapshot(context, commitSha) {
-  const root = snapshotDirectory(context.cacheRoot, commitSha);
-  const metadata = readJson(join(root, "metadata.json"), "Graph metadata");
-  const graphFile = graphPath(root);
-  const graphBytes = readFileSync(graphFile);
-  const graph = readJson(graphFile, "Graph snapshot");
-
+function validateSnapshot(
+  context,
+  commitSha,
+  metadata,
+  graphBytes,
+  graph,
+  graphFile,
+) {
   if (
     metadata.schemaVersion !== schemaVersion ||
     metadata.ref !== "refs/remotes/origin/main" ||
     metadata.scope !== "code" ||
+    metadata.sourcePathFormat !== "repository-relative" ||
     metadata.commitSha !== commitSha ||
     metadata.treeSha !==
       gitText(context.repositoryRoot, "rev-parse", `${commitSha}^{tree}`) ||
@@ -156,10 +157,7 @@ function verifySnapshot(context, commitSha) {
     ...(graph.links ?? graph.edges),
   ]) {
     if (!item.source_file) continue;
-    const source = repositoryRelativeSource(
-      item.source_file,
-      metadata.sourceRoot,
-    );
+    const source = repositoryRelativeSource(item.source_file);
     if (source === null || !tracked.has(source)) {
       fail(
         `Graph snapshot source path does not match ${commitSha}: ` +
@@ -167,6 +165,22 @@ function verifySnapshot(context, commitSha) {
       );
     }
   }
+}
+
+function verifySnapshot(context, commitSha) {
+  const root = snapshotDirectory(context.cacheRoot, commitSha);
+  const metadata = readJson(join(root, "metadata.json"), "Graph metadata");
+  const graphFile = graphPath(root);
+  const graphBytes = readFileSync(graphFile);
+  const graph = readJson(graphFile, "Graph snapshot");
+  validateSnapshot(
+    context,
+    commitSha,
+    metadata,
+    graphBytes,
+    graph,
+    graphFile,
+  );
   return { root, metadata, graph };
 }
 
@@ -182,6 +196,7 @@ function processIsAlive(pid) {
 
 function acquireRefreshLock(cacheRoot) {
   const lock = join(cacheRoot, "refresh.lock");
+  const ownerToken = randomUUID();
   mkdirSync(cacheRoot, { recursive: true });
   while (true) {
     const candidate = join(
@@ -194,6 +209,7 @@ function acquireRefreshLock(cacheRoot) {
       JSON.stringify({
         pid: process.pid,
         hostname: hostname(),
+        token: ownerToken,
         startedAt: new Date().toISOString(),
       }),
     );
@@ -209,12 +225,9 @@ function acquireRefreshLock(cacheRoot) {
         join(lock, "owner.json"),
         "Graphify refresh lock owner",
       );
-      const startedAt = Date.parse(owner.startedAt);
-      const age = Date.now() - startedAt;
       const active =
         owner.hostname !== hostname() ||
-        (!Number.isFinite(age) ||
-          (age < maximumRefreshLockAgeMs && processIsAlive(owner.pid)));
+        processIsAlive(owner.pid);
       if (active) {
         fail("Another Graphify refresh is already running.");
       }
@@ -236,7 +249,19 @@ function acquireRefreshLock(cacheRoot) {
       }
     }
   }
-  return () => rmSync(lock, { recursive: true, force: true });
+  return () => {
+    try {
+      const owner = readJson(
+        join(lock, "owner.json"),
+        "Graphify refresh lock owner",
+      );
+      if (owner.token === ownerToken) {
+        rmSync(lock, { recursive: true, force: true });
+      }
+    } catch {
+      // Never remove a lock whose ownership can no longer be proven.
+    }
+  };
 }
 
 function graphifyExecutable() {
@@ -323,6 +348,23 @@ function archiveCommit(context, destination) {
   }
 }
 
+function normalizeGraphSources(graph, sourceRoot, tracked) {
+  for (const item of [
+    ...graph.nodes,
+    ...(graph.links ?? graph.edges),
+  ]) {
+    if (!item.source_file) continue;
+    const source = repositoryRelativeSource(item.source_file, sourceRoot);
+    if (source === null || !tracked.has(source)) {
+      fail(
+        `Graphify emitted a source path outside the pinned tree: ` +
+          item.source_file,
+      );
+    }
+    item.source_file = source;
+  }
+}
+
 function refresh() {
   const context = repositoryContext();
   assertRefreshWorktree(context);
@@ -363,11 +405,15 @@ function refresh() {
       { cwd: sourceRoot },
     );
     const stagedGraphPath = graphPath(staging);
-    const graphBytes = readFileSync(stagedGraphPath);
-    validateGraph(
-      JSON.parse(graphBytes.toString("utf8")),
-      stagedGraphPath,
+    const graph = readJson(stagedGraphPath, "Staged Graphify graph");
+    validateGraph(graph, stagedGraphPath);
+    normalizeGraphSources(
+      graph,
+      sourceRoot,
+      trackedPaths(context.repositoryRoot, context.head),
     );
+    const graphBytes = Buffer.from(`${JSON.stringify(graph)}\n`);
+    writeFileSync(stagedGraphPath, graphBytes);
     const metadata = {
       schemaVersion,
       repository: context.repository,
@@ -380,7 +426,7 @@ function refresh() {
       ),
       graphifyVersion: graphifyVersion(context),
       generatedAt: new Date().toISOString(),
-      sourceRoot,
+      sourcePathFormat: "repository-relative",
       sourceManifestSha256: manifestHash(
         context.repositoryRoot,
         context.head,
@@ -389,6 +435,14 @@ function refresh() {
       scope: "code",
     };
     assertRefreshWorktree(context);
+    validateSnapshot(
+      context,
+      context.head,
+      metadata,
+      graphBytes,
+      graph,
+      stagedGraphPath,
+    );
     writeFileSync(
       join(staging, "metadata.json"),
       `${JSON.stringify(metadata, null, 2)}\n`,
@@ -457,12 +511,13 @@ function portablePath(path) {
   return normalize(path).split(sep).join("/");
 }
 
-function repositoryRelativeSource(sourceFile, sourceRoot) {
+function repositoryRelativeSource(sourceFile, sourceRoot = null) {
   if (typeof sourceFile !== "string" || sourceFile === "") return null;
   if (!isAbsolute(sourceFile)) {
     const normalized = portablePath(sourceFile).replace(/^\.\//u, "");
     return normalized.startsWith("../") ? null : normalized;
   }
+  if (sourceRoot === null) return null;
   const candidate = portablePath(relative(sourceRoot, sourceFile));
   return candidate === ".." || candidate.startsWith("../") ? null : candidate;
 }
@@ -473,14 +528,11 @@ function edgeEndpointId(endpoint) {
     : endpoint;
 }
 
-function filterGraph(graph, metadata, changed) {
+function filterGraph(graph, changed) {
   const removed = new Set();
   const nodes = graph.nodes.filter((node) => {
     if (!node.source_file) return true;
-    const source = repositoryRelativeSource(
-      node.source_file,
-      metadata.sourceRoot,
-    );
+    const source = repositoryRelativeSource(node.source_file);
     const keep = source !== null && !changed.has(source);
     if (!keep) removed.add(node.id);
     return keep;
@@ -488,7 +540,7 @@ function filterGraph(graph, metadata, changed) {
   const edgeKey = Array.isArray(graph.links) ? "links" : "edges";
   const edges = graph[edgeKey].filter((edge) => {
     const sourceFile = edge.source_file
-      ? repositoryRelativeSource(edge.source_file, metadata.sourceRoot)
+      ? repositoryRelativeSource(edge.source_file)
       : null;
     return (
       (!edge.source_file ||
@@ -552,11 +604,7 @@ function query(arguments_) {
   const context = repositoryContext();
   const snapshot = branchSnapshot(context);
   const changed = changedPaths(context, snapshot.baseSha);
-  const filtered = filterGraph(
-    snapshot.graph,
-    snapshot.metadata,
-    changed,
-  );
+  const filtered = filterGraph(snapshot.graph, changed);
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "foundry-graphify-query-"),
   );

@@ -31,7 +31,7 @@ Snapshot metadata binds the graph to:
 - the tracked-file manifest hash;
 - the Graphify version;
 - the graph content hash; and
-- the source root used during extraction.
+- the repository-relative source-path format.
 
 ## Foreman refresh
 
@@ -48,11 +48,12 @@ After a verified merge:
 The refresh acquires an ownership-aware shared lock, archives the pinned commit
 to an immutable temporary source tree, performs code-only extraction, validates
 the result, rechecks the publishing worktree, and atomically publishes the
-commit-addressed snapshot. It refuses feature commits and dirty worktrees. If
-the same snapshot already exists, it verifies that snapshot rather than
-rebuilding it. A later refresh reclaims a lock left by a process that no longer
-exists. It also reclaims a lock older than four hours, while preserving a live
-refresher's lock during the bounded refresh window.
+commit-addressed snapshot. Every indexed source path is checked against the
+pinned tree and rewritten repository-relative, so query output remains usable
+after the temporary archive is removed. It refuses feature commits and dirty
+worktrees. If the same snapshot already exists, it verifies that snapshot
+rather than rebuilding it. A later refresh reclaims a lock left by a process
+that no longer exists, but never takes or removes another live owner's lock.
 
 Graphify's AST workers may be denied by an agent sandbox even when its process
 exits successfully. The wrapper rejects an empty graph. If the refresh reports
