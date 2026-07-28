@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -89,6 +90,9 @@ if (args[0] === "extract") {
     join(graphDirectory, "graph.json"),
     JSON.stringify(graph),
   );
+  if (process.env.GRAPHIFY_FAKE_WARNING === "1") {
+    console.error("  warning: worker failed for src/changed.ts: simulated failure");
+  }
   if (process.env.GRAPHIFY_FAKE_MUTATE_REPOSITORY === "1") {
     writeFileSync(
       join(
@@ -107,6 +111,9 @@ if (args[0] === "query") {
   );
   for (const node of graph.nodes ?? []) {
     console.log(\`NODE \${node.label} [src=\${node.source_file ?? ""}]\`);
+  }
+  for (const edge of graph.links ?? graph.edges ?? []) {
+    console.log(\`EDGE \${edge.source} -> \${edge.target}\`);
   }
   process.exit(0);
 }
@@ -183,6 +190,7 @@ function runIndex(repository, arguments_, options = {}) {
             GRAPHIFY_FAKE_MUTATE_REPOSITORY: options.mutateRepository
               ? "1"
               : "0",
+            GRAPHIFY_FAKE_WARNING: options.warning ? "1" : "0",
             GRAPHIFY_INDEX_CACHE_DIR: cache,
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -310,6 +318,63 @@ describe("commit-pinned Graphify index", () => {
     expect(result.output).not.toContain("NODE Changed");
   });
 
+  it("drops all relationships when branch changes can affect module resolution", () => {
+    const { root } = createRepository();
+    writeFileSync(
+      join(root, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@lib/*": ["src/*"] } } }),
+    );
+    const main = commitAll(root, "add resolver configuration");
+    git(root, "update-ref", "refs/remotes/origin/main", main);
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const graphify = createFakeGraphify();
+    const graph = writeFakeGraph(root);
+    expect(
+      runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+    ).toBe(0);
+
+    git(root, "checkout", "-b", "feature");
+    writeFileSync(
+      join(root, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@lib/*": ["other/*"] } } }),
+    );
+
+    const result = runIndex(root, ["query", "stable"], {
+      cache,
+      graphify,
+      graph,
+    });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toContain("Graph relationships excluded");
+    expect(result.output).toContain("NODE Stable");
+    expect(result.output).not.toContain("EDGE stable -> changed");
+  });
+
+  it("drops all relationships when an added file can become a resolution target", () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const graphify = createFakeGraphify();
+    const graph = writeFakeGraph(root);
+    expect(
+      runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+    ).toBe(0);
+
+    git(root, "checkout", "-b", "feature");
+    writeFileSync(join(root, "src", "new-target.ts"), "export const target = 1;\n");
+
+    const result = runIndex(root, ["query", "stable"], {
+      cache,
+      graphify,
+      graph,
+    });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toContain("Graph relationships excluded");
+    expect(result.output).toContain("src/new-target.ts");
+    expect(result.output).not.toContain("EDGE stable -> changed");
+  });
+
   it("fails closed when a branch has integrated main without a matching snapshot", () => {
     const { root } = createRepository();
     const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
@@ -407,6 +472,88 @@ describe("commit-pinned Graphify index", () => {
     expect(result.output).toContain(
       "Graphify produced an invalid or empty graph",
     );
+  });
+
+  it("rejects a successful extractor process that reports partial extraction", () => {
+    const { root, main } = createRepository();
+    const result = runIndex(root, ["refresh"], { warning: true });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain(
+      "Graphify extraction reported incomplete results",
+    );
+    expect(result.output).toContain("warning: worker failed");
+    expect(
+      existsSync(join(result.cache, "snapshots", main)),
+    ).toBe(false);
+  });
+
+  it("retains active and recent snapshots while pruning older cache entries", () => {
+    const { root, main } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const snapshots = join(cache, "snapshots");
+    mkdirSync(snapshots, { recursive: true });
+    for (let index = 0; index < 24; index += 1) {
+      const commitSha = index.toString(16).padStart(40, "0");
+      const directory = join(snapshots, commitSha);
+      mkdirSync(directory);
+      writeFileSync(
+        join(directory, "metadata.json"),
+        JSON.stringify({
+          generatedAt: new Date(index * 1_000).toISOString(),
+        }),
+      );
+    }
+
+    const result = runIndex(root, ["refresh"], { cache });
+
+    expect(result.status, result.output).toBe(0);
+    const retained = readdirSync(snapshots);
+    expect(retained).toContain(main);
+    expect(retained.length).toBe(20);
+    expect(retained).not.toContain("0".repeat(40));
+  });
+
+  it("preserves an older snapshot used as an active worktree merge base", () => {
+    const { root, main: oldMain } = createRepository();
+    const featureWorktree = mkdtempSync(
+      join(tmpdir(), "foundry-graphify-worktree-"),
+    );
+    git(root, "worktree", "add", "-b", "feature", featureWorktree, oldMain);
+    writeFileSync(join(root, "src", "main-only.ts"), "export const main = 2;\n");
+    const newMain = commitAll(root, "advance main");
+    git(root, "update-ref", "refs/remotes/origin/main", newMain);
+
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const snapshots = join(cache, "snapshots");
+    mkdirSync(snapshots, { recursive: true });
+    const oldSnapshot = join(snapshots, oldMain);
+    mkdirSync(oldSnapshot);
+    writeFileSync(
+      join(oldSnapshot, "metadata.json"),
+      JSON.stringify({ generatedAt: new Date(0).toISOString() }),
+    );
+    for (let index = 1; index <= 24; index += 1) {
+      const directory = join(
+        snapshots,
+        index.toString(16).padStart(40, "0"),
+      );
+      mkdirSync(directory);
+      writeFileSync(
+        join(directory, "metadata.json"),
+        JSON.stringify({
+          generatedAt: new Date(index * 1_000).toISOString(),
+        }),
+      );
+    }
+
+    const result = runIndex(root, ["refresh"], { cache });
+
+    expect(result.status, result.output).toBe(0);
+    const retained = readdirSync(snapshots);
+    expect(retained).toContain(newMain);
+    expect(retained).toContain(oldMain);
+    expect(retained.length).toBe(21);
   });
 
   it("refuses to refresh from a feature branch or a dirty main worktree", () => {

@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -27,6 +28,7 @@ const schemaVersion = "foundry.graphify-index/v1";
 const maximumQueryBudget = 3_000;
 const defaultQueryBudget = 1_200;
 const remoteRefreshLeaseMs = 4 * 60 * 60 * 1_000;
+const recentSnapshotRetention = 20;
 
 function fail(message) {
   throw new Error(message);
@@ -296,6 +298,24 @@ function runGraphify(arguments_, options = {}) {
         .join("\n"),
     );
   }
+  if (options.rejectExtractionFailures) {
+    const extractionFailures = (result.stderr ?? "")
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter(
+        (line) =>
+          /warning:\s+(?:worker failed for|skipped )|classified as code but graphify has no AST extractor|contributed nothing to the graph because a dependency is missing|(?:cross-file .*resolution|type-reference resolution) failed/iu.test(
+            line,
+          ),
+      );
+    if (extractionFailures.length > 0) {
+      fail(
+        "Graphify extraction reported incomplete results, so no snapshot was published:\n" +
+          extractionFailures.join("\n"),
+      );
+    }
+  }
   return result.stdout ?? "";
 }
 
@@ -372,17 +392,88 @@ function normalizeGraphSources(graph, sourceRoot, tracked) {
   }
 }
 
+function activeWorktreeBases(context) {
+  const records = runGit(context.repositoryRoot, [
+    "worktree",
+    "list",
+    "--porcelain",
+    "-z",
+  ])
+    .split("\0\0")
+    .filter(Boolean);
+  const bases = new Set([context.originMain]);
+  for (const record of records) {
+    const head = record
+      .split("\0")
+      .find((line) => line.startsWith("HEAD "))
+      ?.slice("HEAD ".length);
+    if (!head) continue;
+    try {
+      bases.add(
+        gitText(
+          context.repositoryRoot,
+          "merge-base",
+          head,
+          "refs/remotes/origin/main",
+        ),
+      );
+    } catch {
+      // A concurrently removed worktree cannot require its base snapshot.
+    }
+  }
+  return bases;
+}
+
+function garbageCollectSnapshots(context) {
+  const snapshotsRoot = join(context.cacheRoot, "snapshots");
+  if (!existsSync(snapshotsRoot)) return;
+  const snapshots = readdirSync(snapshotsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      let generatedAt = Number.NEGATIVE_INFINITY;
+      try {
+        generatedAt = Date.parse(
+          JSON.parse(
+            readFileSync(
+              join(snapshotsRoot, entry.name, "metadata.json"),
+              "utf8",
+            ),
+          ).generatedAt,
+        );
+      } catch {
+        // Invalid abandoned snapshots sort behind valid published snapshots.
+      }
+      return {
+        commitSha: entry.name,
+        generatedAt: Number.isFinite(generatedAt)
+          ? generatedAt
+          : Number.NEGATIVE_INFINITY,
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.generatedAt - left.generatedAt ||
+        right.commitSha.localeCompare(left.commitSha),
+    );
+  const retained = activeWorktreeBases(context);
+  for (const snapshot of snapshots.slice(0, recentSnapshotRetention)) {
+    retained.add(snapshot.commitSha);
+  }
+  for (const snapshot of snapshots) {
+    if (!retained.has(snapshot.commitSha)) {
+      rmSync(join(snapshotsRoot, snapshot.commitSha), {
+        recursive: true,
+        force: true,
+      });
+    }
+  }
+}
+
 function refresh() {
   const context = repositoryContext();
   assertRefreshWorktree(context);
 
   const existing = snapshotDirectory(context.cacheRoot, context.head);
-  if (existsSync(existing)) {
-    verifySnapshot(context, context.head);
-    console.log(`Graph snapshot already exists: ${context.head}`);
-    return;
-  }
-
   const releaseLock = acquireRefreshLock(context.cacheRoot);
   const staging = join(
     context.cacheRoot,
@@ -395,6 +486,7 @@ function refresh() {
   try {
     if (existsSync(existing)) {
       verifySnapshot(context, context.head);
+      garbageCollectSnapshots(context);
       console.log(`Graph snapshot already exists: ${context.head}`);
       return;
     }
@@ -409,7 +501,7 @@ function refresh() {
         "--out",
         staging,
       ],
-      { cwd: sourceRoot },
+      { cwd: sourceRoot, rejectExtractionFailures: true },
     );
     const stagedGraphPath = graphPath(staging);
     const graph = readJson(stagedGraphPath, "Staged Graphify graph");
@@ -468,6 +560,7 @@ function refresh() {
       )}\n`,
     );
     renameSync(pointerStaging, pointer);
+    garbageCollectSnapshots(context);
     console.log(`Published immutable Graphify snapshot: ${context.head}`);
   } finally {
     rmSync(staging, { recursive: true, force: true });
@@ -514,6 +607,46 @@ function changedPaths(context, baseSha) {
   );
 }
 
+function relationshipInvalidators(context, baseSha, changed) {
+  const addedCommands = [
+    [
+      "diff",
+      "--no-renames",
+      "--name-only",
+      "-z",
+      "--diff-filter=A",
+      `${baseSha}...HEAD`,
+    ],
+    [
+      "diff",
+      "--no-renames",
+      "--name-only",
+      "-z",
+      "--diff-filter=A",
+    ],
+    [
+      "diff",
+      "--cached",
+      "--no-renames",
+      "--name-only",
+      "-z",
+      "--diff-filter=A",
+    ],
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+  ];
+  const invalidators = new Set(
+    addedCommands.flatMap((arguments_) =>
+      splitNullDelimited(runGit(context.repositoryRoot, arguments_)),
+    ),
+  );
+  const configurationPattern =
+    /(^|\/)(?:tsconfig(?:\.[^/]+)?\.json|jsconfig(?:\.[^/]+)?\.json|package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|yarn\.lock|bun\.lockb?|deno\.jsonc?|nx\.json|turbo\.json|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|pyproject\.toml|\.gitignore|\.graphifyignore)$/u;
+  for (const path of changed) {
+    if (configurationPattern.test(path)) invalidators.add(path);
+  }
+  return invalidators;
+}
+
 function portablePath(path) {
   return normalize(path).split(sep).join("/");
 }
@@ -535,7 +668,7 @@ function edgeEndpointId(endpoint) {
     : endpoint;
 }
 
-function filterGraph(graph, changed) {
+function filterGraph(graph, changed, omitRelationships = false) {
   const removed = new Set();
   const nodes = graph.nodes.filter((node) => {
     if (!node.source_file) return true;
@@ -545,7 +678,7 @@ function filterGraph(graph, changed) {
     return keep;
   });
   const edgeKey = Array.isArray(graph.links) ? "links" : "edges";
-  const edges = graph[edgeKey].filter((edge) => {
+  const edges = omitRelationships ? [] : graph[edgeKey].filter((edge) => {
     const sourceFile = edge.source_file
       ? repositoryRelativeSource(edge.source_file)
       : null;
@@ -611,7 +744,16 @@ function query(arguments_) {
   const context = repositoryContext();
   const snapshot = branchSnapshot(context);
   const changed = changedPaths(context, snapshot.baseSha);
-  const filtered = filterGraph(snapshot.graph, changed);
+  const invalidators = relationshipInvalidators(
+    context,
+    snapshot.baseSha,
+    changed,
+  );
+  const filtered = filterGraph(
+    snapshot.graph,
+    changed,
+    invalidators.size > 0,
+  );
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "foundry-graphify-query-"),
   );
@@ -627,6 +769,17 @@ function query(arguments_) {
     }
     if (changed.size > 20) {
       console.log(`  ... ${changed.size - 20} more`);
+    }
+    if (invalidators.size > 0) {
+      console.log(
+        "Graph relationships excluded: branch changes can affect module resolution.",
+      );
+      for (const path of [...invalidators].sort().slice(0, 20)) {
+        console.log(`  ${path}`);
+      }
+      if (invalidators.size > 20) {
+        console.log(`  ... ${invalidators.size - 20} more`);
+      }
     }
     const graphifyArguments = [
       "query",

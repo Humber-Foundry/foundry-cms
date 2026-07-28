@@ -52,16 +52,23 @@ commit-addressed snapshot. Every indexed source path is checked against the
 pinned tree and rewritten repository-relative, so query output remains usable
 after the temporary archive is removed. It refuses feature commits and dirty
 worktrees. If the same snapshot already exists, it verifies that snapshot
-rather than rebuilding it. A later refresh reclaims a lock left by a process
+while still applying cache retention rather than rebuilding it. Each refresh
+retains the 20 most recent snapshots plus the merge-base snapshot of every
+active worktree; older snapshots are removed so the shared Git directory cannot
+grow without bound. A later refresh reclaims a lock left by a process
 that no longer exists, but never takes or removes another confirmed live
 same-host owner's lock. An owner recorded under another hostname receives a
 four-hour lease so a machine rename or vanished shared-storage host cannot
 block AFK refreshes forever.
 
 Graphify's AST workers may be denied by an agent sandbox even when its process
-exits successfully. The wrapper rejects an empty graph. If the refresh reports
-an AST permission error or an empty graph, rerun the same command with approved
-local execution; never publish or rely on the empty result.
+exits successfully. The wrapper rejects an empty graph and rejects extraction
+diagnostics that prove skipped files, failed workers, missing extractors or
+dependencies, or incomplete relationship resolution. A source that legitimately
+produces no graph nodes may still be reported by Graphify without blocking the
+otherwise complete snapshot. If the refresh reports an AST permission error,
+incomplete result, or empty graph, rerun the same command with approved local
+execution; never publish or rely on the incomplete result.
 
 Do not install Graphify's generic post-commit hook in this repository. It runs
 independently in each worktree and does not enforce this commit-pinned
@@ -88,11 +95,14 @@ The wrapper:
 2. requires the immutable snapshot for that exact commit;
 3. verifies every metadata and content hash;
 4. finds committed, staged, unstaged, deleted, and untracked branch paths;
-5. removes graph nodes and edges sourced from those paths; and
-6. runs a budget-capped Graphify query against a temporary filtered graph.
+5. removes graph nodes and edges sourced from those paths;
+6. removes all relationships when a new file or resolver configuration change
+   could invalidate relationships sourced from otherwise unchanged files; and
+7. runs a budget-capped Graphify query against a temporary filtered graph.
 
 Every result begins with the graph base, branch head, scope, and number of
-branch-modified files excluded. Inspect excluded files directly.
+branch-modified files excluded. When all relationships are excluded, the result
+also identifies the invalidating paths. Inspect excluded files directly.
 
 If a branch integrates a newer `main`, its merge base changes immediately.
 Until Foreman publishes the matching snapshot, queries fail closed with a
