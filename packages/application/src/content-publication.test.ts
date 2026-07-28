@@ -970,12 +970,16 @@ describe("content publication application", () => {
     createCommit
       .mockRejectedValueOnce(new Error("network lost"))
       .mockResolvedValueOnce({
+        state: "blocked",
+        detail: "production_head_moved",
+      });
+    vi.mocked(publisher.reconcileCommit)
+      .mockResolvedValueOnce({ state: "unknown" })
+      .mockResolvedValueOnce({ state: "unknown" })
+      .mockResolvedValueOnce({
         state: "committed",
         commitSha: "c".repeat(40),
       });
-    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
-      state: "unknown",
-    });
     const app = createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),
       revisions: repository,
@@ -1051,6 +1055,7 @@ describe("content publication application", () => {
     expect(createCommit.mock.calls[1]![0].bytes).toBe(
       createCommit.mock.calls[0]![0].bytes,
     );
+    expect(publisher.reconcileCommit).toHaveBeenCalledTimes(3);
     expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
@@ -2047,6 +2052,16 @@ describe("content publication application", () => {
         detail: "deployment_retry_timeout",
       }),
     );
+    getDeploymentStatus.mockResolvedValue("building");
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "building",
+        detail: "deployment_retry_reconciled",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
   });
 
   it("rejects deployment retry after the bound channel changes", async () => {

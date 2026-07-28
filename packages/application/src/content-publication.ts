@@ -330,6 +330,13 @@ export function contentPublicationHasUnresolvedGitOutcome(publication: {
   );
 }
 
+function deploymentRetryDispatchIsUncertain(detail: string | null) {
+  return (
+    detail === "deployment_retry_result_unknown" ||
+    detail === "deployment_retry_timeout"
+  );
+}
+
 export class ContentApprovalInvalidError extends Error {
   readonly code:
     | "revision_not_current"
@@ -895,6 +902,112 @@ export function createContentPublicationApplication({
     };
   }
 
+  function createPublicationCommitLeaseGuard(input: {
+    publication: ContentPublication;
+    leaseToken: string;
+    requestedBy: HumanMembershipId;
+  }) {
+    return async () => {
+      let currentApproval: ContentApproval;
+      try {
+        ({ approval: currentApproval } = await requireApproval(
+          input.publication.approvalId,
+          input.requestedBy,
+        ));
+      } catch (error) {
+        if (error instanceof ContentApprovalInvalidError) {
+          return false;
+        }
+        throw error;
+      }
+      if (!(await approvedBaseIsLive(currentApproval))) {
+        await invalidateForProductionChange(currentApproval);
+        return false;
+      }
+      const leaseNow = now();
+      return store.renewPublicationLease({
+        publicationId: input.publication.id,
+        leaseToken: input.leaseToken,
+        now: leaseNow,
+        leaseExpiresAt: new Date(
+          new Date(leaseNow).getTime() + publicationLeaseDurationMs,
+        ).toISOString(),
+      });
+    };
+  }
+
+  async function attemptAtomicPublicationCommit(input: {
+    publication: ContentPublication;
+    approval: ContentApproval;
+    revision: ContentRevision;
+    assertLease(): Promise<boolean>;
+  }): Promise<PublicationCommitResult> {
+    try {
+      return await publisher.createCommit({
+        publishId: input.publication.id,
+        workspaceId: input.publication.workspaceId,
+        revision: input.publication.revision,
+        approvedBy: input.approval.approvedBy,
+        contributors: input.publication.contributors,
+        contentHash: input.approval.fingerprint.contentHash,
+        expectedHead: input.publication.expectedHead,
+        path: publishedSiteDefinitionPath,
+        bytes: serializePublishedSiteDefinition(input.revision.definition),
+        message: commitMessage({
+          publication: input.publication,
+          approval: input.approval,
+        }),
+        assertLease: input.assertLease,
+      });
+    } catch {
+      return {
+        state: "unknown",
+        detail: "git_result_unknown",
+      };
+    }
+  }
+
+  async function claimFailedPublicationRetry(
+    publication: ContentPublication,
+    detail: string,
+  ) {
+    if ((await store.findActivePublication()) !== null) {
+      throw new ContentPublicationValidationError(
+        "deployment_retry_in_progress",
+      );
+    }
+    const retryRequestedAt = now();
+    const leaseToken = crypto.randomUUID();
+    let dispatching: ContentPublication;
+    try {
+      dispatching = await store.updatePublication(
+        nextPublication(publication, {
+          status: "requested",
+          detail,
+          deploymentRequestedAt: retryRequestedAt,
+          leaseToken,
+          leaseExpiresAt: new Date(
+            new Date(retryRequestedAt).getTime() +
+              publicationLeaseDurationMs,
+          ).toISOString(),
+          updatedAt: retryRequestedAt,
+        }),
+        {
+          expectedStatus: "failed",
+          expectedUpdatedAt: publication.updatedAt,
+        },
+      );
+    } catch (error) {
+      if ((await store.findActivePublication()) !== null) {
+        throw new ContentPublicationValidationError(
+          "deployment_retry_in_progress",
+        );
+      }
+      throw error;
+    }
+    return { dispatching, leaseToken };
+  }
+
   async function refreshPublication(publicationId: ContentPublicationId) {
     const publication = await store.findPublication(publicationId);
     if (publication === null) {
@@ -1357,33 +1470,11 @@ export function createContentPublicationApplication({
         if (leaseToken === null) {
           return blockForLostLease();
         }
-        const renewLease = async () => {
-          let currentApproval: ContentApproval;
-          try {
-            ({ approval: currentApproval } = await requireApproval(
-              input.approvalId,
-              input.requestedBy,
-            ));
-          } catch (error) {
-            if (error instanceof ContentApprovalInvalidError) {
-              return false;
-            }
-            throw error;
-          }
-          if (!(await approvedBaseIsLive(currentApproval))) {
-            await invalidateForProductionChange(currentApproval);
-            return false;
-          }
-          const leaseNow = now();
-          return store.renewPublicationLease({
-            publicationId: publication.id,
-            leaseToken,
-            now: leaseNow,
-            leaseExpiresAt: new Date(
-              new Date(leaseNow).getTime() + publicationLeaseDurationMs,
-            ).toISOString(),
-          });
-        };
+        const renewLease = createPublicationCommitLeaseGuard({
+          publication,
+          leaseToken,
+          requestedBy: input.requestedBy,
+        });
         if (!(await renewLease())) {
           return blockForLostLease();
         }
@@ -1404,27 +1495,12 @@ export function createContentPublicationApplication({
           }
           throw error;
         }
-        let result: PublicationCommitResult;
-        try {
-          result = await publisher.createCommit({
-            publishId: publication.id,
-            workspaceId: publication.workspaceId,
-            revision: publication.revision,
-            approvedBy: approval.approvedBy,
-            contributors,
-            contentHash: approval.fingerprint.contentHash,
-            expectedHead: head,
-            path: publishedSiteDefinitionPath,
-            bytes: serializePublishedSiteDefinition(revision.definition),
-            message: commitMessage({ publication, approval }),
-            assertLease: renewLease,
-          });
-        } catch {
-          result = {
-            state: "unknown",
-            detail: "git_result_ambiguous",
-          };
-        }
+        const result = await attemptAtomicPublicationCommit({
+          publication,
+          approval,
+          revision,
+          assertLease: renewLease,
+        });
         const updatedAt = now();
         if (result.state === "committed") {
           return store.updatePublication(
@@ -1556,30 +1632,11 @@ export function createContentPublicationApplication({
                   "deployment_retry_release_marker_mismatch",
                 );
               }
-              if ((await store.findActivePublication()) !== null) {
-                throw new ContentPublicationValidationError(
-                  "deployment_retry_in_progress",
+              const { dispatching, leaseToken } =
+                await claimFailedPublicationRetry(
+                  publication,
+                  "git_result_unknown",
                 );
-              }
-              const retryRequestedAt = now();
-              const leaseToken = crypto.randomUUID();
-              const dispatching = await store.updatePublication(
-                nextPublication(publication, {
-                  status: "requested",
-                  detail: "git_result_unknown",
-                  deploymentRequestedAt: retryRequestedAt,
-                  leaseToken,
-                  leaseExpiresAt: new Date(
-                    new Date(retryRequestedAt).getTime() +
-                      publicationLeaseDurationMs,
-                  ).toISOString(),
-                  updatedAt: retryRequestedAt,
-                }),
-                {
-                  expectedStatus: "failed",
-                  expectedUpdatedAt: publication.updatedAt,
-                },
-              );
               if (
                 dispatching.status !== "requested" ||
                 dispatching.leaseToken !== leaseToken
@@ -1587,62 +1644,29 @@ export function createContentPublicationApplication({
                 return dispatching;
               }
               const retryPublication = publication;
-              const assertLease = async () => {
-                let currentApproval: ContentApproval;
-                try {
-                  ({ approval: currentApproval } = await requireApproval(
-                    retryPublication.approvalId,
-                    requestedBy,
-                  ));
-                } catch {
-                  return false;
-                }
-                if (!(await approvedBaseIsLive(currentApproval))) {
-                  await invalidateForProductionChange(currentApproval);
-                  return false;
-                }
-                const leaseNow = now();
-                return store.renewPublicationLease({
-                  publicationId: retryPublication.id,
-                  leaseToken,
-                  now: leaseNow,
-                  leaseExpiresAt: new Date(
-                    new Date(leaseNow).getTime() +
-                      publicationLeaseDurationMs,
-                  ).toISOString(),
-                });
-              };
-              let result: PublicationCommitResult;
-              try {
-                result = await publisher.createCommit({
-                  publishId: retryPublication.id,
-                  workspaceId: retryPublication.workspaceId,
-                  revision: retryPublication.revision,
-                  approvedBy: approval.approvedBy,
-                  contributors: retryPublication.contributors,
-                  contentHash: approval.fingerprint.contentHash,
-                  expectedHead: retryPublication.expectedHead,
-                  path: publishedSiteDefinitionPath,
-                  bytes: serializePublishedSiteDefinition(
-                    revision.definition,
-                  ),
-                  message: commitMessage({
-                    publication: retryPublication,
-                    approval,
-                  }),
-                  assertLease,
-                });
-              } catch {
-                result = {
-                  state: "unknown",
-                  detail: "git_result_unknown",
-                };
-              }
+              const assertLease = createPublicationCommitLeaseGuard({
+                publication: retryPublication,
+                leaseToken,
+                requestedBy,
+              });
+              let result = await attemptAtomicPublicationCommit({
+                publication: retryPublication,
+                approval,
+                revision,
+                assertLease,
+              });
               if (
                 result.state === "blocked" &&
                 result.detail === "production_head_moved"
               ) {
-                await invalidateForProductionChange(approval);
+                const afterCas = await publisher.reconcileCommit(
+                  commitReconciliationInput(retryPublication, approval),
+                );
+                if (afterCas.state === "committed") {
+                  result = afterCas;
+                } else {
+                  await invalidateForProductionChange(approval);
+                }
               }
               const updatedAt = now();
               return store.updatePublication(
@@ -1722,70 +1746,22 @@ export function createContentPublicationApplication({
                 : "deployment_retry_release_marker_mismatch",
             );
           }
-          if ((await store.findActivePublication()) !== null) {
-            throw new ContentPublicationValidationError(
-              "deployment_retry_in_progress",
+          const { dispatching, leaseToken } =
+            await claimFailedPublicationRetry(
+              publication,
+              `git_reference_result_unknown:${candidateCommitSha}`,
             );
-          }
-          const retryRequestedAt = now();
-          const leaseToken = crypto.randomUUID();
-          let dispatching: ContentPublication;
-          try {
-            dispatching = await store.updatePublication(
-              nextPublication(publication, {
-                status: "requested",
-                detail: `git_reference_result_unknown:${candidateCommitSha}`,
-                deploymentRequestedAt: retryRequestedAt,
-                leaseToken,
-                leaseExpiresAt: new Date(
-                  new Date(retryRequestedAt).getTime() +
-                    publicationLeaseDurationMs,
-                ).toISOString(),
-                updatedAt: retryRequestedAt,
-              }),
-              {
-                expectedStatus: "failed",
-                expectedUpdatedAt: publication.updatedAt,
-              },
-            );
-          } catch (error) {
-            if ((await store.findActivePublication()) !== null) {
-              throw new ContentPublicationValidationError(
-                "deployment_retry_in_progress",
-              );
-            }
-            throw error;
-          }
           if (
             dispatching.status !== "requested" ||
             dispatching.leaseToken !== leaseToken
           ) {
             return dispatching;
           }
-          const assertLease = async () => {
-            let currentApproval: ContentApproval;
-            try {
-              ({ approval: currentApproval } = await requireApproval(
-                publication.approvalId,
-                requestedBy,
-              ));
-            } catch {
-              return false;
-            }
-            if (!(await approvedBaseIsLive(currentApproval))) {
-              await invalidateForProductionChange(currentApproval);
-              return false;
-            }
-            const leaseNow = now();
-            return store.renewPublicationLease({
-              publicationId: publication.id,
-              leaseToken,
-              now: leaseNow,
-              leaseExpiresAt: new Date(
-                new Date(leaseNow).getTime() + publicationLeaseDurationMs,
-              ).toISOString(),
-            });
-          };
+          const assertLease = createPublicationCommitLeaseGuard({
+            publication,
+            leaseToken,
+            requestedBy,
+          });
           const result = await publisher.retryReference({
             publishId: publication.id,
             candidateCommitSha,
@@ -1859,6 +1835,27 @@ export function createContentPublicationApplication({
           }
         } catch {
           // A missing marker still permits one explicitly requested retry.
+        }
+        if (deploymentRetryDispatchIsUncertain(publication.detail)) {
+          const observed = await publisher.getDeploymentStatus(commitSha);
+          if (
+            observed === "requested" ||
+            observed === "building" ||
+            observed === "deployed"
+          ) {
+            return store.updatePublication(
+              nextPublication(publication, {
+                status: observed,
+                detail: "deployment_retry_reconciled",
+                updatedAt: now(),
+              }),
+              {
+                expectedStatus: "failed",
+                expectedUpdatedAt: publication.updatedAt,
+              },
+            );
+          }
+          return publication;
         }
         if ((await publisher.getProductionHead()) !== commitSha) {
           await store.invalidateApproval({

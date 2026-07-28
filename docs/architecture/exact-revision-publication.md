@@ -143,7 +143,10 @@ protected human-mutation receipt prevent a repeated request from dispatching a
 second build. If a Worker disappears while dispatching, the durable attempt
 becomes uncertain after one minute and terminal after the same bounded
 15-minute recovery window rather than holding the global publication slot
-indefinitely.
+indefinitely. A timed-out ambiguous manual build request is never sent again:
+an explicit retry only checks the exact live marker and commit-bound deployment
+signals. Evidence can resume polling the original build, while absence remains
+an explicit failed/uncertain record rather than authority for a duplicate POST.
 Any later edit invalidates that retry authority; the newer revision must be
 previewed and approved instead. A retained historical candidate whose ref
 update was ambiguous can be retried through the same explicit action. Foundry
