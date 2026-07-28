@@ -740,7 +740,41 @@ export function createD1MediaAssetStore(
           reserved.idempotency_key !== context.idempotencyKey ||
           reserved.request_hash !== context.requestHash
         ) {
-          throw new MediaSiteAccessError();
+          const adopted = await database
+            .prepare(
+              `UPDATE media_asset_deletions
+               SET idempotency_key = ?3, request_hash = ?4,
+                   reserved_at = datetime('now')
+               WHERE site_id = ?1 AND asset_id = ?2
+                 AND idempotency_key = ?6 AND request_hash = ?7
+                 AND NOT EXISTS (
+                   SELECT 1 FROM media_mutation_receipts
+                   WHERE site_id = ?1 AND idempotency_key = ?6
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM media_mutation_claims
+                   WHERE site_id = ?1 AND idempotency_key = ?6
+                     AND claimed_at > datetime('now', '-30 seconds')
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM media_mutation_claims
+                   WHERE site_id = ?1 AND idempotency_key = ?3
+                     AND request_hash = ?4 AND claim_token = ?5
+                 )`,
+            )
+            .bind(
+              siteId,
+              assetId,
+              context.idempotencyKey,
+              context.requestHash,
+              context.claimToken,
+              reserved.idempotency_key,
+              reserved.request_hash,
+            )
+            .run();
+          if ((adopted.meta.changes ?? 0) === 0) {
+            throw new MediaSiteAccessError();
+          }
         }
       }
       return existing;

@@ -76,6 +76,12 @@ export function MediaManager({
 
   type JsonAttempt = Readonly<{ body: unknown; idempotencyKey: string }>;
 
+  function selectAsset(assetId: string) {
+    replaceAttempt.current = null;
+    deleteAttempt.current = null;
+    setSelectedAsset(assetId);
+  }
+
   async function mutateJson(attempt: JsonAttempt) {
     const result = await sendMediaMutationAttempt({
       attempt: {
@@ -123,7 +129,7 @@ export function MediaManager({
       uploadAttempt.current = mediaUploadAttemptAfterResult(attempt, true);
       setUploadPending(false);
       setAssets((current) => [...current, asset]);
-      setSelectedAsset(asset.assetId);
+      selectAsset(asset.assetId);
       setMessage("Source stored in client-owned media.");
     } catch {
       if (uploadAttempt.current !== null) {
@@ -245,7 +251,7 @@ export function MediaManager({
         (asset) => asset.assetId !== selectedAsset,
       );
       setAssets(remaining);
-      setSelectedAsset(remaining[0]?.assetId ?? "");
+      selectAsset(remaining[0]?.assetId ?? "");
       setMessage("Unused source and metadata deleted.");
     } catch {
       setMessage(
@@ -316,9 +322,7 @@ export function MediaManager({
             <select
               value={selectedAsset}
               onChange={(event) => {
-                replaceAttempt.current = null;
-                deleteAttempt.current = null;
-                setSelectedAsset(event.target.value);
+                selectAsset(event.target.value);
               }}
             >
               {assets.map((asset) => (

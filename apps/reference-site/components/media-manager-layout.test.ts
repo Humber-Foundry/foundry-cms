@@ -13,4 +13,18 @@ describe("media manager layout", () => {
       /\.media-manager-preview img\s*\{[^}]*max-width:\s*100%;[^}]*\}/su,
     );
   });
+
+  it("clears asset-scoped retry attempts for every asset selection change", async () => {
+    const component = await readFile(
+      new URL("./media-manager.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(component).toMatch(
+      /function selectAsset\(assetId: string\) \{\s*replaceAttempt\.current = null;\s*deleteAttempt\.current = null;\s*setSelectedAsset\(assetId\);\s*\}/su,
+    );
+    expect(component).toContain("selectAsset(asset.assetId);");
+    expect(component).toContain('selectAsset(remaining[0]?.assetId ?? "");');
+    expect(component).toContain("selectAsset(event.target.value);");
+  });
 });

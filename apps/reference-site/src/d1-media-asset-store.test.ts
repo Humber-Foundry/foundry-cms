@@ -393,4 +393,51 @@ describe("D1 media asset store", () => {
     ).rejects.toEqual(new MediaSiteAccessError());
     await expect(store.replay(competitor)).resolves.toBeNull();
   });
+
+  it("lets a new mutation resume an orphaned deletion reservation", async () => {
+    const app = application();
+    await upload(app);
+    const store = createD1MediaAssetStore(database);
+    const interrupted = {
+      siteId,
+      idempotencyKey: "orphaned-deletion-owner",
+      requestHash: "orphaned-request",
+      claimToken: "interrupted-worker",
+    };
+    const recovery = {
+      siteId,
+      idempotencyKey: "orphaned-deletion-recovery",
+      requestHash: "recovery-request",
+      claimToken: "recovery-worker",
+    };
+    await expect(store.claim(interrupted)).resolves.toBe(true);
+    await expect(
+      store.beginAssetDeletion(siteId, assetId, interrupted),
+    ).resolves.toMatchObject({ assetId });
+    await store.releaseClaim(interrupted);
+    await expect(store.claim(recovery)).resolves.toBe(true);
+
+    await expect(
+      store.beginAssetDeletion(siteId, assetId, recovery),
+    ).resolves.toMatchObject({ assetId });
+    await store.tombstoneAssetDeletion(
+      siteId,
+      assetId,
+      actorId,
+      "2026-07-27T12:00:00.000Z",
+      recovery,
+    );
+    await store.completeAssetDeletion(
+      siteId,
+      assetId,
+      "2026-07-27T12:00:00.000Z",
+      recovery,
+    );
+
+    await expect(store.replay(recovery)).resolves.toEqual({
+      kind: "deleted",
+      assetId,
+    });
+    await expect(store.getAsset(siteId, assetId)).resolves.toBeNull();
+  });
 });
