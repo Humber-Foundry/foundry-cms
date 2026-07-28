@@ -43,7 +43,9 @@ describe("page component composition", () => {
       "callToAction",
       "section_second_contact",
     );
-    const hero = structuredClone(source.home.sections[0]);
+    const hero = structuredClone(
+      source.home.sections.find((section) => section.type === "hero")!,
+    );
     const duplicateHero = {
       ...structuredClone(hero),
       id: "section_hero_copy",

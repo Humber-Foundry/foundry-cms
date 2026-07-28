@@ -49,6 +49,25 @@ export async function findLatestContentWorkspaceIdForActor(
     : createContentWorkspaceId(row.workspace_id);
 }
 
+export async function listContentRevisionContributors(
+  database: D1DatabaseBinding,
+  workspaceId: ContentWorkspaceId,
+  revision: number,
+): Promise<ReadonlyArray<ContentActorId>> {
+  const rows = await database
+    .prepare(
+      `SELECT DISTINCT created_by
+       FROM content_revisions
+       WHERE workspace_id = ?1
+         AND revision <= ?2
+         AND created_by <> 'system:published-base'
+       ORDER BY created_by`,
+    )
+    .bind(workspaceId, revision)
+    .all<{ created_by: string }>();
+  return rows.results.map((row) => restoreContentActorId(row.created_by));
+}
+
 type RevisionRow = {
   workspace_id: ContentWorkspaceId;
   revision: number;
