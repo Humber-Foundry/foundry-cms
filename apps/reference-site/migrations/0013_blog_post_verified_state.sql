@@ -6,7 +6,14 @@ CHECK (
 );
 
 ALTER TABLE blog_posts
-ADD COLUMN last_verified_at TEXT;
+ADD COLUMN last_verified_publication_id TEXT;
+
+ALTER TABLE blog_posts
+ADD COLUMN last_verified_publication_sequence INTEGER
+CHECK (
+  last_verified_publication_sequence IS NULL
+  OR last_verified_publication_sequence >= 1
+);
 
 UPDATE blog_posts
 SET last_verified_visibility = CASE
@@ -14,7 +21,5 @@ SET last_verified_visibility = CASE
       WHEN live_revision IS NULL THEN 'unpublished'
       ELSE 'public'
     END,
-    last_verified_at = CASE
-      WHEN last_verified_revision IS NULL THEN NULL
-      ELSE updated_at
-    END;
+    last_verified_publication_id = NULL,
+    last_verified_publication_sequence = NULL;

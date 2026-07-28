@@ -354,6 +354,7 @@ describe("D1 content revision store", () => {
       database,
       referenceSiteDefinition.site.id,
       current.definition,
+      { id: "publication-blog-live", sequence: 1 },
       "2026-07-27T12:30:00.000Z",
     );
 
@@ -486,13 +487,15 @@ describe("D1 content revision store", () => {
       database,
       referenceSiteDefinition.site.id,
       unpublished.definition,
+      { id: "publication-blog-unpublished", sequence: 2 },
       "2026-07-27T13:00:00.000Z",
     );
     await reconcileVerifiedBlogPostPublication(
       database,
       referenceSiteDefinition.site.id,
       current.definition,
-      "2026-07-27T12:31:00.000Z",
+      { id: "publication-blog-live", sequence: 1 },
+      "2026-07-27T13:00:00.000Z",
     );
     expect(
       await database
@@ -616,12 +619,14 @@ describe("D1 content revision store", () => {
       database,
       referenceSiteDefinition.site.id,
       republished.definition,
+      { id: "publication-blog-republished", sequence: 3 },
       "2026-07-27T13:20:00.000Z",
     );
     await reconcileVerifiedBlogPostPublication(
       database,
       referenceSiteDefinition.site.id,
       referenceSiteDefinition,
+      { id: "publication-blog-restored-without-post", sequence: 4 },
       "2026-07-27T13:30:00.000Z",
     );
     expect(
@@ -639,16 +644,18 @@ describe("D1 content revision store", () => {
     });
     await expect(
       hydrateManagedBlogPosts(database, referenceSiteDefinition),
-    ).resolves.toMatchObject({
-      blog: {
-        posts: [
-          expect.objectContaining({
-            id: postId,
-            revision: 6,
-            visibility: "unpublished",
-          }),
-        ],
-      },
+    ).resolves.toMatchObject({ blog: { posts: [] } });
+    expect(
+      await database
+        .prepare(
+          `SELECT snapshot_json
+           FROM blog_post_revisions
+           WHERE site_id = ?1 AND post_id = ?2 AND revision = 6`,
+        )
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first<{ snapshot_json: string }>(),
+    ).toMatchObject({
+      snapshot_json: expect.stringContaining('"visibility":"public"'),
     });
   });
 
@@ -808,6 +815,7 @@ describe("D1 content revision store", () => {
         database,
         referenceSiteDefinition.site.id,
         missingPostDefinition,
+        { id: "publication-missing-aggregate", sequence: 1 },
         "2026-07-27T15:00:00.000Z",
       ),
     ).rejects.toBeInstanceOf(ContentRevisionConfigurationError);

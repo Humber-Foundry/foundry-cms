@@ -20,6 +20,7 @@ import {
 } from "./content-revision-runtime";
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import {
+  findVerifiedPublicationOrder,
   listContentRevisionContributors,
   reconcileVerifiedBlogPostPublication,
 } from "./d1-content-revision-store";
@@ -142,11 +143,15 @@ export async function loadContentPublicationApplication(
         ),
     },
     publisher,
-    onVerifiedLive: (publication, revision) =>
+    onVerifiedLive: async (publication, revision) =>
       reconcileVerifiedBlogPostPublication(
         environment.FOUNDRY_DB!,
         referenceSiteDefinition.site.id,
         revision.definition,
+        await findVerifiedPublicationOrder(
+          environment.FOUNDRY_DB!,
+          publication.id,
+        ),
         publication.requestedAt,
       ),
     publishedRevisions: publisher,
