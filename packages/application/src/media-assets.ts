@@ -721,6 +721,24 @@ export function createMediaAssetApplication({
       },
     }),
     queries: Object.freeze({
+      async getReplacementReceipt(
+        command: ReplaceMediaOccurrenceCommand,
+      ): Promise<MediaOccurrenceRevision | null> {
+        if (command.actorId !== actorId) throw new MediaSiteAccessError();
+        requireRenderedMediaOccurrenceId(command.occurrenceId);
+        assertIdempotencyKey(command.idempotencyKey);
+        const hash = await sha256CanonicalJson(command);
+        const replay = await replayMutation(
+          mutationContext(command.idempotencyKey, hash),
+          "occurrence",
+        );
+        return replay === null
+          ? null
+          : (replay as Extract<
+              MediaMutationResult,
+              { kind: "occurrence" }
+            >).value;
+      },
       getAsset(assetId: MediaAssetId) {
         return assets.getAsset(siteId, assetId);
       },

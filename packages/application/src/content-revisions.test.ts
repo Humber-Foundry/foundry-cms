@@ -31,12 +31,12 @@ const applicationInputs = {
   workspaceId: createContentWorkspaceId("workspace_home"),
   actorId: editorActorId,
   rendererVersion: "renderer-commit-a",
-  productionBase: "published:site_foundry_reference@1.0.0",
+  productionBase: "published:site_foundry_reference@1.1.0",
 } as const;
 
 const commandInputs = {
   workspaceId: applicationInputs.workspaceId,
-  schemaVersion: "1.0.0",
+  schemaVersion: "1.1.0",
 } as const;
 
 async function createWorkspace(
@@ -125,26 +125,68 @@ describe("content revision application", () => {
     );
     expect(saved.inputs).toEqual({
       contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       rendererVersion: "renderer-commit-a",
-      productionBase: "published:site_foundry_reference@1.0.0",
+      productionBase: "published:site_foundry_reference@1.1.0",
     });
     expect(Object.isFrozen(saved)).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(false);
+    expect(
+      isContentRevisionRenderableBy(
+        {
+          ...saved,
+          inputs: { ...saved.inputs, schemaVersion: "1.0.0" },
+        },
+        {
+          schemaVersion: "1.1.0",
+          rendererVersion: "renderer-commit-a",
+          productionBase: applicationInputs.productionBase,
+        },
+      ),
+    ).toBe(false);
     await expect(application.queries.getRevision(0)).resolves.toEqual(
       expect.objectContaining({ definition: referenceSiteDefinition }),
     );
+  });
+
+  it("includes controlled design changes in the canonical revision fingerprint", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    const initial = await createWorkspace(
+      application,
+      "create-workspace-design-hash",
+    );
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [
+        { path: "design.colour.accent", value: "clay" },
+        { path: "section_hero.variant", value: "focused" },
+      ],
+      idempotencyKey: "save-controlled-design-0001",
+    });
+
+    expect(saved.definition.design.colour.accent).toBe("clay");
+    expect(saved.definition.home.sections[0].variant).toBe("focused");
+    expect(saved.inputs.contentHash).not.toBe(initial.inputs.contentHash);
   });
 
   it("keeps pre-composition request hashes stable for retry compatibility", async () => {
@@ -265,6 +307,66 @@ describe("content revision application", () => {
     if (savedHero.type === "hero") {
       expect(savedHero.primaryAction.label).toBe("Start here");
     }
+  });
+
+  it("combines authoritative variant edits with structural composition", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(
+      application,
+      "create-workspace-compose-variant",
+    );
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const originalHero = composition.components[0]!;
+    if (originalHero.type !== "hero") {
+      throw new Error("expected_hero_fixture");
+    }
+    const hero = { ...originalHero, variant: "focused" as const };
+    const added = createDefaultPageSection(
+      "proof",
+      "section_added_proof",
+      referenceSiteDefinition,
+    );
+    if (added.type !== "proof") {
+      throw new Error("expected_proof_fixture");
+    }
+    const nonDefaultAdded = { ...added, variant: "plain" as const };
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [{ path: "section_hero.variant", value: "focused" }],
+      composition: {
+        ...composition,
+        components: [
+          composition.components[1]!,
+          hero,
+          ...composition.components.slice(2),
+          nonDefaultAdded,
+        ],
+      },
+      idempotencyKey: "compose-with-variants",
+    });
+
+    expect(saved.definition.home.sections[0]?.id).toBe(
+      "section_services",
+    );
+    expect(
+      saved.definition.home.sections.find(
+        ({ id }) => id === "section_hero",
+      )?.variant,
+    ).toBe("focused");
+    expect(
+      saved.definition.home.sections.find(
+        ({ id }) => id === "section_added_proof",
+      )?.variant,
+    ).toBe("plain");
   });
 
   it("rejects composition outside the registered slot before persistence", async () => {
@@ -727,7 +829,7 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: createContentWorkspaceId("workspace_other"),
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong workspace" }],
         idempotencyKey: "save-section-hero-0007",
@@ -741,14 +843,14 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: applicationInputs.workspaceId,
-        schemaVersion: "2.0.0" as "1.0.0",
+        schemaVersion: "2.0.0" as "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong schema" }],
         idempotencyKey: "save-section-hero-0008",
       }),
     ).rejects.toEqual(
       new ContentRevisionValidationError({
-        schemaVersion: "Use Site Definition schema 1.0.0.",
+        schemaVersion: "Use Site Definition schema 1.1.0.",
       }),
     );
   });

@@ -157,7 +157,7 @@ describe("D1 content publication store", () => {
     await revisionApplication.commands.save({
       actorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Changed after approval" }],
       idempotencyKey: "save-after-d1-approval-1",
@@ -203,7 +203,7 @@ describe("D1 content publication store", () => {
     await revisionApplication.commands.save({
       actorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Advanced first" }],
       idempotencyKey: "advance-before-approval-1",
@@ -271,7 +271,7 @@ describe("D1 content publication store", () => {
     await revisionApplication.commands.save({
       actorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Invalidate first" }],
       idempotencyKey: "invalidate-before-claim-1",
@@ -297,7 +297,7 @@ describe("D1 content publication store", () => {
       revisionApplication.commands.save({
         actorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Racing save" }],
         idempotencyKey: "save-during-publish-001",
@@ -364,7 +364,7 @@ describe("D1 content publication store", () => {
       revisionApplication.commands.save({
         actorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Racing retry" }],
         idempotencyKey: "save-during-retry-0001",
@@ -414,7 +414,7 @@ describe("D1 content publication store", () => {
       otherApplication.commands.save({
         actorId,
         workspaceId: otherWorkspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Parallel edit" }],
         idempotencyKey: "save-parallel-workspace-1",
@@ -433,7 +433,7 @@ describe("D1 content publication store", () => {
       revisionApplication.commands.save({
         actorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Edit after expiry" }],
         idempotencyKey: "save-after-lease-expiry-1",

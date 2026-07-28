@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
 
+import { siteDefinitionValidationKeywords } from "../scripts/site-definition-validation-keywords.mjs";
 import {
   applySiteDefinitionEdits,
   createReferenceSiteDefinition,
   DuplicateEditableSiteFieldPathError,
   createSiteId,
+  isSiteDefinition,
   listEditableSiteFields,
   referenceSiteDefinition,
   siteDefinitionSchema,
-  siteDefinitionValidationKeywords,
   type SiteDefinition,
 } from "./index";
 
@@ -21,13 +22,13 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.0.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.0.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.1.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.1.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.0.0",
+      "https://foundrycms.dev/schemas/site-definition/1.1.0",
     );
   });
 
@@ -50,6 +51,7 @@ describe("reference Site Definition", () => {
     expect(validate(referenceSiteDefinition), validate.errors?.toString()).toBe(
       true,
     );
+    expect(isSiteDefinition(referenceSiteDefinition)).toBe(true);
   });
 
   it("preserves the Git-published media manifest at runtime", () => {
@@ -78,7 +80,7 @@ describe("reference Site Definition", () => {
     );
   });
 
-  it("continues to validate saved 1.0 definitions created before media manifests", () => {
+  it("keeps media optional for definitions saved before media manifests", () => {
     const legacy = structuredClone(referenceSiteDefinition) as unknown as Record<
       string,
       any
@@ -122,6 +124,24 @@ describe("reference Site Definition", () => {
       name: "an arbitrary off-site link target",
       change: (definition: Record<string, any>) => {
         definition.site.navigation[0].href = "https://example.com";
+      },
+    },
+    {
+      name: "an unknown design token",
+      change: (definition: Record<string, any>) => {
+        definition.design.colour.custom = "red";
+      },
+    },
+    {
+      name: "an executable design value",
+      change: (definition: Record<string, any>) => {
+        definition.design.colour.accent = "url(javascript:alert(1))";
+      },
+    },
+    {
+      name: "a variant registered for a different component",
+      change: (definition: Record<string, any>) => {
+        definition.home.sections[0].variant = "cards";
       },
     },
     {
@@ -171,6 +191,7 @@ describe("reference Site Definition", () => {
     change(malformed);
 
     expect(validate(malformed)).toBe(false);
+    expect(isSiteDefinition(malformed)).toBe(false);
   });
 
   it("exposes editable copy through stable item identifiers", () => {
@@ -248,9 +269,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.0.0.",
+        "section_missing.title": "This field is not in Site Definition 1.1.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.0.0.",
+        "section_hero.href": "This field is not in Site Definition 1.1.0.",
       },
     });
   });
@@ -264,7 +285,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.0.0.",
+        "This field is not in Site Definition 1.1.0.",
       );
     }
   });

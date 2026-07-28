@@ -2,6 +2,7 @@ import type {
   PageSection,
   SiteDefinition,
 } from "@foundry/site-definition";
+import { siteDesignAttributes } from "@foundry/site-definition";
 
 import { MediaOccurrence } from "./media-occurrence";
 import { sectionAnchor } from "@/src/section-anchor";
@@ -35,6 +36,7 @@ export function SiteSection({
       return (
         <section
           className="hero"
+          data-component-variant={section.variant}
           id={sectionAnchor(section)}
           aria-labelledby={`${section.id}_title`}
         >
@@ -70,6 +72,7 @@ export function SiteSection({
       return (
         <section
           className="services"
+          data-component-variant={section.variant}
           id={sectionAnchor(section)}
           aria-labelledby={`${section.id}_title`}
         >
@@ -107,6 +110,7 @@ export function SiteSection({
       return (
         <section
           className="proof"
+          data-component-variant={section.variant}
           id={sectionAnchor(section)}
           aria-label="Foundry principle and outcomes"
         >
@@ -129,6 +133,7 @@ export function SiteSection({
       return (
         <section
           className="contact"
+          data-component-variant={section.variant}
           id={sectionAnchor(section)}
           aria-labelledby={`${section.id}_title`}
         >
@@ -158,7 +163,7 @@ export function SiteRenderer({
   mediaAccessToken?: string;
 }) {
   return (
-    <>
+    <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
       <header className="site-header">
         <a className="wordmark" href="/" aria-label={`${definition.site.name} home`}>
           <span aria-hidden="true">F</span>
@@ -187,6 +192,6 @@ export function SiteRenderer({
         <p>{definition.site.footer}</p>
         <p>Site Definition v{definition.definitionVersion}</p>
       </footer>
-    </>
+    </div>
   );
 }

@@ -14,6 +14,7 @@ import {
 } from "@foundry/application";
 import type {
   PageComposition,
+  SiteDefinition,
   SiteDefinitionEdit,
 } from "@foundry/site-definition";
 
@@ -47,7 +48,7 @@ import { createRevisionPreviewCapability } from "../../../../src/preview-capabil
 
 type SaveBody = {
   workspaceId: ReturnType<typeof createContentWorkspaceId>;
-  schemaVersion: "1.0.0";
+  schemaVersion: SiteDefinition["schemaVersion"];
   baseRevision: number;
   edits: SiteDefinitionEdit[];
   composition?: PageComposition;
@@ -223,7 +224,8 @@ function parseSaveBody(
       ok: true,
       body: {
         workspaceId: createContentWorkspaceId(candidate.workspaceId),
-        schemaVersion: candidate.schemaVersion as "1.0.0",
+        schemaVersion:
+          candidate.schemaVersion as SiteDefinition["schemaVersion"],
         baseRevision: candidate.baseRevision as number,
         edits,
         ...(composition === undefined ? {} : { composition }),
