@@ -210,6 +210,7 @@ export async function restorePreservedMedia({
             `${idempotencyKey}:media:${occurrence.occurrenceId}:replace`,
           body: JSON.stringify({
             operation: "replace",
+            requireReplay: true,
             occurrenceId: occurrence.occurrenceId,
             assetId: occurrence.asset.assetId,
             baseRevision: 0,
@@ -221,6 +222,14 @@ export async function restorePreservedMedia({
       );
       mutationToken = replacementProof.mutationToken;
       onMutationToken(mutationToken);
+      if (
+        typeof replacementProof.body !== "object" ||
+        replacementProof.body === null ||
+        !("mutationReplay" in replacementProof.body) ||
+        replacementProof.body.mutationReplay !== true
+      ) {
+        throw new Error("content_media_recovery_conflict");
+      }
       const provenReplacement = mediaMutationRevisions(
         replacementProof,
         true,

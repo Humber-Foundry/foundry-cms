@@ -367,6 +367,7 @@ describe("content media schema recovery", () => {
         body: {
           occurrence: { revision: 1 },
           contentRevision: { revision: 1 },
+          mutationReplay: true,
         },
         mutationToken: "csrf-after-proof",
       })
@@ -399,6 +400,7 @@ describe("content media schema recovery", () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(JSON.parse(send.mock.calls[0]![0].body)).toEqual({
       operation: "replace",
+      requireReplay: true,
       occurrenceId: "occurrence_home_hero",
       assetId: "asset_replacement",
       baseRevision: 0,
@@ -456,7 +458,7 @@ describe("content media schema recovery", () => {
         idempotencyKey: "workspace-create-0001",
         send,
       }),
-    ).rejects.toThrow("content_media_recovery_failed");
+    ).rejects.toThrow("content_media_recovery_conflict");
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]![0].idempotencyKey).toBe(
       "workspace-create-0001:media:occurrence_home_hero:replace",
