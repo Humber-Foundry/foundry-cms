@@ -118,6 +118,10 @@ previewed and approved instead. A retained commit whose ref update was
 ambiguous can be retried through the same explicit action. Foundry verifies its
 publish trailer, sole expected parent, and sole exact content-file change
 before attempting the non-force ref compare-and-swap again.
+The commit carries an HMAC publication signature over its parent, content path,
+content hash, and complete attribution message. The signing secret is shared
+only by the CMS publisher and Workers Builds, so an ordinary pull request
+cannot forge the Foundry trailers and enter the exact content deployment path.
 The only accepted trigger deploy command is `npm run deploy`. That shipped
 script builds, then runs `scripts/deploy-exact-production.mjs`. The controller
 requires the local checkout, `WORKERS_CI_COMMIT_SHA`, and `origin`'s protected
@@ -131,14 +135,18 @@ again after success. Before promotion it records the currently serving
 deployment and traffic allocation. If the protected ref moves after Cloudflare
 accepts the promotion, the controller re-reads the latest deployment and
 restores that prior allocation only when its stale deployment has not already
-been superseded. A build also compares its published-content path with the
-live release marker: content may advance only through one direct,
-trailer-verified Foundry publication commit. This quarantines a content commit
-whose earlier deployment failed so a later code build cannot publish it
-without the exact retry. Together these deployment-time fences prevent an
-older or unapproved revision from becoming the public site after an external
-merge. The build result is also rejected if Cloudflare reports a different
-commit hash.
+been superseded. Because Cloudflare does not expose a conditional deployment
+write, the controller also inspects deployment history after compensation and
+restores any newer deployment that raced its rollback. Every direct Cloudflare
+request has a bounded timeout. A build compares its published-content path
+with the live release marker: content may advance only through one direct,
+signature-verified Foundry publication commit. This quarantines a content
+commit whose earlier deployment failed so a later code build cannot publish
+it without the exact retry. The activation proxy accepts only the fingerprinted
+Cloudflare account and Worker script path. Together these deployment-time
+fences prevent an older or unapproved revision from becoming the public site
+after an external merge. The build result is also rejected if Cloudflare
+reports a different commit hash.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory
@@ -165,15 +173,14 @@ Set these non-secret values for each installation:
 - `FOUNDRY_CLOUDFLARE_SCRIPT_TAG`
 - `FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID`
 - `FOUNDRY_PRODUCTION_BASE` (a bootstrap fallback Git object ID)
-- `FOUNDRY_INITIAL_RELEASE_COMMIT_SHA` (optional one-time build bootstrap;
-  must equal the exact initial release commit and should be removed after that
-  release is live)
 
-Store `FOUNDRY_GITHUB_PRIVATE_KEY` and `FOUNDRY_CLOUDFLARE_API_TOKEN` only as
-Worker secrets. The Cloudflare token needs the narrow account-scoped Workers CI
+Store `FOUNDRY_GITHUB_PRIVATE_KEY`, `FOUNDRY_CLOUDFLARE_API_TOKEN`, and the
+32-byte-or-longer `FOUNDRY_PUBLICATION_SIGNING_SECRET` only as Worker/Build
+secrets. The signing secret must be identical in the publisher Worker and
+Workers Builds. The Cloudflare token needs the narrow account-scoped Workers CI
 Edit permission (called Workers CI Write in Cloudflare's newer permission
-vocabulary) used to trigger and inspect an exact manual build. Never put either
-secret, the GitHub App JWT, or an installation token in D1, logs, build output,
+vocabulary) used to trigger and inspect an exact manual build. Never put these
+secrets, the GitHub App JWT, or an installation token in D1, logs, build output,
 or client bundles.
 
 Approval and every active refresh read the live Workers build trigger and its
@@ -182,6 +189,17 @@ identity, branch/path filters, build and deploy commands, root directory,
 caching, and sorted non-secret environment values. Secret values remain
 hidden; their Cloudflare creation timestamps act as rotation versions. A
 missing trigger or unreadable configuration fails closed.
+
+Cloudflare requires `wrangler deploy` for a Worker's first upload; its Versions
+API cannot create that initial deployment. During installation, before enabling
+CMS publication, an operator sets
+`FOUNDRY_BASELINE_PROVISION_COMMIT_SHA` to the exact protected production head
+and runs `npm run provision:deployment-baseline` once. The command checks the
+local, build, and remote commits, deploys only the configured account and
+Worker name, checks the protected head again, and verifies the release marker.
+Remove the one-time authorization afterward. Normal `npm run deploy` requires
+that verified serving baseline and never falls back to an unguarded first
+upload.
 
 Workers Builds must expose `WORKERS_CI_COMMIT_SHA` during the build. Next
 embeds it as `FOUNDRY_RELEASE_COMMIT_SHA` in the release marker. A build without

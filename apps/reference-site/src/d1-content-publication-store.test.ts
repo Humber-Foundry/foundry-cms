@@ -273,6 +273,34 @@ describe("D1 content publication store", () => {
     ).rejects.toThrow(/content_publication_commit_in_progress/u);
   });
 
+  it("fences revision saves while an exact deployment retry is dispatching", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-retry-fence-001");
+    await store.claimPublication(requested);
+    await database
+      .prepare(
+        `UPDATE content_publications
+         SET status = 'committed',
+             detail = 'deployment_retry_dispatching',
+             commit_sha = ?1
+         WHERE id = ?2`,
+      )
+      .bind("c".repeat(40), requested.id)
+      .run();
+
+    await expect(
+      revisionApplication.commands.save({
+        actorId,
+        workspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Racing retry" }],
+        idempotencyKey: "save-during-retry-0001",
+      }),
+    ).rejects.toThrow(/content_publication_commit_in_progress/u);
+  });
+
   it("does not fence another workspace or the same workspace after lease expiry", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);

@@ -19,6 +19,7 @@ export type GitHubContentPublisherConfiguration = Readonly<{
   cloudflareScriptTag: string;
   cloudflareBuildTriggerId: string;
   cloudflareApiToken: string;
+  publicationSigningSecret: string;
 }>;
 
 export class GitHubContentPublisherConfigurationError extends Error {
@@ -41,6 +42,7 @@ export type GitHubContentPublisherEnvironment = Readonly<{
   FOUNDRY_CLOUDFLARE_SCRIPT_TAG?: string;
   FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID?: string;
   FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
+  FOUNDRY_PUBLICATION_SIGNING_SECRET?: string;
 }>;
 
 function requireValue(value: string | undefined): string {
@@ -48,6 +50,14 @@ function requireValue(value: string | undefined): string {
     throw new GitHubContentPublisherConfigurationError();
   }
   return value.trim();
+}
+
+function requireSigningSecret(value: string | undefined): string {
+  const secret = requireValue(value);
+  if (new TextEncoder().encode(secret).byteLength < 32) {
+    throw new GitHubContentPublisherConfigurationError();
+  }
+  return secret;
 }
 
 export function readGitHubContentPublisherConfiguration(
@@ -96,6 +106,9 @@ export function readGitHubContentPublisherConfiguration(
     ),
     cloudflareApiToken: requireValue(
       environment.FOUNDRY_CLOUDFLARE_API_TOKEN,
+    ),
+    publicationSigningSecret: requireSigningSecret(
+      environment.FOUNDRY_PUBLICATION_SIGNING_SECRET,
     ),
   };
 }
@@ -198,6 +211,48 @@ async function sha256(value: string) {
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function publicationSignaturePayload(input: {
+  expectedHead: string;
+  path: string;
+  contentHash: string;
+  message: string;
+}) {
+  return [
+    "foundry-publication-signature-v1",
+    input.expectedHead,
+    input.path,
+    input.contentHash,
+    input.message,
+  ].join("\0");
+}
+
+async function signPublicationMessage(
+  secret: string,
+  input: {
+    expectedHead: string;
+    path: string;
+    contentHash: string;
+    message: string;
+  },
+) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(publicationSignaturePayload(input)),
+  );
+  const hex = [...new Uint8Array(signature)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `${input.message}\nFoundry-Publication-Signature: v1=${hex}`;
 }
 
 async function gitBlobSha(value: string, repositoryObjectId: string) {
@@ -518,10 +573,19 @@ export function createGitHubContentPublisher({
           }),
         });
         gitSideEffectStarted = true;
+        const signedMessage = await signPublicationMessage(
+          configuration.publicationSigningSecret,
+          {
+            expectedHead: input.expectedHead,
+            path: input.path,
+            contentHash: input.contentHash,
+            message: input.message,
+          },
+        );
         const commit = await request(token, "/git/commits", {
           method: "POST",
           body: JSON.stringify({
-            message: input.message,
+            message: signedMessage,
             tree: tree.sha,
             parents: [input.expectedHead],
           }),

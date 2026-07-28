@@ -29,6 +29,7 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_CLOUDFLARE_SCRIPT_TAG?: string;
   FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID?: string;
   FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
+  FOUNDRY_PUBLICATION_SIGNING_SECRET?: string;
 }>;
 
 export class HumanAccessConfigurationError extends Error {

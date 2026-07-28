@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { exportPKCS8, generateKeyPair } from "jose";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 import {
   createContentActorId,
@@ -42,6 +42,7 @@ const configurationInputs = {
   cloudflareScriptTag: "script-789",
   cloudflareBuildTriggerId: "trigger-456",
   cloudflareApiToken: "cloudflare-api-token",
+  publicationSigningSecret: "publication-signing-secret-32-bytes",
 };
 
 describe("GitHub content publisher", () => {
@@ -61,6 +62,8 @@ describe("GitHub content publisher", () => {
         FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "script-789",
         FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
         FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
+        FOUNDRY_PUBLICATION_SIGNING_SECRET:
+          "publication-signing-secret-32-bytes",
       }),
     ).toEqual({
       ...configurationInputs,
@@ -79,6 +82,8 @@ describe("GitHub content publisher", () => {
         FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "script-789",
         FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
         FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
+        FOUNDRY_PUBLICATION_SIGNING_SECRET:
+          "publication-signing-secret-32-bytes",
       }),
     ).toThrow(GitHubContentPublisherConfigurationError);
   });
@@ -149,7 +154,21 @@ describe("GitHub content publisher", () => {
         method: "POST",
         body: JSON.stringify({
           message:
-            "Publish\n\nFoundry-Publish-Id: publish_11111111111111111111111111111111",
+            "Publish\n\nFoundry-Publish-Id: publish_11111111111111111111111111111111\n" +
+            `Foundry-Publication-Signature: v1=${createHmac(
+              "sha256",
+              configurationInputs.publicationSigningSecret,
+            )
+              .update(
+                [
+                  "foundry-publication-signature-v1",
+                  expectedHead,
+                  "packages/site-definition/src/published-site.json",
+                  "b".repeat(64),
+                  "Publish\n\nFoundry-Publish-Id: publish_11111111111111111111111111111111",
+                ].join("\0"),
+              )
+              .digest("hex")}`,
           tree: "tree-sha",
           parents: [expectedHead],
         }),

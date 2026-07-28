@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  timingSafeEqual,
+} from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
@@ -26,6 +30,53 @@ function contentHash(bytes) {
   return createHash("sha256")
     .update(canonicalJson(JSON.parse(bytes)))
     .digest("hex");
+}
+
+function publicationSignaturePayload(input) {
+  return [
+    "foundry-publication-signature-v1",
+    input.expectedHead,
+    input.path,
+    input.contentHash,
+    input.message,
+  ].join("\0");
+}
+
+function signatureIsValid({
+  contentHash: expectedContentHash,
+  expectedHead,
+  message,
+  path,
+  secret,
+}) {
+  const matches = [
+    ...message.matchAll(
+      /^Foundry-Publication-Signature: v1=([a-f0-9]{64})$/gmu,
+    ),
+  ];
+  if (matches.length !== 1) {
+    return false;
+  }
+  const trailer =
+    `\nFoundry-Publication-Signature: v1=${matches[0][1]}`;
+  if (!message.endsWith(trailer)) {
+    return false;
+  }
+  const unsignedMessage = message.slice(0, -trailer.length);
+  const expected = createHmac("sha256", secret)
+    .update(
+      publicationSignaturePayload({
+        expectedHead,
+        path,
+        contentHash: expectedContentHash,
+        message: unsignedMessage,
+      }),
+    )
+    .digest();
+  return timingSafeEqual(
+    expected,
+    Buffer.from(matches[0][1], "hex"),
+  );
 }
 
 async function fetchLiveMarker(environment) {
@@ -71,26 +122,18 @@ export async function assertExactProductionContent({
 } = {}) {
   const expectedCommit =
     environment.WORKERS_CI_COMMIT_SHA?.trim().toLowerCase();
-  const initialReleaseCommit =
-    environment.FOUNDRY_INITIAL_RELEASE_COMMIT_SHA?.trim().toLowerCase();
+  const publicationSigningSecret =
+    environment.FOUNDRY_PUBLICATION_SIGNING_SECRET?.trim();
   if (
     expectedCommit === undefined ||
     !objectIdPattern.test(expectedCommit) ||
-    (initialReleaseCommit !== undefined &&
-      !objectIdPattern.test(initialReleaseCommit))
+    publicationSigningSecret === undefined ||
+    Buffer.byteLength(publicationSigningSecret) < 32
   ) {
     throw new Error("exact_content_authorization_configuration_invalid");
   }
 
-  let marker;
-  try {
-    marker = await readLiveMarker();
-  } catch (error) {
-    if (initialReleaseCommit === expectedCommit) {
-      return;
-    }
-    throw error;
-  }
+  const marker = await readLiveMarker();
   if (
     typeof marker !== "object" ||
     marker === null ||
@@ -126,7 +169,14 @@ export async function assertExactProductionContent({
     changedPaths[0] !== publishedContentPath ||
     !/^Foundry-Publish-Id: publish_[a-f0-9]{32}$/mu.test(message) ||
     hashTrailer === null ||
-    expectedContentHash !== hashTrailer[1]
+    expectedContentHash !== hashTrailer[1] ||
+    !signatureIsValid({
+      contentHash: expectedContentHash,
+      expectedHead: liveCommit,
+      message,
+      path: publishedContentPath,
+      secret: publicationSigningSecret,
+    })
   ) {
     throw new Error("exact_content_release_not_authorized");
   }

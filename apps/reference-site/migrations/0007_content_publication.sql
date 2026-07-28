@@ -100,7 +100,13 @@ BEFORE INSERT ON content_revisions
 WHEN NEW.revision > 0 AND EXISTS (
   SELECT 1 FROM content_publications
   WHERE workspace_id = NEW.workspace_id
-    AND status = 'requested'
+    AND (
+      status = 'requested'
+      OR (
+        status = 'committed'
+        AND detail = 'deployment_retry_dispatching'
+      )
+    )
     AND lease_expires_at > NEW.created_at
 )
 BEGIN
