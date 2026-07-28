@@ -662,8 +662,10 @@ export function createD1MediaAssetStore(
       if (existing === null) throw new MediaSiteAccessError();
       const result = await database
         .prepare(
-          `INSERT INTO media_asset_deletions (site_id, asset_id, reserved_at)
-           SELECT ?1, ?2, datetime('now')
+          `INSERT INTO media_asset_deletions (
+             site_id, asset_id, idempotency_key, request_hash, reserved_at
+           )
+           SELECT ?1, ?2, ?3, ?4, datetime('now')
            WHERE NOT EXISTS (
              SELECT 1 FROM media_occurrence_revisions
              WHERE site_id = ?1 AND asset_id = ?2
@@ -686,11 +688,11 @@ export function createD1MediaAssetStore(
       if ((result.meta.changes ?? 0) === 0) {
         const reserved = await database
           .prepare(
-            `SELECT 1 AS reserved FROM media_asset_deletions
+            `SELECT idempotency_key, request_hash FROM media_asset_deletions
              WHERE site_id = ?1 AND asset_id = ?2`,
           )
           .bind(siteId, assetId)
-          .first<{ reserved: number }>();
+          .first<{ idempotency_key: string; request_hash: string }>();
         if (reserved === null) {
           const references = await database
             .prepare(
@@ -701,6 +703,12 @@ export function createD1MediaAssetStore(
             .bind(siteId, assetId)
             .first<{ count: number }>();
           throw new MediaAssetReferencedError(assetId, references?.count ?? 0);
+        }
+        if (
+          reserved.idempotency_key !== context.idempotencyKey ||
+          reserved.request_hash !== context.requestHash
+        ) {
+          throw new MediaSiteAccessError();
         }
       }
       return existing;
@@ -721,6 +729,7 @@ export function createD1MediaAssetStore(
                AND EXISTS (
                  SELECT 1 FROM media_asset_deletions
                  WHERE site_id = ?1 AND asset_id = ?2
+                   AND idempotency_key = ?4 AND request_hash = ?5
                )
                AND EXISTS (
                  SELECT 1 FROM media_mutation_claims
@@ -744,9 +753,10 @@ export function createD1MediaAssetStore(
              )
              SELECT ?1, ?2, 'media.asset.deleted', ?3, NULL, ?4
              WHERE EXISTS (
-               SELECT 1 FROM media_asset_deletions
-               WHERE site_id = ?1 AND asset_id = ?3
-             )
+                 SELECT 1 FROM media_asset_deletions
+                 WHERE site_id = ?1 AND asset_id = ?3
+                   AND idempotency_key = ?5 AND request_hash = ?6
+               )
                AND EXISTS (
                  SELECT 1 FROM media_mutation_claims
                  WHERE site_id = ?1 AND idempotency_key = ?5
@@ -779,6 +789,7 @@ export function createD1MediaAssetStore(
           .prepare(
             `DELETE FROM media_asset_deletions
              WHERE site_id = ?1 AND asset_id = ?2
+               AND idempotency_key = ?3 AND request_hash = ?4
                AND EXISTS (
                  SELECT 1 FROM media_assets
                  WHERE site_id = ?1 AND asset_id = ?2

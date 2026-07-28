@@ -74,7 +74,10 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
   const revisions = new Map<string, Map<number, MediaOccurrenceRevision>>();
   const current = new Map<string, number>();
   const auditEvents: MediaAuditEvent[] = [];
-  const deletionReservations = new Set<string>();
+  const deletionReservations = new Map<
+    string,
+    Readonly<{ idempotencyKey: string; requestHash: string }>
+  >();
   const receipts = new Map<
     string,
     Readonly<{ requestHash: string; result: MediaMutationResult }>
@@ -286,7 +289,16 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       const key = scopedKey(siteId, assetId);
       const asset = assets.get(key);
       if (asset === undefined) throw new MediaSiteAccessError();
-      if (deletionReservations.has(key)) return asset;
+      const reservation = deletionReservations.get(key);
+      if (reservation !== undefined) {
+        if (
+          reservation.idempotencyKey !== context.idempotencyKey ||
+          reservation.requestHash !== context.requestHash
+        ) {
+          throw new MediaSiteAccessError();
+        }
+        return asset;
+      }
       if (deletedAssetIds.has(key)) throw new MediaSiteAccessError();
       let referenceCount = 0;
       for (const [occurrenceKey, history] of revisions) {
@@ -302,7 +314,10 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       if (referenceCount > 0) {
         throw new MediaAssetReferencedError(assetId, referenceCount);
       }
-      deletionReservations.add(key);
+      deletionReservations.set(key, {
+        idempotencyKey: context.idempotencyKey,
+        requestHash: context.requestHash,
+      });
       return asset;
     },
     async tombstoneAssetDeletion(
@@ -319,7 +334,12 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
         throw new MediaSiteAccessError();
       }
       const key = scopedKey(siteId, assetId);
-      if (!deletionReservations.has(key) || !assets.has(key)) {
+      const reservation = deletionReservations.get(key);
+      if (
+        reservation?.idempotencyKey !== context.idempotencyKey ||
+        reservation.requestHash !== context.requestHash ||
+        !assets.has(key)
+      ) {
         throw new MediaSiteAccessError();
       }
       if (deletedAssetIds.has(key)) return;
@@ -341,7 +361,12 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       context,
     ) {
       const key = scopedKey(siteId, assetId);
-      if (!deletionReservations.has(key) || !assets.has(key)) {
+      const reservation = deletionReservations.get(key);
+      if (
+        reservation?.idempotencyKey !== context.idempotencyKey ||
+        reservation.requestHash !== context.requestHash ||
+        !assets.has(key)
+      ) {
         throw new MediaSiteAccessError();
       }
       if (

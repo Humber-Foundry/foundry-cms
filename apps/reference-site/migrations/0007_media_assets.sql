@@ -21,6 +21,8 @@ CREATE TABLE media_assets (
 CREATE TABLE media_asset_deletions (
   site_id TEXT NOT NULL,
   asset_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
   reserved_at TEXT NOT NULL,
   PRIMARY KEY (site_id, asset_id),
   FOREIGN KEY (site_id, asset_id)

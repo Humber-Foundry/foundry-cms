@@ -406,6 +406,32 @@ describe("media asset application", () => {
     );
   });
 
+  it("does not let a different mutation key adopt an in-memory deletion reservation", async () => {
+    const { application, assets } = setup();
+    await upload(application, assetC);
+    const owner = {
+      siteId: siteA,
+      idempotencyKey: "in-memory-deletion-owner",
+      requestHash: "owner-request",
+      claimToken: "owner-claim",
+    };
+    const competitor = {
+      siteId: siteA,
+      idempotencyKey: "in-memory-deletion-competitor",
+      requestHash: "competitor-request",
+      claimToken: "competitor-claim",
+    };
+    await expect(assets.claim(owner)).resolves.toBe(true);
+    await expect(assets.claim(competitor)).resolves.toBe(true);
+    await expect(
+      assets.beginAssetDeletion(siteA, assetC, owner),
+    ).resolves.toMatchObject({ assetId: assetC });
+
+    await expect(
+      assets.beginAssetDeletion(siteA, assetC, competitor),
+    ).rejects.toEqual(new MediaSiteAccessError());
+  });
+
   it("hands a released mutation lease to an already-waiting duplicate", async () => {
     const assets = createInMemoryMediaAssetStore();
     const baseSources = createInMemoryMediaSourceStore();

@@ -313,4 +313,40 @@ describe("D1 media asset store", () => {
     expect(row?.deleted_at).toBe("2026-07-27T12:00:00.000Z");
     await expect(upload(app)).rejects.toThrow();
   });
+
+  it("does not let a different mutation key adopt a deletion reservation", async () => {
+    const app = application();
+    await upload(app);
+    const store = createD1MediaAssetStore(database);
+    const owner = {
+      siteId,
+      idempotencyKey: "deletion-reservation-owner",
+      requestHash: "owner-request",
+      claimToken: "owner-claim",
+    };
+    const competitor = {
+      siteId,
+      idempotencyKey: "deletion-reservation-competitor",
+      requestHash: "competitor-request",
+      claimToken: "competitor-claim",
+    };
+    await expect(store.claim(owner)).resolves.toBe(true);
+    await expect(store.claim(competitor)).resolves.toBe(true);
+    await expect(
+      store.beginAssetDeletion(siteId, assetId, owner),
+    ).resolves.toMatchObject({ assetId });
+
+    await expect(
+      store.beginAssetDeletion(siteId, assetId, competitor),
+    ).rejects.toEqual(new MediaSiteAccessError());
+    await expect(
+      store.tombstoneAssetDeletion(
+        siteId,
+        assetId,
+        actorId,
+        "2026-07-27T12:00:00.000Z",
+        competitor,
+      ),
+    ).rejects.toEqual(new MediaSiteAccessError());
+  });
 });
