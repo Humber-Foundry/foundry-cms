@@ -41,10 +41,12 @@ requires the command workspace to equal the approval workspace.
 
 Published site content lives at
 `packages/site-definition/src/published-site.json`. The publisher writes
-canonical key-sorted JSON with one trailing newline, creates one blob, one tree
-based on the approved head, and one commit whose sole parent is that head. It
-then updates the configured production ref with `force: false`. A moved ref is
-blocked and is never silently rebased.
+canonical key-sorted JSON with one trailing newline. GitHub's
+`createCommitOnBranch` mutation receives the approved head as
+`expectedHeadOid`, the exact file addition, and the signed message, so creation
+of the one-parent commit and advancement of the configured production branch
+are one optimistic compare-and-swap. A moved ref is blocked and is never
+silently rebased.
 
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author
@@ -67,8 +69,8 @@ uninvalidated and the approved revision to remain current; D1 fences new
 revision inserts in that workspace until the Git result releases that lease,
 while other workspaces remain editable. The five-minute lease covers the
 complete bounded GitHub request sequence. Its holder renews the matching token
-before Git work and again immediately before the bounded, non-force production
-ref update. Every renewal rechecks that the exact approval remains
+immediately before the bounded atomic commit-and-ref mutation. Every renewal
+rechecks that the exact approval remains
 uninvalidated, its revision remains current, and its approved production-base
 marker is still live. Marker drift durably invalidates the approval before the
 ref can advance. A stale holder cannot advance the ref or persist its result.
@@ -77,10 +79,11 @@ before it can
 become failed; a recovered exact commit is durably recorded and releases the
 lease before deployment polling. The stable publication key and commit
 trailers support replay and ambiguous-result reconciliation without creating
-another content commit. When Git returned a candidate SHA before the reference
-result became ambiguous, reconciliation verifies that exact commit trailer and
-its ancestry from the current production head instead of searching a bounded
-history page. A not-found observation remains uncertain until the same
+another content commit. Successful ambiguous atomic mutations are reachable
+from the production branch and are discovered by exact signed-message, parent,
+one-commit, one-file, and artifact-byte checks. Historical operations that
+retained a candidate SHA are reconciled directly instead of searching a
+bounded history page. A not-found observation remains uncertain until the same
 15-minute deadline. Refresh transitions compare the prior durable status and
 update timestamp, while exact reconciled commit evidence cannot be erased by a
 delayed not-found result. Reload recovery prioritizes any active
@@ -95,7 +98,11 @@ retained candidate evidence is also preserved while channel-configuration
 reads are unavailable, so a later recovery can reconcile the exact commit
 instead of losing the only durable link to a possibly completed side effect.
 If Git cannot resolve an ambiguous no-SHA result for 15 minutes, the operation
-becomes terminal with explicit `git_reconciliation_timeout` evidence.
+becomes terminal with explicit `git_reconciliation_timeout` evidence. An
+explicit retry first reconciles again; only while the branch still equals the
+approved head may it repeat the same atomic mutation. A prior success makes
+that compare-and-swap fail without creating a second commit, after which
+reconciliation retains the original operation.
 
 The status vocabulary is:
 
@@ -120,13 +127,16 @@ retryable unavailability, not evidence that the approval's production base
 mismatches; it is retried until the same bounded release-marker deadline, then
 becomes `failed`. Each GitHub and marker request also has a 30-second transport
 timeout.
-An Editor or Owner can explicitly retry a failed deployment whose commit
-remains the production head. Foundry first claims that retry durably, then asks
-the Cloudflare Workers Builds API to build that exact branch and commit hash;
-it does not create or move a Git commit. Immediately before that external
-request, Foundry revalidates the exact approval and production head under the
-claimed retry. An observed mismatch durably invalidates approval and releases
-the claim without dispatch. The returned build UUID is stored with the
+An Editor or Owner can explicitly retry a failed operation. When a commit is
+already recorded and remains the production head, Foundry first claims the
+retry durably, then asks the Cloudflare Workers Builds API to build that exact
+branch and commit hash; this deployment retry does not create or move a Git
+commit. When an ambiguous atomic Git response has no recorded SHA, the same
+action performs the safe reconcile-or-compare-and-swap repair described above.
+Immediately before either external request, Foundry revalidates the exact
+approval and production head under the claimed retry. An observed mismatch
+durably invalidates approval and releases the claim without dispatch. The
+returned build UUID is stored with the
 publication and polled through the Builds API, so an earlier failed GitHub
 check cannot be mistaken for the new attempt. The stable publication and
 protected human-mutation receipt prevent a repeated request from dispatching a
@@ -135,15 +145,16 @@ becomes uncertain after one minute and terminal after the same bounded
 15-minute recovery window rather than holding the global publication slot
 indefinitely.
 Any later edit invalidates that retry authority; the newer revision must be
-previewed and approved instead. A retained commit whose ref update was
-ambiguous can be retried through the same explicit action. Foundry verifies its
-publish trailer, sole expected parent, and sole exact content-file change
-before attempting the non-force ref compare-and-swap again. When a lost commit
-response leaves no candidate SHA, branch-history reconciliation applies the
-same signed-message, parent, one-commit, one-file, and artifact-byte checks to
-every matching trailer; a later code commit that copies the public publication
-ID is not accepted. HTTP timeout, early-data, rate-limit, client-closed, and
-server-error responses from writes remain ambiguous rather than releasing
+previewed and approved instead. A retained historical candidate whose ref
+update was ambiguous can be retried through the same explicit action. Foundry
+verifies its publish trailer, sole expected parent, and sole exact content-file
+change before attempting the non-force ref compare-and-swap again. When a lost
+atomic mutation response leaves no returned SHA, branch-history reconciliation
+applies the same signed-message, parent, one-commit, one-file, and artifact-byte
+checks to every matching trailer; a later code commit that copies the public
+publication ID is not accepted. HTTP timeout, early-data, rate-limit,
+client-closed, and server-error responses from writes remain ambiguous rather
+than releasing
 authority for a duplicate commit, ref update, or build dispatch.
 The commit carries an HMAC publication signature over its parent, content path,
 content hash, and complete attribution message. The signing secret is shared

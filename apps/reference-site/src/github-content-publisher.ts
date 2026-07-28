@@ -168,6 +168,18 @@ function isNonFastForwardRefError(error: unknown) {
   );
 }
 
+function isExpectedHeadMismatch(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "responseMessage" in error &&
+    typeof error.responseMessage === "string" &&
+    /expected.?head|head oid|expected.*branch|expected.*oid|branch.*point|branch.*updated|branch.*changed/iu.test(
+      error.responseMessage,
+    )
+  );
+}
+
 const ambiguousWriteResponseStatuses = new Set([408, 425, 429, 499]);
 
 function isDefiniteHttpRejection(error: unknown) {
@@ -318,6 +330,15 @@ function decodeGitHubBlob(value: unknown): Uint8Array | null {
   } catch {
     return null;
   }
+}
+
+function encodeBase64Utf8(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 32_768) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
+  }
+  return btoa(binary);
 }
 
 function publicationSignaturePayload(input: {
@@ -517,6 +538,38 @@ export function createGitHubContentPublisher({
         },
       }),
     );
+  }
+
+  async function graphqlRequest(
+    token: string,
+    query: string,
+    variables: Record<string, unknown>,
+  ) {
+    const body = await readJson(
+      await fetchImplementation("https://api.github.com/graphql", {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+        headers: githubHeaders(token),
+        body: JSON.stringify({ query, variables }),
+      }),
+    );
+    if (Array.isArray(body.errors) && body.errors.length > 0) {
+      const message = body.errors
+        .map((error: unknown) =>
+          typeof error === "object" &&
+          error !== null &&
+          "message" in error &&
+          typeof error.message === "string"
+            ? error.message
+            : "GraphQL mutation failed",
+        )
+        .join("; ");
+      throw Object.assign(new Error("github_graphql_request_failed"), {
+        status: 422,
+        responseMessage: message,
+      });
+    }
+    return body;
   }
 
   async function productionHead(providedToken?: string) {
@@ -777,7 +830,6 @@ export function createGitHubContentPublisher({
       );
     },
     async createCommit(input): Promise<PublicationCommitResult> {
-      let createdCommitSha: string | undefined;
       let gitSideEffectStarted = false;
       try {
         if (!(await input.assertLease())) {
@@ -787,32 +839,6 @@ export function createGitHubContentPublisher({
         if ((await productionHead(token)) !== input.expectedHead) {
           return { state: "blocked", detail: "production_head_moved" };
         }
-        const baseCommit = await request(
-          token,
-          `/git/commits/${input.expectedHead}`,
-        );
-        if (typeof baseCommit.tree?.sha !== "string") {
-          throw new Error("github_base_tree_invalid");
-        }
-        const blob = await request(token, "/git/blobs", {
-          method: "POST",
-          body: JSON.stringify({ content: input.bytes, encoding: "utf-8" }),
-        });
-        const tree = await request(token, "/git/trees", {
-          method: "POST",
-          body: JSON.stringify({
-            base_tree: baseCommit.tree.sha,
-            tree: [
-              {
-                path: input.path,
-                mode: "100644",
-                type: "blob",
-                sha: blob.sha,
-              },
-            ],
-          }),
-        });
-        gitSideEffectStarted = true;
         const signedMessage = await signPublicationMessage(
           configuration.publicationSigningSecret,
           {
@@ -822,48 +848,58 @@ export function createGitHubContentPublisher({
             message: input.message,
           },
         );
-        const commit = await request(token, "/git/commits", {
-          method: "POST",
-          body: JSON.stringify({
-            message: signedMessage,
-            tree: tree.sha,
-            parents: [input.expectedHead],
-          }),
-        });
-        if (typeof commit.sha !== "string") {
+        const separator = signedMessage.indexOf("\n\n");
+        const headline =
+          separator === -1
+            ? signedMessage
+            : signedMessage.slice(0, separator);
+        const body =
+          separator === -1
+            ? null
+            : signedMessage.slice(separator + 2);
+        gitSideEffectStarted = true;
+        const result = await graphqlRequest(
+          token,
+          `mutation CreateFoundryPublication(
+            $input: CreateCommitOnBranchInput!
+          ) {
+            createCommitOnBranch(input: $input) {
+              commit { oid }
+            }
+          }`,
+          {
+            input: {
+              branch: {
+                repositoryNameWithOwner:
+                  `${configuration.owner}/${configuration.repository}`,
+                branchName: configuration.productionBranch,
+              },
+              expectedHeadOid: input.expectedHead,
+              message: {
+                headline,
+                ...(body === null ? {} : { body }),
+              },
+              fileChanges: {
+                additions: [
+                  {
+                    path: input.path,
+                    contents: encodeBase64Utf8(input.bytes),
+                  },
+                ],
+              },
+            },
+          },
+        );
+        const commitSha = result.data?.createCommitOnBranch?.commit?.oid;
+        if (typeof commitSha !== "string") {
           throw new Error("github_commit_invalid");
         }
-        createdCommitSha = commit.sha;
-        if (!(await input.assertLease())) {
-          return {
-            state: "unknown",
-            detail: `git_reference_result_unknown:${commit.sha}`,
-          };
-        }
-        try {
-          await request(
-            token,
-            `/git/refs/heads/${configuration.productionBranch
-              .split("/")
-              .map(encodeURIComponent)
-              .join("/")}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify({ sha: commit.sha, force: false }),
-            },
-          );
-        } catch (error) {
-          if (isNonFastForwardRefError(error)) {
-            return { state: "blocked", detail: "production_head_moved" };
-          }
-          throw error;
-        }
-        return { state: "committed", commitSha: commit.sha };
+        return { state: "committed", commitSha };
       } catch (error) {
-        if (
-          createdCommitSha === undefined &&
-          isDefiniteHttpRejection(error)
-        ) {
+        if (isExpectedHeadMismatch(error)) {
+          return { state: "blocked", detail: "production_head_moved" };
+        }
+        if (isDefiniteHttpRejection(error)) {
           return { state: "failed", detail: "git_operation_failed" };
         }
         if (!gitSideEffectStarted) {
@@ -871,10 +907,7 @@ export function createGitHubContentPublisher({
         }
         return {
           state: "unknown",
-          detail:
-            createdCommitSha === undefined
-              ? "git_result_unknown"
-              : `git_reference_result_unknown:${createdCommitSha}`,
+          detail: "git_result_unknown",
         };
       }
     },

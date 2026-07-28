@@ -50,7 +50,7 @@ sides of the material boundaries:
 
 - D1 claim/transition compare-and-swap and response-loss-safe restored
   workspace initialization;
-- Git commit creation and non-force reference update reconciliation;
+- atomic expected-head Git commit-and-reference reconciliation;
 - Cloudflare build-request dispatch and ambiguous response recovery; and
 - exact release-marker verification, delayed visibility, and repeated
   refresh.

@@ -286,26 +286,59 @@ describe("visual component editor browser acceptance", () => {
                     id: publicationId,
                     workspaceId: "workspace_history",
                     revision: 7,
+                    approvalId: `approval_${"1".repeat(32)}`,
+                    fingerprint: "f".repeat(64),
+                    idempotencyKey: "browser-history-publication-1",
+                    requestedBy: "membership-editor",
+                    contributors: ["membership-editor"],
+                    expectedHead: "b".repeat(40),
                     status: "verified-live",
                     detail: null,
                     commitSha: "c".repeat(40),
+                    deploymentId: "build-browser-history",
+                    deploymentRequestedAt:
+                      "2026-07-27T10:00:30.000Z",
+                    leaseToken: null,
+                    leaseExpiresAt: null,
                     requestedAt: "2026-07-27T10:00:00.000Z",
+                    updatedAt: "2026-07-27T10:02:00.000Z",
                   },
                   approval: {
+                    id: `approval_${"1".repeat(32)}`,
+                    workspaceId: "workspace_history",
+                    revision: 7,
                     fingerprint: {
+                      value: "f".repeat(64),
+                      channel: "site",
+                      channelConfigurationHash: "channel-browser",
                       contentHash: "d".repeat(64),
+                      designHash: "a".repeat(64),
+                      schemaVersion: "1.0.0",
+                      rendererVersion: "renderer-browser",
+                      productionBase: `git:${"b".repeat(40)}@content:${"9".repeat(64)}`,
                       artifactHash: "e".repeat(64),
+                      serializationVersion:
+                        "foundry.site-definition.canonical-json.v1",
                     },
+                    approvedBy: "membership-editor",
+                    approvedAt: "2026-07-27T09:59:00.000Z",
+                    invalidatedAt: null,
                   },
                   events: [
                     {
                       status: "committed",
                       detail: null,
+                      commitSha: "c".repeat(40),
+                      deploymentId: null,
+                      approvalFingerprint: "f".repeat(64),
                       occurredAt: "2026-07-27T10:01:00.000Z",
                     },
                     {
                       status: "verified-live",
                       detail: null,
+                      commitSha: "c".repeat(40),
+                      deploymentId: "build-browser-history",
+                      approvalFingerprint: "f".repeat(64),
                       occurredAt: "2026-07-27T10:02:00.000Z",
                     },
                   ],
@@ -344,6 +377,46 @@ describe("visual component editor browser acceptance", () => {
     expect(
       page.getByRole("button", { name: "Restore as new draft" }),
     ).toBeDefined();
+  });
+
+  it("distinguishes unavailable publication history from an empty history", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("view=history")
+        ? Response.json({ error: "request_check_unavailable" }, { status: 503 })
+        : Response.json({ publication: null }),
+    );
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-history-unavailable",
+          initialRevision: browserRevision("workspace_history_unavailable"),
+          initialPreviewUrl: "/preview/history-unavailable",
+          activeWorkspaceUrl: "/dash?workspace=history-unavailable",
+        }),
+      );
+    });
+
+    for (
+      let index = 0;
+      index < 20 &&
+      !host.textContent?.includes(
+        "Publication history is temporarily unavailable",
+      );
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+
+    expect(host.textContent).toContain(
+      "Publication history is temporarily unavailable",
+    );
+    expect(host.textContent).not.toContain(
+      "No publication attempts are recorded yet.",
+    );
   });
 
   it("keeps duplicate workspace tabs editable while coordinating browser persistence", async () => {

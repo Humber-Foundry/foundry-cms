@@ -2,54 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import type {
+  ContentPublication,
+  ContentPublicationHistoryEntry,
+  ContentPublicationStatus,
+} from "@foundry/application";
+
 import {
   loadContentPublicationHistory,
   restoreContentPublication,
 } from "../src/content-publication-client";
 
-export type PublicationStatus =
-  | "requested"
-  | "committed"
-  | "building"
-  | "deployed"
-  | "verified-live"
-  | "blocked"
-  | "failed"
-  | "unknown";
-
-export type PublicationRecord = Readonly<{
-  id: string;
-  workspaceId?: string;
-  revision?: number;
-  status: PublicationStatus;
-  detail: string | null;
-  commitSha: string | null;
-  deploymentId?: string | null;
-  requestedAt?: string;
-}>;
-
-type PublicationHistoryEntry = Readonly<{
-  publication: PublicationRecord;
-  approval: Readonly<{
-    fingerprint: Readonly<{
-      contentHash: string;
-      artifactHash: string;
-    }>;
-  }>;
-  events: ReadonlyArray<
-    Readonly<{
-      status: PublicationStatus;
-      detail: string | null;
-      commitSha: string | null;
-      deploymentId: string | null;
-      approvalFingerprint: string;
-      occurredAt: string;
-    }>
-  >;
-}>;
+export type PublicationRecord = ContentPublication;
 
 export const publicationLabels: Readonly<
-  Record<PublicationStatus, string>
+  Record<ContentPublicationStatus, string>
 > = {
   requested: "Publish requested",
   committed: "Commit created",
@@ -73,30 +40,29 @@ export function PublicationHistory({
   refreshKey: string;
 }) {
   const [history, setHistory] = useState<
-    ReadonlyArray<PublicationHistoryEntry>
+    ReadonlyArray<ContentPublicationHistoryEntry>
   >([]);
+  const [historyState, setHistoryState] = useState<
+    "loading" | "loaded" | "unavailable"
+  >("loading");
   const [restoringPublicationId, setRestoringPublicationId] =
     useState<string | null>(null);
   const restoreAttempts = useRef(new Map<string, string>());
 
   useEffect(() => {
     let cancelled = false;
+    setHistoryState("loading");
     void loadContentPublicationHistory()
       .then((result) => {
-        if (
-          !cancelled &&
-          typeof result === "object" &&
-          result !== null &&
-          "history" in result &&
-          Array.isArray(result.history)
-        ) {
-          setHistory(
-            result.history as ReadonlyArray<PublicationHistoryEntry>,
-          );
+        if (!cancelled) {
+          setHistory(result.history);
+          setHistoryState("loaded");
         }
       })
       .catch(() => {
-        // Publication history is supplementary to safe draft editing.
+        if (!cancelled) {
+          setHistoryState("unavailable");
+        }
       });
     return () => {
       cancelled = true;
@@ -153,7 +119,14 @@ export function PublicationHistory({
           Restoring creates a new unpublished draft.
         </p>
       </div>
-      {history.length === 0 ? (
+      {historyState === "loading" ? (
+        <p>Loading publication history…</p>
+      ) : historyState === "unavailable" ? (
+        <p>
+          Publication history is temporarily unavailable. No release
+          evidence has been discarded.
+        </p>
+      ) : history.length === 0 ? (
         <p>No publication attempts are recorded yet.</p>
       ) : (
         <ol>

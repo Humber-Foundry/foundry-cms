@@ -134,16 +134,28 @@ describe("content publication client", () => {
   it("loads published history without a workspace-scoped query", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(
-        json({ history: [{ publication: { status: "verified-live" } }] }),
-      );
+      .mockResolvedValue(json({ history: [] }));
 
-    await loadContentPublicationHistory({ fetcher });
+    await expect(
+      loadContentPublicationHistory({ fetcher }),
+    ).resolves.toEqual({ history: [] });
 
     expect(fetcher).toHaveBeenCalledWith(
       "/api/foundry-cms/publications?view=history",
       { cache: "no-store" },
     );
+  });
+
+  it("rejects incomplete publication history evidence", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        json({ history: [{ publication: { status: "verified-live" } }] }),
+      );
+
+    await expect(
+      loadContentPublicationHistory({ fetcher }),
+    ).rejects.toThrow("content_publication_history_invalid");
   });
 
   it("restores a published version through the protected mutation path", async () => {

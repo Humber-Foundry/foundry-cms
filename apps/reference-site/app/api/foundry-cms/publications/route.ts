@@ -307,7 +307,6 @@ export async function POST(request: Request) {
               sourcePublicationId: createContentPublicationId(
                 command.sourcePublicationId,
               ),
-              restoredBy: access.membership.id,
               actorId,
               workspaceId: await contentWorkspaceIdForMutation(
                 actorId,

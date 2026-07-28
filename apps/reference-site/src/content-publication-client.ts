@@ -1,4 +1,8 @@
-import { contentPublicationHasUnresolvedGitOutcome } from "@foundry/application";
+import {
+  contentPublicationHasUnresolvedGitOutcome,
+  contentPublicationStatuses,
+  type ContentPublicationHistoryEntry,
+} from "@foundry/application";
 
 export type ContentPublicationAttempt = Readonly<{
   body: string;
@@ -6,6 +10,110 @@ export type ContentPublicationAttempt = Readonly<{
 }>;
 
 type Fetcher = typeof fetch;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+function hasStringFields(
+  value: Record<string, unknown>,
+  fields: ReadonlyArray<string>,
+) {
+  return fields.every((field) => typeof value[field] === "string");
+}
+
+function isPublicationStatus(
+  value: unknown,
+): value is ContentPublicationHistoryEntry["publication"]["status"] {
+  return (
+    typeof value === "string" &&
+    contentPublicationStatuses.some((status) => status === value)
+  );
+}
+
+function isPublicationHistoryEntry(
+  value: unknown,
+): value is ContentPublicationHistoryEntry {
+  if (!isRecord(value) || !isRecord(value.publication)) {
+    return false;
+  }
+  const publication = value.publication;
+  if (
+    !hasStringFields(publication, [
+      "id",
+      "workspaceId",
+      "approvalId",
+      "fingerprint",
+      "idempotencyKey",
+      "requestedBy",
+      "expectedHead",
+      "requestedAt",
+      "updatedAt",
+    ]) ||
+    !Number.isSafeInteger(publication.revision) ||
+    !Array.isArray(publication.contributors) ||
+    !publication.contributors.every(
+      (contributor) => typeof contributor === "string",
+    ) ||
+    !isPublicationStatus(publication.status) ||
+    ![
+      publication.commitSha,
+      publication.deploymentId,
+      publication.deploymentRequestedAt,
+      publication.detail,
+      publication.leaseToken,
+      publication.leaseExpiresAt,
+    ].every(isStringOrNull)
+  ) {
+    return false;
+  }
+  if (!isRecord(value.approval)) {
+    return false;
+  }
+  const approval = value.approval;
+  const fingerprint = approval.fingerprint;
+  if (!isRecord(fingerprint)) {
+    return false;
+  }
+  if (
+    !hasStringFields(approval, [
+      "id",
+      "workspaceId",
+      "approvedBy",
+      "approvedAt",
+    ]) ||
+    !Number.isSafeInteger(approval.revision) ||
+    !isStringOrNull(approval.invalidatedAt) ||
+    !hasStringFields(fingerprint, [
+      "value",
+      "channel",
+      "channelConfigurationHash",
+      "contentHash",
+      "designHash",
+      "schemaVersion",
+      "rendererVersion",
+      "productionBase",
+      "artifactHash",
+      "serializationVersion",
+    ]) ||
+    !Array.isArray(value.events)
+  ) {
+    return false;
+  }
+  return value.events.every(
+    (event) =>
+      isRecord(event) &&
+      isPublicationStatus(event.status) &&
+      isStringOrNull(event.detail) &&
+      isStringOrNull(event.commitSha) &&
+      isStringOrNull(event.deploymentId) &&
+      hasStringFields(event, ["approvalFingerprint", "occurredAt"]),
+  );
+}
 
 export function contentPublicationCanRetry(publication: {
   status: string;
@@ -115,7 +223,19 @@ export async function loadContentPublicationHistory({
   if (!response.ok) {
     throw new Error("content_publication_history_failed");
   }
-  return (await response.json()) as unknown;
+  const result: unknown = await response.json();
+  if (
+    !isRecord(result) ||
+    !Array.isArray(result.history) ||
+    !result.history.every(isPublicationHistoryEntry)
+  ) {
+    throw new Error("content_publication_history_invalid");
+  }
+  return {
+    history: result.history,
+  } satisfies {
+    history: ReadonlyArray<ContentPublicationHistoryEntry>;
+  };
 }
 
 export function restoreContentPublication({

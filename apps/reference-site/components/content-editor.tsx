@@ -1001,7 +1001,15 @@ export function ContentEditor({
       const recorded = result.body.publication as PublicationRecord;
       setPublicationPollAttempt(0);
       setPublication(recorded);
-      setMessage("The exact committed revision is queued for another build.");
+      setMessage(
+        recorded.status === "failed" && recorded.commitSha === null
+          ? "No commit is confirmed yet. This exact publication can be retried safely."
+          : recorded.status === "unknown"
+            ? "The exact publication remains uncertain and is being reconciled."
+            : recorded.commitSha !== null
+              ? "The exact committed revision is queued for build verification."
+              : "The exact publication retry remains recorded.",
+      );
     } catch {
       setMessage(
         "The deployment retry could not be confirmed. Retry the same request.",

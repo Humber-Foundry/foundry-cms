@@ -327,7 +327,6 @@ describe("content publication endpoint", () => {
     expect(response.status).toBe(201);
     expect(mocks.restore).toHaveBeenCalledWith({
       sourcePublicationId: source.id,
-      restoredBy: "membership-editor",
       actorId: "membership-editor",
       workspaceId: "workspace_restored",
       idempotencyKey: "publication-route-restore-1",
