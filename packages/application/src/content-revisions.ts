@@ -1,9 +1,11 @@
 import {
   applyPageComposition,
   applySiteDefinitionEdits,
+  bindSiteMediaOccurrence,
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
+  type SiteMediaOccurrence,
 } from "@foundry/site-definition";
 import { sha256CanonicalJson } from "./deterministic-hash";
 
@@ -72,6 +74,15 @@ export type SaveContentRevisionCommand = Readonly<{
 export type CreateContentWorkspaceCommand = Readonly<{
   actorId: ContentActorId;
   workspaceId: ContentWorkspaceId;
+  idempotencyKey: string;
+}>;
+
+export type SaveContentMediaOccurrenceCommand = Readonly<{
+  actorId: ContentActorId;
+  workspaceId: ContentWorkspaceId;
+  schemaVersion: SiteDefinition["schemaVersion"];
+  baseRevision: number;
+  occurrence: SiteMediaOccurrence;
   idempotencyKey: string;
 }>;
 
@@ -474,6 +485,81 @@ export function createContentRevisionApplication({
           inputs: {
             contentHash: await sha256CanonicalJson(edited.definition),
             schemaVersion: edited.definition.schemaVersion,
+            rendererVersion,
+            productionBase: base.inputs.productionBase,
+          },
+          createdAt: now(),
+          createdBy: command.actorId,
+        };
+        return store.persist({
+          baseRevision: command.baseRevision,
+          idempotencyKey: command.idempotencyKey,
+          requestHash,
+          revision: nextRevision,
+        });
+      },
+      async saveMediaOccurrence(command: SaveContentMediaOccurrenceCommand) {
+        if (command.actorId !== actorId) {
+          throw new ContentWorkspaceAccessError();
+        }
+        if (!/^[A-Za-z0-9._:-]{16,128}$/.test(command.idempotencyKey)) {
+          throw new ContentRevisionValidationError({
+            idempotencyKey: "Use a 16–128 character idempotency key.",
+          });
+        }
+        if (command.workspaceId !== workspaceId) {
+          throw new ContentRevisionValidationError({
+            workspaceId: "This workspace is not available.",
+          });
+        }
+        await store.requireAccess(actorId);
+        const currentProductionBase = await resolveProductionBase();
+        const requestHash = await sha256CanonicalJson(command);
+        const replay = await store.replay(
+          command.idempotencyKey,
+          requestHash,
+        );
+        if (replay !== null) {
+          if (
+            !isContentRevisionRenderableBy(replay, {
+              rendererVersion,
+              productionBase: currentProductionBase,
+            })
+          ) {
+            throw new ContentRevisionStaleError(replay.revision);
+          }
+          return replay;
+        }
+        if (command.schemaVersion !== siteDefinition.schemaVersion) {
+          throw new ContentRevisionValidationError({
+            schemaVersion:
+              `Use Site Definition schema ${siteDefinition.schemaVersion}.`,
+          });
+        }
+        const base = await store.getRevision(command.baseRevision);
+        if (base === null) {
+          const current = await store.getCurrent();
+          throw new ContentRevisionConflictError(current.revision);
+        }
+        if (
+          !isContentRevisionRenderableBy(base, {
+            rendererVersion,
+            productionBase: currentProductionBase,
+          })
+        ) {
+          throw new ContentRevisionStaleError();
+        }
+        const definition = bindSiteMediaOccurrence(
+          base.definition,
+          command.occurrence,
+        );
+        const nextRevision: ContentRevision = {
+          workspaceId,
+          revision: command.baseRevision + 1,
+          definition,
+          inputs: {
+            contentHash: await sha256CanonicalJson(definition),
+            schemaVersion: definition.schemaVersion,
             rendererVersion,
             productionBase: base.inputs.productionBase,
           },

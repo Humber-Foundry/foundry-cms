@@ -60,7 +60,9 @@ occurrences that reference the same asset.
 
 **Media occurrence revision** — An immutable snapshot of one occurrence's
 asset reference and optional normalized crop. A crop is presentation data; it
-never rewrites the media asset's source object.
+never rewrites the media asset's source object. A selected occurrence revision
+is bound into an immutable content revision before it appears in an exact
+preview; only the Git-published Site Definition is public.
 
 ## Blog
 

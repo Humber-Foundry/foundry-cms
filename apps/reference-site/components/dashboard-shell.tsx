@@ -117,6 +117,7 @@ export function DashboardShell({
             csrfToken={mutationToken}
             initialAssets={mediaAssets}
             initialOccurrences={mediaOccurrences}
+            initialContentRevision={contentRevision}
           />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">

@@ -3,10 +3,12 @@
 import { useState } from "react";
 
 import type {
+  ContentRevision,
   MediaAsset,
   MediaOccurrenceRevision,
 } from "@foundry/application";
 import { renderedMediaOccurrenceIds } from "@foundry/application";
+import { requireRenderedMediaOccurrenceId } from "@foundry/application";
 
 import { MediaOccurrence } from "./media-occurrence";
 
@@ -26,13 +28,18 @@ export function MediaManager({
   csrfToken,
   initialAssets,
   initialOccurrences,
+  initialContentRevision,
 }: {
   csrfToken: string;
   initialAssets: ReadonlyArray<MediaAsset>;
   initialOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
+  initialContentRevision?: ContentRevision;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
   const [occurrences, setOccurrences] = useState([...initialOccurrences]);
+  const [contentRevision, setContentRevision] = useState(
+    initialContentRevision,
+  );
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string>(
@@ -98,16 +105,25 @@ export function MediaManager({
     );
     setBusy(true);
     try {
-      const revision = (await mutateJson({
+    if (contentRevision === undefined) return;
+    const result = (await mutateJson({
         operation: "replace",
         occurrenceId,
         assetId: selectedAsset,
         baseRevision: current?.revision ?? 0,
-      })) as MediaOccurrenceRevision;
+        workspaceId: contentRevision.workspaceId,
+        contentBaseRevision: contentRevision.revision,
+      })) as {
+        occurrence: MediaOccurrenceRevision;
+        contentRevision: ContentRevision;
+        previewUrl: string;
+      };
+      const revision = result.occurrence;
       setOccurrences((items) => [
         ...items.filter((item) => item.occurrenceId !== occurrenceId),
         revision,
       ]);
+      setContentRevision(result.contentRevision);
       setMessage("Only the selected occurrence was replaced.");
     } catch {
       setMessage("The occurrence changed elsewhere or could not be replaced.");
@@ -120,19 +136,27 @@ export function MediaManager({
     const current = occurrences.find(
       (occurrence) => occurrence.occurrenceId === occurrenceId,
     );
-    if (current === undefined) return;
+    if (current === undefined || contentRevision === undefined) return;
     setBusy(true);
     try {
-      const revision = (await mutateJson({
+      const result = (await mutateJson({
         operation: "crop",
         occurrenceId,
         baseRevision: current.revision,
         crop,
-      })) as MediaOccurrenceRevision;
+        workspaceId: contentRevision.workspaceId,
+        contentBaseRevision: contentRevision.revision,
+      })) as {
+        occurrence: MediaOccurrenceRevision;
+        contentRevision: ContentRevision;
+        previewUrl: string;
+      };
+      const revision = result.occurrence;
       setOccurrences((items) => [
         ...items.filter((item) => item.occurrenceId !== occurrenceId),
         revision,
       ]);
+      setContentRevision(result.contentRevision);
       setMessage("Crop saved as revision data; the source is unchanged.");
     } catch {
       setMessage("The crop could not be saved.");
@@ -216,7 +240,12 @@ export function MediaManager({
             <button
               className="button button-primary"
               type="button"
-              disabled={busy || occurrenceId === "" || selectedAsset === ""}
+              disabled={
+                busy ||
+                contentRevision === undefined ||
+                occurrenceId === "" ||
+                selectedAsset === ""
+              }
               onClick={() => void replaceSelected()}
             >
               Use in selected occurrence
@@ -226,6 +255,7 @@ export function MediaManager({
               type="button"
               disabled={
                 busy ||
+                contentRevision === undefined ||
                 !occurrences.some(
                   (occurrence) => occurrence.occurrenceId === occurrenceId,
                 )
@@ -272,8 +302,19 @@ export function MediaManager({
             return (
               <MediaOccurrence
                 key={occurrence.occurrenceId}
-                occurrence={occurrence}
-                asset={asset}
+                occurrence={{
+                  occurrenceId: requireRenderedMediaOccurrenceId(
+                    occurrence.occurrenceId,
+                  ),
+                  revision: occurrence.revision,
+                  asset: {
+                    assetId: asset.assetId,
+                    width: asset.width,
+                    height: asset.height,
+                    contentType: asset.contentType,
+                  },
+                  crop: occurrence.crop,
+                }}
               >
               <figcaption>
                 {occurrence.occurrenceId} · revision {occurrence.revision}

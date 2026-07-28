@@ -48,6 +48,19 @@ describe("reference Site Definition", () => {
     );
   });
 
+  it("keeps the Git-published reference media manifest explicit and empty", () => {
+    expect(referenceSiteDefinition.home.media).toEqual([]);
+  });
+
+  it("continues to validate saved 1.0 definitions created before media manifests", () => {
+    const legacy = structuredClone(referenceSiteDefinition) as unknown as Record<
+      string,
+      any
+    >;
+    delete legacy.home.media;
+    expect(validate(legacy), validate.errors?.toString()).toBe(true);
+  });
+
   it.each([
     {
       name: "a non-string site identifier",

@@ -1,8 +1,8 @@
-import type { MediaAsset, MediaCrop } from "@foundry/application";
+import type { SiteMediaCrop } from "@foundry/site-definition";
 
 export function mediaCropStyle(
-  crop: MediaCrop,
-  asset: Pick<MediaAsset, "width" | "height">,
+  crop: SiteMediaCrop,
+  asset: Readonly<{ width: number; height: number }>,
 ) {
   return {
     frame: {

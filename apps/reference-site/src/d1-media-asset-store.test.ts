@@ -190,5 +190,6 @@ describe("D1 media asset store", () => {
       .bind(siteId, assetId)
       .first<{ deleted_at: string | null }>();
     expect(row?.deleted_at).toBe("2026-07-27T12:00:00.000Z");
+    await expect(upload(app)).rejects.toThrow();
   });
 });

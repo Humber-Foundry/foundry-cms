@@ -4,9 +4,16 @@ import {
   MediaOccurrenceConflictError,
   MediaSiteAccessError,
   MediaValidationError,
+  ContentRevisionConflictError,
+  ContentRevisionConfigurationError,
+  ContentRevisionStaleError,
+  ContentRevisionValidationError,
+  ContentWorkspaceAccessError,
   createContentActorId,
+  createContentWorkspaceId,
   createMediaAssetId,
   createMediaOccurrenceId,
+  requireRenderedMediaOccurrenceId,
 } from "@foundry/application";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
@@ -23,6 +30,8 @@ import {
   MediaAssetConfigurationError,
   loadMediaAssetApplication,
 } from "../../../../src/media-asset-runtime";
+import { loadContentRevisionApplication } from "../../../../src/content-revision-runtime";
+import { revisionPreviewGatewayUrl } from "../../../../src/content-revision-links";
 
 async function authorized(request: Request) {
   const authenticated = await loadHumanIdentityRequestContext(request.headers);
@@ -74,6 +83,72 @@ function numberField(form: FormData, name: string) {
   return typeof value === "string" ? Number(value) : Number.NaN;
 }
 
+async function bindOccurrenceToContentRevision({
+  body,
+  actorId,
+  idempotencyKey,
+  occurrence,
+  application,
+}: {
+  body: Record<string, unknown>;
+  actorId: ReturnType<typeof createContentActorId>;
+  idempotencyKey: string;
+  occurrence: Awaited<
+    ReturnType<
+      Awaited<ReturnType<typeof loadMediaAssetApplication>>["commands"]["replaceOccurrence"]
+    >
+  >;
+  application: Awaited<ReturnType<typeof loadMediaAssetApplication>>;
+}) {
+  const workspaceId = createContentWorkspaceId(String(body.workspaceId ?? ""));
+  const contentBaseRevision = Number(body.contentBaseRevision);
+  if (!Number.isSafeInteger(contentBaseRevision) || contentBaseRevision < 0) {
+    throw new MediaValidationError("contentBaseRevision");
+  }
+  const asset = await application.queries.getAsset(occurrence.assetId);
+  if (asset === null) throw new MediaSiteAccessError();
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(idempotencyKey),
+  );
+  const contentIdempotencyKey = `media-content-${[...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")}`;
+  const contentApplication = await loadContentRevisionApplication(
+    workspaceId,
+    actorId,
+  );
+  const contentRevision =
+    await contentApplication.commands.saveMediaOccurrence({
+      actorId,
+      workspaceId,
+      schemaVersion: "1.0.0",
+      baseRevision: contentBaseRevision,
+      occurrence: {
+        occurrenceId: requireRenderedMediaOccurrenceId(
+          occurrence.occurrenceId,
+        ),
+        revision: occurrence.revision,
+        asset: {
+          assetId: asset.assetId,
+          width: asset.width,
+          height: asset.height,
+          contentType: asset.contentType,
+        },
+        crop: occurrence.crop,
+      },
+      idempotencyKey: contentIdempotencyKey,
+    });
+  return {
+    occurrence,
+    contentRevision,
+    previewUrl: revisionPreviewGatewayUrl(
+      contentRevision.workspaceId,
+      contentRevision.revision,
+    ),
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const { authenticated, actorId } = await authorized(request);
@@ -108,7 +183,16 @@ export async function POST(request: Request) {
         baseRevision: Number(body.baseRevision),
         idempotencyKey,
       });
-      return Response.json(occurrence, { status: 201 });
+      return Response.json(
+        await bindOccurrenceToContentRevision({
+          body,
+          actorId,
+          idempotencyKey,
+          occurrence,
+          application,
+        }),
+        { status: 201 },
+      );
     }
     if (body.operation === "crop") {
       const crop = body.crop as Record<string, unknown> | undefined;
@@ -124,7 +208,16 @@ export async function POST(request: Request) {
         },
         idempotencyKey,
       });
-      return Response.json(occurrence, { status: 201 });
+      return Response.json(
+        await bindOccurrenceToContentRevision({
+          body,
+          actorId,
+          idempotencyKey,
+          occurrence,
+          application,
+        }),
+        { status: 201 },
+      );
     }
     if (body.operation === "delete") {
       await application.commands.delete({
@@ -159,6 +252,7 @@ function mediaError(error: unknown) {
   if (
     error instanceof AccessIdentityError ||
     error instanceof AccessDeniedError ||
+    error instanceof ContentWorkspaceAccessError ||
     error instanceof HumanRequestIntegrityError ||
     error instanceof MediaSiteAccessError
   ) {
@@ -166,11 +260,33 @@ function mediaError(error: unknown) {
   }
   if (
     error instanceof HumanAccessConfigurationError ||
+    error instanceof ContentRevisionConfigurationError ||
     error instanceof MediaAssetConfigurationError
   ) {
     return Response.json(
       { error: "request_check_unavailable" },
       { status: 503 },
+    );
+  }
+  if (error instanceof ContentRevisionConflictError) {
+    return Response.json(
+      {
+        error: "content_revision_conflict",
+        currentRevision: error.currentRevision,
+      },
+      { status: 409 },
+    );
+  }
+  if (error instanceof ContentRevisionStaleError) {
+    return Response.json(
+      { error: "content_revision_stale" },
+      { status: 409 },
+    );
+  }
+  if (error instanceof ContentRevisionValidationError) {
+    return Response.json(
+      { error: "validation_failed", fields: error.fields },
+      { status: 422 },
     );
   }
   if (error instanceof SyntaxError) {

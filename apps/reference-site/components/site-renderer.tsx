@@ -1,8 +1,4 @@
 import type {
-  MediaAsset,
-  MediaOccurrenceRevision,
-} from "@foundry/application";
-import type {
   PageSection,
   SiteDefinition,
 } from "@foundry/site-definition";
@@ -10,35 +6,25 @@ import type {
 import { MediaOccurrence } from "./media-occurrence";
 import { sectionAnchor } from "@/src/section-anchor";
 
-type MediaPresentation = Readonly<{
-  assets: ReadonlyArray<MediaAsset>;
-  occurrences: ReadonlyArray<MediaOccurrenceRevision>;
-}>;
-
 function occurrenceFor(
-  media: MediaPresentation,
+  definition: SiteDefinition,
   occurrenceId: string,
 ) {
-  const occurrence = media.occurrences.find(
+  return (definition.home.media ?? []).find(
     (candidate) => candidate.occurrenceId === occurrenceId,
-  );
-  if (occurrence === undefined) return null;
-  const asset = media.assets.find(
-    (candidate) => candidate.assetId === occurrence.assetId,
-  );
-  return asset === undefined ? null : { occurrence, asset };
+  ) ?? null;
 }
 
 export function SiteSection({
   section,
-  media,
+  definition,
 }: {
   section: PageSection;
-  media: MediaPresentation;
+  definition: SiteDefinition;
 }) {
   switch (section.type) {
     case "hero": {
-      const presentation = occurrenceFor(media, "occurrence_home_hero");
+      const occurrence = occurrenceFor(definition, "occurrence_home_hero");
       return (
         <section
           className="hero"
@@ -48,10 +34,10 @@ export function SiteSection({
           <p className="eyebrow">{section.eyebrow}</p>
           <h1 id={`${section.id}_title`}>{section.title}</h1>
           <p className="hero-summary">{section.summary}</p>
-          {presentation === null ? null : (
+          {occurrence === null ? null : (
             <MediaOccurrence
               className="site-media site-media-hero"
-              {...presentation}
+              occurrence={occurrence}
             />
           )}
           <div className="action-row">
@@ -68,7 +54,7 @@ export function SiteSection({
     }
 
     case "services": {
-      const presentation = occurrenceFor(media, "occurrence_home_detail");
+      const occurrence = occurrenceFor(definition, "occurrence_home_detail");
       return (
         <section
           className="services"
@@ -80,10 +66,10 @@ export function SiteSection({
             <h2 id={`${section.id}_title`}>{section.title}</h2>
             <p>{section.introduction}</p>
           </div>
-          {presentation === null ? null : (
+          {occurrence === null ? null : (
             <MediaOccurrence
               className="site-media site-media-detail"
-              {...presentation}
+              occurrence={occurrence}
             />
           )}
           <ol className="service-list">
@@ -150,10 +136,8 @@ export function SiteSection({
 
 export function SiteRenderer({
   definition,
-  media = { assets: [], occurrences: [] },
 }: {
   definition: SiteDefinition;
-  media?: MediaPresentation;
 }) {
   return (
     <>
@@ -172,7 +156,11 @@ export function SiteRenderer({
       </header>
       <main>
         {definition.home.sections.map((section) => (
-          <SiteSection key={section.id} section={section} media={media} />
+          <SiteSection
+            key={section.id}
+            section={section}
+            definition={definition}
+          />
         ))}
       </main>
       <footer className="site-footer">

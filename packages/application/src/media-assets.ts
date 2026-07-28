@@ -31,11 +31,16 @@ export const renderedMediaOccurrenceIds = [
   "occurrence_home_hero",
   "occurrence_home_detail",
 ] as const satisfies ReadonlyArray<string>;
+export type RenderedMediaOccurrenceId =
+  (typeof renderedMediaOccurrenceIds)[number];
 
-function assertRenderedOccurrenceId(value: MediaOccurrenceId): void {
+export function requireRenderedMediaOccurrenceId(
+  value: MediaOccurrenceId,
+): RenderedMediaOccurrenceId {
   if (!(renderedMediaOccurrenceIds as ReadonlyArray<string>).includes(value)) {
     throw new MediaValidationError("occurrenceId");
   }
+  return value as RenderedMediaOccurrenceId;
 }
 
 export type MediaAsset = Readonly<{
@@ -345,6 +350,9 @@ export function createMediaAssetApplication({
         const context = mutationContext(command.idempotencyKey, hash);
         const replay = await replayMutation(context, "asset");
         if (replay !== null) {
+          if ((await assets.getAsset(siteId, command.assetId)) === null) {
+            throw new MediaValidationError("assetId");
+          }
           return (replay as Extract<
             MediaMutationResult,
             { kind: "asset" }
@@ -396,7 +404,7 @@ export function createMediaAssetApplication({
         command: ReplaceMediaOccurrenceCommand,
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
-        assertRenderedOccurrenceId(command.occurrenceId);
+        requireRenderedMediaOccurrenceId(command.occurrenceId);
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
         const context = mutationContext(command.idempotencyKey, hash);
@@ -432,7 +440,7 @@ export function createMediaAssetApplication({
         command: CropMediaOccurrenceCommand,
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
-        assertRenderedOccurrenceId(command.occurrenceId);
+        requireRenderedMediaOccurrenceId(command.occurrenceId);
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
         const context = mutationContext(command.idempotencyKey, hash);

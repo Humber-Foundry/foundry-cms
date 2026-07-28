@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   listAssets: vi.fn(),
   listOccurrences: vi.fn(),
   getSource: vi.fn(),
+  getAsset: vi.fn(),
+  saveMediaOccurrence: vi.fn(),
+  loadContentApplication: vi.fn(),
 }));
 vi.mock("../../../../src/human-access-runtime", () => ({
   authorizeAuthenticatedHumanIdentity: mocks.authorize,
@@ -24,6 +27,9 @@ vi.mock("../../../../src/human-mutation-runtime", () => ({
 vi.mock("../../../../src/media-asset-runtime", () => ({
   MediaAssetConfigurationError: class extends Error {},
   loadMediaAssetApplication: mocks.loadApplication,
+}));
+vi.mock("../../../../src/content-revision-runtime", () => ({
+  loadContentRevisionApplication: mocks.loadContentApplication,
 }));
 
 import { GET, POST } from "./route";
@@ -45,6 +51,19 @@ describe("media endpoint", () => {
     mocks.verifyMutation.mockResolvedValue(undefined);
     mocks.listAssets.mockResolvedValue([]);
     mocks.listOccurrences.mockResolvedValue([]);
+    mocks.getAsset.mockResolvedValue({
+      assetId: "asset_replacement",
+      width: 1600,
+      height: 900,
+      contentType: "image/png",
+    });
+    mocks.saveMediaOccurrence.mockResolvedValue({
+      workspaceId: "workspace_editor",
+      revision: 3,
+    });
+    mocks.loadContentApplication.mockResolvedValue({
+      commands: { saveMediaOccurrence: mocks.saveMediaOccurrence },
+    });
     mocks.loadApplication.mockResolvedValue({
       commands: {
         upload: mocks.upload,
@@ -56,6 +75,7 @@ describe("media endpoint", () => {
         listAssets: mocks.listAssets,
         listOccurrences: mocks.listOccurrences,
         getSource: mocks.getSource,
+        getAsset: mocks.getAsset,
       },
     });
   });
@@ -65,6 +85,7 @@ describe("media endpoint", () => {
       occurrenceId: "occurrence_home_hero",
       revision: 2,
       assetId: "asset_replacement",
+      crop: null,
     });
     const response = await POST(
       new Request("https://foundry.example/api/foundry-cms/media", {
@@ -78,6 +99,8 @@ describe("media endpoint", () => {
           occurrenceId: "occurrence_home_hero",
           assetId: "asset_replacement",
           baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
         }),
       }),
     );
@@ -91,6 +114,20 @@ describe("media endpoint", () => {
       idempotencyKey: "replace-media-route-0001",
     });
     expect(mocks.verifyMutation).toHaveBeenCalledOnce();
+    expect(mocks.saveMediaOccurrence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "membership-editor",
+        workspaceId: "workspace_editor",
+        baseRevision: 2,
+        occurrence: expect.objectContaining({
+          occurrenceId: "occurrence_home_hero",
+          revision: 2,
+          asset: expect.objectContaining({
+            assetId: "asset_replacement",
+          }),
+        }),
+      }),
+    );
   });
 
   it("serves a private source only through the authenticated site application", async () => {

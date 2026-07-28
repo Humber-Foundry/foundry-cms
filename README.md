@@ -125,9 +125,13 @@ Media sources are written to the private `FOUNDRY_MEDIA` R2 bucket under
 `media/<site-id>/<asset-id>/source`. D1 stores stable asset metadata and
 site-scoped occurrence references. Replacing one occurrence appends a revision
 only for that occurrence; cropping appends normalized crop data and never
-rewrites the R2 source. All mutations are idempotent and audited. Deletion first
+rewrites the R2 source. The selected occurrence revision and asset presentation
+metadata are then fingerprinted into the Editor's immutable content revision;
+the exact preview renders that bound manifest, while the public route continues
+to render only the Git-published Site Definition. All mutations are idempotent
+and audited. Deletion first
 reserves an unreferenced asset in D1, fences new references, removes its source,
-and then completes the metadata deletion. Any current or historical occurrence
+and then tombstones its stable identity. Any current or historical occurrence
 revision rejects deletion so immutable previews never acquire a broken media
 reference.
 

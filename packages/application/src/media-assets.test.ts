@@ -319,6 +319,20 @@ describe("media asset application", () => {
     );
   });
 
+  it("does not replay a successful upload after that stable identity is deleted", async () => {
+    const { application } = setup();
+    await upload(application, assetC);
+    await application.commands.delete({
+      actorId: editor,
+      assetId: assetC,
+      idempotencyKey: "delete-before-upload-replay",
+    });
+
+    await expect(upload(application, assetC)).rejects.toEqual(
+      expect.objectContaining({ field: "assetId" }),
+    );
+  });
+
   it("fails closed across sites even when identifiers overlap", async () => {
     const assets = createInMemoryMediaAssetStore();
     const sources = createInMemoryMediaSourceStore();

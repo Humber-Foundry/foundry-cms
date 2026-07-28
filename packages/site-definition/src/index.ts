@@ -2,6 +2,8 @@ import publishedSite from "./published-site.json";
 
 declare const siteIdBrand: unique symbol;
 
+export { bindSiteMediaOccurrence } from "./media";
+
 export type SiteId = string & {
   readonly [siteIdBrand]: "SiteId";
 };
@@ -22,6 +24,25 @@ export type SiteLink = Readonly<{
   id: string;
   label: string;
   href: SiteHref;
+}>;
+
+export type SiteMediaCrop = Readonly<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}>;
+
+export type SiteMediaOccurrence = Readonly<{
+  occurrenceId: "occurrence_home_hero" | "occurrence_home_detail";
+  revision: number;
+  asset: Readonly<{
+    assetId: string;
+    width: number;
+    height: number;
+    contentType: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
+  }>;
+  crop: SiteMediaCrop | null;
 }>;
 
 export type HeroSection = Readonly<{
@@ -91,6 +112,7 @@ export type SiteDefinition = Readonly<{
   }>;
   home: Readonly<{
     id: string;
+    media: ReadonlyArray<SiteMediaOccurrence>;
     seo: Readonly<{
       title: string;
       description: string;
@@ -130,6 +152,10 @@ export const siteDefinitionSchema = {
       required: ["id", "seo", "sections"],
       properties: {
         id: { $ref: "#/$defs/id" },
+        media: {
+          type: "array",
+          items: { $ref: "#/$defs/mediaOccurrence" },
+        },
         seo: {
           type: "object",
           additionalProperties: false,
@@ -182,6 +208,46 @@ export const siteDefinitionSchema = {
         { pattern: "^#[a-z][a-z0-9_]*$" },
         { pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
       ],
+    },
+    mediaOccurrence: {
+      type: "object",
+      additionalProperties: false,
+      required: ["occurrenceId", "revision", "asset", "crop"],
+      properties: {
+        occurrenceId: {
+          enum: ["occurrence_home_hero", "occurrence_home_detail"],
+        },
+        revision: { type: "integer", minimum: 1 },
+        asset: {
+          type: "object",
+          additionalProperties: false,
+          required: ["assetId", "width", "height", "contentType"],
+          properties: {
+            assetId: { type: "string", pattern: "^asset_[a-z0-9_]+$" },
+            width: { type: "integer", minimum: 1 },
+            height: { type: "integer", minimum: 1 },
+            contentType: {
+              enum: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+            },
+          },
+        },
+        crop: {
+          anyOf: [
+            { type: "null" },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["x", "y", "width", "height"],
+              properties: {
+                x: { type: "number", minimum: 0, maximum: 1 },
+                y: { type: "number", minimum: 0, maximum: 1 },
+                width: { type: "number", exclusiveMinimum: 0, maximum: 1 },
+                height: { type: "number", exclusiveMinimum: 0, maximum: 1 },
+              },
+            },
+          ],
+        },
+      },
     },
     serviceItem: {
       type: "object",
@@ -279,7 +345,11 @@ export const referenceSiteDefinition = {
     ...publishedSite.site,
     id: createSiteId(publishedSite.site.id),
   },
-} as SiteDefinition;
+  home: {
+    ...publishedSite.home,
+    media: [],
+  },
+} as const satisfies SiteDefinition;
 
 export * from "./editable-fields";
 export * from "./component-composition";

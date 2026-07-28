@@ -1,26 +1,21 @@
-import type {
-  MediaAsset,
-  MediaOccurrenceRevision,
-} from "@foundry/application";
+import type { SiteMediaOccurrence } from "@foundry/site-definition";
 import type { ReactNode } from "react";
 
 import { mediaCropStyle } from "./media-crop";
 
 export function MediaOccurrence({
   occurrence,
-  asset,
   className,
   children,
 }: {
-  occurrence: MediaOccurrenceRevision;
-  asset: MediaAsset;
+  occurrence: SiteMediaOccurrence;
   className?: string;
   children?: ReactNode;
 }) {
   const crop =
     occurrence.crop === null
       ? undefined
-      : mediaCropStyle(occurrence.crop, asset);
+      : mediaCropStyle(occurrence.crop, occurrence.asset);
   return (
     <figure
       className={className}
@@ -28,7 +23,9 @@ export function MediaOccurrence({
     >
       <div className="media-crop-frame" style={crop?.frame}>
         <img
-          src={`/api/media/${encodeURIComponent(asset.assetId)}`}
+          src={`/api/foundry-cms/media?assetId=${encodeURIComponent(
+            occurrence.asset.assetId,
+          )}`}
           alt=""
           style={crop?.image}
         />

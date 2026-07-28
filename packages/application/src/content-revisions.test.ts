@@ -299,6 +299,62 @@ describe("content revision application", () => {
     );
   });
 
+  it("binds media occurrence revisions into the immutable content fingerprint", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-media-0001");
+
+    const first = await application.commands.saveMediaOccurrence({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      occurrence: {
+        occurrenceId: "occurrence_home_hero",
+        revision: 1,
+        asset: {
+          assetId: "asset_hero",
+          width: 1600,
+          height: 900,
+          contentType: "image/png",
+        },
+        crop: null,
+      },
+      idempotencyKey: "save-media-hero-0001",
+    });
+    const cropped = await application.commands.saveMediaOccurrence({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 1,
+      occurrence: {
+        ...first.definition.home.media[0]!,
+        revision: 2,
+        crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
+      },
+      idempotencyKey: "save-media-hero-0002",
+    });
+
+    expect(first.definition.home.media[0]).toMatchObject({
+      occurrenceId: "occurrence_home_hero",
+      revision: 1,
+      crop: null,
+    });
+    expect(cropped.definition.home.media[0]).toMatchObject({
+      revision: 2,
+      crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
+    });
+    expect(cropped.inputs.contentHash).not.toBe(first.inputs.contentHash);
+    await expect(application.queries.getRevision(1)).resolves.toEqual(
+      expect.objectContaining({
+        revision: first.revision,
+        definition: first.definition,
+        inputs: first.inputs,
+      }),
+    );
+  });
+
   it("replays one idempotency key without creating another revision", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
