@@ -2,7 +2,11 @@
 
 import { useRef, useState } from "react";
 
-import type { ContentRevision } from "@foundry/application";
+import {
+  canonicalJson,
+  type ContentRevision,
+} from "@foundry/application";
+import { pageCompositionContract } from "@foundry/site-definition";
 
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
@@ -31,24 +35,11 @@ function fullRecoveryValue(
   edit: StaleRecoveryEdit,
   property: "baseValue" | "value",
 ): string {
-  if (edit.path !== "slot_home_sections") {
+  if (edit.path !== pageCompositionContract.slot.id) {
     return edit[property];
   }
-  const canonicalize = (value: unknown): unknown => {
-    if (Array.isArray(value)) {
-      return value.map(canonicalize);
-    }
-    if (typeof value === "object" && value !== null) {
-      return Object.fromEntries(
-        Object.entries(value)
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([key, nested]) => [key, canonicalize(nested)]),
-      );
-    }
-    return value;
-  };
   try {
-    return JSON.stringify(canonicalize(JSON.parse(edit[property])));
+    return canonicalJson(JSON.parse(edit[property]));
   } catch {
     return edit[property];
   }
