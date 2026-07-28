@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import {
+  createDefaultPageSection,
   referenceSiteDefinition,
+  toPageComposition,
   type SiteDefinition,
 } from "@foundry/site-definition";
 
@@ -283,6 +285,73 @@ describe("visual component editor browser acceptance", () => {
         },
       ],
     });
+    await clearContentEditorOutbox(workspaceId);
+  });
+
+  it("restores a component before applying its dependent unsaved fields", async () => {
+    const workspaceId = "workspace_browser_structural_recovery";
+    await clearContentEditorOutbox(workspaceId);
+    const addedProof = createDefaultPageSection(
+      "proof",
+      "section_recovered_proof",
+      referenceSiteDefinition,
+    );
+    await writeContentEditorOutbox({
+      workspaceId,
+      baseRevision: 4,
+      edits: [
+        {
+          path: "section_recovered_proof.quote",
+          baseValue: addedProof.type === "proof" ? addedProof.quote : "",
+          value: "Unsaved evidence after the durable addition",
+        },
+        {
+          path: "slot_home_sections",
+          baseValue: JSON.stringify(toPageComposition(referenceSiteDefinition)),
+          value: JSON.stringify({
+            ...toPageComposition(referenceSiteDefinition),
+            components: [
+              ...referenceSiteDefinition.home.sections,
+              addedProof,
+            ],
+          }),
+        },
+      ],
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-structural-recovery",
+          initialRevision: browserRevision(workspaceId),
+          initialPreviewUrl: "/preview/structural-recovery",
+          activeWorkspaceUrl: "/dash?workspace=structural-recovery",
+        }),
+      );
+    });
+
+    let recovered = false;
+    for (let index = 0; index < 50 && !recovered; index += 1) {
+      recovered = Array.from(
+        host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          ".editor-groups input, .editor-groups textarea",
+        ),
+      ).some(
+        ({ value }) =>
+          value === "Unsaved evidence after the durable addition",
+      );
+      if (!recovered) {
+        await new Promise((resolve) => window.setTimeout(resolve, 20));
+      }
+    }
+
+    expect(recovered).toBe(true);
+    expect(host.textContent).not.toContain(
+      "some overlap newer values",
+    );
     await clearContentEditorOutbox(workspaceId);
   });
 

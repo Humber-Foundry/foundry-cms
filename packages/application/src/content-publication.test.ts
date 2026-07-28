@@ -185,6 +185,27 @@ describe("content publication application", () => {
         "channel-a",
       ),
     ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+
+    const coherentLegacyDefinition = {
+      ...revisionApplication.saved.definition,
+      definitionVersion: "1.0.0",
+      schemaVersion: "1.0.0",
+    } as unknown as typeof revisionApplication.saved.definition;
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          definition: coherentLegacyDefinition,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            contentHash:
+              await hashPublishedSiteDefinition(coherentLegacyDefinition),
+            schemaVersion: "1.0.0",
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
   });
 
   it("fingerprints tokens and variants as design while ignoring copy-only changes", async () => {

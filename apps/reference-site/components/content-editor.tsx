@@ -265,8 +265,30 @@ export function ContentEditor({
           );
           return;
         }
+        const orderedEdits = [
+          ...record.edits.filter(
+            ({ path }) => path === pageCompositionContract.slot.id,
+          ),
+          ...record.edits.filter(
+            ({ path }) => path !== pageCompositionContract.slot.id,
+          ),
+        ];
+        let projectedDefinition = state.workingDefinition;
+        for (const edit of orderedEdits) {
+          if (edit.path !== pageCompositionContract.slot.id) {
+            continue;
+          }
+          const projected = applyStructuralRecovery(
+            projectedDefinition,
+            edit,
+          );
+          if (projected.ok) {
+            projectedDefinition = projected.definition;
+          }
+        }
+        const projectedFields = listEditableSiteFields(projectedDefinition);
         const currentValues = new Map([
-          ...workingFields.map(
+          ...projectedFields.map(
             (field) => [field.path, field.value] as const,
           ),
           [
@@ -279,7 +301,7 @@ export function ContentEditor({
         const conflicts: StaleRecoveryConflict[] = [];
         let recoveredCount = 0;
         let alreadyAppliedCount = 0;
-        for (const edit of record.edits) {
+        for (const edit of orderedEdits) {
           const currentValue = currentValues.get(edit.path);
           if (currentValue === undefined) {
             conflicts.push({
@@ -303,7 +325,7 @@ export function ContentEditor({
           }
           if (edit.path === pageCompositionContract.slot.id) {
             const result = applyStructuralRecovery(
-              initialRevision.definition,
+              state.workingDefinition,
               edit,
             );
             if (result.ok) {
@@ -325,7 +347,7 @@ export function ContentEditor({
             recoveredCount += 1;
           }
         }
-        if (alreadyAppliedCount === record.edits.length) {
+        if (alreadyAppliedCount === orderedEdits.length) {
           recoveryPending.current = [];
           void persistence.clear();
           setMessage(

@@ -1,4 +1,7 @@
-import type { SiteDefinition } from "@foundry/site-definition";
+import {
+  siteDefinitionSchema,
+  type SiteDefinition,
+} from "@foundry/site-definition";
 
 import type {
   ContentActorId,
@@ -359,6 +362,12 @@ export async function createContentApprovalFingerprint(
   channel: ContentPublicationChannel = "site",
 ): Promise<ContentApprovalFingerprint> {
   if (revision.inputs.schemaVersion !== revision.definition.schemaVersion) {
+    throw new ContentApprovalInvalidError("revision_stale");
+  }
+  if (
+    revision.definition.schemaVersion !==
+    siteDefinitionSchema.properties.schemaVersion.const
+  ) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
   const serialized = serializePublishedSiteDefinition(revision.definition);
