@@ -1088,7 +1088,7 @@ export function createContentPublicationApplication({
             detail:
               deploymentRetryDispatchWasAttempted(publication)
                 ? "deployment_retry_timeout"
-                : reconciliationCandidate(publication.detail) !== undefined
+                : contentPublicationHasUnresolvedGitOutcome(publication)
                 ? publication.detail
                 : channelFailure === "changed"
                   ? "publication_channel_changed"
@@ -1922,7 +1922,10 @@ export function createContentPublicationApplication({
           // A missing marker still permits one explicitly requested retry.
         }
         if (deploymentRetryDispatchWasAttempted(publication)) {
-          const observed = await publisher.getDeploymentStatus(commitSha);
+          const observed = await publisher.getDeploymentStatus(
+            commitSha,
+            publication.deploymentId ?? undefined,
+          );
           if (
             observed === "building" ||
             observed === "deployed"
