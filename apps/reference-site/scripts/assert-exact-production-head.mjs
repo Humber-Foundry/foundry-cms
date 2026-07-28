@@ -3,8 +3,9 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+import { isValidGitBranchName } from "../../../packages/application/src/git-branch-name.mjs";
+
 const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
-const branchPattern = /^[A-Za-z0-9._/-]+$/u;
 
 export function assertExactProductionSource({
   assertHead = assertExactProductionHead,
@@ -41,7 +42,7 @@ export function assertExactProductionHead({
   if (
     expectedCommit === undefined ||
     !objectIdPattern.test(expectedCommit) ||
-    !branchPattern.test(productionBranch)
+    !isValidGitBranchName(productionBranch)
   ) {
     throw new Error("exact_production_head_configuration_invalid");
   }

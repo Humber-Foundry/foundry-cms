@@ -3,15 +3,19 @@
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+import { isValidGitBranchName } from "../../../packages/application/src/git-branch-name.mjs";
+
 import {
   assertExactProductionContent,
   assertExactProductionRelease,
 } from "./assert-exact-production-content.mjs";
 import { assertProductionDeploymentAbsent } from "./deploy-exact-production.mjs";
-import { assertExactProductionHead } from "./assert-exact-production-head.mjs";
+import {
+  assertExactProductionHead,
+  assertExactProductionSource,
+} from "./assert-exact-production-head.mjs";
 
 const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
-const branchPattern = /^[A-Za-z0-9._/-]+$/u;
 
 function waitForProcess(process) {
   return new Promise((resolve, reject) => {
@@ -108,7 +112,7 @@ export async function acquireProductionBranchLock({
     owner.length === 0 ||
     repository === undefined ||
     repository.length === 0 ||
-    !branchPattern.test(branch) ||
+    !isValidGitBranchName(branch) ||
     token === undefined ||
     token.length === 0
   ) {
@@ -235,6 +239,7 @@ export async function acquireProductionBranchLock({
 export async function provisionProductionBaseline({
   environment = process.env,
   assertHead = assertExactProductionHead,
+  assertSource = assertExactProductionSource,
   assertDeploymentAbsent = assertProductionDeploymentAbsent,
   authorizeContent = assertExactProductionContent,
   verifyRelease = assertExactProductionRelease,
@@ -287,7 +292,7 @@ export async function provisionProductionBaseline({
   }
   assertHead();
   await assertDeploymentAbsent();
-  assertHead();
+  assertSource({ assertHead });
   const {
     FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN: _baselineGitHubToken,
     ...provisionEnvironment

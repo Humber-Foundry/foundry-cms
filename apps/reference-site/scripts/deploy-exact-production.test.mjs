@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   activateExactVersion,
+  assertProductionDeploymentAbsent,
   assertProductionDeploymentBaseline,
   deployExactProduction,
   uploadExactVersion,
@@ -245,6 +246,111 @@ describe("guarded exact production deployment", () => {
     ).rejects.toThrow("exact_activation_baseline_unavailable");
 
     await close(upstream);
+  });
+
+  it("treats Cloudflare's exact missing Worker script response as an absent baseline", async () => {
+    const upstream = createServer((_request, response) => {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          result: null,
+          success: false,
+          errors: [
+            {
+              code: 10007,
+              message: "workers.api.error.script_not_found",
+            },
+          ],
+          messages: [],
+        }),
+      );
+    });
+    const upstreamBaseUrl = await listen(upstream);
+
+    try {
+      await expect(
+        assertProductionDeploymentAbsent({
+          environment: {
+            ...activationEnvironment,
+            CLOUDFLARE_API_TOKEN: "token",
+          },
+          upstreamBaseUrl,
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await close(upstream);
+    }
+  });
+
+  it.each([
+    {
+      name: "an authentication failure",
+      status: 401,
+      body: {
+        result: null,
+        success: false,
+        errors: [
+          {
+            code: 9109,
+            message: "Invalid access token",
+          },
+        ],
+        messages: [],
+      },
+    },
+    {
+      name: "another 404 response",
+      status: 404,
+      body: {
+        result: null,
+        success: false,
+        errors: [
+          {
+            code: 7003,
+            message: "Could not route to /workers/scripts/site/deployments",
+          },
+        ],
+        messages: [],
+      },
+    },
+    {
+      name: "a provider failure",
+      status: 500,
+      body: {
+        result: null,
+        success: false,
+        errors: [
+          {
+            code: 10000,
+            message: "Authentication error",
+          },
+        ],
+        messages: [],
+      },
+    },
+  ])("fails closed for $name while checking first deployment", async ({
+    body,
+    status,
+  }) => {
+    const upstream = createServer((_request, response) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+    });
+    const upstreamBaseUrl = await listen(upstream);
+
+    try {
+      await expect(
+        assertProductionDeploymentAbsent({
+          environment: {
+            ...activationEnvironment,
+            CLOUDFLARE_API_TOKEN: "token",
+          },
+          upstreamBaseUrl,
+        }),
+      ).rejects.toThrow("exact_activation_deployment_lookup_failed");
+    } finally {
+      await close(upstream);
+    }
   });
 
   it("ignores an ambient Cloudflare API base URL for production lookups", async () => {

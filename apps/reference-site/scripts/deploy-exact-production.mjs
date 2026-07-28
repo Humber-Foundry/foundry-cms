@@ -269,10 +269,36 @@ function deploymentId(result) {
   return result.id;
 }
 
+function isMissingWorkerScriptResponse(response, body) {
+  if (response.status !== 404) {
+    return false;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(body.toString("utf8"));
+  } catch {
+    return false;
+  }
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    payload.success === false &&
+    payload.result === null &&
+    Array.isArray(payload.errors) &&
+    payload.errors.length === 1 &&
+    payload.errors[0]?.code === 10007 &&
+    payload.errors[0]?.message ===
+      "workers.api.error.script_not_found" &&
+    Array.isArray(payload.messages) &&
+    payload.messages.length === 0
+  );
+}
+
 async function readDeploymentList({
   abortSignal,
   activationPath,
   headers,
+  missingScriptIsEmpty = false,
   requestTimeoutMs = cloudflareRequestTimeoutMs,
   upstreamBaseUrl,
 }) {
@@ -297,6 +323,12 @@ async function readDeploymentList({
   );
   const body = Buffer.from(await response.arrayBuffer());
   if (!response.ok) {
+    if (
+      missingScriptIsEmpty &&
+      isMissingWorkerScriptResponse(response, body)
+    ) {
+      return [];
+    }
     throw new Error("exact_activation_deployment_lookup_failed");
   }
   return deploymentList(parseCloudflareResult(body));
@@ -512,6 +544,7 @@ export async function assertProductionDeploymentAbsent({
   const deployments = await readDeploymentList({
     activationPath: productionActivationPath(environment),
     headers: new Headers({ authorization: `Bearer ${apiToken}` }),
+    missingScriptIsEmpty: true,
     upstreamBaseUrl,
   });
   if (deployments.length !== 0) {

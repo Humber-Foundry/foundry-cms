@@ -1,6 +1,7 @@
 import type { SiteDefinition, SiteId } from "@foundry/site-definition";
 
 export * from "./human-access";
+export { isValidGitBranchName } from "./git-branch-name.mjs";
 export * from "./in-memory-human-access-store";
 export * from "./subscriber-ledger";
 export * from "./in-memory-subscriber-ledger-store";

@@ -5,6 +5,7 @@ import type {
   ContentPublicationId,
   PublicationCommitResult,
 } from "@foundry/application";
+import { isValidGitBranchName } from "@foundry/application";
 
 export type GitHubContentPublisherConfiguration = Readonly<{
   appId: string;
@@ -67,7 +68,7 @@ export function readGitHubContentPublisherConfiguration(
 ): GitHubContentPublisherConfiguration {
   const productionBranch =
     environment.FOUNDRY_PRODUCTION_BRANCH?.trim() || "main";
-  if (!/^[A-Za-z0-9._/-]+$/u.test(productionBranch)) {
+  if (!isValidGitBranchName(productionBranch)) {
     throw new GitHubContentPublisherConfigurationError();
   }
   let publicOrigin: string;
@@ -166,14 +167,17 @@ function isNonFastForwardRefError(error: unknown) {
   );
 }
 
-function isExplicitHttpRejection(error: unknown) {
+const ambiguousWriteResponseStatuses = new Set([408, 425, 429, 499]);
+
+function isDefiniteHttpRejection(error: unknown) {
   return (
     typeof error === "object" &&
     error !== null &&
     "status" in error &&
     typeof error.status === "number" &&
     error.status >= 400 &&
-    error.status < 500
+    error.status < 500 &&
+    !ambiguousWriteResponseStatuses.has(error.status)
   );
 }
 
@@ -270,6 +274,34 @@ async function sha256(value: string) {
     .join("");
 }
 
+async function sha256Bytes(value: Uint8Array) {
+  const bytes = new ArrayBuffer(value.byteLength);
+  new Uint8Array(bytes).set(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function decodeGitHubBlob(value: unknown): Uint8Array | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("encoding" in value) ||
+    value.encoding !== "base64" ||
+    !("content" in value) ||
+    typeof value.content !== "string"
+  ) {
+    return null;
+  }
+  try {
+    const decoded = atob(value.content.replaceAll(/\s/gu, ""));
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
 function publicationSignaturePayload(input: {
   expectedHead: string;
   path: string;
@@ -340,6 +372,12 @@ function trailerMatches(message: unknown, publishId: ContentPublicationId) {
       .split("\n")
       .some((line) => line === `Foundry-Publish-Id: ${publishId}`)
   );
+}
+
+function normalizeCommitMessage(message: unknown) {
+  return typeof message === "string"
+    ? message.replace(/(?:\r?\n)+$/u, "")
+    : null;
 }
 
 export function createGitHubContentPublisher({
@@ -476,6 +514,44 @@ export function createGitHubContentPublisher({
       throw new Error("github_production_head_invalid");
     }
     return body.object.sha as string;
+  }
+
+  async function commitMatchesExactPublication(
+    token: string,
+    commitSha: string,
+    input: Parameters<ContentPublisher["reconcileCommit"]>[0],
+    signedMessage: string,
+  ) {
+    const [candidate, comparison] = await Promise.all([
+      request(token, `/git/commits/${commitSha}`),
+      request(
+        token,
+        `/compare/${input.expectedHead}...${commitSha}`,
+      ),
+    ]);
+    const parents = Array.isArray(candidate.parents) ? candidate.parents : [];
+    const files = Array.isArray(comparison.files) ? comparison.files : [];
+    if (
+      normalizeCommitMessage(candidate.message) !== signedMessage ||
+      parents.length !== 1 ||
+      parents[0]?.sha !== input.expectedHead ||
+      comparison.status !== "ahead" ||
+      comparison.ahead_by !== 1 ||
+      comparison.total_commits !== 1 ||
+      files.length !== 1 ||
+      files[0]?.filename !== input.path ||
+      files[0]?.status !== "modified" ||
+      typeof files[0]?.sha !== "string"
+    ) {
+      return false;
+    }
+    const blob = decodeGitHubBlob(
+      await request(token, `/git/blobs/${files[0].sha}`),
+    );
+    return (
+      blob !== null &&
+      (await sha256Bytes(blob)) === input.artifactHash
+    );
   }
 
   async function readReleaseMarker(expected: {
@@ -697,7 +773,7 @@ export function createGitHubContentPublisher({
       } catch (error) {
         if (
           createdCommitSha === undefined &&
-          isExplicitHttpRejection(error)
+          isDefiniteHttpRejection(error)
         ) {
           return { state: "failed", detail: "git_operation_failed" };
         }
@@ -713,29 +789,48 @@ export function createGitHubContentPublisher({
         };
       }
     },
-    async reconcileCommit(publishId, candidateCommitSha) {
+    async reconcileCommit(input) {
       try {
         const token = await installationToken();
-        if (candidateCommitSha !== undefined) {
-          const candidate = await request(
-            token,
-            `/git/commits/${candidateCommitSha}`,
-          );
-          if (!trailerMatches(candidate.message, publishId)) {
+        const signedMessage = await signPublicationMessage(
+          configuration.publicationSigningSecret,
+          {
+            expectedHead: input.expectedHead,
+            path: input.path,
+            contentHash: input.contentHash,
+            message: input.message,
+          },
+        );
+        if (input.candidateCommitSha !== undefined) {
+          if (
+            !(await commitMatchesExactPublication(
+              token,
+              input.candidateCommitSha,
+              input,
+              signedMessage,
+            ))
+          ) {
             return { state: "not-found" };
           }
           const head = await productionHead(token);
-          if (head === candidateCommitSha) {
-            return { state: "committed", commitSha: candidateCommitSha };
+          if (head === input.candidateCommitSha) {
+            return {
+              state: "committed",
+              commitSha: input.candidateCommitSha,
+            };
           }
           const comparison = await request(
             token,
-            `/compare/${candidateCommitSha}...${head}`,
+            `/compare/${input.candidateCommitSha}...${head}`,
           );
-          return comparison.merge_base_commit?.sha === candidateCommitSha &&
+          return comparison.merge_base_commit?.sha ===
+            input.candidateCommitSha &&
             (comparison.status === "ahead" ||
               comparison.status === "identical")
-            ? { state: "committed", commitSha: candidateCommitSha }
+            ? {
+                state: "committed",
+                commitSha: input.candidateCommitSha,
+              }
             : { state: "not-found" };
         }
         const commits = await request(
@@ -747,12 +842,24 @@ export function createGitHubContentPublisher({
         if (!Array.isArray(commits)) {
           return { state: "unknown" };
         }
-        const match = commits.find((commit) =>
-          trailerMatches(commit?.commit?.message, publishId),
+        const matches = commits.filter(
+          (commit) =>
+            typeof commit?.sha === "string" &&
+            trailerMatches(commit?.commit?.message, input.publishId),
         );
-        return typeof match?.sha === "string"
-          ? { state: "committed", commitSha: match.sha }
-          : { state: "not-found" };
+        for (const match of matches) {
+          if (
+            await commitMatchesExactPublication(
+              token,
+              match.sha,
+              input,
+              signedMessage,
+            )
+          ) {
+            return { state: "committed", commitSha: match.sha };
+          }
+        }
+        return { state: "not-found" };
       } catch {
         return { state: "unknown" };
       }
@@ -829,7 +936,7 @@ export function createGitHubContentPublisher({
           if (isNonFastForwardRefError(error)) {
             return { state: "blocked", detail: "production_head_moved" };
           }
-          if (isExplicitHttpRejection(error)) {
+          if (isDefiniteHttpRejection(error)) {
             return {
               state: "failed",
               detail: "git_reference_update_failed",
@@ -971,7 +1078,7 @@ export function createGitHubContentPublisher({
           ? { state: "requested" as const, deploymentId: body.result.build_uuid }
           : { state: "failed" as const };
       } catch (error) {
-        return isExplicitHttpRejection(error)
+        return isDefiniteHttpRejection(error)
           ? { state: "failed" as const }
           : { state: "unknown" as const };
       }

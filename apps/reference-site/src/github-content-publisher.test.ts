@@ -46,6 +46,42 @@ const configurationInputs = {
   publicationSigningSecret: "publication-signing-secret-32-bytes",
 };
 
+function publicationReconciliationInput(
+  publishId: ReturnType<typeof createContentPublicationId>,
+) {
+  const bytes = "{\"schemaVersion\":\"1.0.0\"}\n";
+  return {
+    publishId,
+    expectedHead: "a".repeat(40),
+    path: "packages/site-definition/src/published-site.json" as const,
+    artifactHash: createHash("sha256").update(bytes).digest("hex"),
+    contentHash: "b".repeat(64),
+    message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+  };
+}
+
+function signedPublicationMessage(
+  input: ReturnType<typeof publicationReconciliationInput>,
+) {
+  return (
+    `${input.message}\nFoundry-Publication-Signature: v1=` +
+    createHmac(
+      "sha256",
+      configurationInputs.publicationSigningSecret,
+    )
+      .update(
+        [
+          "foundry-publication-signature-v1",
+          input.expectedHead,
+          input.path,
+          input.contentHash,
+          input.message,
+        ].join("\0"),
+      )
+      .digest("hex")
+  );
+}
+
 describe("GitHub content publisher", () => {
   it("requires installation-scoped publication configuration", () => {
     expect(() =>
@@ -89,6 +125,37 @@ describe("GitHub content publisher", () => {
           "publication-signing-secret-32-bytes",
       }),
     ).toThrow(GitHubContentPublisherConfigurationError);
+
+    for (const invalidBranch of [
+      "main/../release",
+      "../main",
+      "main//release",
+      "/main",
+      "main/",
+      ".hidden",
+      "release.lock",
+      "-main",
+      "HEAD",
+    ]) {
+      expect(() =>
+        readGitHubContentPublisherConfiguration({
+          FOUNDRY_GITHUB_APP_ID: "123",
+          FOUNDRY_GITHUB_INSTALLATION_ID: "456",
+          FOUNDRY_GITHUB_PRIVATE_KEY: "private-key",
+          FOUNDRY_GITHUB_OWNER: "client-owner",
+          FOUNDRY_GITHUB_REPOSITORY: "client-site",
+          FOUNDRY_PRODUCTION_BRANCH: invalidBranch,
+          FOUNDRY_PUBLIC_ORIGIN: "https://site.example",
+          FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "account-123",
+          FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "script-789",
+          FOUNDRY_CLOUDFLARE_SCRIPT_NAME: "foundry-reference-site",
+          FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
+          FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
+          FOUNDRY_PUBLICATION_SIGNING_SECRET:
+            "publication-signing-secret-32-bytes",
+        }),
+      ).toThrow(GitHubContentPublisherConfigurationError);
+    }
   });
 
   it("creates one tree and bot commit before a non-force production ref update", async () => {
@@ -263,6 +330,43 @@ describe("GitHub content publisher", () => {
       .mockResolvedValueOnce(json({ sha: "blob-sha" }))
       .mockResolvedValueOnce(json({ sha: "tree-sha" }))
       .mockRejectedValueOnce(new TypeError("connection reset"));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"4".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: "Publish",
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "unknown",
+      detail: "git_result_unknown",
+    });
+  });
+
+  it("keeps an ambiguous commit HTTP response unknown for reconciliation", async () => {
+    const expectedHead = "a".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(json({ message: "Request Timeout" }, 408));
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -502,6 +606,27 @@ describe("GitHub content publisher", () => {
     );
   });
 
+  it.each([408, 425, 429, 499])(
+    "keeps an ambiguous Cloudflare build response (%s) unknown",
+    async (status) => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(json({ message: "ambiguous write response" }, status));
+      const publisher = createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: fetchMock,
+      });
+
+      await expect(
+        publisher.retryDeployment({
+          commitSha: "c".repeat(40),
+          assertDispatch: vi.fn().mockResolvedValue(true),
+        }),
+      ).resolves.toEqual({ state: "unknown" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("does not contact Cloudflare after losing the exact retry claim", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     const assertDispatch = vi.fn().mockResolvedValue(false);
@@ -688,6 +813,46 @@ describe("GitHub content publisher", () => {
       .mockResolvedValueOnce(json({ sha: "tree-sha" }))
       .mockResolvedValueOnce(json({ sha: commitSha }))
       .mockResolvedValueOnce(json({ message: "Reference rejected" }, 403));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId,
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${commitSha}`,
+    });
+  });
+
+  it("preserves an exact candidate after an ambiguous ref HTTP response", async () => {
+    const expectedHead = "a".repeat(40);
+    const commitSha = "c".repeat(40);
+    const publishId = createContentPublicationId(
+      `publish_${"4".repeat(32)}`,
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(json({ sha: commitSha }))
+      .mockResolvedValueOnce(json({ message: "Too Early" }, 425));
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -1171,32 +1336,98 @@ describe("GitHub content publisher", () => {
     expect(tokenMints).toBe(2);
   });
 
-  it("reconciles an ambiguous publish by its exact commit trailer", async () => {
+  it("rejects a copied trailer and reconciles the exact signed publication commit", async () => {
     const publishId = createContentPublicationId(
       `publish_${"1".repeat(32)}`,
     );
+    const input = publicationReconciliationInput(publishId);
+    const copiedCommitSha = "d".repeat(40);
+    const exactCommitSha = "c".repeat(40);
+    const fileSha = "f".repeat(40);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(
         json([
           {
-            sha: "c".repeat(40),
+            sha: copiedCommitSha,
             commit: {
-              message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+              message: signedPublicationMessage(input),
+            },
+          },
+          {
+            sha: exactCommitSha,
+            commit: {
+              message: input.message,
             },
           },
         ]),
+      )
+      .mockResolvedValueOnce(
+        json({
+          sha: copiedCommitSha,
+          message: signedPublicationMessage(input),
+          parents: [{ sha: exactCommitSha }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 2,
+          total_commits: 2,
+          files: [
+            {
+              filename: "apps/reference-site/app/page.tsx",
+              status: "modified",
+              sha: fileSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          sha: exactCommitSha,
+          message: `${signedPublicationMessage(input)}\n`,
+          parents: [{ sha: input.expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename: input.path,
+              status: "modified",
+              sha: fileSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          encoding: "base64",
+          content: Buffer.from(
+            "{\"schemaVersion\":\"1.0.0\"}\n",
+          ).toString("base64"),
+        }),
       );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
     });
 
-    await expect(publisher.reconcileCommit(publishId)).resolves.toEqual({
+    await expect(publisher.reconcileCommit(input)).resolves.toEqual({
       state: "committed",
-      commitSha: "c".repeat(40),
+      commitSha: exactCommitSha,
     });
+    expect(String(fetchMock.mock.calls[2]![0])).toContain(
+      `/git/commits/${copiedCommitSha}`,
+    );
+    expect(String(fetchMock.mock.calls[4]![0])).toContain(
+      `/git/commits/${exactCommitSha}`,
+    );
   });
 
   it("reconciles a retained candidate without a bounded history search", async () => {
@@ -1205,13 +1436,41 @@ describe("GitHub content publisher", () => {
     );
     const candidateCommitSha = "c".repeat(40);
     const currentHead = "d".repeat(40);
+    const input = {
+      ...publicationReconciliationInput(publishId),
+      candidateCommitSha,
+    };
+    const fileSha = "f".repeat(40);
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
       .mockResolvedValueOnce(
         json({
           sha: candidateCommitSha,
-          message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+          message: signedPublicationMessage(input),
+          parents: [{ sha: input.expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename: input.path,
+              status: "modified",
+              sha: fileSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          encoding: "base64",
+          content: Buffer.from(
+            "{\"schemaVersion\":\"1.0.0\"}\n",
+          ).toString("base64"),
         }),
       )
       .mockResolvedValueOnce(json({ object: { sha: currentHead } }))
@@ -1227,7 +1486,7 @@ describe("GitHub content publisher", () => {
     });
 
     await expect(
-      publisher.reconcileCommit(publishId, candidateCommitSha),
+      publisher.reconcileCommit(input),
     ).resolves.toEqual({
       state: "committed",
       commitSha: candidateCommitSha,
@@ -1235,7 +1494,7 @@ describe("GitHub content publisher", () => {
     expect(String(fetchMock.mock.calls[1]![0])).toContain(
       `/git/commits/${candidateCommitSha}`,
     );
-    expect(String(fetchMock.mock.calls[3]![0])).toContain(
+    expect(String(fetchMock.mock.calls[5]![0])).toContain(
       `/compare/${candidateCommitSha}...${currentHead}`,
     );
   });

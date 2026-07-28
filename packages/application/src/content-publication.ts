@@ -229,10 +229,15 @@ export type ContentPublisher = Readonly<{
     message: string;
     assertLease(): Promise<boolean>;
   }): Promise<PublicationCommitResult>;
-  reconcileCommit(
-    publishId: ContentPublicationId,
-    candidateCommitSha?: string,
-  ): Promise<
+  reconcileCommit(input: {
+    publishId: ContentPublicationId;
+    candidateCommitSha?: string;
+    expectedHead: string;
+    path: typeof publishedSiteDefinitionPath;
+    artifactHash: string;
+    contentHash: string;
+    message: string;
+  }): Promise<
     | Readonly<{ state: "committed"; commitSha: string }>
     | Readonly<{ state: "not-found" | "unknown" }>
   >;
@@ -745,6 +750,20 @@ export function createContentPublicationApplication({
     return { approval, revision };
   }
 
+  function commitReconciliationInput(
+    publication: ContentPublication,
+    approval: ContentApproval,
+  ): Parameters<ContentPublisher["reconcileCommit"]>[0] {
+    return {
+      publishId: publication.id,
+      expectedHead: publication.expectedHead,
+      path: publishedSiteDefinitionPath,
+      artifactHash: approval.fingerprint.artifactHash,
+      contentHash: approval.fingerprint.contentHash,
+      message: commitMessage({ publication, approval }),
+    };
+  }
+
   async function refreshPublication(publicationId: ContentPublicationId) {
     const publication = await store.findPublication(publicationId);
     if (publication === null) {
@@ -839,10 +858,10 @@ export function createContentPublicationApplication({
       (publication.status === "unknown" ||
         publication.status === "requested")
     ) {
-      const reconciled = await publisher.reconcileCommit(
-        publication.id,
-        reconciliationCandidate(publication.detail),
-      );
+      const reconciled = await publisher.reconcileCommit({
+        ...commitReconciliationInput(publication, boundApproval),
+        candidateCommitSha: reconciliationCandidate(publication.detail),
+      });
       if (reconciled.state === "committed") {
         commitSha = reconciled.commitSha;
         currentPublication = await store.updatePublication(
@@ -1366,10 +1385,10 @@ export function createContentPublicationApplication({
           publication.commitSha === null &&
           candidateCommitSha !== undefined
         ) {
-          const reconciled = await publisher.reconcileCommit(
-            publication.id,
+          const reconciled = await publisher.reconcileCommit({
+            ...commitReconciliationInput(publication, approval),
             candidateCommitSha,
-          );
+          });
           if (reconciled.state === "committed") {
             const reconciledAt = now();
             publication = await store.updatePublication(

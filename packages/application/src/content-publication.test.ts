@@ -829,8 +829,14 @@ describe("content publication application", () => {
       expect.objectContaining({ status: "unknown" }),
     );
     expect(publisher.reconcileCommit).toHaveBeenCalledWith(
-      publication.id,
-      "c".repeat(40),
+      expect.objectContaining({
+        publishId: publication.id,
+        candidateCommitSha: "c".repeat(40),
+        expectedHead: publication.expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        artifactHash: approval.fingerprint.artifactHash,
+        contentHash: approval.fingerprint.contentHash,
+      }),
     );
 
     currentTime = "2026-07-27T10:16:00.000Z";
@@ -995,8 +1001,13 @@ describe("content publication application", () => {
       }),
     );
     expect(publisher.reconcileCommit).toHaveBeenLastCalledWith(
-      publication.id,
-      candidateCommitSha,
+      expect.objectContaining({
+        publishId: publication.id,
+        candidateCommitSha,
+        expectedHead: publication.expectedHead,
+        artifactHash: approval.fingerprint.artifactHash,
+        contentHash: approval.fingerprint.contentHash,
+      }),
     );
     expect(publisher.retryReference).not.toHaveBeenCalled();
     expect(publisher.retryDeployment).toHaveBeenCalledWith({

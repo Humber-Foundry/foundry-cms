@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,6 +7,7 @@ import {
   acquireProductionBranchLock,
   provisionProductionBaseline,
 } from "./provision-production-baseline.mjs";
+import { assertExactProductionSource } from "./assert-exact-production-head.mjs";
 
 const commitSha = "c".repeat(40);
 const environment = {
@@ -32,6 +34,10 @@ describe("production deployment baseline provisioning", () => {
   it("holds a branch lock across first-only provisioning and exact verification", async () => {
     const calls = [];
     const assertHead = vi.fn();
+    const assertSource = vi.fn(({ assertHead: recheckHead }) => {
+      calls.push("source");
+      recheckHead();
+    });
     const assertDeploymentAbsent = vi.fn().mockResolvedValue(undefined);
     const authorizeContent = vi.fn().mockResolvedValue(undefined);
     const verifyRelease = vi.fn().mockResolvedValue(undefined);
@@ -54,6 +60,7 @@ describe("production deployment baseline provisioning", () => {
     await provisionProductionBaseline({
       environment,
       assertHead,
+      assertSource,
       assertDeploymentAbsent,
       authorizeContent,
       verifyRelease,
@@ -62,6 +69,7 @@ describe("production deployment baseline provisioning", () => {
     });
 
     expect(assertHead).toHaveBeenCalledTimes(3);
+    expect(assertSource).toHaveBeenCalledOnce();
     expect(assertDeploymentAbsent).toHaveBeenCalledTimes(2);
     expect(startProvision).toHaveBeenCalledWith({
       accountId: "account",
@@ -70,7 +78,7 @@ describe("production deployment baseline provisioning", () => {
     });
     expect(authorizeContent).toHaveBeenCalledOnce();
     expect(verifyRelease).toHaveBeenCalledOnce();
-    expect(calls).toEqual(["lock", "deploy", "unlock"]);
+    expect(calls).toEqual(["lock", "source", "deploy", "unlock"]);
     expect(releaseBranchLock).toHaveBeenCalledOnce();
   });
 
@@ -87,6 +95,7 @@ describe("production deployment baseline provisioning", () => {
             throw new Error("exact_production_head_moved");
           }
         }),
+        assertSource: ({ assertHead: recheckHead }) => recheckHead(),
         assertDeploymentAbsent: vi.fn().mockResolvedValue(undefined),
         acquireBranchLock: vi.fn().mockResolvedValue({
           retained: false,
@@ -96,6 +105,34 @@ describe("production deployment baseline provisioning", () => {
       }),
     ).rejects.toThrow("exact_production_head_moved");
 
+    expect(releaseBranchLock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tracked mutation introduced by the build before initial deployment", async () => {
+    const startProvision = vi.fn();
+    const releaseBranchLock = vi.fn();
+    const assertHead = vi.fn();
+
+    await expect(
+      provisionProductionBaseline({
+        environment,
+        assertHead,
+        assertSource: ({ assertHead: recheckHead }) =>
+          assertExactProductionSource({
+            assertHead: recheckHead,
+            readSourceStatus: () => " M tracked-source.ts\n",
+          }),
+        assertDeploymentAbsent: vi.fn().mockResolvedValue(undefined),
+        acquireBranchLock: vi.fn().mockResolvedValue({
+          retained: false,
+          release: releaseBranchLock,
+        }),
+        startProvision,
+      }),
+    ).rejects.toThrow("exact_build_source_dirty");
+
+    expect(assertHead).toHaveBeenCalledOnce();
+    expect(startProvision).not.toHaveBeenCalled();
     expect(releaseBranchLock).not.toHaveBeenCalled();
   });
 
@@ -417,7 +454,18 @@ describe("production deployment baseline provisioning", () => {
     );
   });
 
-  it("rejects a branch pattern before creating a ruleset", async () => {
+  it.each([
+    "release/*",
+    "main/../release",
+    "../main",
+    "main//release",
+    "/main",
+    "main/",
+    ".hidden",
+    "release.lock",
+    "-main",
+    "HEAD",
+  ])("rejects the invalid branch %s before creating a ruleset", async (branch) => {
     const fetchImplementation = vi.fn();
 
     await expect(
@@ -425,7 +473,7 @@ describe("production deployment baseline provisioning", () => {
         environment: {
           FOUNDRY_GITHUB_OWNER: "owner",
           FOUNDRY_GITHUB_REPOSITORY: "repo",
-          FOUNDRY_PRODUCTION_BRANCH: "release/*",
+          FOUNDRY_PRODUCTION_BRANCH: branch,
           FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN: "token",
         },
         fetchImplementation,
@@ -433,5 +481,22 @@ describe("production deployment baseline provisioning", () => {
     ).rejects.toThrow("production_baseline_branch_lock_not_configured");
 
     expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("runs a clean-source fence immediately after the baseline build", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    );
+    const preflight =
+      "node scripts/assert-exact-production-head.mjs";
+    const build = "opennextjs-cloudflare build";
+    const provision =
+      "node scripts/provision-production-baseline.mjs";
+
+    expect(
+      packageJson.scripts["provision:deployment-baseline"],
+    ).toBe(
+      `${preflight} && ${build} && ${preflight} && ${provision}`,
+    );
   });
 });

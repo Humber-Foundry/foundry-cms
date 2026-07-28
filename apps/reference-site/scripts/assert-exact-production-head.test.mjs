@@ -59,6 +59,34 @@ describe("exact production head deployment fence", () => {
     ).toThrow("exact_production_head_configuration_invalid");
   });
 
+  it.each([
+    "main/../release",
+    "../main",
+    "main//release",
+    "/main",
+    "main/",
+    ".hidden",
+    "release.lock",
+    "-main",
+    "HEAD",
+  ])("rejects the invalid production branch %s before reading Git", (branch) => {
+    const readLocalHead = vi.fn();
+    const readRemoteHead = vi.fn();
+
+    expect(() =>
+      assertExactProductionHead({
+        environment: {
+          WORKERS_CI_COMMIT_SHA: "c".repeat(40),
+          FOUNDRY_PRODUCTION_BRANCH: branch,
+        },
+        readLocalHead,
+        readRemoteHead,
+      }),
+    ).toThrow("exact_production_head_configuration_invalid");
+    expect(readLocalHead).not.toHaveBeenCalled();
+    expect(readRemoteHead).not.toHaveBeenCalled();
+  });
+
   it("rejects overridden build metadata that differs from the checkout", () => {
     expect(() =>
       assertExactProductionHead({

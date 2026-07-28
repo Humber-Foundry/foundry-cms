@@ -131,7 +131,13 @@ Any later edit invalidates that retry authority; the newer revision must be
 previewed and approved instead. A retained commit whose ref update was
 ambiguous can be retried through the same explicit action. Foundry verifies its
 publish trailer, sole expected parent, and sole exact content-file change
-before attempting the non-force ref compare-and-swap again.
+before attempting the non-force ref compare-and-swap again. When a lost commit
+response leaves no candidate SHA, branch-history reconciliation applies the
+same signed-message, parent, one-commit, one-file, and artifact-byte checks to
+every matching trailer; a later code commit that copies the public publication
+ID is not accepted. HTTP timeout, early-data, rate-limit, client-closed, and
+server-error responses from writes remain ambiguous rather than releasing
+authority for a duplicate commit, ref update, or build dispatch.
 The commit carries an HMAC publication signature over its parent, content path,
 content hash, and complete attribution message. The signing secret is shared
 only by the CMS publisher and Workers Builds, so an ordinary pull request
@@ -230,7 +236,10 @@ missing or unreadable trigger fails closed. The trigger must also identify the
 configured GitHub owner/repository and its documented exclude-first branch and
 path filters must permit both the production branch and
 `packages/site-definition/src/published-site.json`; otherwise Foundry refuses
-to approve a channel that cannot observe the publication commit.
+to approve a channel that cannot observe the publication commit. Production
+branch names are validated once against the supported Git ref-name subset and
+the same validator protects publisher URLs, build-side ref checks, and baseline
+ruleset acquisition, preventing URL normalization from selecting another ref.
 
 An explicit deployment retry claims one durable dispatch token. At the provider
 boundary, immediately before contacting Cloudflare, Foundry renews that exact
@@ -252,6 +261,11 @@ build, and remote commits; deploys only the configured account and Worker
 name; checks the protected head again; and requires the exact authorized
 commit in the live release marker before deleting the temporary ruleset and
 verifying its absence. A normal first run refuses a pre-existing deployment. A
+specific Cloudflare `script_not_found` response is the expected empty state
+before that first upload; authorization failures and other lookup errors still
+fail closed. The command repeats the clean-source and exact-head fence after
+OpenNext builds and again inside the controller immediately before the initial
+deployment, so generated output cannot hide a tracked source mutation. A
 rerun discovers, validates, and reuses the exact retained ruleset rather than
 creating a second lock. If that retained-lock rerun finds the initial
 deployment already present, it reconciles the exact production head,
