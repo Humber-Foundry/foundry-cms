@@ -549,7 +549,11 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
       const current = publications.get(publication.id);
       if (
         options?.expectedLeaseToken !== undefined &&
-        (current?.status !== "requested" ||
+        (!(
+          current?.status === "requested" ||
+          (current?.status === "committed" &&
+            current.detail === "deployment_retry_dispatching")
+        ) ||
           current.leaseToken !== options.expectedLeaseToken ||
           (options.expectedLeaseValidAt !== undefined &&
             (current.leaseExpiresAt === null ||
@@ -1451,6 +1455,7 @@ export function createContentPublicationApplication({
         }
         const retryRequestedAt = now();
         const dispatchToken = `retry-dispatch:${crypto.randomUUID()}`;
+        const leaseToken = crypto.randomUUID();
         let dispatching: ContentPublication;
         try {
           dispatching = await store.updatePublication(
@@ -1459,6 +1464,11 @@ export function createContentPublicationApplication({
               detail: "deployment_retry_dispatching",
               deploymentId: dispatchToken,
               deploymentRequestedAt: retryRequestedAt,
+              leaseToken,
+              leaseExpiresAt: new Date(
+                new Date(retryRequestedAt).getTime() +
+                  publicationLeaseDurationMs,
+              ).toISOString(),
               updatedAt: retryRequestedAt,
             }),
             {
@@ -1477,7 +1487,8 @@ export function createContentPublicationApplication({
         if (
           dispatching.status !== "committed" ||
           dispatching.detail !== "deployment_retry_dispatching" ||
-          dispatching.deploymentId !== dispatchToken
+          dispatching.deploymentId !== dispatchToken ||
+          dispatching.leaseToken !== leaseToken
         ) {
           return dispatching;
         }
@@ -1489,15 +1500,25 @@ export function createContentPublicationApplication({
               status: "failed",
               detail: "approval_stale",
               deploymentId: null,
+              leaseToken: null,
+              leaseExpiresAt: null,
               updatedAt: now(),
             }),
             {
+              expectedLeaseToken: leaseToken,
               expectedStatus: "committed",
               expectedUpdatedAt: dispatching.updatedAt,
             },
           );
         }
-        const result = await publisher.retryDeployment(commitSha);
+        let result: Awaited<
+          ReturnType<ContentPublisher["retryDeployment"]>
+        >;
+        try {
+          result = await publisher.retryDeployment(commitSha);
+        } catch {
+          result = { state: "unknown" };
+        }
         const status =
           result.state === "failed"
             ? "failed"
@@ -1515,9 +1536,12 @@ export function createContentPublicationApplication({
                   : "deployment_retry_requested",
             deploymentId:
               result.state === "requested" ? result.deploymentId : null,
+            leaseToken: null,
+            leaseExpiresAt: null,
             updatedAt: now(),
           }),
           {
+            expectedLeaseToken: leaseToken,
             expectedStatus: "committed",
             expectedUpdatedAt: dispatching.updatedAt,
           },

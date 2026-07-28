@@ -266,19 +266,39 @@ async function readDeploymentList({
 
 function productionActivationPath(environment) {
   const accountId = environment.FOUNDRY_CLOUDFLARE_ACCOUNT_ID?.trim();
-  const scriptTag = environment.FOUNDRY_CLOUDFLARE_SCRIPT_TAG?.trim();
+  const scriptName =
+    environment.FOUNDRY_CLOUDFLARE_SCRIPT_NAME?.trim();
   if (
     accountId === undefined ||
     accountId.length === 0 ||
-    scriptTag === undefined ||
-    scriptTag.length === 0
+    scriptName === undefined ||
+    scriptName.length === 0
   ) {
     throw new Error("exact_activation_target_invalid");
   }
   return (
     `/client/v4/accounts/${encodeURIComponent(accountId)}` +
-    `/workers/scripts/${encodeURIComponent(scriptTag)}/deployments`
+    `/workers/scripts/${encodeURIComponent(scriptName)}/deployments`
   );
+}
+
+export async function assertProductionDeploymentAbsent({
+  environment = process.env,
+  upstreamBaseUrl =
+    environment.CLOUDFLARE_API_BASE_URL ?? cloudflareApiBaseUrl,
+} = {}) {
+  const apiToken = environment.CLOUDFLARE_API_TOKEN?.trim();
+  if (apiToken === undefined || apiToken.length === 0) {
+    throw new Error("exact_activation_baseline_configuration_invalid");
+  }
+  const deployments = await readDeploymentList({
+    activationPath: productionActivationPath(environment),
+    headers: new Headers({ authorization: `Bearer ${apiToken}` }),
+    upstreamBaseUrl,
+  });
+  if (deployments.length !== 0) {
+    throw new Error("production_baseline_already_exists");
+  }
 }
 
 export async function assertProductionDeploymentBaseline({
@@ -472,6 +492,7 @@ export async function activateExactVersion({
             );
             return;
           }
+          assertHead();
         } catch (error) {
           activationError = error;
           rejectActivation(response, "Production head moved.");
@@ -489,6 +510,7 @@ export async function activateExactVersion({
           headers,
           body,
           redirect: "manual",
+          signal: AbortSignal.timeout(cloudflareRequestTimeoutMs),
         },
       );
       const upstreamBody = Buffer.from(await upstream.arrayBuffer());

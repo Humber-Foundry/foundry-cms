@@ -17,6 +17,7 @@ export type GitHubContentPublisherConfiguration = Readonly<{
   deploymentCheckName: string;
   cloudflareAccountId: string;
   cloudflareScriptTag: string;
+  cloudflareScriptName: string;
   cloudflareBuildTriggerId: string;
   cloudflareApiToken: string;
   publicationSigningSecret: string;
@@ -40,6 +41,7 @@ export type GitHubContentPublisherEnvironment = Readonly<{
   FOUNDRY_DEPLOYMENT_CHECK_NAME?: string;
   FOUNDRY_CLOUDFLARE_ACCOUNT_ID?: string;
   FOUNDRY_CLOUDFLARE_SCRIPT_TAG?: string;
+  FOUNDRY_CLOUDFLARE_SCRIPT_NAME?: string;
   FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID?: string;
   FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
   FOUNDRY_PUBLICATION_SIGNING_SECRET?: string;
@@ -100,6 +102,9 @@ export function readGitHubContentPublisherConfiguration(
     ),
     cloudflareScriptTag: requireValue(
       environment.FOUNDRY_CLOUDFLARE_SCRIPT_TAG,
+    ),
+    cloudflareScriptName: requireValue(
+      environment.FOUNDRY_CLOUDFLARE_SCRIPT_NAME,
     ),
     cloudflareBuildTriggerId: requireValue(
       environment.FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID,
@@ -505,6 +510,7 @@ export function createGitHubContentPublisher({
           deploymentCheckName: configuration.deploymentCheckName,
           cloudflareAccountId: configuration.cloudflareAccountId,
           cloudflareScriptTag: configuration.cloudflareScriptTag,
+          cloudflareScriptName: configuration.cloudflareScriptName,
           cloudflareBuildTriggerId:
             configuration.cloudflareBuildTriggerId,
           buildConfiguration: {

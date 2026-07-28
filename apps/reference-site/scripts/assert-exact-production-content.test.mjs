@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
 
-import { assertExactProductionContent } from "./assert-exact-production-content.mjs";
+import {
+  assertExactProductionContent,
+  assertExactProductionRelease,
+} from "./assert-exact-production-content.mjs";
 
 const liveCommit = "a".repeat(40);
 const failedCommit = "b".repeat(40);
@@ -54,6 +57,30 @@ function inputs(overrides = {}) {
 }
 
 describe("exact production content authorization", () => {
+  it("verifies that the exact build commit is live", async () => {
+    await expect(
+      assertExactProductionRelease({
+        environment: { WORKERS_CI_COMMIT_SHA: expectedCommit },
+        readLiveMarker: vi.fn().mockResolvedValue({
+          commitSha: expectedCommit,
+          contentHash,
+        }),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects unchanged content served by an older commit", async () => {
+    await expect(
+      assertExactProductionRelease({
+        environment: { WORKERS_CI_COMMIT_SHA: expectedCommit },
+        readLiveMarker: vi.fn().mockResolvedValue({
+          commitSha: liveCommit,
+          contentHash,
+        }),
+      }),
+    ).rejects.toThrow("exact_release_commit_not_live");
+  });
+
   it("allows a build with no unserved content delta", async () => {
     const options = inputs({
       readLiveMarker: vi.fn().mockResolvedValue({

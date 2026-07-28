@@ -514,7 +514,16 @@ export function createD1ContentPublicationStore(
                AND status <> 'verified-live'
                AND (
                  ?10 IS NULL
-                 OR (status = 'requested' AND lease_token = ?10)
+                 OR (
+                   lease_token = ?10
+                   AND (
+                     status = 'requested'
+                     OR (
+                       status = 'committed'
+                       AND detail = 'deployment_retry_dispatching'
+                     )
+                   )
+                 )
                )
                AND (?11 IS NULL OR lease_expires_at > ?11)
                AND (?12 IS NULL OR status = ?12)

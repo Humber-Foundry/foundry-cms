@@ -40,6 +40,7 @@ const configurationInputs = {
   deploymentCheckName: "Cloudflare Workers",
   cloudflareAccountId: "account-123",
   cloudflareScriptTag: "script-789",
+  cloudflareScriptName: "foundry-reference-site",
   cloudflareBuildTriggerId: "trigger-456",
   cloudflareApiToken: "cloudflare-api-token",
   publicationSigningSecret: "publication-signing-secret-32-bytes",
@@ -60,6 +61,7 @@ describe("GitHub content publisher", () => {
         FOUNDRY_PUBLIC_ORIGIN: "https://site.example/path",
         FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "account-123",
         FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "script-789",
+        FOUNDRY_CLOUDFLARE_SCRIPT_NAME: "foundry-reference-site",
         FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
         FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
         FOUNDRY_PUBLICATION_SIGNING_SECRET:
@@ -80,6 +82,7 @@ describe("GitHub content publisher", () => {
         FOUNDRY_PUBLIC_ORIGIN: "http://site.example",
         FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "account-123",
         FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "script-789",
+        FOUNDRY_CLOUDFLARE_SCRIPT_NAME: "foundry-reference-site",
         FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
         FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
         FOUNDRY_PUBLICATION_SIGNING_SECRET:
@@ -355,6 +358,14 @@ describe("GitHub content publisher", () => {
       },
       fetch: configurationFetch,
     });
+    const differentWorkerPublisher = createGitHubContentPublisher({
+      configuration: {
+        ...configurationInputs,
+        privateKey,
+        cloudflareScriptName: "another-reference-site",
+      },
+      fetch: configurationFetch,
+    });
     const changedBuildPublisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: vi
@@ -381,6 +392,11 @@ describe("GitHub content publisher", () => {
     );
     await expect(
       differentDestinationPublisher.getChannelConfigurationHash(),
+    ).resolves.not.toBe(
+      await publisher.getChannelConfigurationHash(),
+    );
+    await expect(
+      differentWorkerPublisher.getChannelConfigurationHash(),
     ).resolves.not.toBe(
       await publisher.getChannelConfigurationHash(),
     );

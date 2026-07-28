@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Miniflare } from "miniflare";
 
 import {
   createContentActorId,
   createContentApprovalFingerprint,
   createContentApprovalId,
+  createContentPublicationApplication,
   createContentPublicationId,
   createContentRevisionApplication,
   createContentWorkspaceId,
@@ -276,18 +277,57 @@ describe("D1 content publication store", () => {
   it("fences revision saves while an exact deployment retry is dispatching", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);
-    const requested = publication("1", "publish-retry-fence-001");
-    await store.claimPublication(requested);
-    await database
-      .prepare(
-        `UPDATE content_publications
-         SET status = 'committed',
-             detail = 'deployment_retry_dispatching',
-             commit_sha = ?1
-         WHERE id = ?2`,
-      )
-      .bind("c".repeat(40), requested.id)
-      .run();
+    const failed: ContentPublication = {
+      ...publication("1", "publish-retry-fence-001", "failed"),
+      commitSha: "c".repeat(40),
+      detail: "cloudflare_build_failed",
+      leaseToken: null,
+      leaseExpiresAt: null,
+    };
+    await store.claimPublication(failed);
+    let resolveRetry:
+      | ((value: {
+          state: "requested";
+          deploymentId: string;
+        }) => void)
+      | undefined;
+    const retryDeployment = vi.fn(
+      () =>
+        new Promise<{ state: "requested"; deploymentId: string }>(
+          (resolve) => {
+            resolveRetry = resolve;
+          },
+        ),
+    );
+    const publicationApplication = createContentPublicationApplication({
+      store,
+      revisions: {
+        getRevision: (_workspaceId, revision) =>
+          revisionApplication.queries.getRevision(revision),
+        getCurrent: () => revisionApplication.queries.getCurrent(),
+        isCurrent: (revision) =>
+          revisionApplication.queries.isRevisionCurrent(revision),
+        listContributors: async () => [actorId],
+      },
+      publisher: {
+        getChannelConfigurationHash: async () => "channel-a",
+        getProductionHead: async () => "c".repeat(40),
+        isReleaseLive: async () => false,
+        createCommit: vi.fn(),
+        reconcileCommit: vi.fn(),
+        retryReference: vi.fn(),
+        getDeploymentStatus: vi.fn(),
+        retryDeployment,
+      },
+      now: () => "2026-07-27T10:02:00.000Z",
+    });
+    const retry = publicationApplication.commands.retryDeployment(
+      failed.id,
+      membershipId,
+    );
+    await vi.waitFor(() => {
+      expect(retryDeployment).toHaveBeenCalledOnce();
+    });
 
     await expect(
       revisionApplication.commands.save({
@@ -299,6 +339,18 @@ describe("D1 content publication store", () => {
         idempotencyKey: "save-during-retry-0001",
       }),
     ).rejects.toThrow(/content_publication_commit_in_progress/u);
+
+    resolveRetry?.({
+      state: "requested",
+      deploymentId: "build-retry-1",
+    });
+    await expect(retry).resolves.toEqual(
+      expect.objectContaining({
+        detail: "deployment_retry_requested",
+        leaseToken: null,
+        leaseExpiresAt: null,
+      }),
+    );
   });
 
   it("does not fence another workspace or the same workspace after lease expiry", async () => {

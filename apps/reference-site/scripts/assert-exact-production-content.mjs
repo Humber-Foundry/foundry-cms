@@ -100,6 +100,38 @@ async function fetchLiveMarker(environment) {
   return response.json();
 }
 
+function validLiveMarker(marker) {
+  return (
+    typeof marker === "object" &&
+    marker !== null &&
+    typeof marker.commitSha === "string" &&
+    objectIdPattern.test(marker.commitSha) &&
+    typeof marker.contentHash === "string" &&
+    contentHashPattern.test(marker.contentHash)
+  );
+}
+
+export async function assertExactProductionRelease({
+  environment = process.env,
+  readLiveMarker = () => fetchLiveMarker(environment),
+} = {}) {
+  const expectedCommit =
+    environment.WORKERS_CI_COMMIT_SHA?.trim().toLowerCase();
+  if (
+    expectedCommit === undefined ||
+    !objectIdPattern.test(expectedCommit)
+  ) {
+    throw new Error("exact_release_verification_configuration_invalid");
+  }
+  const marker = await readLiveMarker();
+  if (!validLiveMarker(marker)) {
+    throw new Error("exact_live_marker_invalid");
+  }
+  if (marker.commitSha.toLowerCase() !== expectedCommit) {
+    throw new Error("exact_release_commit_not_live");
+  }
+}
+
 export async function assertExactProductionContent({
   environment = process.env,
   readLiveMarker = () => fetchLiveMarker(environment),
@@ -134,14 +166,7 @@ export async function assertExactProductionContent({
   }
 
   const marker = await readLiveMarker();
-  if (
-    typeof marker !== "object" ||
-    marker === null ||
-    typeof marker.commitSha !== "string" ||
-    !objectIdPattern.test(marker.commitSha) ||
-    typeof marker.contentHash !== "string" ||
-    !contentHashPattern.test(marker.contentHash)
-  ) {
+  if (!validLiveMarker(marker)) {
     throw new Error("exact_live_marker_invalid");
   }
   const liveCommit = marker.commitSha.toLowerCase();

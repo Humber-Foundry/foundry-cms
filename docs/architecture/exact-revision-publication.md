@@ -170,18 +170,24 @@ Set these non-secret values for each installation:
 - `FOUNDRY_PUBLIC_ORIGIN` (the canonical HTTPS public-site origin)
 - `FOUNDRY_DEPLOYMENT_CHECK_NAME` (defaults to `Cloudflare`)
 - `FOUNDRY_CLOUDFLARE_ACCOUNT_ID`
-- `FOUNDRY_CLOUDFLARE_SCRIPT_TAG`
+- `FOUNDRY_CLOUDFLARE_SCRIPT_TAG` (the immutable Workers Builds
+  `external_script_id`)
+- `FOUNDRY_CLOUDFLARE_SCRIPT_NAME` (the Worker name used by Wrangler and the
+  Workers Versions/Deployments API)
 - `FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID`
 - `FOUNDRY_PRODUCTION_BASE` (a bootstrap fallback Git object ID)
 
-Store `FOUNDRY_GITHUB_PRIVATE_KEY`, `FOUNDRY_CLOUDFLARE_API_TOKEN`, and the
-32-byte-or-longer `FOUNDRY_PUBLICATION_SIGNING_SECRET` only as Worker/Build
-secrets. The signing secret must be identical in the publisher Worker and
-Workers Builds. The Cloudflare token needs the narrow account-scoped Workers CI
+Store `FOUNDRY_GITHUB_PRIVATE_KEY`, `FOUNDRY_CLOUDFLARE_API_TOKEN`, the
+standard build-time `CLOUDFLARE_API_TOKEN`, and the 32-byte-or-longer
+`FOUNDRY_PUBLICATION_SIGNING_SECRET` only as Worker/Build secrets. The signing
+secret must be identical in the publisher Worker and Workers Builds. The
+Foundry-prefixed Cloudflare token needs the narrow account-scoped Workers CI
 Edit permission (called Workers CI Write in Cloudflare's newer permission
-vocabulary) used to trigger and inspect an exact manual build. Never put these
-secrets, the GitHub App JWT, or an installation token in D1, logs, build output,
-or client bundles.
+vocabulary) used to trigger and inspect an exact manual build. The standard
+Wrangler token must also read and write the configured Worker's deployments.
+Never put these secrets, the GitHub App JWT, an installation token, or the
+one-time baseline provisioning token in D1, logs, build output, or client
+bundles.
 
 Approval and every active refresh read the live Workers build trigger and its
 environment-variable metadata. The channel fingerprint covers repository
@@ -194,12 +200,17 @@ Cloudflare requires `wrangler deploy` for a Worker's first upload; its Versions
 API cannot create that initial deployment. During installation, before enabling
 CMS publication, an operator sets
 `FOUNDRY_BASELINE_PROVISION_COMMIT_SHA` to the exact protected production head
-and runs `npm run provision:deployment-baseline` once. The command checks the
+and supplies a short-lived `FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN` with
+administration permission to lock and unlock that branch. The operator then
+runs `npm run provision:deployment-baseline` once. The command refuses an
+existing deployment, acquires and verifies the GitHub branch lock, checks the
 local, build, and remote commits, deploys only the configured account and
-Worker name, checks the protected head again, and verifies the release marker.
-Remove the one-time authorization afterward. Normal `npm run deploy` requires
-that verified serving baseline and never falls back to an unguarded first
-upload.
+Worker name, checks the protected head again, and requires the exact authorized
+commit in the live release marker before unlocking. On any failure after
+locking, the branch remains locked for operator diagnosis; it must not be
+manually unlocked until the deployment and marker are reconciled. Remove both
+one-time values afterward. Normal `npm run deploy` requires that verified
+serving baseline and never falls back to an unguarded first upload.
 
 Workers Builds must expose `WORKERS_CI_COMMIT_SHA` during the build. Next
 embeds it as `FOUNDRY_RELEASE_COMMIT_SHA` in the release marker. A build without

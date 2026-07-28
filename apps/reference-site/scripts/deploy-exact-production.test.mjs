@@ -23,7 +23,7 @@ const exactActivationBody = JSON.stringify({
 });
 const activationEnvironment = {
   FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "a",
-  FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "site",
+  FOUNDRY_CLOUDFLARE_SCRIPT_NAME: "site",
 };
 
 function activate(options) {
@@ -218,7 +218,7 @@ describe("guarded exact production deployment", () => {
         }),
     });
 
-    expect(assertHead).toHaveBeenCalledTimes(2);
+    expect(assertHead).toHaveBeenCalledTimes(3);
     expect(requests).toEqual([
       "GET /client/v4/accounts/a/workers/scripts/site/deployments",
       "GET /client/v4/accounts/a/workers/scripts/site/deployments",
@@ -264,6 +264,58 @@ describe("guarded exact production deployment", () => {
 
     expect(assertHead).toHaveBeenCalledOnce();
     expect(upstreamRequests).toBe(1);
+    await close(upstream);
+  });
+
+  it("rechecks the head after a delayed deployment baseline lookup", async () => {
+    let deploymentReads = 0;
+    let activationPosts = 0;
+    let headMoved = false;
+    const upstream = createServer((request, response) => {
+      if (request.method === "GET") {
+        deploymentReads += 1;
+        if (deploymentReads === 2) {
+          headMoved = true;
+        }
+      } else {
+        activationPosts += 1;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    const assertHead = vi.fn(() => {
+      if (headMoved) {
+        throw new Error("exact_production_head_moved");
+      }
+    });
+
+    await expect(
+      activate({
+        versionId,
+        assertHead,
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) =>
+          activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(409);
+          }),
+      }),
+    ).rejects.toThrow("exact_production_head_moved");
+
+    expect(assertHead).toHaveBeenCalledTimes(2);
+    expect(deploymentReads).toBe(2);
+    expect(activationPosts).toBe(0);
     await close(upstream);
   });
 
@@ -477,7 +529,7 @@ describe("guarded exact production deployment", () => {
     let headCheck = 0;
     const assertHead = vi.fn(() => {
       headCheck += 1;
-      if (headCheck === 2) {
+      if (headCheck === 3) {
         throw new Error("exact_production_head_moved");
       }
     });
@@ -556,7 +608,7 @@ describe("guarded exact production deployment", () => {
         versionId,
         assertHead: vi.fn(() => {
           headCheck += 1;
-          if (headCheck === 2) {
+          if (headCheck === 3) {
             throw new Error("exact_production_head_moved");
           }
         }),
@@ -627,7 +679,7 @@ describe("guarded exact production deployment", () => {
         versionId,
         assertHead: vi.fn(() => {
           headCheck += 1;
-          if (headCheck === 2) {
+          if (headCheck === 3) {
             throw new Error("exact_production_head_moved");
           }
         }),
