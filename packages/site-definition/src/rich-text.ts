@@ -329,13 +329,23 @@ function validateCommonMarkEmphasisBoundaries(
   children: ReadonlyArray<RichTextText>,
   path: string,
 ) {
+  let joinedEmphasisNodes = 0;
   children.forEach((child, index) => {
     if (!hasEmphasisMark(child)) {
+      joinedEmphasisNodes = 0;
       return;
+    }
+    const linked = hasLinkMark(child);
+    joinedEmphasisNodes = linked ? 0 : joinedEmphasisNodes + 1;
+    if (joinedEmphasisNodes > 2) {
+      issue(
+        "serializer_ambiguity",
+        `${path}[${index}].marks`,
+        "Three or more adjacent unlinked emphasis nodes create ambiguous CommonMark delimiter runs.",
+      );
     }
     const previous = children[index - 1];
     const next = children[index + 1];
-    const linked = hasLinkMark(child);
     const beforeOpening = linked
       ? "["
       : previous === undefined

@@ -180,6 +180,16 @@ describe("reference Site Definition", () => {
         ];
       },
     },
+    {
+      name: "a three-node joined emphasis delimiter run",
+      mutate(document: Record<string, any>) {
+        document.children[0].children = [
+          { type: "text", text: "a", marks: ["bold"] },
+          { type: "text", text: "b", marks: ["bold", "italic"] },
+          { type: "text", text: "c", marks: ["italic"] },
+        ];
+      },
+    },
     ...["https://?", "https://#", "http://[::1"].map((href) => ({
       name: `a malformed absolute link (${href})`,
       mutate(document: Record<string, any>) {

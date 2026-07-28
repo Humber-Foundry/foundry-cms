@@ -606,6 +606,57 @@ describe("rich text contract", () => {
 
   it.each([
     {
+      name: "bold to bold-italic to italic",
+      children: [
+        { type: "text", text: "a", marks: ["bold"] },
+        { type: "text", text: "b", marks: ["bold", "italic"] },
+        { type: "text", text: "c", marks: ["italic"] },
+      ],
+      previousMarkdown: "**a*****b****c*\n",
+      previousHtml:
+        "<p><strong>a</strong>***b***<em>c</em></p>\n",
+    },
+    {
+      name: "italic to bold-italic to bold",
+      children: [
+        { type: "text", text: "a", marks: ["italic"] },
+        { type: "text", text: "b", marks: ["bold", "italic"] },
+        { type: "text", text: "c", marks: ["bold"] },
+      ],
+      previousMarkdown: "*a****b*****c**\n",
+      previousHtml:
+        "<p><em>a</em>***b***<strong>c</strong></p>\n",
+    },
+  ] satisfies ReadonlyArray<{
+    name: string;
+    children: RichTextText[];
+    previousMarkdown: string;
+    previousHtml: string;
+  }>)(
+    "rejects the multi-node $name transition that CommonMark reinterprets",
+    ({ children, previousMarkdown, previousHtml }) => {
+      expect(renderCommonMark(previousMarkdown)).toBe(previousHtml);
+      expect(() =>
+        serializeRichTextToMarkdown({
+          version: "1.0.0",
+          type: "document",
+          children: [{ type: "paragraph", children }],
+        }),
+      ).toThrow(
+        expect.objectContaining<Partial<RichTextValidationError>>({
+          issues: [
+            expect.objectContaining({
+              code: "serializer_ambiguity",
+              path: "$.children[0].children[2].marks",
+            }),
+          ],
+        }),
+      );
+    },
+  );
+
+  it.each([
+    {
       name: "punctuation at a line boundary",
       children: [{ type: "text", text: "!b!", marks: ["bold"] }],
       markdown: "**\\!b\\!**\n",
@@ -657,7 +708,7 @@ describe("rich text contract", () => {
     },
   );
 
-  it("never accepts sampled inline boundaries that CommonMark reinterprets", () => {
+  it("never accepts sampled inline sequences that CommonMark reinterprets", () => {
     const texts = ["a", "!a", "a!", "!", "(a)", "“a”"];
     const markSets = [
       [],
@@ -677,6 +728,22 @@ describe("rich text contract", () => {
         return `<strong>${text}</strong>`;
       }
       return node.marks.includes("italic") ? `<em>${text}</em>` : text;
+    };
+    const expectCommonMarkToPreserve = (children: RichTextText[]) => {
+      let markdown: string;
+      try {
+        markdown = serializeRichTextToMarkdown({
+          version: "1.0.0",
+          type: "document",
+          children: [{ type: "paragraph", children }],
+        });
+      } catch (error) {
+        expect(error).toBeInstanceOf(RichTextValidationError);
+        return;
+      }
+      expect(renderCommonMark(markdown), markdown).toBe(
+        `<p>${children.map(expectedHtml).join("")}</p>\n`,
+      );
     };
 
     for (const leftText of texts) {
@@ -698,20 +765,38 @@ describe("rich text contract", () => {
                 marks: rightMarks,
               },
             ];
-            let markdown: string;
-            try {
-              markdown = serializeRichTextToMarkdown({
-                version: "1.0.0",
-                type: "document",
-                children: [{ type: "paragraph", children }],
-              });
-            } catch (error) {
-              expect(error).toBeInstanceOf(RichTextValidationError);
-              continue;
+            expectCommonMarkToPreserve(children);
+          }
+        }
+      }
+    }
+
+    const tripleTexts = texts.slice(0, 4);
+    for (const leftText of tripleTexts) {
+      for (const leftMarks of markSets) {
+        for (const middleText of tripleTexts) {
+          for (const middleMarks of markSets) {
+            for (const rightText of tripleTexts) {
+              for (const rightMarks of markSets) {
+                expectCommonMarkToPreserve([
+                  {
+                    type: "text",
+                    text: leftText,
+                    marks: leftMarks,
+                  },
+                  {
+                    type: "text",
+                    text: middleText,
+                    marks: middleMarks,
+                  },
+                  {
+                    type: "text",
+                    text: rightText,
+                    marks: rightMarks,
+                  },
+                ]);
+              }
             }
-            expect(renderCommonMark(markdown), markdown).toBe(
-              `<p>${children.map(expectedHtml).join("")}</p>\n`,
-            );
           }
         }
       }
