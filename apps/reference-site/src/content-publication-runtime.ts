@@ -10,7 +10,10 @@ import {
   type ContentWorkspaceId,
 } from "@foundry/application";
 
-import { loadContentRevisionApplication } from "./content-revision-runtime";
+import {
+  loadContentRevisionApplication,
+  loadRestoredContentRevisionApplication,
+} from "./content-revision-runtime";
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import { listContentRevisionContributors } from "./d1-content-revision-store";
 import {
@@ -58,6 +61,7 @@ function publicationQueries(store: ContentPublicationStore) {
   return Object.freeze({
     getLatest: store.findLatestPublication,
     get: store.findPublication,
+    listHistory: () => store.listPublicationHistory(50),
   });
 }
 
@@ -109,8 +113,12 @@ export async function loadContentPublicationApplication(
   if (environment.FOUNDRY_DB === undefined) {
     throw new ContentRevisionConfigurationError();
   }
+  const store = createD1ContentPublicationStore(environment.FOUNDRY_DB);
+  const publisher = createGitHubContentPublisher({
+    configuration: readGitHubContentPublisherConfiguration(environment),
+  });
   return createContentPublicationApplication({
-    store: createD1ContentPublicationStore(environment.FOUNDRY_DB),
+    store,
     revisions: {
       getRevision: (_workspaceId, revision) =>
         revisionApplication.queries.getRevision(revision),
@@ -124,8 +132,26 @@ export async function loadContentPublicationApplication(
           revision,
         ),
     },
-    publisher: createGitHubContentPublisher({
-      configuration: readGitHubContentPublisherConfiguration(environment),
-    }),
+    publisher,
+    publishedRevisions: publisher,
+    draftRestorer: {
+      async restore(input) {
+        const restored = await loadRestoredContentRevisionApplication(
+          input.workspaceId,
+          input.actorId,
+          input.definition,
+        );
+        const revision = await restored.commands.create({
+          actorId: input.actorId,
+          workspaceId: input.workspaceId,
+          idempotencyKey: input.idempotencyKey,
+        });
+        return {
+          workspaceId: revision.workspaceId,
+          revision: revision.revision,
+          sourcePublicationId: input.sourcePublicationId,
+        };
+      },
+    },
   });
 }

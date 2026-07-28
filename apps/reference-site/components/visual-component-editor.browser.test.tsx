@@ -1,7 +1,7 @@
 import { createElement, StrictMode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import {
@@ -43,6 +43,7 @@ describe("visual component editor browser acceptance", () => {
     for (const root of mounted.splice(0)) {
       flushSync(() => root.unmount());
     }
+    vi.restoreAllMocks();
     document.body.replaceChildren();
   });
 
@@ -270,6 +271,79 @@ describe("visual component editor browser acceptance", () => {
       ],
     });
     await clearContentEditorOutbox(workspaceId);
+  });
+
+  it("shows verified publication evidence with a restore-as-draft action", async () => {
+    const publicationId = `publish_${"2".repeat(32)}`;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      return Response.json(
+        url.includes("view=history")
+          ? {
+              history: [
+                {
+                  publication: {
+                    id: publicationId,
+                    workspaceId: "workspace_history",
+                    revision: 7,
+                    status: "verified-live",
+                    detail: null,
+                    commitSha: "c".repeat(40),
+                    requestedAt: "2026-07-27T10:00:00.000Z",
+                  },
+                  approval: {
+                    fingerprint: {
+                      contentHash: "d".repeat(64),
+                      artifactHash: "e".repeat(64),
+                    },
+                  },
+                  events: [
+                    {
+                      status: "committed",
+                      detail: null,
+                      occurredAt: "2026-07-27T10:01:00.000Z",
+                    },
+                    {
+                      status: "verified-live",
+                      detail: null,
+                      occurredAt: "2026-07-27T10:02:00.000Z",
+                    },
+                  ],
+                },
+              ],
+            }
+          : { publication: null },
+      );
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-history",
+          initialRevision: browserRevision("workspace_history"),
+          initialPreviewUrl: "/preview/history",
+          activeWorkspaceUrl: "/dash?workspace=history",
+        }),
+      );
+    });
+
+    for (
+      let index = 0;
+      index < 20 && !host.textContent?.includes("Revision 7");
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+
+    expect(host.textContent).toContain("Published history");
+    expect(host.textContent).toContain("Revision 7");
+    expect(host.textContent).toContain("Verified live");
+    expect(
+      page.getByRole("button", { name: "Restore as new draft" }),
+    ).toBeDefined();
   });
 
   it("keeps duplicate workspace tabs editable while coordinating browser persistence", async () => {

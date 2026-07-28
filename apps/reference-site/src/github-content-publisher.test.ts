@@ -158,6 +158,36 @@ describe("GitHub content publisher", () => {
     }
   });
 
+  it("reads the exact historical published artifact by immutable commit", async () => {
+    const bytes = "{\"schemaVersion\":\"1.0.0\"}\n";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(
+        json({
+          encoding: "base64",
+          content: Buffer.from(bytes).toString("base64"),
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00Z"),
+    });
+    const commitSha = "c".repeat(40);
+
+    await expect(
+      publisher.readPublishedArtifact({
+        commitSha,
+        path: "packages/site-definition/src/published-site.json",
+      }),
+    ).resolves.toBe(bytes);
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      "https://api.github.com/repos/client-owner/client-site/contents/" +
+        `packages/site-definition/src/published-site.json?ref=${commitSha}`,
+    );
+  });
+
   it("creates one tree and bot commit before a non-force production ref update", async () => {
     const expectedHead = "a".repeat(40);
     const fetchMock = vi

@@ -522,6 +522,42 @@ describe("D1 content publication store", () => {
     });
   });
 
+  it("returns published history with the approval fingerprint and ordered state evidence", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-history-0001");
+    await store.claimPublication(requested);
+    const live = {
+      ...requested,
+      status: "verified-live" as const,
+      commitSha: "c".repeat(40),
+      detail: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:04:00.000Z",
+    };
+    await store.updatePublication(live);
+
+    await expect(store.listPublicationHistory()).resolves.toEqual([
+      {
+        publication: live,
+        approval,
+        events: [
+          {
+            status: "requested",
+            detail: null,
+            occurredAt: requested.updatedAt,
+          },
+          {
+            status: "verified-live",
+            detail: null,
+            occurredAt: live.updatedAt,
+          },
+        ],
+      },
+    ]);
+  });
+
   it("audits only the winning lease-fenced update when contenders share a clock", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);

@@ -99,6 +99,42 @@ export type ContentPublication = Readonly<{
   updatedAt: string;
 }>;
 
+export type ContentPublicationEvent = Readonly<{
+  status: ContentPublicationStatus;
+  detail: string | null;
+  occurredAt: string;
+}>;
+
+export type ContentPublicationHistoryEntry = Readonly<{
+  publication: ContentPublication;
+  approval: ContentApproval;
+  events: ReadonlyArray<ContentPublicationEvent>;
+}>;
+
+export type ContentPublishedRevisionReader = Readonly<{
+  readPublishedArtifact(input: {
+    commitSha: string;
+    path: typeof publishedSiteDefinitionPath;
+  }): Promise<string | null>;
+}>;
+
+export type RestoredContentDraft = Readonly<{
+  workspaceId: ContentWorkspaceId;
+  revision: number;
+  sourcePublicationId: ContentPublicationId;
+}>;
+
+export type ContentPublicationDraftRestorer = Readonly<{
+  restore(input: {
+    sourcePublicationId: ContentPublicationId;
+    workspaceId: ContentWorkspaceId;
+    definition: SiteDefinition;
+    actorId: ContentActorId;
+    restoredBy: HumanMembershipId;
+    idempotencyKey: string;
+  }): Promise<RestoredContentDraft>;
+}>;
+
 export type ContentPublicationCommandIdentity = Readonly<
   Pick<
     ContentPublication,
@@ -187,6 +223,9 @@ export type ContentPublicationStore = Readonly<{
   findLatestPublication(
     workspaceId: ContentWorkspaceId,
   ): Promise<ContentPublication | null>;
+  listPublicationHistory(limit?: number): Promise<
+    ReadonlyArray<ContentPublicationHistoryEntry>
+  >;
 }>;
 
 export type ContentPublicationRevisionRepository = Readonly<{
@@ -303,7 +342,12 @@ export class ContentPublicationValidationError extends Error {
     | "deployment_retry_not_available"
     | "deployment_retry_head_moved"
     | "deployment_retry_release_marker_mismatch"
-    | "deployment_retry_in_progress";
+    | "deployment_retry_in_progress"
+    | "restore_source_not_found"
+    | "restore_source_not_live"
+    | "restore_artifact_unavailable"
+    | "restore_artifact_mismatch"
+    | "restore_not_configured";
 
   constructor(code: ContentPublicationValidationError["code"]) {
     super(code);
@@ -486,6 +530,20 @@ const deploymentDispatchTimeoutMs = 60 * 1_000;
 export function createInMemoryContentPublicationStore(): ContentPublicationStore {
   const approvals = new Map<ContentApprovalId, ContentApproval>();
   const publications = new Map<ContentPublicationId, ContentPublication>();
+  const events = new Map<
+    ContentPublicationId,
+    Array<ContentPublicationEvent>
+  >();
+
+  function recordEvent(publication: ContentPublication) {
+    const history = events.get(publication.id) ?? [];
+    history.push({
+      status: publication.status,
+      detail: publication.detail,
+      occurredAt: publication.updatedAt,
+    });
+    events.set(publication.id, history);
+  }
 
   return {
     async saveApproval(approval) {
@@ -553,9 +611,11 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
           updatedAt: publication.updatedAt,
         });
         publications.set(blocked.id, blocked);
+        recordEvent(blocked);
         return { state: "blocked", publication: blocked };
       }
       publications.set(publication.id, publication);
+      recordEvent(publication);
       return { state: "claimed", publication };
     },
     async hasPublicationLease({ publicationId, leaseToken, now }) {
@@ -644,6 +704,7 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
         return current;
       }
       publications.set(publication.id, Object.freeze({ ...publication }));
+      recordEvent(publication);
       return publication;
     },
     async findPublication(id) {
@@ -688,6 +749,24 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
           })[0] ?? null
       );
     },
+    async listPublicationHistory(limit = 50) {
+      const history: ContentPublicationHistoryEntry[] = [];
+      for (const publication of [...publications.values()]
+        .sort((left, right) =>
+          right.requestedAt.localeCompare(left.requestedAt)
+        )
+        .slice(0, Math.min(Math.max(limit, 1), 100))) {
+        const approval = approvals.get(publication.approvalId);
+        if (approval !== undefined) {
+          history.push({
+            publication,
+            approval,
+            events: Object.freeze([...(events.get(publication.id) ?? [])]),
+          });
+        }
+      }
+      return history;
+    },
   };
 }
 
@@ -695,11 +774,15 @@ export function createContentPublicationApplication({
   store,
   revisions,
   publisher,
+  publishedRevisions,
+  draftRestorer,
   now = () => new Date().toISOString(),
 }: {
   store: ContentPublicationStore;
   revisions: ContentPublicationRevisionRepository;
   publisher: ContentPublisher;
+  publishedRevisions?: ContentPublishedRevisionReader;
+  draftRestorer?: ContentPublicationDraftRestorer;
   now?: () => string;
 }) {
   async function requireExactRevision(
@@ -1827,6 +1910,95 @@ export function createContentPublicationApplication({
           },
         );
       },
+      async restore(input: {
+        sourcePublicationId: ContentPublicationId;
+        workspaceId: ContentWorkspaceId;
+        actorId: ContentActorId;
+        restoredBy: HumanMembershipId;
+        idempotencyKey: string;
+      }) {
+        if (!/^[A-Za-z0-9._:-]{16,128}$/u.test(input.idempotencyKey)) {
+          throw new ContentPublicationValidationError(
+            "idempotency_key_invalid",
+          );
+        }
+        if (
+          publishedRevisions === undefined ||
+          draftRestorer === undefined
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_not_configured",
+          );
+        }
+        const publication = await store.findPublication(
+          input.sourcePublicationId,
+        );
+        if (publication === null) {
+          throw new ContentPublicationValidationError(
+            "restore_source_not_found",
+          );
+        }
+        if (
+          publication.status !== "verified-live" ||
+          publication.commitSha === null
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_source_not_live",
+          );
+        }
+        const approval = await store.findApproval(publication.approvalId);
+        if (approval === null) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_unavailable",
+          );
+        }
+        const bytes = await publishedRevisions.readPublishedArtifact({
+          commitSha: publication.commitSha,
+          path: publishedSiteDefinitionPath,
+        });
+        if (bytes === null) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_unavailable",
+          );
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(bytes);
+        } catch {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_mismatch",
+          );
+        }
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed) ||
+          !("schemaVersion" in parsed)
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_mismatch",
+          );
+        }
+        const definition = parsed as SiteDefinition;
+        const [artifactHash, contentHash] = await Promise.all([
+          sha256(bytes),
+          hashPublishedSiteDefinition(definition),
+        ]);
+        if (
+          artifactHash !== approval.fingerprint.artifactHash ||
+          contentHash !== approval.fingerprint.contentHash ||
+          serializePublishedSiteDefinition(definition) !== bytes ||
+          definition.schemaVersion !== approval.fingerprint.schemaVersion
+        ) {
+          throw new ContentPublicationValidationError(
+            "restore_artifact_mismatch",
+          );
+        }
+        return draftRestorer.restore({
+          ...input,
+          definition,
+        });
+      },
     }),
     queries: Object.freeze({
       getLatest(workspaceId: ContentWorkspaceId) {
@@ -1834,6 +2006,9 @@ export function createContentPublicationApplication({
       },
       get(publicationId: ContentPublicationId) {
         return store.findPublication(publicationId);
+      },
+      listHistory() {
+        return store.listPublicationHistory(50);
       },
     }),
   });

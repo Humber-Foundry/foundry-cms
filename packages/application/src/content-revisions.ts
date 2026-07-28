@@ -362,6 +362,8 @@ export function createInMemoryContentRevisionStore({
 
 export function createContentRevisionApplication({
   siteDefinition,
+  initialDefinition = siteDefinition,
+  initialCreatedBy = publishedBaseContentActorId,
   store,
   workspaceId,
   actorId,
@@ -370,6 +372,8 @@ export function createContentRevisionApplication({
   now = () => new Date().toISOString(),
 }: {
   siteDefinition: SiteDefinition;
+  initialDefinition?: SiteDefinition;
+  initialCreatedBy?: ContentActorId;
   store: ContentRevisionStore;
   workspaceId: ContentWorkspaceId;
   actorId: ContentActorId;
@@ -390,12 +394,13 @@ export function createContentRevisionApplication({
   };
   const initialize = () => {
     initialization ??= (async () => {
-      const publishedContentHash = await sha256CanonicalJson(siteDefinition);
+      const publishedContentHash =
+        await sha256CanonicalJson(initialDefinition);
       const resolvedProductionBase = await resolveProductionBase();
       const initial = immutableRevision({
         workspaceId,
         revision: 0,
-        definition: siteDefinition,
+        definition: initialDefinition,
         inputs: {
           contentHash: publishedContentHash,
           schemaVersion: siteDefinition.schemaVersion,
@@ -403,7 +408,7 @@ export function createContentRevisionApplication({
           productionBase: resolvedProductionBase,
         },
         createdAt: now(),
-        createdBy: publishedBaseContentActorId,
+        createdBy: initialCreatedBy,
       });
       await store.initialize(initial, actorId);
       await store.requireAccess(actorId);

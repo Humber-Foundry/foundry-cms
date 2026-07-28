@@ -21,7 +21,9 @@ import {
   contentPublicationCanRetry,
   contentPublicationPollDelay,
   loadContentPublication,
+  loadContentPublicationHistory,
   refreshContentPublication,
+  restoreContentPublication,
   sendContentPublicationAttempt,
 } from "../src/content-publication-client";
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
@@ -61,9 +63,28 @@ type PublicationStatus =
   | "unknown";
 type PublicationRecord = Readonly<{
   id: string;
+  workspaceId?: string;
+  revision?: number;
   status: PublicationStatus;
   detail: string | null;
   commitSha: string | null;
+  requestedAt?: string;
+}>;
+type PublicationHistoryEntry = Readonly<{
+  publication: PublicationRecord;
+  approval: Readonly<{
+    fingerprint: Readonly<{
+      contentHash: string;
+      artifactHash: string;
+    }>;
+  }>;
+  events: ReadonlyArray<
+    Readonly<{
+      status: PublicationStatus;
+      detail: string | null;
+      occurredAt: string;
+    }>
+  >;
 }>;
 
 const publicationLabels: Readonly<Record<PublicationStatus, string>> = {
@@ -145,6 +166,12 @@ export function ContentEditor({
   const [publicationBusy, setPublicationBusy] = useState(false);
   const [publicationPollAttempt, setPublicationPollAttempt] = useState(0);
   const [openingPreview, setOpeningPreview] = useState(false);
+  const [publicationHistory, setPublicationHistory] = useState<
+    ReadonlyArray<PublicationHistoryEntry>
+  >([]);
+  const [restoringPublicationId, setRestoringPublicationId] =
+    useState<string | null>(null);
+  const restoreAttempts = useRef(new Map<string, string>());
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -436,6 +463,30 @@ export function ContentEditor({
   }, [initialRevision.workspaceId]);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadContentPublicationHistory()
+      .then((result) => {
+        if (
+          !cancelled &&
+          typeof result === "object" &&
+          result !== null &&
+          "history" in result &&
+          Array.isArray(result.history)
+        ) {
+          setPublicationHistory(
+            result.history as ReadonlyArray<PublicationHistoryEntry>,
+          );
+        }
+      })
+      .catch(() => {
+        // Publication history is supplementary to safe draft editing.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [publication?.id, publication?.status]);
+
+  useEffect(() => {
     pendingDeploymentRetryAttempt.current = null;
   }, [publication?.id]);
 
@@ -490,6 +541,44 @@ export function ContentEditor({
     publication,
     publicationPollAttempt,
   ]);
+
+  async function restorePublishedVersion(publicationId: string) {
+    setRestoringPublicationId(publicationId);
+    try {
+      let idempotencyKey = restoreAttempts.current.get(publicationId);
+      if (idempotencyKey === undefined) {
+        idempotencyKey = crypto.randomUUID();
+        restoreAttempts.current.set(publicationId, idempotencyKey);
+      }
+      const result = await restoreContentPublication({
+        publicationId,
+        mutationToken,
+        idempotencyKey,
+      });
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("draft" in result.body) ||
+        typeof result.body.draft !== "object" ||
+        result.body.draft === null ||
+        !("workspaceId" in result.body.draft) ||
+        typeof result.body.draft.workspaceId !== "string"
+      ) {
+        throw new Error("content_publication_restore_failed");
+      }
+      const query = new URLSearchParams({
+        workspace: result.body.draft.workspaceId,
+      });
+      window.location.assign(`/dash?${query.toString()}`);
+    } catch {
+      setMessage(
+        "That published version could not be restored safely. No live content was changed.",
+      );
+      setRestoringPublicationId(null);
+    }
+  }
 
   useEffect(() => {
     if (
@@ -1328,6 +1417,75 @@ export function ContentEditor({
           ) : null}
         </div>
       ) : null}
+      <section
+        className="publication-history"
+        aria-labelledby="publication-history-heading"
+      >
+        <div>
+          <h3 id="publication-history-heading">Published history</h3>
+          <p>
+            Durable approval, commit, build, and live-verification evidence.
+            Restoring creates a new unpublished draft.
+          </p>
+        </div>
+        {publicationHistory.length === 0 ? (
+          <p>No publication attempts are recorded yet.</p>
+        ) : (
+          <ol>
+            {publicationHistory.map((entry) => (
+              <li key={entry.publication.id}>
+                <div>
+                  <strong>
+                    {publicationLabels[entry.publication.status]}
+                  </strong>
+                  <span>
+                    Revision {entry.publication.revision ?? "—"} ·{" "}
+                    {entry.publication.requestedAt ?? "Time unavailable"}
+                  </span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>Commit</dt>
+                    <dd>
+                      <code>
+                        {entry.publication.commitSha ?? "Not created"}
+                      </code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Content</dt>
+                    <dd>
+                      <code>{entry.approval.fingerprint.contentHash}</code>
+                    </dd>
+                  </div>
+                </dl>
+                <ol aria-label="Release evidence">
+                  {entry.events.map((event, index) => (
+                    <li key={`${event.occurredAt}:${event.status}:${index}`}>
+                      {publicationLabels[event.status]} · {event.occurredAt}
+                      {event.detail === null ? "" : ` · ${event.detail}`}
+                    </li>
+                  ))}
+                </ol>
+                {entry.publication.status === "verified-live" ? (
+                  <button
+                    type="button"
+                    className="copy-button"
+                    disabled={restoringPublicationId !== null}
+                    onClick={() =>
+                      void restorePublishedVersion(entry.publication.id)
+                    }
+                  >
+                    {restoringPublicationId === entry.publication.id
+                      ? "Restoring…"
+                      : "Restore as new draft"}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
       <p role="status" aria-live="polite" className="editor-message">
         {message}
       </p>

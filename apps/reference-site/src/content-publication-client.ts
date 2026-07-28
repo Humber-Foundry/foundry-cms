@@ -103,6 +103,45 @@ export async function loadContentPublication({
   return (await response.json()) as unknown;
 }
 
+export async function loadContentPublicationHistory({
+  fetcher = fetch,
+}: {
+  fetcher?: Fetcher;
+} = {}) {
+  const response = await fetcher(
+    "/api/foundry-cms/publications?view=history",
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error("content_publication_history_failed");
+  }
+  return (await response.json()) as unknown;
+}
+
+export function restoreContentPublication({
+  publicationId,
+  mutationToken,
+  idempotencyKey,
+  fetcher = fetch,
+}: {
+  publicationId: string;
+  mutationToken: string;
+  idempotencyKey: string;
+  fetcher?: Fetcher;
+}) {
+  return sendContentPublicationAttempt({
+    attempt: {
+      body: JSON.stringify({
+        operation: "restore",
+        sourcePublicationId: publicationId,
+      }),
+      idempotencyKey,
+    },
+    mutationToken,
+    fetcher,
+  });
+}
+
 export function refreshContentPublication({
   workspaceId,
   publicationId,

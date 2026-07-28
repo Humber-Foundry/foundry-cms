@@ -2,6 +2,9 @@
 
 Issue #38 implements the publication transaction accepted in
 [ADR-0004](../decisions/ADR-0004-draft-preview-publish-pipeline.md).
+Published history, uncertainty recovery, and restore-as-new-draft behavior are
+documented in
+[Publication reconciliation and restore](publication-reconciliation-and-restore.md).
 
 ## Authority boundary
 

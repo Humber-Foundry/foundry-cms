@@ -375,6 +375,75 @@
   opacity: 0.5;
 }
 
+.publication-history {
+  display: grid;
+  gap: 0.8rem;
+  padding-block: 1rem;
+  border-bottom: 1px solid #e6e9e6;
+}
+
+.publication-history h3,
+.publication-history p,
+.publication-history dl,
+.publication-history dd {
+  margin: 0;
+}
+
+.publication-history > div,
+.publication-history > ol > li,
+.publication-history > ol > li > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.publication-history > div p,
+.publication-history > p,
+.publication-history > ol > li > div span {
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.publication-history > ol {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.publication-history > ol > li {
+  padding: 0.8rem;
+  border: 1px solid #dfe4df;
+  border-radius: 0.4rem;
+}
+
+.publication-history dl {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+}
+
+.publication-history dl > div {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.publication-history code {
+  overflow-wrap: anywhere;
+}
+
+.publication-history li > ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.publication-history button {
+  justify-self: start;
+}
+
 .editor-message {
   min-height: 1.5rem;
   margin: 0.75rem 0;

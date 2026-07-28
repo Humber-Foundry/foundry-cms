@@ -3,6 +3,7 @@ import { SignJWT, importPKCS8 } from "jose";
 import type {
   ContentPublisher,
   ContentPublicationId,
+  ContentPublishedRevisionReader,
   PublicationCommitResult,
 } from "@foundry/application";
 import { isValidGitBranchName } from "@foundry/application";
@@ -306,7 +307,8 @@ function decodeGitHubBlob(value: unknown): Uint8Array | null {
     !("encoding" in value) ||
     value.encoding !== "base64" ||
     !("content" in value) ||
-    typeof value.content !== "string"
+    typeof value.content !== "string" ||
+    value.content.length > 2_000_000
   ) {
     return null;
   }
@@ -404,7 +406,7 @@ export function createGitHubContentPublisher({
   configuration: GitHubContentPublisherConfiguration;
   fetch?: GitHubFetch;
   now?: () => Date;
-}): ContentPublisher {
+}): ContentPublisher & ContentPublishedRevisionReader {
   const repositoryPath =
     `/repos/${encodeURIComponent(configuration.owner)}` +
     `/${encodeURIComponent(configuration.repository)}`;
@@ -737,6 +739,36 @@ export function createGitHubContentPublisher({
     },
     getProductionHead() {
       return productionHead();
+    },
+    async readPublishedArtifact(input: {
+      commitSha: string;
+      path: string;
+    }) {
+      let body: unknown;
+      try {
+        const token = await installationToken();
+        body = await request(
+          token,
+          `/contents/${input.path
+            .split("/")
+            .map(encodeURIComponent)
+            .join("/")}?ref=${encodeURIComponent(input.commitSha)}`,
+        );
+      } catch (error) {
+        if (isDefiniteHttpRejection(error)) {
+          return null;
+        }
+        throw error;
+      }
+      const bytes = decodeGitHubBlob(body);
+      if (bytes === null) {
+        return null;
+      }
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        return null;
+      }
     },
     async isReleaseLive(expected) {
       return (

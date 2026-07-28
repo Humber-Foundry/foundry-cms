@@ -4,6 +4,8 @@ import type {
   ContentApprovalId,
   ContentPublication,
   ContentPublicationClaim,
+  ContentPublicationEvent,
+  ContentPublicationHistoryEntry,
   ContentPublicationId,
   ContentPublicationStatus,
   ContentPublicationStore,
@@ -64,6 +66,12 @@ type PublicationRow = {
   requested_at: string;
   updated_at: string;
   mutation_token: string;
+};
+
+type PublicationEventRow = {
+  status: ContentPublicationStatus;
+  detail: string | null;
+  occurred_at: string;
 };
 
 const approvalProjection = `
@@ -682,6 +690,45 @@ export function createD1ContentPublicationStore(
         .bind(workspaceId)
         .first<PublicationRow>();
       return row === null ? null : toPublication(row);
+    },
+    async listPublicationHistory(limit = 50) {
+      const boundedLimit = Math.min(Math.max(limit, 1), 100);
+      const rows = await database
+        .prepare(
+          `${publicationProjection}
+           ORDER BY requested_at DESC, id DESC
+           LIMIT ?1`,
+        )
+        .bind(boundedLimit)
+        .all<PublicationRow>();
+      const history: ContentPublicationHistoryEntry[] = [];
+      for (const row of rows.results) {
+        const publication = toPublication(row);
+        const [approval, eventRows] = await Promise.all([
+          findApproval(publication.approvalId),
+          database
+            .prepare(
+              `SELECT status, detail, occurred_at
+               FROM content_publication_audit_events
+               WHERE publication_id = ?1
+               ORDER BY id`,
+            )
+            .bind(publication.id)
+            .all<PublicationEventRow>(),
+        ]);
+        if (approval === null) {
+          continue;
+        }
+        const events: ContentPublicationEvent[] = eventRows.results.map(
+          (event) => ({
+            status: event.status,
+            detail: event.detail,
+            occurredAt: event.occurred_at,
+          }),
+        );
+        history.push({ publication, approval, events });
+      }
+      return history;
     },
   };
 }

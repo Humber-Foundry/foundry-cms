@@ -19,6 +19,8 @@ import {
   parseProductionBase,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
+  type ContentPublicationDraftRestorer,
+  type ContentPublishedRevisionReader,
   type ContentPublisher,
 } from "./content-publication";
 
@@ -514,6 +516,176 @@ describe("content publication application", () => {
     });
     expect(replay).toEqual(publication);
     expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes release history with immutable approval and state evidence", async () => {
+    getDeploymentStatus
+      .mockResolvedValueOnce("deployed")
+      .mockResolvedValueOnce("deployed");
+    isReleaseLive
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const app = application();
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-history-evidence-1",
+    });
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+
+    await expect(app.queries.listHistory()).resolves.toEqual([
+      expect.objectContaining({
+        publication: expect.objectContaining({
+          id: publication.id,
+          status: "verified-live",
+          commitSha: "c".repeat(40),
+        }),
+        approval: expect.objectContaining({
+          id: approval.id,
+          fingerprint: expect.objectContaining({
+            contentHash: revisionApplication.saved.inputs.contentHash,
+            artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          }),
+        }),
+        events: [
+          expect.objectContaining({ status: "requested" }),
+          expect.objectContaining({ status: "committed" }),
+          expect.objectContaining({ status: "deployed" }),
+          expect.objectContaining({ status: "verified-live" }),
+        ],
+      }),
+    ]);
+  });
+
+  it("restores a verified historical Git artifact into one new draft without publishing it", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const historicalBytes = serializePublishedSiteDefinition(
+      revisionApplication.saved.definition,
+    );
+    const reader: ContentPublishedRevisionReader = {
+      readPublishedArtifact: vi.fn().mockResolvedValue(historicalBytes),
+    };
+    const restoredWorkspaceId =
+      createContentWorkspaceId("workspace_restored");
+    const restorer: ContentPublicationDraftRestorer = {
+      restore: vi.fn().mockResolvedValue({
+        workspaceId: restoredWorkspaceId,
+        revision: 0,
+        sourcePublicationId: createContentPublicationId(
+          `publish_${"0".repeat(32)}`,
+        ),
+      }),
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      publishedRevisions: reader,
+      draftRestorer: restorer,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-restore-1",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+    vi.mocked(restorer.restore).mockResolvedValue({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+
+    const restored = await app.commands.restore({
+      sourcePublicationId: publication.id,
+      restoredBy: membershipId,
+      actorId: editorId,
+      workspaceId: restoredWorkspaceId,
+      idempotencyKey: "restore-published-version-1",
+    });
+
+    expect(reader.readPublishedArtifact).toHaveBeenCalledWith({
+      commitSha: "c".repeat(40),
+      path: "packages/site-definition/src/published-site.json",
+    });
+    expect(restorer.restore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        definition: revisionApplication.saved.definition,
+        sourcePublicationId: publication.id,
+        workspaceId: restoredWorkspaceId,
+      }),
+    );
+    expect(restored).toEqual({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+    expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when historical Git bytes do not match the published evidence", async () => {
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      publishedRevisions: {
+        readPublishedArtifact: vi.fn().mockResolvedValue(
+          serializePublishedSiteDefinition(referenceSiteDefinition),
+        ),
+      },
+      draftRestorer: {
+        restore: vi.fn(),
+      },
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-invalid-restore",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+
+    await expect(
+      app.commands.restore({
+        sourcePublicationId: publication.id,
+        restoredBy: membershipId,
+        actorId: editorId,
+        workspaceId: createContentWorkspaceId("workspace_invalid_restore"),
+        idempotencyKey: "restore-invalid-artifact-1",
+      }),
+    ).rejects.toEqual(
+      new ContentPublicationValidationError(
+        "restore_artifact_mismatch",
+      ),
+    );
   });
 
   it("rejects a publication idempotency key reused by another requester", async () => {

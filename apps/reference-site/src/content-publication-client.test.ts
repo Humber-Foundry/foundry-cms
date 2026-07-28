@@ -4,7 +4,9 @@ import {
   contentPublicationCanRetry,
   contentPublicationPollDelay,
   loadContentPublication,
+  loadContentPublicationHistory,
   refreshContentPublication,
+  restoreContentPublication,
   sendContentPublicationAttempt,
 } from "./content-publication-client";
 
@@ -126,6 +128,61 @@ describe("content publication client", () => {
     expect(fetcher).toHaveBeenCalledWith(
       "/api/foundry-cms/publications?workspaceId=workspace_publish",
       { cache: "no-store" },
+    );
+  });
+
+  it("loads published history without a workspace-scoped query", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        json({ history: [{ publication: { status: "verified-live" } }] }),
+      );
+
+    await loadContentPublicationHistory({ fetcher });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/foundry-cms/publications?view=history",
+      { cache: "no-store" },
+    );
+  });
+
+  it("restores a published version through the protected mutation path", async () => {
+    const publicationId = `publish_${"2".repeat(32)}`;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        json(
+          {
+            draft: {
+              workspaceId: "workspace_restored",
+              revision: 0,
+              sourcePublicationId: publicationId,
+            },
+          },
+          201,
+        ),
+      );
+
+    await restoreContentPublication({
+      publicationId,
+      mutationToken: "mutation-token",
+      idempotencyKey: "restore-client-history-1",
+      fetcher,
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/foundry-cms/publications",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "idempotency-key": "restore-client-history-1",
+          "x-foundry-csrf": "mutation-token",
+        }),
+        body: JSON.stringify({
+          operation: "restore",
+          sourcePublicationId: publicationId,
+        }),
+      }),
     );
   });
 
