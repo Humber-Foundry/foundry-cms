@@ -712,6 +712,40 @@ describe("content publication application", () => {
     );
   });
 
+  it("invalidates approval when the live base changes at the final Git boundary", async () => {
+    createCommit.mockImplementation(async (input) => {
+      isReleaseLive.mockResolvedValue(false);
+      return (await input.assertLease())
+        ? { state: "committed", commitSha: "c".repeat(40) }
+        : { state: "blocked", detail: "publication_lease_lost" };
+    });
+    const { app, approval } = await approve();
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-live-base-changed-during-git",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        detail: "publication_lease_lost",
+      }),
+    );
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-live-base-changed-replay",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+  });
+
   it("replays the recorded operation even after its own commit advanced production", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
@@ -1073,6 +1107,66 @@ describe("content publication application", () => {
         commitSha: candidateCommitSha,
         detail: "deployment_retry_requested",
       }),
+    );
+  });
+
+  it("invalidates a retained candidate before ref retry when its live base changes", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const candidateCommitSha = "c".repeat(40);
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${candidateCommitSha}`,
+    });
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retained-live-base-race",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue(productionCommit);
+    let referenceAdvanced = false;
+    vi.mocked(publisher.retryReference).mockImplementation(
+      async ({ assertLease }) => {
+        isReleaseLive.mockResolvedValue(false);
+        if (await assertLease()) {
+          referenceAdvanced = true;
+          return { state: "committed", commitSha: candidateCommitSha };
+        }
+        return { state: "blocked", detail: "publication_lease_lost" };
+      },
+    );
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: null,
+        detail: `git_reference_not_advanced:${candidateCommitSha}`,
+      }),
+    );
+    expect(referenceAdvanced).toBe(false);
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
     );
   });
 

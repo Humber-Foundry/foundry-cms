@@ -247,11 +247,27 @@ function buildEnvironmentProjection(value: unknown) {
     Object.entries(value)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => {
-        if (typeof entry !== "object" || entry === null) {
+        if (
+          key.trim() === "" ||
+          typeof entry !== "object" ||
+          entry === null
+        ) {
           throw new Error("cloudflare_build_environment_invalid");
         }
         const variable = entry as Record<string, unknown>;
-        const isSecret = variable.is_secret === true;
+        if (typeof variable.is_secret !== "boolean") {
+          throw new Error("cloudflare_build_environment_invalid");
+        }
+        const isSecret = variable.is_secret;
+        if (
+          (isSecret &&
+            (typeof variable.created_on !== "string" ||
+              variable.created_on.trim() === "" ||
+              !Number.isFinite(Date.parse(variable.created_on)))) ||
+          (!isSecret && typeof variable.value !== "string")
+        ) {
+          throw new Error("cloudflare_build_environment_invalid");
+        }
         return [
           key,
           {
@@ -567,6 +583,7 @@ export function createGitHubContentPublisher({
     const response = await fetchImplementation(markerUrl, {
       headers: { "cache-control": "no-cache" },
       cache: "no-store",
+      redirect: "manual",
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
@@ -591,25 +608,65 @@ export function createGitHubContentPublisher({
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
           configuration.cloudflareAccountId,
         )}/builds`;
-      const requestOptions = {
+      const requestOptions = () => ({
         signal: AbortSignal.timeout(30_000),
         headers: {
           authorization: `Bearer ${configuration.cloudflareApiToken}`,
         },
+      });
+      const readEnvironment = async () => {
+        const combined: Record<string, unknown> = {};
+        let expectedTotalPages: number | undefined;
+        for (let page = 1; ; page += 1) {
+          const url = new URL(
+            `${root}/triggers/${encodeURIComponent(
+              configuration.cloudflareBuildTriggerId,
+            )}/environment_variables`,
+          );
+          url.searchParams.set("page", String(page));
+          url.searchParams.set("per_page", "100");
+          const body = await fetchImplementation(
+            url,
+            requestOptions(),
+          ).then(readJson);
+          const result = body.result;
+          const info = body.result_info;
+          if (
+            typeof result !== "object" ||
+            result === null ||
+            Array.isArray(result) ||
+            typeof info !== "object" ||
+            info === null ||
+            !Number.isSafeInteger(info.page) ||
+            info.page !== page ||
+            !Number.isSafeInteger(info.total_pages) ||
+            info.total_pages < page ||
+            info.total_pages > 1_000 ||
+            (expectedTotalPages !== undefined &&
+              info.total_pages !== expectedTotalPages)
+          ) {
+            throw new Error("cloudflare_build_environment_invalid");
+          }
+          expectedTotalPages = info.total_pages;
+          for (const [key, value] of Object.entries(result)) {
+            if (Object.hasOwn(combined, key)) {
+              throw new Error("cloudflare_build_environment_invalid");
+            }
+            combined[key] = value;
+          }
+          if (page === expectedTotalPages) {
+            return combined;
+          }
+        }
       };
-      const [triggersBody, environmentBody] = await Promise.all([
+      const [triggersBody, environment] = await Promise.all([
         fetchImplementation(
           `${root}/workers/${encodeURIComponent(
             configuration.cloudflareScriptTag,
           )}/triggers`,
-          requestOptions,
+          requestOptions(),
         ).then(readJson),
-        fetchImplementation(
-          `${root}/triggers/${encodeURIComponent(
-            configuration.cloudflareBuildTriggerId,
-          )}/environment_variables`,
-          requestOptions,
-        ).then(readJson),
+        readEnvironment(),
       ]);
       const trigger = Array.isArray(triggersBody.result)
         ? triggersBody.result.find(
@@ -673,7 +730,7 @@ export function createGitHubContentPublisher({
             pathIncludes: sortedStrings(trigger.path_includes),
             pathExcludes: sortedStrings(trigger.path_excludes),
             buildCachingEnabled: trigger.build_caching_enabled,
-            environment: buildEnvironmentProjection(environmentBody.result),
+            environment: buildEnvironmentProjection(environment),
           },
         }),
       );

@@ -9,7 +9,10 @@ import {
   assertExactProductionContent,
   assertExactProductionRelease,
 } from "./assert-exact-production-content.mjs";
-import { assertProductionDeploymentAbsent } from "./deploy-exact-production.mjs";
+import {
+  assertProductionDeploymentAbsent,
+  cloudflareProductionEnvironment,
+} from "./deploy-exact-production.mjs";
 import {
   assertExactProductionHead,
   assertExactProductionSource,
@@ -305,10 +308,9 @@ export async function provisionProductionBaseline({
       {
         stdio: "inherit",
         shell: false,
-        env: {
-          ...provisionEnvironment,
+        env: cloudflareProductionEnvironment(provisionEnvironment, {
           CLOUDFLARE_ACCOUNT_ID: accountId,
-        },
+        }),
       },
     );
   await waitForProcess(provision);

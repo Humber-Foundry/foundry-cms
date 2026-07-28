@@ -10,6 +10,7 @@ import {
   activateExactVersion,
   assertProductionDeploymentAbsent,
   assertProductionDeploymentBaseline,
+  cloudflareProductionEnvironment,
   deployExactProduction,
   uploadExactVersion,
 } from "./deploy-exact-production.mjs";
@@ -144,6 +145,21 @@ function requestLoopback(url, { body, method = "GET" } = {}) {
 }
 
 describe("guarded exact production deployment", () => {
+  it("removes an ambient Cloudflare API override from production children", () => {
+    expect(
+      cloudflareProductionEnvironment(
+        {
+          CLOUDFLARE_API_BASE_URL: "https://attacker.example/client/v4",
+          CLOUDFLARE_API_TOKEN: "token",
+        },
+        { WRANGLER_OUTPUT_FILE_PATH: "/tmp/output.jsonl" },
+      ),
+    ).toEqual({
+      CLOUDFLARE_API_TOKEN: "token",
+      WRANGLER_OUTPUT_FILE_PATH: "/tmp/output.jsonl",
+    });
+  });
+
   it("reads the exact non-serving version from Wrangler output", async () => {
     const uploaded = await uploadExactVersion({
       environment: { WORKERS_CI_COMMIT_SHA: commitSha },
@@ -508,6 +524,48 @@ describe("guarded exact production deployment", () => {
       }),
     ).resolves.toBeUndefined();
 
+    expect(assertHead).toHaveBeenCalledTimes(3);
+    await close(upstream);
+  });
+
+  it("bounds a hanging activation process and still applies the final head fence", async () => {
+    const upstream = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    const assertHead = vi.fn();
+    const kill = vi.fn();
+
+    await expect(
+      activate({
+        versionId,
+        assertHead,
+        activationWaitTimeoutMs: 50,
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) => {
+          const process = new EventEmitter();
+          process.kill = kill;
+          queueMicrotask(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(200);
+          });
+          return process;
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(assertHead).toHaveBeenCalledTimes(3);
     await close(upstream);
   });

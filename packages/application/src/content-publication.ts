@@ -302,6 +302,7 @@ export class ContentPublicationValidationError extends Error {
     | "publication_no_changes"
     | "deployment_retry_not_available"
     | "deployment_retry_head_moved"
+    | "deployment_retry_release_marker_mismatch"
     | "deployment_retry_in_progress";
 
   constructor(code: ContentPublicationValidationError["code"]) {
@@ -750,6 +751,27 @@ export function createContentPublicationApplication({
     return { approval, revision };
   }
 
+  async function approvedBaseIsLive(approval: ContentApproval) {
+    const base = parseProductionBase(
+      approval.fingerprint.productionBase,
+    );
+    return publisher.isReleaseLive({
+      commitSha: base.commitSha,
+      contentHash: base.contentHash,
+      schemaVersion: approval.fingerprint.schemaVersion,
+    });
+  }
+
+  async function invalidateForProductionChange(
+    approval: ContentApproval,
+  ) {
+    await store.invalidateApproval({
+      approvalId: approval.id,
+      invalidatedAt: now(),
+      reason: "production_changed",
+    });
+  }
+
   function commitReconciliationInput(
     publication: ContentPublication,
     approval: ContentApproval,
@@ -1148,37 +1170,23 @@ export function createContentPublicationApplication({
         if (activePublication !== null) {
           await refreshPublication(activePublication.id);
         }
-        const base = parseProductionBase(
-          approval.fingerprint.productionBase,
-        );
+        const base = parseProductionBase(approval.fingerprint.productionBase);
         const [headResult, baseIsLiveResult] = await Promise.allSettled([
           publisher.getProductionHead(),
-          publisher.isReleaseLive({
-            commitSha: base.commitSha,
-            contentHash: base.contentHash,
-            schemaVersion: approval.fingerprint.schemaVersion,
-          }),
+          approvedBaseIsLive(approval),
         ]);
         if (
           headResult.status === "fulfilled" &&
           headResult.value !== base.commitSha
         ) {
-          await store.invalidateApproval({
-            approvalId: approval.id,
-            invalidatedAt: now(),
-            reason: "production_changed",
-          });
+          await invalidateForProductionChange(approval);
           throw new ContentApprovalInvalidError("production_head_moved");
         }
         if (
           baseIsLiveResult.status === "fulfilled" &&
           !baseIsLiveResult.value
         ) {
-          await store.invalidateApproval({
-            approvalId: approval.id,
-            invalidatedAt: now(),
-            reason: "production_changed",
-          });
+          await invalidateForProductionChange(approval);
           throw new ContentApprovalInvalidError("release_marker_mismatch");
         }
         if (headResult.status === "rejected") {
@@ -1240,13 +1248,21 @@ export function createContentPublicationApplication({
           return blockForLostLease();
         }
         const renewLease = async () => {
+          let currentApproval: ContentApproval;
           try {
-            await requireApproval(input.approvalId, input.requestedBy);
+            ({ approval: currentApproval } = await requireApproval(
+              input.approvalId,
+              input.requestedBy,
+            ));
           } catch (error) {
             if (error instanceof ContentApprovalInvalidError) {
               return false;
             }
             throw error;
+          }
+          if (!(await approvedBaseIsLive(currentApproval))) {
+            await invalidateForProductionChange(currentApproval);
+            return false;
           }
           const leaseNow = now();
           return store.renewPublicationLease({
@@ -1320,11 +1336,7 @@ export function createContentPublicationApplication({
           result.state === "blocked" &&
           result.detail === "production_head_moved"
         ) {
-          await store.invalidateApproval({
-            approvalId: approval.id,
-            invalidatedAt: updatedAt,
-            reason: "production_changed",
-          });
+          await invalidateForProductionChange(approval);
         }
         return store.updatePublication(
           nextPublication(publication, {
@@ -1414,16 +1426,19 @@ export function createContentPublicationApplication({
           publication.commitSha === null &&
           candidateCommitSha !== undefined
         ) {
+          const [currentHead, baseIsLive] = await Promise.all([
+            publisher.getProductionHead(),
+            approvedBaseIsLive(approval),
+          ]);
           if (
-            (await publisher.getProductionHead()) !== publication.expectedHead
+            currentHead !== publication.expectedHead ||
+            !baseIsLive
           ) {
-            await store.invalidateApproval({
-              approvalId: approval.id,
-              invalidatedAt: now(),
-              reason: "production_changed",
-            });
+            await invalidateForProductionChange(approval);
             throw new ContentPublicationValidationError(
-              "deployment_retry_head_moved",
+              currentHead !== publication.expectedHead
+                ? "deployment_retry_head_moved"
+                : "deployment_retry_release_marker_mismatch",
             );
           }
           if ((await store.findActivePublication()) !== null) {
@@ -1467,9 +1482,17 @@ export function createContentPublicationApplication({
             return dispatching;
           }
           const assertLease = async () => {
+            let currentApproval: ContentApproval;
             try {
-              await requireApproval(publication.approvalId, requestedBy);
+              ({ approval: currentApproval } = await requireApproval(
+                publication.approvalId,
+                requestedBy,
+              ));
             } catch {
+              return false;
+            }
+            if (!(await approvedBaseIsLive(currentApproval))) {
+              await invalidateForProductionChange(currentApproval);
               return false;
             }
             const leaseNow = now();
@@ -1500,11 +1523,7 @@ export function createContentPublicationApplication({
             result.state === "blocked" &&
             result.detail === "production_head_moved"
           ) {
-            await store.invalidateApproval({
-              approvalId: approval.id,
-              invalidatedAt: updatedAt,
-              reason: "production_changed",
-            });
+            await invalidateForProductionChange(approval);
           }
           return store.updatePublication(
             nextPublication(dispatching, {

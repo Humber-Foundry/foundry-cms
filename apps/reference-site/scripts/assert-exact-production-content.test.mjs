@@ -81,6 +81,32 @@ describe("exact production content authorization", () => {
     ).rejects.toThrow("exact_release_commit_not_live");
   });
 
+  it("rejects a redirected release marker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://other.example/marker.json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(
+        assertExactProductionRelease({
+          environment: {
+            WORKERS_CI_COMMIT_SHA: expectedCommit,
+            FOUNDRY_PUBLIC_ORIGIN: "https://site.example",
+          },
+        }),
+      ).rejects.toThrow("exact_live_marker_unavailable");
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.any(URL),
+        expect.objectContaining({ redirect: "manual" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("allows a build with no unserved content delta", async () => {
     const options = inputs({
       readLiveMarker: vi.fn().mockResolvedValue({

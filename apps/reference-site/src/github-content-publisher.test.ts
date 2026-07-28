@@ -434,12 +434,13 @@ describe("GitHub content publisher", () => {
           created_on: "2026-07-27T00:00:00Z",
         },
       },
+      result_info: { page: 1, total_pages: 1 },
     };
     const configurationFetch = vi
       .fn<typeof fetch>()
       .mockImplementation(async (input) =>
         json(
-          String(input).endsWith("/environment_variables")
+          String(input).includes("/environment_variables?")
             ? environmentConfiguration
             : buildConfiguration,
         ),
@@ -478,7 +479,7 @@ describe("GitHub content publisher", () => {
         .fn<typeof fetch>()
         .mockImplementation(async (input) =>
           json(
-            String(input).endsWith("/environment_variables")
+            String(input).includes("/environment_variables?")
               ? environmentConfiguration
               : {
                   ...buildConfiguration,
@@ -499,7 +500,7 @@ describe("GitHub content publisher", () => {
           .fn<typeof fetch>()
           .mockImplementation(async (input) =>
             json(
-              String(input).endsWith("/environment_variables")
+              String(input).includes("/environment_variables?")
                 ? environmentConfiguration
                 : { ...buildConfiguration, result: [trigger] },
             ),
@@ -566,6 +567,105 @@ describe("GitHub content publisher", () => {
         path_excludes: ["packages/*/published-site.json"],
       }).getChannelConfigurationHash(),
     ).rejects.toThrow("cloudflare_build_configuration_invalid");
+
+    const pagedEnvironmentFetch = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (input) => {
+        const url = new URL(String(input));
+        if (!url.pathname.endsWith("/environment_variables")) {
+          return json(buildConfiguration);
+        }
+        return url.searchParams.get("page") === "1"
+          ? json({
+              success: true,
+              result: {
+                NODE_ENV: {
+                  is_secret: false,
+                  value: "production",
+                  created_on: "2026-07-27T00:00:00Z",
+                },
+              },
+              result_info: { page: 1, total_pages: 2 },
+            })
+          : json({
+              success: true,
+              result: {
+                DEPLOY_TOKEN: {
+                  is_secret: true,
+                  value: null,
+                  created_on: "2026-07-28T00:00:00Z",
+                },
+              },
+              result_info: { page: 2, total_pages: 2 },
+            });
+      });
+    const pagedPublisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: pagedEnvironmentFetch,
+    });
+    await expect(
+      pagedPublisher.getChannelConfigurationHash(),
+    ).resolves.not.toBe(await publisher.getChannelConfigurationHash());
+    expect(
+      pagedEnvironmentFetch.mock.calls.filter(([input]) =>
+        String(input).includes("/environment_variables?"),
+      ),
+    ).toHaveLength(2);
+
+    const malformedEnvironmentPublisher = (
+      variable: Record<string, unknown>,
+    ) =>
+      createGitHubContentPublisher({
+        configuration: { ...configurationInputs, privateKey },
+        fetch: vi.fn<typeof fetch>().mockImplementation(async (input) =>
+          json(
+            String(input).includes("/environment_variables?")
+              ? {
+                  success: true,
+                  result: { INVALID: variable },
+                  result_info: { page: 1, total_pages: 1 },
+                }
+              : buildConfiguration,
+          ),
+        ),
+      });
+    for (const malformed of [
+      { value: "missing-secret-flag" },
+      { is_secret: "false", value: "wrong-flag-type" },
+      { is_secret: false, value: null },
+      { is_secret: true, value: null },
+      { is_secret: true, value: null, created_on: "not-a-date" },
+    ]) {
+      await expect(
+        malformedEnvironmentPublisher(
+          malformed,
+        ).getChannelConfigurationHash(),
+      ).rejects.toThrow("cloudflare_build_environment_invalid");
+    }
+
+    const rotatedEnvironment = {
+      ...environmentConfiguration,
+      result: {
+        ...environmentConfiguration.result,
+        DEPLOY_TOKEN: {
+          ...environmentConfiguration.result.DEPLOY_TOKEN,
+          created_on: "2026-07-28T00:00:00Z",
+        },
+      },
+    };
+    const secretRotatedPublisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi.fn<typeof fetch>().mockImplementation(async (input) =>
+        json(
+          String(input).includes("/environment_variables?")
+            ? rotatedEnvironment
+            : buildConfiguration,
+        ),
+      ),
+    });
+    await expect(
+      secretRotatedPublisher.getChannelConfigurationHash(),
+    ).resolves.not.toBe(await publisher.getChannelConfigurationHash());
   });
 
   it("retries a Cloudflare build for the exact committed revision", async () => {
@@ -1175,10 +1275,39 @@ describe("GitHub content publisher", () => {
         expect.objectContaining({
           cache: "no-store",
           headers: { "cache-control": "no-cache" },
+          redirect: "manual",
           signal: expect.any(AbortSignal),
         }),
       );
     }
+  });
+
+  it("rejects a redirected runtime release marker", async () => {
+    const expected = {
+      commitSha: "c".repeat(40),
+      contentHash: "d".repeat(64),
+      schemaVersion: "1.0.0" as const,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://other.example/marker.json" },
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(publisher.isReleaseLive(expected)).rejects.toThrow(
+      "release_marker_unavailable",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({ redirect: "manual" }),
+    );
   });
 
   it("does not report live when either marker read differs", async () => {

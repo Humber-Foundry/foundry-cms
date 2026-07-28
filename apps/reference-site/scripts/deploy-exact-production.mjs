@@ -31,6 +31,7 @@ const deploymentHistoryPollMs = 250;
 const loopbackRequestArrivalMs = 250;
 const loopbackRequestBodyTimeoutMs = 5_000;
 const loopbackShutdownTimeoutMs = 5_000;
+const activationProcessWaitTimeoutMs = 60_000;
 const hopByHopHeaders = new Set([
   "connection",
   "content-length",
@@ -43,21 +44,52 @@ const hopByHopHeaders = new Set([
   "upgrade",
 ]);
 
-function waitForProcess(process, failurePrefix) {
+function waitForProcess(process, failurePrefix, timeoutMs) {
   return new Promise((resolve, reject) => {
-    process.once("error", reject);
+    let settled = false;
+    let timeout;
+    const finish = (operation) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      operation();
+    };
+    process.once("error", (error) => finish(() => reject(error)));
     process.once("exit", (code, signal) => {
       if (code !== 0) {
-        reject(
-          new Error(
-            `${failurePrefix}:${code ?? "signal"}:${signal ?? "none"}`,
+        finish(() =>
+          reject(
+            new Error(
+              `${failurePrefix}:${code ?? "signal"}:${signal ?? "none"}`,
+            ),
           ),
         );
         return;
       }
-      resolve();
+      finish(resolve);
     });
+    if (timeoutMs !== undefined) {
+      timeout = setTimeout(() => {
+        finish(() => {
+          process.kill?.("SIGTERM");
+          reject(new Error(`${failurePrefix}:timeout`));
+        });
+      }, timeoutMs);
+    }
   });
+}
+
+export function cloudflareProductionEnvironment(
+  environment,
+  overrides = {},
+) {
+  const {
+    CLOUDFLARE_API_BASE_URL: _ambientCloudflareApiBaseUrl,
+    ...cleanEnvironment
+  } = environment;
+  return { ...cleanEnvironment, ...overrides };
 }
 
 function readUploadedVersion(outputPath) {
@@ -110,10 +142,9 @@ export async function uploadExactVersion({
         {
           stdio: "inherit",
           shell: false,
-          env: {
-            ...environment,
+          env: cloudflareProductionEnvironment(environment, {
             WRANGLER_OUTPUT_FILE_PATH: outputPath,
-          },
+          }),
         },
       );
     await waitForProcess(upload, "exact_version_upload_failed");
@@ -734,6 +765,7 @@ export async function activateExactVersion({
   versionId,
   assertHead = assertExactProductionHead,
   environment = process.env,
+  activationWaitTimeoutMs = activationProcessWaitTimeoutMs,
   loopbackBodyTimeoutMs = loopbackRequestBodyTimeoutMs,
   loopbackDrainTimeoutMs = loopbackShutdownTimeoutMs,
   startActivation,
@@ -745,6 +777,8 @@ export async function activateExactVersion({
   if (
     !Number.isSafeInteger(loopbackBodyTimeoutMs) ||
     loopbackBodyTimeoutMs <= 0 ||
+    !Number.isSafeInteger(activationWaitTimeoutMs) ||
+    activationWaitTimeoutMs <= 0 ||
     !Number.isSafeInteger(loopbackDrainTimeoutMs) ||
     loopbackDrainTimeoutMs <= 0
   ) {
@@ -992,7 +1026,11 @@ export async function activateExactVersion({
       );
     let activationProcessError;
     try {
-      await waitForProcess(activation, "exact_version_activation_failed");
+      await waitForProcess(
+        activation,
+        "exact_version_activation_failed",
+        activationWaitTimeoutMs,
+      );
     } catch (error) {
       activationProcessError = error;
     }

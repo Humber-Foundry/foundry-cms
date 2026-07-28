@@ -66,8 +66,10 @@ while other workspaces remain editable. The five-minute lease covers the
 complete bounded GitHub request sequence. Its holder renews the matching token
 before Git work and again immediately before the bounded, non-force production
 ref update. Every renewal rechecks that the exact approval remains
-uninvalidated and its revision remains current. A stale holder cannot advance
-the ref or persist its result. An expired lease is reconciled by publish ID
+uninvalidated, its revision remains current, and its approved production-base
+marker is still live. Marker drift durably invalidates the approval before the
+ref can advance. A stale holder cannot advance the ref or persist its result.
+An expired lease is reconciled by publish ID
 before it can
 become failed; a recovered exact commit is durably recorded and releases the
 lease before deployment polling. The stable publication key and commit
@@ -104,7 +106,9 @@ state machine through ordinary status refresh.
 A successful configured Cloudflare check reports only `deployed`. Foundry
 reports `verified-live` only after two uncached reads of
 `/.well-known/foundry-release.json` both exactly match the expected commit,
-published-content hash, and schema version. If the deployment signal remains
+published-content hash, and schema version. Marker reads never follow redirects,
+so a different origin cannot satisfy production authorization or live
+verification. If the deployment signal remains
 requested, unknown, or building for 15 minutes—or a deployed release never
 serves the exact marker in that window—the operation becomes `failed` with its
 commit evidence preserved so it cannot hold the global publication slot
@@ -154,10 +158,12 @@ activation API calls through a loopback gate and rechecks the same fence on the
 actual Cloudflare `POST /deployments` request before forwarding it. It requires
 exactly one bounded activation payload naming only the uploaded version at 100
 percent, checks the fence after receiving that payload, and verifies the fence
-again after success. The gate forwards token-bearing production requests only
-to the fixed Cloudflare API origin; an ambient base-URL variable cannot redirect
-them. Request-body reads and shutdown draining have hard deadlines; after
-Wrangler exits, the controller closes request acceptance, aborts overdue
+again after success. The upload, baseline provision, and gate forward
+token-bearing production requests only to the fixed Cloudflare API origin; an
+ambient base-URL variable cannot redirect them. Request-body reads, the
+Wrangler activation process, and shutdown draining have hard deadlines; after
+Wrangler exits or exceeds its deadline, the controller closes request
+acceptance, aborts overdue
 upstream work, and drains every in-flight handler before classifying the
 result. Before promotion it records and freezes the currently serving
 deployment and traffic allocation. If an
@@ -230,9 +236,11 @@ bundles.
 Approval and every active refresh read the live Workers build trigger and its
 environment-variable metadata. The channel fingerprint covers repository
 identity, branch/path filters, build and deploy commands, root directory,
-caching, and sorted non-secret environment values. Secret values remain
-hidden; their Cloudflare creation timestamps act as rotation versions. A
-missing or unreadable trigger fails closed. The trigger must also identify the
+caching, and sorted non-secret environment values across every paginated
+environment-variable response. Secret values remain hidden; their validated
+Cloudflare creation timestamps act as rotation versions. Missing pages,
+duplicates, malformed secret metadata, or an unreadable trigger fail closed.
+The trigger must also identify the
 configured GitHub owner/repository and its documented exclude-first branch and
 path filters must permit both the production branch and
 `packages/site-definition/src/published-site.json`; otherwise Foundry refuses

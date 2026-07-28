@@ -93,6 +93,7 @@ async function fetchLiveMarker(environment) {
   const response = await fetch(url, {
     headers: { "cache-control": "no-cache" },
     cache: "no-store",
+    redirect: "manual",
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
