@@ -10,7 +10,7 @@
     "generate:validator": "node scripts/generate-validator.mjs"
   },
   "devDependencies": {
-    "ajv": "8.17.1",
+    "ajv": "8.20.0",
     "vite": "8.1.5"
   }
 }
