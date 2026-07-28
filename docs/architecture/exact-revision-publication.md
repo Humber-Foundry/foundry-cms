@@ -77,8 +77,11 @@ someone to revisit the originating workspace before the slot can be released.
 If either production-base check observes drift, the approval receives a
 durable `production_changed` invalidation before the request is rejected.
 Recovery runs before validating a later request's production base, allowing a
-commit that advanced the ref just before a Worker crash to be discovered. If
-Git cannot resolve an ambiguous no-SHA result for 15 minutes, the operation
+commit that advanced the ref just before a Worker crash to be discovered. The
+retained candidate evidence is also preserved while channel-configuration
+reads are unavailable, so a later recovery can reconcile the exact commit
+instead of losing the only durable link to a possibly completed side effect.
+If Git cannot resolve an ambiguous no-SHA result for 15 minutes, the operation
 becomes terminal with explicit `git_reconciliation_timeout` evidence.
 
 The status vocabulary is:
@@ -133,15 +136,20 @@ exactly one bounded activation payload naming only the uploaded version at 100
 percent, checks the fence after receiving that payload, and verifies the fence
 again after success. Before promotion it records the currently serving
 deployment and traffic allocation. If an activation response is lost, the
-controller reconciles the uploaded version against deployment history before
-deciding whether the promotion succeeded. If the protected ref moves after
-Cloudflare accepts the promotion, including an activation recovered from a
-lost response, the controller restores the prior allocation only when its stale
-deployment has not already been superseded. Because Cloudflare does not expose
-a conditional deployment write, the controller also inspects deployment
-history after compensation and restores any newer deployment that raced its
-rollback. Every direct Cloudflare request has a bounded timeout. A build
-compares its published-content path with the live release marker: content may
+controller polls deployment history for up to 30 seconds before deciding
+whether the promotion succeeded. Delayed history visibility is not treated as
+proof that another deployment superseded the attempt. If the protected ref
+moves after Cloudflare accepts the promotion, including an activation
+recovered from a lost response, the controller restores the prior allocation
+only when deployment history proves its stale deployment has been superseded.
+Because Cloudflare does not expose a conditional deployment write, the
+controller also waits for the compensating deployment to become visible and
+restores any newer deployment that raced its rollback. Once the controller has
+recorded the one permitted activation and the final production-head fence
+passes, a later non-zero Wrangler exit cannot turn that observed activation
+into an ambiguous failure. Every direct Cloudflare request has a bounded
+timeout. A build compares its published-content path with the live release
+marker: content may
 advance only through one direct, signature-verified Foundry publication
 commit. This quarantines a content commit whose earlier deployment failed so a
 later code build cannot publish it without the exact retry. The activation
@@ -204,20 +212,25 @@ CMS publication, an operator sets
 `FOUNDRY_BASELINE_PROVISION_COMMIT_SHA` to the exact protected production head
 and supplies a short-lived `FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN` with
 administration permission to manage repository rulesets. The operator then
-runs `npm run provision:deployment-baseline` once. The command refuses an
-existing deployment, creates and reads back a temporary active repository
-ruleset targeting only the exact production ref with the `update` restriction
-and no bypass actors, checks the local, build, and remote commits, deploys only
-the configured account and Worker name, checks the protected head again, and
-requires the exact authorized commit in the live release marker before deleting
-the temporary ruleset and verifying its absence. A rerun discovers, validates,
-and reuses the exact retained ruleset rather than creating a second lock. A
-lost deletion response is resolved by reading the ruleset: a verified `404`
-completes release, while an unreadable result is reported as an unverified
-unlock state. On a provisioning failure before release, the retained ruleset
-must not be manually removed until the deployment and marker are reconciled.
-Remove both one-time values afterward. Normal `npm run deploy` requires that
-verified serving baseline and never falls back to an unguarded first upload.
+runs `npm run provision:deployment-baseline` once. The command creates and
+reads back a temporary active repository ruleset targeting only the exact
+production ref with the `update` restriction,
+`update_allows_fetch_and_merge: false`, and no bypass actors; checks the local,
+build, and remote commits; deploys only the configured account and Worker
+name; checks the protected head again; and requires the exact authorized
+commit in the live release marker before deleting the temporary ruleset and
+verifying its absence. A normal first run refuses a pre-existing deployment. A
+rerun discovers, validates, and reuses the exact retained ruleset rather than
+creating a second lock. If that retained-lock rerun finds the initial
+deployment already present, it reconciles the exact production head,
+authorized content, and live release marker, then removes the lock without
+redeploying. A lost deletion response is resolved by reading the ruleset: a
+verified `404` completes release, while an unreadable result is reported as an
+unverified unlock state. On a provisioning failure before release, the
+retained ruleset must not be manually removed until the deployment and marker
+are reconciled. Remove both one-time values afterward. Normal `npm run deploy`
+requires that verified serving baseline and never falls back to an unguarded
+first upload.
 
 Workers Builds must expose `WORKERS_CI_COMMIT_SHA` during the build. Next
 embeds it as `FOUNDRY_RELEASE_COMMIT_SHA` in the release marker. A build without

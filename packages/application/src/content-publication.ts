@@ -727,9 +727,11 @@ export function createContentPublicationApplication({
           nextPublication(publication, {
             status: "failed",
             detail:
-              channelFailure === "changed"
-                ? "publication_channel_changed"
-                : "publication_channel_unavailable",
+              reconciliationCandidate(publication.detail) !== undefined
+                ? publication.detail
+                : channelFailure === "changed"
+                  ? "publication_channel_changed"
+                  : "publication_channel_unavailable",
             updatedAt: observedAt,
           }),
           {

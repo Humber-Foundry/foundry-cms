@@ -59,7 +59,8 @@ function isExactProductionLockRuleset(ruleset, { name, qualifiedName }) {
     ruleset.conditions.ref_name.exclude.length === 0 &&
     Array.isArray(ruleset.rules) &&
     ruleset.rules.length === 1 &&
-    ruleset.rules[0]?.type === "update"
+    ruleset.rules[0]?.type === "update" &&
+    ruleset.rules[0]?.parameters?.update_allows_fetch_and_merge === false
   );
 }
 
@@ -125,6 +126,7 @@ export async function acquireProductionBranchLock({
     name,
     rulesetsUrl,
   });
+  const retained = rulesetId !== null;
   if (rulesetId === null) {
     let createFailed = false;
     try {
@@ -142,7 +144,14 @@ export async function acquireProductionBranchLock({
               exclude: [],
             },
           },
-          rules: [{ type: "update" }],
+          rules: [
+            {
+              type: "update",
+              parameters: {
+                update_allows_fetch_and_merge: false,
+              },
+            },
+          ],
         }),
         signal: AbortSignal.timeout(30_000),
       });
@@ -188,7 +197,7 @@ export async function acquireProductionBranchLock({
     throw new Error("production_baseline_branch_lock_failed");
   }
 
-  return async function releaseBranchLock() {
+  const release = async function releaseBranchLock() {
     let deleteWasAccepted = false;
     try {
       const deleteResponse = await fetchImplementation(rulesetUrl, {
@@ -220,6 +229,7 @@ export async function acquireProductionBranchLock({
     }
     throw new Error("production_baseline_branch_unlock_unverified");
   };
+  return { release, retained };
 }
 
 export async function provisionProductionBaseline({
@@ -251,8 +261,30 @@ export async function provisionProductionBaseline({
     throw new Error("production_baseline_provision_not_authorized");
   }
 
-  await assertDeploymentAbsent();
-  const releaseBranchLock = await acquireBranchLock();
+  let deploymentExists = false;
+  try {
+    await assertDeploymentAbsent();
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      error.message !== "production_baseline_already_exists"
+    ) {
+      throw error;
+    }
+    deploymentExists = true;
+  }
+  const branchLock = await acquireBranchLock();
+  if (deploymentExists) {
+    if (!branchLock.retained) {
+      await branchLock.release();
+      throw new Error("production_baseline_already_exists");
+    }
+    assertHead();
+    await authorizeContent();
+    await verifyRelease();
+    await branchLock.release();
+    return;
+  }
   assertHead();
   await assertDeploymentAbsent();
   assertHead();
@@ -278,7 +310,7 @@ export async function provisionProductionBaseline({
   assertHead();
   await authorizeContent();
   await verifyRelease();
-  await releaseBranchLock();
+  await branchLock.release();
 }
 
 if (

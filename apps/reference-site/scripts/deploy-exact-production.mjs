@@ -23,7 +23,8 @@ const activationPathPattern =
   /^\/client\/v4\/accounts\/[^/]+\/workers\/scripts\/[^/]+\/deployments$/u;
 const maximumActivationBodyBytes = 64 * 1024;
 const cloudflareRequestTimeoutMs = 30_000;
-const activationReconciliationAttempts = 5;
+const deploymentHistoryReconciliationMs = 30_000;
+const deploymentHistoryPollMs = 250;
 const hopByHopHeaders = new Set([
   "connection",
   "content-length",
@@ -280,20 +281,15 @@ async function reconcileActivationAttempt({
   upstreamBaseUrl,
   versionId,
 }) {
+  const deadline = Date.now() + deploymentHistoryReconciliationMs;
   let lastError;
-  let readSucceeded = false;
-  for (
-    let attempt = 0;
-    attempt < activationReconciliationAttempts;
-    attempt += 1
-  ) {
+  while (Date.now() <= deadline) {
     try {
       const deployments = await readDeploymentList({
         activationPath,
         headers,
         upstreamBaseUrl,
       });
-      readSucceeded = true;
       const baselineIndex = deployments.findIndex(
         ({ deploymentId: candidate }) =>
           candidate === baseline.deploymentId,
@@ -310,16 +306,62 @@ async function reconcileActivationAttempt({
     } catch (error) {
       lastError = error;
     }
-    if (attempt + 1 < activationReconciliationAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.min(deploymentHistoryPollMs, remaining),
+        ),
+      );
     }
   }
-  if (!readSucceeded) {
-    throw new Error("exact_activation_reconciliation_failed", {
-      cause: lastError,
-    });
+  throw new Error("exact_activation_reconciliation_failed", {
+    cause: lastError,
+  });
+}
+
+async function readOwnedDeploymentPosition({
+  activatedDeploymentId,
+  activationPath,
+  headers,
+  upstreamBaseUrl,
+}) {
+  const deadline = Date.now() + deploymentHistoryReconciliationMs;
+  let lastError;
+  while (Date.now() <= deadline) {
+    try {
+      const deployments = await readDeploymentList({
+        activationPath,
+        headers,
+        upstreamBaseUrl,
+      });
+      const ownedIndex = deployments.findIndex(
+        ({ deploymentId: candidate }) =>
+          candidate === activatedDeploymentId,
+      );
+      if (ownedIndex === 0) {
+        return { state: "current", deployments };
+      }
+      if (ownedIndex > 0) {
+        return { state: "superseded", deployments };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.min(deploymentHistoryPollMs, remaining),
+        ),
+      );
+    }
   }
-  return { state: "not-found" };
+  throw new Error("exact_activation_history_unverified", {
+    cause: lastError,
+  });
 }
 
 function productionActivationPath(environment) {
@@ -390,14 +432,16 @@ async function restorePreviousDeployment({
   let lastError;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      const before = await readDeploymentList({
+      const beforePosition = await readOwnedDeploymentPosition({
+        activatedDeploymentId: expectedOwnedDeployment,
         activationPath,
         headers,
         upstreamBaseUrl,
       });
-      if (before[0]?.deploymentId !== expectedOwnedDeployment) {
+      if (beforePosition.state === "superseded") {
         return;
       }
+      const before = beforePosition.deployments;
       target ??= before.find(
         ({ deploymentId: candidate }) =>
           !ownedDeployments.has(candidate),
@@ -433,17 +477,21 @@ async function restorePreviousDeployment({
         parseCloudflareResult(rollbackBody),
       );
       ownedDeployments.add(rollbackDeploymentId);
-      const after = await readDeploymentList({
+      const replacedDeploymentId = expectedOwnedDeployment;
+      expectedOwnedDeployment = rollbackDeploymentId;
+      const afterPosition = await readOwnedDeploymentPosition({
+        activatedDeploymentId: rollbackDeploymentId,
         activationPath,
         headers,
         upstreamBaseUrl,
       });
-      if (after[0]?.deploymentId !== rollbackDeploymentId) {
+      if (afterPosition.state === "superseded") {
         return;
       }
+      const after = afterPosition.deployments;
       const replacedIndex = after.findIndex(
         ({ deploymentId: candidate }) =>
-          candidate === expectedOwnedDeployment,
+          candidate === replacedDeploymentId,
       );
       if (replacedIndex === 1) {
         return;
@@ -460,7 +508,6 @@ async function restorePreviousDeployment({
       if (target === undefined) {
         throw new Error("exact_activation_rollback_history_invalid");
       }
-      expectedOwnedDeployment = rollbackDeploymentId;
     } catch (error) {
       lastError = error;
     }
@@ -710,6 +757,9 @@ export async function activateExactVersion({
           );
         }
         throw headError;
+      }
+      if (activationError === undefined) {
+        activationProcessError = undefined;
       }
     }
     if (activationError !== undefined) {

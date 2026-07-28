@@ -227,6 +227,45 @@ describe("guarded exact production deployment", () => {
     await close(upstream);
   });
 
+  it("accepts a recorded exact activation after a later process failure", async () => {
+    const upstream = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    const assertHead = vi.fn();
+
+    await expect(
+      activate({
+        versionId,
+        assertHead,
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) => {
+          const process = new EventEmitter();
+          queueMicrotask(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(200);
+            process.emit("exit", 1, null);
+          });
+          return process;
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(assertHead).toHaveBeenCalledTimes(3);
+    await close(upstream);
+  });
+
   it("blocks activation when the protected ref advances at promotion", async () => {
     let upstreamRequests = 0;
     const upstream = createServer((request, response) => {
@@ -573,6 +612,8 @@ describe("guarded exact production deployment", () => {
       { id: "deployment-before", versionId: previousVersionId },
     ];
     let postCount = 0;
+    let activationHistoryReads = 0;
+    let rollbackHistoryReads = 0;
     const upstream = createServer(async (request, response) => {
       const chunks = [];
       for await (const chunk of request) {
@@ -580,9 +621,17 @@ describe("guarded exact production deployment", () => {
       }
       const body = Buffer.concat(chunks).toString("utf8");
       if (request.method === "GET") {
+        let visibleDeployments = deployments;
+        if (postCount === 1 && activationHistoryReads < 2) {
+          activationHistoryReads += 1;
+          visibleDeployments = deployments.slice(1);
+        } else if (postCount === 2 && rollbackHistoryReads < 2) {
+          rollbackHistoryReads += 1;
+          visibleDeployments = deployments.slice(1);
+        }
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
-          JSON.stringify(deploymentHistoryResult(deployments)),
+          JSON.stringify(deploymentHistoryResult(visibleDeployments)),
         );
         return;
       }
@@ -628,6 +677,8 @@ describe("guarded exact production deployment", () => {
     ).rejects.toThrow("exact_production_head_moved");
 
     expect(postCount).toBe(2);
+    expect(activationHistoryReads).toBe(2);
+    expect(rollbackHistoryReads).toBe(2);
     expect(deployments[0]).toEqual({
       id: "deployment-rollback",
       versionId: previousVersionId,
