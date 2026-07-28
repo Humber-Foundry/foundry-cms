@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   referenceSiteDefinition,
   type PageSection,
+  type SiteDefinition,
 } from "@foundry/site-definition";
 
 import {
@@ -95,6 +96,51 @@ describe("Puck page-composition adapter", () => {
         }),
       }),
     });
+  });
+
+  it("projects related components added earlier in the same Puck change", () => {
+    const proof = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "proof",
+    )!;
+    const base = {
+      ...referenceSiteDefinition,
+      site: { ...referenceSiteDefinition.site, navigation: [] },
+      home: { ...referenceSiteDefinition.home, sections: [proof] },
+    } as SiteDefinition;
+    const result = puckDataToDefinition(base, {
+      root: { props: {} },
+      content: [
+        { type: "proof", props: proof },
+        {
+          type: "callToAction",
+          props: {
+            id: "section_added_contact",
+            type: "callToAction",
+            eyebrow: "Next",
+            title: "Continue",
+            body: "Take the next step",
+          },
+        },
+        {
+          type: "hero",
+          props: {
+            id: "section_added_hero",
+            type: "hero",
+            eyebrow: "Welcome",
+            title: "A new page",
+            summary: "Start here",
+          },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const hero = result.definition.home.sections.at(-1);
+      expect(
+        hero?.type === "hero" ? hero.primaryAction.href : undefined,
+      ).toBe("#section_added_contact");
+    }
   });
 
   it("fails closed for unregistered Puck content", () => {

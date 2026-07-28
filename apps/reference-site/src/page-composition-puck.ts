@@ -118,9 +118,22 @@ export function puckDataToDefinition(
     const existing = definition.home.sections.find(
       (section) => section.id === id && section.type === componentType,
     );
+    const submittedContext = {
+      ...definition,
+      home: {
+        ...definition.home,
+        sections: [
+          ...definition.home.sections,
+          ...components.filter(
+            ({ id: submittedId }) =>
+              !definition.home.sections.some(({ id }) => id === submittedId),
+          ),
+        ],
+      },
+    } as SiteDefinition;
     const base =
       existing ??
-      createDefaultPageSection(componentType, id, definition);
+      createDefaultPageSection(componentType, id, submittedContext);
     const editableProps =
       pageCompositionContract.components[componentType].editableProps;
     const section = structuredClone(base) as unknown as Record<
@@ -137,7 +150,7 @@ export function puckDataToDefinition(
     // non-editable scaffold from its source component.
     const duplicateSource =
       existing === undefined
-        ? definition.home.sections.find((source) => {
+        ? submittedContext.home.sections.find((source) => {
             if (source.type !== componentType) {
               return false;
             }
