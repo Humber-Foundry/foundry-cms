@@ -89,6 +89,7 @@ export function applyStructuralRecovery(
       return { ok: false };
     }
     let baseComposition: unknown = null;
+    let baseIds: ReadonlySet<string> | null = null;
     try {
       baseComposition = JSON.parse(edit.baseValue);
     } catch {
@@ -120,6 +121,7 @@ export function applyStructuralRecovery(
             : [],
         ),
       );
+      baseIds = new Set(baseById.keys());
       for (const current of definition.home.sections) {
         const base = baseById.get(current.id);
         if (
@@ -140,19 +142,26 @@ export function applyStructuralRecovery(
     );
     const mergedComposition = {
       ...composition,
-      components: composition.components.map((candidate) => {
-        if (
-          typeof candidate !== "object" ||
-          candidate === null ||
-          !("id" in candidate) ||
-          typeof candidate.id !== "string" ||
-          !("type" in candidate)
-        ) {
-          return candidate;
-        }
-        const current = currentById.get(candidate.id);
-        return current?.type === candidate.type ? current : candidate;
-      }),
+      components: [
+        ...composition.components.map((candidate) => {
+          if (
+            typeof candidate !== "object" ||
+            candidate === null ||
+            !("id" in candidate) ||
+            typeof candidate.id !== "string" ||
+            !("type" in candidate)
+          ) {
+            return candidate;
+          }
+          const current = currentById.get(candidate.id);
+          return current?.type === candidate.type ? current : candidate;
+        }),
+        ...(baseIds === null
+          ? []
+          : definition.home.sections.filter(
+              ({ id }) => !baseIds.has(id) && !targetIds.has(id),
+            )),
+      ],
     };
     const result = applyPageComposition(definition, mergedComposition);
     return result.ok
@@ -220,6 +229,22 @@ export function recoveryToForward(
   activeRecovery: StaleRecoveryPointer | undefined,
 ): StaleRecoveryPointer | undefined {
   return destinationIsStale ? activeRecovery : undefined;
+}
+
+export function mergeRecoverySources(
+  ...sources: ReadonlyArray<ReadonlyArray<StaleRecoveryEdit>>
+): StaleRecoveryEdit[] {
+  const merged = new Map<string, StaleRecoveryEdit>();
+  for (const source of sources) {
+    for (const edit of source) {
+      const earlier = merged.get(edit.path);
+      merged.set(edit.path, {
+        ...edit,
+        baseValue: earlier?.baseValue ?? edit.baseValue,
+      });
+    }
+  }
+  return [...merged.values()];
 }
 
 export function mergeStaleRecoveryEdits(

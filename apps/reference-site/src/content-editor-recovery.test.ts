@@ -12,6 +12,7 @@ import {
   comparableRecoveryValue,
   clearStaleEdits,
   excludeCompositionOwnedEdits,
+  mergeRecoverySources,
   mergeStaleRecoveryEdits,
   preserveStaleEdits,
   recoveryToForward,
@@ -150,6 +151,33 @@ describe("stale edit recovery", () => {
         ]),
       ).recovered,
     ).toEqual(merged);
+  });
+
+  it("merges disjoint durable recovery sources before forwarding", () => {
+    const fromOutbox = {
+      ...edit,
+      value: "Recovered from IndexedDB",
+    };
+    const fromStaleWorkspace = {
+      path: "page_home.seo.title",
+      value: "Recovered from local storage",
+      baseValue: "Old SEO title",
+    };
+
+    expect(
+      mergeRecoverySources([fromOutbox], [fromStaleWorkspace]),
+    ).toEqual([fromOutbox, fromStaleWorkspace]);
+    expect(
+      mergeRecoverySources(
+        [edit],
+        [{ ...edit, value: "Edited again in the next workspace" }],
+      ),
+    ).toEqual([
+      {
+        ...edit,
+        value: "Edited again in the next workspace",
+      },
+    ]);
   });
 
   it("does not resurrect a recovered edit reverted before another stale hop", () => {
@@ -404,6 +432,46 @@ describe("stale edit recovery", () => {
     expect(applyStructuralRecovery(concurrent, edit)).toEqual({
       ok: false,
     });
+  });
+
+  it("preserves a component added after the structural recovery baseline", () => {
+    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(sourceComposition),
+      value: JSON.stringify({
+        ...sourceComposition,
+        components: [...sourceComposition.components].reverse(),
+      }),
+    };
+    const concurrentAddition = createDefaultPageSection(
+      "proof",
+      "section_concurrent_proof",
+      referenceSiteDefinition,
+    );
+    const concurrent = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          ...referenceSiteDefinition.home.sections,
+          concurrentAddition,
+        ],
+      },
+    };
+
+    const result = applyStructuralRecovery(concurrent, edit);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.definition.home.sections.map(({ id }) => id)).toEqual([
+        "section_contact",
+        "section_proof",
+        "section_services",
+        "section_hero",
+        "section_concurrent_proof",
+      ]);
+    }
   });
 
   it("surfaces a same-path concurrent change as a three-way conflict", () => {

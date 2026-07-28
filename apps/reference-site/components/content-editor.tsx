@@ -24,6 +24,7 @@ import {
   comparableRecoveryValue,
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
+  mergeRecoverySources,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
@@ -99,6 +100,9 @@ export function ContentEditor({
   const recoveryApplied = useRef(false);
   const recoverySyncReady = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
+  const [recoverySourcesReady, setRecoverySourcesReady] = useState(
+    staleRecovery === undefined,
+  );
   const saveInFlight = useRef(false);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
@@ -193,7 +197,10 @@ export function ContentEditor({
         if (cancelled || record === null || record.edits.length === 0) {
           return;
         }
-        recoveryPending.current = record.edits.slice();
+        recoveryPending.current = mergeRecoverySources(
+          recoveryPending.current,
+          record.edits,
+        );
         if (initialStale) {
           setMessage(
             "Unsaved browser edits were recovered. Start a fresh workspace to carry them forward.",
@@ -321,6 +328,7 @@ export function ContentEditor({
     try {
       recoveryStorage = window.localStorage;
     } catch {
+      setRecoverySourcesReady(true);
       setMessage(
         "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
       );
@@ -344,13 +352,18 @@ export function ContentEditor({
       destinationValues,
     );
     if (!available) {
+      setRecoverySourcesReady(true);
       setMessage(
         "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
       );
       return;
     }
     if (initialStale) {
-      recoveryPending.current = [...recovered, ...conflicts];
+      recoveryPending.current = mergeRecoverySources(
+        recoveryPending.current,
+        [...recovered, ...conflicts],
+      );
+      setRecoverySourcesReady(true);
       return;
     }
     const applied: StaleRecoveryEdit[] = [];
@@ -377,7 +390,10 @@ export function ContentEditor({
         dispatch({ type: "edit", ...edit });
       }
     }
-    recoveryPending.current = [...applied, ...nextConflicts];
+    recoveryPending.current = mergeRecoverySources(
+      recoveryPending.current,
+      [...applied, ...nextConflicts],
+    );
     setRecoveryConflicts(nextConflicts);
     if (nextConflicts.length > 0) {
       setMessage(
@@ -388,6 +404,7 @@ export function ContentEditor({
         "Unsaved edits were recovered in this fresh workspace. Review and save them when ready.",
       );
     }
+    setRecoverySourcesReady(true);
   }, [
     initialStale,
     persistence.coordinated,
@@ -620,7 +637,11 @@ export function ContentEditor({
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
-    if (!persistence.coordinated || !persistence.ready) {
+    if (
+      !persistence.coordinated ||
+      !persistence.ready ||
+      !recoverySourcesReady
+    ) {
       return;
     }
     const forwardedRecovery =
@@ -833,7 +854,12 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={creatingWorkspace || !persistence.coordinated}
+            disabled={
+              creatingWorkspace ||
+              !persistence.coordinated ||
+              !persistence.ready ||
+              !recoverySourcesReady
+            }
             onClick={() =>
               void recoverEdits(
                 state.status === "stale" ? "fresh" : "current",
