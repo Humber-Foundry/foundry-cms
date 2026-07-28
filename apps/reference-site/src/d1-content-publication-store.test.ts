@@ -43,6 +43,7 @@ describe("D1 content publication store", () => {
     for (const migrationName of [
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
+      "0008_media_assets.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),

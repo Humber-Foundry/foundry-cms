@@ -16,6 +16,7 @@ import {
   ContentRevisionValidationError,
   createContentWorkspaceId,
   createContentRevisionApplication,
+  createInMemoryMediaContentCoordinator,
   createInMemoryContentRevisionStore,
   isContentRevisionRenderableBy,
 } from "./content-revisions";
@@ -339,6 +340,229 @@ describe("content revision application", () => {
           "This component is not registered for the page slot.",
       }),
     );
+  });
+
+  it("binds media occurrence revisions into the immutable content fingerprint", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-media-0001");
+
+    const first = await application.commands.saveMediaOccurrence({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      occurrence: {
+        occurrenceId: "occurrence_home_hero",
+        revision: 1,
+        asset: {
+          assetId: "asset_hero",
+          width: 1600,
+          height: 900,
+          contentType: "image/png",
+        },
+        crop: null,
+      },
+      idempotencyKey: "save-media-hero-0001",
+    });
+    const cropped = await application.commands.saveMediaOccurrence({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 1,
+      occurrence: {
+        ...first.definition.home.media![0]!,
+        revision: 2,
+        crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
+      },
+      idempotencyKey: "save-media-hero-0002",
+    });
+
+    expect(first.definition.home.media![0]).toMatchObject({
+      occurrenceId: "occurrence_home_hero",
+      revision: 1,
+      crop: null,
+    });
+    expect(cropped.definition.home.media![0]).toMatchObject({
+      revision: 2,
+      crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
+    });
+    expect(cropped.inputs.contentHash).not.toBe(first.inputs.contentHash);
+    await expect(application.queries.getRevision(1)).resolves.toEqual(
+      expect.objectContaining({
+        revision: first.revision,
+        definition: first.definition,
+        inputs: first.inputs,
+      }),
+    );
+  });
+
+  it("rejects a media binding when its occurrence is no longer current", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore({
+        isMediaOccurrenceCurrent: async () => false,
+      }),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-media-race");
+
+    await expect(
+      application.commands.saveMediaOccurrence({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        occurrence: {
+          occurrenceId: "occurrence_home_hero",
+          revision: 1,
+          asset: {
+            assetId: "asset_hero",
+            width: 1600,
+            height: 900,
+            contentType: "image/png",
+          },
+          crop: null,
+        },
+        idempotencyKey: "save-media-raced-head",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+    await expect(application.queries.getCurrent()).resolves.toMatchObject({
+      revision: 0,
+    });
+  });
+
+  it("serializes a local media head change with content binding", async () => {
+    const coordinator = createInMemoryMediaContentCoordinator();
+    let signalValidation = () => {};
+    const validationStarted = new Promise<void>((resolve) => {
+      signalValidation = resolve;
+    });
+    let releaseValidation = () => {};
+    const validationMayFinish = new Promise<void>((resolve) => {
+      releaseValidation = resolve;
+    });
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore({
+        mediaContentCoordinator: coordinator,
+        isMediaOccurrenceCurrent: async () => {
+          signalValidation();
+          await validationMayFinish;
+          return true;
+        },
+      }),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-media-atomic");
+
+    const contentSave = application.commands.saveMediaOccurrence({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      occurrence: {
+        occurrenceId: "occurrence_home_hero",
+        revision: 1,
+        asset: {
+          assetId: "asset_hero",
+          width: 1600,
+          height: 900,
+          contentType: "image/png",
+        },
+        crop: null,
+      },
+      idempotencyKey: "save-media-atomic-head",
+    });
+    await validationStarted;
+
+    let mediaHeadChanged = false;
+    const mediaHeadChange = coordinator.runExclusive(async () => {
+      mediaHeadChanged = true;
+    });
+    await Promise.resolve();
+    expect(mediaHeadChanged).toBe(false);
+
+    releaseValidation();
+    await contentSave;
+    await mediaHeadChange;
+    expect(mediaHeadChanged).toBe(true);
+  });
+
+  it("serializes an ordinary local content save with media validation", async () => {
+    const coordinator = createInMemoryMediaContentCoordinator();
+    let signalValidation = () => {};
+    const validationStarted = new Promise<void>((resolve) => {
+      signalValidation = resolve;
+    });
+    let releaseValidation = () => {};
+    const validationMayFinish = new Promise<void>((resolve) => {
+      releaseValidation = resolve;
+    });
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore({
+        mediaContentCoordinator: coordinator,
+        isMediaOccurrenceCurrent: async () => {
+          signalValidation();
+          await validationMayFinish;
+          return true;
+        },
+      }),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-content-atomic");
+
+    const mediaSave = application.commands.saveMediaOccurrence({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      occurrence: {
+        occurrenceId: "occurrence_home_hero",
+        revision: 1,
+        asset: {
+          assetId: "asset_hero",
+          width: 1600,
+          height: 900,
+          contentType: "image/png",
+        },
+        crop: null,
+      },
+      idempotencyKey: "save-media-before-copy",
+    });
+    await validationStarted;
+
+    let copySaveSettled = false;
+    const copySave = application.commands
+      .save({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        edits: [{ path: "section_hero.title", value: "Concurrent copy" }],
+        idempotencyKey: "save-copy-during-media",
+      })
+      .finally(() => {
+        copySaveSettled = true;
+      });
+    await Promise.resolve();
+    expect(copySaveSettled).toBe(false);
+
+    releaseValidation();
+    await mediaSave;
+    await expect(copySave).rejects.toBeInstanceOf(
+      ContentRevisionConflictError,
+    );
+    await expect(application.queries.getCurrent()).resolves.toMatchObject({
+      revision: 1,
+      definition: {
+        home: {
+          media: [
+            expect.objectContaining({
+              occurrenceId: "occurrence_home_hero",
+            }),
+          ],
+        },
+      },
+    });
   });
 
   it("replays one idempotency key without creating another revision", async () => {

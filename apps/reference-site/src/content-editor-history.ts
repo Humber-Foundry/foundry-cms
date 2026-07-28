@@ -1,7 +1,198 @@
 import {
+  listEditableSiteFields,
+  pageCompositionContract,
+  toPageCompositionIdentity,
   updateEditableSiteField,
   type SiteDefinition,
 } from "@foundry/site-definition";
+
+function compositionIdentity(definition: SiteDefinition): string {
+  return JSON.stringify(toPageCompositionIdentity(definition));
+}
+
+function hasConcurrentCompositionConflict(
+  state: ContentEditorState,
+  incoming: SiteDefinition,
+): boolean {
+  const persisted = compositionIdentity(state.persistedDefinition);
+  const working = compositionIdentity(state.workingDefinition);
+  const external = compositionIdentity(incoming);
+  return working !== persisted && external !== persisted && working !== external;
+}
+
+function concurrentFieldConflicts(
+  state: ContentEditorState,
+  incoming: SiteDefinition,
+): ReadonlyArray<string> {
+  const persisted = new Map(
+    listEditableSiteFields(state.persistedDefinition).map((field) => [
+      field.path,
+      field.value,
+    ]),
+  );
+  const external = new Map(
+    listEditableSiteFields(incoming).map((field) => [
+      field.path,
+      field.value,
+    ]),
+  );
+  const working = new Map(
+    listEditableSiteFields(state.workingDefinition).map((field) => [
+      field.path,
+      field.value,
+    ]),
+  );
+  return [...new Set([
+    ...persisted.keys(),
+    ...working.keys(),
+    ...external.keys(),
+  ])]
+    .filter((path) => {
+      const baseline = persisted.get(path);
+      const workingValue = working.get(path);
+      const incomingValue = external.get(path);
+      return (
+        workingValue !== baseline &&
+        incomingValue !== baseline &&
+        workingValue !== incomingValue
+      );
+    })
+    .sort();
+}
+
+function restoreLocalEditableOwner(
+  definition: SiteDefinition,
+  working: SiteDefinition,
+  path: string,
+): SiteDefinition | null {
+  const baseFieldPaths = new Set(
+    listEditableSiteFields({
+      ...working,
+      home: { ...working.home, sections: [] },
+    }).map((field) => field.path),
+  );
+  const localSectionIndex = working.home.sections.findIndex((section) =>
+    listEditableSiteFields({
+      ...working,
+      home: { ...working.home, sections: [section] },
+    }).some(
+      (field) => field.path === path && !baseFieldPaths.has(field.path),
+    ),
+  );
+  if (localSectionIndex >= 0) {
+    const localSection = working.home.sections[localSectionIndex]!;
+    const sections = [...definition.home.sections];
+    const incomingIndex = sections.findIndex(
+      (section) => section.id === localSection.id,
+    );
+    if (incomingIndex >= 0) {
+      sections[incomingIndex] = localSection;
+    } else {
+      sections.splice(
+        Math.min(localSectionIndex, sections.length),
+        0,
+        localSection,
+      );
+    }
+    return {
+      ...definition,
+      home: { ...definition.home, sections },
+    };
+  }
+
+  const localNavigationIndex = working.site.navigation.findIndex(
+    (item) => `${item.id}.label` === path,
+  );
+  if (localNavigationIndex >= 0) {
+    const localItem = working.site.navigation[localNavigationIndex]!;
+    const navigation = [...definition.site.navigation];
+    const incomingIndex = navigation.findIndex(
+      (item) => item.id === localItem.id,
+    );
+    if (incomingIndex >= 0) {
+      navigation[incomingIndex] = localItem;
+    } else {
+      navigation.splice(
+        Math.min(localNavigationIndex, navigation.length),
+        0,
+        localItem,
+      );
+    }
+    return {
+      ...definition,
+      site: { ...definition.site, navigation },
+    };
+  }
+  return null;
+}
+
+function mergeExternalRevision(
+  state: ContentEditorState,
+  incoming: SiteDefinition,
+) {
+  const persisted = new Map(
+    listEditableSiteFields(state.persistedDefinition).map((field) => [
+      field.path,
+      field.value,
+    ]),
+  );
+  const workingFields = listEditableSiteFields(state.workingDefinition);
+  const locallyDirtyPaths = new Set(
+    workingFields
+      .filter((field) => persisted.get(field.path) !== field.value)
+      .map((field) => field.path),
+  );
+  const compositionChanged =
+    compositionIdentity(state.persistedDefinition) !==
+    compositionIdentity(state.workingDefinition);
+  const incomingFields = hasConcurrentCompositionConflict(state, incoming)
+    ? []
+    : listEditableSiteFields(incoming);
+  const incomingSections = new Map(
+    incoming.home.sections.map((section) => [
+      `${section.type}:${section.id}`,
+      section,
+    ]),
+  );
+  let merged = compositionChanged
+    ? {
+        ...incoming,
+        home: {
+          ...incoming.home,
+          sections: state.workingDefinition.home.sections.map(
+            (section) =>
+              incomingSections.get(`${section.type}:${section.id}`) ?? section,
+          ),
+        },
+      }
+    : incoming;
+  for (const field of workingFields) {
+    if (!locallyDirtyPaths.has(field.path)) continue;
+    const updated = updateEditableSiteField(merged, field);
+    if (updated === null) {
+      const restored = restoreLocalEditableOwner(
+        merged,
+        state.workingDefinition,
+        field.path,
+      );
+      if (restored === null) {
+        continue;
+      }
+      merged = incomingFields.reduce(
+        (definition, incomingField) =>
+          locallyDirtyPaths.has(incomingField.path)
+            ? definition
+            : (updateEditableSiteField(definition, incomingField) ??
+              definition),
+        restored,
+      );
+      merged = updateEditableSiteField(merged, field) ?? merged;
+      continue;
+    }
+    merged = updated;
+  }
+  return merged;
+}
 
 export type ContentEditorState = Readonly<{
   persistedRevision: number;
@@ -13,6 +204,12 @@ export type ContentEditorState = Readonly<{
   status: "saved" | "dirty" | "saving" | "conflict" | "stale";
   errors: Readonly<Record<string, string>>;
 }>;
+
+export function contentEditorStatusLocked(
+  status: ContentEditorState["status"],
+): boolean {
+  return status === "saving" || status === "conflict" || status === "stale";
+}
 
 export type ContentEditorAction =
   | Readonly<{ type: "edit"; path: string; value: string }>
@@ -26,6 +223,11 @@ export type ContentEditorAction =
   | Readonly<{ type: "saving" }>
   | Readonly<{
       type: "saved";
+      definition: SiteDefinition;
+      revision: number;
+    }>
+  | Readonly<{
+      type: "externalRevision";
       definition: SiteDefinition;
       revision: number;
     }>
@@ -69,6 +271,15 @@ export function contentEditorReducer(
   action: ContentEditorAction,
 ): ContentEditorState {
   if (state.status === "stale") {
+    return state;
+  }
+  if (
+    contentEditorStatusLocked(state.status) &&
+    (action.type === "edit" ||
+      action.type === "compose" ||
+      action.type === "undo" ||
+      action.type === "redo")
+  ) {
     return state;
   }
   switch (action.type) {
@@ -161,6 +372,44 @@ export function contentEditorReducer(
         projectionVersion: state.projectionVersion + 1,
         status: "saved",
         errors: {},
+      };
+    case "externalRevision":
+      const compositionConflict = hasConcurrentCompositionConflict(
+        state,
+        action.definition,
+      );
+      const fieldConflicts = compositionConflict
+        ? []
+        : concurrentFieldConflicts(state, action.definition);
+      const hasConflict =
+        compositionConflict || fieldConflicts.length > 0;
+      return {
+        ...state,
+        persistedDefinition: action.definition,
+        persistedRevision: action.revision,
+        workingDefinition: mergeExternalRevision(state, action.definition),
+        past: [],
+        future: [],
+        status:
+          hasConflict
+            ? "conflict"
+            : state.status === "saved"
+              ? "saved"
+              : state.status,
+        errors: {
+          ...(compositionConflict
+            ? {
+                [pageCompositionContract.slot.id]:
+                  "The page structure changed elsewhere. Reload latest to reconcile your unsaved structure.",
+              }
+            : {}),
+          ...Object.fromEntries(
+            fieldConflicts.map((path) => [
+              path,
+              "This field changed elsewhere. Reload latest to reconcile your unsaved value.",
+            ]),
+          ),
+        },
       };
     case "failed":
       return {

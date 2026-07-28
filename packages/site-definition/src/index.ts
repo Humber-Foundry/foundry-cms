@@ -11,6 +11,8 @@ import validateSiteDefinition from "./site-definition-validator.mjs";
 
 declare const siteIdBrand: unique symbol;
 
+export { bindSiteMediaOccurrence } from "./media";
+
 export type SiteId = string & {
   readonly [siteIdBrand]: "SiteId";
 };
@@ -32,6 +34,52 @@ export type SiteLink = Readonly<{
   label: string;
   href: SiteHref;
 }>;
+
+export type SiteMediaCrop = Readonly<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}>;
+
+export type SiteMediaOccurrence = Readonly<{
+  occurrenceId: "occurrence_home_hero" | "occurrence_home_detail";
+  revision: number;
+  asset: Readonly<{
+    assetId: string;
+    width: number;
+    height: number;
+    contentType: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
+  }>;
+  crop: SiteMediaCrop | null;
+}>;
+
+export const siteDefinitionValidationKeywords = [
+  {
+    keyword: "xFoundryCropWithinSource",
+    schemaType: "boolean",
+    type: "object",
+    validate(
+      enabled: boolean,
+      crop: Readonly<{
+        x?: unknown;
+        y?: unknown;
+        width?: unknown;
+        height?: unknown;
+      }>,
+    ) {
+      return (
+        !enabled ||
+        (typeof crop.x === "number" &&
+          typeof crop.y === "number" &&
+          typeof crop.width === "number" &&
+          typeof crop.height === "number" &&
+          crop.x + crop.width <= 1 &&
+          crop.y + crop.height <= 1)
+      );
+    },
+  },
+] as const;
 
 export type HeroSection = Readonly<{
   id: string;
@@ -105,6 +153,7 @@ export type SiteDefinition = Readonly<{
   }>;
   home: Readonly<{
     id: string;
+    media?: ReadonlyArray<SiteMediaOccurrence>;
     seo: Readonly<{
       title: string;
       description: string;
@@ -199,6 +248,34 @@ export const siteDefinitionSchema = {
       required: ["id", "seo", "sections"],
       properties: {
         id: { $ref: "#/$defs/id" },
+        media: {
+          type: "array",
+          items: { $ref: "#/$defs/mediaOccurrence" },
+          allOf: [
+            {
+              contains: {
+                type: "object",
+                properties: {
+                  occurrenceId: { const: "occurrence_home_hero" },
+                },
+                required: ["occurrenceId"],
+              },
+              minContains: 0,
+              maxContains: 1,
+            },
+            {
+              contains: {
+                type: "object",
+                properties: {
+                  occurrenceId: { const: "occurrence_home_detail" },
+                },
+                required: ["occurrenceId"],
+              },
+              minContains: 0,
+              maxContains: 1,
+            },
+          ],
+        },
         seo: {
           type: "object",
           additionalProperties: false,
@@ -251,6 +328,47 @@ export const siteDefinitionSchema = {
         { pattern: "^#[a-z][a-z0-9_]*$" },
         { pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
       ],
+    },
+    mediaOccurrence: {
+      type: "object",
+      additionalProperties: false,
+      required: ["occurrenceId", "revision", "asset", "crop"],
+      properties: {
+        occurrenceId: {
+          enum: ["occurrence_home_hero", "occurrence_home_detail"],
+        },
+        revision: { type: "integer", minimum: 1 },
+        asset: {
+          type: "object",
+          additionalProperties: false,
+          required: ["assetId", "width", "height", "contentType"],
+          properties: {
+            assetId: { type: "string", pattern: "^asset_[a-z0-9_]+$" },
+            width: { type: "integer", minimum: 1 },
+            height: { type: "integer", minimum: 1 },
+            contentType: {
+              enum: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+            },
+          },
+        },
+        crop: {
+          anyOf: [
+            { type: "null" },
+            {
+              type: "object",
+              xFoundryCropWithinSource: true,
+              additionalProperties: false,
+              required: ["x", "y", "width", "height"],
+              properties: {
+                x: { type: "number", minimum: 0, maximum: 1 },
+                y: { type: "number", minimum: 0, maximum: 1 },
+                width: { type: "number", exclusiveMinimum: 0, maximum: 1 },
+                height: { type: "number", exclusiveMinimum: 0, maximum: 1 },
+              },
+            },
+          ],
+        },
+      },
     },
     serviceItem: {
       type: "object",
@@ -374,13 +492,25 @@ export function isSiteDefinition(value: unknown): value is SiteDefinition {
   return validateSiteDefinition(value);
 }
 
-export const referenceSiteDefinition = {
-  ...publishedSite,
-  site: {
-    ...publishedSite.site,
-    id: createSiteId(publishedSite.site.id),
-  },
-} as SiteDefinition;
+export function createReferenceSiteDefinition(
+  published: SiteDefinition,
+): SiteDefinition {
+  return {
+    ...published,
+    site: {
+      ...published.site,
+      id: createSiteId(published.site.id),
+    },
+    home: {
+      ...published.home,
+      media: published.home.media ?? [],
+    },
+  };
+}
+
+export const referenceSiteDefinition = createReferenceSiteDefinition(
+  publishedSite as unknown as SiteDefinition,
+);
 
 export * from "./editable-fields";
 export * from "./component-composition";

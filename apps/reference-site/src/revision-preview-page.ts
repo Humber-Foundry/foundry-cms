@@ -28,6 +28,7 @@ export type RevisionPreviewPageProps = {
   searchParams: Promise<{
     capability?: string | string[];
     bookmark?: string | string[];
+    accessToken?: string | string[];
   }>;
 };
 

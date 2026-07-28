@@ -2,17 +2,19 @@ import type {
   ContentRevision,
   FailedPublicFormDelivery,
   HumanMembership,
+  MediaAsset,
   PublicFormDeliveryHealth,
   SuspectedSpamSubmission,
 } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
 import type { StaleRecoveryEdit } from "../src/content-editor-recovery";
 
-import { ContentEditor } from "./content-editor";
 import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
+import type { MediaOccurrenceState } from "./media-manager-state";
+import { WorkspaceEditors } from "./workspace-editors";
 
 export function contentWorkspaceRequiresSchemaRecovery(
   definition: SiteDefinition,
@@ -35,6 +37,9 @@ export function DashboardShell({
   formDeliveryHealth,
   failedFormDeliveries,
   suspectedSpam,
+  mediaAssets,
+  mediaOccurrences,
+  mediaWorkspaceId,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -52,6 +57,9 @@ export function DashboardShell({
   formDeliveryHealth: PublicFormDeliveryHealth;
   failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
+  mediaAssets: ReadonlyArray<MediaAsset>;
+  mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
+  mediaWorkspaceId: string;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined
@@ -82,7 +90,7 @@ export function DashboardShell({
           </a>
           <span aria-disabled="true">Pages</span>
           <span aria-disabled="true">Design</span>
-          <span aria-disabled="true">Media</span>
+          <a href="#media-heading">Media</a>
           <p className="nav-label">Operate</p>
           <span aria-disabled="true">Forms</span>
           <span aria-disabled="true">Analytics</span>
@@ -121,13 +129,16 @@ export function DashboardShell({
               staleRecovery={staleRecovery}
             />
           ) : (
-            <ContentEditor
+            <WorkspaceEditors
               csrfToken={contentMutationToken}
-              initialRevision={contentRevision}
+              contentRevision={contentRevision}
               initialPreviewUrl={initialPreviewUrl}
-              initialStale={initialContentStale}
+              initialContentStale={initialContentStale}
               activeWorkspaceUrl={activeWorkspaceUrl}
               staleRecovery={staleRecovery}
+              mediaAssets={mediaAssets}
+              mediaOccurrences={mediaOccurrences}
+              mediaWorkspaceId={mediaWorkspaceId}
             />
           )}
           <section aria-labelledby="foundation-status">

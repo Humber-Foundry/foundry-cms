@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import {
   AccessDeniedError,
   type ContentRevision,
+  type MediaAsset,
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   createContentActorId,
@@ -12,6 +13,7 @@ import {
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import { InvitationActivation } from "@/components/invitation-activation";
+import { mergeMediaOccurrenceState } from "@/components/media-manager-state";
 import { AccessIdentityError } from "@/src/access-identity";
 import {
   loadHumanAccessRequestContext,
@@ -174,6 +176,11 @@ export default async function DashboardPage({
       throw error;
     }
   }
+  const mediaAssets: ReadonlyArray<MediaAsset> = [];
+  const mediaOccurrences = mergeMediaOccurrenceState(
+    [],
+    contentRevision?.definition.home.media ?? [],
+  );
 
   return (
     <DashboardShell
@@ -190,6 +197,9 @@ export default async function DashboardPage({
       formDeliveryHealth={formOperations.health}
       failedFormDeliveries={formOperations.failedDeliveries}
       suspectedSpam={formOperations.suspectedSpam}
+      mediaAssets={mediaAssets}
+      mediaOccurrences={mediaOccurrences}
+      mediaWorkspaceId={workspaceId}
     />
   );
 }
