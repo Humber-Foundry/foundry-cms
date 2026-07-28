@@ -8,7 +8,7 @@ import type {
   ContentRevision,
   ContentWorkspaceId,
 } from "./content-revisions";
-import { canonicalJson } from "./content-revisions";
+import { canonicalJson } from "./deterministic-hash";
 import type { HumanMembershipId } from "./human-access";
 
 export const publishedSiteDefinitionPath =

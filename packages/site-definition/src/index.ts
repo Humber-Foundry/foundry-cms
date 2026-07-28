@@ -54,33 +54,6 @@ export type SiteMediaOccurrence = Readonly<{
   crop: SiteMediaCrop | null;
 }>;
 
-export const siteDefinitionValidationKeywords = [
-  {
-    keyword: "xFoundryCropWithinSource",
-    schemaType: "boolean",
-    type: "object",
-    validate(
-      enabled: boolean,
-      crop: Readonly<{
-        x?: unknown;
-        y?: unknown;
-        width?: unknown;
-        height?: unknown;
-      }>,
-    ) {
-      return (
-        !enabled ||
-        (typeof crop.x === "number" &&
-          typeof crop.y === "number" &&
-          typeof crop.width === "number" &&
-          typeof crop.height === "number" &&
-          crop.x + crop.width <= 1 &&
-          crop.y + crop.height <= 1)
-      );
-    },
-  },
-] as const;
-
 export type HeroSection = Readonly<{
   id: string;
   type: "hero";

@@ -3,8 +3,9 @@ import { resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import standaloneCode from "ajv/dist/standalone/index.js";
-import { _ } from "ajv/dist/compile/codegen/index.js";
 import { createServer } from "vite";
+
+import { siteDefinitionValidationKeywords } from "./site-definition-validation-keywords.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
 const vite = await createServer({
@@ -21,19 +22,9 @@ try {
     allErrors: true,
     code: { esm: true, source: true },
   });
-  ajv.addKeyword({
-    keyword: "xFoundryCropWithinSource",
-    schemaType: "boolean",
-    type: "object",
-    code(context) {
-      if (context.schema === true) {
-        const { data } = context;
-        context.fail(
-          _`${data}.x + ${data}.width > 1 || ${data}.y + ${data}.height > 1`,
-        );
-      }
-    },
-  });
+  for (const keyword of siteDefinitionValidationKeywords) {
+    ajv.addKeyword(keyword);
+  }
   const validate = ajv.compile(siteDefinitionSchema);
   const generatedValidator = standaloneCode(ajv, validate).replace(
     'const func1 = require("ajv/dist/runtime/ucs2length").default;',

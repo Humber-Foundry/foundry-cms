@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
 
+import { siteDefinitionValidationKeywords } from "../scripts/site-definition-validation-keywords.mjs";
 import {
   applySiteDefinitionEdits,
   createReferenceSiteDefinition,
@@ -10,7 +11,6 @@ import {
   listEditableSiteFields,
   referenceSiteDefinition,
   siteDefinitionSchema,
-  siteDefinitionValidationKeywords,
   type SiteDefinition,
 } from "./index";
 
@@ -80,7 +80,7 @@ describe("reference Site Definition", () => {
     );
   });
 
-  it("continues to validate saved 1.0 definitions created before media manifests", () => {
+  it("keeps media optional for definitions saved before media manifests", () => {
     const legacy = structuredClone(referenceSiteDefinition) as unknown as Record<
       string,
       any

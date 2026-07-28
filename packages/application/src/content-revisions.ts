@@ -9,7 +9,6 @@ import {
   type SiteMediaOccurrence,
 } from "@foundry/site-definition";
 import { sha256CanonicalJson } from "./deterministic-hash";
-export { canonicalJson } from "./deterministic-hash";
 
 export type ContentRevisionInputs = Readonly<{
   contentHash: string;
