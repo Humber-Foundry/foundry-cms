@@ -169,6 +169,15 @@ function isSameContentOccurrence(
   );
 }
 
+function isSameOptionalContentOccurrence(
+  left: Parameters<typeof isSameContentOccurrence>[0],
+  right: Parameters<typeof isSameContentOccurrence>[0],
+) {
+  return left === undefined
+    ? right === undefined
+    : right !== undefined && isSameContentOccurrence(left, right);
+}
+
 async function bindOccurrenceToContentRevision({
   actorId,
   idempotencyKey,
@@ -235,6 +244,13 @@ async function bindOccurrenceToContentRevision({
         contentRevision = current;
         break;
       }
+      const originalBinding = (binding.current.definition.home.media ?? []).find(
+        (candidate) =>
+          candidate.occurrenceId === boundOccurrence.occurrenceId,
+      );
+      if (!isSameOptionalContentOccurrence(currentBinding, originalBinding)) {
+        throw error;
+      }
       const mediaHead = await application.queries.getOccurrence(
         workspaceId,
         occurrence.occurrenceId,
@@ -291,7 +307,7 @@ async function loadContentBinding(
   if (!(await contentApplication.queries.isRevisionCurrent(current))) {
     throw new ContentRevisionStaleError(current.revision);
   }
-  return { workspaceId, contentBaseRevision, contentApplication };
+  return { workspaceId, contentBaseRevision, contentApplication, current };
 }
 
 export async function POST(request: Request) {
@@ -362,9 +378,22 @@ export async function POST(request: Request) {
       );
       const binding = await loadContentBinding(body, actorId);
       const crop = body.crop as Record<string, unknown> | undefined;
+      const occurrenceId = createMediaOccurrenceId(
+        String(body.occurrenceId ?? ""),
+      );
+      const workspaceOccurrence = await application.queries.getOccurrence(
+        binding.workspaceId,
+        occurrenceId,
+      );
+      const inheritedOccurrence = (
+        binding.current.definition.home.media ?? []
+      ).find((candidate) => candidate.occurrenceId === occurrenceId);
       const occurrence = await application.commands.cropOccurrence({
         actorId,
-        occurrenceId: createMediaOccurrenceId(String(body.occurrenceId ?? "")),
+        occurrenceId,
+        assetId:
+          workspaceOccurrence?.assetId ??
+          createMediaAssetId(inheritedOccurrence?.asset.assetId ?? ""),
         baseRevision,
         workspaceId: binding.workspaceId,
         crop: {

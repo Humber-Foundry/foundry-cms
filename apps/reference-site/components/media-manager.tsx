@@ -5,9 +5,9 @@ import { useRef, useState } from "react";
 import type {
   ContentRevision,
   MediaAsset,
-  MediaOccurrenceRevision,
 } from "@foundry/application";
 import { renderedMediaOccurrenceIds } from "@foundry/application";
+import { createMediaOccurrenceId } from "@foundry/application";
 import { requireRenderedMediaOccurrenceId } from "@foundry/application";
 
 import { MediaOccurrence } from "./media-occurrence";
@@ -15,6 +15,7 @@ import {
   cropForOccurrence,
   cropForSelectedRevision,
   mediaOccurrenceMutationsEnabled,
+  type MediaOccurrenceState,
 } from "./media-manager-state";
 import {
   mediaUploadAttemptAfterResult,
@@ -44,7 +45,7 @@ export function MediaManager({
 }: {
   csrfToken: string;
   initialAssets: ReadonlyArray<MediaAsset>;
-  initialOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
+  initialOccurrences: ReadonlyArray<MediaOccurrenceState>;
   contentRevision?: ContentRevision;
   contentStale?: boolean;
   onRevisionSaved(revision: ContentRevision, previewUrl: string): void;
@@ -160,7 +161,7 @@ export function MediaManager({
       },
     };
     const result = (await mutateJson(replaceAttempt.current)) as {
-        occurrence: MediaOccurrenceRevision;
+        occurrence: MediaOccurrenceState;
         contentRevision: ContentRevision;
         previewUrl: string;
       };
@@ -210,7 +211,7 @@ export function MediaManager({
         },
       };
       const result = (await mutateJson(cropAttempt.current)) as {
-        occurrence: MediaOccurrenceRevision;
+        occurrence: MediaOccurrenceState;
         contentRevision: ContentRevision;
         previewUrl: string;
       };
@@ -399,7 +400,7 @@ export function MediaManager({
                 className="media-manager-preview"
                 occurrence={{
                   occurrenceId: requireRenderedMediaOccurrenceId(
-                    occurrence.occurrenceId,
+                    createMediaOccurrenceId(occurrence.occurrenceId),
                   ),
                   revision: occurrence.revision,
                   asset: {

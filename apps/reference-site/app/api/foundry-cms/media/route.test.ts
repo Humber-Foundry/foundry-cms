@@ -196,6 +196,62 @@ describe("media endpoint", () => {
     expect(mocks.crop).not.toHaveBeenCalled();
   });
 
+  it("crops an inherited content occurrence into workspace-local revision one", async () => {
+    mocks.getOccurrence.mockResolvedValueOnce(null);
+    mocks.getCurrentContent.mockResolvedValue({
+      revision: 2,
+      definition: {
+        home: {
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 8,
+              asset: {
+                assetId: "asset_replacement",
+                width: 1600,
+                height: 900,
+                contentType: "image/png",
+              },
+              crop: null,
+            },
+          ],
+        },
+      },
+    });
+    mocks.crop.mockResolvedValue({
+      occurrenceId: "occurrence_home_hero",
+      revision: 1,
+      assetId: "asset_replacement",
+      crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+    });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "crop-inherited-media-0001",
+        },
+        body: JSON.stringify({
+          operation: "crop",
+          occurrenceId: "occurrence_home_hero",
+          baseRevision: 0,
+          crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.crop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset_replacement",
+        baseRevision: 0,
+      }),
+    );
+  });
+
   it("does not rebind an older occurrence over a newer same-slot revision", async () => {
     mocks.replace.mockResolvedValue({
       occurrenceId: "occurrence_home_hero",
@@ -206,16 +262,26 @@ describe("media endpoint", () => {
     mocks.saveMediaOccurrence.mockRejectedValue(
       new ContentRevisionConflictError(3),
     );
-    mocks.getOccurrence.mockResolvedValueOnce({
-      occurrenceId: "occurrence_home_hero",
-      revision: 3,
-      assetId: "asset_newer",
-      crop: null,
-    });
     mocks.getCurrentContent
       .mockResolvedValueOnce({
         revision: 2,
-        definition: { home: { media: [] } },
+        definition: {
+          home: {
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 2,
+                asset: {
+                  assetId: "asset_inherited",
+                  width: 800,
+                  height: 600,
+                  contentType: "image/png",
+                },
+                crop: null,
+              },
+            ],
+          },
+        },
       })
       .mockResolvedValueOnce({
         revision: 3,
@@ -269,7 +335,23 @@ describe("media endpoint", () => {
     mocks.getCurrentContent
       .mockResolvedValueOnce({
         revision: 2,
-        definition: { home: { media: [] } },
+        definition: {
+          home: {
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 2,
+                asset: {
+                  assetId: "asset_inherited",
+                  width: 800,
+                  height: 600,
+                  contentType: "image/png",
+                },
+                crop: null,
+              },
+            ],
+          },
+        },
       })
       .mockResolvedValueOnce({
         revision: 3,

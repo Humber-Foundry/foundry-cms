@@ -92,6 +92,7 @@ describe("D1 media asset store", () => {
       actorId,
       workspaceId,
       occurrenceId,
+      assetId,
       baseRevision: 1,
       crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
       idempotencyKey: "crop-d1-hero",

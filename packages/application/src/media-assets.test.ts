@@ -200,6 +200,29 @@ describe("media asset application", () => {
     ).resolves.toMatchObject({ revision: 1, assetId: assetB });
   });
 
+  it("creates a workspace-local crop revision from an inherited asset", async () => {
+    const { application } = setup();
+    await upload(application, assetA);
+
+    const cropped = await application.commands.cropOccurrence({
+      actorId: editor,
+      workspaceId: workspaceB,
+      occurrenceId: occurrenceA,
+      assetId: assetA,
+      baseRevision: 0,
+      crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+      idempotencyKey: "crop-inherited-hero",
+    });
+
+    expect(cropped).toMatchObject({
+      workspaceId: workspaceB,
+      occurrenceId: occurrenceA,
+      revision: 1,
+      assetId: assetA,
+      crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+    });
+  });
+
   it("rejects a save against an asset whose deletion already completed", async () => {
     const { application, assets } = setup();
     await upload(application, assetC);
@@ -357,6 +380,7 @@ describe("media asset application", () => {
       actorId: editor,
       workspaceId: workspaceA,
       occurrenceId: occurrenceA,
+      assetId: assetA,
       baseRevision: 1,
       crop: { x: 0.1, y: 0.2, width: 0.6, height: 0.5 },
       idempotencyKey: "crop-hero",

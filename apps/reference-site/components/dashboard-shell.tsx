@@ -3,7 +3,6 @@ import type {
   FailedPublicFormDelivery,
   HumanMembership,
   MediaAsset,
-  MediaOccurrenceRevision,
   PublicFormDeliveryHealth,
   SuspectedSpamSubmission,
 } from "@foundry/application";
@@ -14,6 +13,7 @@ import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
 import { MediaManager } from "./media-manager";
+import type { MediaOccurrenceState } from "./media-manager-state";
 import { WorkspaceEditors } from "./workspace-editors";
 
 export function DashboardShell({
@@ -48,7 +48,7 @@ export function DashboardShell({
   failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
   mediaAssets: ReadonlyArray<MediaAsset>;
-  mediaOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
+  mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined

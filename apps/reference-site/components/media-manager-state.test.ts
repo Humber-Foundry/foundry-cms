@@ -4,6 +4,7 @@ import {
   cropForOccurrence,
   cropForSelectedRevision,
   mediaOccurrenceMutationsEnabled,
+  mergeMediaOccurrenceState,
 } from "./media-manager-state";
 
 describe("media manager crop state", () => {
@@ -43,5 +44,25 @@ describe("media manager crop state", () => {
     expect(mediaOccurrenceMutationsEnabled(true, { revision: 3 })).toBe(false);
     expect(mediaOccurrenceMutationsEnabled(false, { revision: 3 })).toBe(true);
     expect(mediaOccurrenceMutationsEnabled(false, undefined)).toBe(false);
+  });
+
+  it("hydrates inherited content bindings as workspace revision zero", () => {
+    expect(
+      mergeMediaOccurrenceState([], [
+        {
+          occurrenceId: "occurrence_home_hero",
+          revision: 7,
+          asset: { assetId: "asset_inherited" },
+          crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+        },
+      ]),
+    ).toEqual([
+      {
+        occurrenceId: "occurrence_home_hero",
+        revision: 0,
+        assetId: "asset_inherited",
+        crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+      },
+    ]);
   });
 });

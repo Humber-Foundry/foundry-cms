@@ -12,6 +12,7 @@ import {
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import { InvitationActivation } from "@/components/invitation-activation";
+import { mergeMediaOccurrenceState } from "@/components/media-manager-state";
 import { AccessIdentityError } from "@/src/access-identity";
 import {
   loadHumanAccessRequestContext,
@@ -174,6 +175,10 @@ export default async function DashboardPage({
     if (error instanceof MediaAssetConfigurationError) notFound();
     throw error;
   }
+  mediaOccurrences = mergeMediaOccurrenceState(
+    mediaOccurrences,
+    contentRevision?.definition.home.media ?? [],
+  );
 
   return (
     <DashboardShell

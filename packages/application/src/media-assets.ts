@@ -258,6 +258,7 @@ type CropMediaOccurrenceCommand = Readonly<{
   actorId: ContentActorId;
   workspaceId: ContentWorkspaceId;
   occurrenceId: MediaOccurrenceId;
+  assetId: MediaAssetId;
   crop: MediaCrop;
   baseRevision: number;
   idempotencyKey: string;
@@ -559,11 +560,19 @@ export function createMediaAssetApplication({
               command.workspaceId,
               command.occurrenceId,
             );
-            if (current === null) {
+            if (
+              (await assets.getAsset(siteId, command.assetId)) === null ||
+              (current !== null && current.assetId !== command.assetId)
+            ) {
               throw new MediaSiteAccessError();
             }
             const revision: MediaOccurrenceRevision = {
-              ...current,
+              ...(current ?? {
+                siteId,
+                workspaceId: command.workspaceId,
+                occurrenceId: command.occurrenceId,
+                assetId: command.assetId,
+              }),
               revision: command.baseRevision + 1,
               crop: command.crop,
               createdAt: now(),

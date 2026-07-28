@@ -5,11 +5,11 @@ import { useCallback, useState } from "react";
 import type {
   ContentRevision,
   MediaAsset,
-  MediaOccurrenceRevision,
 } from "@foundry/application";
 
 import { ContentEditor } from "./content-editor";
 import { MediaManager } from "./media-manager";
+import type { MediaOccurrenceState } from "./media-manager-state";
 import { advanceWorkspaceRevisionHead } from "./workspace-revision";
 
 export function WorkspaceEditors({
@@ -29,7 +29,7 @@ export function WorkspaceEditors({
   activeWorkspaceUrl: string;
   staleRecovery?: Readonly<{ id: string; sourceWorkspaceId: string }>;
   mediaAssets: ReadonlyArray<MediaAsset>;
-  mediaOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
+  mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
 }) {
   const [head, setHead] = useState({
     revision: initialContentRevision,
