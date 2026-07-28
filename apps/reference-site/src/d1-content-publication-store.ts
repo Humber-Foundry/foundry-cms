@@ -319,6 +319,21 @@ export function createD1ContentPublicationStore(
       );
   }
 
+  function reconciliationOrderStatement(
+    publication: ContentPublication,
+    mutationToken: string,
+  ) {
+    return database
+      .prepare(
+        `INSERT INTO blog_publication_reconciliation_order (publication_id)
+         SELECT id
+         FROM content_publications
+         WHERE id = ?1 AND mutation_token = ?2
+         ON CONFLICT (publication_id) DO NOTHING`,
+      )
+      .bind(publication.id, mutationToken);
+  }
+
   async function insertPublication(
     publication: ContentPublication,
     requireCurrentApproval: boolean,
@@ -331,6 +346,7 @@ export function createD1ContentPublicationStore(
         mutationToken,
       ),
       auditStatement(publication, mutationToken),
+      reconciliationOrderStatement(publication, mutationToken),
     ]);
     return results[0]?.meta.changes ?? 0;
   }

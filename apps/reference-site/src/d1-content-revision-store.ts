@@ -226,9 +226,9 @@ export async function findVerifiedPublicationOrder(
 ): Promise<Readonly<{ id: string; sequence: number }>> {
   const row = await database
     .prepare(
-      `SELECT rowid AS sequence
-       FROM content_publications
-       WHERE id = ?1`,
+      `SELECT sequence
+       FROM blog_publication_reconciliation_order
+       WHERE publication_id = ?1`,
     )
     .bind(publicationId)
     .first<{ sequence: number }>();
@@ -359,7 +359,28 @@ export function createD1ContentRevisionStore(
                  last_verified_publication_sequence,
                  version, updated_at
                ) VALUES (
-                 ?1, ?2, 'active', ?3, ?4, ?3, ?5, NULL, NULL, ?3, ?6
+                 ?1, ?2, 'active', ?3, ?4, ?3, ?5,
+                 (
+                   SELECT publication_order.publication_id
+                   FROM blog_publication_reconciliation_order
+                     AS publication_order
+                   JOIN content_publications AS publication
+                     ON publication.id = publication_order.publication_id
+                   WHERE publication.status = 'verified-live'
+                   ORDER BY publication_order.sequence DESC
+                   LIMIT 1
+                 ),
+                 (
+                   SELECT publication_order.sequence
+                   FROM blog_publication_reconciliation_order
+                     AS publication_order
+                   JOIN content_publications AS publication
+                     ON publication.id = publication_order.publication_id
+                   WHERE publication.status = 'verified-live'
+                   ORDER BY publication_order.sequence DESC
+                   LIMIT 1
+                 ),
+                 ?3, ?6
                )
                ON CONFLICT (site_id, post_id) DO NOTHING`,
             )
