@@ -58,6 +58,12 @@ export function createDefaultPageSection(
   id: string,
   definition?: SiteDefinition,
 ): PageSection {
+  const existingCallToAction = definition?.home.sections.find(
+    (section) => section.type === "callToAction",
+  );
+  const contactNavigation = definition?.site.navigation.find(
+    (link) => link.href.startsWith("mailto:"),
+  );
   const linkTo = (preferredType?: PageComponentType): SiteHref => {
     const target =
       definition?.home.sections.find(
@@ -125,8 +131,14 @@ export function createDefaultPageSection(
         body: "Explain what will happen next.",
         action: {
           id: `${id}_action`,
-          label: "Get in touch",
-          href: "mailto:hello@example.com",
+          label:
+            existingCallToAction?.action.label ??
+            contactNavigation?.label ??
+            "Continue",
+          href:
+            existingCallToAction?.action.href ??
+            contactNavigation?.href ??
+            linkTo(),
         },
       };
   }

@@ -6,6 +6,7 @@ import {
   pageCompositionContract,
   referenceSiteDefinition,
   toPageComposition,
+  type SiteDefinition,
 } from "./index";
 
 describe("page component composition", () => {
@@ -130,6 +131,54 @@ describe("page component composition", () => {
         }),
       }),
     });
+  });
+
+  it("derives an inserted call-to-action destination from the active Site Definition", () => {
+    const existing = referenceSiteDefinition.home.sections[3];
+    if (existing.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const clientDefinition = {
+      ...referenceSiteDefinition,
+      site: {
+        ...referenceSiteDefinition.site,
+        navigation: [],
+      },
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          ...referenceSiteDefinition.home.sections.slice(0, 3),
+          {
+            ...existing,
+            action: {
+              ...existing.action,
+              label: "Contact Acme",
+              href: "mailto:studio@acme.example",
+            },
+          },
+        ],
+      },
+    } as SiteDefinition;
+    const inserted = createDefaultPageSection(
+      "callToAction",
+      "section_second_contact",
+      clientDefinition,
+    );
+
+    expect(inserted).toEqual(
+      expect.objectContaining({
+        action: expect.objectContaining({
+          label: "Contact Acme",
+          href: "mailto:studio@acme.example",
+        }),
+      }),
+    );
+    expect(
+      applyPageComposition(clientDefinition, {
+        slotId: "slot_home_sections",
+        components: [...clientDefinition.home.sections, inserted],
+      }).ok,
+    ).toBe(true);
   });
 
   it("accepts semantically equal protected scaffolding regardless of object key order", () => {

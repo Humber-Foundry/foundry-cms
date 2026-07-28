@@ -57,6 +57,13 @@ export function createContentEditorState({
   };
 }
 
+function definitionsAreEqual(
+  first: SiteDefinition,
+  second: SiteDefinition,
+): boolean {
+  return JSON.stringify(first) === JSON.stringify(second);
+}
+
 export function contentEditorReducer(
   state: ContentEditorState,
   action: ContentEditorAction,
@@ -93,8 +100,10 @@ export function contentEditorReducer(
           state.projectionVersion +
           (action.refreshProjection ? 1 : 0),
         status:
-          JSON.stringify(action.definition) ===
-          JSON.stringify(state.persistedDefinition)
+          definitionsAreEqual(
+            action.definition,
+            state.persistedDefinition,
+          )
             ? "saved"
             : "dirty",
         errors: {},
@@ -111,7 +120,12 @@ export function contentEditorReducer(
         future: [state.workingDefinition, ...state.future],
         projectionVersion: state.projectionVersion + 1,
         status:
-          workingDefinition === state.persistedDefinition ? "saved" : "dirty",
+          definitionsAreEqual(
+            workingDefinition,
+            state.persistedDefinition,
+          )
+            ? "saved"
+            : "dirty",
         errors: {},
       };
     }
@@ -127,7 +141,12 @@ export function contentEditorReducer(
         future,
         projectionVersion: state.projectionVersion + 1,
         status:
-          workingDefinition === state.persistedDefinition ? "saved" : "dirty",
+          definitionsAreEqual(
+            workingDefinition,
+            state.persistedDefinition,
+          )
+            ? "saved"
+            : "dirty",
         errors: {},
       };
     }

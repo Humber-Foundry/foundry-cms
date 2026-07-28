@@ -24,6 +24,7 @@ import {
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
+  resolveStructuralRecovery,
   synchronizeStaleEdits,
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
@@ -318,19 +319,20 @@ export function ContentEditor({
       );
       return;
     }
+    const destinationValues = new Map([
+      ...workingFields.map(
+        (field) => [field.path, field.value] as const,
+      ),
+      [
+        pageCompositionContract.slot.id,
+        JSON.stringify(toPageComposition(state.workingDefinition)),
+      ] as const,
+    ]);
     const { available, recovered, conflicts } = recoverStaleEdits(
       recoveryStorage,
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
-      new Map([
-        ...workingFields.map(
-          (field) => [field.path, field.value] as const,
-        ),
-        [
-          pageCompositionContract.slot.id,
-          JSON.stringify(toPageComposition(state.workingDefinition)),
-        ],
-      ]),
+      destinationValues,
     );
     if (!available) {
       setMessage(
@@ -338,33 +340,41 @@ export function ContentEditor({
       );
       return;
     }
-    recoveryPending.current = [...recovered, ...conflicts];
     if (initialStale) {
+      recoveryPending.current = [...recovered, ...conflicts];
       return;
     }
+    const applied: StaleRecoveryEdit[] = [];
+    const nextConflicts = [...conflicts];
     for (const edit of recovered) {
       if (edit.path === pageCompositionContract.slot.id) {
-        const result = applyStructuralRecovery(
+        const result = resolveStructuralRecovery(
           initialRevision.definition,
           edit,
+          destinationValues.get(edit.path) ?? null,
         );
         if (result.ok) {
+          applied.push(edit);
           dispatch({
             type: "compose",
             definition: result.definition,
             refreshProjection: true,
           });
+        } else {
+          nextConflicts.push(result.conflict);
         }
       } else {
+        applied.push(edit);
         dispatch({ type: "edit", ...edit });
       }
     }
-    setRecoveryConflicts(conflicts);
-    if (conflicts.length > 0) {
+    recoveryPending.current = [...applied, ...nextConflicts];
+    setRecoveryConflicts(nextConflicts);
+    if (nextConflicts.length > 0) {
       setMessage(
         "Some unsaved edits overlap newer values or changed field paths. Choose how to resolve each one.",
       );
-    } else if (recovered.length > 0) {
+    } else if (applied.length > 0) {
       setMessage(
         "Unsaved edits were recovered in this fresh workspace. Review and save them when ready.",
       );

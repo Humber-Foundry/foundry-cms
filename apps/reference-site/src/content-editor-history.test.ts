@@ -84,6 +84,32 @@ describe("content editor history", () => {
     expect(restored.status).toBe("saved");
   });
 
+  it("marks semantically persisted clones as saved after undo and redo", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const cloned = contentEditorReducer(initial, {
+      type: "compose",
+      definition: structuredClone(referenceSiteDefinition),
+    });
+    const edited = contentEditorReducer(cloned, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Working headline",
+    });
+    const undoneToClone = contentEditorReducer(edited, { type: "undo" });
+    const undoneToOriginal = contentEditorReducer(undoneToClone, {
+      type: "undo",
+    });
+    const redoneToClone = contentEditorReducer(undoneToOriginal, {
+      type: "redo",
+    });
+
+    expect(undoneToClone.status).toBe("saved");
+    expect(redoneToClone.status).toBe("saved");
+  });
+
   it("refreshes the Puck projection for externally recovered composition", () => {
     const initial = createContentEditorState({
       definition: referenceSiteDefinition,

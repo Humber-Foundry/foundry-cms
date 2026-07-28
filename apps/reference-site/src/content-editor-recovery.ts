@@ -45,6 +45,26 @@ export function applyStructuralRecovery(
   }
 }
 
+export function resolveStructuralRecovery(
+  definition: SiteDefinition,
+  edit: StaleRecoveryEdit,
+  currentValue: string | null,
+):
+  | Readonly<{ ok: true; definition: SiteDefinition }>
+  | Readonly<{ ok: false; conflict: StaleRecoveryConflict }> {
+  const result = applyStructuralRecovery(definition, edit);
+  return result.ok
+    ? result
+    : {
+        ok: false,
+        conflict: {
+          ...edit,
+          currentValue,
+          reason: "changed",
+        },
+      };
+}
+
 export function excludeCompositionOwnedEdits(
   edits: ReadonlyArray<StaleRecoveryEdit>,
   components: ReadonlyArray<PageSection>,

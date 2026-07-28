@@ -14,6 +14,7 @@ import {
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
+  resolveStructuralRecovery,
   synchronizeStaleEdits,
 } from "./content-editor-recovery";
 
@@ -226,6 +227,38 @@ describe("stale edit recovery", () => {
         value: "{malformed",
       }),
     ).toEqual({ ok: false });
+  });
+
+  it("retains a recovered structural edit as a conflict when revalidation fails", () => {
+    const currentValue = JSON.stringify(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const composition = toPageComposition(referenceSiteDefinition);
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: currentValue,
+      value: JSON.stringify({
+        ...composition,
+        components: composition.components.filter(
+          ({ id }) => id !== "section_contact",
+        ),
+      }),
+    };
+
+    expect(
+      resolveStructuralRecovery(
+        referenceSiteDefinition,
+        edit,
+        currentValue,
+      ),
+    ).toEqual({
+      ok: false,
+      conflict: {
+        ...edit,
+        currentValue,
+        reason: "changed",
+      },
+    });
   });
 
   it("surfaces a same-path concurrent change as a three-way conflict", () => {
