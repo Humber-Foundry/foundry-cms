@@ -287,12 +287,12 @@ export function VisualComponentEditor({
   const [message, setMessage] = useState("");
   const active = useRef(true);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    active.current = true;
+    return () => {
       active.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   function accept(data: Data<RegisteredComponents>) {
     if (!active.current || disabled) {

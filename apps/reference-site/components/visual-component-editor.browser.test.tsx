@@ -257,14 +257,18 @@ describe("visual component editor browser acceptance", () => {
     let latest: SiteDefinition = referenceSiteDefinition;
     flushSync(() => {
       root.render(
-        createElement(VisualComponentEditor, {
-          definition: referenceSiteDefinition,
-          disabled: false,
-          iframeEnabled: false,
-          onChange: (definition) => {
-            latest = definition;
-          },
-        }),
+        createElement(
+          StrictMode,
+          null,
+          createElement(VisualComponentEditor, {
+            definition: referenceSiteDefinition,
+            disabled: false,
+            iframeEnabled: false,
+            onChange: (definition) => {
+              latest = definition;
+            },
+          }),
+        ),
       );
     });
     await new Promise<void>((resolve) => {
