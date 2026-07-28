@@ -1410,15 +1410,19 @@ export function createContentPublicationApplication({
         const recoverableCandidate = await store.findLatestPublication(
           approval.workspaceId,
         );
-        const definiteGitFailureCanBeRetried =
-          recoverableCandidate?.status === "failed" &&
-          recoverableCandidate.commitSha === null &&
-          recoverableCandidate.detail === "git_operation_failed";
+        const terminalAttemptCanBeRestarted =
+          recoverableCandidate?.commitSha === null &&
+          ((recoverableCandidate.status === "failed" &&
+            recoverableCandidate.detail === "git_operation_failed") ||
+            (recoverableCandidate.status === "blocked" &&
+              (recoverableCandidate.detail === "publication_in_progress" ||
+                recoverableCandidate.detail ===
+                  "publication_lease_lost")));
         if (
           recoverableCandidate !== null &&
           recoverableCandidate.approvalId === approval.id &&
           recoverableCandidate.fingerprint === approval.fingerprint.value &&
-          !definiteGitFailureCanBeRetried
+          !terminalAttemptCanBeRestarted
         ) {
           return activeStatuses.has(recoverableCandidate.status)
             ? (await refreshPublication(recoverableCandidate.id)) ??

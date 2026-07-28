@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   contentPublicationCanRetry,
+  contentPublicationHistoryRefreshKey,
   contentPublicationPollDelay,
   loadContentPublication,
   loadContentPublicationHistory,
@@ -54,6 +55,21 @@ describe("content publication client", () => {
     expect(
       [0, 1, 2, 3, 4, 20].map(contentPublicationPollDelay),
     ).toEqual([2_500, 5_000, 10_000, 20_000, 30_000, 30_000]);
+  });
+
+  it("refreshes history when publication evidence changes without a status change", () => {
+    const publication = {
+      id: "publish_evidence",
+      status: "building",
+      updatedAt: "2026-07-27T10:01:00.000Z",
+    } as const;
+
+    expect(
+      contentPublicationHistoryRefreshKey({
+        ...publication,
+        updatedAt: "2026-07-27T10:02:00.000Z",
+      }),
+    ).not.toBe(contentPublicationHistoryRefreshKey(publication));
   });
 
   it("retries the exact mutation once with a refreshed human token", async () => {

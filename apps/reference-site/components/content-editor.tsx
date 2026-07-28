@@ -19,6 +19,7 @@ import {
 } from "../src/content-editor-history";
 import {
   contentPublicationCanRetry,
+  contentPublicationHistoryRefreshKey,
   contentPublicationPollDelay,
   loadContentPublication,
   refreshContentPublication,
@@ -1319,7 +1320,7 @@ export function ContentEditor({
         mutationToken={mutationToken}
         onMutationToken={setMutationToken}
         onMessage={setMessage}
-        refreshKey={`${publication?.id ?? ""}:${publication?.status ?? ""}`}
+        refreshKey={contentPublicationHistoryRefreshKey(publication)}
       />
       <p role="status" aria-live="polite" className="editor-message">
         {message}

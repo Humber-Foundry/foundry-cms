@@ -914,6 +914,9 @@ export function createGitHubContentPublisher({
           separator === -1
             ? null
             : signedMessage.slice(separator + 2);
+        if (!(await input.assertLease())) {
+          return { state: "blocked", detail: "publication_lease_lost" };
+        }
         gitSideEffectStarted = true;
         const result = await graphqlRequest(
           token,

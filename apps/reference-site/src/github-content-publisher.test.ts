@@ -1326,11 +1326,16 @@ describe("GitHub content publisher", () => {
         assertLease,
       }),
     ).resolves.toEqual({
-      state: "committed",
-      commitSha: "c".repeat(40),
+      state: "blocked",
+      detail: "publication_lease_lost",
     });
-    expect(assertLease).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(assertLease).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/graphql"),
+      ),
+    ).toBe(false);
   });
 
   it("requires two uncached exact release-marker reads before reporting live", async () => {

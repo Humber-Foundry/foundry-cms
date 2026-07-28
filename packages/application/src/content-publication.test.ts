@@ -506,6 +506,122 @@ describe("content publication application", () => {
     expect(createCommit).toHaveBeenCalledTimes(2);
   });
 
+  it("starts a new publication after a lease is lost before Git mutation", async () => {
+    createCommit
+      .mockResolvedValueOnce({
+        state: "blocked",
+        detail: "publication_lease_lost",
+      })
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      });
+    const { app, approval } = await approve();
+
+    const blocked = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-lease-loss",
+    });
+    expect(blocked).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        commitSha: null,
+        detail: "publication_lease_lost",
+      }),
+    );
+
+    const retried = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-after-lease-loss",
+    });
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(retried.id).not.toBe(blocked.id);
+    expect(createCommit).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts a new publication after its competing global claim ends", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const competing = {
+      id: createContentPublicationId(`publish_${"8".repeat(32)}`),
+      workspaceId: createContentWorkspaceId("workspace_competing"),
+      revision: 1,
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+      idempotencyKey: "competing-publication-claim",
+      requestedBy: membershipId,
+      contributors: [editorId],
+      expectedHead: productionCommit,
+      status: "requested" as const,
+      commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
+      detail: null,
+      leaseToken: "competing-lease",
+      leaseExpiresAt: "2026-07-27T11:00:00.000Z",
+      requestedAt: "2026-07-27T09:00:00.000Z",
+      updatedAt: "2026-07-27T09:00:00.000Z",
+    };
+    await store.claimPublication(competing);
+
+    const blocked = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-while-competing",
+    });
+    expect(blocked).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        detail: "publication_in_progress",
+      }),
+    );
+
+    await store.updatePublication({
+      ...competing,
+      status: "failed",
+      detail: "git_operation_failed",
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:03:30.000Z",
+    });
+    const retried = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-after-competing",
+    });
+
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(retried.id).not.toBe(blocked.id);
+    expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
   it("does not publish an approval through a different workspace boundary", async () => {
     const { app, approval } = await approve();
 

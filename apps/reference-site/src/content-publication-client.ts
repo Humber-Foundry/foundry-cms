@@ -9,6 +9,18 @@ export type ContentPublicationAttempt = Readonly<{
   idempotencyKey: string;
 }>;
 
+export function contentPublicationHistoryRefreshKey(
+  publication: Readonly<{
+    id: string;
+    status: string;
+    updatedAt: string;
+  }> | null,
+) {
+  return publication === null
+    ? ""
+    : `${publication.id}:${publication.status}:${publication.updatedAt}`;
+}
+
 type Fetcher = typeof fetch;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
