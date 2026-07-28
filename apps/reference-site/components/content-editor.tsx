@@ -29,9 +29,10 @@ import {
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
 import {
-  createContentEditorOutboxController,
-  type ContentEditorOutboxRecord,
-} from "../src/content-editor-outbox";
+  outboxAttemptMatchesWorkspace,
+  useContentEditorAutosave,
+  useContentEditorPersistence,
+} from "../src/content-editor-persistence";
 import { pageCompositionChanged } from "../src/page-composition-puck";
 import { VisualComponentEditor } from "./visual-component-editor";
 
@@ -83,14 +84,9 @@ export function ContentEditor({
   const [mutationToken, setMutationToken] = useState(csrfToken);
   const [previewUrl, setPreviewUrl] = useState(initialPreviewUrl);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
-  const [outboxReady, setOutboxReady] = useState(false);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
-  const pendingAttempt = useRef<{
-    body: string;
-    idempotencyKey: string;
-  } | null>(null);
   const pendingWorkspaceAttempt = useRef<{
     body: string;
     idempotencyKey: string;
@@ -99,11 +95,6 @@ export function ContentEditor({
   const recoveryApplied = useRef(false);
   const recoverySyncReady = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
-  const outboxController = useMemo(
-    () => createContentEditorOutboxController(initialRevision.workspaceId),
-    [initialRevision.workspaceId],
-  );
-  const lastAutosaveFingerprint = useRef<string | null>(null);
   const saveInFlight = useRef(false);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
@@ -153,6 +144,14 @@ export function ContentEditor({
     },
     [composition, edits, persistedFields, state.persistedDefinition],
   );
+  const persistence = useContentEditorPersistence({
+    workspaceId: initialRevision.workspaceId,
+    baseRevision: state.persistedRevision,
+    edits: recoverableEdits,
+    editorStatus: state.status,
+    recoveryBlocked: recoveryConflicts.length > 0,
+    onStorageError: setMessage,
+  });
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
     state.status === "saving" ||
@@ -166,8 +165,8 @@ export function ContentEditor({
   }, [state.status]);
 
   function preserveOutboxWithoutAttempt(): void {
-    void outboxController
-      .snapshot(state.persistedRevision, recoverableEdits)
+    void persistence
+      .preserveWithoutAttempt()
       .catch(() => {
         setMessage(
           "Browser recovery storage could not be updated. Keep this tab open until these edits are resolved.",
@@ -175,30 +174,9 @@ export function ContentEditor({
       });
   }
 
-  function outboxAttemptMatchesCurrentWorkspace(
-    record: ContentEditorOutboxRecord,
-  ): boolean {
-    if (record.attempt === undefined) {
-      return false;
-    }
-    try {
-      const body: unknown = JSON.parse(record.attempt.body);
-      return (
-        typeof body === "object" &&
-        body !== null &&
-        "workspaceId" in body &&
-        body.workspaceId === initialRevision.workspaceId &&
-        "baseRevision" in body &&
-        body.baseRevision === record.baseRevision
-      );
-    } catch {
-      return false;
-    }
-  }
-
   useEffect(() => {
     let cancelled = false;
-    void outboxController
+    void persistence
       .read()
       .then((record) => {
         if (cancelled || record === null || record.edits.length === 0) {
@@ -271,7 +249,7 @@ export function ContentEditor({
         }
         if (alreadyAppliedCount === record.edits.length) {
           recoveryPending.current = [];
-          void outboxController.clear();
+          void persistence.clear();
           setMessage(
             `Revision ${state.persistedRevision} already contains the browser's last autosave.`,
           );
@@ -281,9 +259,12 @@ export function ContentEditor({
         if (
           conflicts.length === 0 &&
           record.baseRevision === state.persistedRevision &&
-          outboxAttemptMatchesCurrentWorkspace(record)
+          outboxAttemptMatchesWorkspace(
+            record,
+            initialRevision.workspaceId,
+          )
         ) {
-          pendingAttempt.current = record.attempt!;
+          persistence.restoreAttempt(record.attempt!);
         }
         if (conflicts.length > 0) {
           setMessage(
@@ -306,7 +287,7 @@ export function ContentEditor({
       })
       .finally(() => {
         if (!cancelled) {
-          setOutboxReady(true);
+          persistence.finishHydration();
         }
       });
     return () => {
@@ -440,32 +421,16 @@ export function ContentEditor({
       return;
     }
     saveInFlight.current = true;
-    lastAutosaveFingerprint.current = JSON.stringify(recoverableEdits);
-    if (pendingAttempt.current === null) {
-      pendingAttempt.current = {
-        body: JSON.stringify({
-          workspaceId: initialRevision.workspaceId,
-          schemaVersion: state.persistedDefinition.schemaVersion,
-          baseRevision: state.persistedRevision,
-          edits,
-          ...(composition === undefined ? {} : { composition }),
-        }),
-        idempotencyKey: crypto.randomUUID(),
-      };
-    }
-    const attempt = pendingAttempt.current;
     dispatch({ type: "saving" });
-    try {
-      await outboxController.saveAttempt(
-        state.persistedRevision,
-        recoverableEdits,
-        attempt,
-      );
-    } catch {
-      setMessage(
-        "Browser recovery storage is unavailable. This save will continue with its stable retry identity.",
-      );
-    }
+    const attempt = await persistence.beginAttempt(
+      JSON.stringify({
+        workspaceId: initialRevision.workspaceId,
+        schemaVersion: state.persistedDefinition.schemaVersion,
+        baseRevision: state.persistedRevision,
+        edits,
+        ...(composition === undefined ? {} : { composition }),
+      }),
+    );
     try {
       const result = await sendContentRevisionAttempt({
         attempt,
@@ -481,7 +446,6 @@ export function ContentEditor({
         typeof body.fields === "object" &&
         body.fields !== null
       ) {
-        pendingAttempt.current = null;
         preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
@@ -497,7 +461,6 @@ export function ContentEditor({
         "error" in body &&
         body.error === "revision_conflict"
       ) {
-        pendingAttempt.current = null;
         preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
@@ -522,7 +485,6 @@ export function ContentEditor({
           (body.acknowledgedRevision as number) >= 0
             ? (body.acknowledgedRevision as number)
             : undefined;
-        pendingAttempt.current = null;
         preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
@@ -541,10 +503,9 @@ export function ContentEditor({
         throw new Error("content_revision_save_failed");
       }
       const saved = body as SaveResponse;
-      pendingAttempt.current = null;
       let outboxCleared = true;
       try {
-        await outboxController.clear();
+        await persistence.acknowledge();
       } catch {
         outboxCleared = false;
       }
@@ -599,72 +560,21 @@ export function ContentEditor({
     }
   }
 
-  useEffect(() => {
-    if (
-      !outboxReady ||
-      pendingAttempt.current !== null ||
-      state.status === "saving" ||
-      state.status === "conflict" ||
-      state.status === "stale" ||
-      recoveryConflicts.length > 0
-    ) {
-      return;
-    }
-    const persistence =
-      recoverableEdits.length === 0
-        ? outboxController.clear()
-        : outboxController.snapshot(
-            state.persistedRevision,
-            recoverableEdits,
-          );
-    void persistence.catch(() => {
-      setMessage(
-        "Browser recovery storage could not record the latest edit. Keep this tab open until it is saved.",
-      );
-    });
-  }, [
-    outboxReady,
-    recoverableEdits,
-    recoveryConflicts,
-    state.persistedRevision,
-    state.status,
-  ]);
-
-  useEffect(() => {
-    if (
-      !outboxReady ||
-      state.status !== "dirty" ||
-      recoverableEdits.length === 0 ||
-      recoveryConflicts.length > 0
-    ) {
-      return;
-    }
-    const autosave = () => {
-      const fingerprint = JSON.stringify(recoverableEdits);
-      if (lastAutosaveFingerprint.current === fingerprint) {
-        return;
-      }
-      lastAutosaveFingerprint.current = fingerprint;
-      void save();
-    };
-    const timer = window.setTimeout(autosave, 250);
-    window.addEventListener("blur", autosave);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("blur", autosave);
-    };
-  }, [
-    outboxReady,
-    recoverableEdits,
-    recoveryConflicts,
-    state.status,
-  ]);
+  useContentEditorAutosave({
+    enabled:
+      persistence.ready &&
+      state.status === "dirty" &&
+      recoverableEdits.length > 0 &&
+      recoveryConflicts.length === 0,
+    fingerprint: JSON.stringify(recoverableEdits),
+    onSave: () => void save(),
+  });
 
   function edit(path: string, value: string) {
     if (saveInFlight.current) {
       return;
     }
-    pendingAttempt.current = null;
+    persistence.discardAttempt();
     dispatch({ type: "edit", path, value });
   }
 
@@ -748,7 +658,7 @@ export function ContentEditor({
           conflict,
         );
         if (result.ok) {
-          pendingAttempt.current = null;
+          persistence.discardAttempt();
           dispatch({
             type: "compose",
             definition: result.definition,
@@ -772,11 +682,8 @@ export function ContentEditor({
         candidate.path !== conflict.path || resolution === "mine",
     );
     void (recoveryPending.current.length === 0
-      ? outboxController.clear()
-      : outboxController.snapshot(
-          state.persistedRevision,
-          recoveryPending.current,
-        )
+      ? persistence.clear()
+      : persistence.snapshot(recoveryPending.current)
     ).catch(() => {
       setMessage(
         "That choice is active in this tab, but browser recovery storage could not be updated.",
@@ -830,6 +737,7 @@ export function ContentEditor({
             disabled={state.past.length === 0 || editorLocked}
             onClick={() => {
               if (!saveInFlight.current) {
+                persistence.discardAttempt();
                 dispatch({ type: "undo" });
               }
             }}
@@ -842,6 +750,7 @@ export function ContentEditor({
             disabled={state.future.length === 0 || editorLocked}
             onClick={() => {
               if (!saveInFlight.current) {
+                persistence.discardAttempt();
                 dispatch({ type: "redo" });
               }
             }}
@@ -955,7 +864,7 @@ export function ContentEditor({
           if (saveInFlight.current) {
             return;
           }
-          pendingAttempt.current = null;
+          persistence.discardAttempt();
           dispatch({ type: "compose", definition });
         }}
       />
