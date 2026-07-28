@@ -134,7 +134,7 @@ export type ContentPublicationHistoryEntry = Readonly<{
 export type ContentPublishedRevisionReader = Readonly<{
   readPublishedArtifact(input: {
     commitSha: string;
-    path: typeof publishedSiteDefinitionPath;
+    path: ContentPublicationArtifact["path"];
   }): Promise<string | null>;
 }>;
 
