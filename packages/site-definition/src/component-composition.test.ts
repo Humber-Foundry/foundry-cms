@@ -88,6 +88,50 @@ describe("page component composition", () => {
     });
   });
 
+  it("derives inserted Hero links from the active Site Definition", () => {
+    const proof = referenceSiteDefinition.home.sections[2];
+    const clientDefinition = {
+      ...referenceSiteDefinition,
+      site: {
+        ...referenceSiteDefinition.site,
+        navigation: [],
+      },
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [proof],
+      },
+    };
+    const hero = createDefaultPageSection(
+      "hero",
+      "section_client_hero",
+      clientDefinition,
+    );
+
+    expect(hero).toEqual(
+      expect.objectContaining({
+        primaryAction: expect.objectContaining({
+          href: "#section_proof",
+        }),
+        secondaryAction: expect.objectContaining({
+          href: "#section_proof",
+        }),
+      }),
+    );
+    expect(
+      applyPageComposition(clientDefinition, {
+        slotId: "slot_home_sections",
+        components: [hero, proof],
+      }),
+    ).toEqual({
+      ok: true,
+      definition: expect.objectContaining({
+        home: expect.objectContaining({
+          sections: [hero, proof],
+        }),
+      }),
+    });
+  });
+
   it("accepts semantically equal protected scaffolding regardless of object key order", () => {
     const composition = structuredClone(
       toPageComposition(referenceSiteDefinition),

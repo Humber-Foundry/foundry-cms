@@ -1,11 +1,12 @@
 import type { StaleRecoveryEdit } from "./content-editor-recovery";
 
 const databaseName = "foundry-cms-content-editor";
-const storeName = "workspace-outbox";
+const storeName = "workspace-tab-outbox";
 const maximumOutboxEdits = 500;
 
 export type ContentEditorOutboxRecord = Readonly<{
   workspaceId: string;
+  tabId: string;
   baseRevision: number;
   edits: ReadonlyArray<StaleRecoveryEdit>;
   attempt?: Readonly<{
@@ -15,19 +16,22 @@ export type ContentEditorOutboxRecord = Readonly<{
 }>;
 
 type ContentEditorOutboxDriver = Readonly<{
-  read(workspaceId: string): Promise<ContentEditorOutboxRecord | null>;
+  read(
+    workspaceId: string,
+    tabId: string,
+  ): Promise<ContentEditorOutboxRecord | null>;
   write(record: ContentEditorOutboxRecord): Promise<void>;
-  clear(workspaceId: string): Promise<void>;
+  clear(workspaceId: string, tabId: string): Promise<void>;
 }>;
 
 function openOutbox(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(databaseName, 1);
+    const request = indexedDB.open(databaseName, 2);
     request.onerror = () => reject(request.error);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(storeName)) {
         request.result.createObjectStore(storeName, {
-          keyPath: "workspaceId",
+          keyPath: ["workspaceId", "tabId"],
         });
       }
     };
@@ -74,11 +78,14 @@ function isOutboxAttempt(
 
 export async function readContentEditorOutbox(
   workspaceId: string,
+  tabId: string,
 ): Promise<ContentEditorOutboxRecord | null> {
   const database = await openOutbox();
   try {
     const transaction = database.transaction(storeName, "readonly");
-    const request = transaction.objectStore(storeName).get(workspaceId);
+    const request = transaction
+      .objectStore(storeName)
+      .get([workspaceId, tabId]);
     const result = await new Promise<unknown>((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -89,6 +96,8 @@ export async function readContentEditorOutbox(
       result === null ||
       !("workspaceId" in result) ||
       result.workspaceId !== workspaceId ||
+      !("tabId" in result) ||
+      result.tabId !== tabId ||
       !("baseRevision" in result) ||
       !Number.isSafeInteger(result.baseRevision) ||
       !("edits" in result) ||
@@ -124,11 +133,12 @@ export async function writeContentEditorOutbox(
 
 export async function clearContentEditorOutbox(
   workspaceId: string,
+  tabId: string,
 ): Promise<void> {
   const database = await openOutbox();
   try {
     const transaction = database.transaction(storeName, "readwrite");
-    transaction.objectStore(storeName).delete(workspaceId);
+    transaction.objectStore(storeName).delete([workspaceId, tabId]);
     await complete(transaction);
   } finally {
     database.close();
@@ -137,6 +147,7 @@ export async function clearContentEditorOutbox(
 
 export function createContentEditorOutboxController(
   workspaceId: string,
+  tabId: string,
   driver: ContentEditorOutboxDriver = {
     read: readContentEditorOutbox,
     write: writeContentEditorOutbox,
@@ -157,6 +168,7 @@ export function createContentEditorOutboxController(
     serialize(() =>
       driver.write({
         workspaceId,
+        tabId,
         baseRevision,
         edits,
         ...(attempt === undefined ? {} : { attempt }),
@@ -164,7 +176,7 @@ export function createContentEditorOutboxController(
     );
 
   return Object.freeze({
-    read: () => driver.read(workspaceId),
+    read: () => driver.read(workspaceId, tabId),
     snapshot: (
       baseRevision: number,
       edits: ReadonlyArray<StaleRecoveryEdit>,
@@ -174,6 +186,6 @@ export function createContentEditorOutboxController(
       edits: ReadonlyArray<StaleRecoveryEdit>,
       attempt: NonNullable<ContentEditorOutboxRecord["attempt"]>,
     ) => record(baseRevision, edits, attempt),
-    clear: () => serialize(() => driver.clear(workspaceId)),
+    clear: () => serialize(() => driver.clear(workspaceId, tabId)),
   });
 }

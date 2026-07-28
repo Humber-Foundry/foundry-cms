@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  contentEditorTabId,
   contentEditorPersistenceTransition,
   outboxAttemptMatchesWorkspace,
   type ContentEditorPersistenceState,
@@ -64,6 +65,7 @@ describe("content editor persistence lifecycle", () => {
   it("replays an attempt only for its matching workspace and base revision", () => {
     const record = {
       workspaceId: "workspace_transition",
+      tabId: "tab_transition",
       baseRevision: 6,
       edits: [],
       attempt,
@@ -81,5 +83,24 @@ describe("content editor persistence lifecycle", () => {
         "workspace_transition",
       ),
     ).toBe(false);
+  });
+
+  it("keeps one durable owner ID per browser tab", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem(key: string) {
+        return values.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        values.set(key, value);
+      },
+    };
+
+    expect(contentEditorTabId(storage, () => "tab_owner_0001")).toBe(
+      "tab_owner_0001",
+    );
+    expect(contentEditorTabId(storage, () => "tab_owner_0002")).toBe(
+      "tab_owner_0001",
+    );
   });
 });

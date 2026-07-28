@@ -17,6 +17,7 @@ import {
   readContentEditorOutbox,
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
+import { contentEditorTabId } from "../src/content-editor-persistence";
 
 describe("visual component editor browser acceptance", () => {
   const mounted: Array<ReturnType<typeof createRoot>> = [];
@@ -112,6 +113,7 @@ describe("visual component editor browser acceptance", () => {
     );
     const config = createVisualComponentConfig(
       new Set(["section_contact"]),
+      referenceSiteDefinition,
     );
     expect(
       config.components.callToAction.resolvePermissions!(
@@ -129,9 +131,11 @@ describe("visual component editor browser acceptance", () => {
 
   it("round-trips unsaved structural edits through the browser outbox", async () => {
     const workspaceId = "workspace_browser_acceptance";
-    await clearContentEditorOutbox(workspaceId);
+    const tabId = "tab_browser_acceptance";
+    await clearContentEditorOutbox(workspaceId, tabId);
     await writeContentEditorOutbox({
       workspaceId,
+      tabId,
       baseRevision: 12,
       edits: [
         {
@@ -147,8 +151,9 @@ describe("visual component editor browser acceptance", () => {
       },
     });
 
-    expect(await readContentEditorOutbox(workspaceId)).toEqual({
+    expect(await readContentEditorOutbox(workspaceId, tabId)).toEqual({
       workspaceId,
+      tabId,
       baseRevision: 12,
       edits: [
         {
@@ -163,13 +168,14 @@ describe("visual component editor browser acceptance", () => {
         idempotencyKey: "browser-outbox-attempt-0001",
       },
     });
-    await clearContentEditorOutbox(workspaceId);
-    expect(await readContentEditorOutbox(workspaceId)).toBeNull();
+    await clearContentEditorOutbox(workspaceId, tabId);
+    expect(await readContentEditorOutbox(workspaceId, tabId)).toBeNull();
   });
 
   it("records an accepted edit before the autosave debounce", async () => {
     const workspaceId = "workspace_browser_snapshot";
-    await clearContentEditorOutbox(workspaceId);
+    const tabId = contentEditorTabId();
+    await clearContentEditorOutbox(workspaceId, tabId);
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -205,13 +211,14 @@ describe("visual component editor browser acceptance", () => {
     expect(siteName).toBeDefined();
     await userEvent.fill(siteName!, "Recovered immediately");
 
-    let record = await readContentEditorOutbox(workspaceId);
+    let record = await readContentEditorOutbox(workspaceId, tabId);
     for (let index = 0; record === null && index < 5; index += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 10));
-      record = await readContentEditorOutbox(workspaceId);
+      record = await readContentEditorOutbox(workspaceId, tabId);
     }
     expect(record).toEqual({
       workspaceId,
+      tabId,
       baseRevision: 4,
       edits: [
         {
@@ -221,6 +228,6 @@ describe("visual component editor browser acceptance", () => {
         },
       ],
     });
-    await clearContentEditorOutbox(workspaceId);
+    await clearContentEditorOutbox(workspaceId, tabId);
   });
 });

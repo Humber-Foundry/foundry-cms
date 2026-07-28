@@ -139,7 +139,7 @@ export function puckDataToDefinition(
     );
     const base =
       existing ??
-      createDefaultPageSection(componentType, id);
+      createDefaultPageSection(componentType, id, definition);
     const editableProps =
       pageCompositionContract.components[componentType].editableProps;
     const section = structuredClone(base) as unknown as Record<

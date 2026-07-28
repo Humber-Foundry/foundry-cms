@@ -10,6 +10,36 @@ import {
 import type { StaleRecoveryEdit } from "./content-editor-recovery";
 
 type SaveAttempt = NonNullable<ContentEditorOutboxRecord["attempt"]>;
+const contentEditorTabStorageKey = "foundry-cms:content-editor-tab-id";
+
+export function contentEditorTabId(
+  storage?: Pick<Storage, "getItem" | "setItem">,
+  createId: () => string = () => crypto.randomUUID(),
+): string {
+  let target = storage;
+  if (target === undefined && typeof window !== "undefined") {
+    try {
+      target = window.sessionStorage;
+    } catch {
+      // A fresh fallback still isolates this tab for its current lifetime.
+    }
+  }
+  try {
+    const existing = target?.getItem(contentEditorTabStorageKey);
+    if (
+      existing !== null &&
+      existing !== undefined &&
+      /^[A-Za-z0-9._:-]{8,128}$/u.test(existing)
+    ) {
+      return existing;
+    }
+    const created = createId();
+    target?.setItem(contentEditorTabStorageKey, created);
+    return created;
+  } catch {
+    return createId();
+  }
+}
 
 export type ContentEditorPersistenceState = Readonly<{
   phase: "loading" | "ready" | "snapshot" | "attempt";
@@ -79,7 +109,11 @@ export function useContentEditorPersistence({
   onStorageError(message: string): void;
 }) {
   const controller = useMemo(
-    () => createContentEditorOutboxController(workspaceId),
+    () =>
+      createContentEditorOutboxController(
+        workspaceId,
+        contentEditorTabId(),
+      ),
     [workspaceId],
   );
   const [lifecycle, transition] = useReducer(

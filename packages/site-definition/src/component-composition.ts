@@ -1,6 +1,7 @@
 import type {
   PageSection,
   SiteDefinition,
+  SiteHref,
 } from "./index";
 
 export type PageComponentType = PageSection["type"];
@@ -55,7 +56,17 @@ export const pageCompositionContract = Object.freeze({
 export function createDefaultPageSection(
   type: PageComponentType,
   id: string,
+  definition?: SiteDefinition,
 ): PageSection {
+  const linkTo = (preferredType?: PageComponentType): SiteHref => {
+    const target =
+      definition?.home.sections.find(
+        (section) => section.type === preferredType,
+      ) ?? definition?.home.sections[0];
+    return target === undefined
+      ? "mailto:hello@example.com"
+      : `#${target.id}`;
+  };
   switch (type) {
     case "hero":
       return {
@@ -67,12 +78,12 @@ export function createDefaultPageSection(
         primaryAction: {
           id: `${id}_primary`,
           label: "Primary action",
-          href: "#section_contact",
+          href: linkTo("callToAction"),
         },
         secondaryAction: {
           id: `${id}_secondary`,
           label: "Learn more",
-          href: "#section_services",
+          href: linkTo("services"),
         },
       };
     case "services":
@@ -522,7 +533,7 @@ export function applyPageComposition(
     const scaffoldAllowed =
       existing === undefined
         ? equalProtectedShape(
-            createDefaultPageSection(section.type, id),
+            createDefaultPageSection(section.type, id, definition),
             section,
           ) ||
           definition.home.sections

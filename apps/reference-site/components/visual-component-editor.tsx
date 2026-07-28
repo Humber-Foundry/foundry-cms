@@ -183,30 +183,51 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
 
 export function createVisualComponentConfig(
   protectedComponentIds: ReadonlySet<string>,
+  definition: SiteDefinition,
 ): Config<RegisteredComponents> {
   return {
     ...visualComponentConfig,
     components: {
       hero: {
         ...visualComponentConfig.components.hero,
+        defaultProps: createDefaultPageSection(
+          "hero",
+          "section_new_hero",
+          definition,
+        ) as HeroSection,
         resolvePermissions: (data) => ({
           delete: !protectedComponentIds.has(data.props.id),
         }),
       },
       services: {
         ...visualComponentConfig.components.services,
+        defaultProps: createDefaultPageSection(
+          "services",
+          "section_new_services",
+          definition,
+        ) as ServicesSection,
         resolvePermissions: (data) => ({
           delete: !protectedComponentIds.has(data.props.id),
         }),
       },
       proof: {
         ...visualComponentConfig.components.proof,
+        defaultProps: createDefaultPageSection(
+          "proof",
+          "section_new_proof",
+          definition,
+        ) as ProofSection,
         resolvePermissions: (data) => ({
           delete: !protectedComponentIds.has(data.props.id),
         }),
       },
       callToAction: {
         ...visualComponentConfig.components.callToAction,
+        defaultProps: createDefaultPageSection(
+          "callToAction",
+          "section_new_call_to_action",
+          definition,
+        ) as CallToActionSection,
         resolvePermissions: (data) => ({
           delete: !protectedComponentIds.has(data.props.id),
         }),
@@ -234,6 +255,7 @@ export function VisualComponentEditor({
     () =>
       createVisualComponentConfig(
         referencedPageComponentIds(definition),
+        definition,
       ),
     [definition],
   );
