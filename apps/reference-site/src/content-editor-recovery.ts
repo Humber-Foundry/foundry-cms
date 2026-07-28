@@ -5,6 +5,7 @@ import {
   type SiteDefinition,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
+import { canonicalJson } from "@foundry/application";
 
 const staleEditRecoveryPrefix = "foundry-cms:stale-edit-recovery";
 const maximumRecoveredEdits = 500;
@@ -127,7 +128,7 @@ export function applyStructuralRecovery(
         if (
           base !== undefined &&
           !targetIds.has(current.id) &&
-          JSON.stringify(current) !== JSON.stringify(base)
+          canonicalJson(current) !== canonicalJson(base)
         ) {
           return { ok: false };
         }

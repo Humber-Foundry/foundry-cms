@@ -6,6 +6,7 @@ import {
   durableSchemaRecoveryEdits,
   mergeDurableAndOutboxRecoveryEdits,
 } from "./content-schema-recovery";
+import { applyStructuralRecovery } from "./content-editor-recovery";
 
 function legacyDefinition(
   name: string = referenceSiteDefinition.site.name,
@@ -44,6 +45,45 @@ describe("content schema recovery", () => {
         legacyDefinition(),
       ),
     ).toEqual([]);
+  });
+
+  it("recovers a legacy component removal independent of upgraded key order", () => {
+    const base = legacyDefinition();
+    base.home.sections.push({
+      id: "section_legacy_extra",
+      type: "proof",
+      quote: "Remove this legacy section",
+      attribution: "Legacy draft",
+      metrics: [],
+    });
+    const current = structuredClone(base);
+    current.home.sections = current.home.sections.filter(
+      (section: any) => section.id !== "section_legacy_extra",
+    );
+    const [structural] = durableSchemaRecoveryEdits(base, current);
+    const destination = structuredClone(referenceSiteDefinition) as any;
+    destination.home.sections.push({
+      id: "section_legacy_extra",
+      type: "proof",
+      variant: "panel",
+      quote: "Remove this legacy section",
+      attribution: "Legacy draft",
+      metrics: [],
+    });
+
+    const recovered = applyStructuralRecovery(
+      destination,
+      structural!,
+    );
+
+    expect(recovered.ok).toBe(true);
+    if (recovered.ok) {
+      expect(
+        recovered.definition.home.sections.some(
+          ({ id }) => id === "section_legacy_extra",
+        ),
+      ).toBe(false);
+    }
   });
 
   it("layers an unsaved value over the durable three-way base", () => {
