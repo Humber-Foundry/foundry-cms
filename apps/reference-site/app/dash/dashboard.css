@@ -306,6 +306,17 @@
   background: var(--white);
 }
 
+.media-manager-preview {
+  max-width: 100%;
+  margin-inline: 0;
+}
+
+.media-manager-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 .editor-heading {
   align-items: center;
 }

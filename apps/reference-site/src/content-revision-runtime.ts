@@ -7,6 +7,7 @@ import {
   createContentRevisionApplication,
   createContentWorkspaceId,
   createInMemoryContentRevisionStore,
+  createMediaOccurrenceId,
   type ContentWorkspaceId,
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
@@ -19,6 +20,10 @@ import {
   loadHumanAccessEnvironment,
   type HumanAccessEnvironment,
 } from "./human-access-environment";
+import {
+  localMediaAssetStore,
+  localMediaContentCoordinator,
+} from "./media-asset-runtime";
 
 type LocalContentRevisionStore = ReturnType<
   typeof createInMemoryContentRevisionStore
@@ -160,6 +165,25 @@ function applicationFor({
   });
 }
 
+function cropsMatch(
+  left:
+    | Readonly<{ x: number; y: number; width: number; height: number }>
+    | null,
+  right:
+    | Readonly<{ x: number; y: number; width: number; height: number }>
+    | null,
+): boolean {
+  return (
+    (left === null && right === null) ||
+    (left !== null &&
+      right !== null &&
+      left.x === right.x &&
+      left.y === right.y &&
+      left.width === right.width &&
+      left.height === right.height)
+  );
+}
+
 export async function loadContentRevisionApplication(
   workspaceId: ContentWorkspaceId,
   actorId: ContentActorId,
@@ -168,7 +192,23 @@ export async function loadContentRevisionApplication(
     let store =
       localRuntime.__foundryContentRevisionStores!.get(workspaceId);
     if (store === undefined) {
-      store = createInMemoryContentRevisionStore();
+      const mediaAssets = localMediaAssetStore();
+      store = createInMemoryContentRevisionStore({
+        mediaContentCoordinator: localMediaContentCoordinator(),
+        isMediaOccurrenceCurrent: async (expected) => {
+          const current = await mediaAssets.getOccurrence(
+            referenceSiteDefinition.site.id,
+            workspaceId,
+            createMediaOccurrenceId(expected.occurrenceId),
+          );
+          return (
+            current !== null &&
+            current.revision === expected.revision &&
+            current.assetId === expected.assetId &&
+            cropsMatch(current.crop, expected.crop)
+          );
+        },
+      });
       localRuntime.__foundryContentRevisionStores!.set(workspaceId, store);
     }
     return applicationFor({

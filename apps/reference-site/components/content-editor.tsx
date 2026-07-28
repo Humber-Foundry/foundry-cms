@@ -14,6 +14,7 @@ import {
 
 import {
   contentEditorReducer,
+  contentEditorStatusLocked,
   createContentEditorState,
 } from "../src/content-editor-history";
 import {
@@ -99,6 +100,10 @@ export function ContentEditor({
   initialStale = false,
   activeWorkspaceUrl,
   staleRecovery,
+  revisionHead = initialRevision,
+  revisionHeadPreviewUrl = initialPreviewUrl,
+  onRevisionSaved = () => undefined,
+  onContentStale = () => undefined,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
@@ -109,6 +114,11 @@ export function ContentEditor({
     id: string;
     sourceWorkspaceId: string;
   }>;
+  revisionHead?: ContentRevision;
+  revisionHeadPreviewUrl?: string;
+  onRevisionSaved?(revision: ContentRevision, previewUrl: string): void;
+  onContentStale?(): void;
+  mediaAccessToken?: string;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -134,6 +144,7 @@ export function ContentEditor({
     useState<PublicationRecord | null>(null);
   const [publicationBusy, setPublicationBusy] = useState(false);
   const [publicationPollAttempt, setPublicationPollAttempt] = useState(0);
+  const [openingPreview, setOpeningPreview] = useState(false);
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -144,6 +155,7 @@ export function ContentEditor({
   const pendingApprovalAttempt = useRef<{
     body: string;
     idempotencyKey: string;
+    revision: number;
   } | null>(null);
   const pendingPublicationAttempt = useRef<{
     body: string;
@@ -161,10 +173,15 @@ export function ContentEditor({
     staleRecovery === undefined,
   );
   const saveInFlight = useRef(false);
+  const latestRevisionHead = useRef(revisionHead.revision);
+  latestRevisionHead.current = revisionHead.revision;
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
   );
+  useEffect(() => {
+    setPreviewUrl(revisionHeadPreviewUrl);
+  }, [revisionHeadPreviewUrl]);
   const workingFields = useMemo(
     () => listEditableSiteFields(state.workingDefinition),
     [state.workingDefinition],
@@ -226,10 +243,28 @@ export function ContentEditor({
   const editorLocked =
     !persistence.coordinated ||
     !persistence.ready ||
-    state.status === "saving" ||
-    state.status === "stale" ||
+    contentEditorStatusLocked(state.status) ||
     recoveryConflicts.length > 0 ||
     publicationBusy;
+
+  useEffect(() => {
+    if (revisionHead.revision > state.persistedRevision) {
+      persistence.discardAttempt();
+      dispatch({
+        type: "externalRevision",
+        definition: revisionHead.definition,
+        revision: revisionHead.revision,
+      });
+      setApprovalId(null);
+      setPublication((current) =>
+        current !== null && publicationIsActive(current) ? current : null,
+      );
+      setPreviewedRevision(null);
+      pendingApprovalAttempt.current = null;
+      pendingPublicationAttempt.current = null;
+      pendingDeploymentRetryAttempt.current = null;
+    }
+  }, [persistence, revisionHead, state.persistedRevision]);
 
   useEffect(() => {
     if (state.status !== "saving") {
@@ -610,7 +645,8 @@ export function ContentEditor({
     if (
       saveInFlight.current ||
       !persistence.coordinated ||
-      !persistence.ready
+      !persistence.ready ||
+      contentEditorStatusLocked(state.status)
     ) {
       return;
     }
@@ -686,6 +722,7 @@ export function ContentEditor({
           acknowledgedRevision,
           errors: {},
         });
+        onContentStale();
         setMessage(
           acknowledgedRevision === undefined
             ? "This workspace is based on an older production version. Start a fresh workspace to edit the current site; this draft will remain preserved."
@@ -747,7 +784,8 @@ export function ContentEditor({
       setPreviewedRevision(null);
       pendingApprovalAttempt.current = null;
       pendingPublicationAttempt.current = null;
-      setPreviewUrl(saved.previewUrl);
+      pendingDeploymentRetryAttempt.current = null;
+      onRevisionSaved(saved, saved.previewUrl);
       setMessage(
         outboxCleared
           ? `Revision ${saved.revision} saved.`
@@ -758,6 +796,46 @@ export function ContentEditor({
       setMessage(
         "The save result could not be confirmed. Retry to check the same request.",
       );
+    }
+  }
+
+  async function openPreview() {
+    const popup = window.open("", "_blank");
+    if (popup !== null) popup.opener = null;
+    setOpeningPreview(true);
+    try {
+      const result = await sendContentRevisionAttempt({
+        attempt: {
+          body: JSON.stringify({
+            operation: "open_preview",
+            workspaceId: initialRevision.workspaceId,
+            revision: state.persistedRevision,
+          }),
+          idempotencyKey: crypto.randomUUID(),
+        },
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (
+        !result.response.ok ||
+        typeof result.body !== "object" ||
+        result.body === null ||
+        !("previewUrl" in result.body) ||
+        typeof result.body.previewUrl !== "string"
+      ) {
+        throw new Error("preview_access_grant_failed");
+      }
+      setPreviewedRevision(state.persistedRevision);
+      if (popup === null) {
+        window.open(result.body.previewUrl, "_blank", "noopener,noreferrer");
+      } else {
+        popup.location.href = result.body.previewUrl;
+      }
+    } catch {
+      popup?.close();
+      setMessage("The audited preview could not be opened. Try again.");
+    } finally {
+      setOpeningPreview(false);
     }
   }
 
@@ -777,7 +855,8 @@ export function ContentEditor({
       publicationBusy ||
       saveInFlight.current ||
       !persistence.coordinated ||
-      !persistence.ready
+      !persistence.ready ||
+      contentEditorStatusLocked(state.status)
     ) {
       return;
     }
@@ -810,12 +889,14 @@ export function ContentEditor({
         previewConfirmed: true,
       }),
       idempotencyKey: crypto.randomUUID(),
+      revision: state.persistedRevision,
     };
+    const attempt = pendingApprovalAttempt.current;
     setPublicationBusy(true);
     setMessage("");
     try {
       const result = await sendContentPublicationAttempt({
-        attempt: pendingApprovalAttempt.current,
+        attempt,
         mutationToken,
       });
       setMutationToken(result.mutationToken);
@@ -831,6 +912,10 @@ export function ContentEditor({
       ) {
         throw new Error("content_approval_failed");
       }
+      if (latestRevisionHead.current !== attempt.revision) {
+        pendingApprovalAttempt.current = null;
+        return;
+      }
       setApprovalId(result.body.approval.id);
       pendingPublicationAttempt.current = null;
       pendingDeploymentRetryAttempt.current = null;
@@ -839,7 +924,7 @@ export function ContentEditor({
       );
       pendingApprovalAttempt.current = null;
       setMessage(
-        `Revision ${state.persistedRevision} approved. It is ready to publish while every bound input remains unchanged.`,
+        `Revision ${attempt.revision} approved. It is ready to publish while every bound input remains unchanged.`,
       );
     } catch {
       setMessage(
@@ -1147,14 +1232,16 @@ export function ContentEditor({
         {state.status === "stale" ? (
           <span>Saved preview unavailable for the current production version</span>
         ) : (
-          <a
-            href={previewUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={() => setPreviewedRevision(state.persistedRevision)}
+          <button
+            type="button"
+            className="copy-button"
+            disabled={openingPreview || previewUrl === undefined}
+            onClick={() => void openPreview()}
           >
-            Preview exact saved revision ↗
-          </a>
+            {openingPreview
+              ? "Opening audited preview…"
+              : "Preview exact saved revision ↗"}
+          </button>
         )}
         {state.status === "conflict" || state.status === "stale" ? (
           <button
@@ -1304,7 +1391,10 @@ export function ContentEditor({
         definition={state.workingDefinition}
         disabled={editorLocked}
         onChange={(definition) => {
-          if (saveInFlight.current) {
+          if (
+            saveInFlight.current ||
+            contentEditorStatusLocked(state.status)
+          ) {
             return;
           }
           persistence.discardAttempt();

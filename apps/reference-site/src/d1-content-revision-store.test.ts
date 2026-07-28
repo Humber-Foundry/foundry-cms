@@ -37,12 +37,17 @@ describe("D1 content revision store", () => {
       d1Databases: ["FOUNDRY_DB"],
     });
     database = await miniflare.getD1Database("FOUNDRY_DB");
-    const migration = await readFile(
-      new URL("../migrations/0005_content_revisions.sql", import.meta.url),
-      "utf8",
-    );
-    for (const statement of migration.trim().split(/\n\n+/)) {
-      await database.prepare(statement).run();
+    for (const name of [
+      "0005_content_revisions.sql",
+      "0008_media_assets.sql",
+    ]) {
+      const migration = await readFile(
+        new URL(`../migrations/${name}`, import.meta.url),
+        "utf8",
+      );
+      for (const statement of migration.trim().split(/\n\n+/)) {
+        await database.prepare(statement).run();
+      }
     }
   });
 
@@ -143,6 +148,77 @@ describe("D1 content revision store", () => {
         .bind(workspaceId)
         .first<{ count: number }>(),
     ).toEqual({ count: 0 });
+  });
+
+  it("atomically rejects a media binding after the occurrence head advances", async () => {
+    const application = createApplication();
+    await createWorkspace(application, "d1-content-media-race-create");
+    await database
+      .prepare(
+        `INSERT INTO media_assets (
+           site_id, asset_id, object_key, source_hash, file_name, content_type,
+           byte_length, width, height, created_at, created_by
+         ) VALUES (?1, 'asset_hero', 'media/site/asset/source', ?2,
+           'hero.png', 'image/png', 128, 1600, 900, ?3, ?4)`,
+      )
+      .bind(
+        referenceSiteDefinition.site.id,
+        "a".repeat(64),
+        "2026-07-27T12:00:00.000Z",
+        editorActorId,
+      )
+      .run();
+    for (const revision of [1, 2]) {
+      await database
+        .prepare(
+          `INSERT INTO media_occurrence_revisions (
+             site_id, workspace_id, occurrence_id, revision, asset_id,
+             crop_json, created_at, created_by
+           ) VALUES (?1, ?2, 'occurrence_home_hero', ?3, 'asset_hero',
+             NULL, ?4, ?5)`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          workspaceId,
+          revision,
+          "2026-07-27T12:00:00.000Z",
+          editorActorId,
+        )
+        .run();
+    }
+    await database
+      .prepare(
+        `INSERT INTO media_occurrences (
+           site_id, workspace_id, occurrence_id, current_revision,
+           current_asset_id
+         ) VALUES (?1, ?2, 'occurrence_home_hero', 2, 'asset_hero')`,
+      )
+      .bind(referenceSiteDefinition.site.id, workspaceId)
+      .run();
+
+    await expect(
+      application.commands.saveMediaOccurrence({
+        actorId: editorActorId,
+        workspaceId,
+        schemaVersion: "1.0.0",
+        baseRevision: 0,
+        occurrence: {
+          occurrenceId: "occurrence_home_hero",
+          revision: 1,
+          asset: {
+            assetId: "asset_hero",
+            width: 1600,
+            height: 900,
+            contentType: "image/png",
+          },
+          crop: null,
+        },
+        idempotencyKey: "d1-content-media-raced-head",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+    await expect(application.queries.getCurrent()).resolves.toMatchObject({
+      revision: 0,
+    });
   });
 
   it("allows explicit collaborators and rejects outsiders", async () => {

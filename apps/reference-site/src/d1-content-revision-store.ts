@@ -375,6 +375,11 @@ export function createD1ContentRevisionStore(
         }
       }
       assertContentRevisionBase(command.baseRevision, current.revision);
+      const mediaOccurrence = command.mediaOccurrence;
+      const mediaCrop =
+        mediaOccurrence?.crop === null || mediaOccurrence === undefined
+          ? null
+          : JSON.stringify(mediaOccurrence.crop);
 
       const results = await session.batch([
         session
@@ -392,6 +397,23 @@ export function createD1ContentRevisionStore(
              AND NOT EXISTS (
                SELECT 1 FROM content_revision_receipts
                WHERE idempotency_key = ?12 AND workspace_id = ?1
+             )
+             AND (
+               ?13 IS NULL OR EXISTS (
+                 SELECT 1
+                 FROM media_occurrences AS media_head
+                 JOIN media_occurrence_revisions AS media_revision
+                   ON media_revision.site_id = media_head.site_id
+                  AND media_revision.workspace_id = media_head.workspace_id
+                  AND media_revision.occurrence_id = media_head.occurrence_id
+                  AND media_revision.revision = media_head.current_revision
+                 WHERE media_head.site_id = ?14
+                   AND media_head.workspace_id = ?1
+                   AND media_head.occurrence_id = ?13
+                   AND media_head.current_revision = ?15
+                   AND media_revision.asset_id = ?16
+                   AND media_revision.crop_json IS ?17
+               )
              )`,
           )
           .bind(
@@ -407,6 +429,11 @@ export function createD1ContentRevisionStore(
             command.revision.createdBy,
             command.baseRevision,
             command.idempotencyKey,
+            mediaOccurrence?.occurrenceId ?? null,
+            siteId,
+            mediaOccurrence?.revision ?? null,
+            mediaOccurrence?.assetId ?? null,
+            mediaCrop,
           ),
         session
           .prepare(
@@ -419,6 +446,24 @@ export function createD1ContentRevisionStore(
                AND EXISTS (
                  SELECT 1 FROM content_revisions
                  WHERE workspace_id = ?4 AND revision = ?1
+                   AND request_hash = ?6
+               )
+               AND (
+                 ?7 IS NULL OR EXISTS (
+                   SELECT 1
+                   FROM media_occurrences AS media_head
+                   JOIN media_occurrence_revisions AS media_revision
+                     ON media_revision.site_id = media_head.site_id
+                    AND media_revision.workspace_id = media_head.workspace_id
+                    AND media_revision.occurrence_id = media_head.occurrence_id
+                    AND media_revision.revision = media_head.current_revision
+                   WHERE media_head.site_id = ?8
+                     AND media_head.workspace_id = ?4
+                     AND media_head.occurrence_id = ?7
+                     AND media_head.current_revision = ?9
+                     AND media_revision.asset_id = ?10
+                     AND media_revision.crop_json IS ?11
+                 )
                )`,
           )
           .bind(
@@ -427,6 +472,12 @@ export function createD1ContentRevisionStore(
             command.revision.createdAt,
             workspaceId,
             command.baseRevision,
+            command.requestHash,
+            mediaOccurrence?.occurrenceId ?? null,
+            siteId,
+            mediaOccurrence?.revision ?? null,
+            mediaOccurrence?.assetId ?? null,
+            mediaCrop,
           ),
         session
           .prepare(
