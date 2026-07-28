@@ -162,11 +162,7 @@ export async function restorePreservedMedia({
     targetMedia.map(({ occurrenceId }) => occurrenceId),
   );
   if (
-    baseMedia.some(({ occurrenceId }) => !targetIds.has(occurrenceId)) ||
-    currentMedia.some(
-      ({ occurrenceId }) =>
-        !baseById.has(occurrenceId) && !targetIds.has(occurrenceId),
-    )
+    baseMedia.some(({ occurrenceId }) => !targetIds.has(occurrenceId))
   ) {
     throw new Error("content_media_recovery_removal_unsupported");
   }

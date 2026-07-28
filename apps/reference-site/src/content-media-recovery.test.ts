@@ -266,6 +266,76 @@ describe("content media schema recovery", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("preserves an unrelated occurrence added only by the destination", async () => {
+    const base = {
+      occurrenceId: "occurrence_home_hero",
+      revision: 1,
+      asset: {
+        assetId: "asset_base",
+        width: 1200,
+        height: 800,
+        contentType: "image/jpeg",
+      },
+      crop: null,
+    } as const;
+    const target = {
+      ...base,
+      revision: 2,
+      asset: { ...base.asset, assetId: "asset_preserved" },
+    };
+    const destinationOnly = {
+      occurrenceId: "occurrence_home_detail",
+      revision: 3,
+      asset: {
+        assetId: "asset_destination_detail",
+        width: 800,
+        height: 800,
+        contentType: "image/webp",
+      },
+      crop: null,
+    } as const;
+    const send = vi.fn().mockResolvedValue({
+      response: { ok: true },
+      body: {
+        occurrence: { revision: 1 },
+        contentRevision: { revision: 1 },
+      },
+      mutationToken: "csrf-after-replace",
+    });
+
+    await expect(
+      restorePreservedMedia({
+        edit: {
+          path: mediaManifestRecoveryPath,
+          baseValue: canonicalJson([base]),
+          value: canonicalJson([target]),
+        },
+        created: {
+          workspaceId: "workspace_fresh",
+          revision: 0,
+          definition: {
+            ...referenceSiteDefinition,
+            home: {
+              ...referenceSiteDefinition.home,
+              media: [base, destinationOnly],
+            },
+          },
+        },
+        mutationToken: "csrf-start",
+        idempotencyKey: "workspace-create-0001",
+        send,
+      }),
+    ).resolves.toBe("csrf-after-replace");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(send.mock.calls[0]![0].body)).toEqual(
+      expect.objectContaining({
+        operation: "replace",
+        occurrenceId: "occurrence_home_hero",
+        assetId: "asset_preserved",
+      }),
+    );
+  });
+
   it("resumes the crop after a confirmed replacement survives a retry", async () => {
     const replacement = {
       occurrenceId: "occurrence_home_hero",
