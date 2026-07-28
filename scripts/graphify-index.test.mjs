@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -22,6 +22,7 @@ const graphifyIndexScript = join(
   "scripts",
   "graphify-index.mjs",
 );
+const refreshLockRef = "refs/graphify/refresh-lock";
 
 function git(repository, ...arguments_) {
   return execFileSync("git", arguments_, {
@@ -34,6 +35,28 @@ function commitAll(repository, message) {
   git(repository, "add", ".");
   git(repository, "commit", "-m", message);
   return git(repository, "rev-parse", "HEAD");
+}
+
+function setRefreshLock(repository, owner) {
+  const oid = execFileSync(
+    "git",
+    ["hash-object", "-w", "--stdin"],
+    {
+      cwd: repository,
+      encoding: "utf8",
+      input: JSON.stringify(owner),
+    },
+  ).trim();
+  git(repository, "update-ref", refreshLockRef, oid);
+  return oid;
+}
+
+function getRefreshLock(repository) {
+  try {
+    return git(repository, "rev-parse", "--verify", "--quiet", refreshLockRef);
+  } catch {
+    return null;
+  }
 }
 
 function createRepository() {
@@ -67,6 +90,10 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 if (args[0] === "extract") {
+  const delay = Number(process.env.GRAPHIFY_FAKE_DELAY_MS ?? "0");
+  if (delay > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+  }
   const sourceRoot = args[1];
   const output = args[args.indexOf("--out") + 1];
   const graphDirectory = join(output, "graphify-out");
@@ -207,6 +234,7 @@ function runIndex(repository, arguments_, options = {}) {
                 : options.warning
                   ? "1"
                   : "0",
+            GRAPHIFY_FAKE_DELAY_MS: String(options.delayMs ?? 0),
             GRAPHIFY_INDEX_CACHE_DIR: cache,
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -221,6 +249,43 @@ function runIndex(repository, arguments_, options = {}) {
       cache,
     };
   }
+}
+
+function runIndexAsync(repository, arguments_, options) {
+  return new Promise((resolveResult) => {
+    const child = spawn(
+      process.execPath,
+      [graphifyIndexScript, ...arguments_],
+      {
+        cwd: repository,
+        env: {
+          ...process.env,
+          GRAPHIFY_BIN: options.graphify,
+          GRAPHIFY_FAKE_GRAPH: options.graph,
+          GRAPHIFY_FAKE_REPOSITORY_ROOT: git(
+            repository,
+            "rev-parse",
+            "--show-toplevel",
+          ),
+          GRAPHIFY_FAKE_MUTATE_REPOSITORY: "0",
+          GRAPHIFY_FAKE_WARNING: "0",
+          GRAPHIFY_FAKE_DELAY_MS: String(options.delayMs ?? 0),
+          GRAPHIFY_INDEX_CACHE_DIR: options.cache,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.on("close", (status) => {
+      resolveResult({ status, output });
+    });
+  });
 }
 
 describe("commit-pinned Graphify index", () => {
@@ -741,41 +806,31 @@ describe("commit-pinned Graphify index", () => {
   it("reclaims a dead refresh lock but preserves a live owner's lock", () => {
     const { root } = createRepository();
     const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
-    const lock = join(cache, "refresh.lock");
-    mkdirSync(lock);
-    writeFileSync(
-      join(lock, "owner.json"),
-      JSON.stringify({
-        pid: 999_999,
-        hostname: hostname(),
-        startedAt: new Date(0).toISOString(),
-      }),
-    );
+    setRefreshLock(root, {
+      pid: 999_999,
+      hostname: hostname(),
+      startedAt: new Date(0).toISOString(),
+    });
 
     const reclaimed = runIndex(root, ["refresh"], { cache });
     expect(reclaimed.status, reclaimed.output).toBe(0);
-    expect(existsSync(lock)).toBe(false);
+    expect(getRefreshLock(root)).toBeNull();
 
     const liveCache = mkdtempSync(
       join(tmpdir(), "foundry-graphify-cache-"),
     );
-    const liveLock = join(liveCache, "refresh.lock");
-    mkdirSync(liveLock);
-    writeFileSync(
-      join(liveLock, "owner.json"),
-      JSON.stringify({
-        pid: process.pid,
-        hostname: hostname(),
-        startedAt: new Date().toISOString(),
-      }),
-    );
+    const liveOid = setRefreshLock(root, {
+      pid: process.pid,
+      hostname: hostname(),
+      startedAt: new Date().toISOString(),
+    });
 
     const blocked = runIndex(root, ["refresh"], { cache: liveCache });
     expect(blocked.status).not.toBe(0);
     expect(blocked.output).toContain(
       "Another Graphify refresh is already running",
     );
-    expect(existsSync(liveLock)).toBe(true);
+    expect(getRefreshLock(root)).toBe(liveOid);
   });
 
   it("bounds locks owned by an unverifiable hostname", () => {
@@ -783,35 +838,26 @@ describe("commit-pinned Graphify index", () => {
     const staleCache = mkdtempSync(
       join(tmpdir(), "foundry-graphify-cache-"),
     );
-    const staleLock = join(staleCache, "refresh.lock");
-    mkdirSync(staleLock);
-    writeFileSync(
-      join(staleLock, "owner.json"),
-      JSON.stringify({
-        pid: process.pid,
-        hostname: `${hostname()}-before-rename`,
-        startedAt: new Date(0).toISOString(),
-      }),
-    );
+    setRefreshLock(root, {
+      pid: process.pid,
+      hostname: `${hostname()}-before-rename`,
+      startedAt: new Date(0).toISOString(),
+    });
 
     const reclaimed = runIndex(root, ["refresh"], {
       cache: staleCache,
     });
     expect(reclaimed.status, reclaimed.output).toBe(0);
+    expect(getRefreshLock(root)).toBeNull();
 
     const recentCache = mkdtempSync(
       join(tmpdir(), "foundry-graphify-cache-"),
     );
-    const recentLock = join(recentCache, "refresh.lock");
-    mkdirSync(recentLock);
-    writeFileSync(
-      join(recentLock, "owner.json"),
-      JSON.stringify({
-        pid: 999_999,
-        hostname: `${hostname()}-other`,
-        startedAt: new Date().toISOString(),
-      }),
-    );
+    const recentOid = setRefreshLock(root, {
+      pid: 999_999,
+      hostname: `${hostname()}-other`,
+      startedAt: new Date().toISOString(),
+    });
 
     const blocked = runIndex(root, ["refresh"], {
       cache: recentCache,
@@ -820,5 +866,56 @@ describe("commit-pinned Graphify index", () => {
     expect(blocked.output).toContain(
       "Another Graphify refresh is already running",
     );
+    expect(getRefreshLock(root)).toBe(recentOid);
+  });
+
+  it("reclaims an expired same-host lock even when its PID exists", () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    setRefreshLock(root, {
+      pid: process.pid,
+      hostname: hostname(),
+      startedAt: new Date(0).toISOString(),
+    });
+
+    const result = runIndex(root, ["refresh"], { cache });
+
+    expect(result.status, result.output).toBe(0);
+    expect(getRefreshLock(root)).toBeNull();
+  });
+
+  it("atomically serializes concurrent stale-lock reclamation", async () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const graphify = createFakeGraphify();
+    const graph = writeFakeGraph(root);
+    setRefreshLock(root, {
+      pid: 999_999,
+      hostname: hostname(),
+      startedAt: new Date(0).toISOString(),
+    });
+
+    const results = await Promise.all([
+      runIndexAsync(root, ["refresh"], {
+        cache,
+        graphify,
+        graph,
+        delayMs: 500,
+      }),
+      runIndexAsync(root, ["refresh"], {
+        cache,
+        graphify,
+        graph,
+        delayMs: 500,
+      }),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual([0, 1]);
+    expect(
+      results.some((result) =>
+        result.output.includes("Another Graphify refresh is already running"),
+      ),
+    ).toBe(true);
+    expect(getRefreshLock(root)).toBeNull();
   });
 });

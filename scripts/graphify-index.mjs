@@ -30,6 +30,7 @@ const defaultQueryBudget = 1_200;
 const remoteRefreshLeaseMs = 4 * 60 * 60 * 1_000;
 const recentSnapshotRetention = 20;
 const snapshotGcGraceMs = 24 * 60 * 60 * 1_000;
+const refreshLockRef = "refs/graphify/refresh-lock";
 
 function fail(message) {
   throw new Error(message);
@@ -39,6 +40,7 @@ function runGit(repositoryRoot, arguments_, options = {}) {
   return execFileSync("git", arguments_, {
     cwd: repositoryRoot,
     encoding: options.binary ? null : "utf8",
+    input: options.input,
     maxBuffer: 32 * 1024 * 1024,
   });
 }
@@ -188,89 +190,108 @@ function verifySnapshot(context, commitSha) {
   return { root, metadata, graph };
 }
 
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+function currentRefreshLock(repositoryRoot) {
+  let oid;
   try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
+    oid = gitText(
+      repositoryRoot,
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      refreshLockRef,
+    );
+  } catch {
+    return null;
+  }
+  try {
+    const owner = JSON.parse(
+      runGit(repositoryRoot, ["cat-file", "blob", oid]),
+    );
+    return { oid, owner };
+  } catch {
+    return { oid, owner: {} };
   }
 }
 
-function acquireRefreshLock(cacheRoot) {
-  const lock = join(cacheRoot, "refresh.lock");
+function writeLockOwner(repositoryRoot, owner) {
+  return runGit(
+    repositoryRoot,
+    ["hash-object", "-w", "--stdin"],
+    { input: JSON.stringify(owner) },
+  ).trim();
+}
+
+function zeroObjectId(repositoryRoot) {
+  const length =
+    gitText(repositoryRoot, "rev-parse", "--show-object-format") ===
+    "sha256"
+      ? 64
+      : 40;
+  return "0".repeat(length);
+}
+
+function compareAndSwapRefreshLock(
+  repositoryRoot,
+  newOid,
+  expectedOid,
+) {
+  const result = spawnSync(
+    "git",
+    [
+      "update-ref",
+      refreshLockRef,
+      newOid,
+      expectedOid ?? zeroObjectId(repositoryRoot),
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    },
+  );
+  return !result.error && result.status === 0;
+}
+
+function acquireRefreshLock(repositoryRoot) {
   const ownerToken = randomUUID();
-  mkdirSync(cacheRoot, { recursive: true });
+  const owner = {
+    pid: process.pid,
+    hostname: hostname(),
+    token: ownerToken,
+    startedAt: new Date().toISOString(),
+  };
+  const ownerOid = writeLockOwner(repositoryRoot, owner);
   while (true) {
-    const candidate = join(
-      cacheRoot,
-      `refresh.lock.candidate-${process.pid}-${randomUUID()}`,
-    );
-    mkdirSync(candidate);
-    writeFileSync(
-      join(candidate, "owner.json"),
-      JSON.stringify({
-        pid: process.pid,
-        hostname: hostname(),
-        token: ownerToken,
-        startedAt: new Date().toISOString(),
-      }),
-    );
-    try {
-      renameSync(candidate, lock);
+    const existing = currentRefreshLock(repositoryRoot);
+    if (existing === null) {
+      if (compareAndSwapRefreshLock(repositoryRoot, ownerOid, null)) {
+        break;
+      }
+      continue;
+    }
+    const age = Date.now() - Date.parse(existing.owner.startedAt);
+    const leaseActive =
+      Number.isFinite(age) &&
+      age >= -60_000 &&
+      age < remoteRefreshLeaseMs;
+    if (leaseActive) {
+      fail("Another Graphify refresh is already running.");
+    }
+    if (
+      compareAndSwapRefreshLock(
+        repositoryRoot,
+        ownerOid,
+        existing.oid,
+      )
+    ) {
       break;
-    } catch (error) {
-      rmSync(candidate, { recursive: true, force: true });
-      if (error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY") {
-        throw error;
-      }
-      const owner = readJson(
-        join(lock, "owner.json"),
-        "Graphify refresh lock owner",
-      );
-      const sameHost = owner.hostname === hostname();
-      const age = Date.now() - Date.parse(owner.startedAt);
-      const remoteLeaseActive =
-        Number.isFinite(age) &&
-        age >= -60_000 &&
-        age < remoteRefreshLeaseMs;
-      const active = sameHost
-        ? processIsAlive(owner.pid)
-        : remoteLeaseActive;
-      if (active) {
-        fail("Another Graphify refresh is already running.");
-      }
-      const stale = join(
-        cacheRoot,
-        `refresh.lock.stale-${process.pid}-${randomUUID()}`,
-      );
-      try {
-        renameSync(lock, stale);
-        rmSync(stale, { recursive: true, force: true });
-      } catch (reclaimError) {
-        if (
-          reclaimError?.code !== "ENOENT" &&
-          reclaimError?.code !== "EEXIST" &&
-          reclaimError?.code !== "ENOTEMPTY"
-        ) {
-          throw reclaimError;
-        }
-      }
     }
   }
   return () => {
-    try {
-      const owner = readJson(
-        join(lock, "owner.json"),
-        "Graphify refresh lock owner",
-      );
-      if (owner.token === ownerToken) {
-        rmSync(lock, { recursive: true, force: true });
-      }
-    } catch {
-      // Never remove a lock whose ownership can no longer be proven.
-    }
+    spawnSync(
+      "git",
+      ["update-ref", "-d", refreshLockRef, ownerOid],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    );
   };
 }
 
@@ -518,7 +539,7 @@ function refresh() {
   assertRefreshWorktree(context);
 
   const existing = snapshotDirectory(context.cacheRoot, context.head);
-  const releaseLock = acquireRefreshLock(context.cacheRoot);
+  const releaseLock = acquireRefreshLock(context.repositoryRoot);
   const staging = join(
     context.cacheRoot,
     "staging",

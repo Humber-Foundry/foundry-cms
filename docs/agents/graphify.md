@@ -45,23 +45,23 @@ After a verified merge:
    npm run graphify:refresh
    ```
 
-The refresh acquires an ownership-aware shared lock, archives the pinned commit
-to an immutable temporary source tree, performs code-only extraction, validates
-the result, rechecks the publishing worktree, and atomically publishes the
-commit-addressed snapshot. Every indexed source path is checked against the
-pinned tree and rewritten repository-relative, so query output remains usable
-after the temporary archive is removed. It refuses feature commits and dirty
-worktrees. If the same snapshot already exists, it verifies that snapshot
-while still applying cache retention rather than rebuilding it. Each refresh
-retains the 20 most recent snapshots plus the merge-base snapshot of every
-active, non-prunable worktree. Overflow snapshots must remain inactive across
-refreshes and a 24-hour grace period, followed by a fresh active-worktree check,
-before removal; this bounds the shared cache without deleting a base after one
-racy observation. A later refresh reclaims a lock left by a process that no
-longer exists, but never takes or removes another confirmed live same-host
-owner's lock. An owner recorded under another hostname receives a four-hour
-lease so a machine rename or vanished shared-storage host cannot block AFK
-refreshes forever.
+The refresh acquires an ownership-aware shared lock with Git's atomic
+compare-and-swap ref update, archives the pinned commit to an immutable
+temporary source tree, performs code-only extraction, validates the result,
+rechecks the publishing worktree, and atomically publishes the commit-addressed
+snapshot. Every indexed source path is checked against the pinned tree and
+rewritten repository-relative, so query output remains usable after the
+temporary archive is removed. It refuses feature commits and dirty worktrees.
+If the same snapshot already exists, it verifies that snapshot while still
+applying cache retention rather than rebuilding it. Each refresh retains the 20
+most recent snapshots plus the merge-base snapshot of every active,
+non-prunable worktree. Overflow snapshots must remain inactive across refreshes
+and a 24-hour grace period, followed by a fresh active-worktree check, before
+removal; this bounds the shared cache without deleting a base after one racy
+observation. Every refresh owner receives a four-hour lock lease. Atomic
+ownership swaps serialize simultaneous stale-lock reclaimers, while the bounded
+lease prevents a crashed process, reused PID, renamed machine, or vanished
+shared-storage host from blocking AFK refreshes forever.
 
 Graphify's AST workers may be denied by an agent sandbox even when its process
 exits successfully. The wrapper rejects an empty graph and rejects extraction
