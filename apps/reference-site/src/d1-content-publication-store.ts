@@ -36,7 +36,7 @@ type ApprovalRow = {
   channel_configuration_hash: string;
   content_hash: string;
   design_hash: string;
-  schema_version: "1.0.0";
+  schema_version: ContentApprovalFingerprint["schemaVersion"];
   renderer_version: string;
   production_base: string;
   artifact_hash: string;

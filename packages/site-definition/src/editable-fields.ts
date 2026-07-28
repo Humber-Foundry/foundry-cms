@@ -1,4 +1,5 @@
 import type { ProofSection, ServicesSection, SiteDefinition } from "./index";
+import { designContract } from "./design-tokens";
 
 export type SiteDefinitionEdit = Readonly<{
   path: string;
@@ -8,9 +9,10 @@ export type SiteDefinitionEdit = Readonly<{
 export type EditableSiteField = Readonly<{
   path: string;
   label: string;
-  group: "Page" | "Navigation" | "Footer" | "SEO";
+  group: "Page" | "Navigation" | "Footer" | "SEO" | "Design";
   value: string;
   multiline: boolean;
+  values?: ReadonlyArray<string>;
 }>;
 
 export type SiteDefinitionEditResult =
@@ -51,19 +53,85 @@ function fieldBinding({
   group,
   value,
   multiline = false,
+  values,
   write,
 }: EditableSiteField & {
   write(definition: MutableSiteDefinition, value: string): void;
 }): EditableFieldBinding {
   return {
-    field: { path, label, group, value, multiline },
+    field: {
+      path,
+      label,
+      group,
+      value,
+      multiline,
+      ...(values === undefined ? {} : { values }),
+    },
     write,
   };
 }
 function editableFieldBindings(
   definition: SiteDefinition,
 ): EditableFieldBinding[] {
+  const designTokenBinding = ({
+    path,
+    label,
+    value,
+    values,
+    write,
+  }: Pick<EditableSiteField, "path" | "label" | "value" | "values"> & {
+    write(definition: MutableSiteDefinition, value: string): void;
+  }) =>
+    fieldBinding({
+      path,
+      label,
+      group: "Design",
+      value,
+      multiline: false,
+      values,
+      write,
+    });
   const fields: EditableFieldBinding[] = [
+    designTokenBinding({
+      path: "design.typography.heading",
+      label: designContract.tokens["typography.heading"].label,
+      value: definition.design.typography.heading,
+      values: designContract.tokens["typography.heading"].values,
+      write: (draft, value) => {
+        draft.design.typography.heading =
+          value as SiteDefinition["design"]["typography"]["heading"];
+      },
+    }),
+    designTokenBinding({
+      path: "design.colour.accent",
+      label: designContract.tokens["colour.accent"].label,
+      value: definition.design.colour.accent,
+      values: designContract.tokens["colour.accent"].values,
+      write: (draft, value) => {
+        draft.design.colour.accent =
+          value as SiteDefinition["design"]["colour"]["accent"];
+      },
+    }),
+    designTokenBinding({
+      path: "design.spacing.section",
+      label: designContract.tokens["spacing.section"].label,
+      value: definition.design.spacing.section,
+      values: designContract.tokens["spacing.section"].values,
+      write: (draft, value) => {
+        draft.design.spacing.section =
+          value as SiteDefinition["design"]["spacing"]["section"];
+      },
+    }),
+    designTokenBinding({
+      path: "design.layout.contentWidth",
+      label: designContract.tokens["layout.contentWidth"].label,
+      value: definition.design.layout.contentWidth,
+      values: designContract.tokens["layout.contentWidth"].values,
+      write: (draft, value) => {
+        draft.design.layout.contentWidth =
+          value as SiteDefinition["design"]["layout"]["contentWidth"];
+      },
+    }),
     fieldBinding({
       path: `${definition.site.id}.name`,
       label: "Site name",
@@ -132,6 +200,23 @@ function editableFieldBindings(
   });
 
   definition.home.sections.forEach((section, sectionIndex) => {
+    const variant = designContract.variants[section.type];
+    fields.push(
+      fieldBinding({
+        path: `${section.id}.variant`,
+        label: variant.label,
+        group: "Design",
+        value: section.variant,
+        multiline: false,
+        values: variant.values,
+        write: (draft, value) => {
+          const draftSection = draft.home.sections[
+            sectionIndex
+          ] as unknown as Record<string, unknown>;
+          draftSection.variant = value;
+        },
+      }),
+    );
     const bindSectionField = (
       property: string,
       label: string,
@@ -317,6 +402,12 @@ export function updateEditableSiteField(
   if (binding === undefined) {
     return null;
   }
+  if (
+    binding.field.values !== undefined &&
+    !binding.field.values.includes(edit.value)
+  ) {
+    return null;
+  }
   const draft = structuredClone(
     definition,
   ) as unknown as MutableSiteDefinition;
@@ -341,6 +432,12 @@ export function applySiteDefinitionEdits(
         `This field is not in Site Definition ${definition.definitionVersion}.`;
     } else if (edit.value.trim() === "") {
       errors[edit.path] = "Enter at least one visible character.";
+    } else {
+      const values = bindings.get(edit.path)!.field.values;
+      if (values !== undefined && !values.includes(edit.value)) {
+        errors[edit.path] =
+          `Choose a value registered by Site Definition ${definition.definitionVersion}.`;
+      }
     }
   }
   if (Object.keys(errors).length > 0) {

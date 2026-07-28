@@ -5,13 +5,14 @@ import {
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
+  type StoredSiteDefinitionSchemaVersion,
   type SiteMediaOccurrence,
 } from "@foundry/site-definition";
 import { sha256CanonicalJson } from "./deterministic-hash";
 
 export type ContentRevisionInputs = Readonly<{
   contentHash: string;
-  schemaVersion: SiteDefinition["schemaVersion"];
+  schemaVersion: StoredSiteDefinitionSchemaVersion;
   rendererVersion: string;
   productionBase: string;
 }>;
@@ -70,6 +71,52 @@ export type SaveContentRevisionCommand = Readonly<{
   composition?: PageComposition;
   idempotencyKey: string;
 }>;
+
+function compositionWithAuthoritativeVariants(
+  definition: SiteDefinition,
+  composition: PageComposition,
+  edits: ReadonlyArray<SiteDefinitionEdit>,
+): PageComposition {
+  const existingById = new Map(
+    definition.home.sections.map((section) => [section.id, section]),
+  );
+  const variantEdits = new Map(
+    edits
+      .filter(({ path }) => path.endsWith(".variant"))
+      .map(({ path, value }) => [path, value]),
+  );
+  return {
+    ...composition,
+    components: composition.components.map((component) => {
+      const existing = existingById.get(component.id);
+      if (
+        existing === undefined ||
+        variantEdits.get(`${component.id}.variant`) !== component.variant
+      ) {
+        return component;
+      }
+      if (component.type === "hero" && existing.type === "hero") {
+        return { ...component, variant: existing.variant };
+      }
+      if (
+        component.type === "services" &&
+        existing.type === "services"
+      ) {
+        return { ...component, variant: existing.variant };
+      }
+      if (component.type === "proof" && existing.type === "proof") {
+        return { ...component, variant: existing.variant };
+      }
+      if (
+        component.type === "callToAction" &&
+        existing.type === "callToAction"
+      ) {
+        return { ...component, variant: existing.variant };
+      }
+      return component;
+    }),
+  };
+}
 
 export type CreateContentWorkspaceCommand = Readonly<{
   actorId: ContentActorId;
@@ -218,11 +265,13 @@ export function withContentRevisionBookmark(
 export function isContentRevisionRenderableBy(
   revision: ContentRevision,
   inputs: Readonly<{
+    schemaVersion: SiteDefinition["schemaVersion"];
     rendererVersion: string;
     productionBase: string;
   }>,
 ): boolean {
   return (
+    revision.inputs.schemaVersion === inputs.schemaVersion &&
     revision.inputs.rendererVersion === inputs.rendererVersion &&
     revision.inputs.productionBase === inputs.productionBase
   );
@@ -441,6 +490,7 @@ export function createContentRevisionApplication({
       async isRevisionCurrent(revision: ContentRevision) {
         await store.requireAccess(actorId);
         return isContentRevisionRenderableBy(revision, {
+          schemaVersion: siteDefinition.schemaVersion,
           rendererVersion,
           productionBase: await resolveProductionBase(),
         });
@@ -501,6 +551,7 @@ export function createContentRevisionApplication({
         if (replay !== null) {
           if (
             !isContentRevisionRenderableBy(replay, {
+              schemaVersion: siteDefinition.schemaVersion,
               rendererVersion,
               productionBase: currentProductionBase,
             })
@@ -522,6 +573,7 @@ export function createContentRevisionApplication({
         }
         if (
           !isContentRevisionRenderableBy(base, {
+            schemaVersion: siteDefinition.schemaVersion,
             rendererVersion,
             productionBase: currentProductionBase,
           })
@@ -531,7 +583,14 @@ export function createContentRevisionApplication({
         const composed =
           command.composition === undefined
             ? { ok: true as const, definition: base.definition }
-            : applyPageComposition(base.definition, command.composition);
+            : applyPageComposition(
+                base.definition,
+                compositionWithAuthoritativeVariants(
+                  base.definition,
+                  command.composition,
+                  command.edits,
+                ),
+              );
         if (!composed.ok) {
           throw new ContentRevisionValidationError(composed.errors);
         }
@@ -586,6 +645,7 @@ export function createContentRevisionApplication({
         if (replay !== null) {
           if (
             !isContentRevisionRenderableBy(replay, {
+              schemaVersion: siteDefinition.schemaVersion,
               rendererVersion,
               productionBase: currentProductionBase,
             })
@@ -607,6 +667,7 @@ export function createContentRevisionApplication({
         }
         if (
           !isContentRevisionRenderableBy(base, {
+            schemaVersion: siteDefinition.schemaVersion,
             rendererVersion,
             productionBase: currentProductionBase,
           })

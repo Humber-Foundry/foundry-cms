@@ -13,9 +13,11 @@ import {
   ContentApprovalInvalidError,
   ContentPublicationIdempotencyError,
   ContentPublicationValidationError,
+  createContentApprovalFingerprint,
   createContentPublicationApplication,
   createContentPublicationId,
   createInMemoryContentPublicationStore,
+  hashPublishedSiteDefinition,
   parseProductionBase,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
@@ -50,7 +52,7 @@ async function revisionFixture() {
   const saved = await application.commands.save({
     actorId: editorId,
     workspaceId,
-    schemaVersion: "1.0.0",
+    schemaVersion: "1.1.0",
     baseRevision: 0,
     edits: [{ path: "section_hero.title", value: "Approved headline" }],
     idempotencyKey: "save-publish-workspace-0001",
@@ -161,7 +163,7 @@ describe("content publication application", () => {
           channelConfigurationHash: "channel-a",
           contentHash: revisionApplication.saved.inputs.contentHash,
           designHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-          schemaVersion: "1.0.0",
+          schemaVersion: "1.1.0",
           rendererVersion: "renderer-v1",
           productionBase,
           artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -169,6 +171,148 @@ describe("content publication application", () => {
             "foundry.site-definition.canonical-json.v1",
         },
       }),
+    );
+  });
+
+  it("rejects a stored legacy schema before creating a publication fingerprint", async () => {
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            schemaVersion: "1.0.0",
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+
+    const coherentLegacyDefinition = {
+      ...revisionApplication.saved.definition,
+      definitionVersion: "1.0.0",
+      schemaVersion: "1.0.0",
+    } as unknown as typeof revisionApplication.saved.definition;
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          definition: coherentLegacyDefinition,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            contentHash:
+              await hashPublishedSiteDefinition(coherentLegacyDefinition),
+            schemaVersion: "1.0.0",
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+  });
+
+  it.each([
+    [
+      "an unregistered design token",
+      (definition: Record<string, any>) => {
+        definition.design.colour.accent = "url(javascript:alert(1))";
+      },
+    ],
+    [
+      "a cross-component variant",
+      (definition: Record<string, any>) => {
+        definition.home.sections[0].variant = "cards";
+      },
+    ],
+    [
+      "an arbitrary URL",
+      (definition: Record<string, any>) => {
+        definition.site.navigation[0].href = "https://attacker.example";
+      },
+    ],
+    [
+      "an extra property",
+      (definition: Record<string, any>) => {
+        definition.design.rawCss = "body{display:none}";
+      },
+    ],
+  ])("rejects %s at the approval boundary", async (_name, mutate) => {
+    const malformed = structuredClone(
+      revisionApplication.saved.definition,
+    ) as unknown as Record<string, any>;
+    mutate(malformed);
+    const definition =
+      malformed as unknown as typeof revisionApplication.saved.definition;
+
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          definition,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            contentHash: await hashPublishedSiteDefinition(definition),
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+  });
+
+  it("fingerprints tokens and variants as design while ignoring copy-only changes", async () => {
+    const base = revisionApplication.saved;
+    const hero = base.definition.home.sections[0]!;
+    if (hero.type !== "hero") {
+      throw new TypeError("expected_hero_fixture");
+    }
+    const revisionWith = async (
+      definition: typeof base.definition,
+    ): Promise<typeof base> => ({
+      ...base,
+      definition,
+      inputs: {
+        ...base.inputs,
+        contentHash: await hashPublishedSiteDefinition(definition),
+      },
+    });
+    const copyRevision = await revisionWith({
+      ...base.definition,
+      home: {
+        ...base.definition.home,
+        sections: [
+          { ...hero, title: "Copy-only fingerprint change" },
+          ...base.definition.home.sections.slice(1),
+        ],
+      },
+    });
+    const tokenRevision = await revisionWith({
+      ...base.definition,
+      design: {
+        ...base.definition.design,
+        colour: { accent: "clay" },
+      },
+    });
+    const variantRevision = await revisionWith({
+      ...base.definition,
+      home: {
+        ...base.definition.home,
+        sections: [
+          { ...hero, variant: "focused" },
+          ...base.definition.home.sections.slice(1),
+        ],
+      },
+    });
+
+    const [baseFingerprint, copyFingerprint, tokenFingerprint, variantFingerprint] =
+      await Promise.all(
+        [base, copyRevision, tokenRevision, variantRevision].map((revision) =>
+          createContentApprovalFingerprint(revision, "channel-a"),
+        ),
+      );
+
+    expect(copyFingerprint.designHash).toBe(baseFingerprint.designHash);
+    expect(tokenFingerprint.designHash).not.toBe(baseFingerprint.designHash);
+    expect(variantFingerprint.designHash).not.toBe(
+      baseFingerprint.designHash,
     );
   });
 
@@ -275,7 +419,7 @@ describe("content publication application", () => {
     await revisionApplication.application.commands.save({
       actorId: editorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 1,
       edits: [{ path: "section_hero.summary", value: "Changed after approval" }],
       idempotencyKey: "save-after-approval-0001",
@@ -977,7 +1121,7 @@ describe("content publication application", () => {
       await revisionApplication.application.commands.save({
         actorId: editorId,
         workspaceId,
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 1,
         edits: [{ path: "section_hero.title", value: "Newer headline" }],
         idempotencyKey: "save-after-publication-claim",
@@ -1664,7 +1808,7 @@ describe("content publication application", () => {
     expect(isReleaseLive).toHaveBeenLastCalledWith({
       commitSha: "c".repeat(40),
       contentHash: revisionApplication.saved.inputs.contentHash,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
     });
   });
 
@@ -2152,6 +2296,53 @@ describe("content publication application", () => {
     );
   });
 
+  it("permits another manual retry after a definitive dispatch rejection", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-definitive-retry-rejection",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    vi.mocked(publisher.retryDeployment)
+      .mockImplementationOnce(async ({ assertDispatch }) => {
+        expect(await assertDispatch()).toBe(true);
+        return { state: "failed" };
+      })
+      .mockImplementationOnce(async ({ assertDispatch }) =>
+        (await assertDispatch())
+          ? { state: "requested", deploymentId: "build-after-rejection" }
+          : {
+              state: "blocked",
+              detail: "deployment_retry_claim_lost",
+            },
+      );
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_failed",
+        deploymentId: null,
+      }),
+    );
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        detail: "deployment_retry_requested",
+        deploymentId: "build-after-rejection",
+      }),
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a global deployment retry claim conflict without dispatching", async () => {
     const underlyingStore = createInMemoryContentPublicationStore();
     let conflictPublication:
@@ -2469,7 +2660,7 @@ describe("content publication application", () => {
     await revisionApplication.application.commands.save({
       actorId: editorId,
       workspaceId,
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 1,
       edits: [{ path: "section_hero.title", value: "Newer headline" }],
       idempotencyKey: "save-publish-workspace-0002",

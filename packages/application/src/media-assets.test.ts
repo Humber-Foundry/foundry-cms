@@ -492,11 +492,17 @@ describe("media asset application", () => {
       idempotencyKey: "place-idempotent-hero",
     } as const;
 
+    await expect(
+      application.queries.getReplacementReceipt(command),
+    ).resolves.toBeNull();
     const first = await application.commands.replaceOccurrence(command);
     const replay = await application.commands.replaceOccurrence(command);
     const uploadReplay = await upload(application);
 
     expect(replay).toEqual(first);
+    await expect(
+      application.queries.getReplacementReceipt(command),
+    ).resolves.toEqual(first);
     expect(uploadReplay).toEqual(uploaded);
     await expect(application.queries.audit()).resolves.toHaveLength(2);
   });

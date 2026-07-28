@@ -113,10 +113,10 @@ describe("content revision endpoint", () => {
       workspaceId: "workspace_home",
       revision: 3,
       bookmark: "d1-bookmark",
-      definition: { schemaVersion: "1.0.0" },
+      definition: { schemaVersion: "1.1.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -125,7 +125,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Changed" }],
       }),
@@ -135,7 +135,7 @@ describe("content revision endpoint", () => {
     expect(mocks.save).toHaveBeenCalledWith({
       actorId: "membership-editor",
       workspaceId: "workspace_home",
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       baseRevision: 2,
       edits: [{ path: "section_hero.title", value: "Changed" }],
       idempotencyKey: "content-save-route-0001",
@@ -158,10 +158,10 @@ describe("content revision endpoint", () => {
       workspaceId: "workspace_home",
       revision: 3,
       bookmark: "d1-bookmark",
-      definition: { schemaVersion: "1.0.0" },
+      definition: { schemaVersion: "1.1.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -182,7 +182,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [],
         composition,
@@ -202,7 +202,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [],
       }),
@@ -216,10 +216,10 @@ describe("content revision endpoint", () => {
     mocks.create.mockResolvedValue({
       workspaceId: "workspace_created",
       revision: 0,
-      definition: { schemaVersion: "1.0.0" },
+      definition: { schemaVersion: "1.1.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -254,10 +254,10 @@ describe("content revision endpoint", () => {
     mocks.create.mockResolvedValue({
       workspaceId: "workspace_default",
       revision: 0,
-      definition: { schemaVersion: "1.0.0" },
+      definition: { schemaVersion: "1.1.0" },
       inputs: {
         contentHash: "abc",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-a",
         productionBase: "published-a",
       },
@@ -495,7 +495,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Stale inputs" }],
       }),
@@ -511,7 +511,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Already saved" }],
       }),
@@ -531,7 +531,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_private",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Unauthorized" }],
       }),
@@ -552,7 +552,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "" }],
       }),
@@ -573,7 +573,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Stale" }],
       }),
@@ -592,7 +592,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: "Different" }],
       }),
@@ -608,7 +608,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "section_hero.title", value: 42 }],
       }),
@@ -628,7 +628,7 @@ describe("content revision endpoint", () => {
     const response = await POST(
       request({
         workspaceId: "workspace_home",
-        schemaVersion: "1.0.0",
+        schemaVersion: "1.1.0",
         baseRevision: 2,
         edits: [{ path: "__proto__", value: 42 }],
       }),

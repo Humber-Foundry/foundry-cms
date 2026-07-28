@@ -1342,7 +1342,7 @@ describe("GitHub content publisher", () => {
     const expected = {
       commitSha: "c".repeat(40),
       contentHash: "d".repeat(64),
-      schemaVersion: "1.0.0" as const,
+      schemaVersion: "1.1.0" as const,
     };
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -1374,7 +1374,7 @@ describe("GitHub content publisher", () => {
     const expected = {
       commitSha: "c".repeat(40),
       contentHash: "d".repeat(64),
-      schemaVersion: "1.0.0" as const,
+      schemaVersion: "1.1.0" as const,
     };
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -1402,7 +1402,7 @@ describe("GitHub content publisher", () => {
     const expected = {
       commitSha: "c".repeat(40),
       contentHash: "d".repeat(64),
-      schemaVersion: "1.0.0" as const,
+      schemaVersion: "1.1.0" as const,
     };
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -1422,7 +1422,7 @@ describe("GitHub content publisher", () => {
     const expected = {
       commitSha: "c".repeat(40),
       contentHash: "d".repeat(64),
-      schemaVersion: "1.0.0" as const,
+      schemaVersion: "1.1.0" as const,
     };
     const fetchMock = vi
       .fn<typeof fetch>()

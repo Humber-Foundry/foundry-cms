@@ -14,16 +14,18 @@
     "dev": "npm run dev --workspace @foundry/reference-site",
     "preview": "npm run preview --workspace @foundry/reference-site",
     "provision:deployment-baseline": "npm run provision:deployment-baseline --workspace @foundry/reference-site",
+    "generate:site-validator": "npm run generate:validator --workspace @foundry/site-definition",
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project apps/reference-site/tsconfig.json",
     "verify:integrity": "node scripts/verify-repository-integrity.mjs",
+    "verify:site-validator": "npm run generate:validator --workspace @foundry/site-definition -- --check",
     "verify:bundle": "node scripts/verify-public-bundle.mjs",
     "verify:worker": "node scripts/verify-worker-runtime.mjs"
   },
   "engines": {
-    "node": "^20.17.0 || >=22.9.0"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "packageManager": "npm@11.12.1",
   "devDependencies": {

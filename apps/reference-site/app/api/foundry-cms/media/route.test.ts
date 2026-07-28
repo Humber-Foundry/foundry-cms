@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   getSource: vi.fn(),
   getAsset: vi.fn(),
   getOccurrence: vi.fn(),
+  getReplacementReceipt: vi.fn(),
   saveMediaOccurrence: vi.fn(),
   loadContentApplication: vi.fn(),
   getCurrentContent: vi.fn(),
@@ -119,6 +120,7 @@ describe("media endpoint", () => {
         getSource: mocks.getSource,
         getAsset: mocks.getAsset,
         getOccurrence: mocks.getOccurrence,
+        getReplacementReceipt: mocks.getReplacementReceipt,
       },
     });
   });
@@ -232,6 +234,74 @@ describe("media endpoint", () => {
 
     expect(response.status).toBe(201);
     expect(mocks.replace).toHaveBeenCalledOnce();
+    expect(mocks.saveMediaOccurrence).not.toHaveBeenCalled();
+  });
+
+  it("proves a completed replacement receipt without creating a mutation", async () => {
+    const completedOccurrence = {
+      occurrenceId: "occurrence_home_hero",
+      revision: 2,
+      assetId: "asset_replacement",
+      crop: null,
+    } as const;
+    mocks.getReplacementReceipt.mockResolvedValue(completedOccurrence);
+    mocks.getOccurrence.mockResolvedValue(completedOccurrence);
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "lost-replace-response-0001",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          requireReplay: true,
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ mutationReplay: true }),
+    );
+    expect(mocks.getReplacementReceipt).toHaveBeenCalledOnce();
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("rejects replacement proof when no matching receipt exists", async () => {
+    mocks.getReplacementReceipt.mockResolvedValue(null);
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "missing-replace-receipt-0001",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          requireReplay: true,
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "content_revision_conflict",
+      currentRevision: 3,
+    });
+    expect(mocks.replace).not.toHaveBeenCalled();
     expect(mocks.saveMediaOccurrence).not.toHaveBeenCalled();
   });
 

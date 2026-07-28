@@ -32,6 +32,9 @@ jobs:
       - name: Install pinned dependencies
         run: npm ci
 
+      - name: Verify generated Site Definition validator
+        run: npm run verify:site-validator
+
       - name: Run application-seam tests
         run: npm test
 

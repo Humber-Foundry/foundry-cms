@@ -34,6 +34,7 @@ import {
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
   mergeRecoverySources,
+  planStructuralFirstRecovery,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
@@ -219,7 +220,7 @@ export function ContentEditor({
     recoveryBlocked: recoveryConflicts.length > 0,
     onStorageError: setMessage,
   });
-  const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
+  const groups = ["Design", "Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
     !persistence.coordinated ||
     !persistence.ready ||
@@ -280,21 +281,17 @@ export function ContentEditor({
           );
           return;
         }
-        const currentValues = new Map([
-          ...workingFields.map(
-            (field) => [field.path, field.value] as const,
-          ),
-          [
-            pageCompositionContract.slot.id,
-            JSON.stringify(
-              toPageCompositionIdentity(state.workingDefinition),
-            ),
-          ] as const,
-        ]);
+        const {
+          orderedEdits,
+          destinationValues: currentValues,
+        } = planStructuralFirstRecovery(
+          state.workingDefinition,
+          record.edits,
+        );
         const conflicts: StaleRecoveryConflict[] = [];
         let recoveredCount = 0;
         let alreadyAppliedCount = 0;
-        for (const edit of record.edits) {
+        for (const edit of orderedEdits) {
           const currentValue = currentValues.get(edit.path);
           if (currentValue === undefined) {
             conflicts.push({
@@ -318,7 +315,7 @@ export function ContentEditor({
           }
           if (edit.path === pageCompositionContract.slot.id) {
             const result = applyStructuralRecovery(
-              initialRevision.definition,
+              state.workingDefinition,
               edit,
             );
             if (result.ok) {
@@ -340,7 +337,7 @@ export function ContentEditor({
             recoveredCount += 1;
           }
         }
-        if (alreadyAppliedCount === record.edits.length) {
+        if (alreadyAppliedCount === orderedEdits.length) {
           recoveryPending.current = [];
           void persistence.clear();
           setMessage(
@@ -474,6 +471,7 @@ export function ContentEditor({
   useEffect(() => {
     if (
       !persistence.coordinated ||
+      !persistence.ready ||
       staleRecovery === undefined ||
       recoveryApplied.current
     ) {
@@ -501,13 +499,13 @@ export function ContentEditor({
         ),
       ] as const,
     ]);
-    const { available, recovered, conflicts } = recoverStaleEdits(
+    let recovery = recoverStaleEdits(
       recoveryStorage,
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
       destinationValues,
     );
-    if (!available) {
+    if (!recovery.available) {
       setRecoverySourcesReady(true);
       setMessage(
         "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
@@ -517,17 +515,41 @@ export function ContentEditor({
     if (initialStale) {
       recoveryPending.current = mergeRecoverySources(
         recoveryPending.current,
-        [...recovered, ...conflicts],
+        [...recovery.recovered, ...recovery.conflicts],
       );
       setRecoverySourcesReady(true);
       return;
     }
+    const projectedRecovery = planStructuralFirstRecovery(
+      state.workingDefinition,
+      recovery.recovered,
+    );
+    if (projectedRecovery.projected) {
+      recovery = recoverStaleEdits(
+        recoveryStorage,
+        staleRecovery.id,
+        staleRecovery.sourceWorkspaceId,
+        projectedRecovery.destinationValues,
+      );
+      if (!recovery.available) {
+        setRecoverySourcesReady(true);
+        setMessage(
+          "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
+        );
+        return;
+      }
+    }
     const applied: StaleRecoveryEdit[] = [];
-    const nextConflicts = [...conflicts];
-    for (const edit of recovered) {
+    const nextConflicts = [...recovery.conflicts];
+    const { orderedEdits: orderedRecovered } =
+      planStructuralFirstRecovery(
+        state.workingDefinition,
+        recovery.recovered,
+      );
+    for (const edit of orderedRecovered) {
       if (edit.path === pageCompositionContract.slot.id) {
         const result = resolveStructuralRecovery(
-          initialRevision.definition,
+          state.workingDefinition,
           edit,
           destinationValues.get(edit.path) ?? null,
         );
@@ -564,6 +586,7 @@ export function ContentEditor({
   }, [
     initialStale,
     persistence.coordinated,
+    persistence.ready,
     staleRecovery,
     workingFields,
   ]);
@@ -1407,7 +1430,21 @@ export function ContentEditor({
                     {field.label}
                     <code>{field.path}</code>
                   </span>
-                  {field.multiline ? (
+                  {field.values !== undefined ? (
+                    <select
+                      disabled={editorLocked}
+                      value={field.value}
+                      aria-invalid={Boolean(state.errors[field.path])}
+                      aria-describedby={`${field.path}-error`}
+                      onChange={(event) => edit(field.path, event.target.value)}
+                    >
+                      {field.values.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.multiline ? (
                     <textarea
                       rows={3}
                       disabled={editorLocked}

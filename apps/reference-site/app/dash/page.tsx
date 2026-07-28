@@ -29,6 +29,8 @@ import {
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
 import { referenceSiteApplication } from "@/src/reference-installation";
 import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
+import { durableSchemaRecoveryEdits } from "@/src/content-schema-recovery";
+import type { StaleRecoveryEdit } from "@/src/content-editor-recovery";
 
 import "./dashboard.css";
 import "../public.css";
@@ -132,6 +134,7 @@ export default async function DashboardPage({
   let contentRevision: ContentRevision | undefined;
   let initialContentStale: boolean | undefined;
   let initialPreviewUrl: string | undefined;
+  let durableSchemaRecovery: ReadonlyArray<StaleRecoveryEdit> | undefined;
   try {
     await requireExistingContentWorkspaceAccess(workspaceId, actorId);
     const contentApplication = await loadContentRevisionApplication(
@@ -139,6 +142,19 @@ export default async function DashboardPage({
       actorId,
     );
     contentRevision = await contentApplication.queries.getCurrent();
+    if (
+      contentRevision.inputs.schemaVersion !== definition.schemaVersion
+    ) {
+      const baseRevision =
+        await contentApplication.queries.getRevision(0);
+      if (baseRevision === null) {
+        throw new ContentRevisionConfigurationError();
+      }
+      durableSchemaRecovery = durableSchemaRecoveryEdits(
+        baseRevision.definition,
+        contentRevision.definition,
+      );
+    }
     initialContentStale =
       !(await contentApplication.queries.isRevisionCurrent(contentRevision));
     initialPreviewUrl = revisionPreviewGatewayUrl(
@@ -177,6 +193,7 @@ export default async function DashboardPage({
       initialPreviewUrl={initialPreviewUrl}
       initialContentStale={initialContentStale}
       staleRecovery={staleRecovery}
+      durableSchemaRecovery={durableSchemaRecovery}
       formDeliveryHealth={formOperations.health}
       failedFormDeliveries={formOperations.failedDeliveries}
       suspectedSpam={formOperations.suspectedSpam}
