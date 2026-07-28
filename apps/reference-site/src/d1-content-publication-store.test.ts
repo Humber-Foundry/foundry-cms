@@ -12,6 +12,7 @@ import {
   createContentRevisionApplication,
   createContentWorkspaceId,
   createHumanMembershipId,
+  ContentPublicationIdempotencyError,
   type ContentApproval,
   type ContentPublication,
 } from "@foundry/application";
@@ -234,6 +235,35 @@ describe("D1 content publication store", () => {
     });
   });
 
+  it("does not turn a transient claim failure into a blocked contender", async () => {
+    const stableStore = createD1ContentPublicationStore(database);
+    await stableStore.saveApproval(approval);
+    let failNextBatch = true;
+    const unstableDatabase: Parameters<
+      typeof createD1ContentPublicationStore
+    >[0] = {
+      prepare: database.prepare.bind(database),
+      batch(statements) {
+        if (failNextBatch) {
+          failNextBatch = false;
+          return Promise.reject(new Error("transient_d1_failure"));
+        }
+        return database.batch(statements);
+      },
+    };
+    const store = createD1ContentPublicationStore(unstableDatabase);
+    const requested = publication("1", "publish-transient-claim-1");
+
+    await expect(store.claimPublication(requested)).rejects.toThrow(
+      "transient_d1_failure",
+    );
+    await expect(store.findLatestPublication(workspaceId)).resolves.toBeNull();
+    await expect(store.claimPublication(requested)).resolves.toEqual({
+      state: "claimed",
+      publication: requested,
+    });
+  });
+
   it("atomically rejects a claim when the approval was invalidated before the lease", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);
@@ -429,6 +459,29 @@ describe("D1 content publication store", () => {
     ).toEqual({ count: 1 });
   });
 
+  it("rejects an idempotency key reused for a different publish command", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const first = publication("1", "publish-command-conflict-1");
+    await store.claimPublication(first);
+
+    await expect(
+      store.claimPublication({
+        ...publication("2", first.idempotencyKey),
+        approvalId: first.approvalId,
+        requestedBy: createHumanMembershipId("membership-other"),
+      }),
+    ).rejects.toEqual(new ContentPublicationIdempotencyError());
+    await expect(
+      store.claimPublication({
+        ...publication("3", first.idempotencyKey),
+        approvalId: first.approvalId,
+        fingerprint: "f".repeat(64),
+      }),
+    ).rejects.toEqual(new ContentPublicationIdempotencyError());
+    await expect(store.findPublication(first.id)).resolves.toEqual(first);
+  });
+
   it("updates operational state with an append-only audit event", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);
@@ -463,6 +516,107 @@ describe("D1 content publication store", () => {
         .all<{ status: string }>(),
     ).toEqual({
       results: [{ status: "requested" }, { status: "committed" }],
+      success: true,
+      meta: expect.any(Object),
+    });
+  });
+
+  it("audits only the winning lease-fenced update when contenders share a clock", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-audit-cas-0001");
+    await store.claimPublication(requested);
+    const transition = (detail: string): ContentPublication => ({
+      ...requested,
+      status: "committed",
+      commitSha: "c".repeat(40),
+      detail,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:02:00.000Z",
+    });
+
+    await Promise.all([
+      store.updatePublication(transition("winner-a"), {
+        expectedLeaseToken: requested.leaseToken ?? undefined,
+      }),
+      store.updatePublication(transition("winner-b"), {
+        expectedLeaseToken: requested.leaseToken ?? undefined,
+      }),
+    ]);
+
+    const current = await store.findPublication(requested.id);
+    expect(current?.detail).toMatch(/^winner-[ab]$/u);
+    expect(
+      await database
+        .prepare(
+          `SELECT status, detail, occurred_at
+           FROM content_publication_audit_events
+           WHERE publication_id = ?1
+           ORDER BY id`,
+        )
+        .bind(requested.id)
+        .all<{
+          status: string;
+          detail: string | null;
+          occurred_at: string;
+        }>(),
+    ).toEqual({
+      results: [
+        {
+          status: "requested",
+          detail: null,
+          occurred_at: requested.updatedAt,
+        },
+        {
+          status: "committed",
+          detail: current?.detail,
+          occurred_at: "2026-07-27T10:02:00.000Z",
+        },
+      ],
+      success: true,
+      meta: expect.any(Object),
+    });
+  });
+
+  it("never replaces a publication commit with a different commit", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-commit-immutable");
+    await store.claimPublication(requested);
+    const committed: ContentPublication = {
+      ...requested,
+      status: "committed",
+      commitSha: "c".repeat(40),
+      detail: "commit-c",
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:02:00.000Z",
+    };
+    await store.updatePublication(committed);
+
+    await expect(
+      store.updatePublication({
+        ...committed,
+        commitSha: "d".repeat(40),
+        detail: "fictional-commit-d",
+      }),
+    ).resolves.toEqual(committed);
+    await expect(store.findPublication(requested.id)).resolves.toEqual(
+      committed,
+    );
+    expect(
+      await database
+        .prepare(
+          `SELECT detail
+           FROM content_publication_audit_events
+           WHERE publication_id = ?1
+           ORDER BY id`,
+        )
+        .bind(requested.id)
+        .all<{ detail: string | null }>(),
+    ).toEqual({
+      results: [{ detail: null }, { detail: "commit-c" }],
       success: true,
       meta: expect.any(Object),
     });

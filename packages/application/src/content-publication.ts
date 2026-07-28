@@ -99,6 +99,41 @@ export type ContentPublication = Readonly<{
   updatedAt: string;
 }>;
 
+export type ContentPublicationCommandIdentity = Readonly<
+  Pick<
+    ContentPublication,
+    | "workspaceId"
+    | "revision"
+    | "approvalId"
+    | "fingerprint"
+    | "requestedBy"
+  >
+>;
+
+export function serializeContentPublicationCommandIdentity(
+  publication: ContentPublicationCommandIdentity,
+): string {
+  return canonicalJson({
+    approvalId: publication.approvalId,
+    fingerprint: publication.fingerprint,
+    requestedBy: publication.requestedBy,
+    revision: publication.revision,
+    workspaceId: publication.workspaceId,
+  });
+}
+
+export function assertContentPublicationIdempotency(
+  recordedIdentity: string,
+  publication: ContentPublicationCommandIdentity,
+): void {
+  if (
+    recordedIdentity !==
+    serializeContentPublicationCommandIdentity(publication)
+  ) {
+    throw new ContentPublicationIdempotencyError();
+  }
+}
+
 export type ContentPublicationClaim =
   | Readonly<{
       state: "claimed" | "replayed";
@@ -239,6 +274,13 @@ export class ContentApprovalInvalidError extends Error {
     super(code);
     this.name = "ContentApprovalInvalidError";
     this.code = code;
+  }
+}
+
+export class ContentPublicationIdempotencyError extends Error {
+  constructor() {
+    super("content_publication_idempotency_key_conflict");
+    this.name = "ContentPublicationIdempotencyError";
   }
 }
 
@@ -484,6 +526,10 @@ export function createInMemoryContentPublicationStore(): ContentPublicationStore
           candidate.idempotencyKey === publication.idempotencyKey,
       );
       if (replay !== undefined) {
+        assertContentPublicationIdempotency(
+          serializeContentPublicationCommandIdentity(replay),
+          publication,
+        );
         return { state: "replayed", publication: replay };
       }
       const active = [...publications.values()].find((candidate) =>
@@ -1035,6 +1081,16 @@ export function createContentPublicationApplication({
             idempotencyKey: input.idempotencyKey,
           });
           if (replay !== null) {
+            assertContentPublicationIdempotency(
+              serializeContentPublicationCommandIdentity(replay),
+              {
+                workspaceId: input.workspaceId,
+                revision: recordedApproval.revision,
+                approvalId: input.approvalId,
+                fingerprint: recordedApproval.fingerprint.value,
+                requestedBy: input.requestedBy,
+              },
+            );
             return replay;
           }
         }
@@ -1474,6 +1530,11 @@ export function createContentPublicationApplication({
           // A missing marker still permits one explicitly requested retry.
         }
         if ((await publisher.getProductionHead()) !== commitSha) {
+          await store.invalidateApproval({
+            approvalId: approval.id,
+            invalidatedAt: now(),
+            reason: "production_changed",
+          });
           throw new ContentPublicationValidationError(
             "deployment_retry_head_moved",
           );
@@ -1534,6 +1595,49 @@ export function createContentPublicationApplication({
               leaseToken: null,
               leaseExpiresAt: null,
               updatedAt: now(),
+            }),
+            {
+              expectedLeaseToken: leaseToken,
+              expectedStatus: "committed",
+              expectedUpdatedAt: dispatching.updatedAt,
+            },
+          );
+        }
+        let productionHead: string;
+        try {
+          productionHead = await publisher.getProductionHead();
+        } catch {
+          return store.updatePublication(
+            nextPublication(dispatching, {
+              status: "failed",
+              detail: "deployment_retry_head_unavailable",
+              deploymentId: null,
+              leaseToken: null,
+              leaseExpiresAt: null,
+              updatedAt: now(),
+            }),
+            {
+              expectedLeaseToken: leaseToken,
+              expectedStatus: "committed",
+              expectedUpdatedAt: dispatching.updatedAt,
+            },
+          );
+        }
+        if (productionHead !== commitSha) {
+          const invalidatedAt = now();
+          await store.invalidateApproval({
+            approvalId: approval.id,
+            invalidatedAt,
+            reason: "production_changed",
+          });
+          return store.updatePublication(
+            nextPublication(dispatching, {
+              status: "failed",
+              detail: "deployment_retry_head_moved",
+              deploymentId: null,
+              leaseToken: null,
+              leaseExpiresAt: null,
+              updatedAt: invalidatedAt,
             }),
             {
               expectedLeaseToken: leaseToken,

@@ -11,12 +11,14 @@ import type {
   HumanMembershipId,
 } from "@foundry/application";
 import {
+  assertContentPublicationIdempotency,
   ContentApprovalInvalidError,
   createContentActorId,
   createContentApprovalId,
   createContentPublicationId,
   createContentWorkspaceId,
   createHumanMembershipId,
+  serializeContentPublicationCommandIdentity,
 } from "@foundry/application";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
@@ -48,6 +50,7 @@ type PublicationRow = {
   approval_id: string;
   fingerprint: string;
   idempotency_key: string;
+  command_identity: string;
   requested_by: string;
   contributors_json: string;
   expected_head: string;
@@ -60,6 +63,7 @@ type PublicationRow = {
   lease_expires_at: string | null;
   requested_at: string;
   updated_at: string;
+  mutation_token: string;
 };
 
 const approvalProjection = `
@@ -93,6 +97,7 @@ const publicationProjection = `
     approval_id,
     fingerprint,
     idempotency_key,
+    command_identity,
     requested_by,
     contributors_json,
     expected_head,
@@ -104,7 +109,8 @@ const publicationProjection = `
     lease_token,
     lease_expires_at,
     requested_at,
-    updated_at
+    updated_at,
+    mutation_token
   FROM content_publications
 `;
 
@@ -189,6 +195,14 @@ export function createD1ContentPublicationStore(
     workspaceId: ContentWorkspaceId,
     idempotencyKey: string,
   ) {
+    const row = await findPublicationRowByKey(workspaceId, idempotencyKey);
+    return row === null ? null : toPublication(row);
+  }
+
+  async function findPublicationRowByKey(
+    workspaceId: ContentWorkspaceId,
+    idempotencyKey: string,
+  ) {
     const row = await database
       .prepare(
         `${publicationProjection}
@@ -196,23 +210,25 @@ export function createD1ContentPublicationStore(
       )
       .bind(workspaceId, idempotencyKey)
       .first<PublicationRow>();
-    return row === null ? null : toPublication(row);
+    return row;
   }
 
   function insertPublicationStatement(
     publication: ContentPublication,
     requireCurrentApproval: boolean,
+    mutationToken: string,
   ) {
     const statement = database.prepare(
       `INSERT INTO content_publications (
            id, workspace_id, revision, approval_id, fingerprint,
-           idempotency_key, requested_by, contributors_json, expected_head,
-           status, commit_sha, deployment_id, deployment_requested_at, detail,
-           lease_token, lease_expires_at, requested_at, updated_at
+           idempotency_key, command_identity, requested_by, contributors_json,
+           expected_head, status, commit_sha, deployment_id,
+           deployment_requested_at, detail, lease_token, lease_expires_at,
+           requested_at, updated_at, mutation_token
          )
          SELECT
            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-           ?15, ?16, ?17, ?18
+           ?15, ?16, ?17, ?18, ?19, ?20
          ${requireCurrentApproval
            ? `WHERE EXISTS (
                 SELECT 1
@@ -239,6 +255,7 @@ export function createD1ContentPublicationStore(
         publication.approvalId,
         publication.fingerprint,
         publication.idempotencyKey,
+        serializeContentPublicationCommandIdentity(publication),
         publication.requestedBy,
         JSON.stringify(publication.contributors),
         publication.expectedHead,
@@ -251,12 +268,13 @@ export function createD1ContentPublicationStore(
         publication.leaseExpiresAt,
         publication.requestedAt,
         publication.updatedAt,
+        mutationToken,
       );
   }
 
   function auditStatement(
     publication: ContentPublication,
-    requireExactState = false,
+    mutationToken: string,
   ) {
     return database
       .prepare(
@@ -267,7 +285,7 @@ export function createD1ContentPublicationStore(
          WHERE EXISTS (
            SELECT 1 FROM content_publications
            WHERE id = ?1
-             ${requireExactState ? "AND status = ?2 AND updated_at = ?4" : ""}
+             AND mutation_token = ?5
          )`,
       )
       .bind(
@@ -275,6 +293,7 @@ export function createD1ContentPublicationStore(
         publication.status,
         publication.detail,
         publication.updatedAt,
+        mutationToken,
       );
   }
 
@@ -282,11 +301,30 @@ export function createD1ContentPublicationStore(
     publication: ContentPublication,
     requireCurrentApproval: boolean,
   ) {
+    const mutationToken = crypto.randomUUID();
     const results = await database.batch([
-      insertPublicationStatement(publication, requireCurrentApproval),
-      auditStatement(publication),
+      insertPublicationStatement(
+        publication,
+        requireCurrentApproval,
+        mutationToken,
+      ),
+      auditStatement(publication, mutationToken),
     ]);
     return results[0]?.meta.changes ?? 0;
+  }
+
+  async function findActivePublication() {
+    const row = await database
+      .prepare(
+        `${publicationProjection}
+         WHERE status IN (
+           'requested', 'committed', 'building', 'deployed', 'unknown'
+         )
+         ORDER BY requested_at, id
+         LIMIT 1`,
+      )
+      .first<PublicationRow>();
+    return row === null ? null : toPublication(row);
   }
 
   return {
@@ -396,12 +434,19 @@ export function createD1ContentPublicationStore(
       return findApproval(approvalId);
     },
     async claimPublication(publication): Promise<ContentPublicationClaim> {
-      const replay = await findPublicationByKey(
+      const replayRow = await findPublicationRowByKey(
         publication.workspaceId,
         publication.idempotencyKey,
       );
-      if (replay !== null) {
-        return { state: "replayed", publication: replay };
+      if (replayRow !== null) {
+        assertContentPublicationIdempotency(
+          replayRow.command_identity,
+          publication,
+        );
+        return {
+          state: "replayed",
+          publication: toPublication(replayRow),
+        };
       }
       try {
         const inserted = await insertPublication(publication, true);
@@ -417,12 +462,28 @@ export function createD1ContentPublicationStore(
           return { state: "blocked", publication: blocked };
         }
       } catch (error) {
-        const racedReplay = await findPublicationByKey(
+        const racedReplay = await findPublicationRowByKey(
           publication.workspaceId,
           publication.idempotencyKey,
         );
         if (racedReplay !== null) {
-          return { state: "replayed", publication: racedReplay };
+          assertContentPublicationIdempotency(
+            racedReplay.command_identity,
+            publication,
+          );
+          return {
+            state: "replayed",
+            publication: toPublication(racedReplay),
+          };
+        }
+        if (
+          !(
+            error instanceof Error &&
+            error.message.includes("content_publications_one_active")
+          ) ||
+          (await findActivePublication()) === null
+        ) {
+          throw error;
         }
         const blocked = {
           ...publication,
@@ -472,7 +533,8 @@ export function createD1ContentPublicationStore(
       const result = await database
         .prepare(
           `UPDATE content_publications
-           SET lease_expires_at = ?1
+           SET lease_expires_at = ?1,
+               mutation_token = ?5
            WHERE id = ?2
              AND status = 'requested'
              AND lease_token = ?3
@@ -487,7 +549,13 @@ export function createD1ContentPublicationStore(
                  AND current_revision = content_publications.revision
              )`,
         )
-        .bind(leaseExpiresAt, publicationId, leaseToken, now)
+        .bind(
+          leaseExpiresAt,
+          publicationId,
+          leaseToken,
+          now,
+          crypto.randomUUID(),
+        )
         .run();
       return (result.meta.changes ?? 0) === 1;
     },
@@ -497,6 +565,7 @@ export function createD1ContentPublicationStore(
         options?.expectedLeaseValidAt ?? null;
       const expectedStatus = options?.expectedStatus ?? null;
       const expectedUpdatedAt = options?.expectedUpdatedAt ?? null;
+      const mutationToken = crypto.randomUUID();
       const results = await database.batch([
         database
           .prepare(
@@ -509,13 +578,14 @@ export function createD1ContentPublicationStore(
                detail = ?5,
                lease_token = ?6,
                lease_expires_at = ?7,
-               updated_at = ?8
-             WHERE id = ?9
+               updated_at = ?8,
+               mutation_token = ?9
+             WHERE id = ?10
                AND status <> 'verified-live'
                AND (
-                 ?10 IS NULL
+                 ?11 IS NULL
                  OR (
-                   lease_token = ?10
+                   lease_token = ?11
                    AND (
                      status = 'requested'
                      OR (
@@ -525,10 +595,10 @@ export function createD1ContentPublicationStore(
                    )
                  )
                )
-               AND (?11 IS NULL OR lease_expires_at > ?11)
-               AND (?12 IS NULL OR status = ?12)
-               AND (?13 IS NULL OR updated_at = ?13)
-               AND NOT (commit_sha IS NOT NULL AND ?2 IS NULL)
+               AND (?12 IS NULL OR lease_expires_at > ?12)
+               AND (?13 IS NULL OR status = ?13)
+               AND (?14 IS NULL OR updated_at = ?14)
+               AND (commit_sha IS NULL OR commit_sha = ?2)
                AND NOT (
                  status = 'deployed'
                  AND ?1 IN ('requested', 'committed', 'building', 'unknown')
@@ -555,13 +625,14 @@ export function createD1ContentPublicationStore(
             publication.leaseToken,
             publication.leaseExpiresAt,
             publication.updatedAt,
+            mutationToken,
             publication.id,
             expectedLeaseToken,
             expectedLeaseValidAt,
             expectedStatus,
             expectedUpdatedAt,
           ),
-        auditStatement(publication, true),
+        auditStatement(publication, mutationToken),
       ]);
       if ((results[0]?.meta.changes ?? 0) < 1) {
         const current = await findPublication(publication.id);
@@ -579,19 +650,7 @@ export function createD1ContentPublicationStore(
     }) {
       return findPublicationByKey(workspaceId, idempotencyKey);
     },
-    async findActivePublication() {
-      const row = await database
-        .prepare(
-          `${publicationProjection}
-           WHERE status IN (
-             'requested', 'committed', 'building', 'deployed', 'unknown'
-           )
-           ORDER BY requested_at, id
-           LIMIT 1`,
-        )
-        .first<PublicationRow>();
-      return row === null ? null : toPublication(row);
-    },
+    findActivePublication,
     async findLatestPublication(workspaceId) {
       const row = await database
         .prepare(

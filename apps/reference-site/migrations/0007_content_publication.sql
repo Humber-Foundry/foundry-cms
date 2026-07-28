@@ -33,6 +33,7 @@ CREATE TABLE content_publications (
   approval_id TEXT NOT NULL REFERENCES content_approvals(id),
   fingerprint TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
+  command_identity TEXT NOT NULL,
   requested_by TEXT NOT NULL,
   contributors_json TEXT NOT NULL,
   expected_head TEXT NOT NULL,
@@ -50,6 +51,7 @@ CREATE TABLE content_publications (
   lease_expires_at TEXT,
   requested_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  mutation_token TEXT NOT NULL,
   UNIQUE (workspace_id, idempotency_key),
   FOREIGN KEY (workspace_id, revision)
     REFERENCES content_revisions(workspace_id, revision)

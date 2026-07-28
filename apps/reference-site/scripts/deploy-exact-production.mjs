@@ -25,6 +25,7 @@ const maximumActivationBodyBytes = 64 * 1024;
 const cloudflareRequestTimeoutMs = 30_000;
 const deploymentHistoryReconciliationMs = 30_000;
 const deploymentHistoryPollMs = 250;
+const loopbackRequestArrivalMs = 250;
 const hopByHopHeaders = new Set([
   "connection",
   "content-length",
@@ -248,6 +249,7 @@ function deploymentId(result) {
 async function readDeploymentList({
   activationPath,
   headers,
+  requestTimeoutMs = cloudflareRequestTimeoutMs,
   upstreamBaseUrl,
 }) {
   const response = await fetch(
@@ -256,7 +258,12 @@ async function readDeploymentList({
       method: "GET",
       headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(cloudflareRequestTimeoutMs),
+      signal: AbortSignal.timeout(
+        Math.max(
+          1,
+          Math.min(cloudflareRequestTimeoutMs, requestTimeoutMs),
+        ),
+      ),
     },
   );
   const body = Buffer.from(await response.arrayBuffer());
@@ -283,11 +290,13 @@ async function reconcileActivationAttempt({
 }) {
   const deadline = Date.now() + deploymentHistoryReconciliationMs;
   let lastError;
-  while (Date.now() <= deadline) {
+  while (Date.now() < deadline) {
+    const requestBudget = deadline - Date.now();
     try {
       const deployments = await readDeploymentList({
         activationPath,
         headers,
+        requestTimeoutMs: requestBudget,
         upstreamBaseUrl,
       });
       const baselineIndex = deployments.findIndex(
@@ -329,11 +338,13 @@ async function readOwnedDeploymentPosition({
 }) {
   const deadline = Date.now() + deploymentHistoryReconciliationMs;
   let lastError;
-  while (Date.now() <= deadline) {
+  while (Date.now() < deadline) {
+    const requestBudget = deadline - Date.now();
     try {
       const deployments = await readDeploymentList({
         activationPath,
         headers,
+        requestTimeoutMs: requestBudget,
         upstreamBaseUrl,
       });
       const ownedIndex = deployments.findIndex(
@@ -364,6 +375,75 @@ async function readOwnedDeploymentPosition({
   });
 }
 
+function deploymentsAreEquivalent(left, right) {
+  return (
+    left.versions.length === right.versions.length &&
+    left.versions.every(
+      (version, index) =>
+        version.version_id === right.versions[index]?.version_id &&
+        version.percentage === right.versions[index]?.percentage,
+    )
+  );
+}
+
+async function reconcileAmbiguousRollback({
+  activationPath,
+  headers,
+  replacedDeploymentId,
+  target,
+  upstreamBaseUrl,
+}) {
+  const deadline = Date.now() + deploymentHistoryReconciliationMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    const requestBudget = deadline - Date.now();
+    try {
+      const deployments = await readDeploymentList({
+        activationPath,
+        headers,
+        requestTimeoutMs: requestBudget,
+        upstreamBaseUrl,
+      });
+      const replacedIndex = deployments.findIndex(
+        ({ deploymentId: candidate }) =>
+          candidate === replacedDeploymentId,
+      );
+      if (replacedIndex > 0) {
+        const intervening = deployments.slice(0, replacedIndex);
+        const restoredIndex = intervening.findIndex((deployment) =>
+          deploymentsAreEquivalent(deployment, target),
+        );
+        if (restoredIndex >= 0) {
+          return {
+            state: restoredIndex === 0 ? "restored" : "superseded",
+            deployment: intervening[restoredIndex],
+            deployments,
+            replacedIndex,
+          };
+        }
+        // The protected activation is no longer current. A concurrent
+        // deployment won the race, so retrying the stale rollback would
+        // overwrite it even if the ambiguous request was rejected.
+        return { state: "superseded" };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.min(deploymentHistoryPollMs, remaining),
+        ),
+      );
+    }
+  }
+  throw new Error("exact_activation_rollback_ambiguous", {
+    cause: lastError,
+  });
+}
+
 function productionActivationPath(environment) {
   const accountId = environment.FOUNDRY_CLOUDFLARE_ACCOUNT_ID?.trim();
   const scriptName =
@@ -384,8 +464,7 @@ function productionActivationPath(environment) {
 
 export async function assertProductionDeploymentAbsent({
   environment = process.env,
-  upstreamBaseUrl =
-    environment.CLOUDFLARE_API_BASE_URL ?? cloudflareApiBaseUrl,
+  upstreamBaseUrl = cloudflareApiBaseUrl,
 } = {}) {
   const apiToken = environment.CLOUDFLARE_API_TOKEN?.trim();
   if (apiToken === undefined || apiToken.length === 0) {
@@ -403,8 +482,7 @@ export async function assertProductionDeploymentAbsent({
 
 export async function assertProductionDeploymentBaseline({
   environment = process.env,
-  upstreamBaseUrl =
-    environment.CLOUDFLARE_API_BASE_URL ?? cloudflareApiBaseUrl,
+  upstreamBaseUrl = cloudflareApiBaseUrl,
 } = {}) {
   const apiToken = environment.CLOUDFLARE_API_TOKEN?.trim();
   if (apiToken === undefined || apiToken.length === 0) {
@@ -430,6 +508,37 @@ async function restorePreviousDeployment({
   let expectedOwnedDeployment = activatedDeploymentId;
   let target;
   let lastError;
+  const reconcileUnknownRollback = async () => {
+    const reconciled = await reconcileAmbiguousRollback({
+      activationPath,
+      headers,
+      replacedDeploymentId: expectedOwnedDeployment,
+      target,
+      upstreamBaseUrl,
+    });
+    if (reconciled.state === "superseded") {
+      return true;
+    }
+    const rollbackDeploymentId = reconciled.deployment.deploymentId;
+    ownedDeployments.add(rollbackDeploymentId);
+    expectedOwnedDeployment = rollbackDeploymentId;
+    if (reconciled.replacedIndex === 1) {
+      return true;
+    }
+    if (reconciled.replacedIndex < 2) {
+      throw new Error("exact_activation_rollback_history_invalid");
+    }
+    target = reconciled.deployments
+      .slice(1, reconciled.replacedIndex)
+      .find(
+        ({ deploymentId: candidate }) =>
+          !ownedDeployments.has(candidate),
+      );
+    if (target === undefined) {
+      throw new Error("exact_activation_rollback_history_invalid");
+    }
+    return false;
+  };
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       const beforePosition = await readOwnedDeploymentPosition({
@@ -450,32 +559,49 @@ async function restorePreviousDeployment({
         throw new Error("exact_activation_rollback_baseline_unavailable");
       }
 
-      const rollbackResponse = await fetch(
-        new URL(activationPath, upstreamBaseUrl),
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            strategy: "percentage",
-            versions: target.versions,
-            annotations: {
-              "workers/message":
-                "Foundry automatic rollback after protected ref movement",
-            },
-          }),
-          redirect: "manual",
-          signal: AbortSignal.timeout(cloudflareRequestTimeoutMs),
-        },
-      );
-      const rollbackBody = Buffer.from(
-        await rollbackResponse.arrayBuffer(),
-      );
+      let rollbackResponse;
+      let rollbackBody;
+      try {
+        rollbackResponse = await fetch(
+          new URL(activationPath, upstreamBaseUrl),
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              strategy: "percentage",
+              versions: target.versions,
+              annotations: {
+                "workers/message":
+                  "Foundry automatic rollback after protected ref movement",
+              },
+            }),
+            redirect: "manual",
+            signal: AbortSignal.timeout(cloudflareRequestTimeoutMs),
+          },
+        );
+        rollbackBody = Buffer.from(
+          await rollbackResponse.arrayBuffer(),
+        );
+      } catch (error) {
+        if (await reconcileUnknownRollback()) {
+          return;
+        }
+        continue;
+      }
       if (!rollbackResponse.ok) {
         throw new Error("exact_activation_rollback_request_failed");
       }
-      const rollbackDeploymentId = deploymentId(
-        parseCloudflareResult(rollbackBody),
-      );
+      let rollbackDeploymentId;
+      try {
+        rollbackDeploymentId = deploymentId(
+          parseCloudflareResult(rollbackBody),
+        );
+      } catch (error) {
+        if (await reconcileUnknownRollback()) {
+          return;
+        }
+        continue;
+      }
       ownedDeployments.add(rollbackDeploymentId);
       const replacedDeploymentId = expectedOwnedDeployment;
       expectedOwnedDeployment = rollbackDeploymentId;
@@ -509,6 +635,9 @@ async function restorePreviousDeployment({
         throw new Error("exact_activation_rollback_history_invalid");
       }
     } catch (error) {
+      if (error?.message === "exact_activation_rollback_ambiguous") {
+        throw error;
+      }
       lastError = error;
     }
   }
@@ -522,8 +651,7 @@ export async function activateExactVersion({
   assertHead = assertExactProductionHead,
   environment = process.env,
   startActivation,
-  upstreamBaseUrl =
-    environment.CLOUDFLARE_API_BASE_URL ?? cloudflareApiBaseUrl,
+  upstreamBaseUrl = cloudflareApiBaseUrl,
 } = {}) {
   if (typeof versionId !== "string" || !versionIdPattern.test(versionId)) {
     throw new Error("exact_version_id_invalid");
@@ -536,131 +664,161 @@ export async function activateExactVersion({
   let activationRecord;
   let activationRequest;
   let baseline;
-  const server = createServer(async (request, response) => {
-    try {
-      const requestUrl = new URL(
-        request.url ?? "/",
-        "http://127.0.0.1",
-      );
-      const isActivation =
-        request.method === "POST" &&
-        requestUrl.pathname === expectedActivationPath;
-      const isOtherActivation =
-        request.method === "POST" &&
-        activationPathPattern.test(requestUrl.pathname) &&
-        !isActivation;
-      const isDeploymentLookup =
-        request.method === "GET" &&
-        requestUrl.pathname === expectedActivationPath;
-      const body = await readRequestBody(request);
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(request.headers)) {
-        if (
-          value !== undefined &&
-          name.toLowerCase() !== "host" &&
-          !hopByHopHeaders.has(name.toLowerCase())
-        ) {
-          headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+  let requestHandlerError;
+  const inFlightRequests = new Set();
+  const server = createServer((request, response) => {
+    const handler = (async () => {
+      try {
+        const requestUrl = new URL(
+          request.url ?? "/",
+          "http://127.0.0.1",
+        );
+        const isActivation =
+          request.method === "POST" &&
+          requestUrl.pathname === expectedActivationPath;
+        const isOtherActivation =
+          request.method === "POST" &&
+          activationPathPattern.test(requestUrl.pathname) &&
+          !isActivation;
+        const isDeploymentLookup =
+          request.method === "GET" &&
+          requestUrl.pathname === expectedActivationPath;
+        const body = await readRequestBody(request);
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(request.headers)) {
+          if (
+            value !== undefined &&
+            name.toLowerCase() !== "host" &&
+            !hopByHopHeaders.has(name.toLowerCase())
+          ) {
+            headers.set(
+              name,
+              Array.isArray(value) ? value.join(", ") : value,
+            );
+          }
         }
-      }
-      if (isOtherActivation) {
-        activationError = new Error("exact_activation_target_invalid");
-        rejectActivation(response, "Exact activation target required.");
-        return;
-      }
-      if (isActivation) {
-        if (activationAttempted) {
-          activationError = new Error("exact_activation_repeated");
-          rejectActivation(response, "Activation already attempted.");
+        if (isOtherActivation) {
+          activationError = new Error("exact_activation_target_invalid");
+          rejectActivation(response, "Exact activation target required.");
           return;
         }
-        activationAttempted = true;
-        if (!activationPayloadIsExact(body, versionId)) {
-          activationError = new Error("exact_activation_payload_invalid");
-          rejectActivation(response, "Exact activation payload required.");
-          return;
-        }
-        try {
-          assertHead();
-          const deployments = await readDeploymentList({
-            activationPath: expectedActivationPath,
-            headers,
-            upstreamBaseUrl,
-          });
-          baseline = deployments[0];
-          if (baseline === undefined) {
-            activationError = new Error(
-              "exact_activation_baseline_unavailable",
-            );
-            rejectActivation(
-              response,
-              "Provision a production baseline before exact deployment.",
-            );
+        if (isActivation) {
+          if (activationAttempted) {
+            activationError = new Error("exact_activation_repeated");
+            rejectActivation(response, "Activation already attempted.");
             return;
           }
-          assertHead();
-          activationRequest = {
+          activationAttempted = true;
+          if (!activationPayloadIsExact(body, versionId)) {
+            activationError = new Error("exact_activation_payload_invalid");
+            rejectActivation(response, "Exact activation payload required.");
+            return;
+          }
+          try {
+            assertHead();
+            const deployments = await readDeploymentList({
+              activationPath: expectedActivationPath,
+              headers,
+              upstreamBaseUrl,
+            });
+            baseline = deployments[0];
+            if (baseline === undefined) {
+              activationError = new Error(
+                "exact_activation_baseline_unavailable",
+              );
+              rejectActivation(
+                response,
+                "Provision a production baseline before exact deployment.",
+              );
+              return;
+            }
+            assertHead();
+            activationRequest = {
+              activationPath: requestUrl.pathname,
+              headers: new Headers(headers),
+            };
+          } catch (error) {
+            activationError = error;
+            rejectActivation(response, "Production head moved.");
+            return;
+          }
+        }
+
+        const upstream = await fetch(
+          new URL(
+            `${requestUrl.pathname}${requestUrl.search}`,
+            upstreamBaseUrl,
+          ),
+          {
+            method: request.method,
+            headers,
+            body,
+            redirect: "manual",
+            signal: AbortSignal.timeout(cloudflareRequestTimeoutMs),
+          },
+        );
+        const upstreamBody = Buffer.from(await upstream.arrayBuffer());
+        if (isDeploymentLookup && upstream.ok) {
+          baseline = deploymentList(
+            parseCloudflareResult(upstreamBody),
+          )[0];
+        }
+        if (isActivation && upstream.ok) {
+          const activatedDeploymentId = deploymentId(
+            parseCloudflareResult(upstreamBody),
+          );
+          activationCount += 1;
+          activationRecord = {
+            activatedDeploymentId,
             activationPath: requestUrl.pathname,
             headers: new Headers(headers),
           };
-        } catch (error) {
-          activationError = error;
-          rejectActivation(response, "Production head moved.");
-          return;
         }
-      }
-
-      const upstream = await fetch(
-        new URL(
-          `${requestUrl.pathname}${requestUrl.search}`,
-          upstreamBaseUrl,
-        ),
-        {
-          method: request.method,
-          headers,
-          body,
-          redirect: "manual",
-          signal: AbortSignal.timeout(cloudflareRequestTimeoutMs),
-        },
-      );
-      const upstreamBody = Buffer.from(await upstream.arrayBuffer());
-      if (isDeploymentLookup && upstream.ok) {
-        baseline = deploymentList(
-          parseCloudflareResult(upstreamBody),
-        )[0];
-      }
-      if (isActivation && upstream.ok) {
-        const activatedDeploymentId = deploymentId(
-          parseCloudflareResult(upstreamBody),
+        response.statusCode = upstream.status;
+        copyResponseHeaders(upstream, response);
+        response.end(upstreamBody);
+      } catch (error) {
+        activationError ??= error;
+        response.writeHead(502, {
+          "content-type": "application/json",
+        });
+        response.end(
+          JSON.stringify({
+            success: false,
+            errors: [{ code: 10001, message: "Activation proxy failed." }],
+          }),
         );
-        activationCount += 1;
-        activationRecord = {
-          activatedDeploymentId,
-          activationPath: requestUrl.pathname,
-          headers: new Headers(headers),
-        };
       }
-      response.statusCode = upstream.status;
-      copyResponseHeaders(upstream, response);
-      response.end(upstreamBody);
-    } catch (error) {
-      activationError ??= error;
-      response.writeHead(502, {
-        "content-type": "application/json",
-      });
-      response.end(
-        JSON.stringify({
-          success: false,
-          errors: [{ code: 10001, message: "Activation proxy failed." }],
-        }),
-      );
-    }
+    })();
+    inFlightRequests.add(handler);
+    void handler.then(
+      () => {
+        inFlightRequests.delete(handler);
+      },
+      (error) => {
+        requestHandlerError ??= error;
+        inFlightRequests.delete(handler);
+      },
+    );
   });
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
+  let serverClosePromise;
+  const closeActivationServer = () => {
+    serverClosePromise ??= new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+    return serverClosePromise;
+  };
   try {
     const address = server.address();
     if (address === null || typeof address === "string") {
@@ -700,6 +858,17 @@ export async function activateExactVersion({
     } catch (error) {
       activationProcessError = error;
     }
+    const requestArrivalDeadline = Date.now() + loopbackRequestArrivalMs;
+    while (
+      !activationAttempted &&
+      activationError === undefined &&
+      Date.now() < requestArrivalDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await closeActivationServer();
+    await Promise.all([...inFlightRequests]);
+    activationError ??= requestHandlerError;
     if (
       activationCount === 0 &&
       activationRequest !== undefined &&
@@ -774,15 +943,8 @@ export async function activateExactVersion({
       );
     }
   } finally {
-    await new Promise((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
+    await closeActivationServer();
+    await Promise.all([...inFlightRequests]);
   }
 }
 

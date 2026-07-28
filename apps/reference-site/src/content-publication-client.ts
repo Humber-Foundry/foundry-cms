@@ -5,6 +5,20 @@ export type ContentPublicationAttempt = Readonly<{
 
 type Fetcher = typeof fetch;
 
+export function contentPublicationCanRetry(publication: {
+  status: string;
+  detail: string | null;
+  commitSha: string | null;
+}) {
+  return (
+    publication.status === "failed" &&
+    (publication.commitSha !== null ||
+      /^git_reference_(?:not_advanced|result_unknown):[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(
+        publication.detail ?? "",
+      ))
+  );
+}
+
 export function contentPublicationPollDelay(attempt: number) {
   const boundedAttempt = Math.min(
     Math.max(0, Number.isSafeInteger(attempt) ? attempt : 0),

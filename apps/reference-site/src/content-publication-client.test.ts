@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  contentPublicationCanRetry,
   contentPublicationPollDelay,
   loadContentPublication,
   refreshContentPublication,
@@ -15,6 +16,38 @@ function json(body: unknown, status = 200) {
 }
 
 describe("content publication client", () => {
+  it.each([
+    ["recorded commit", "c".repeat(40), null],
+    [
+      "retained candidate",
+      null,
+      `git_reference_not_advanced:${"c".repeat(40)}`,
+    ],
+    [
+      "ambiguous retained candidate",
+      null,
+      `git_reference_result_unknown:${"c".repeat(40)}`,
+    ],
+  ])("offers an exact deployment retry for a %s", (_label, commitSha, detail) => {
+    expect(
+      contentPublicationCanRetry({
+        status: "failed",
+        commitSha,
+        detail,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not offer a retry without exact commit evidence", () => {
+    expect(
+      contentPublicationCanRetry({
+        status: "failed",
+        commitSha: null,
+        detail: "deployment_retry_timeout",
+      }),
+    ).toBe(false);
+  });
+
   it("backs active publication polling off to a bounded interval", () => {
     expect(
       [0, 1, 2, 3, 4, 20].map(contentPublicationPollDelay),

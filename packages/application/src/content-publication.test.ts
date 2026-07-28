@@ -11,6 +11,7 @@ import {
 import { createHumanMembershipId } from "./human-access";
 import {
   ContentApprovalInvalidError,
+  ContentPublicationIdempotencyError,
   ContentPublicationValidationError,
   createContentPublicationApplication,
   createContentPublicationId,
@@ -505,6 +506,26 @@ describe("content publication application", () => {
       idempotencyKey: "publish-exact-revision-1",
     });
     expect(replay).toEqual(publication);
+    expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a publication idempotency key reused by another requester", async () => {
+    const { app, approval } = await approve();
+    await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-command-identity-conflict",
+    });
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: createHumanMembershipId("membership-other"),
+        idempotencyKey: "publish-command-identity-conflict",
+      }),
+    ).rejects.toEqual(new ContentPublicationIdempotencyError());
     expect(createCommit).toHaveBeenCalledTimes(1);
   });
 
@@ -1212,6 +1233,69 @@ describe("content publication application", () => {
       "c".repeat(40),
       "build-123",
     );
+  });
+
+  it("invalidates retry authority when the initial production-head check mismatches", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-initial-head-mismatch",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("d".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).rejects.toEqual(
+      new ContentPublicationValidationError(
+        "deployment_retry_head_moved",
+      ),
+    );
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the exact production head after claiming a deployment retry", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-post-claim-head-race",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.getProductionHead)
+      .mockResolvedValueOnce("c".repeat(40))
+      .mockResolvedValueOnce("d".repeat(40));
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_head_moved",
+        deploymentId: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+      }),
+    );
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+    expect(publisher.getProductionHead).toHaveBeenCalledTimes(3);
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
   it("dispatches only one exact build when deployment retries race", async () => {

@@ -116,6 +116,31 @@ async function loadDeploymentBaseline(localApiBaseUrl) {
   expect(response.status).toBe(200);
 }
 
+function requestLoopback(url, { body, method = "GET" } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = createHttpRequest(
+      url,
+      {
+        method,
+        headers: {
+          connection: "close",
+          ...(body === undefined
+            ? {}
+            : { "content-type": "application/json" }),
+        },
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () => {
+          resolve(response.statusCode);
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end(body);
+  });
+}
+
 describe("guarded exact production deployment", () => {
   it("reads the exact non-serving version from Wrangler output", async () => {
     const uploaded = await uploadExactVersion({
@@ -185,6 +210,86 @@ describe("guarded exact production deployment", () => {
     ).rejects.toThrow("exact_activation_baseline_unavailable");
 
     await close(upstream);
+  });
+
+  it("ignores an ambient Cloudflare API base URL for production lookups", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify(deploymentResult()), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+    try {
+      await assertProductionDeploymentBaseline({
+        environment: {
+          ...activationEnvironment,
+          CLOUDFLARE_API_BASE_URL: "https://attacker.invalid/client/v4",
+          CLOUDFLARE_API_TOKEN: "sensitive-token",
+        },
+      });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(String(fetchSpy.mock.calls[0][0])).toBe(
+        "https://api.cloudflare.com/client/v4/accounts/a/workers/scripts/site/deployments",
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("ignores an ambient Cloudflare API base URL while proxying activation", async () => {
+    const upstreamUrls = [];
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        upstreamUrls.push(String(input));
+        return new Response(
+          JSON.stringify(
+            init?.method === "POST"
+              ? activationResult()
+              : deploymentResult(),
+          ),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      });
+
+    try {
+      await activateExactVersion({
+        versionId,
+        assertHead: vi.fn(),
+        environment: {
+          ...activationEnvironment,
+          CLOUDFLARE_API_BASE_URL: "https://attacker.invalid/client/v4",
+        },
+        startActivation: ({ localApiBaseUrl }) =>
+          activationProcess(async () => {
+            const endpoint =
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`;
+            expect(await requestLoopback(endpoint)).toBe(200);
+            expect(
+              await requestLoopback(endpoint, {
+                method: "POST",
+                body: exactActivationBody,
+              }),
+            ).toBe(200);
+          }),
+      });
+
+      expect(upstreamUrls).toHaveLength(3);
+      expect(
+        upstreamUrls.every((url) =>
+          url.startsWith("https://api.cloudflare.com/client/v4/"),
+        ),
+      ).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it("checks the production ref at the actual activation request", async () => {
@@ -262,6 +367,72 @@ describe("guarded exact production deployment", () => {
       }),
     ).resolves.toBeUndefined();
 
+    expect(assertHead).toHaveBeenCalledTimes(3);
+    await close(upstream);
+  });
+
+  it("awaits an in-flight activation after the child exits without reading the response", async () => {
+    let acceptedActivations = 0;
+    const upstream = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      if (request.method === "GET") {
+        response.end(JSON.stringify(deploymentResult()));
+        return;
+      }
+      acceptedActivations += 1;
+      setTimeout(() => {
+        response.end(JSON.stringify(activationResult()));
+      }, 20);
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    const assertHead = vi.fn();
+
+    await expect(
+      activate({
+        versionId,
+        assertHead,
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) => {
+          const process = new EventEmitter();
+          queueMicrotask(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const target = new URL(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+            );
+            const request = createHttpRequest(
+              target,
+              {
+                method: "POST",
+                headers: {
+                  connection: "close",
+                  "content-type": "application/json",
+                },
+              },
+              (response) => {
+                response.resume();
+              },
+            );
+            request.once("error", (error) => {
+              process.emit("error", error);
+            });
+            request.once("socket", (socket) => {
+              const exitImmediately = () => {
+                process.emit("exit", 1, null);
+              };
+              if (socket.connecting) {
+                socket.once("connect", exitImmediately);
+              } else {
+                exitImmediately();
+              }
+            });
+            request.end(exactActivationBody);
+          });
+          return process;
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(acceptedActivations).toBe(1);
     expect(assertHead).toHaveBeenCalledTimes(3);
     await close(upstream);
   });
@@ -608,6 +779,14 @@ describe("guarded exact production deployment", () => {
   });
 
   it("reconciles an accepted activation whose response was lost before applying the final head fence", async () => {
+    const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeoutDurations = [];
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation((milliseconds) => {
+        timeoutDurations.push(milliseconds);
+        return nativeTimeout(milliseconds);
+      });
     const deployments = [
       { id: "deployment-before", versionId: previousVersionId },
     ];
@@ -682,6 +861,99 @@ describe("guarded exact production deployment", () => {
     expect(deployments[0]).toEqual({
       id: "deployment-rollback",
       versionId: previousVersionId,
+    });
+    expect(
+      timeoutDurations.some((milliseconds) => milliseconds < 29_900),
+    ).toBe(true);
+    timeoutSpy.mockRestore();
+    await close(upstream);
+  });
+
+  it("does not retry a lost rollback response after a newer deployment wins during delayed history visibility", async () => {
+    const deployments = [
+      { id: "deployment-before", versionId: previousVersionId },
+    ];
+    const newerVersionId =
+      "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    let postCount = 0;
+    let delayedHistoryReads = 0;
+    const upstream = createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const body = Buffer.concat(chunks).toString("utf8");
+      if (request.method === "GET") {
+        const visibleDeployments =
+          postCount === 2 && delayedHistoryReads < 2
+            ? (delayedHistoryReads += 1, deployments.slice(2))
+            : deployments;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify(deploymentHistoryResult(visibleDeployments)),
+        );
+        return;
+      }
+      postCount += 1;
+      if (postCount === 1) {
+        deployments.unshift({
+          id: "deployment-activated",
+          versionId,
+        });
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(activationResult()));
+        return;
+      }
+      if (postCount === 2) {
+        deployments.unshift({
+          id: "deployment-newer",
+          versionId: newerVersionId,
+        });
+        deployments.unshift({
+          id: "deployment-rollback-with-lost-response",
+          versionId: JSON.parse(body).versions[0].version_id,
+        });
+        response.destroy();
+        return;
+      }
+      const compensationId = "deployment-race-compensation";
+      deployments.unshift({
+        id: compensationId,
+        versionId: JSON.parse(body).versions[0].version_id,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(activationResult(compensationId)));
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    let headCheck = 0;
+
+    await expect(
+      activate({
+        versionId,
+        assertHead: vi.fn(() => {
+          headCheck += 1;
+          if (headCheck === 3) {
+            throw new Error("exact_production_head_moved");
+          }
+        }),
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) =>
+          activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(200);
+          }),
+      }),
+    ).rejects.toThrow("exact_production_head_moved");
+
+    expect(postCount).toBe(3);
+    expect(delayedHistoryReads).toBe(2);
+    expect(deployments[0]).toEqual({
+      id: "deployment-race-compensation",
+      versionId: newerVersionId,
     });
     await close(upstream);
   });

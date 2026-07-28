@@ -14,6 +14,7 @@ import {
   createContentEditorState,
 } from "../src/content-editor-history";
 import {
+  contentPublicationCanRetry,
   contentPublicationPollDelay,
   loadContentPublication,
   refreshContentPublication,
@@ -61,16 +62,6 @@ const publicationLabels: Readonly<Record<PublicationStatus, string>> = {
 
 function publicationIsActive(publication: PublicationRecord): boolean {
   return !["verified-live", "blocked", "failed"].includes(publication.status);
-}
-
-function publicationCanRetry(publication: PublicationRecord): boolean {
-  return (
-    publication.status === "failed" &&
-    (publication.commitSha !== null ||
-      /^git_reference_not_advanced:[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(
-        publication.detail ?? "",
-      ))
-  );
 }
 
 function changedFields(
@@ -625,7 +616,7 @@ export function ContentEditor({
   }
 
   async function retryDeployment() {
-    if (publication === null || !publicationCanRetry(publication)) {
+    if (publication === null || !contentPublicationCanRetry(publication)) {
       return;
     }
     pendingDeploymentRetryAttempt.current ??= {
@@ -904,7 +895,8 @@ export function ContentEditor({
               publicationBusy ||
               approvalId === null ||
               (publication !== null && publicationIsActive(publication)) ||
-              (publication !== null && publicationCanRetry(publication)) ||
+              (publication !== null &&
+                contentPublicationCanRetry(publication)) ||
               edits.length > 0 ||
               state.status !== "saved"
             }
@@ -914,7 +906,8 @@ export function ContentEditor({
               ? "Publishing…"
               : "Publish approved revision"}
           </button>
-          {publication !== null && publicationCanRetry(publication) ? (
+          {publication !== null &&
+          contentPublicationCanRetry(publication) ? (
             <button
               type="button"
               className="copy-button"

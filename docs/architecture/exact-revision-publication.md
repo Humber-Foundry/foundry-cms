@@ -26,11 +26,13 @@ preview for the current saved revision. The approval fingerprint binds:
   Cloudflare account, and build trigger.
 
 Any later revision, production-base, or channel-configuration change makes
-that evidence unusable before Git is contacted. The private keys and API
-tokens are deliberately excluded so credential rotation does not invalidate
-content evidence. D1 inserts the approval only while the workspace still
-points to that revision, and publication requires the command workspace to
-equal the approval workspace.
+that evidence unusable before Git is contacted. Private-key and API-token
+values are deliberately excluded. For secrets configured in the Workers build
+trigger, Cloudflare's non-secret creation timestamp remains in the channel
+fingerprint as a rotation version, so rotating one intentionally requires a
+fresh preview and approval without exposing its value. D1 inserts the approval
+only while the workspace still points to that revision, and publication
+requires the command workspace to equal the approval workspace.
 
 ## Deterministic Git publication
 
@@ -51,13 +53,19 @@ defined by ADR-0004.
 D1 stores immutable approvals, separate invalidation records, publication
 operations, and append-only status events. A partial unique index permits only
 one active production publication across workspaces. Claim and initial audit
-are one transaction. The short commit lease atomically requires the approval
-to remain uninvalidated and the approved revision to remain current; D1 fences
-new revision inserts in that workspace until the Git result releases that
-lease, while other workspaces remain editable. The five-minute lease covers
-the complete bounded GitHub request sequence. Its holder renews the matching
-token before Git work and again immediately before the bounded, non-force
-production ref update. Every renewal rechecks that the exact approval remains
+are one transaction. The workspace-scoped idempotency key is bound to a
+canonical command identity covering the workspace, revision, approval,
+fingerprint, and requesting human. Each successful state mutation writes a
+fresh token, and its audit insert is conditional on that exact token, so a
+losing compare-and-swap cannot append a fictional event even when timestamps
+collide. Once a commit SHA is recorded, it may be repeated but never replaced.
+The short commit lease atomically requires the approval to remain
+uninvalidated and the approved revision to remain current; D1 fences new
+revision inserts in that workspace until the Git result releases that lease,
+while other workspaces remain editable. The five-minute lease covers the
+complete bounded GitHub request sequence. Its holder renews the matching token
+before Git work and again immediately before the bounded, non-force production
+ref update. Every renewal rechecks that the exact approval remains
 uninvalidated and its revision remains current. A stale holder cannot advance
 the ref or persist its result. An expired lease is reconciled by publish ID
 before it can
@@ -108,14 +116,17 @@ timeout.
 An Editor or Owner can explicitly retry a failed deployment whose commit
 remains the production head. Foundry first claims that retry durably, then asks
 the Cloudflare Workers Builds API to build that exact branch and commit hash;
-it does not create or move a Git commit. The returned build UUID is stored
-with the publication and polled through the Builds API, so an earlier failed
-GitHub check cannot be mistaken for the new attempt. The stable publication
-and protected human-mutation receipt prevent a repeated request from
-dispatching a second build. If a Worker disappears while dispatching, the
-durable attempt becomes uncertain after one minute and terminal after the
-same bounded 15-minute recovery window rather than holding the global
-publication slot indefinitely.
+it does not create or move a Git commit. Immediately before that external
+request, Foundry revalidates the exact approval and production head under the
+claimed retry. An observed mismatch durably invalidates approval and releases
+the claim without dispatch. The returned build UUID is stored with the
+publication and polled through the Builds API, so an earlier failed GitHub
+check cannot be mistaken for the new attempt. The stable publication and
+protected human-mutation receipt prevent a repeated request from dispatching a
+second build. If a Worker disappears while dispatching, the durable attempt
+becomes uncertain after one minute and terminal after the same bounded
+15-minute recovery window rather than holding the global publication slot
+indefinitely.
 Any later edit invalidates that retry authority; the newer revision must be
 previewed and approved instead. A retained commit whose ref update was
 ambiguous can be retried through the same explicit action. Foundry verifies its
@@ -125,17 +136,22 @@ The commit carries an HMAC publication signature over its parent, content path,
 content hash, and complete attribution message. The signing secret is shared
 only by the CMS publisher and Workers Builds, so an ordinary pull request
 cannot forge the Foundry trailers and enter the exact content deployment path.
-The only accepted trigger deploy command is `npm run deploy`. That shipped
-script builds, then runs `scripts/deploy-exact-production.mjs`. The controller
-requires the local checkout, `WORKERS_CI_COMMIT_SHA`, and `origin`'s protected
-production ref to agree before upload. OpenNext uploads a non-serving,
-commit-tagged Worker version first. The controller then routes Wrangler's
+The only accepted trigger deploy command is `npm run deploy`. Before building,
+that shipped command rejects staged, unstaged, or non-ignored untracked source,
+then runs `scripts/deploy-exact-production.mjs`. The controller requires the
+local checkout, `WORKERS_CI_COMMIT_SHA`, and `origin`'s protected production
+ref to agree before upload. OpenNext uploads a non-serving, commit-tagged
+Worker version first. The controller then routes Wrangler's
 activation API calls through a loopback gate and rechecks the same fence on the
 actual Cloudflare `POST /deployments` request before forwarding it. It requires
 exactly one bounded activation payload naming only the uploaded version at 100
 percent, checks the fence after receiving that payload, and verifies the fence
-again after success. Before promotion it records the currently serving
-deployment and traffic allocation. If an activation response is lost, the
+again after success. The gate forwards token-bearing production requests only
+to the fixed Cloudflare API origin; an ambient base-URL variable cannot redirect
+them. After Wrangler exits, the controller closes request acceptance and drains
+every in-flight handler before classifying the result. Before promotion it
+records the currently serving deployment and traffic allocation. If an
+activation response is lost, the
 controller polls deployment history for up to 30 seconds before deciding
 whether the promotion succeeded. Delayed history visibility is not treated as
 proof that another deployment superseded the attempt. If the protected ref
@@ -143,13 +159,14 @@ moves after Cloudflare accepts the promotion, including an activation
 recovered from a lost response, the controller restores the prior allocation
 only when deployment history proves its stale deployment has been superseded.
 Because Cloudflare does not expose a conditional deployment write, the
-controller also waits for the compensating deployment to become visible and
-restores any newer deployment that raced its rollback. Once the controller has
-recorded the one permitted activation and the final production-head fence
-passes, a later non-zero Wrangler exit cannot turn that observed activation
-into an ambiguous failure. Every direct Cloudflare request has a bounded
-timeout. A build compares its published-content path with the live release
-marker: content may
+controller reconciles a lost rollback response before any retry. It also waits
+for the compensating deployment to become visible and restores any newer
+deployment that raced its rollback. Once the controller has recorded the one
+permitted activation and the final production-head fence passes, a later
+non-zero Wrangler exit cannot turn that observed activation into an ambiguous
+failure. Every direct Cloudflare request and reconciliation loop uses its
+remaining bounded timeout. A build compares its published-content path with
+the live release marker: content may
 advance only through one direct, signature-verified Foundry publication
 commit. This quarantines a content commit whose earlier deployment failed so a
 later code build cannot publish it without the exact retry. The activation

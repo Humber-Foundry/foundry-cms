@@ -6,6 +6,26 @@ import { pathToFileURL } from "node:url";
 const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 const branchPattern = /^[A-Za-z0-9._/-]+$/u;
 
+export function assertExactProductionSource({
+  assertHead = assertExactProductionHead,
+  readSourceStatus = () =>
+    execFileSync(
+      "git",
+      [
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignore-submodules=none",
+      ],
+      { encoding: "utf8" },
+    ),
+} = {}) {
+  if (readSourceStatus().length !== 0) {
+    throw new Error("exact_build_source_dirty");
+  }
+  assertHead();
+}
+
 export function assertExactProductionHead({
   environment = process.env,
   readLocalHead = () =>
@@ -51,8 +71,8 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   try {
-    assertExactProductionHead();
-    console.log("Exact production head confirmed.");
+    assertExactProductionSource();
+    console.log("Exact production source confirmed.");
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
