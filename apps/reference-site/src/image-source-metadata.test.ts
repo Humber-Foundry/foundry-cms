@@ -60,6 +60,24 @@ describe("image source metadata", () => {
     1_000,
   );
 
+  it("does not treat the ftyp minor version as an AVIF brand", () => {
+    const source = new Uint8Array(20 + 32 + 9);
+    const view = new DataView(source.buffer);
+    view.setUint32(0, 20);
+    source.set(new TextEncoder().encode("ftypmif1avif\u0000\u0000\u0000\u0000"), 4);
+    view.setUint32(20, 32);
+    source.set(new TextEncoder().encode("meta"), 24);
+    view.setUint32(32, 20);
+    source.set(new TextEncoder().encode("ispe"), 36);
+    view.setUint32(44, 120);
+    view.setUint32(48, 80);
+    view.setUint32(52, 9);
+    source.set(new TextEncoder().encode("mdat"), 56);
+    source[60] = 1;
+
+    expect(() => inspectImageSource(source)).toThrow("invalid_image_source");
+  });
+
   it("preserves EXIF orientation when a later APP1 segment contains XMP", () => {
     const exif = new Uint8Array(32);
     exif.set(new TextEncoder().encode("Exif\u0000\u0000"), 0);

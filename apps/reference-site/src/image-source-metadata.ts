@@ -319,9 +319,22 @@ function avif(source: Uint8Array): ImageSourceMetadata | null {
   while (offset + 8 <= source.byteLength) {
     const box = boxAt(offset, source.byteLength);
     if (box.type === "ftyp") {
-      if (box.size > 1_024 || (box.size - box.headerSize) % 4 !== 0) invalid();
+      const payloadSize = box.size - box.headerSize;
+      if (
+        box.size > 1_024 ||
+        payloadSize < 8 ||
+        payloadSize % 4 !== 0
+      ) {
+        invalid();
+      }
+      const majorBrand = ascii(
+        source,
+        offset + box.headerSize,
+        offset + box.headerSize + 4,
+      );
+      if (majorBrand === "avif" || majorBrand === "avis") validBrand = true;
       for (
-        let brandOffset = offset + box.headerSize;
+        let brandOffset = offset + box.headerSize + 8;
         brandOffset + 4 <= box.end;
         brandOffset += 4
       ) {
