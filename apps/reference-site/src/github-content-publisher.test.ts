@@ -48,8 +48,8 @@ const configurationInputs = {
 
 function publicationReconciliationInput(
   publishId: ReturnType<typeof createContentPublicationId>,
+  bytes = "{\"schemaVersion\":\"1.0.0\"}\n",
 ) {
-  const bytes = "{\"schemaVersion\":\"1.0.0\"}\n";
   return {
     publishId,
     expectedHead: "a".repeat(40),
@@ -1548,6 +1548,65 @@ describe("GitHub content publisher", () => {
     expect(tokenMints).toBe(2);
   });
 
+  it("reconciles a large exact publication after an ambiguous commit response", async () => {
+    const publishId = createContentPublicationId(
+      `publish_${"9".repeat(32)}`,
+    );
+    const bytes = JSON.stringify({ content: "x".repeat(1_600_000) });
+    const input = publicationReconciliationInput(publishId, bytes);
+    const commitSha = "c".repeat(40);
+    const fileSha = "f".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(
+        json([
+          {
+            sha: commitSha,
+            commit: { message: signedPublicationMessage(input) },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        json({
+          sha: commitSha,
+          message: signedPublicationMessage(input),
+          parents: [{ sha: input.expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename: input.path,
+              status: "modified",
+              sha: fileSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(new Response(bytes));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(publisher.reconcileCommit(input)).resolves.toEqual({
+      state: "committed",
+      commitSha,
+    });
+    expect(fetchMock.mock.calls[4]![1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          accept: "application/vnd.github.raw+json",
+        }),
+      }),
+    );
+  });
+
   it("rejects a copied trailer and reconciles the exact signed publication commit", async () => {
     const publishId = createContentPublicationId(
       `publish_${"1".repeat(32)}`,
@@ -1618,12 +1677,7 @@ describe("GitHub content publisher", () => {
         }),
       )
       .mockResolvedValueOnce(
-        json({
-          encoding: "base64",
-          content: Buffer.from(
-            "{\"schemaVersion\":\"1.0.0\"}\n",
-          ).toString("base64"),
-        }),
+        new Response("{\"schemaVersion\":\"1.0.0\"}\n"),
       );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
@@ -1678,12 +1732,7 @@ describe("GitHub content publisher", () => {
         }),
       )
       .mockResolvedValueOnce(
-        json({
-          encoding: "base64",
-          content: Buffer.from(
-            "{\"schemaVersion\":\"1.0.0\"}\n",
-          ).toString("base64"),
-        }),
+        new Response("{\"schemaVersion\":\"1.0.0\"}\n"),
       )
       .mockResolvedValueOnce(json({ object: { sha: currentHead } }))
       .mockResolvedValueOnce(

@@ -541,7 +541,7 @@ export function createGitHubContentPublisher({
     );
   }
 
-  async function requestRawContents(token: string, path: string) {
+  async function requestRaw(token: string, path: string) {
     const response = await fetchImplementation(
       api(`${repositoryPath}${path}`),
       {
@@ -673,8 +673,9 @@ export function createGitHubContentPublisher({
     ) {
       return false;
     }
-    const blob = decodeGitHubBlob(
-      await request(token, `/git/blobs/${files[0].sha}`),
+    const blob = await requestRaw(
+      token,
+      `/git/blobs/${files[0].sha}`,
     );
     return (
       blob !== null &&
@@ -857,7 +858,7 @@ export function createGitHubContentPublisher({
       let bytes: Uint8Array | null;
       try {
         const token = await installationToken();
-        bytes = await requestRawContents(
+        bytes = await requestRaw(
           token,
           `/contents/${input.path
             .split("/")
