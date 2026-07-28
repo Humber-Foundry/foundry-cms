@@ -14,6 +14,7 @@
     "dev": "npm run dev --workspace @foundry/reference-site",
     "preview": "npm run preview --workspace @foundry/reference-site",
     "provision:deployment-baseline": "npm run provision:deployment-baseline --workspace @foundry/reference-site",
+    "generate:site-validator": "node scripts/generate-site-definition-validator.mjs",
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:watch": "vitest",

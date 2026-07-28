@@ -5,6 +5,7 @@ import {
   applySiteDefinitionEdits,
   DuplicateEditableSiteFieldPathError,
   createSiteId,
+  isSiteDefinition,
   listEditableSiteFields,
   referenceSiteDefinition,
   siteDefinitionSchema,
@@ -46,6 +47,7 @@ describe("reference Site Definition", () => {
     expect(validate(referenceSiteDefinition), validate.errors?.toString()).toBe(
       true,
     );
+    expect(isSiteDefinition(referenceSiteDefinition)).toBe(true);
   });
 
   it.each([
@@ -111,6 +113,7 @@ describe("reference Site Definition", () => {
     change(malformed);
 
     expect(validate(malformed)).toBe(false);
+    expect(isSiteDefinition(malformed)).toBe(false);
   });
 
   it("exposes editable copy through stable item identifiers", () => {

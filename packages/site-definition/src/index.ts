@@ -1,5 +1,3 @@
-import Ajv2020 from "ajv/dist/2020.js";
-
 import type {
   CallToActionVariant,
   HeroVariant,
@@ -9,6 +7,7 @@ import type {
 } from "./design-tokens";
 import { designContract } from "./design-tokens";
 import publishedSite from "./published-site.json";
+import validateSiteDefinition from "./site-definition-validator.mjs";
 
 declare const siteIdBrand: unique symbol;
 
@@ -370,10 +369,6 @@ export const siteDefinitionSchema = {
     },
   },
 } as const;
-
-const validateSiteDefinition = new Ajv2020({ allErrors: true }).compile(
-  siteDefinitionSchema,
-);
 
 export function isSiteDefinition(value: unknown): value is SiteDefinition {
   return validateSiteDefinition(value);
