@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import type {
   ContentRevision,
@@ -10,6 +10,7 @@ import type {
 
 import { ContentEditor } from "./content-editor";
 import { MediaManager } from "./media-manager";
+import { newestContentRevision } from "./workspace-revision";
 
 export function WorkspaceEditors({
   csrfToken,
@@ -31,13 +32,18 @@ export function WorkspaceEditors({
   mediaOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
 }) {
   const [revisionHead, setRevisionHead] = useState(initialContentRevision);
+  const advanceRevisionHead = useCallback((incoming: ContentRevision) => {
+    setRevisionHead((current) =>
+      newestContentRevision(current, incoming),
+    );
+  }, []);
   return (
     <>
       <ContentEditor
         csrfToken={csrfToken}
         initialRevision={initialContentRevision}
         revisionHead={revisionHead}
-        onRevisionSaved={setRevisionHead}
+        onRevisionSaved={advanceRevisionHead}
         initialPreviewUrl={initialPreviewUrl}
         initialStale={initialContentStale}
         activeWorkspaceUrl={activeWorkspaceUrl}
@@ -48,7 +54,7 @@ export function WorkspaceEditors({
         initialAssets={mediaAssets}
         initialOccurrences={mediaOccurrences}
         contentRevision={revisionHead}
-        onRevisionSaved={setRevisionHead}
+        onRevisionSaved={advanceRevisionHead}
       />
     </>
   );

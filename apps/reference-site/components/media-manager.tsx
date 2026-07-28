@@ -11,6 +11,10 @@ import { renderedMediaOccurrenceIds } from "@foundry/application";
 import { requireRenderedMediaOccurrenceId } from "@foundry/application";
 
 import { MediaOccurrence } from "./media-occurrence";
+import {
+  mediaUploadAttemptAfterResult,
+  type MediaUploadAttempt,
+} from "./media-upload-attempt";
 
 async function imageDimensions(file: File) {
   const url = URL.createObjectURL(file);
@@ -52,6 +56,8 @@ export function MediaManager({
     height: 1,
   });
   const [previewUrl, setPreviewUrl] = useState<string>();
+  const [uploadPending, setUploadPending] = useState(false);
+  const uploadAttempt = useRef<MediaUploadAttempt | null>(null);
   const replaceAttempt = useRef<JsonAttempt | null>(null);
   const cropAttempt = useRef<JsonAttempt | null>(null);
   const deleteAttempt = useRef<JsonAttempt | null>(null);
@@ -73,32 +79,52 @@ export function MediaManager({
     return result;
   }
 
-  async function upload(file: File) {
+  async function upload(file?: File) {
     setBusy(true);
     setMessage("");
     try {
-      const dimensions = await imageDimensions(file);
-      const assetId = `asset_${crypto.randomUUID().replaceAll("-", "")}`;
-      const body = new FormData();
-      body.set("assetId", assetId);
-      body.set("width", String(dimensions.width));
-      body.set("height", String(dimensions.height));
-      body.set("source", file);
+      if (file !== undefined) {
+        const dimensions = await imageDimensions(file);
+        const assetId = `asset_${crypto.randomUUID().replaceAll("-", "")}`;
+        const body = new FormData();
+        body.set("assetId", assetId);
+        body.set("width", String(dimensions.width));
+        body.set("height", String(dimensions.height));
+        body.set("source", file);
+        uploadAttempt.current = {
+          assetId,
+          idempotencyKey: crypto.randomUUID(),
+          body,
+        };
+      }
+      const attempt = uploadAttempt.current;
+      if (attempt === null) return;
       const response = await fetch("/api/foundry-cms/media", {
         method: "POST",
         headers: {
-          "idempotency-key": crypto.randomUUID(),
+          "idempotency-key": attempt.idempotencyKey,
           "x-foundry-csrf": csrfToken,
         },
-        body,
+        body: attempt.body,
       });
       if (!response.ok) throw new Error("media_upload_failed");
       const asset = (await response.json()) as MediaAsset;
+      uploadAttempt.current = mediaUploadAttemptAfterResult(attempt, true);
+      setUploadPending(false);
       setAssets((current) => [...current, asset]);
       setSelectedAsset(asset.assetId);
       setMessage("Source stored in client-owned media.");
     } catch {
-      setMessage("The image could not be stored. Try again.");
+      if (uploadAttempt.current !== null) {
+        uploadAttempt.current = mediaUploadAttemptAfterResult(
+          uploadAttempt.current,
+          false,
+        );
+        setUploadPending(true);
+      }
+      setMessage(
+        "The upload result could not be confirmed. Retry the same upload.",
+      );
     } finally {
       setBusy(false);
     }
@@ -227,6 +253,16 @@ export function MediaManager({
             }}
           />
         </label>
+        {uploadPending ? (
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => void upload()}
+          >
+            Retry same upload
+          </button>
+        ) : null}
       </div>
       {assets.length > 0 ? (
         <div className="editor-fields">

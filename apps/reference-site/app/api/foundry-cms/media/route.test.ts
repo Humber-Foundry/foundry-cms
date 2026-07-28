@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ContentRevisionConflictError } from "@foundry/application";
+import {
+  ContentRevisionConflictError,
+  ContentWorkspaceAccessError,
+} from "@foundry/application";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
@@ -67,7 +70,10 @@ describe("media endpoint", () => {
       commands: { saveMediaOccurrence: mocks.saveMediaOccurrence },
       queries: { getCurrent: mocks.getCurrentContent },
     });
-    mocks.getCurrentContent.mockResolvedValue({ revision: 3 });
+    mocks.getCurrentContent.mockResolvedValue({
+      revision: 3,
+      definition: { home: { media: [] } },
+    });
     mocks.loadApplication.mockResolvedValue({
       commands: {
         upload: mocks.upload,
@@ -121,6 +127,84 @@ describe("media endpoint", () => {
       2,
       expect.objectContaining({ baseRevision: 3 }),
     );
+  });
+
+  it("does not rebind an older occurrence over a newer same-slot revision", async () => {
+    mocks.replace.mockResolvedValue({
+      occurrenceId: "occurrence_home_hero",
+      revision: 2,
+      assetId: "asset_replacement",
+      crop: null,
+    });
+    mocks.saveMediaOccurrence.mockRejectedValue(
+      new ContentRevisionConflictError(3),
+    );
+    mocks.getCurrentContent
+      .mockResolvedValueOnce({
+        revision: 2,
+        definition: { home: { media: [] } },
+      })
+      .mockResolvedValueOnce({
+        revision: 3,
+        definition: {
+          home: {
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 3,
+              },
+            ],
+          },
+        },
+      });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "reject-stale-media-slot-0001",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.saveMediaOccurrence).toHaveBeenCalledOnce();
+  });
+
+  it("validates workspace access before appending a media occurrence", async () => {
+    mocks.getCurrentContent.mockRejectedValueOnce(
+      new ContentWorkspaceAccessError(),
+    );
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "reject-workspace-before-media",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.replace).not.toHaveBeenCalled();
   });
 
   it("derives the editor actor and changes only the requested occurrence", async () => {

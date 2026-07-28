@@ -84,13 +84,12 @@ function numberField(form: FormData, name: string) {
 }
 
 async function bindOccurrenceToContentRevision({
-  body,
   actorId,
   idempotencyKey,
   occurrence,
   application,
+  binding,
 }: {
-  body: Record<string, unknown>;
   actorId: ReturnType<typeof createContentActorId>;
   idempotencyKey: string;
   occurrence: Awaited<
@@ -99,12 +98,10 @@ async function bindOccurrenceToContentRevision({
     >
   >;
   application: Awaited<ReturnType<typeof loadMediaAssetApplication>>;
+  binding: Awaited<ReturnType<typeof loadContentBinding>>;
 }) {
-  const workspaceId = createContentWorkspaceId(String(body.workspaceId ?? ""));
-  let contentBaseRevision = Number(body.contentBaseRevision);
-  if (!Number.isSafeInteger(contentBaseRevision) || contentBaseRevision < 0) {
-    throw new MediaValidationError("contentBaseRevision");
-  }
+  const { workspaceId, contentApplication } = binding;
+  let { contentBaseRevision } = binding;
   const asset = await application.queries.getAsset(occurrence.assetId);
   if (asset === null) throw new MediaSiteAccessError();
   const digest = await crypto.subtle.digest(
@@ -114,10 +111,6 @@ async function bindOccurrenceToContentRevision({
   const contentIdempotencyKey = `media-content-${[...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("")}`;
-  const contentApplication = await loadContentRevisionApplication(
-    workspaceId,
-    actorId,
-  );
   const boundOccurrence = {
     occurrenceId: requireRenderedMediaOccurrenceId(occurrence.occurrenceId),
     revision: occurrence.revision,
@@ -146,9 +139,25 @@ async function bindOccurrenceToContentRevision({
       if (!(error instanceof ContentRevisionConflictError) || attempt === 2) {
         throw error;
       }
-      contentBaseRevision = (
-        await contentApplication.queries.getCurrent()
-      ).revision;
+      const current = await contentApplication.queries.getCurrent();
+      const currentBinding = (current.definition.home.media ?? []).find(
+        (candidate) =>
+          candidate.occurrenceId === boundOccurrence.occurrenceId,
+      );
+      if (
+        currentBinding !== undefined &&
+        currentBinding.revision > boundOccurrence.revision
+      ) {
+        throw error;
+      }
+      if (
+        currentBinding !== undefined &&
+        currentBinding.revision === boundOccurrence.revision
+      ) {
+        contentRevision = current;
+        break;
+      }
+      contentBaseRevision = current.revision;
     }
   }
   if (contentRevision === undefined) {
@@ -162,6 +171,23 @@ async function bindOccurrenceToContentRevision({
       contentRevision.revision,
     ),
   };
+}
+
+async function loadContentBinding(
+  body: Record<string, unknown>,
+  actorId: ReturnType<typeof createContentActorId>,
+) {
+  const workspaceId = createContentWorkspaceId(String(body.workspaceId ?? ""));
+  const contentBaseRevision = Number(body.contentBaseRevision);
+  if (!Number.isSafeInteger(contentBaseRevision) || contentBaseRevision < 0) {
+    throw new MediaValidationError("contentBaseRevision");
+  }
+  const contentApplication = await loadContentRevisionApplication(
+    workspaceId,
+    actorId,
+  );
+  await contentApplication.queries.getCurrent();
+  return { workspaceId, contentBaseRevision, contentApplication };
 }
 
 export async function POST(request: Request) {
@@ -191,6 +217,7 @@ export async function POST(request: Request) {
     }
     const body = (await request.json()) as Record<string, unknown>;
     if (body.operation === "replace") {
+      const binding = await loadContentBinding(body, actorId);
       const occurrence = await application.commands.replaceOccurrence({
         actorId,
         occurrenceId: createMediaOccurrenceId(String(body.occurrenceId ?? "")),
@@ -200,16 +227,17 @@ export async function POST(request: Request) {
       });
       return Response.json(
         await bindOccurrenceToContentRevision({
-          body,
           actorId,
           idempotencyKey,
           occurrence,
           application,
+          binding,
         }),
         { status: 201 },
       );
     }
     if (body.operation === "crop") {
+      const binding = await loadContentBinding(body, actorId);
       const crop = body.crop as Record<string, unknown> | undefined;
       const occurrence = await application.commands.cropOccurrence({
         actorId,
@@ -225,11 +253,11 @@ export async function POST(request: Request) {
       });
       return Response.json(
         await bindOccurrenceToContentRevision({
-          body,
           actorId,
           idempotencyKey,
           occurrence,
           application,
+          binding,
         }),
         { status: 201 },
       );
