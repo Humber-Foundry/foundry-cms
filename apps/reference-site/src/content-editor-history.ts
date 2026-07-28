@@ -1,7 +1,26 @@
 import {
+  listEditableSiteFields,
   updateEditableSiteField,
   type SiteDefinition,
 } from "@foundry/site-definition";
+
+function mergeExternalRevision(
+  state: ContentEditorState,
+  incoming: SiteDefinition,
+) {
+  const persisted = new Map(
+    listEditableSiteFields(state.persistedDefinition).map((field) => [
+      field.path,
+      field.value,
+    ]),
+  );
+  let merged = incoming;
+  for (const field of listEditableSiteFields(state.workingDefinition)) {
+    if (persisted.get(field.path) === field.value) continue;
+    merged = updateEditableSiteField(merged, field) ?? merged;
+  }
+  return merged;
+}
 
 export type ContentEditorState = Readonly<{
   persistedRevision: number;
@@ -172,13 +191,9 @@ export function contentEditorReducer(
         ...state,
         persistedDefinition: action.definition,
         persistedRevision: action.revision,
-        workingDefinition: {
-          ...state.workingDefinition,
-          home: {
-            ...state.workingDefinition.home,
-            media: action.definition.home.media,
-          },
-        },
+        workingDefinition: mergeExternalRevision(state, action.definition),
+        past: [],
+        future: [],
         status: state.status === "saved" ? "saved" : state.status,
         errors: {},
       };

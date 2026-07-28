@@ -15,6 +15,7 @@ import {
   mediaUploadAttemptAfterResult,
   type MediaUploadAttempt,
 } from "./media-upload-attempt";
+import { sendMediaMutationAttempt } from "../src/media-mutation-client";
 
 async function imageDimensions(file: File) {
   const url = URL.createObjectURL(file);
@@ -57,6 +58,7 @@ export function MediaManager({
   });
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [uploadPending, setUploadPending] = useState(false);
+  const [mutationToken, setMutationToken] = useState(csrfToken);
   const uploadAttempt = useRef<MediaUploadAttempt | null>(null);
   const replaceAttempt = useRef<JsonAttempt | null>(null);
   const cropAttempt = useRef<JsonAttempt | null>(null);
@@ -65,18 +67,17 @@ export function MediaManager({
   type JsonAttempt = Readonly<{ body: unknown; idempotencyKey: string }>;
 
   async function mutateJson(attempt: JsonAttempt) {
-    const response = await fetch("/api/foundry-cms/media", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "idempotency-key": attempt.idempotencyKey,
-        "x-foundry-csrf": csrfToken,
+    const result = await sendMediaMutationAttempt({
+      attempt: {
+        body: JSON.stringify(attempt.body),
+        contentType: "application/json",
+        idempotencyKey: attempt.idempotencyKey,
       },
-      body: JSON.stringify(attempt.body),
+      mutationToken,
     });
-    const result: unknown = response.status === 204 ? null : await response.json();
-    if (!response.ok) throw new Error("media_mutation_failed");
-    return result;
+    setMutationToken(result.mutationToken);
+    if (!result.response.ok) throw new Error("media_mutation_failed");
+    return result.body;
   }
 
   async function upload(file?: File) {
@@ -99,16 +100,16 @@ export function MediaManager({
       }
       const attempt = uploadAttempt.current;
       if (attempt === null) return;
-      const response = await fetch("/api/foundry-cms/media", {
-        method: "POST",
-        headers: {
-          "idempotency-key": attempt.idempotencyKey,
-          "x-foundry-csrf": csrfToken,
+      const result = await sendMediaMutationAttempt({
+        attempt: {
+          body: attempt.body,
+          idempotencyKey: attempt.idempotencyKey,
         },
-        body: attempt.body,
+        mutationToken,
       });
-      if (!response.ok) throw new Error("media_upload_failed");
-      const asset = (await response.json()) as MediaAsset;
+      setMutationToken(result.mutationToken);
+      if (!result.response.ok) throw new Error("media_upload_failed");
+      const asset = result.body as MediaAsset;
       uploadAttempt.current = mediaUploadAttemptAfterResult(attempt, true);
       setUploadPending(false);
       setAssets((current) => [...current, asset]);

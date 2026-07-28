@@ -245,6 +245,10 @@ describe("content editor history", () => {
     });
     const definition = {
       ...structuredClone(referenceSiteDefinition),
+      site: {
+        ...structuredClone(referenceSiteDefinition.site),
+        footer: "Concurrent footer",
+      },
       home: {
         ...structuredClone(referenceSiteDefinition.home),
         media: [
@@ -276,6 +280,37 @@ describe("content editor history", () => {
     expect(synchronized.workingDefinition.home.sections[0]).toMatchObject({
       title: "Unsaved headline",
     });
+    expect(synchronized.workingDefinition.site.footer).toBe(
+      "Concurrent footer",
+    );
     expect(synchronized.status).toBe("dirty");
+  });
+
+  it("adopts all concurrent fields when a clean editor receives a media revision", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const incoming = {
+      ...structuredClone(referenceSiteDefinition),
+      site: {
+        ...structuredClone(referenceSiteDefinition.site),
+        footer: "Concurrent footer",
+      },
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        media: [],
+      },
+    };
+
+    const synchronized = contentEditorReducer(initial, {
+      type: "externalRevision",
+      definition: incoming,
+      revision: 2,
+    });
+
+    expect(synchronized.persistedDefinition).toEqual(incoming);
+    expect(synchronized.workingDefinition).toEqual(incoming);
+    expect(synchronized.status).toBe("saved");
   });
 });

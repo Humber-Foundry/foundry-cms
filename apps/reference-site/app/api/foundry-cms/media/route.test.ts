@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   saveMediaOccurrence: vi.fn(),
   loadContentApplication: vi.fn(),
   getCurrentContent: vi.fn(),
+  isRevisionCurrent: vi.fn(),
 }));
 vi.mock("../../../../src/human-access-runtime", () => ({
   authorizeAuthenticatedHumanIdentity: mocks.authorize,
@@ -68,12 +69,16 @@ describe("media endpoint", () => {
     });
     mocks.loadContentApplication.mockResolvedValue({
       commands: { saveMediaOccurrence: mocks.saveMediaOccurrence },
-      queries: { getCurrent: mocks.getCurrentContent },
+      queries: {
+        getCurrent: mocks.getCurrentContent,
+        isRevisionCurrent: mocks.isRevisionCurrent,
+      },
     });
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: { home: { media: [] } },
     });
+    mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.loadApplication.mockResolvedValue({
       commands: {
         upload: mocks.upload,
@@ -204,6 +209,31 @@ describe("media endpoint", () => {
     );
 
     expect(response.status).toBe(403);
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale workspace before appending a media occurrence", async () => {
+    mocks.isRevisionCurrent.mockResolvedValueOnce(false);
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "reject-stale-before-media-0001",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 

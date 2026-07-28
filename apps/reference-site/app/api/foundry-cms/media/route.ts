@@ -79,11 +79,6 @@ export async function GET(request: Request) {
   }
 }
 
-function numberField(form: FormData, name: string) {
-  const value = form.get(name);
-  return typeof value === "string" ? Number(value) : Number.NaN;
-}
-
 async function bindOccurrenceToContentRevision({
   actorId,
   idempotencyKey,
@@ -187,7 +182,10 @@ async function loadContentBinding(
     workspaceId,
     actorId,
   );
-  await contentApplication.queries.getCurrent();
+  const current = await contentApplication.queries.getCurrent();
+  if (!(await contentApplication.queries.isRevisionCurrent(current))) {
+    throw new ContentRevisionStaleError(current.revision);
+  }
   return { workspaceId, contentBaseRevision, contentApplication };
 }
 
@@ -205,11 +203,7 @@ export async function POST(request: Request) {
       }
       const sourceBytes = new Uint8Array(await source.arrayBuffer());
       const metadata = inspectImageSource(sourceBytes);
-      if (
-        source.type !== metadata.contentType ||
-        numberField(form, "width") !== metadata.width ||
-        numberField(form, "height") !== metadata.height
-      ) {
+      if (source.type !== metadata.contentType) {
         throw new MediaValidationError("source");
       }
       const asset = await application.commands.upload({
@@ -218,8 +212,8 @@ export async function POST(request: Request) {
         fileName: source.name,
         contentType: source.type,
         byteLength: source.size,
-        width: numberField(form, "width"),
-        height: numberField(form, "height"),
+        width: metadata.width,
+        height: metadata.height,
         source: sourceBytes,
         idempotencyKey,
       });
