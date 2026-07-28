@@ -6,7 +6,7 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "devDependencies": {
+  "dependencies": {
     "ajv": "8.17.1"
   }
 }

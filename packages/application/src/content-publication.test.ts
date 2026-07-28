@@ -208,6 +208,54 @@ describe("content publication application", () => {
     ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
   });
 
+  it.each([
+    [
+      "an unregistered design token",
+      (definition: Record<string, any>) => {
+        definition.design.colour.accent = "url(javascript:alert(1))";
+      },
+    ],
+    [
+      "a cross-component variant",
+      (definition: Record<string, any>) => {
+        definition.home.sections[0].variant = "cards";
+      },
+    ],
+    [
+      "an arbitrary URL",
+      (definition: Record<string, any>) => {
+        definition.site.navigation[0].href = "https://attacker.example";
+      },
+    ],
+    [
+      "an extra property",
+      (definition: Record<string, any>) => {
+        definition.design.rawCss = "body{display:none}";
+      },
+    ],
+  ])("rejects %s at the approval boundary", async (_name, mutate) => {
+    const malformed = structuredClone(
+      revisionApplication.saved.definition,
+    ) as unknown as Record<string, any>;
+    mutate(malformed);
+    const definition =
+      malformed as unknown as typeof revisionApplication.saved.definition;
+
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          definition,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            contentHash: await hashPublishedSiteDefinition(definition),
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+  });
+
   it("fingerprints tokens and variants as design while ignoring copy-only changes", async () => {
     const base = revisionApplication.saved;
     const hero = base.definition.home.sections[0]!;

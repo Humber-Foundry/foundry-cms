@@ -1,5 +1,5 @@
 import {
-  siteDefinitionSchema,
+  isSiteDefinition,
   type SiteDefinition,
 } from "@foundry/site-definition";
 
@@ -364,10 +364,7 @@ export async function createContentApprovalFingerprint(
   if (revision.inputs.schemaVersion !== revision.definition.schemaVersion) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
-  if (
-    revision.definition.schemaVersion !==
-    siteDefinitionSchema.properties.schemaVersion.const
-  ) {
+  if (!isSiteDefinition(revision.definition)) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
   const serialized = serializePublishedSiteDefinition(revision.definition);

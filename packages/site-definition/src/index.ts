@@ -1,3 +1,5 @@
+import Ajv2020 from "ajv/dist/2020.js";
+
 import type {
   CallToActionVariant,
   HeroVariant,
@@ -368,6 +370,14 @@ export const siteDefinitionSchema = {
     },
   },
 } as const;
+
+const validateSiteDefinition = new Ajv2020({ allErrors: true }).compile(
+  siteDefinitionSchema,
+);
+
+export function isSiteDefinition(value: unknown): value is SiteDefinition {
+  return validateSiteDefinition(value);
+}
 
 export const referenceSiteDefinition = {
   ...publishedSite,
