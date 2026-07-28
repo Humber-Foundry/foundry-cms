@@ -15,6 +15,7 @@ describe("exact production head deployment fence", () => {
           WORKERS_CI_COMMIT_SHA: commit,
           FOUNDRY_PRODUCTION_BRANCH: "main",
         },
+        readLocalHead: () => `${commit}\n`,
         readRemoteHead,
       }),
     ).not.toThrow();
@@ -28,6 +29,7 @@ describe("exact production head deployment fence", () => {
           WORKERS_CI_COMMIT_SHA: "c".repeat(40),
           FOUNDRY_PRODUCTION_BRANCH: "main",
         },
+        readLocalHead: () => `${"c".repeat(40)}\n`,
         readRemoteHead: () => `${"d".repeat(40)}\trefs/heads/main\n`,
       }),
     ).toThrow("exact_production_head_moved");
@@ -40,5 +42,19 @@ describe("exact production head deployment fence", () => {
         readRemoteHead: () => "",
       }),
     ).toThrow("exact_production_head_configuration_invalid");
+  });
+
+  it("rejects overridden build metadata that differs from the checkout", () => {
+    expect(() =>
+      assertExactProductionHead({
+        environment: {
+          WORKERS_CI_COMMIT_SHA: "d".repeat(40),
+          FOUNDRY_PRODUCTION_BRANCH: "main",
+        },
+        readLocalHead: () => `${"c".repeat(40)}\n`,
+        readRemoteHead: () =>
+          `${"d".repeat(40)}\trefs/heads/main\n`,
+      }),
+    ).toThrow("exact_build_commit_mismatch");
   });
 });

@@ -8,6 +8,8 @@ const branchPattern = /^[A-Za-z0-9._/-]+$/u;
 
 export function assertExactProductionHead({
   environment = process.env,
+  readLocalHead = () =>
+    execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }),
   readRemoteHead = (reference) =>
     execFileSync("git", ["ls-remote", "--exit-code", "origin", reference], {
       encoding: "utf8",
@@ -22,6 +24,13 @@ export function assertExactProductionHead({
     !branchPattern.test(productionBranch)
   ) {
     throw new Error("exact_production_head_configuration_invalid");
+  }
+  const localCommit = readLocalHead().trim().toLowerCase();
+  if (
+    !objectIdPattern.test(localCommit) ||
+    localCommit !== expectedCommit
+  ) {
+    throw new Error("exact_build_commit_mismatch");
   }
   const reference = `refs/heads/${productionBranch}`;
   const fields = readRemoteHead(reference).trim().split(/\s+/u);

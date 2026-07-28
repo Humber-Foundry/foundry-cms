@@ -802,23 +802,27 @@ export function createContentPublicationApplication({
         }
       } else {
         const observedAt = now();
+        const candidateCommitSha = reconciliationCandidate(
+          publication.detail,
+        );
         if (
           new Date(observedAt).getTime() -
-            new Date(publication.requestedAt).getTime() >=
+            new Date(
+              publication.deploymentRequestedAt ??
+                publication.requestedAt,
+            ).getTime() >=
           deploymentSignalTimeoutMs
         ) {
           return store.updatePublication(
             nextPublication(publication, {
               status: "failed",
               detail:
-                reconciled.state === "not-found"
+                candidateCommitSha !== undefined
+                  ? `git_reference_not_advanced:${candidateCommitSha}`
+                  : reconciled.state === "not-found"
                   ? publication.status === "requested"
                     ? "publication_lease_expired"
-                    : reconciliationCandidate(publication.detail) === undefined
-                      ? "git_commit_not_found"
-                      : `git_reference_not_advanced:${reconciliationCandidate(
-                          publication.detail,
-                        )}`
+                    : "git_commit_not_found"
                   : "git_reconciliation_timeout",
               leaseToken: null,
               leaseExpiresAt: null,
@@ -1357,6 +1361,11 @@ export function createContentPublicationApplication({
             assertLease,
           });
           const updatedAt = now();
+          const retryStatus =
+            result.state === "blocked" &&
+            result.detail === "publication_lease_lost"
+              ? "failed"
+              : result.state;
           if (
             result.state === "blocked" &&
             result.detail === "production_head_moved"
@@ -1369,7 +1378,7 @@ export function createContentPublicationApplication({
           }
           return store.updatePublication(
             nextPublication(dispatching, {
-              status: result.state,
+              status: retryStatus,
               commitSha:
                 result.state === "committed"
                   ? result.commitSha

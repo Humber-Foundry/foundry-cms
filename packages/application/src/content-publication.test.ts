@@ -737,6 +737,81 @@ describe("content publication application", () => {
     );
   });
 
+  it("preserves a retained candidate when its ref-retry Worker disappears", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${"c".repeat(40)}`,
+    });
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-ref-retry-worker-loss",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await app.commands.refresh(publication.id);
+
+    let resolveReferenceRetry:
+      | ((result: Awaited<
+          ReturnType<ContentPublisher["retryReference"]>
+        >) => void)
+      | undefined;
+    vi.mocked(publisher.retryReference).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveReferenceRetry = resolve;
+        }),
+    );
+    const retry = app.commands.retryDeployment(publication.id, membershipId);
+    await vi.waitFor(() =>
+      expect(publisher.retryReference).toHaveBeenCalled(),
+    );
+
+    currentTime = "2026-07-27T10:32:00.000Z";
+    const recovered = await app.commands.refresh(publication.id);
+    expect(recovered).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: null,
+        detail: `git_reference_not_advanced:${"c".repeat(40)}`,
+      }),
+    );
+    resolveReferenceRetry?.({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    await retry;
+
+    vi.mocked(publisher.retryReference).mockResolvedValue({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+  });
+
   it.each([
     ["requested", "committed"],
     ["building", "building"],
