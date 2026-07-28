@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  contentEditorTabId,
+  claimContentEditorWorkspace,
   contentEditorPersistenceTransition,
   outboxAttemptMatchesWorkspace,
   type ContentEditorPersistenceState,
@@ -65,7 +65,6 @@ describe("content editor persistence lifecycle", () => {
   it("replays an attempt only for its matching workspace and base revision", () => {
     const record = {
       workspaceId: "workspace_transition",
-      tabId: "tab_transition",
       baseRevision: 6,
       edits: [],
       attempt,
@@ -85,22 +84,44 @@ describe("content editor persistence lifecycle", () => {
     ).toBe(false);
   });
 
-  it("keeps one durable owner ID per browser tab", () => {
-    const values = new Map<string, string>();
-    const storage = {
-      getItem(key: string) {
-        return values.get(key) ?? null;
-      },
-      setItem(key: string, value: string) {
-        values.set(key, value);
+  it("allows only one live tab to own a workspace and releases ownership on close", async () => {
+    const held = new Set<string>();
+    const locks = {
+      async request(
+        name: string,
+        _options: unknown,
+        callback: (lock: Lock | null) => Promise<void>,
+      ) {
+        if (held.has(name)) {
+          return callback(null);
+        }
+        held.add(name);
+        try {
+          return await callback({ name } as Lock);
+        } finally {
+          held.delete(name);
+        }
       },
     };
 
-    expect(contentEditorTabId(storage, () => "tab_owner_0001")).toBe(
-      "tab_owner_0001",
+    const first = await claimContentEditorWorkspace(
+      "workspace_shared",
+      locks as never,
     );
-    expect(contentEditorTabId(storage, () => "tab_owner_0002")).toBe(
-      "tab_owner_0001",
+    const duplicate = await claimContentEditorWorkspace(
+      "workspace_shared",
+      locks as never,
     );
+    expect(first.acquired).toBe(true);
+    expect(duplicate.acquired).toBe(false);
+
+    first.release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const reopened = await claimContentEditorWorkspace(
+      "workspace_shared",
+      locks as never,
+    );
+    expect(reopened.acquired).toBe(true);
+    reopened.release();
   });
 });

@@ -154,6 +154,7 @@ export function ContentEditor({
   });
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
+    !persistence.owned ||
     state.status === "saving" ||
     state.status === "stale" ||
     recoveryConflicts.length > 0;
@@ -562,6 +563,7 @@ export function ContentEditor({
 
   useContentEditorAutosave({
     enabled:
+      persistence.owned &&
       persistence.ready &&
       state.status === "dirty" &&
       recoverableEdits.length > 0 &&

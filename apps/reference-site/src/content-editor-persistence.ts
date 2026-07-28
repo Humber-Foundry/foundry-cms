@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type { ContentEditorState } from "./content-editor-history";
 import {
@@ -10,35 +10,49 @@ import {
 import type { StaleRecoveryEdit } from "./content-editor-recovery";
 
 type SaveAttempt = NonNullable<ContentEditorOutboxRecord["attempt"]>;
-const contentEditorTabStorageKey = "foundry-cms:content-editor-tab-id";
 
-export function contentEditorTabId(
-  storage?: Pick<Storage, "getItem" | "setItem">,
-  createId: () => string = () => crypto.randomUUID(),
-): string {
-  let target = storage;
-  if (target === undefined && typeof window !== "undefined") {
-    try {
-      target = window.sessionStorage;
-    } catch {
-      // A fresh fallback still isolates this tab for its current lifetime.
-    }
+export type ContentEditorWorkspaceClaim = Readonly<{
+  acquired: boolean;
+  release(): void;
+}>;
+
+export async function claimContentEditorWorkspace(
+  workspaceId: string,
+  locks: Pick<LockManager, "request"> | undefined =
+    typeof navigator === "undefined" ? undefined : navigator.locks,
+  retryDelay: () => Promise<void> = () =>
+    new Promise((resolve) => setTimeout(resolve, 25)),
+): Promise<ContentEditorWorkspaceClaim> {
+  if (locks === undefined) {
+    return { acquired: false, release() {} };
   }
-  try {
-    const existing = target?.getItem(contentEditorTabStorageKey);
-    if (
-      existing !== null &&
-      existing !== undefined &&
-      /^[A-Za-z0-9._:-]{8,128}$/u.test(existing)
-    ) {
-      return existing;
-    }
-    const created = createId();
-    target?.setItem(contentEditorTabStorageKey, created);
-    return created;
-  } catch {
-    return createId();
+  let releaseHold = () => {};
+  const hold = new Promise<void>((resolve) => {
+    releaseHold = resolve;
+  });
+  const lockName = `foundry-cms:content-editor:${workspaceId}`;
+  const acquire = (): Promise<boolean> =>
+    new Promise((resolve) => {
+      void locks
+        .request(lockName, { ifAvailable: true }, async (lock) => {
+          resolve(lock !== null);
+          if (lock !== null) {
+            await hold;
+          }
+        })
+        .catch(() => resolve(false));
+    });
+  let ownsWorkspace = await acquire();
+  if (!ownsWorkspace) {
+    await retryDelay();
+    ownsWorkspace = await acquire();
   }
+  return {
+    acquired: ownsWorkspace,
+    release() {
+      releaseHold();
+    },
+  };
 }
 
 export type ContentEditorPersistenceState = Readonly<{
@@ -109,20 +123,54 @@ export function useContentEditorPersistence({
   onStorageError(message: string): void;
 }) {
   const controller = useMemo(
-    () =>
-      createContentEditorOutboxController(
-        workspaceId,
-        contentEditorTabId(),
-      ),
+    () => createContentEditorOutboxController(workspaceId),
     [workspaceId],
   );
+  const ownershipWaiter = useRef<{
+    promise: Promise<ContentEditorWorkspaceClaim>;
+    resolve(claim: ContentEditorWorkspaceClaim): void;
+  } | null>(null);
+  if (ownershipWaiter.current === null) {
+    let resolve!: (claim: ContentEditorWorkspaceClaim) => void;
+    const promise = new Promise<ContentEditorWorkspaceClaim>((next) => {
+      resolve = next;
+    });
+    ownershipWaiter.current = { promise, resolve };
+  }
+  const [ownership, setOwnership] = useState<
+    "claiming" | "owned" | "blocked"
+  >("claiming");
   const [lifecycle, transition] = useReducer(
     contentEditorPersistenceTransition,
     { phase: "loading", attempt: null },
   );
 
   useEffect(() => {
+    let cancelled = false;
+    let activeClaim: ContentEditorWorkspaceClaim | undefined;
+    void claimContentEditorWorkspace(workspaceId).then((claim) => {
+      if (cancelled) {
+        claim.release();
+        return;
+      }
+      activeClaim = claim;
+      ownershipWaiter.current!.resolve(claim);
+      setOwnership(claim.acquired ? "owned" : "blocked");
+      if (!claim.acquired) {
+        onStorageError(
+          "This workspace is already open in another tab, or this browser cannot coordinate editing. Close the other tab and reload before editing here.",
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+      activeClaim?.release();
+    };
+  }, [onStorageError, workspaceId]);
+
+  useEffect(() => {
     if (
+      ownership !== "owned" ||
       lifecycle.phase === "loading" ||
       lifecycle.attempt !== null ||
       editorStatus === "saving" ||
@@ -149,13 +197,19 @@ export function useContentEditorPersistence({
     lifecycle.attempt,
     lifecycle.phase,
     onStorageError,
+    ownership,
     recoveryBlocked,
   ]);
 
   return {
+    owned: ownership === "owned",
+    blocked: ownership === "blocked",
     ready: lifecycle.phase !== "loading",
     attempt: lifecycle.attempt,
-    read: () => controller.read(),
+    async read() {
+      const claim = await ownershipWaiter.current!.promise;
+      return claim.acquired ? controller.read() : null;
+    },
     finishHydration: () => transition({ type: "hydrated" }),
     restoreAttempt: (attempt: SaveAttempt) =>
       transition({ type: "attempt", attempt }),

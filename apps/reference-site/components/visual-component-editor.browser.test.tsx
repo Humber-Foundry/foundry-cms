@@ -17,7 +17,6 @@ import {
   readContentEditorOutbox,
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
-import { contentEditorTabId } from "../src/content-editor-persistence";
 
 describe("visual component editor browser acceptance", () => {
   const mounted: Array<ReturnType<typeof createRoot>> = [];
@@ -131,11 +130,9 @@ describe("visual component editor browser acceptance", () => {
 
   it("round-trips unsaved structural edits through the browser outbox", async () => {
     const workspaceId = "workspace_browser_acceptance";
-    const tabId = "tab_browser_acceptance";
-    await clearContentEditorOutbox(workspaceId, tabId);
+    await clearContentEditorOutbox(workspaceId);
     await writeContentEditorOutbox({
       workspaceId,
-      tabId,
       baseRevision: 12,
       edits: [
         {
@@ -151,9 +148,8 @@ describe("visual component editor browser acceptance", () => {
       },
     });
 
-    expect(await readContentEditorOutbox(workspaceId, tabId)).toEqual({
+    expect(await readContentEditorOutbox(workspaceId)).toEqual({
       workspaceId,
-      tabId,
       baseRevision: 12,
       edits: [
         {
@@ -168,14 +164,13 @@ describe("visual component editor browser acceptance", () => {
         idempotencyKey: "browser-outbox-attempt-0001",
       },
     });
-    await clearContentEditorOutbox(workspaceId, tabId);
-    expect(await readContentEditorOutbox(workspaceId, tabId)).toBeNull();
+    await clearContentEditorOutbox(workspaceId);
+    expect(await readContentEditorOutbox(workspaceId)).toBeNull();
   });
 
   it("records an accepted edit before the autosave debounce", async () => {
     const workspaceId = "workspace_browser_snapshot";
-    const tabId = contentEditorTabId();
-    await clearContentEditorOutbox(workspaceId, tabId);
+    await clearContentEditorOutbox(workspaceId);
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -211,14 +206,13 @@ describe("visual component editor browser acceptance", () => {
     expect(siteName).toBeDefined();
     await userEvent.fill(siteName!, "Recovered immediately");
 
-    let record = await readContentEditorOutbox(workspaceId, tabId);
+    let record = await readContentEditorOutbox(workspaceId);
     for (let index = 0; record === null && index < 5; index += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 10));
-      record = await readContentEditorOutbox(workspaceId, tabId);
+      record = await readContentEditorOutbox(workspaceId);
     }
     expect(record).toEqual({
       workspaceId,
-      tabId,
       baseRevision: 4,
       edits: [
         {
@@ -228,6 +222,6 @@ describe("visual component editor browser acceptance", () => {
         },
       ],
     });
-    await clearContentEditorOutbox(workspaceId, tabId);
+    await clearContentEditorOutbox(workspaceId);
   });
 });
