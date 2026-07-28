@@ -275,6 +275,61 @@ describe("content publication application", () => {
     ).resolves.toEqual(expect.objectContaining({ status: "committed" }));
   });
 
+  it("invalidates drift observed by either base probe when its sibling is unavailable", async () => {
+    const headDrift = await approve();
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("d".repeat(40));
+    isReleaseLive.mockRejectedValue(new Error("release_marker_unavailable"));
+
+    await expect(
+      headDrift.app.commands.publish({
+        workspaceId,
+        approvalId: headDrift.approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-head-drift-sibling-down",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("production_head_moved"),
+    );
+    await expect(
+      headDrift.app.commands.publish({
+        workspaceId,
+        approvalId: headDrift.approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-head-drift-invalidated",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+
+    const markerDrift = await approve();
+    vi.mocked(publisher.getProductionHead).mockRejectedValue(
+      new Error("github_temporarily_unavailable"),
+    );
+    isReleaseLive.mockResolvedValue(false);
+
+    await expect(
+      markerDrift.app.commands.publish({
+        workspaceId,
+        approvalId: markerDrift.approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-marker-drift-sibling-down",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("release_marker_mismatch"),
+    );
+    await expect(
+      markerDrift.app.commands.publish({
+        workspaceId,
+        approvalId: markerDrift.approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-marker-drift-invalidated",
+      }),
+    ).rejects.toEqual(
+      new ContentApprovalInvalidError("approval_invalidated"),
+    );
+    expect(createCommit).not.toHaveBeenCalled();
+  });
+
   it("invalidates approval when Git's final compare-and-swap sees a moved head", async () => {
     createCommit.mockResolvedValue({
       state: "blocked",
@@ -391,6 +446,42 @@ describe("content publication application", () => {
       }),
     );
     expect(createCommit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the lease valid across the bounded GitHub request sequence", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    createCommit.mockImplementation(async (input) => {
+      currentTime = "2026-07-27T10:04:30.000Z";
+      return (await input.assertLease())
+        ? { state: "committed", commitSha: "c".repeat(40) }
+        : { state: "blocked", detail: "publication_lease_lost" };
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-bounded-github-sequence",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
   });
 
   it("replays the recorded operation even after its own commit advanced production", async () => {

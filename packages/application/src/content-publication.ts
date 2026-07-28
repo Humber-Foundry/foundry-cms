@@ -11,6 +11,7 @@ export const publishedSiteDefinitionPath =
   "packages/site-definition/src/published-site.json";
 export const contentSerializationVersion =
   "foundry.site-definition.canonical-json.v1";
+const publicationLeaseDurationMs = 5 * 60 * 1_000;
 
 declare const contentApprovalIdBrand: unique symbol;
 export type ContentApprovalId = string & {
@@ -847,7 +848,7 @@ export function createContentPublicationApplication({
         const base = parseProductionBase(
           approval.fingerprint.productionBase,
         );
-        const [head, baseIsLive] = await Promise.all([
+        const [headResult, baseIsLiveResult] = await Promise.allSettled([
           publisher.getProductionHead(),
           publisher.isReleaseLive({
             commitSha: base.commitSha,
@@ -855,7 +856,10 @@ export function createContentPublicationApplication({
             schemaVersion: approval.fingerprint.schemaVersion,
           }),
         ]);
-        if (head !== base.commitSha) {
+        if (
+          headResult.status === "fulfilled" &&
+          headResult.value !== base.commitSha
+        ) {
           await store.invalidateApproval({
             approvalId: approval.id,
             invalidatedAt: now(),
@@ -863,7 +867,10 @@ export function createContentPublicationApplication({
           });
           throw new ContentApprovalInvalidError("production_head_moved");
         }
-        if (!baseIsLive) {
+        if (
+          baseIsLiveResult.status === "fulfilled" &&
+          !baseIsLiveResult.value
+        ) {
           await store.invalidateApproval({
             approvalId: approval.id,
             invalidatedAt: now(),
@@ -871,6 +878,13 @@ export function createContentPublicationApplication({
           });
           throw new ContentApprovalInvalidError("release_marker_mismatch");
         }
+        if (headResult.status === "rejected") {
+          throw headResult.reason;
+        }
+        if (baseIsLiveResult.status === "rejected") {
+          throw baseIsLiveResult.reason;
+        }
+        const head = headResult.value;
         const contributors = await revisions.listContributors(
           approval.workspaceId,
           approval.revision,
@@ -891,7 +905,7 @@ export function createContentPublicationApplication({
           detail: null,
           leaseToken: crypto.randomUUID(),
           leaseExpiresAt: new Date(
-            new Date(requestedAt).getTime() + 2 * 60 * 1_000,
+            new Date(requestedAt).getTime() + publicationLeaseDurationMs,
           ).toISOString(),
           requestedAt,
           updatedAt: requestedAt,
@@ -922,7 +936,7 @@ export function createContentPublicationApplication({
             leaseToken,
             now: leaseNow,
             leaseExpiresAt: new Date(
-              new Date(leaseNow).getTime() + 2 * 60 * 1_000,
+              new Date(leaseNow).getTime() + publicationLeaseDurationMs,
             ).toISOString(),
           });
         };

@@ -49,10 +49,11 @@ one active production publication across workspaces. Claim and initial audit
 are one transaction. The short commit lease atomically requires the approval
 to remain uninvalidated and the approved revision to remain current; D1 fences
 new revision inserts in that workspace until the Git result releases that
-lease, while other workspaces remain editable. The lease holder renews its
-matching token before Git work and again immediately before the bounded,
-non-force production ref update. A stale holder cannot advance the ref or
-persist its result. An expired lease is reconciled by publish ID before it can
+lease, while other workspaces remain editable. The five-minute lease covers
+the complete bounded GitHub request sequence. Its holder renews the matching
+token before Git work and again immediately before the bounded, non-force
+production ref update. A stale holder cannot advance the ref or persist its
+result. An expired lease is reconciled by publish ID before it can
 become failed; a recovered exact commit is durably recorded and releases the
 lease before deployment polling. The stable publication key and commit
 trailers support replay and ambiguous-result reconciliation without creating
