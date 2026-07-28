@@ -14,6 +14,7 @@ import { MediaOccurrence } from "./media-occurrence";
 import {
   cropForOccurrence,
   cropForSelectedRevision,
+  mediaOccurrenceMutationsEnabled,
 } from "./media-manager-state";
 import {
   mediaUploadAttemptAfterResult,
@@ -38,12 +39,14 @@ export function MediaManager({
   initialAssets,
   initialOccurrences,
   contentRevision,
+  contentStale = false,
   onRevisionSaved,
 }: {
   csrfToken: string;
   initialAssets: ReadonlyArray<MediaAsset>;
   initialOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
   contentRevision?: ContentRevision;
+  contentStale?: boolean;
   onRevisionSaved(revision: ContentRevision, previewUrl: string): void;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
@@ -65,6 +68,10 @@ export function MediaManager({
   const replaceAttempt = useRef<JsonAttempt | null>(null);
   const cropAttempt = useRef<JsonAttempt | null>(null);
   const deleteAttempt = useRef<JsonAttempt | null>(null);
+  const occurrenceMutationsEnabled = mediaOccurrenceMutationsEnabled(
+    contentStale,
+    contentRevision,
+  );
 
   type JsonAttempt = Readonly<{ body: unknown; idempotencyKey: string }>;
 
@@ -134,6 +141,7 @@ export function MediaManager({
   }
 
   async function replaceSelected() {
+    if (!occurrenceMutationsEnabled) return;
     const current = occurrences.find(
       (occurrence) => occurrence.occurrenceId === occurrenceId,
     );
@@ -181,7 +189,13 @@ export function MediaManager({
     const current = occurrences.find(
       (occurrence) => occurrence.occurrenceId === occurrenceId,
     );
-    if (current === undefined || contentRevision === undefined) return;
+    if (
+      current === undefined ||
+      contentRevision === undefined ||
+      !occurrenceMutationsEnabled
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       cropAttempt.current ??= {
@@ -319,7 +333,7 @@ export function MediaManager({
               type="button"
               disabled={
                 busy ||
-                contentRevision === undefined ||
+                !occurrenceMutationsEnabled ||
                 occurrenceId === "" ||
                 selectedAsset === ""
               }
@@ -332,7 +346,7 @@ export function MediaManager({
               type="button"
               disabled={
                 busy ||
-                contentRevision === undefined ||
+                !occurrenceMutationsEnabled ||
                 !occurrences.some(
                   (occurrence) => occurrence.occurrenceId === occurrenceId,
                 )
@@ -382,6 +396,7 @@ export function MediaManager({
             return (
               <MediaOccurrence
                 key={occurrence.occurrenceId}
+                className="media-manager-preview"
                 occurrence={{
                   occurrenceId: requireRenderedMediaOccurrenceId(
                     occurrence.occurrenceId,
@@ -411,6 +426,12 @@ export function MediaManager({
       ) : (
         <p>Upload an image to create the first stable media asset.</p>
       )}
+      {contentStale ? (
+        <p>
+          Start a fresh workspace before replacing or cropping an occurrence.
+          Site-level uploads and deletion of unused assets remain available.
+        </p>
+      ) : null}
       <p role="status" aria-live="polite">{message}</p>
     </section>
   );

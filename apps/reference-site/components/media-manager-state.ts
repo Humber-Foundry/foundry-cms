@@ -28,3 +28,10 @@ export function cropForSelectedRevision(
     ? revision.crop ?? fullFrameCrop
     : undefined;
 }
+
+export function mediaOccurrenceMutationsEnabled(
+  contentStale: boolean,
+  contentRevision: Readonly<{ revision: number }> | undefined,
+) {
+  return !contentStale && contentRevision !== undefined;
+}

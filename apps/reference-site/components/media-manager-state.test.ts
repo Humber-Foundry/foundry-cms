@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   cropForOccurrence,
   cropForSelectedRevision,
+  mediaOccurrenceMutationsEnabled,
 } from "./media-manager-state";
 
 describe("media manager crop state", () => {
@@ -36,5 +37,11 @@ describe("media manager crop state", () => {
         crop: null,
       }),
     ).toBeUndefined();
+  });
+
+  it("disables occurrence mutations when the content workspace is stale", () => {
+    expect(mediaOccurrenceMutationsEnabled(true, { revision: 3 })).toBe(false);
+    expect(mediaOccurrenceMutationsEnabled(false, { revision: 3 })).toBe(true);
+    expect(mediaOccurrenceMutationsEnabled(false, undefined)).toBe(false);
   });
 });

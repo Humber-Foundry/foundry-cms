@@ -61,6 +61,7 @@ export function WorkspaceEditors({
         initialAssets={mediaAssets}
         initialOccurrences={mediaOccurrences}
         contentRevision={head.revision}
+        contentStale={initialContentStale === true}
         onRevisionSaved={advanceRevisionHead}
       />
     </>
