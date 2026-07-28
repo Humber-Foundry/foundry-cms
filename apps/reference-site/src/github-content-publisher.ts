@@ -5,6 +5,7 @@ import type {
   ContentPublisher,
   ContentPublicationId,
   ContentPublishedRevisionReader,
+  ContentSerializationVersion,
   PublicationCommitResult,
 } from "@foundry/application";
 import {
@@ -335,10 +336,13 @@ function buildEnvironmentProjection(value: unknown) {
 }
 
 async function sha256(value: string) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
+  return sha256Bytes(new TextEncoder().encode(value));
+}
+
+async function sha256Bytes(value: Uint8Array) {
+  const bytes = new Uint8Array(value.byteLength);
+  bytes.set(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes.buffer);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -355,23 +359,36 @@ function encodeBase64Utf8(value: string) {
 
 function publicationSignaturePayload(input: {
   expectedHead: string;
+  serializationVersion: ContentSerializationVersion;
+  path: string;
   artifactHash: string;
   contentHash: string;
   message: string;
 }) {
-  return [
-    "foundry-publication-signature-v2",
-    input.expectedHead,
-    input.artifactHash,
-    input.contentHash,
-    input.message,
-  ].join("\0");
+  return input.serializationVersion ===
+    "foundry.site-definition.canonical-json.v1"
+    ? [
+        "foundry-publication-signature-v1",
+        input.expectedHead,
+        input.path,
+        input.contentHash,
+        input.message,
+      ].join("\0")
+    : [
+        "foundry-publication-signature-v2",
+        input.expectedHead,
+        input.artifactHash,
+        input.contentHash,
+        input.message,
+      ].join("\0");
 }
 
 async function signPublicationMessage(
   secret: string,
   input: {
     expectedHead: string;
+    serializationVersion: ContentSerializationVersion;
+    path: string;
     artifactHash: string;
     contentHash: string;
     message: string;
@@ -392,7 +409,12 @@ async function signPublicationMessage(
   const hex = [...new Uint8Array(signature)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  return `${input.message}\nFoundry-Publication-Signature: v2=${hex}`;
+  const version =
+    input.serializationVersion ===
+    "foundry.site-definition.canonical-json.v1"
+      ? "v1"
+      : "v2";
+  return `${input.message}\nFoundry-Publication-Signature: ${version}=${hex}`;
 }
 
 async function gitBlobSha(value: string, repositoryObjectId: string) {
@@ -770,22 +792,35 @@ export function createGitHubContentPublisher({
     const artifacts = [...input.artifacts].sort(
       ({ path: left }, { path: right }) => left.localeCompare(right),
     );
+    const legacyArtifact =
+      input.serializationVersion ===
+        "foundry.site-definition.canonical-json.v1" &&
+      artifacts.length === 1 &&
+      artifacts[0]?.path ===
+        "packages/site-definition/src/published-site.json"
+        ? artifacts[0]
+        : null;
     if (
+      input.serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
+    ) {
+      if (
+        legacyArtifact === null ||
+        (await sha256(legacyArtifact.bytes)) !== input.artifactHash
+      ) {
+        return false;
+      }
+    } else if (
       (await hashContentPublicationArtifacts(artifacts)) !==
       input.artifactHash
     ) {
       return false;
     }
-    const [candidate, comparison, expectedBlobShas] = await Promise.all([
+    const [candidate, comparison] = await Promise.all([
       request(token, `/git/commits/${commitSha}`),
       request(
         token,
         `/compare/${input.expectedHead}...${commitSha}`,
-      ),
-      Promise.all(
-        artifacts.map(({ bytes }) =>
-          gitBlobSha(bytes, input.expectedHead),
-        ),
       ),
     ]);
     const parents = Array.isArray(candidate.parents) ? candidate.parents : [];
@@ -797,11 +832,36 @@ export function createGitHubContentPublisher({
       comparison.status !== "ahead" ||
       comparison.ahead_by !== 1 ||
       comparison.total_commits !== 1 ||
-      files.length >= 300 ||
-      typeof candidate.tree?.sha !== "string"
+      files.length >= 300
     ) {
       return false;
     }
+    if (legacyArtifact !== null) {
+      if (
+        files.length !== 1 ||
+        files[0]?.filename !== legacyArtifact.path ||
+        files[0]?.status !== "modified" ||
+        typeof files[0]?.sha !== "string"
+      ) {
+        return false;
+      }
+      const blob = await requestRaw(
+        token,
+        `/git/blobs/${files[0].sha}`,
+      );
+      return (
+        blob !== null &&
+        (await sha256Bytes(blob)) === input.artifactHash
+      );
+    }
+    if (typeof candidate.tree?.sha !== "string") {
+      return false;
+    }
+    const expectedBlobShas = await Promise.all(
+      artifacts.map(({ bytes }) =>
+        gitBlobSha(bytes, input.expectedHead),
+      ),
+    );
     const candidateBlobs = gitTreeBlobs(
       await request(
         token,
@@ -1035,10 +1095,23 @@ export function createGitHubContentPublisher({
         const artifacts = [...input.artifacts].sort(
           ({ path: left }, { path: right }) => left.localeCompare(right),
         );
-        if (
-          (await hashContentPublicationArtifacts(artifacts)) !==
-          input.artifactHash
-        ) {
+        const legacyArtifact =
+          input.serializationVersion ===
+            "foundry.site-definition.canonical-json.v1" &&
+          artifacts.length === 1 &&
+          artifacts[0]?.path ===
+            "packages/site-definition/src/published-site.json"
+            ? artifacts[0]
+            : null;
+        const artifactsValid =
+          legacyArtifact !== null
+            ? (await sha256(legacyArtifact.bytes)) ===
+              input.artifactHash
+            : input.serializationVersion ===
+                "foundry.site-publication-artifacts.v2" &&
+              (await hashContentPublicationArtifacts(artifacts)) ===
+                input.artifactHash;
+        if (!artifactsValid) {
           return { state: "failed", detail: "git_operation_failed" };
         }
         if (!(await input.assertLease())) {
@@ -1048,35 +1121,40 @@ export function createGitHubContentPublisher({
         if ((await productionHead(token)) !== input.expectedHead) {
           return { state: "blocked", detail: "production_head_moved" };
         }
-        const baseCommit = await request(
-          token,
-          `/git/commits/${input.expectedHead}`,
-        );
-        if (typeof baseCommit.tree?.sha !== "string") {
-          throw new Error("github_base_tree_invalid");
-        }
-        const baseBlobs = gitTreeBlobs(
-          await request(
+        let staleManagedPaths: string[] = [];
+        if (legacyArtifact === null) {
+          const baseCommit = await request(
             token,
-            `/git/trees/${baseCommit.tree.sha}?recursive=1`,
-          ),
-        );
-        const artifactPaths = new Set(
-          artifacts.map(({ path }) => path),
-        );
-        const staleManagedPaths = [...baseBlobs.keys()]
-          .filter(
-            (path) =>
-              managedRichTextArtifactPathPattern.test(path) &&
-              !artifactPaths.has(
-                path as ContentPublicationArtifact["path"],
-              ),
-          )
-          .sort();
+            `/git/commits/${input.expectedHead}`,
+          );
+          if (typeof baseCommit.tree?.sha !== "string") {
+            throw new Error("github_base_tree_invalid");
+          }
+          const baseBlobs = gitTreeBlobs(
+            await request(
+              token,
+              `/git/trees/${baseCommit.tree.sha}?recursive=1`,
+            ),
+          );
+          const artifactPaths = new Set(
+            artifacts.map(({ path }) => path),
+          );
+          staleManagedPaths = [...baseBlobs.keys()]
+            .filter(
+              (path) =>
+                managedRichTextArtifactPathPattern.test(path) &&
+                !artifactPaths.has(
+                  path as ContentPublicationArtifact["path"],
+                ),
+            )
+            .sort();
+        }
         const signedMessage = await signPublicationMessage(
           configuration.publicationSigningSecret,
           {
             expectedHead: input.expectedHead,
+            serializationVersion: input.serializationVersion,
+            path: artifacts[0]!.path,
             artifactHash: input.artifactHash,
             contentHash: input.contentHash,
             message: input.message,
@@ -1163,6 +1241,8 @@ export function createGitHubContentPublisher({
           configuration.publicationSigningSecret,
           {
             expectedHead: input.expectedHead,
+            serializationVersion: input.serializationVersion,
+            path: input.artifacts[0]!.path,
             artifactHash: input.artifactHash,
             contentHash: input.contentHash,
             message: input.message,
@@ -1237,10 +1317,23 @@ export function createGitHubContentPublisher({
         const artifacts = [...input.artifacts].sort(
           ({ path: left }, { path: right }) => left.localeCompare(right),
         );
-        if (
-          (await hashContentPublicationArtifacts(artifacts)) !==
-          input.artifactHash
-        ) {
+        const legacyArtifact =
+          input.serializationVersion ===
+            "foundry.site-definition.canonical-json.v1" &&
+          artifacts.length === 1 &&
+          artifacts[0]?.path ===
+            "packages/site-definition/src/published-site.json"
+            ? artifacts[0]
+            : null;
+        const artifactsValid =
+          legacyArtifact !== null
+            ? (await sha256(legacyArtifact.bytes)) ===
+              input.artifactHash
+            : input.serializationVersion ===
+                "foundry.site-publication-artifacts.v2" &&
+              (await hashContentPublicationArtifacts(artifacts)) ===
+                input.artifactHash;
+        if (!artifactsValid) {
           return {
             state: "failed",
             detail: "git_reference_candidate_invalid",
@@ -1280,28 +1373,32 @@ export function createGitHubContentPublisher({
           comparison.status !== "ahead" ||
           comparison.ahead_by !== 1 ||
           comparison.total_commits !== 1 ||
-          files.length >= 300 ||
-          typeof candidate.tree?.sha !== "string"
+          files.length >= 300
         ) {
           return {
             state: "failed",
             detail: "git_reference_candidate_invalid",
           };
         }
-        const candidateBlobs = gitTreeBlobs(
-          await request(
-            token,
-            `/git/trees/${candidate.tree.sha}?recursive=1`,
-          ),
-        );
-        if (
-          !publicationCandidateMatches({
-            artifacts,
-            candidateBlobs,
-            expectedBlobShas,
-            files,
-          })
-        ) {
+        const candidateMatches =
+          legacyArtifact !== null
+            ? files.length === 1 &&
+              files[0]?.filename === legacyArtifact.path &&
+              files[0]?.status === "modified" &&
+              files[0]?.sha === expectedBlobShas[0]
+            : typeof candidate.tree?.sha === "string" &&
+              publicationCandidateMatches({
+                artifacts,
+                candidateBlobs: gitTreeBlobs(
+                  await request(
+                    token,
+                    `/git/trees/${candidate.tree.sha}?recursive=1`,
+                  ),
+                ),
+                expectedBlobShas,
+                files,
+              });
+        if (!candidateMatches) {
           return {
             state: "failed",
             detail: "git_reference_candidate_invalid",

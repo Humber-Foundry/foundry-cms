@@ -60,6 +60,8 @@ function publicationArtifactSet<
     sha256: createHash("sha256").update(artifact.bytes).digest("hex"),
   }));
   return {
+    serializationVersion:
+      "foundry.site-publication-artifacts.v2" as const,
     artifacts,
     artifactHash: createHash("sha256")
       .update(
@@ -70,6 +72,20 @@ function publicationArtifactSet<
         ),
       )
       .digest("hex"),
+  };
+}
+
+function legacyPublicationArtifacts(bytes: string) {
+  return {
+    serializationVersion:
+      "foundry.site-definition.canonical-json.v1" as const,
+    artifacts: [
+      {
+        path: "packages/site-definition/src/published-site.json" as const,
+        bytes,
+      },
+    ],
+    artifactHash: createHash("sha256").update(bytes).digest("hex"),
   };
 }
 
@@ -98,22 +114,31 @@ function publicationReconciliationInput(
 function signedPublicationMessage(
   input: Readonly<{
     expectedHead: string;
+    serializationVersion:
+      | "foundry.site-definition.canonical-json.v1"
+      | "foundry.site-publication-artifacts.v2";
+    artifacts: ReadonlyArray<{ path: string }>;
     artifactHash: string;
     contentHash: string;
     message: string;
   }>,
 ) {
+  const legacy =
+    input.serializationVersion ===
+    "foundry.site-definition.canonical-json.v1";
   return (
-    `${input.message}\nFoundry-Publication-Signature: v2=` +
+    `${input.message}\nFoundry-Publication-Signature: ${legacy ? "v1" : "v2"}=` +
     createHmac(
       "sha256",
       configurationInputs.publicationSigningSecret,
     )
       .update(
         [
-          "foundry-publication-signature-v2",
+          legacy
+            ? "foundry-publication-signature-v1"
+            : "foundry-publication-signature-v2",
           input.expectedHead,
-          input.artifactHash,
+          legacy ? input.artifacts[0]!.path : input.artifactHash,
           input.contentHash,
           input.message,
         ].join("\0"),
@@ -386,6 +411,81 @@ describe("GitHub content publisher", () => {
         ).toString("base64"),
       },
     ]);
+  });
+
+  it("repeats a legacy atomic publication with its original v1 signature contract", async () => {
+    const expectedHead = "a".repeat(40);
+    const publishId = createContentPublicationId(
+      `publish_${"8".repeat(32)}`,
+    );
+    const bytes = "{\"schemaVersion\":\"1.1.0\"}\n";
+    const publication = legacyPublicationArtifacts(bytes);
+    const message = `Publish\n\nFoundry-Publish-Id: ${publishId}`;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            createCommitOnBranch: {
+              commit: { oid: "c".repeat(40) },
+            },
+          },
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId,
+        workspaceId: createContentWorkspaceId("workspace_legacy_retry"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        ...publication,
+        message,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    const mutation = JSON.parse(
+      fetchMock.mock.calls[2]![1]!.body as string,
+    ) as {
+      variables: {
+        input: {
+          message: { headline: string; body: string };
+          fileChanges: {
+            additions: Array<{ path: string; contents: string }>;
+            deletions?: Array<{ path: string }>;
+          };
+        };
+      };
+    };
+    expect(mutation.variables.input.message).toEqual({
+      headline: "Publish",
+      body: signedPublicationMessage({
+        expectedHead,
+        ...publication,
+        contentHash: "b".repeat(64),
+        message,
+      }).slice("Publish\n\n".length),
+    });
+    expect(mutation.variables.input.fileChanges).toEqual({
+      additions: [
+        {
+          path: "packages/site-definition/src/published-site.json",
+          contents: Buffer.from(bytes).toString("base64"),
+        },
+      ],
+    });
   });
 
   it("atomically writes the artifact set and removes stale managed Markdown", async () => {
@@ -1462,6 +1562,66 @@ describe("GitHub content publisher", () => {
     );
   });
 
+  it("verifies and retries a retained legacy v1 commit without requiring a v2 tree", async () => {
+    const expectedHead = "a".repeat(40);
+    const commitSha = "c".repeat(40);
+    const bytes = "{\"schemaVersion\":\"1.1.0\"}\n";
+    const blobSha = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(bytes)}\0${bytes}`)
+      .digest("hex");
+    const publishId = createContentPublicationId(
+      `publish_${"6".repeat(32)}`,
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(
+        json({
+          message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+          parents: [{ sha: expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename:
+                "packages/site-definition/src/published-site.json",
+              status: "modified",
+              sha: blobSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(json({ object: { sha: commitSha } }));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.retryReference({
+        publishId,
+        candidateCommitSha: commitSha,
+        expectedHead,
+        ...legacyPublicationArtifacts(bytes),
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({ state: "committed", commitSha });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://api.github.com/repos/client-owner/client-site/git/refs/heads/main",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ sha: commitSha, force: false }),
+      }),
+    );
+  });
+
   it("reconciles an exact retained commit that already advanced the ref", async () => {
     const expectedHead = "a".repeat(40);
     const commitSha = "c".repeat(40);
@@ -1990,6 +2150,67 @@ describe("GitHub content publisher", () => {
       state: "committed",
       commitSha,
     });
+  });
+
+  it("reconciles an ambiguous legacy publication with its v1 signature and raw JSON hash", async () => {
+    const publishId = createContentPublicationId(
+      `publish_${"7".repeat(32)}`,
+    );
+    const commitSha = "c".repeat(40);
+    const bytes = "{\"schemaVersion\":\"1.1.0\"}\n";
+    const input = {
+      publishId,
+      candidateCommitSha: commitSha,
+      expectedHead: "a".repeat(40),
+      ...legacyPublicationArtifacts(bytes),
+      contentHash: "b".repeat(64),
+      message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(
+        json({
+          sha: commitSha,
+          message: signedPublicationMessage(input),
+          parents: [{ sha: input.expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename:
+                "packages/site-definition/src/published-site.json",
+              status: "modified",
+              sha: "legacy-json-blob",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(bytes, {
+          headers: {
+            "content-length": String(Buffer.byteLength(bytes)),
+          },
+        }),
+      )
+      .mockResolvedValueOnce(json({ object: { sha: commitSha } }));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(publisher.reconcileCommit(input)).resolves.toEqual({
+      state: "committed",
+      commitSha,
+    });
+    expect(fetchMock.mock.calls[3]![0]).toBe(
+      "https://api.github.com/repos/client-owner/client-site/git/blobs/legacy-json-blob",
+    );
   });
 
   it("reconciles a large exact publication after an ambiguous commit response", async () => {

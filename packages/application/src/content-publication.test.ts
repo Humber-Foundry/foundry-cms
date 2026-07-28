@@ -1126,6 +1126,157 @@ describe("content publication application", () => {
     );
   });
 
+  it("reconciles and explicitly retries an ambiguous legacy v1 publication after rollout", async () => {
+    const backingStore = createInMemoryContentPublicationStore();
+    let approvalOverride: Awaited<
+      ReturnType<typeof backingStore.findApproval>
+    > = null;
+    let revisionOverride: Awaited<
+      ReturnType<ContentPublicationRevisionRepository["getRevision"]>
+    > = null;
+    const rolloutStore = {
+      ...backingStore,
+      findApproval: async (approvalId: Parameters<
+        typeof backingStore.findApproval
+      >[0]) =>
+        approvalOverride?.id === approvalId
+          ? approvalOverride
+          : backingStore.findApproval(approvalId),
+    };
+    const rolloutRepository: ContentPublicationRevisionRepository = {
+      getRevision: async (targetWorkspaceId, revision) =>
+        revisionOverride?.workspaceId === targetWorkspaceId &&
+        revisionOverride.revision === revision
+          ? revisionOverride
+          : repository.getRevision(targetWorkspaceId, revision),
+      getCurrent: async (targetWorkspaceId) =>
+        revisionOverride?.workspaceId === targetWorkspaceId
+          ? revisionOverride
+          : repository.getCurrent(targetWorkspaceId),
+      isCurrent: async (revision) =>
+        revisionOverride === revision || repository.isCurrent(revision),
+      listContributors: repository.listContributors,
+    };
+    let currentTime = "2026-07-27T10:00:00.000Z";
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: "git_result_unknown",
+    });
+    const app = createContentPublicationApplication({
+      store: rolloutStore,
+      revisions: rolloutRepository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-ambiguous-before-v2-rollout",
+    });
+    const legacyDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    legacyDefinition.definitionVersion = "1.1.0";
+    legacyDefinition.schemaVersion = "1.1.0";
+    delete legacyDefinition.home.media;
+    legacyDefinition.home.sections.find(
+      (section: any) => section.type === "callToAction",
+    ).body = "Ambiguous legacy CTA copy.";
+    const legacyBytes = serializePublishedSiteDefinition(legacyDefinition);
+    const legacyArtifactHash = [
+      ...new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(legacyBytes),
+        ),
+      ),
+    ]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    const legacyContentHash =
+      await hashPublishedSiteDefinition(legacyDefinition);
+    approvalOverride = {
+      ...approval,
+      fingerprint: {
+        ...approval.fingerprint,
+        contentHash: legacyContentHash,
+        schemaVersion: "1.1.0",
+        artifactHash: legacyArtifactHash,
+        serializationVersion:
+          "foundry.site-definition.canonical-json.v1",
+      },
+    };
+    revisionOverride = {
+      ...revisionApplication.saved,
+      definition: legacyDefinition,
+      inputs: {
+        ...revisionApplication.saved.inputs,
+        contentHash: legacyContentHash,
+        schemaVersion: "1.1.0",
+      },
+    } as any;
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "git_commit_not_found",
+      }),
+    );
+    createCommit.mockResolvedValue({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(publisher.reconcileCommit).toHaveBeenCalledTimes(2);
+    for (const [input] of vi.mocked(publisher.reconcileCommit).mock.calls) {
+      expect(input).toEqual(
+        expect.objectContaining({
+          serializationVersion:
+            "foundry.site-definition.canonical-json.v1",
+          artifactHash: legacyArtifactHash,
+          artifacts: [
+            {
+              path: "packages/site-definition/src/published-site.json",
+              bytes: legacyBytes,
+            },
+          ],
+        }),
+      );
+    }
+    expect(createCommit).toHaveBeenCalledTimes(2);
+    expect(createCommit.mock.calls[1]![0]).toEqual(
+      expect.objectContaining({
+        serializationVersion:
+          "foundry.site-definition.canonical-json.v1",
+        artifactHash: legacyArtifactHash,
+        artifacts: [
+          {
+            path: "packages/site-definition/src/published-site.json",
+            bytes: legacyBytes,
+          },
+        ],
+      }),
+    );
+  });
+
   it("fails closed when historical Git bytes do not match the published evidence", async () => {
     const app = createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),

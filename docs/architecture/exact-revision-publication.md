@@ -59,6 +59,12 @@ signature-verified Foundry publication. This prevents an ordinary code merge
 from being mistaken for an authorized content publication. The release marker
 and build authorization gate hash the same shared versioned projection, so an
 unchanged legacy artifact remains deployable while its reader is upgraded.
+Completed and in-flight approvals retain their recorded serialization contract
+across that rollout. A retained canonical-JSON v1 operation is restored,
+reconciled, or safely retried with its original single-file byte hash and v1
+HMAC payload; new approvals use the v2 JSON-plus-Markdown manifest. Once a
+legacy release is restored as a current draft, its next human-approved
+publication advances through v2 rather than rewriting the historical evidence.
 
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author

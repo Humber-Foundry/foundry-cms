@@ -301,6 +301,7 @@ export type ContentPublisher = Readonly<{
     contributors: ReadonlyArray<ContentActorId>;
     contentHash: string;
     expectedHead: string;
+    serializationVersion: ContentSerializationVersion;
     artifacts: ReadonlyArray<ContentPublicationArtifact>;
     artifactHash: string;
     message: string;
@@ -310,6 +311,7 @@ export type ContentPublisher = Readonly<{
     publishId: ContentPublicationId;
     candidateCommitSha?: string;
     expectedHead: string;
+    serializationVersion: ContentSerializationVersion;
     artifacts: ReadonlyArray<ContentPublicationArtifact>;
     artifactHash: string;
     contentHash: string;
@@ -322,6 +324,7 @@ export type ContentPublisher = Readonly<{
     publishId: ContentPublicationId;
     candidateCommitSha: string;
     expectedHead: string;
+    serializationVersion: ContentSerializationVersion;
     artifacts: ReadonlyArray<ContentPublicationArtifact>;
     artifactHash: string;
     assertLease(): Promise<boolean>;
@@ -462,6 +465,21 @@ export function serializeContentPublicationArtifacts(
       }),
     ),
   ];
+}
+
+function serializeContentPublicationArtifactsForVersion(
+  definition: SiteDefinition,
+  serializationVersion: ContentSerializationVersion,
+): ReadonlyArray<ContentPublicationArtifact> {
+  return serializationVersion ===
+    "foundry.site-definition.canonical-json.v1"
+    ? [
+        {
+          path: publishedSiteDefinitionPath,
+          bytes: serializePublishedSiteDefinition(definition),
+        },
+      ]
+    : serializeContentPublicationArtifacts(definition);
 }
 
 export async function hashContentPublicationArtifacts(
@@ -961,16 +979,39 @@ export function createContentPublicationApplication({
       approval.workspaceId,
       approval.revision,
     );
-    const fingerprint = await createContentApprovalFingerprint(
-      revision,
-      await publisher.getChannelConfigurationHash(),
-    );
+    const channelConfigurationHash =
+      await publisher.getChannelConfigurationHash();
     if (
-      fingerprint.value !== approval.fingerprint.value ||
-      approval.fingerprint.serializationVersion !==
-        contentSerializationVersion
+      approval.fingerprint.serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
     ) {
-      throw new ContentApprovalInvalidError("approval_stale");
+      const serializedDefinition = serializePublishedSiteDefinition(
+        revision.definition,
+      );
+      if (
+        approval.fingerprint.channelConfigurationHash !==
+          channelConfigurationHash ||
+        approval.fingerprint.contentHash !==
+          (await hashPublishedSiteDefinition(revision.definition)) ||
+        approval.fingerprint.artifactHash !==
+          (await sha256(serializedDefinition)) ||
+        approval.fingerprint.schemaVersion !==
+          revision.definition.schemaVersion ||
+        approval.fingerprint.rendererVersion !==
+          revision.inputs.rendererVersion ||
+        approval.fingerprint.productionBase !==
+          revision.inputs.productionBase
+      ) {
+        throw new ContentApprovalInvalidError("approval_stale");
+      }
+    } else {
+      const fingerprint = await createContentApprovalFingerprint(
+        revision,
+        channelConfigurationHash,
+      );
+      if (fingerprint.value !== approval.fingerprint.value) {
+        throw new ContentApprovalInvalidError("approval_stale");
+      }
     }
     if (actorId.trim() === "") {
       throw new ContentApprovalInvalidError("approval_not_found");
@@ -1007,7 +1048,11 @@ export function createContentPublicationApplication({
     return {
       publishId: publication.id,
       expectedHead: publication.expectedHead,
-      artifacts: serializeContentPublicationArtifacts(revision.definition),
+      serializationVersion: approval.fingerprint.serializationVersion,
+      artifacts: serializeContentPublicationArtifactsForVersion(
+        revision.definition,
+        approval.fingerprint.serializationVersion,
+      ),
       artifactHash: approval.fingerprint.artifactHash,
       contentHash: approval.fingerprint.contentHash,
       message: commitMessage({ publication, approval }),
@@ -1063,8 +1108,11 @@ export function createContentPublicationApplication({
         contributors: input.publication.contributors,
         contentHash: input.approval.fingerprint.contentHash,
         expectedHead: input.publication.expectedHead,
-        artifacts: serializeContentPublicationArtifacts(
+        serializationVersion:
+          input.approval.fingerprint.serializationVersion,
+        artifacts: serializeContentPublicationArtifactsForVersion(
           input.revision.definition,
+          input.approval.fingerprint.serializationVersion,
         ),
         artifactHash: input.approval.fingerprint.artifactHash,
         message: commitMessage({
@@ -1945,8 +1993,11 @@ export function createContentPublicationApplication({
             publishId: publication.id,
             candidateCommitSha,
             expectedHead: publication.expectedHead,
-            artifacts: serializeContentPublicationArtifacts(
+            serializationVersion:
+              approval.fingerprint.serializationVersion,
+            artifacts: serializeContentPublicationArtifactsForVersion(
               revision.definition,
+              approval.fingerprint.serializationVersion,
             ),
             artifactHash: approval.fingerprint.artifactHash,
             assertLease,
