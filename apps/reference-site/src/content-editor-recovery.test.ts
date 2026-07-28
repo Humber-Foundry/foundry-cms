@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   createDefaultPageSection,
   referenceSiteDefinition,
+  remapPageSectionNestedIds,
   serializeRichTextDocument,
   toPageComposition,
   toPageCompositionIdentity,
+  type SiteDefinition,
 } from "@foundry/site-definition";
 
 import {
@@ -42,6 +44,26 @@ const edit = {
   baseValue: "Original title",
   value: "My unsaved title",
 };
+
+function legacyComposition(definition: SiteDefinition) {
+  return {
+    ...toPageComposition(definition),
+    components: definition.home.sections.map((section) => {
+      if (section.type !== "callToAction") {
+        return section;
+      }
+      const body = section.body.children
+        .map((block) => {
+          if (block.type !== "paragraph") {
+            throw new Error("expected_plain_legacy_fixture");
+          }
+          return block.children.map(({ text }) => text).join("");
+        })
+        .join("\n");
+      return { ...section, body };
+    }),
+  };
+}
 
 describe("stale edit recovery", () => {
   it("preserves the rich-text discriminator through durable recovery", () => {
@@ -393,6 +415,86 @@ describe("stale edit recovery", () => {
         value: "{malformed",
       }),
     ).toEqual({ ok: false });
+  });
+
+  it.each([
+    ["adds", false],
+    ["duplicates", true],
+  ] as const)(
+    "%s a CTA from a legacy structural recovery command",
+    (_operation, duplicate) => {
+      const added = duplicate
+        ? remapPageSectionNestedIds({
+            ...structuredClone(
+              referenceSiteDefinition.home.sections.find(
+                (section) => section.type === "callToAction",
+              )!,
+            ),
+            id: "section_legacy_contact_copy",
+          })
+        : createDefaultPageSection(
+            "callToAction",
+            "section_legacy_contact_added",
+            referenceSiteDefinition,
+          );
+      const target = {
+        ...referenceSiteDefinition,
+        home: {
+          ...referenceSiteDefinition.home,
+          sections: [...referenceSiteDefinition.home.sections, added],
+        },
+      } as SiteDefinition;
+      const result = applyStructuralRecovery(referenceSiteDefinition, {
+        path: "slot_home_sections",
+        baseValue: JSON.stringify(
+          legacyComposition(referenceSiteDefinition),
+        ),
+        value: JSON.stringify(legacyComposition(target)),
+      });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(
+          result.definition.home.sections.find(
+            ({ id }) => id === added.id,
+          ),
+        ).toEqual(added);
+      }
+    },
+  );
+
+  it("removes an unreferenced CTA from a legacy structural recovery command", () => {
+    const removable = createDefaultPageSection(
+      "callToAction",
+      "section_legacy_contact_removable",
+      referenceSiteDefinition,
+    );
+    const source = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections, removable],
+      },
+    } as SiteDefinition;
+    const result = applyStructuralRecovery(source, {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(legacyComposition(source)),
+      value: JSON.stringify({
+        ...legacyComposition(source),
+        components: legacyComposition(source).components.filter(
+          ({ id }) => id !== removable.id,
+        ),
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(
+        result.definition.home.sections.some(
+          ({ id }) => id === removable.id,
+        ),
+      ).toBe(false);
+    }
   });
 
   it("retains a recovered structural edit as a conflict when revalidation fails", () => {

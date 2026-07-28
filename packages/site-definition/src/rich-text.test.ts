@@ -210,6 +210,40 @@ describe("rich text contract", () => {
     ).toBe("[\\# \\[literal\\] \\*copy\\*](https://example.com/a_\\(b\\))\n");
   });
 
+  it("round-trips entity-looking text and link destinations literally", () => {
+    const document: RichTextDocument = {
+      version: "1.0.0",
+      type: "document",
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "text",
+              text: "&copy; &#169; &#xA9;",
+              marks: [
+                {
+                  type: "link",
+                  href: "https://example.com/?a=1&copy;=2",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const markdown = serializeRichTextToMarkdown(document);
+
+    expect(markdown).toBe(
+      "[\\&copy; \\&\\#169; \\&\\#xA9;](https://example.com/?a=1\\&copy;=2)\n",
+    );
+    expect(parseRichTextMarkdown(markdown)).toEqual(document);
+    expect(serializeRichTextToMarkdown(parseRichTextMarkdown(markdown))).toBe(
+      markdown,
+    );
+  });
+
   it.each([
     ["javascript:alert(1)", "unsafe_link"],
     ["data:text/html,<script>alert(1)</script>", "unsafe_link"],

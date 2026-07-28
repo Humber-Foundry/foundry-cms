@@ -700,11 +700,11 @@ export function toTipTapDocument(document: RichTextDocument): JsonObject {
 }
 
 function escapeMarkdownText(value: string): string {
-  return value.replace(/([\\`*{}[\]()<>#+\-.!_|>])/gu, "\\$1");
+  return value.replace(/([\\`*{}[\]()<>#+\-.!_|>&])/gu, "\\$1");
 }
 
 function escapeMarkdownDestination(value: string): string {
-  return value.replace(/([\\()])/gu, "\\$1");
+  return value.replace(/([\\()&])/gu, "\\$1");
 }
 
 function serializeText(node: RichTextText): string {
@@ -794,7 +794,7 @@ function unescapeMarkdown(value: string, path: string): string {
     const escaped = value[index + 1];
     if (
       escaped === undefined ||
-      !"\\`*{}[]()<>#+-.!_|>".includes(escaped)
+      !"\\`*{}[]()<>#+-.!_|>&".includes(escaped)
     ) {
       issue(
         "serializer_ambiguity",

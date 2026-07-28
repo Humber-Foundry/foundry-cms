@@ -27,10 +27,66 @@ export type StaleRecoveryPointer = Readonly<{
   sourceWorkspaceId: string;
 }>;
 
+function upgradeLegacyStructuralRecoveryEdit(
+  edit: StaleRecoveryEdit,
+): StaleRecoveryEdit {
+  if (
+    edit.path !== pageCompositionContract.slot.id ||
+    edit.format === "richText"
+  ) {
+    return edit;
+  }
+  const upgradeComposition = (serialized: string): string => {
+    try {
+      const composition: unknown = JSON.parse(serialized);
+      if (
+        typeof composition !== "object" ||
+        composition === null ||
+        !("components" in composition) ||
+        !Array.isArray(composition.components)
+      ) {
+        return serialized;
+      }
+      let changed = false;
+      const components = composition.components.map((candidate) => {
+        if (
+          typeof candidate !== "object" ||
+          candidate === null ||
+          !("type" in candidate) ||
+          candidate.type !== "callToAction" ||
+          !("body" in candidate) ||
+          typeof candidate.body !== "string"
+        ) {
+          return candidate;
+        }
+        changed = true;
+        return {
+          ...candidate,
+          body: createRichTextDocumentFromPlainText(candidate.body),
+        };
+      });
+      return changed
+        ? JSON.stringify({ ...composition, components })
+        : serialized;
+    } catch {
+      return serialized;
+    }
+  };
+  const value = upgradeComposition(edit.value);
+  const baseValue = upgradeComposition(edit.baseValue);
+  return value === edit.value && baseValue === edit.baseValue
+    ? edit
+    : { ...edit, value, baseValue };
+}
+
 export function upgradeLegacyRichTextRecoveryEdit(
   edit: StaleRecoveryEdit,
   richTextPaths: ReadonlySet<string>,
 ): StaleRecoveryEdit {
+  const structuralEdit = upgradeLegacyStructuralRecoveryEdit(edit);
+  if (structuralEdit !== edit) {
+    return structuralEdit;
+  }
   if (!richTextPaths.has(edit.path) || edit.format !== undefined) {
     return edit;
   }
@@ -106,8 +162,9 @@ export function applyStructuralRecovery(
   if (edit.path !== pageCompositionContract.slot.id) {
     return { ok: false };
   }
+  const recoveredEdit = upgradeLegacyStructuralRecoveryEdit(edit);
   try {
-    const composition: unknown = JSON.parse(edit.value);
+    const composition: unknown = JSON.parse(recoveredEdit.value);
     if (
       typeof composition !== "object" ||
       composition === null ||
@@ -119,7 +176,7 @@ export function applyStructuralRecovery(
     let baseComposition: unknown = null;
     let baseIds: ReadonlySet<string> | null = null;
     try {
-      baseComposition = JSON.parse(edit.baseValue);
+      baseComposition = JSON.parse(recoveredEdit.baseValue);
     } catch {
       // Identity-only records from older editor sessions remain recoverable.
     }
