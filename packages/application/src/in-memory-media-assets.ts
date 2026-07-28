@@ -72,7 +72,10 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     string,
     Readonly<{ requestHash: string; result: MediaMutationResult }>
   >();
-  const claims = new Map<string, string>();
+  const claims = new Map<
+    string,
+    { requestHash: string; claimToken: string; claimedAt: number }
+  >();
   const scopedKey = (
     siteId: SiteId,
     id: MediaAssetId | MediaOccurrenceId,
@@ -82,11 +85,24 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     async claim(context) {
       const key = `${context.siteId}:${context.idempotencyKey}`;
       const existing = claims.get(key);
-      if (existing !== undefined && existing !== context.requestHash) {
+      if (
+        existing !== undefined &&
+        existing.requestHash !== context.requestHash
+      ) {
         throw new MediaValidationError("idempotencyKey");
       }
-      if (existing !== undefined) return false;
-      claims.set(key, context.requestHash);
+      if (
+        existing !== undefined &&
+        existing.claimToken !== context.claimToken &&
+        Date.now() - existing.claimedAt < 30_000
+      ) {
+        return false;
+      }
+      claims.set(key, {
+        requestHash: context.requestHash,
+        claimToken: context.claimToken,
+        claimedAt: Date.now(),
+      });
       return true;
     },
     async replay(context) {
@@ -101,7 +117,10 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
     },
     async releaseClaim(context) {
       const key = `${context.siteId}:${context.idempotencyKey}`;
-      if (!receipts.has(key) && claims.get(key) === context.requestHash) {
+      if (
+        !receipts.has(key) &&
+        claims.get(key)?.claimToken === context.claimToken
+      ) {
         claims.delete(key);
       }
     },

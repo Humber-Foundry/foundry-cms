@@ -188,6 +188,29 @@ describe("D1 media asset store", () => {
     );
   });
 
+  it("takes over an expired orphan mutation lease", async () => {
+    const store = createD1MediaAssetStore(database);
+    const orphan = {
+      siteId,
+      idempotencyKey: "d1-orphan-mutation-key",
+      requestHash: "same-request",
+      claimToken: "dead-worker",
+    };
+    await expect(store.claim(orphan)).resolves.toBe(true);
+    await database
+      .prepare(
+        `UPDATE media_mutation_claims
+         SET claimed_at = datetime('now', '-31 seconds')
+         WHERE site_id = ?1 AND idempotency_key = ?2`,
+      )
+      .bind(siteId, orphan.idempotencyKey)
+      .run();
+
+    await expect(
+      store.claim({ ...orphan, claimToken: "recovery-worker" }),
+    ).resolves.toBe(true);
+  });
+
   it("retains a tombstone so a deleted stable asset identity cannot be reused", async () => {
     const app = application();
     await upload(app);

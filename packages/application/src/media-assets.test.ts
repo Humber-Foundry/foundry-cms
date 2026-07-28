@@ -393,6 +393,52 @@ describe("media asset application", () => {
     );
   });
 
+  it("hands a released mutation lease to an already-waiting duplicate", async () => {
+    const assets = createInMemoryMediaAssetStore();
+    const baseSources = createInMemoryMediaSourceStore();
+    let rejectFirstDelete: ((error: Error) => void) | undefined;
+    let signalDeleteStarted: (() => void) | undefined;
+    const deleteStarted = new Promise<void>((resolve) => {
+      signalDeleteStarted = resolve;
+    });
+    let deleteCalls = 0;
+    const sources = {
+      ...baseSources,
+      async delete(objectKey: string) {
+        deleteCalls += 1;
+        if (deleteCalls === 1) {
+          signalDeleteStarted?.();
+          await new Promise<void>((_resolve, reject) => {
+            rejectFirstDelete = reject;
+          });
+          return;
+        }
+        await baseSources.delete(objectKey);
+      },
+    };
+    const application = createMediaAssetApplication({
+      siteId: siteA,
+      actorId: editor,
+      assets,
+      sources,
+    });
+    await upload(application, assetC);
+    const command = {
+      actorId: editor,
+      assetId: assetC,
+      idempotencyKey: "handoff-overlapping-delete",
+    } as const;
+
+    const winner = application.commands.delete(command);
+    await deleteStarted;
+    const duplicate = application.commands.delete(command);
+    rejectFirstDelete?.(new Error("simulated_worker_failure"));
+
+    await expect(winner).rejects.toThrow("simulated_worker_failure");
+    await expect(duplicate).resolves.toBeUndefined();
+    expect(deleteCalls).toBe(2);
+  });
+
   it("fails closed across sites even when identifiers overlap", async () => {
     const assets = createInMemoryMediaAssetStore();
     const sources = createInMemoryMediaSourceStore();

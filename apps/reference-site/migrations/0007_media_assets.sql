@@ -83,6 +83,7 @@ CREATE TABLE media_mutation_claims (
   site_id TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   request_hash TEXT NOT NULL,
+  claim_token TEXT NOT NULL,
   claimed_at TEXT NOT NULL,
   PRIMARY KEY (site_id, idempotency_key)
 );

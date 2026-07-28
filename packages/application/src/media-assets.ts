@@ -102,6 +102,7 @@ export type MediaMutationContext = Readonly<{
   siteId: SiteId;
   idempotencyKey: string;
   requestHash: string;
+  claimToken: string;
 }>;
 
 export class MediaAssetReferencedError extends Error {
@@ -305,7 +306,12 @@ export function createMediaAssetApplication({
   const mutationContext = (
     idempotencyKey: string,
     requestHash: string,
-  ): MediaMutationContext => ({ siteId, idempotencyKey, requestHash });
+  ): MediaMutationContext => ({
+    siteId,
+    idempotencyKey,
+    requestHash,
+    claimToken: crypto.randomUUID(),
+  });
 
   async function replayMutation(
     context: MediaMutationContext,
@@ -322,8 +328,8 @@ export function createMediaAssetApplication({
     context: MediaMutationContext,
     expectedKind: MediaMutationResult["kind"],
   ) {
-    if (await assets.claim(context)) return null;
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      if (await assets.claim(context)) return null;
       const replay = await replayMutation(context, expectedKind);
       if (replay !== null) return replay;
       await new Promise((resolve) => setTimeout(resolve, 50));
