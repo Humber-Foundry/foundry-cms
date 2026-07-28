@@ -27,6 +27,17 @@ type MediaRecoverySender = (
   mutationToken: string;
 }>>;
 
+type MediaRecoveryPlan =
+  | Readonly<{
+      operation: "replace";
+      target: SiteMediaOccurrence;
+    }>
+  | Readonly<{
+      operation: "crop";
+      target: SiteMediaOccurrence;
+      baseRevision: number;
+    }>;
+
 function parseMediaRecoveryManifest(
   encoded: string,
   definition: SiteDefinition,
@@ -160,7 +171,7 @@ export async function restorePreservedMedia({
   ) {
     throw new Error("content_media_recovery_removal_unsupported");
   }
-  let contentRevision = created.revision;
+  const plan: MediaRecoveryPlan[] = [];
   for (const occurrence of targetMedia) {
     const base = baseById.get(occurrence.occurrenceId);
     const current = currentById.get(occurrence.occurrenceId);
@@ -168,19 +179,36 @@ export async function restorePreservedMedia({
       continue;
     }
     const targetChanged = !sameMediaBinding(base, occurrence);
-    if (!targetChanged || !sameMediaBinding(current, base)) {
-      const replaceAlreadyApplied =
-        current !== undefined &&
-        occurrence.crop !== null &&
-        current.occurrenceId === occurrence.occurrenceId &&
-        current.asset.assetId === occurrence.asset.assetId &&
-        current.asset.width === occurrence.asset.width &&
-        current.asset.height === occurrence.asset.height &&
-        current.asset.contentType === occurrence.asset.contentType &&
-        current.crop === null;
-      if (!replaceAlreadyApplied) {
-        throw new Error("content_media_recovery_conflict");
-      }
+    if (!targetChanged) {
+      continue;
+    }
+    const replaceAlreadyApplied =
+      current !== undefined &&
+      occurrence.crop !== null &&
+      current.occurrenceId === occurrence.occurrenceId &&
+      current.asset.assetId === occurrence.asset.assetId &&
+      current.asset.width === occurrence.asset.width &&
+      current.asset.height === occurrence.asset.height &&
+      current.asset.contentType === occurrence.asset.contentType &&
+      current.crop === null;
+    if (replaceAlreadyApplied) {
+      plan.push({
+        operation: "crop",
+        target: occurrence,
+        baseRevision: current.revision,
+      });
+      continue;
+    }
+    if (!sameMediaBinding(current, base)) {
+      throw new Error("content_media_recovery_conflict");
+    }
+    plan.push({ operation: "replace", target: occurrence });
+  }
+
+  let contentRevision = created.revision;
+  for (const step of plan) {
+    const occurrence = step.target;
+    if (step.operation === "crop") {
       const crop = await send(
         {
           contentType: "application/json",
@@ -189,7 +217,7 @@ export async function restorePreservedMedia({
           body: JSON.stringify({
             operation: "crop",
             occurrenceId: occurrence.occurrenceId,
-            baseRevision: current.revision,
+            baseRevision: step.baseRevision,
             workspaceId: created.workspaceId,
             contentBaseRevision: contentRevision,
             crop: occurrence.crop,

@@ -444,9 +444,8 @@ function protectedShape(
   >;
   delete protectedSection.id;
   // Variants are owned by the outer controlled-design fields. Composition
-  // submissions carry them for rendering, but they are not protected scaffold
-  // and the Puck adapter does not copy them back onto existing components.
-  delete protectedSection.variant;
+  // submissions carry them for rendering, so the domain boundary must protect
+  // them from stale or direct composition writes.
   for (const property of registration.editableProps) {
     delete protectedSection[property];
   }
@@ -706,7 +705,25 @@ export function applyPageComposition(
         ? defaultScaffold || duplicateScaffold
         : equalProtectedShape(existing, section);
     if (!scaffoldAllowed) {
-      const protectedProperty = Object.keys(protectedShape(section))[1] ?? "type";
+      const submittedProtected = protectedShape(section);
+      const protectedProperty =
+        (existing === undefined
+          ? undefined
+          : Object.keys(submittedProtected).find((property) => {
+              const existingValue = protectedShape(existing)[property];
+              const submittedValue = submittedProtected[property];
+              return (
+                JSON.stringify(existingValue) !==
+                JSON.stringify(submittedValue)
+              );
+            })) ??
+        Object.keys(submittedProtected).find(
+          (property) => property !== "type" && property !== "variant",
+        ) ??
+        (Object.hasOwn(submittedProtected, "variant")
+          ? "variant"
+          : undefined) ??
+        "type";
       errors[`${id}.${protectedProperty}`] =
         "This component scaffolding is protected by the Site Definition.";
       continue;

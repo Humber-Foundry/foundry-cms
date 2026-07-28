@@ -145,6 +145,127 @@ describe("content media schema recovery", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("preflights all occurrences before issuing any mutation", async () => {
+    const occurrence = (
+      occurrenceId:
+        | "occurrence_home_hero"
+        | "occurrence_home_detail",
+      assetId: string,
+      revision = 1,
+    ) =>
+      ({
+        occurrenceId,
+        revision,
+        asset: {
+          assetId,
+          width: 1200,
+          height: 800,
+          contentType: "image/jpeg",
+        },
+        crop: null,
+      }) as const;
+    const baseFirst = occurrence("occurrence_home_hero", "asset_base");
+    const targetFirst = occurrence(
+      "occurrence_home_hero",
+      "asset_preserved",
+      2,
+    );
+    const conflictingBase = occurrence(
+      "occurrence_home_detail",
+      "asset_proof_base",
+    );
+    const conflictingTarget = occurrence(
+      "occurrence_home_detail",
+      "asset_proof_preserved",
+      2,
+    );
+    const conflictingDestination = occurrence(
+      "occurrence_home_detail",
+      "asset_proof_newer",
+      5,
+    );
+    const send = vi.fn();
+
+    await expect(
+      restorePreservedMedia({
+        edit: {
+          path: mediaManifestRecoveryPath,
+          baseValue: canonicalJson([
+            baseFirst,
+            conflictingBase,
+          ]),
+          value: canonicalJson([
+            targetFirst,
+            conflictingTarget,
+          ]),
+        },
+        created: {
+          workspaceId: "workspace_fresh",
+          revision: 0,
+          definition: {
+            ...referenceSiteDefinition,
+            home: {
+              ...referenceSiteDefinition.home,
+              media: [
+                baseFirst,
+                conflictingDestination,
+              ],
+            },
+          },
+        },
+        mutationToken: "csrf-start",
+        idempotencyKey: "workspace-create-0001",
+        send,
+      }),
+    ).rejects.toThrow("content_media_recovery_conflict");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("retains a newer destination binding when the preserved target was unchanged", async () => {
+    const base = {
+      occurrenceId: "occurrence_home_hero",
+      revision: 1,
+      asset: {
+        assetId: "asset_base",
+        width: 1200,
+        height: 800,
+        contentType: "image/jpeg",
+      },
+      crop: null,
+    } as const;
+    const destination = {
+      ...base,
+      revision: 4,
+      asset: { ...base.asset, assetId: "asset_destination" },
+    };
+    const send = vi.fn();
+
+    await expect(
+      restorePreservedMedia({
+        edit: {
+          path: mediaManifestRecoveryPath,
+          baseValue: canonicalJson([base]),
+          value: canonicalJson([base]),
+        },
+        created: {
+          workspaceId: "workspace_fresh",
+          revision: 0,
+          definition: {
+            ...referenceSiteDefinition,
+            home: {
+              ...referenceSiteDefinition.home,
+              media: [destination],
+            },
+          },
+        },
+        mutationToken: "csrf-start",
+        idempotencyKey: "workspace-create-0001",
+        send,
+      }),
+    ).resolves.toBe("csrf-start");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("resumes the crop after a confirmed replacement survives a retry", async () => {
     const replacement = {
       occurrenceId: "occurrence_home_hero",
