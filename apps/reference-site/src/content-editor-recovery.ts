@@ -94,22 +94,22 @@ export function applyStructuralRecovery(
     } catch {
       // Identity-only records from older editor sessions remain recoverable.
     }
+    const targetIds = new Set(
+      composition.components.flatMap((candidate) =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        "id" in candidate &&
+        typeof candidate.id === "string"
+          ? [candidate.id]
+          : [],
+      ),
+    );
     if (
       typeof baseComposition === "object" &&
       baseComposition !== null &&
       "components" in baseComposition &&
       Array.isArray(baseComposition.components)
     ) {
-      const targetIds = new Set(
-        composition.components.flatMap((candidate) =>
-          typeof candidate === "object" &&
-          candidate !== null &&
-          "id" in candidate &&
-          typeof candidate.id === "string"
-            ? [candidate.id]
-            : [],
-        ),
-      );
       const baseById = new Map(
         baseComposition.components.flatMap((candidate) =>
           typeof candidate === "object" &&
@@ -130,6 +130,10 @@ export function applyStructuralRecovery(
           return { ok: false };
         }
       }
+    } else if (
+      definition.home.sections.some(({ id }) => !targetIds.has(id))
+    ) {
+      return { ok: false };
     }
     const currentById = new Map(
       definition.home.sections.map((section) => [section.id, section]),
