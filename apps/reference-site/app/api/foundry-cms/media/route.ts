@@ -1,6 +1,7 @@
 import {
   AccessDeniedError,
   MediaAssetReferencedError,
+  MediaMutationInProgressError,
   MediaOccurrenceConflictError,
   MediaSiteAccessError,
   MediaValidationError,
@@ -491,6 +492,12 @@ export async function POST(request: Request) {
 }
 
 function mediaError(error: unknown) {
+  if (error instanceof MediaMutationInProgressError) {
+    return Response.json(
+      { error: "media_mutation_in_progress" },
+      { status: 409, headers: { "retry-after": "30" } },
+    );
+  }
   if (error instanceof MediaAssetReferencedError) {
     return Response.json(
       { error: "media_asset_referenced", references: error.referenceCount },

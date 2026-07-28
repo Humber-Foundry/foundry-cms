@@ -131,6 +131,13 @@ export class MediaOccurrenceConflictError extends Error {
   }
 }
 
+export class MediaMutationInProgressError extends Error {
+  constructor() {
+    super("media_mutation_in_progress");
+    this.name = "MediaMutationInProgressError";
+  }
+}
+
 export class MediaValidationError extends Error {
   constructor(readonly field: string) {
     super("media_validation_failed");
@@ -344,7 +351,7 @@ export function createMediaAssetApplication({
     context: MediaMutationContext,
     expectedKind: MediaMutationResult["kind"],
   ) {
-    for (let attempt = 0; attempt < 620; attempt += 1) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       const replay = await replayMutation(context, expectedKind);
       if (replay !== null) return replay;
       if (await assets.claim(context)) {
@@ -352,9 +359,11 @@ export function createMediaAssetApplication({
         if (racedReceipt !== null) return racedReceipt;
         return null;
       }
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
     }
-    throw new MediaSiteAccessError();
+    throw new MediaMutationInProgressError();
   }
 
   async function withMutationLease<Value>(

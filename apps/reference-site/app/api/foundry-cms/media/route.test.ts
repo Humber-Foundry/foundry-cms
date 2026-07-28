@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
+  MediaMutationInProgressError,
 } from "@foundry/application";
 
 vi.mock("server-only", () => ({}));
@@ -686,6 +687,30 @@ describe("media endpoint", () => {
         height: 1,
       }),
     );
+  });
+
+  it("returns a retry window while another media mutation owns the lease", async () => {
+    mocks.delete.mockRejectedValue(new MediaMutationInProgressError());
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "retry-active-delete-lease",
+        },
+        body: JSON.stringify({
+          operation: "delete",
+          assetId: "asset_replacement",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBe("30");
+    await expect(response.json()).resolves.toEqual({
+      error: "media_mutation_in_progress",
+    });
   });
 
   it("rejects oversized or unbounded multipart requests before parsing", async () => {

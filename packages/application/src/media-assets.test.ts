@@ -4,6 +4,7 @@ import { createSiteId } from "@foundry/site-definition";
 
 import {
   MediaAssetReferencedError,
+  MediaMutationInProgressError,
   MediaSiteAccessError,
   createContentActorId,
   createContentWorkspaceId,
@@ -587,6 +588,36 @@ describe("media asset application", () => {
     await expect(winner).rejects.toThrow("simulated_worker_failure");
     await expect(duplicate).resolves.toBeUndefined();
     expect(deleteCalls).toBe(2);
+  });
+
+  it("bounds active-lease reconciliation and returns a retryable conflict", async () => {
+    const baseAssets = createInMemoryMediaAssetStore();
+    let claimCalls = 0;
+    const assets = {
+      ...baseAssets,
+      async replay() {
+        return null;
+      },
+      async claim() {
+        claimCalls += 1;
+        return false;
+      },
+    };
+    const application = createMediaAssetApplication({
+      siteId: siteA,
+      actorId: editor,
+      assets,
+      sources: createInMemoryMediaSourceStore(),
+    });
+
+    await expect(
+      application.commands.delete({
+        actorId: editor,
+        assetId: assetC,
+        idempotencyKey: "bounded-active-delete-lease",
+      }),
+    ).rejects.toEqual(new MediaMutationInProgressError());
+    expect(claimCalls).toBe(3);
   });
 
   it("fails closed across sites even when identifiers overlap", async () => {
