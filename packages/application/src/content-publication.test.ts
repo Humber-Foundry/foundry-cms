@@ -1025,6 +1025,107 @@ describe("content publication application", () => {
     expect(createCommit).toHaveBeenCalledTimes(1);
   });
 
+  it("restores a verified legacy v1 artifact without applying the v2 rich-text manifest contract", async () => {
+    const store = createInMemoryContentPublicationStore();
+    const legacyDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    legacyDefinition.definitionVersion = "1.1.0";
+    legacyDefinition.schemaVersion = "1.1.0";
+    delete legacyDefinition.home.media;
+    legacyDefinition.home.sections.find(
+      (section: any) => section.type === "callToAction",
+    ).body = "Restored legacy CTA copy.";
+    const historicalBytes =
+      serializePublishedSiteDefinition(legacyDefinition);
+    const historicalArtifactHash = [
+      ...new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(historicalBytes),
+        ),
+      ),
+    ]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    const restoredWorkspaceId = createContentWorkspaceId(
+      "workspace_restored_legacy",
+    );
+    const reader: ContentPublishedRevisionReader = {
+      readPublishedArtifact: vi.fn().mockResolvedValue(historicalBytes),
+    };
+    const restorer: ContentPublicationDraftRestorer = {
+      restore: vi.fn().mockResolvedValue({
+        workspaceId: restoredWorkspaceId,
+        revision: 0,
+        sourcePublicationId: createContentPublicationId(
+          `publish_${"0".repeat(32)}`,
+        ),
+      }),
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      publishedRevisions: reader,
+      draftRestorer: restorer,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-before-legacy-restore",
+    });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+    await store.saveApproval({
+      ...approval,
+      fingerprint: {
+        ...approval.fingerprint,
+        value: "e".repeat(64),
+        contentHash: await hashPublishedSiteDefinition(legacyDefinition),
+        schemaVersion: "1.1.0",
+        artifactHash: historicalArtifactHash,
+        serializationVersion:
+          "foundry.site-definition.canonical-json.v1",
+      },
+    });
+    vi.mocked(restorer.restore).mockResolvedValue({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+
+    await expect(
+      app.commands.restore({
+        sourcePublicationId: publication.id,
+        actorId: editorId,
+        workspaceId: restoredWorkspaceId,
+        idempotencyKey: "restore-legacy-published-version",
+      }),
+    ).resolves.toEqual({
+      workspaceId: restoredWorkspaceId,
+      revision: 0,
+      sourcePublicationId: publication.id,
+    });
+    expect(reader.readPublishedArtifact).toHaveBeenCalledTimes(1);
+    expect(restorer.restore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        definition: legacyDefinition,
+        sourcePublicationId: publication.id,
+        workspaceId: restoredWorkspaceId,
+      }),
+    );
+  });
+
   it("fails closed when historical Git bytes do not match the published evidence", async () => {
     const app = createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),

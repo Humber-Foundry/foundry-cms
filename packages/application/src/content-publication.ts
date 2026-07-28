@@ -21,6 +21,10 @@ export const contentSerializationVersion =
 export type ContentSerializationVersion =
   | "foundry.site-definition.canonical-json.v1"
   | typeof contentSerializationVersion;
+export type ContentPublicationSchemaVersion =
+  | "1.0.0"
+  | "1.1.0"
+  | SiteDefinitionSchemaVersion;
 const publicationLeaseDurationMs = 5 * 60 * 1_000;
 
 declare const contentApprovalIdBrand: unique symbol;
@@ -57,7 +61,7 @@ export type ContentApprovalFingerprint = Readonly<{
   channelConfigurationHash: string;
   contentHash: string;
   designHash: string;
-  schemaVersion: SiteDefinitionSchemaVersion;
+  schemaVersion: ContentPublicationSchemaVersion;
   rendererVersion: string;
   productionBase: string;
   artifactHash: string;
@@ -287,7 +291,7 @@ export type ContentPublisher = Readonly<{
   isReleaseLive(expected: {
     commitSha: string;
     contentHash: string;
-    schemaVersion: SiteDefinitionSchemaVersion;
+    schemaVersion: ContentPublicationSchemaVersion;
   }): Promise<boolean>;
   createCommit(input: {
     publishId: ContentPublicationId;
@@ -2372,11 +2376,25 @@ export function createContentPublicationApplication({
           );
         }
         const definition = parsed as SiteDefinition;
-        const artifacts = serializeContentPublicationArtifacts(definition);
-        const [artifactHash, contentHash, publishedArtifactBytes] =
-          await Promise.all([
+        const contentHash = await hashPublishedSiteDefinition(definition);
+        let artifactHash: string;
+        let publishedArtifactsMatch = true;
+        if (
+          approval.fingerprint.serializationVersion ===
+          "foundry.site-definition.canonical-json.v1"
+        ) {
+          artifactHash = await sha256(bytes);
+        } else {
+          let artifacts: ReadonlyArray<ContentPublicationArtifact>;
+          try {
+            artifacts = serializeContentPublicationArtifacts(definition);
+          } catch {
+            throw new ContentPublicationValidationError(
+              "restore_artifact_mismatch",
+            );
+          }
+          const [manifestHash, publishedArtifactBytes] = await Promise.all([
             hashContentPublicationArtifacts(artifacts),
-            hashPublishedSiteDefinition(definition),
             Promise.all(
               artifacts.map((artifact) =>
                 artifact.path === publishedSiteDefinitionPath
@@ -2388,15 +2406,18 @@ export function createContentPublicationApplication({
               ),
             ),
           ]);
+          artifactHash = manifestHash;
+          publishedArtifactsMatch = publishedArtifactBytes.every(
+            (publishedBytes, index) =>
+              publishedBytes === artifacts[index]!.bytes,
+          );
+        }
         if (
           artifactHash !== approval.fingerprint.artifactHash ||
           contentHash !== approval.fingerprint.contentHash ||
           serializePublishedSiteDefinition(definition) !== bytes ||
           definition.schemaVersion !== approval.fingerprint.schemaVersion ||
-          publishedArtifactBytes.some(
-            (publishedBytes, index) =>
-              publishedBytes !== artifacts[index]!.bytes,
-          )
+          !publishedArtifactsMatch
         ) {
           throw new ContentPublicationValidationError(
             "restore_artifact_mismatch",
