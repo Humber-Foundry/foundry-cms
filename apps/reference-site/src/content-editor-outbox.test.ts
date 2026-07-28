@@ -119,4 +119,35 @@ describe("content editor outbox controller", () => {
       edits: [edit],
     });
   });
+
+  it("keeps concurrent tab attempts in separate recovery records", async () => {
+    const { driver, records } = memoryDriver();
+    const first = createContentEditorOutboxController(
+      "workspace_shared",
+      driver,
+      "tab_first",
+    );
+    const second = createContentEditorOutboxController(
+      "workspace_shared",
+      driver,
+      "tab_second",
+    );
+    await first.saveAttempt(2, [edit], {
+      body: '{"workspaceId":"workspace_shared","baseRevision":2}',
+      idempotencyKey: "stable-attempt-first-0001",
+    });
+    await second.saveAttempt(2, [{ ...edit, path: "section_proof.quote" }], {
+      body: '{"workspaceId":"workspace_shared","baseRevision":2}',
+      idempotencyKey: "stable-attempt-second-0001",
+    });
+
+    await first.clear();
+
+    expect(
+      records.get("workspace_shared::tab_first"),
+    ).toBeUndefined();
+    expect(
+      records.get("workspace_shared::tab_second")?.attempt?.idempotencyKey,
+    ).toBe("stable-attempt-second-0001");
+  });
 });

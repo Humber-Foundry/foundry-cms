@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  claimContentEditorWorkspace,
-  ContentEditorWorkspaceOwnershipError,
+  createContentEditorWorkspaceCoordinator,
   contentEditorPersistenceTransition,
   outboxAttemptMatchesWorkspace,
-  withContentEditorWorkspaceOwnership,
+  withContentEditorWorkspaceCoordination,
   type ContentEditorPersistenceState,
 } from "./content-editor-persistence";
 
@@ -100,16 +99,14 @@ describe("content editor persistence lifecycle", () => {
       },
     };
 
-    const first = await claimContentEditorWorkspace(
+    const first = await createContentEditorWorkspaceCoordinator(
       "workspace_shared",
       locks as never,
     );
-    const duplicate = await claimContentEditorWorkspace(
+    const duplicate = await createContentEditorWorkspaceCoordinator(
       "workspace_shared",
       locks as never,
     );
-    expect(first.acquired).toBe(true);
-    expect(duplicate.acquired).toBe(true);
     let active = 0;
     let maximumActive = 0;
     const operation = async () => {
@@ -125,21 +122,19 @@ describe("content editor persistence lifecycle", () => {
     expect(maximumActive).toBe(1);
   });
 
-  it("does not invoke persistence for a denied workspace claimant", async () => {
+  it("continues without Web Locks when coordination is unavailable", async () => {
     let driverCalls = 0;
 
-    await expect(
-      withContentEditorWorkspaceOwnership(
-        Promise.resolve({
-          acquired: false,
-          run: async (operation) => operation(),
-          release() {},
-        }),
-        async () => {
-          driverCalls += 1;
-        },
-      ),
-    ).rejects.toBeInstanceOf(ContentEditorWorkspaceOwnershipError);
-    expect(driverCalls).toBe(0);
+    const coordinator = createContentEditorWorkspaceCoordinator(
+      "workspace_without_locks",
+      undefined,
+    );
+    await withContentEditorWorkspaceCoordination(
+      coordinator,
+      async () => {
+        driverCalls += 1;
+      },
+    );
+    expect(driverCalls).toBe(1);
   });
 });

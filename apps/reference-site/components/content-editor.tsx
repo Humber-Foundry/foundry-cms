@@ -30,7 +30,6 @@ import {
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
 import {
-  ContentEditorWorkspaceOwnershipError,
   outboxAttemptMatchesWorkspace,
   useContentEditorAutosave,
   useContentEditorPersistence,
@@ -156,7 +155,7 @@ export function ContentEditor({
   });
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
-    !persistence.owned ||
+    !persistence.coordinated ||
     !persistence.ready ||
     state.status === "saving" ||
     state.status === "stale" ||
@@ -282,11 +281,8 @@ export function ContentEditor({
           );
         }
       })
-      .catch((error) => {
-        if (
-          !cancelled &&
-          !(error instanceof ContentEditorWorkspaceOwnershipError)
-        ) {
+      .catch(() => {
+        if (!cancelled) {
           setMessage(
             "Browser recovery storage is unavailable. Keep this tab open until your edits are saved.",
           );
@@ -304,7 +300,7 @@ export function ContentEditor({
 
   useEffect(() => {
     if (
-      !persistence.owned ||
+      !persistence.coordinated ||
       staleRecovery === undefined ||
       recoveryApplied.current
     ) {
@@ -382,14 +378,14 @@ export function ContentEditor({
     }
   }, [
     initialStale,
-    persistence.owned,
+    persistence.coordinated,
     staleRecovery,
     workingFields,
   ]);
 
   useEffect(() => {
     if (
-      !persistence.owned ||
+      !persistence.coordinated ||
       staleRecovery === undefined ||
       initialStale ||
       !recoveryApplied.current ||
@@ -434,7 +430,7 @@ export function ContentEditor({
     activeWorkspaceUrl,
     recoverableEdits,
     initialStale,
-    persistence.owned,
+    persistence.coordinated,
     persistedFields,
     recoveryConflicts,
     staleRecovery,
@@ -443,7 +439,7 @@ export function ContentEditor({
   async function save() {
     if (
       saveInFlight.current ||
-      !persistence.owned ||
+      !persistence.coordinated ||
       !persistence.ready
     ) {
       return;
@@ -590,7 +586,7 @@ export function ContentEditor({
 
   useContentEditorAutosave({
     enabled:
-      persistence.owned &&
+      persistence.coordinated &&
       persistence.ready &&
       state.status === "dirty" &&
       recoverableEdits.length > 0 &&
@@ -602,7 +598,7 @@ export function ContentEditor({
   function edit(path: string, value: string) {
     if (
       saveInFlight.current ||
-      !persistence.owned ||
+      !persistence.coordinated ||
       !persistence.ready
     ) {
       return;
@@ -612,7 +608,7 @@ export function ContentEditor({
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
-    if (!persistence.owned || !persistence.ready) {
+    if (!persistence.coordinated || !persistence.ready) {
       return;
     }
     const forwardedRecovery =
@@ -687,7 +683,7 @@ export function ContentEditor({
     conflict: StaleRecoveryConflict,
     resolution: "latest" | "mine",
   ) {
-    if (!persistence.owned || !persistence.ready) {
+    if (!persistence.coordinated || !persistence.ready) {
       return;
     }
     if (resolution === "mine" && conflict.currentValue !== null) {
@@ -825,7 +821,7 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={creatingWorkspace || !persistence.owned}
+            disabled={creatingWorkspace || !persistence.coordinated}
             onClick={() =>
               void recoverEdits(
                 state.status === "stale" ? "fresh" : "current",
@@ -858,7 +854,7 @@ export function ContentEditor({
                       <button
                         type="button"
                         className="copy-button"
-                        disabled={!persistence.owned}
+                        disabled={!persistence.coordinated}
                         onClick={() =>
                           resolveRecoveryConflict(edit, "latest")
                         }
@@ -868,7 +864,7 @@ export function ContentEditor({
                       <button
                         type="button"
                         className="copy-button"
-                        disabled={!persistence.owned}
+                        disabled={!persistence.coordinated}
                         onClick={() => resolveRecoveryConflict(edit, "mine")}
                       >
                         Use my value
@@ -884,7 +880,7 @@ export function ContentEditor({
                     <button
                       type="button"
                       className="copy-button"
-                      disabled={!persistence.owned}
+                      disabled={!persistence.coordinated}
                       onClick={() =>
                         resolveRecoveryConflict(edit, "latest")
                       }

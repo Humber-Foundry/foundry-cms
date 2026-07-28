@@ -11,43 +11,29 @@ import type { StaleRecoveryEdit } from "./content-editor-recovery";
 
 type SaveAttempt = NonNullable<ContentEditorOutboxRecord["attempt"]>;
 
-export type ContentEditorWorkspaceClaim = Readonly<{
-  acquired: boolean;
+export type ContentEditorWorkspaceCoordinator = Readonly<{
   run<Value>(operation: () => Promise<Value>): Promise<Value>;
-  release(): void;
 }>;
 
-export class ContentEditorWorkspaceOwnershipError extends Error {
-  constructor() {
-    super("content_editor_workspace_not_owned");
-    this.name = "ContentEditorWorkspaceOwnershipError";
-  }
-}
-
-export async function withContentEditorWorkspaceOwnership<Value>(
-  claim: Promise<ContentEditorWorkspaceClaim>,
+export async function withContentEditorWorkspaceCoordination<Value>(
+  coordinator: Promise<ContentEditorWorkspaceCoordinator>,
   operation: () => Promise<Value>,
 ): Promise<Value> {
-  if (!(await claim).acquired) {
-    throw new ContentEditorWorkspaceOwnershipError();
-  }
-  return (await claim).run(operation);
+  return (await coordinator).run(operation);
 }
 
-export async function claimContentEditorWorkspace(
+export async function createContentEditorWorkspaceCoordinator(
   workspaceId: string,
   locks: Pick<LockManager, "request"> | undefined =
     typeof navigator === "undefined" ? undefined : navigator.locks,
-): Promise<ContentEditorWorkspaceClaim> {
+): Promise<ContentEditorWorkspaceCoordinator> {
   const lockName = `foundry-cms:content-editor:${workspaceId}`;
   return {
-    acquired: true,
     run<Value>(operation: () => Promise<Value>): Promise<Value> {
       return locks === undefined
         ? operation()
         : locks.request(lockName, operation);
     },
-    release() {},
   };
 }
 
@@ -119,61 +105,67 @@ export function useContentEditorPersistence({
   onStorageError(message: string): void;
 }) {
   const controller = useMemo(
-    () => createContentEditorOutboxController(workspaceId),
+    () => {
+      let tabId = crypto.randomUUID();
+      try {
+        const key = "foundry-cms:content-editor-tab";
+        tabId = window.sessionStorage.getItem(key) ?? tabId;
+        window.sessionStorage.setItem(key, tabId);
+      } catch {
+        // The random in-memory tab scope still prevents this mounted editor
+        // from clearing another tab's durable command.
+      }
+      return createContentEditorOutboxController(
+        workspaceId,
+        undefined,
+        tabId,
+      );
+    },
     [workspaceId],
   );
-  const ownershipWaiter = useRef<{
-    promise: Promise<ContentEditorWorkspaceClaim>;
-    resolve(claim: ContentEditorWorkspaceClaim): void;
+  const coordinationWaiter = useRef<{
+    promise: Promise<ContentEditorWorkspaceCoordinator>;
+    resolve(coordinator: ContentEditorWorkspaceCoordinator): void;
   } | null>(null);
-  if (ownershipWaiter.current === null) {
-    let resolve!: (claim: ContentEditorWorkspaceClaim) => void;
-    const promise = new Promise<ContentEditorWorkspaceClaim>((next) => {
+  if (coordinationWaiter.current === null) {
+    let resolve!: (coordinator: ContentEditorWorkspaceCoordinator) => void;
+    const promise = new Promise<ContentEditorWorkspaceCoordinator>((next) => {
       resolve = next;
     });
-    ownershipWaiter.current = { promise, resolve };
+    coordinationWaiter.current = { promise, resolve };
   }
-  const [ownership, setOwnership] = useState<
-    "claiming" | "owned" | "blocked"
-  >("claiming");
+  const [coordinated, setCoordinated] = useState(false);
   const [lifecycle, transition] = useReducer(
     contentEditorPersistenceTransition,
     { phase: "loading", attempt: null },
   );
-  const withOwnership = <Value,>(
+  const coordinate = <Value,>(
     operation: () => Promise<Value>,
   ): Promise<Value> =>
-    withContentEditorWorkspaceOwnership(
-      ownershipWaiter.current!.promise,
+    withContentEditorWorkspaceCoordination(
+      coordinationWaiter.current!.promise,
       operation,
     );
 
   useEffect(() => {
     let cancelled = false;
-    let activeClaim: ContentEditorWorkspaceClaim | undefined;
-    void claimContentEditorWorkspace(workspaceId).then((claim) => {
-      if (cancelled) {
-        claim.release();
-        return;
-      }
-      activeClaim = claim;
-      ownershipWaiter.current!.resolve(claim);
-      setOwnership(claim.acquired ? "owned" : "blocked");
-      if (!claim.acquired) {
-        onStorageError(
-          "This workspace is already open in another tab, or this browser cannot coordinate editing. Close the other tab and reload before editing here.",
-        );
-      }
-    });
+    void createContentEditorWorkspaceCoordinator(workspaceId).then(
+      (coordinator) => {
+        if (cancelled) {
+          return;
+        }
+        coordinationWaiter.current!.resolve(coordinator);
+        setCoordinated(true);
+      },
+    );
     return () => {
       cancelled = true;
-      activeClaim?.release();
     };
-  }, [onStorageError, workspaceId]);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (
-      ownership !== "owned" ||
+      !coordinated ||
       lifecycle.phase === "loading" ||
       lifecycle.attempt !== null ||
       editorStatus === "saving" ||
@@ -200,23 +192,22 @@ export function useContentEditorPersistence({
     lifecycle.attempt,
     lifecycle.phase,
     onStorageError,
-    ownership,
+    coordinated,
     recoveryBlocked,
   ]);
 
   return {
-    owned: ownership === "owned",
-    blocked: ownership === "blocked",
+    coordinated,
     ready: lifecycle.phase !== "loading",
     attempt: lifecycle.attempt,
-    read: () => withOwnership(() => controller.read()),
+    read: () => coordinate(() => controller.read()),
     finishHydration: () => transition({ type: "hydrated" }),
     restoreAttempt: (attempt: SaveAttempt) =>
       transition({ type: "attempt", attempt }),
     discardAttempt: () => transition({ type: "snapshot" }),
     async preserveWithoutAttempt() {
       transition({ type: "snapshot" });
-      await withOwnership(() => controller.snapshot(baseRevision, edits));
+      await coordinate(() => controller.snapshot(baseRevision, edits));
     },
     async beginAttempt(body: string) {
       const attempt =
@@ -226,13 +217,10 @@ export function useContentEditorPersistence({
       };
       transition({ type: "attempt", attempt });
       try {
-        await withOwnership(() =>
+        await coordinate(() =>
           controller.saveAttempt(baseRevision, edits, attempt),
         );
       } catch (error) {
-        if (error instanceof ContentEditorWorkspaceOwnershipError) {
-          throw error;
-        }
         onStorageError(
           "Browser recovery storage is unavailable. This save will continue with its stable retry identity.",
         );
@@ -241,11 +229,11 @@ export function useContentEditorPersistence({
     },
     async acknowledge() {
       transition({ type: "acknowledged" });
-      await withOwnership(() => controller.clear());
+      await coordinate(() => controller.clear());
     },
-    clear: () => withOwnership(() => controller.clear()),
+    clear: () => coordinate(() => controller.clear()),
     snapshot: (snapshotEdits: ReadonlyArray<StaleRecoveryEdit>) =>
-      withOwnership(() =>
+      coordinate(() =>
         controller.snapshot(baseRevision, snapshotEdits),
       ),
   };

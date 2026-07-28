@@ -78,32 +78,57 @@ export async function readContentEditorOutbox(
   const database = await openOutbox();
   try {
     const transaction = database.transaction(storeName, "readonly");
-    const request = transaction.objectStore(storeName).get(workspaceId);
+    const request = workspaceId.includes("::")
+      ? transaction.objectStore(storeName).get(workspaceId)
+      : transaction.objectStore(storeName).getAll();
     const result = await new Promise<unknown>((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
     await complete(transaction);
+    const candidate = Array.isArray(result)
+      ? result.find(
+          (record) =>
+            typeof record === "object" &&
+            record !== null &&
+            "workspaceId" in record &&
+            (record.workspaceId === workspaceId ||
+              (typeof record.workspaceId === "string" &&
+                record.workspaceId.startsWith(`${workspaceId}::`))),
+        ) ?? null
+      : result;
     if (
-      typeof result !== "object" ||
-      result === null ||
-      !("workspaceId" in result) ||
-      result.workspaceId !== workspaceId ||
-      !("baseRevision" in result) ||
-      !Number.isSafeInteger(result.baseRevision) ||
-      !("edits" in result) ||
-      !Array.isArray(result.edits) ||
-      result.edits.length > maximumOutboxEdits ||
-      !result.edits.every(isOutboxEdit) ||
-      new Set(result.edits.map((edit) => edit.path)).size !==
-        result.edits.length ||
-      ("attempt" in result &&
-        result.attempt !== undefined &&
-        !isOutboxAttempt(result.attempt))
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("workspaceId" in candidate) ||
+      (candidate.workspaceId !== workspaceId &&
+        !(
+          !workspaceId.includes("::") &&
+          typeof candidate.workspaceId === "string" &&
+          candidate.workspaceId.startsWith(`${workspaceId}::`)
+        )) ||
+      !("baseRevision" in candidate) ||
+      !Number.isSafeInteger(candidate.baseRevision) ||
+      !("edits" in candidate) ||
+      !Array.isArray(candidate.edits) ||
+      candidate.edits.length > maximumOutboxEdits ||
+      !candidate.edits.every(isOutboxEdit) ||
+      new Set(
+        candidate.edits.map((edit: unknown) =>
+          isOutboxEdit(edit) ? edit.path : "",
+        ),
+      ).size !==
+        candidate.edits.length ||
+      ("attempt" in candidate &&
+        candidate.attempt !== undefined &&
+        !isOutboxAttempt(candidate.attempt))
     ) {
       return null;
     }
-    return result as ContentEditorOutboxRecord;
+    return {
+      ...(candidate as ContentEditorOutboxRecord),
+      workspaceId: workspaceId.split("::")[0]!,
+    };
   } finally {
     database.close();
   }
@@ -128,7 +153,24 @@ export async function clearContentEditorOutbox(
   const database = await openOutbox();
   try {
     const transaction = database.transaction(storeName, "readwrite");
-    transaction.objectStore(storeName).delete(workspaceId);
+    const store = transaction.objectStore(storeName);
+    if (workspaceId.includes("::")) {
+      store.delete(workspaceId);
+    } else {
+      const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+        const request = store.getAllKeys();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      keys
+        .filter(
+          (key) =>
+            typeof key === "string" &&
+            (key === workspaceId ||
+              key.startsWith(`${workspaceId}::`)),
+        )
+        .forEach((key) => store.delete(key));
+    }
     await complete(transaction);
   } finally {
     database.close();
@@ -142,7 +184,12 @@ export function createContentEditorOutboxController(
     write: writeContentEditorOutbox,
     clear: clearContentEditorOutbox,
   },
+  scopeId = workspaceId,
 ) {
+  const storageId =
+    scopeId === workspaceId
+      ? workspaceId
+      : `${workspaceId}::${scopeId}`;
   let queue = Promise.resolve();
   const serialize = (operation: () => Promise<void>): Promise<void> => {
     const result = queue.catch(() => undefined).then(operation);
@@ -156,7 +203,7 @@ export function createContentEditorOutboxController(
   ): Promise<void> =>
     serialize(() =>
       driver.write({
-        workspaceId,
+        workspaceId: storageId,
         baseRevision,
         edits,
         ...(attempt === undefined ? {} : { attempt }),
@@ -164,7 +211,16 @@ export function createContentEditorOutboxController(
     );
 
   return Object.freeze({
-    read: () => driver.read(workspaceId),
+    read: async () => {
+      const stored =
+        (await driver.read(storageId)) ??
+        (storageId === workspaceId
+          ? null
+          : await driver.read(workspaceId));
+      return stored === null
+        ? null
+        : { ...stored, workspaceId };
+    },
     snapshot: (
       baseRevision: number,
       edits: ReadonlyArray<StaleRecoveryEdit>,
@@ -174,6 +230,6 @@ export function createContentEditorOutboxController(
       edits: ReadonlyArray<StaleRecoveryEdit>,
       attempt: NonNullable<ContentEditorOutboxRecord["attempt"]>,
     ) => record(baseRevision, edits, attempt),
-    clear: () => serialize(() => driver.clear(workspaceId)),
+    clear: () => serialize(() => driver.clear(storageId)),
   });
 }
