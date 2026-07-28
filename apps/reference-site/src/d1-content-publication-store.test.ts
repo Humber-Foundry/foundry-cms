@@ -149,6 +149,58 @@ describe("D1 content publication store", () => {
     ).rejects.toThrow(/content_approvals_are_immutable/u);
   });
 
+  it("reads a v1 approval row and fails it closed at the v2 publication boundary", async () => {
+    const store = createD1ContentPublicationStore(database);
+    const legacyApproval: ContentApproval = {
+      ...approval,
+      fingerprint: {
+        ...approval.fingerprint,
+        value: "f".repeat(64),
+        serializationVersion:
+          "foundry.site-definition.canonical-json.v1",
+      },
+    };
+    await store.saveApproval(legacyApproval);
+    await expect(store.findApproval(legacyApproval.id)).resolves.toEqual(
+      legacyApproval,
+    );
+
+    const createCommit = vi.fn();
+    const application = createContentPublicationApplication({
+      store,
+      revisions: {
+        getRevision: (_workspaceId, revision) =>
+          revisionApplication.queries.getRevision(revision),
+        getCurrent: () => revisionApplication.queries.getCurrent(),
+        isCurrent: (revision) =>
+          revisionApplication.queries.isRevisionCurrent(revision),
+        listContributors: async () => [actorId],
+      },
+      publisher: {
+        getChannelConfigurationHash: async () => "channel-a",
+        getProductionHead: async () => "a".repeat(40),
+        isReleaseLive: async () => true,
+        createCommit,
+        reconcileCommit: vi.fn(),
+        retryReference: vi.fn(),
+        getDeploymentStatus: vi.fn(),
+        retryDeployment: vi.fn(),
+      },
+    });
+
+    await expect(
+      application.commands.publish({
+        workspaceId,
+        approvalId: legacyApproval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "reject-v1-approval-at-v2-boundary",
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "approval_stale" }),
+    );
+    expect(createCommit).not.toHaveBeenCalled();
+  });
+
   it("invalidates approval in the same D1 transaction that records a later revision", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);

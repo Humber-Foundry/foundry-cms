@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  referenceSiteDefinition,
+  serializeSiteDefinitionRichTextForPublication,
+} from "@foundry/site-definition";
 
 import {
   createContentActorId,
@@ -17,6 +20,7 @@ import {
   createContentPublicationApplication,
   createContentPublicationId,
   createInMemoryContentPublicationStore,
+  hashContentPublicationArtifacts,
   parseProductionBase,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
@@ -139,6 +143,32 @@ describe("content publication application", () => {
     ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
   });
 
+  it("hashes the full publication manifest without path or byte ambiguity", async () => {
+    const jsonArtifact = {
+      path: "packages/site-definition/src/published-site.json" as const,
+      bytes: "{}\n",
+    };
+    const richPath =
+      "content/rich-text/section_contact/body.md" as const;
+    const [left, right] = await Promise.all([
+      hashContentPublicationArtifacts([
+        jsonArtifact,
+        { path: richPath, bytes: "One.\n" },
+      ]),
+      hashContentPublicationArtifacts([
+        jsonArtifact,
+        { path: richPath, bytes: "Two.\n" },
+      ]),
+    ]);
+    expect(left).not.toBe(right);
+    await expect(
+      hashContentPublicationArtifacts([
+        jsonArtifact,
+        jsonArtifact,
+      ]),
+    ).rejects.toThrow("content_publication_artifacts_invalid");
+  });
+
   function application() {
     return createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),
@@ -180,7 +210,7 @@ describe("content publication application", () => {
           productionBase,
           artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           serializationVersion:
-            "foundry.site-definition.canonical-json.v1",
+            "foundry.site-publication-artifacts.v2",
         },
       }),
     );
@@ -494,7 +524,7 @@ describe("content publication application", () => {
     expect(createCommit).not.toHaveBeenCalled();
   });
 
-  it("serializes one deterministic file and creates one attributed compare-and-swap commit", async () => {
+  it("serializes one deterministic artifact set and creates one attributed compare-and-swap commit", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
       workspaceId,
@@ -509,10 +539,21 @@ describe("content publication application", () => {
     expect(createCommit).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedHead: productionCommit,
-        path: "packages/site-definition/src/published-site.json",
-        bytes: serializePublishedSiteDefinition(
-          revisionApplication.saved.definition,
-        ),
+        artifacts: [
+          {
+            path: "packages/site-definition/src/published-site.json",
+            bytes: serializePublishedSiteDefinition(
+              revisionApplication.saved.definition,
+            ),
+          },
+          ...serializeSiteDefinitionRichTextForPublication(
+            revisionApplication.saved.definition,
+          ).map(({ filePath, markdown }) => ({
+            path: filePath,
+            bytes: markdown,
+          })),
+        ],
+        artifactHash: approval.fingerprint.artifactHash,
         message: expect.stringContaining(
           `Foundry-Approved-By: ${membershipId}`,
         ),
@@ -883,7 +924,14 @@ describe("content publication application", () => {
         publishId: publication.id,
         candidateCommitSha: "c".repeat(40),
         expectedHead: publication.expectedHead,
-        path: "packages/site-definition/src/published-site.json",
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "packages/site-definition/src/published-site.json",
+          }),
+          expect.objectContaining({
+            path: "content/rich-text/section_contact/body.md",
+          }),
+        ]),
         artifactHash: approval.fingerprint.artifactHash,
         contentHash: approval.fingerprint.contentHash,
       }),
@@ -921,7 +969,15 @@ describe("content publication application", () => {
         publishId: publication.id,
         candidateCommitSha: "c".repeat(40),
         expectedHead: productionCommit,
-        path: "packages/site-definition/src/published-site.json",
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "packages/site-definition/src/published-site.json",
+          }),
+          expect.objectContaining({
+            path: "content/rich-text/section_contact/body.md",
+          }),
+        ]),
+        artifactHash: approval.fingerprint.artifactHash,
       }),
     );
   });

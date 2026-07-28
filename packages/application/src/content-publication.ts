@@ -1,6 +1,7 @@
-import type {
-  SiteDefinition,
-  SiteDefinitionSchemaVersion,
+import {
+  serializeSiteDefinitionRichTextForPublication,
+  type SiteDefinition,
+  type SiteDefinitionSchemaVersion,
 } from "@foundry/site-definition";
 
 import type {
@@ -13,7 +14,10 @@ import type { HumanMembershipId } from "./human-access";
 export const publishedSiteDefinitionPath =
   "packages/site-definition/src/published-site.json";
 export const contentSerializationVersion =
-  "foundry.site-definition.canonical-json.v1";
+  "foundry.site-publication-artifacts.v2";
+export type ContentSerializationVersion =
+  | "foundry.site-definition.canonical-json.v1"
+  | typeof contentSerializationVersion;
 const publicationLeaseDurationMs = 5 * 60 * 1_000;
 
 declare const contentApprovalIdBrand: unique symbol;
@@ -54,7 +58,14 @@ export type ContentApprovalFingerprint = Readonly<{
   rendererVersion: string;
   productionBase: string;
   artifactHash: string;
-  serializationVersion: typeof contentSerializationVersion;
+  serializationVersion: ContentSerializationVersion;
+}>;
+
+export type ContentPublicationArtifact = Readonly<{
+  path:
+    | typeof publishedSiteDefinitionPath
+    | `content/rich-text/${string}.md`;
+  bytes: string;
 }>;
 
 export type ContentApproval = Readonly<{
@@ -227,8 +238,8 @@ export type ContentPublisher = Readonly<{
     contributors: ReadonlyArray<ContentActorId>;
     contentHash: string;
     expectedHead: string;
-    path: typeof publishedSiteDefinitionPath;
-    bytes: string;
+    artifacts: ReadonlyArray<ContentPublicationArtifact>;
+    artifactHash: string;
     message: string;
     assertLease(): Promise<boolean>;
   }): Promise<PublicationCommitResult>;
@@ -236,7 +247,7 @@ export type ContentPublisher = Readonly<{
     publishId: ContentPublicationId;
     candidateCommitSha?: string;
     expectedHead: string;
-    path: typeof publishedSiteDefinitionPath;
+    artifacts: ReadonlyArray<ContentPublicationArtifact>;
     artifactHash: string;
     contentHash: string;
     message: string;
@@ -248,8 +259,8 @@ export type ContentPublisher = Readonly<{
     publishId: ContentPublicationId;
     candidateCommitSha: string;
     expectedHead: string;
-    path: typeof publishedSiteDefinitionPath;
-    bytes: string;
+    artifacts: ReadonlyArray<ContentPublicationArtifact>;
+    artifactHash: string;
     assertLease(): Promise<boolean>;
   }): Promise<PublicationCommitResult>;
   getDeploymentStatus(
@@ -344,6 +355,54 @@ export function serializePublishedSiteDefinition(
   return `${canonicalJson(definition)}\n`;
 }
 
+export function serializeContentPublicationArtifacts(
+  definition: SiteDefinition,
+): ReadonlyArray<ContentPublicationArtifact> {
+  return [
+    {
+      path: publishedSiteDefinitionPath,
+      bytes: serializePublishedSiteDefinition(definition),
+    },
+    ...serializeSiteDefinitionRichTextForPublication(definition).map(
+      ({ filePath, markdown }) => ({
+        path: filePath,
+        bytes: markdown,
+      }),
+    ),
+  ];
+}
+
+export async function hashContentPublicationArtifacts(
+  artifacts: ReadonlyArray<ContentPublicationArtifact>,
+): Promise<string> {
+  const sorted = [...artifacts].sort(({ path: left }, { path: right }) =>
+    left.localeCompare(right),
+  );
+  if (
+    sorted.length === 0 ||
+    !sorted.some(({ path }) => path === publishedSiteDefinitionPath) ||
+    sorted.some(
+      (artifact, index) =>
+        artifact.bytes.length === 0 ||
+        (artifact.path !== publishedSiteDefinitionPath &&
+          !/^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u.test(
+            artifact.path,
+          )) ||
+        (index > 0 && sorted[index - 1]?.path === artifact.path),
+    )
+  ) {
+    throw new TypeError("content_publication_artifacts_invalid");
+  }
+  const manifest = await Promise.all(
+    sorted.map(async ({ path, bytes }) => ({
+      path,
+      byteLength: new TextEncoder().encode(bytes).byteLength,
+      sha256: await sha256(bytes),
+    })),
+  );
+  return sha256(canonicalJson(manifest));
+}
+
 export function hashPublishedSiteDefinition(
   definition: SiteDefinition,
 ): Promise<string> {
@@ -368,8 +427,9 @@ export async function createContentApprovalFingerprint(
   channelConfigurationHash: string,
   channel: ContentPublicationChannel = "site",
 ): Promise<ContentApprovalFingerprint> {
-  const serialized = serializePublishedSiteDefinition(revision.definition);
-  const artifactHash = await sha256(serialized);
+  const artifactHash = await hashContentPublicationArtifacts(
+    serializeContentPublicationArtifacts(revision.definition),
+  );
   const canonicalDefinitionHash = await sha256(
     canonicalJson(revision.definition),
   );
@@ -748,7 +808,11 @@ export function createContentPublicationApplication({
       revision,
       await publisher.getChannelConfigurationHash(),
     );
-    if (fingerprint.value !== approval.fingerprint.value) {
+    if (
+      fingerprint.value !== approval.fingerprint.value ||
+      approval.fingerprint.serializationVersion !==
+        contentSerializationVersion
+    ) {
       throw new ContentApprovalInvalidError("approval_stale");
     }
     if (actorId.trim() === "") {
@@ -781,11 +845,12 @@ export function createContentPublicationApplication({
   function commitReconciliationInput(
     publication: ContentPublication,
     approval: ContentApproval,
+    revision: ContentRevision,
   ): Parameters<ContentPublisher["reconcileCommit"]>[0] {
     return {
       publishId: publication.id,
       expectedHead: publication.expectedHead,
-      path: publishedSiteDefinitionPath,
+      artifacts: serializeContentPublicationArtifacts(revision.definition),
       artifactHash: approval.fingerprint.artifactHash,
       contentHash: approval.fingerprint.contentHash,
       message: commitMessage({ publication, approval }),
@@ -886,8 +951,19 @@ export function createContentPublicationApplication({
       (publication.status === "unknown" ||
         publication.status === "requested")
     ) {
+      const boundRevision = await revisions.getRevision(
+        boundApproval.workspaceId,
+        boundApproval.revision,
+      );
+      if (boundRevision === null) {
+        return publication;
+      }
       const reconciled = await publisher.reconcileCommit({
-        ...commitReconciliationInput(publication, boundApproval),
+        ...commitReconciliationInput(
+          publication,
+          boundApproval,
+          boundRevision,
+        ),
         candidateCommitSha: reconciliationCandidate(publication.detail),
       });
       if (reconciled.state === "committed") {
@@ -1310,8 +1386,10 @@ export function createContentPublicationApplication({
             contributors,
             contentHash: approval.fingerprint.contentHash,
             expectedHead: head,
-            path: publishedSiteDefinitionPath,
-            bytes: serializePublishedSiteDefinition(revision.definition),
+            artifacts: serializeContentPublicationArtifacts(
+              revision.definition,
+            ),
+            artifactHash: approval.fingerprint.artifactHash,
             message: commitMessage({ publication, approval }),
             assertLease: renewLease,
           });
@@ -1404,7 +1482,11 @@ export function createContentPublicationApplication({
           candidateCommitSha !== undefined
         ) {
           const reconciled = await publisher.reconcileCommit({
-            ...commitReconciliationInput(publication, approval),
+            ...commitReconciliationInput(
+              publication,
+              approval,
+              revision,
+            ),
             candidateCommitSha,
           });
           if (reconciled.state === "committed") {
@@ -1515,8 +1597,10 @@ export function createContentPublicationApplication({
             publishId: publication.id,
             candidateCommitSha,
             expectedHead: publication.expectedHead,
-            path: publishedSiteDefinitionPath,
-            bytes: serializePublishedSiteDefinition(revision.definition),
+            artifacts: serializeContentPublicationArtifacts(
+              revision.definition,
+            ),
+            artifactHash: approval.fingerprint.artifactHash,
             assertLease,
           });
           const updatedAt = now();

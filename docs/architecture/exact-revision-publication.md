@@ -19,7 +19,7 @@ preview for the current saved revision. The approval fingerprint binds:
 - a structural design projection;
 - schema and renderer versions;
 - the exact production Git base and published-content hash;
-- the deterministic serialized artifact;
+- the deterministic serialized artifact set;
 - the `site` publication channel and serialization version; and
 - a non-secret channel-configuration hash covering the GitHub App
   installation, repository, production ref, public origin, deployment signal,
@@ -36,12 +36,16 @@ requires the command workspace to equal the approval workspace.
 
 ## Deterministic Git publication
 
-Published site content lives at
-`packages/site-definition/src/published-site.json`. The publisher writes
-canonical key-sorted JSON with one trailing newline, creates one blob, one tree
-based on the approved head, and one commit whose sole parent is that head. It
-then updates the configured production ref with `force: false`. A moved ref is
-blocked and is never silently rebased.
+Published site content is one atomic artifact set: canonical key-sorted JSON
+with one trailing newline at
+`packages/site-definition/src/published-site.json`, plus deterministic Markdown
+for every rich-text field under `content/rich-text/`. The v2 artifact
+fingerprint hashes a canonical manifest of every sorted path, UTF-8 byte
+length, and SHA-256 digest. The publisher creates every blob and one tree based
+on the approved head; that tree also removes managed Markdown paths that no
+longer exist in the approved definition. It then creates one commit whose sole
+parent is the approved head and updates the configured production ref with
+`force: false`. A moved ref is blocked and is never silently rebased.
 
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author
@@ -134,16 +138,19 @@ indefinitely.
 Any later edit invalidates that retry authority; the newer revision must be
 previewed and approved instead. A retained commit whose ref update was
 ambiguous can be retried through the same explicit action. Foundry verifies its
-publish trailer, sole expected parent, and sole exact content-file change
-before attempting the non-force ref compare-and-swap again. When a lost commit
-response leaves no candidate SHA, branch-history reconciliation applies the
-same signed-message, parent, one-commit, one-file, and artifact-byte checks to
+publish trailer, sole expected parent, complete candidate artifact tree, and
+absence of unrelated changes before attempting the non-force ref
+compare-and-swap again. Unchanged artifacts may be omitted from Git's diff,
+while obsolete managed Markdown must be absent from the candidate tree. When a
+lost commit response leaves no candidate SHA, branch-history reconciliation
+applies the same signed-message, parent, one-commit, complete-tree, and
+artifact-byte checks to
 every matching trailer; a later code commit that copies the public publication
 ID is not accepted. HTTP timeout, early-data, rate-limit, client-closed, and
 server-error responses from writes remain ambiguous rather than releasing
 authority for a duplicate commit, ref update, or build dispatch.
-The commit carries an HMAC publication signature over its parent, content path,
-content hash, and complete attribution message. The signing secret is shared
+The commit carries a v2 HMAC publication signature over its parent, complete
+artifact-manifest hash, content hash, and attribution message. The signing secret is shared
 only by the CMS publisher and Workers Builds, so an ordinary pull request
 cannot forge the Foundry trailers and enter the exact content deployment path.
 The only accepted trigger deploy command is `npm run deploy`. Before building,
@@ -183,8 +190,8 @@ that raced its rollback. Once the controller has recorded the one
 permitted activation and the final production-head fence passes, a later
 non-zero Wrangler exit cannot turn that observed activation into an ambiguous
 failure. Every direct Cloudflare request and reconciliation loop uses its
-remaining bounded timeout. A build compares its published-content path with
-the live release marker: content may
+remaining bounded timeout. A build compares its complete JSON-and-Markdown
+artifact set with the live release marker: content may
 advance only through one direct, signature-verified Foundry publication
 commit. This quarantines a content commit whose earlier deployment failed so a
 later code build cannot publish it without the exact retry. The activation
@@ -243,8 +250,9 @@ Cloudflare creation timestamps act as rotation versions. Missing pages,
 duplicates, malformed secret metadata, or an unreadable trigger fail closed.
 The trigger must also identify the
 configured GitHub owner/repository and its documented exclude-first branch and
-path filters must permit both the production branch and
-`packages/site-definition/src/published-site.json`; otherwise Foundry refuses
+path filters must permit the production branch,
+`packages/site-definition/src/published-site.json`, and managed
+`content/rich-text/` paths; otherwise Foundry refuses
 to approve a channel that cannot observe the publication commit. Production
 branch names are validated once against the supported Git ref-name subset and
 the same validator protects publisher URLs, build-side ref checks, and baseline

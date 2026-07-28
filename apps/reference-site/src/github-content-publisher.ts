@@ -1,11 +1,15 @@
 import { SignJWT, importPKCS8 } from "jose";
 
 import type {
+  ContentPublicationArtifact,
   ContentPublisher,
   ContentPublicationId,
   PublicationCommitResult,
 } from "@foundry/application";
-import { isValidGitBranchName } from "@foundry/application";
+import {
+  hashContentPublicationArtifacts,
+  isValidGitBranchName,
+} from "@foundry/application";
 
 export type GitHubContentPublisherConfiguration = Readonly<{
   appId: string;
@@ -290,44 +294,16 @@ async function sha256(value: string) {
     .join("");
 }
 
-async function sha256Bytes(value: Uint8Array) {
-  const bytes = new ArrayBuffer(value.byteLength);
-  new Uint8Array(bytes).set(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function decodeGitHubBlob(value: unknown): Uint8Array | null {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("encoding" in value) ||
-    value.encoding !== "base64" ||
-    !("content" in value) ||
-    typeof value.content !== "string"
-  ) {
-    return null;
-  }
-  try {
-    const decoded = atob(value.content.replaceAll(/\s/gu, ""));
-    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
-  } catch {
-    return null;
-  }
-}
-
 function publicationSignaturePayload(input: {
   expectedHead: string;
-  path: string;
+  artifactHash: string;
   contentHash: string;
   message: string;
 }) {
   return [
-    "foundry-publication-signature-v1",
+    "foundry-publication-signature-v2",
     input.expectedHead,
-    input.path,
+    input.artifactHash,
     input.contentHash,
     input.message,
   ].join("\0");
@@ -337,7 +313,7 @@ async function signPublicationMessage(
   secret: string,
   input: {
     expectedHead: string;
-    path: string;
+    artifactHash: string;
     contentHash: string;
     message: string;
   },
@@ -357,7 +333,7 @@ async function signPublicationMessage(
   const hex = [...new Uint8Array(signature)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  return `${input.message}\nFoundry-Publication-Signature: v1=${hex}`;
+  return `${input.message}\nFoundry-Publication-Signature: v2=${hex}`;
 }
 
 async function gitBlobSha(value: string, repositoryObjectId: string) {
@@ -379,6 +355,109 @@ async function gitBlobSha(value: string, repositoryObjectId: string) {
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+const managedRichTextArtifactPathPattern =
+  /^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u;
+
+function gitTreeBlobs(value: unknown): ReadonlyMap<string, string> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    ("truncated" in value && value.truncated === true) ||
+    !("tree" in value) ||
+    !Array.isArray(value.tree)
+  ) {
+    throw new Error("github_tree_invalid");
+  }
+  const blobs = new Map<string, string>();
+  for (const entry of value.tree) {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      !("type" in entry) ||
+      entry.type !== "blob"
+    ) {
+      continue;
+    }
+    if (
+      !("path" in entry) ||
+      typeof entry.path !== "string" ||
+      !("sha" in entry) ||
+      typeof entry.sha !== "string" ||
+      blobs.has(entry.path)
+    ) {
+      throw new Error("github_tree_invalid");
+    }
+    blobs.set(entry.path, entry.sha);
+  }
+  return blobs;
+}
+
+function publicationCandidateMatches({
+  artifacts,
+  candidateBlobs,
+  expectedBlobShas,
+  files,
+}: {
+  artifacts: ReadonlyArray<ContentPublicationArtifact>;
+  candidateBlobs: ReadonlyMap<string, string>;
+  expectedBlobShas: ReadonlyArray<string>;
+  files: ReadonlyArray<any>;
+}) {
+  const expectedArtifacts = new Map(
+    artifacts.map((artifact, index) => [
+      artifact.path,
+      expectedBlobShas[index]!,
+    ]),
+  );
+  const candidateManagedPaths = [...candidateBlobs.keys()]
+    .filter((path) => managedRichTextArtifactPathPattern.test(path))
+    .sort();
+  const expectedManagedPaths = artifacts
+    .map(({ path }) => path)
+    .filter((path) => managedRichTextArtifactPathPattern.test(path))
+    .sort();
+  if (
+    candidateManagedPaths.join("\0") !== expectedManagedPaths.join("\0") ||
+    ![...expectedArtifacts].every(
+      ([path, sha]) => candidateBlobs.get(path) === sha,
+    )
+  ) {
+    return false;
+  }
+  const seenFiles = new Set<string>();
+  return files.every((file) => {
+    if (
+      typeof file?.filename !== "string" ||
+      seenFiles.has(file.filename)
+    ) {
+      return false;
+    }
+    seenFiles.add(file.filename);
+    const expectedSha = expectedArtifacts.get(file.filename);
+    if (
+      expectedSha !== undefined &&
+      (file.status === "added" || file.status === "modified") &&
+      file.sha === expectedSha
+    ) {
+      return true;
+    }
+    if (
+      expectedSha !== undefined &&
+      file.status === "renamed" &&
+      file.sha === expectedSha &&
+      typeof file.previous_filename === "string" &&
+      managedRichTextArtifactPathPattern.test(file.previous_filename)
+    ) {
+      return true;
+    }
+    return (
+      expectedSha === undefined &&
+      managedRichTextArtifactPathPattern.test(file.filename) &&
+      file.status === "removed"
+    );
+  });
 }
 
 function trailerMatches(message: unknown, publishId: ContentPublicationId) {
@@ -538,11 +617,25 @@ export function createGitHubContentPublisher({
     input: Parameters<ContentPublisher["reconcileCommit"]>[0],
     signedMessage: string,
   ) {
-    const [candidate, comparison] = await Promise.all([
+    const artifacts = [...input.artifacts].sort(
+      ({ path: left }, { path: right }) => left.localeCompare(right),
+    );
+    if (
+      (await hashContentPublicationArtifacts(artifacts)) !==
+      input.artifactHash
+    ) {
+      return false;
+    }
+    const [candidate, comparison, expectedBlobShas] = await Promise.all([
       request(token, `/git/commits/${commitSha}`),
       request(
         token,
         `/compare/${input.expectedHead}...${commitSha}`,
+      ),
+      Promise.all(
+        artifacts.map(({ bytes }) =>
+          gitBlobSha(bytes, input.expectedHead),
+        ),
       ),
     ]);
     const parents = Array.isArray(candidate.parents) ? candidate.parents : [];
@@ -554,20 +647,23 @@ export function createGitHubContentPublisher({
       comparison.status !== "ahead" ||
       comparison.ahead_by !== 1 ||
       comparison.total_commits !== 1 ||
-      files.length !== 1 ||
-      files[0]?.filename !== input.path ||
-      files[0]?.status !== "modified" ||
-      typeof files[0]?.sha !== "string"
+      files.length >= 300 ||
+      typeof candidate.tree?.sha !== "string"
     ) {
       return false;
     }
-    const blob = decodeGitHubBlob(
-      await request(token, `/git/blobs/${files[0].sha}`),
+    const candidateBlobs = gitTreeBlobs(
+      await request(
+        token,
+        `/git/trees/${candidate.tree.sha}?recursive=1`,
+      ),
     );
-    return (
-      blob !== null &&
-      (await sha256Bytes(blob)) === input.artifactHash
-    );
+    return publicationCandidateMatches({
+      artifacts,
+      candidateBlobs,
+      expectedBlobShas,
+      files,
+    });
   }
 
   async function readReleaseMarker(expected: {
@@ -697,6 +793,16 @@ export function createGitHubContentPublisher({
           "packages/site-definition/src/published-site.json",
           trigger.path_includes,
           trigger.path_excludes,
+        ) ||
+        !cloudflareWatchFilterAllows(
+          "content/rich-text/foundry-probe.md",
+          trigger.path_includes,
+          trigger.path_excludes,
+        ) ||
+        !cloudflareWatchFilterAllows(
+          "content/rich-text/nested/foundry-probe.md",
+          trigger.path_includes,
+          trigger.path_excludes,
         )
       ) {
         throw new Error("cloudflare_build_configuration_invalid");
@@ -748,6 +854,15 @@ export function createGitHubContentPublisher({
       let createdCommitSha: string | undefined;
       let gitSideEffectStarted = false;
       try {
+        const artifacts = [...input.artifacts].sort(
+          ({ path: left }, { path: right }) => left.localeCompare(right),
+        );
+        if (
+          (await hashContentPublicationArtifacts(artifacts)) !==
+          input.artifactHash
+        ) {
+          return { state: "failed", detail: "git_operation_failed" };
+        }
         if (!(await input.assertLease())) {
           return { state: "blocked", detail: "publication_lease_lost" };
         }
@@ -762,21 +877,58 @@ export function createGitHubContentPublisher({
         if (typeof baseCommit.tree?.sha !== "string") {
           throw new Error("github_base_tree_invalid");
         }
-        const blob = await request(token, "/git/blobs", {
-          method: "POST",
-          body: JSON.stringify({ content: input.bytes, encoding: "utf-8" }),
-        });
+        const baseBlobs = gitTreeBlobs(
+          await request(
+            token,
+            `/git/trees/${baseCommit.tree.sha}?recursive=1`,
+          ),
+        );
+        const artifactPaths = new Set(
+          artifacts.map(({ path }) => path),
+        );
+        const staleManagedPaths = [...baseBlobs.keys()]
+          .filter(
+            (path) =>
+              managedRichTextArtifactPathPattern.test(path) &&
+              !artifactPaths.has(
+                path as ContentPublicationArtifact["path"],
+              ),
+          )
+          .sort();
+        const blobs: Array<{
+          artifact: ContentPublicationArtifact;
+          sha: string;
+        }> = [];
+        for (const artifact of artifacts) {
+          const blob = await request(token, "/git/blobs", {
+            method: "POST",
+            body: JSON.stringify({
+              content: artifact.bytes,
+              encoding: "utf-8",
+            }),
+          });
+          if (typeof blob.sha !== "string") {
+            throw new Error("github_blob_invalid");
+          }
+          blobs.push({ artifact, sha: blob.sha });
+        }
         const tree = await request(token, "/git/trees", {
           method: "POST",
           body: JSON.stringify({
             base_tree: baseCommit.tree.sha,
             tree: [
-              {
-                path: input.path,
+              ...blobs.map(({ artifact, sha }) => ({
+                path: artifact.path,
                 mode: "100644",
                 type: "blob",
-                sha: blob.sha,
-              },
+                sha,
+              })),
+              ...staleManagedPaths.map((path) => ({
+                path,
+                mode: "100644",
+                type: "blob",
+                sha: null,
+              })),
             ],
           }),
         });
@@ -785,7 +937,7 @@ export function createGitHubContentPublisher({
           configuration.publicationSigningSecret,
           {
             expectedHead: input.expectedHead,
-            path: input.path,
+            artifactHash: input.artifactHash,
             contentHash: input.contentHash,
             message: input.message,
           },
@@ -853,7 +1005,7 @@ export function createGitHubContentPublisher({
           configuration.publicationSigningSecret,
           {
             expectedHead: input.expectedHead,
-            path: input.path,
+            artifactHash: input.artifactHash,
             contentHash: input.contentHash,
             message: input.message,
           },
@@ -924,6 +1076,18 @@ export function createGitHubContentPublisher({
     async retryReference(input) {
       let refUpdateStarted = false;
       try {
+        const artifacts = [...input.artifacts].sort(
+          ({ path: left }, { path: right }) => left.localeCompare(right),
+        );
+        if (
+          (await hashContentPublicationArtifacts(artifacts)) !==
+          input.artifactHash
+        ) {
+          return {
+            state: "failed",
+            detail: "git_reference_candidate_invalid",
+          };
+        }
         if (!(await input.assertLease())) {
           return { state: "blocked", detail: "publication_lease_lost" };
         }
@@ -935,13 +1099,17 @@ export function createGitHubContentPublisher({
         ) {
           return { state: "blocked", detail: "production_head_moved" };
         }
-        const [candidate, comparison, expectedBlobSha] = await Promise.all([
+        const [candidate, comparison, expectedBlobShas] = await Promise.all([
           request(token, `/git/commits/${input.candidateCommitSha}`),
           request(
             token,
             `/compare/${input.expectedHead}...${input.candidateCommitSha}`,
           ),
-          gitBlobSha(input.bytes, input.expectedHead),
+          Promise.all(
+            artifacts.map(({ bytes }) =>
+              gitBlobSha(bytes, input.expectedHead),
+            ),
+          ),
         ]);
         const parents = Array.isArray(candidate.parents)
           ? candidate.parents
@@ -954,10 +1122,27 @@ export function createGitHubContentPublisher({
           comparison.status !== "ahead" ||
           comparison.ahead_by !== 1 ||
           comparison.total_commits !== 1 ||
-          files.length !== 1 ||
-          files[0]?.filename !== input.path ||
-          files[0]?.status !== "modified" ||
-          files[0]?.sha !== expectedBlobSha
+          files.length >= 300 ||
+          typeof candidate.tree?.sha !== "string"
+        ) {
+          return {
+            state: "failed",
+            detail: "git_reference_candidate_invalid",
+          };
+        }
+        const candidateBlobs = gitTreeBlobs(
+          await request(
+            token,
+            `/git/trees/${candidate.tree.sha}?recursive=1`,
+          ),
+        );
+        if (
+          !publicationCandidateMatches({
+            artifacts,
+            candidateBlobs,
+            expectedBlobShas,
+            files,
+          })
         ) {
           return {
             state: "failed",

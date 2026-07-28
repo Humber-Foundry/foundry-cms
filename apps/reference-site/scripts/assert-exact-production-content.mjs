@@ -12,6 +12,8 @@ const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 const contentHashPattern = /^[a-f0-9]{64}$/u;
 const publishedContentPath =
   "packages/site-definition/src/published-site.json";
+const managedRichTextPathPattern =
+  /^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u;
 
 function canonicalJson(value) {
   if (Array.isArray(value)) {
@@ -32,11 +34,24 @@ function contentHash(bytes) {
     .digest("hex");
 }
 
+function publicationArtifactHash(artifacts) {
+  const manifest = [...artifacts]
+    .sort((left, right) => left.path.localeCompare(right.path))
+    .map(({ path, bytes }) => ({
+      byteLength: Buffer.byteLength(bytes),
+      path,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    }));
+  return createHash("sha256")
+    .update(canonicalJson(manifest))
+    .digest("hex");
+}
+
 function publicationSignaturePayload(input) {
   return [
-    "foundry-publication-signature-v1",
+    "foundry-publication-signature-v2",
     input.expectedHead,
-    input.path,
+    input.artifactHash,
     input.contentHash,
     input.message,
   ].join("\0");
@@ -45,21 +60,21 @@ function publicationSignaturePayload(input) {
 function signatureIsValid({
   contentHash: expectedContentHash,
   expectedHead,
+  artifactHash,
   message,
-  path,
   secret,
 }) {
   const normalizedMessage = message.replace(/(?:\r?\n)+$/u, "");
   const matches = [
     ...normalizedMessage.matchAll(
-      /^Foundry-Publication-Signature: v1=([a-f0-9]{64})$/gmu,
+      /^Foundry-Publication-Signature: v2=([a-f0-9]{64})$/gmu,
     ),
   ];
   if (matches.length !== 1) {
     return false;
   }
   const trailer =
-    `\nFoundry-Publication-Signature: v1=${matches[0][1]}`;
+    `\nFoundry-Publication-Signature: v2=${matches[0][1]}`;
   if (!normalizedMessage.endsWith(trailer)) {
     return false;
   }
@@ -68,7 +83,7 @@ function signatureIsValid({
     .update(
       publicationSignaturePayload({
         expectedHead,
-        path,
+        artifactHash,
         contentHash: expectedContentHash,
         message: unsignedMessage,
       }),
@@ -153,6 +168,23 @@ export async function assertExactProductionContent({
     execFileSync("git", ["show", `${commit}:${publishedContentPath}`], {
       encoding: "utf8",
     }),
+  readManagedRichTextPaths = (commit) =>
+    execFileSync(
+      "git",
+      [
+        "ls-tree",
+        "-r",
+        "--name-only",
+        commit,
+        "--",
+        "content/rich-text",
+      ],
+      { encoding: "utf8" },
+    ),
+  readArtifact = (commit, path) =>
+    execFileSync("git", ["show", `${commit}:${path}`], {
+      encoding: "utf8",
+    }),
 } = {}) {
   const expectedCommit =
     environment.WORKERS_CI_COMMIT_SHA?.trim().toLowerCase();
@@ -184,6 +216,37 @@ export async function assertExactProductionContent({
     .trim()
     .split("\n")
     .filter((path) => path.length > 0);
+  const managedRichTextPaths = readManagedRichTextPaths(expectedCommit)
+    .trim()
+    .split("\n")
+    .filter((path) => path.length > 0)
+    .sort();
+  const managedPathSet = new Set(managedRichTextPaths);
+  const changedPathSet = new Set(changedPaths);
+  const pathsAreValid =
+    managedPathSet.size === managedRichTextPaths.length &&
+    managedRichTextPaths.every((path) =>
+      managedRichTextPathPattern.test(path),
+    ) &&
+    changedPathSet.size === changedPaths.length &&
+    changedPaths.includes(publishedContentPath) &&
+    changedPaths.every(
+      (path) =>
+        path === publishedContentPath ||
+        managedRichTextPathPattern.test(path),
+    );
+  const expectedArtifactHash = pathsAreValid
+    ? publicationArtifactHash([
+        {
+          path: publishedContentPath,
+          bytes: readPublishedContent(expectedCommit),
+        },
+        ...managedRichTextPaths.map((path) => ({
+          path,
+          bytes: readArtifact(expectedCommit, path),
+        })),
+      ])
+    : null;
   const message = readCommitMessage(expectedCommit);
   const hashTrailer = message.match(
     /^Foundry-Content-Hash: ([a-f0-9]{64})$/mu,
@@ -192,16 +255,15 @@ export async function assertExactProductionContent({
     parents.length !== 2 ||
     parents[0] !== expectedCommit ||
     parents[1] !== liveCommit ||
-    changedPaths.length !== 1 ||
-    changedPaths[0] !== publishedContentPath ||
+    expectedArtifactHash === null ||
     !/^Foundry-Publish-Id: publish_[a-f0-9]{32}$/mu.test(message) ||
     hashTrailer === null ||
     expectedContentHash !== hashTrailer[1] ||
     !signatureIsValid({
       contentHash: expectedContentHash,
       expectedHead: liveCommit,
+      artifactHash: expectedArtifactHash,
       message,
-      path: publishedContentPath,
       secret: publicationSigningSecret,
     })
   ) {
