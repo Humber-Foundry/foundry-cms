@@ -178,6 +178,24 @@ function isSameOptionalContentOccurrence(
     : right !== undefined && isSameContentOccurrence(left, right);
 }
 
+function assertContentOccurrenceUnchanged(
+  binding: Awaited<ReturnType<typeof loadContentBinding>>,
+  occurrenceId: string,
+) {
+  const selected = (revision: typeof binding.current) =>
+    (revision.definition.home.media ?? []).find(
+      (candidate) => candidate.occurrenceId === occurrenceId,
+    );
+  if (
+    !isSameOptionalContentOccurrence(
+      selected(binding.base),
+      selected(binding.current),
+    )
+  ) {
+    throw new ContentRevisionConflictError(binding.current.revision);
+  }
+}
+
 async function bindOccurrenceToContentRevision({
   actorId,
   idempotencyKey,
@@ -244,7 +262,7 @@ async function bindOccurrenceToContentRevision({
         contentRevision = current;
         break;
       }
-      const originalBinding = (binding.current.definition.home.media ?? []).find(
+      const originalBinding = (binding.base.definition.home.media ?? []).find(
         (candidate) =>
           candidate.occurrenceId === boundOccurrence.occurrenceId,
       );
@@ -304,10 +322,22 @@ async function loadContentBinding(
     actorId,
   );
   const current = await contentApplication.queries.getCurrent();
+  const base = await contentApplication.queries.getRevision(
+    contentBaseRevision,
+  );
+  if (base === null) {
+    throw new ContentRevisionConflictError(current.revision);
+  }
   if (!(await contentApplication.queries.isRevisionCurrent(current))) {
     throw new ContentRevisionStaleError(current.revision);
   }
-  return { workspaceId, contentBaseRevision, contentApplication, current };
+  return {
+    workspaceId,
+    contentBaseRevision,
+    contentApplication,
+    current,
+    base,
+  };
 }
 
 export async function POST(request: Request) {
@@ -352,9 +382,13 @@ export async function POST(request: Request) {
         "baseRevision",
       );
       const binding = await loadContentBinding(body, actorId);
+      const occurrenceId = createMediaOccurrenceId(
+        String(body.occurrenceId ?? ""),
+      );
+      assertContentOccurrenceUnchanged(binding, occurrenceId);
       const occurrence = await application.commands.replaceOccurrence({
         actorId,
-        occurrenceId: createMediaOccurrenceId(String(body.occurrenceId ?? "")),
+        occurrenceId,
         assetId: createMediaAssetId(String(body.assetId ?? "")),
         baseRevision,
         workspaceId: binding.workspaceId,
@@ -381,6 +415,7 @@ export async function POST(request: Request) {
       const occurrenceId = createMediaOccurrenceId(
         String(body.occurrenceId ?? ""),
       );
+      assertContentOccurrenceUnchanged(binding, occurrenceId);
       const workspaceOccurrence = await application.queries.getOccurrence(
         binding.workspaceId,
         occurrenceId,
