@@ -1,9 +1,131 @@
+import {
+  contentPublicationHasUnresolvedGitOutcome,
+  contentPublicationStatuses,
+  type ContentPublicationHistoryEntry,
+} from "@foundry/application";
+
 export type ContentPublicationAttempt = Readonly<{
   body: string;
   idempotencyKey: string;
 }>;
 
+export function contentPublicationHistoryRefreshKey(
+  publication: Readonly<{
+    id: string;
+    status: string;
+    updatedAt: string;
+  }> | null,
+) {
+  return publication === null
+    ? ""
+    : `${publication.id}:${publication.status}:${publication.updatedAt}`;
+}
+
 type Fetcher = typeof fetch;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+function hasStringFields(
+  value: Record<string, unknown>,
+  fields: ReadonlyArray<string>,
+) {
+  return fields.every((field) => typeof value[field] === "string");
+}
+
+function isPublicationStatus(
+  value: unknown,
+): value is ContentPublicationHistoryEntry["publication"]["status"] {
+  return (
+    typeof value === "string" &&
+    contentPublicationStatuses.some((status) => status === value)
+  );
+}
+
+function isPublicationHistoryEntry(
+  value: unknown,
+): value is ContentPublicationHistoryEntry {
+  if (!isRecord(value) || !isRecord(value.publication)) {
+    return false;
+  }
+  const publication = value.publication;
+  if (
+    !hasStringFields(publication, [
+      "id",
+      "workspaceId",
+      "approvalId",
+      "fingerprint",
+      "idempotencyKey",
+      "requestedBy",
+      "expectedHead",
+      "requestedAt",
+      "updatedAt",
+    ]) ||
+    !Number.isSafeInteger(publication.revision) ||
+    !Array.isArray(publication.contributors) ||
+    !publication.contributors.every(
+      (contributor) => typeof contributor === "string",
+    ) ||
+    !isPublicationStatus(publication.status) ||
+    ![
+      publication.commitSha,
+      publication.deploymentId,
+      publication.deploymentRequestedAt,
+      publication.detail,
+      publication.leaseToken,
+      publication.leaseExpiresAt,
+    ].every(isStringOrNull)
+  ) {
+    return false;
+  }
+  if (!isRecord(value.approval)) {
+    return false;
+  }
+  const approval = value.approval;
+  const fingerprint = approval.fingerprint;
+  if (!isRecord(fingerprint)) {
+    return false;
+  }
+  if (
+    !hasStringFields(approval, [
+      "id",
+      "workspaceId",
+      "approvedBy",
+      "approvedAt",
+    ]) ||
+    !Number.isSafeInteger(approval.revision) ||
+    !isStringOrNull(approval.invalidatedAt) ||
+    !hasStringFields(fingerprint, [
+      "value",
+      "channel",
+      "channelConfigurationHash",
+      "contentHash",
+      "designHash",
+      "schemaVersion",
+      "rendererVersion",
+      "productionBase",
+      "artifactHash",
+      "serializationVersion",
+    ]) ||
+    !Array.isArray(value.events)
+  ) {
+    return false;
+  }
+  return value.events.every(
+    (event) =>
+      isRecord(event) &&
+      isPublicationStatus(event.status) &&
+      isStringOrNull(event.detail) &&
+      isStringOrNull(event.commitSha) &&
+      isStringOrNull(event.deploymentId) &&
+      hasStringFields(event, ["approvalFingerprint", "occurredAt"]),
+  );
+}
 
 export function contentPublicationCanRetry(publication: {
   status: string;
@@ -13,9 +135,7 @@ export function contentPublicationCanRetry(publication: {
   return (
     publication.status === "failed" &&
     (publication.commitSha !== null ||
-      /^git_reference_(?:not_advanced|result_unknown):[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(
-        publication.detail ?? "",
-      ))
+      contentPublicationHasUnresolvedGitOutcome(publication))
   );
 }
 
@@ -101,6 +221,57 @@ export async function loadContentPublication({
     throw new Error("content_publication_refresh_failed");
   }
   return (await response.json()) as unknown;
+}
+
+export async function loadContentPublicationHistory({
+  fetcher = fetch,
+}: {
+  fetcher?: Fetcher;
+} = {}) {
+  const response = await fetcher(
+    "/api/foundry-cms/publications?view=history",
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    throw new Error("content_publication_history_failed");
+  }
+  const result: unknown = await response.json();
+  if (
+    !isRecord(result) ||
+    !Array.isArray(result.history) ||
+    !result.history.every(isPublicationHistoryEntry)
+  ) {
+    throw new Error("content_publication_history_invalid");
+  }
+  return {
+    history: result.history,
+  } satisfies {
+    history: ReadonlyArray<ContentPublicationHistoryEntry>;
+  };
+}
+
+export function restoreContentPublication({
+  publicationId,
+  mutationToken,
+  idempotencyKey,
+  fetcher = fetch,
+}: {
+  publicationId: string;
+  mutationToken: string;
+  idempotencyKey: string;
+  fetcher?: Fetcher;
+}) {
+  return sendContentPublicationAttempt({
+    attempt: {
+      body: JSON.stringify({
+        operation: "restore",
+        sourcePublicationId: publicationId,
+      }),
+      idempotencyKey,
+    },
+    mutationToken,
+    fetcher,
+  });
 }
 
 export function refreshContentPublication({

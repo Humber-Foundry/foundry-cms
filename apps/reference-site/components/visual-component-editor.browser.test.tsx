@@ -71,6 +71,7 @@ describe("visual component editor browser acceptance", () => {
     for (const root of mounted.splice(0)) {
       flushSync(() => root.unmount());
     }
+    vi.restoreAllMocks();
     document.body.replaceChildren();
   });
 
@@ -675,6 +676,223 @@ describe("visual component editor browser acceptance", () => {
     await clearContentEditorOutbox(workspaceId);
   });
 
+  it("shows verified publication evidence with a restore-as-draft action", async () => {
+    const publicationId = `publish_${"2".repeat(32)}`;
+    const restoreKeys: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        restoreKeys.push(
+          new Headers(init.headers).get("idempotency-key") ?? "",
+        );
+        if (restoreKeys.length > 2 && restoreKeys.length <= 4) {
+          throw new Error("transport_response_lost");
+        }
+        if (restoreKeys.length > 4) {
+          return Response.json({ draft: {} });
+        }
+        return Response.json(
+          { error: "restore_source_not_live" },
+          { status: 422 },
+        );
+      }
+      return Response.json(
+        url.includes("view=history")
+          ? {
+              history: [
+                {
+                  publication: {
+                    id: publicationId,
+                    workspaceId: "workspace_history",
+                    revision: 7,
+                    approvalId: `approval_${"1".repeat(32)}`,
+                    fingerprint: "f".repeat(64),
+                    idempotencyKey: "browser-history-publication-1",
+                    requestedBy: "membership-editor",
+                    contributors: ["membership-editor"],
+                    expectedHead: "b".repeat(40),
+                    status: "verified-live",
+                    detail: null,
+                    commitSha: "c".repeat(40),
+                    deploymentId: "build-browser-history",
+                    deploymentRequestedAt:
+                      "2026-07-27T10:00:30.000Z",
+                    leaseToken: null,
+                    leaseExpiresAt: null,
+                    requestedAt: "2026-07-27T10:00:00.000Z",
+                    updatedAt: "2026-07-27T10:02:00.000Z",
+                  },
+                  approval: {
+                    id: `approval_${"1".repeat(32)}`,
+                    workspaceId: "workspace_history",
+                    revision: 7,
+                    fingerprint: {
+                      value: "f".repeat(64),
+                      channel: "site",
+                      channelConfigurationHash: "channel-browser",
+                      contentHash: "d".repeat(64),
+                      designHash: "a".repeat(64),
+                      schemaVersion: "1.0.0",
+                      rendererVersion: "renderer-browser",
+                      productionBase: `git:${"b".repeat(40)}@content:${"9".repeat(64)}`,
+                      artifactHash: "e".repeat(64),
+                      serializationVersion:
+                        "foundry.site-definition.canonical-json.v1",
+                    },
+                    approvedBy: "membership-editor",
+                    approvedAt: "2026-07-27T09:59:00.000Z",
+                    invalidatedAt: null,
+                  },
+                  events: [
+                    {
+                      status: "committed",
+                      detail: null,
+                      commitSha: "c".repeat(40),
+                      deploymentId: null,
+                      approvalFingerprint: "f".repeat(64),
+                      occurredAt: "2026-07-27T10:01:00.000Z",
+                    },
+                    {
+                      status: "verified-live",
+                      detail: null,
+                      commitSha: "c".repeat(40),
+                      deploymentId: "build-browser-history",
+                      approvalFingerprint: "f".repeat(64),
+                      occurredAt: "2026-07-27T10:02:00.000Z",
+                    },
+                  ],
+                },
+              ],
+            }
+          : { publication: null },
+      );
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-history",
+          initialRevision: browserRevision("workspace_history"),
+          initialPreviewUrl: "/preview/history",
+          activeWorkspaceUrl: "/dash?workspace=history",
+        }),
+      );
+    });
+
+    for (
+      let index = 0;
+      index < 20 && !host.textContent?.includes("Revision 7");
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+
+    expect(host.textContent).toContain("Published history");
+    expect(host.textContent).toContain("Revision 7");
+    expect(host.textContent).toContain("Verified live");
+    expect(
+      page.getByRole("button", { name: "Restore as new draft" }),
+    ).toBeDefined();
+    const restoreButton = page.getByRole("button", {
+      name: "Restore as new draft",
+    });
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 1;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 2;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(restoreKeys).toHaveLength(2);
+    expect(restoreKeys[1]).not.toBe(restoreKeys[0]);
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 3;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 4;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(restoreKeys[3]).toBe(restoreKeys[2]);
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 5;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    await userEvent.click(restoreButton);
+    for (
+      let index = 0;
+      index < 20 && restoreKeys.length < 6;
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+    expect(restoreKeys[5]).toBe(restoreKeys[4]);
+  });
+
+  it("distinguishes unavailable publication history from an empty history", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("view=history")
+        ? Response.json({ error: "request_check_unavailable" }, { status: 503 })
+        : Response.json({ publication: null }),
+    );
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-history-unavailable",
+          initialRevision: browserRevision("workspace_history_unavailable"),
+          initialPreviewUrl: "/preview/history-unavailable",
+          activeWorkspaceUrl: "/dash?workspace=history-unavailable",
+        }),
+      );
+    });
+
+    for (
+      let index = 0;
+      index < 20 &&
+      !host.textContent?.includes(
+        "Publication history is temporarily unavailable",
+      );
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    }
+
+    expect(host.textContent).toContain(
+      "Publication history is temporarily unavailable",
+    );
+    expect(host.textContent).not.toContain(
+      "No publication attempts are recorded yet.",
+    );
+  });
+
   it("restores a component before applying its dependent unsaved fields", async () => {
     const workspaceId = "workspace_browser_structural_recovery";
     await clearContentEditorOutbox(workspaceId);
@@ -775,6 +993,12 @@ describe("visual component editor browser acceptance", () => {
               ],
             }),
           },
+          {
+            path: "section_contact.body",
+            baseValue:
+              "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
+            value: "Recovered legacy CTA copy alongside a structural edit.",
+          },
         ],
       ),
     ).toBe(true);
@@ -806,7 +1030,25 @@ describe("visual component editor browser acceptance", () => {
         "Destination copy survives stale recovery",
       ),
     ).toBe(true);
-    expect(host.textContent).not.toContain("some overlap newer values");
+    const recoveredRichText = host.querySelector<HTMLElement>(
+      '[id="section_contact.body-editor"]',
+    );
+    for (
+      let index = 0;
+      index < 50 &&
+      !recoveredRichText?.textContent?.includes(
+        "Recovered legacy CTA copy alongside a structural edit.",
+      );
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+    expect(recoveredRichText?.textContent).toContain(
+      "Recovered legacy CTA copy alongside a structural edit.",
+    );
+    expect(host.textContent).not.toContain(
+      "Some unsaved edits overlap newer values",
+    );
     expect(
       clearStaleEdits(
         window.localStorage,

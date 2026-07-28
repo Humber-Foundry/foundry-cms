@@ -8,6 +8,7 @@ import {
   createContentApprovalId,
   createContentPublicationId,
   createContentWorkspaceId,
+  type ContentWorkspaceId,
 } from "@foundry/application";
 
 import {
@@ -17,8 +18,10 @@ import {
 import {
   loadContentPublicationApplication,
   loadContentPublicationQueries,
+  loadContentPublicationRestoreApplication,
 } from "../../../../src/content-publication-runtime";
 import {
+  contentWorkspaceIdForMutation,
   requireExistingContentWorkspaceAccess,
 } from "../../../../src/content-revision-runtime";
 import {
@@ -67,6 +70,11 @@ type RetryDeploymentCommand = Readonly<{
   publicationId: string;
 }>;
 
+type RestoreCommand = Readonly<{
+  operation: "restore";
+  sourcePublicationId: string;
+}>;
+
 function readCommand(
   value: unknown,
 ):
@@ -74,11 +82,23 @@ function readCommand(
   | PublishCommand
   | RefreshCommand
   | RetryDeploymentCommand
+  | RestoreCommand
   | null {
   if (
     typeof value !== "object" ||
     value === null ||
-    !("operation" in value) ||
+    !("operation" in value)
+  ) {
+    return null;
+  }
+  if (
+    value.operation === "restore" &&
+    "sourcePublicationId" in value &&
+    typeof value.sourcePublicationId === "string"
+  ) {
+    return value as RestoreCommand;
+  }
+  if (
     !("workspaceId" in value) ||
     typeof value.workspaceId !== "string"
   ) {
@@ -152,6 +172,13 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceParameter = url.searchParams.get("workspaceId");
     const publicationParameter = url.searchParams.get("publicationId");
+    if (url.searchParams.get("view") === "history") {
+      const queries = await loadContentPublicationQueries();
+      return Response.json(
+        { history: await queries.listHistory() },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
     if (workspaceParameter === null) {
       return Response.json({ error: "invalid_query" }, { status: 400 });
     }
@@ -215,9 +242,13 @@ export async function POST(request: Request) {
     if (command === null) {
       return Response.json({ error: "invalid_command" }, { status: 400 });
     }
-    let workspaceId;
+    let workspaceId: ContentWorkspaceId | undefined;
     try {
-      workspaceId = createContentWorkspaceId(command.workspaceId);
+      if (command.operation === "restore") {
+        createContentPublicationId(command.sourcePublicationId);
+      } else {
+        workspaceId = createContentWorkspaceId(command.workspaceId);
+      }
       if (command.operation === "publish") {
         createContentApprovalId(command.approvalId);
       } else if (
@@ -245,21 +276,49 @@ export async function POST(request: Request) {
             );
           }
           const actorId = createContentActorId(access.membership.id);
-          await requireExistingContentWorkspaceAccess(
-            workspaceId,
-            actorId,
-          );
-          application = await loadContentPublicationApplication(
-            workspaceId,
-            actorId,
-          );
+          if (command.operation === "restore") {
+            application = await loadContentPublicationRestoreApplication(
+              createContentPublicationId(command.sourcePublicationId),
+              actorId,
+            );
+          } else {
+            await requireExistingContentWorkspaceAccess(
+              workspaceId!,
+              actorId,
+            );
+            application = await loadContentPublicationApplication(
+              workspaceId!,
+              actorId,
+            );
+          }
         } catch (error) {
+          const domain = domainErrorResponse(error);
+          if (domain !== null) {
+            return domain;
+          }
           throw new HumanMutationExecutionNotStartedError(error);
         }
         try {
+          if (command.operation === "restore") {
+            const idempotencyKey =
+              request.headers.get("idempotency-key") ?? "";
+            const actorId = createContentActorId(access.membership.id);
+            const draft = await application.commands.restore({
+              sourcePublicationId: createContentPublicationId(
+                command.sourcePublicationId,
+              ),
+              actorId,
+              workspaceId: await contentWorkspaceIdForMutation(
+                actorId,
+                idempotencyKey,
+              ),
+              idempotencyKey,
+            });
+            return Response.json({ draft }, { status: 201 });
+          }
           if (command.operation === "approve") {
             const approval = await application.commands.approve({
-              workspaceId,
+              workspaceId: workspaceId!,
               revision: command.revision,
               approvedBy: access.membership.id,
               previewConfirmed: command.previewConfirmed,
@@ -289,7 +348,7 @@ export async function POST(request: Request) {
             return Response.json({ publication });
           }
           const publication = await application.commands.publish({
-            workspaceId,
+            workspaceId: workspaceId!,
             approvalId: createContentApprovalId(command.approvalId),
             requestedBy: access.membership.id,
             idempotencyKey: request.headers.get("idempotency-key") ?? "",

@@ -98,6 +98,56 @@ describe("content revision application", () => {
     await expect(application.queries.getCurrent()).resolves.toEqual(created);
   });
 
+  it("creates one restored draft from a historical definition across response-loss retries", async () => {
+    const historical = structuredClone(referenceSiteDefinition);
+    (
+      historical.home.sections[0] as {
+        title: string;
+      }
+    ).title = "Historical published headline";
+    const store = createInMemoryContentRevisionStore();
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      initialDefinition: historical,
+      initialCreatedBy: editorActorId,
+      store,
+      ...applicationInputs,
+    });
+    const command = {
+      actorId: editorActorId,
+      workspaceId: applicationInputs.workspaceId,
+      idempotencyKey: "restore-response-loss-0001",
+    } as const;
+
+    const committedBeforeResponseLoss =
+      await application.commands.create(command);
+    const retried = await createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      initialDefinition: historical,
+      initialCreatedBy: editorActorId,
+      store,
+      ...applicationInputs,
+    }).commands.create(command);
+
+    expect(retried).toEqual(committedBeforeResponseLoss);
+    expect(retried).toEqual(
+      expect.objectContaining({
+        revision: 0,
+        createdBy: editorActorId,
+        definition: expect.objectContaining({
+          home: expect.objectContaining({
+            sections: expect.arrayContaining([
+              expect.objectContaining({
+                title: "Historical published headline",
+              }),
+            ]),
+          }),
+        }),
+      }),
+    );
+    await expect(store.getRevision(1)).resolves.toBeNull();
+  });
+
   it("creates an immutable revision for a schema-valid edit", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,

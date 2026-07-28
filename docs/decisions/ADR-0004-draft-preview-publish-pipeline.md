@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-26
+- **Amended:** 2026-07-27 by issue #39
 
 ## Context
 
@@ -31,19 +32,18 @@ The mechanics rely on current first-party behavior:
   and D1 sessions can preserve read-your-write consistency with bookmarks.
 - [GitHub installation tokens expire after one hour](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app)
   and can be limited to one repository and the app's declared permissions.
-- GitHub's Git Database API can
-  [create a tree](https://docs.github.com/en/rest/git/trees#create-a-tree),
-  [create one commit](https://docs.github.com/en/rest/git/commits#create-a-commit),
-  and then update a branch reference without force.
+- GitHub's GraphQL
+  [`createCommitOnBranch`](https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch)
+  mutation accepts an expected head, file changes and a message in one atomic
+  branch update.
 - [Workers Builds deploys on a Git push](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/)
   and reports build state against the commit through a check run or commit
   status.
 
 ## Decision
 
-Use a **revisioned D1 draft workspace, an authenticated canonical preview, and
-one compare-and-swap GitHub App commit followed by a verified Cloudflare
-deployment**.
+Use a **revisioned D1 draft workspace, an authenticated canonical preview, one
+atomic expected-head GitHub App commit, and a verified Cloudflare deployment**.
 
 ### Draft storage and recovery
 
@@ -119,9 +119,10 @@ Publication is an idempotent, recoverable operation with a stable publish ID:
    contacting GitHub. Only one operation may advance the production branch at a
    time.
 4. Mint a fresh, repository-limited GitHub App installation token. Serialize
-   every changed file, create blobs and one tree based on the expected head,
-   create one commit with that head as its sole parent, and update the
-   production reference with `force: false`.
+   every changed file and use GitHub's `createCommitOnBranch` mutation with the
+   approved head as `expectedHeadOid`. The mutation atomically creates the
+   one-parent commit and advances the production branch, or rejects the stale
+   expected head without creating a second publication commit.
 5. If the reference moved, do not retry against the new head automatically.
    Release the lease and return the workspace to stale review.
 6. Reconcile an ambiguous network result before retrying. The commit message
@@ -132,8 +133,16 @@ Publication is an idempotent, recoverable operation with a stable publish ID:
    `committing` to `building`. D1 is operational state; the Git commit is the
    published content record.
 
-No per-file Content API calls are used: all changed files land in one tree and
-one commit, so one approval creates one Git revision and one build trigger.
+No per-file Content API calls are used: all changed files land in one atomic
+commit-on-branch mutation, so one approval creates one Git revision and one
+build trigger.
+
+This issue #39 amendment supersedes the original step 4 implementation detail
+that created blobs, a tree and a commit before a separate non-force ref update.
+That two-write boundary could leave a successful commit object orphaned with no
+returned SHA after transport loss. The accepted authority, attribution,
+single-parent, expected-head, no-silent-rebase and one-commit invariants remain
+unchanged; the atomic mutation strengthens their recoverability.
 
 Published restoration reads a historical Git revision into a new D1 workspace.
 It then follows the same preview, approval and publication path and creates a

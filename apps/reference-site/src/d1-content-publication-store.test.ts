@@ -44,6 +44,8 @@ describe("D1 content publication store", () => {
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
       "0008_media_assets.sql",
+      "0009_content_publication_history_evidence.sql",
+      "0010_content_publication_restore_identity.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -572,6 +574,123 @@ describe("D1 content publication store", () => {
       success: true,
       meta: expect.any(Object),
     });
+  });
+
+  it("returns published history with the approval fingerprint and ordered state evidence", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    const requested = publication("1", "publish-d1-history-0001");
+    await store.claimPublication(requested);
+    const live = {
+      ...requested,
+      status: "verified-live" as const,
+      commitSha: "c".repeat(40),
+      detail: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:04:00.000Z",
+    };
+    await store.updatePublication(live);
+
+    let subrequests = 0;
+    const rawStatements = new WeakMap<object, object>();
+    const wrapStatement = (statement: any): any => {
+      const wrapped = {
+        bind(...values: unknown[]) {
+          return wrapStatement(statement.bind(...values));
+        },
+        async all() {
+          subrequests += 1;
+          return statement.all();
+        },
+        async first() {
+          subrequests += 1;
+          return statement.first();
+        },
+        async run() {
+          subrequests += 1;
+          return statement.run();
+        },
+      };
+      rawStatements.set(wrapped, statement);
+      return wrapped;
+    };
+    const countedDatabase = {
+      prepare(query: string) {
+        return wrapStatement(database.prepare(query));
+      },
+      async batch(statements: readonly object[]) {
+        subrequests += 1;
+        return database.batch(
+          statements.map(
+            (statement) => rawStatements.get(statement) ?? statement,
+          ) as Parameters<typeof database.batch>[0],
+        );
+      },
+    } as unknown as typeof database;
+
+    await expect(
+      createD1ContentPublicationStore(
+        countedDatabase,
+      ).listPublicationHistory(),
+    ).resolves.toEqual([
+      {
+        publication: live,
+        approval,
+        events: [
+          {
+            status: "requested",
+            detail: null,
+            commitSha: null,
+            deploymentId: null,
+            approvalFingerprint: approval.fingerprint.value,
+            occurredAt: requested.updatedAt,
+          },
+          {
+            status: "verified-live",
+            detail: null,
+            commitSha: "c".repeat(40),
+            deploymentId: null,
+            approvalFingerprint: approval.fingerprint.value,
+            occurredAt: live.updatedAt,
+          },
+        ],
+      },
+    ]);
+    expect(subrequests).toBe(2);
+  });
+
+  it("persists and verifies restore source identity for a derived workspace", async () => {
+    const store = createD1ContentPublicationStore(database);
+    const identity = {
+      sourcePublicationId: createContentPublicationId(
+        `publish_${"1".repeat(32)}`,
+      ),
+      workspaceId: createContentWorkspaceId("workspace_restore_identity"),
+      actorId,
+      idempotencyKey: "restore-identity-command-1",
+    };
+
+    await expect(store.claimRestoreIdentity(identity)).resolves.toBeUndefined();
+    await expect(store.claimRestoreIdentity(identity)).resolves.toBeUndefined();
+    await expect(
+      store.claimRestoreIdentity({
+        ...identity,
+        sourcePublicationId: createContentPublicationId(
+          `publish_${"2".repeat(32)}`,
+        ),
+      }),
+    ).rejects.toEqual(new ContentPublicationIdempotencyError());
+    expect(
+      await database
+        .prepare(
+          `SELECT source_publication_id
+           FROM content_publication_restore_identities
+           WHERE workspace_id = ?1`,
+        )
+        .bind(identity.workspaceId)
+        .first<{ source_publication_id: string }>(),
+    ).toEqual({ source_publication_id: identity.sourcePublicationId });
   });
 
   it("audits only the winning lease-fenced update when contenders share a clock", async () => {

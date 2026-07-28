@@ -46,8 +46,9 @@ site without deleting its history or editable content.
 **Archive** — A reversible editorial withdrawal that cancels pending work and
 preserves the item, its revisions and its history. Archive is not deletion.
 
-**Restore** — Creation of active, unpublished work from an archived item. It
-does not silently republish an old revision.
+**Restore** — Creation of active, unpublished work from an archived item or a
+selected published revision. It does not silently republish an old revision;
+published-version restore creates a new draft on the current production base.
 
 ## Media
 

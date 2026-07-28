@@ -60,7 +60,7 @@ function upgradeLegacyPageComponent(component: unknown): PageSection {
   return upgraded as PageSection;
 }
 
-function upgradeLegacyDefinition(
+export function upgradeSiteDefinitionForCurrentSchema(
   definition: SiteDefinition,
 ): SiteDefinition {
   try {
@@ -74,8 +74,8 @@ export function durableSchemaRecoveryEdits(
   baseDefinition: SiteDefinition,
   currentDefinition: SiteDefinition,
 ): StaleRecoveryEdit[] {
-  const base = upgradeLegacyDefinition(baseDefinition);
-  const current = upgradeLegacyDefinition(currentDefinition);
+  const base = upgradeSiteDefinitionForCurrentSchema(baseDefinition);
+  const current = upgradeSiteDefinitionForCurrentSchema(currentDefinition);
   const baseFields = new Map(
     listEditableSiteFields(base).map((field) => [field.path, field]),
   );
