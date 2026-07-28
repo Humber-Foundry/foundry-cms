@@ -574,6 +574,43 @@ describe("commit-pinned Graphify index", () => {
     },
   );
 
+  it("fails closed when an untracked ignore file hides itself", () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const graphify = createFakeGraphify();
+    const graph = writeFakeGraph(root);
+    expect(
+      runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+    ).toBe(0);
+
+    git(root, "checkout", "-b", "feature");
+    writeFileSync(
+      join(root, ".gitignore"),
+      ".gitignore\n.graphifyignore\n",
+    );
+    writeFileSync(join(root, ".graphifyignore"), "/src/stable.ts\n");
+    expect(git(root, "status", "--porcelain")).toBe("");
+
+    const query = runIndex(root, ["query", "stable"], {
+      cache,
+      graphify,
+      graph,
+    });
+    const status = runIndex(root, ["status"], {
+      cache,
+      graphify,
+      graph,
+    });
+
+    expect(query.status).not.toBe(0);
+    expect(query.output).toContain(".gitignore");
+    expect(query.output).toContain(".graphifyignore");
+    expect(status.status).not.toBe(0);
+    expect(status.output).toContain(
+      "Graph snapshot is unavailable because branch ignore rules changed",
+    );
+  });
+
   it("reports status unavailable when the Graphify executable cannot start", () => {
     const { root } = createRepository();
     const result = runIndex(root, ["refresh"]);

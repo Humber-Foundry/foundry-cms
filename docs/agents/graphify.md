@@ -109,7 +109,8 @@ The wrapper:
 1. computes the worktree's merge base with local `origin/main`;
 2. requires the immutable snapshot for that exact commit;
 3. verifies every metadata and content hash;
-4. finds committed, staged, unstaged, deleted, and untracked branch paths;
+4. finds committed, staged, unstaged, deleted, and untracked branch paths,
+   including ignore-rule files hidden by Git's normal untracked listing;
 5. fails closed when any `.gitignore` or `.graphifyignore` differs from the
    snapshot, because branch rules could hide existing nodes or reveal files the
    snapshot never indexed;

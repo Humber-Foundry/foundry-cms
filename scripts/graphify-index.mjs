@@ -810,6 +810,16 @@ function changedPaths(context, baseSha) {
       "--diff-filter=ACDMRTUXB",
     ],
     ["ls-files", "--others", "--exclude-standard", "-z"],
+    [
+      "ls-files",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+      "-z",
+      "--",
+      ":(glob)**/.gitignore",
+      ":(glob)**/.graphifyignore",
+    ],
   ];
   return new Set(
     commands.flatMap((arguments_) =>
