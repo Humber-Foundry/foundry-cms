@@ -943,7 +943,7 @@ export function createContentPublicationApplication({
   restoreSourcePublication?: ContentPublication;
   now?: () => string;
 }) {
-  async function requireExactRevision(
+  async function requireBoundRevision(
     workspaceId: ContentWorkspaceId,
     revisionNumber: number,
   ) {
@@ -958,6 +958,17 @@ export function createContentPublicationApplication({
     ) {
       throw new ContentApprovalInvalidError("revision_not_current");
     }
+    return selected;
+  }
+
+  async function requireExactRevision(
+    workspaceId: ContentWorkspaceId,
+    revisionNumber: number,
+  ) {
+    const selected = await requireBoundRevision(
+      workspaceId,
+      revisionNumber,
+    );
     if (!(await revisions.isCurrent(selected))) {
       throw new ContentApprovalInvalidError("revision_stale");
     }
@@ -975,10 +986,17 @@ export function createContentPublicationApplication({
     if (approval.invalidatedAt !== null) {
       throw new ContentApprovalInvalidError("approval_invalidated");
     }
-    const revision = await requireExactRevision(
-      approval.workspaceId,
-      approval.revision,
-    );
+    const revision =
+      approval.fingerprint.serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
+        ? await requireBoundRevision(
+            approval.workspaceId,
+            approval.revision,
+          )
+        : await requireExactRevision(
+            approval.workspaceId,
+            approval.revision,
+          );
     const channelConfigurationHash =
       await publisher.getChannelConfigurationHash();
     if (

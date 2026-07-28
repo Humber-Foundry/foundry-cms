@@ -1153,8 +1153,7 @@ describe("content publication application", () => {
         revisionOverride?.workspaceId === targetWorkspaceId
           ? revisionOverride
           : repository.getCurrent(targetWorkspaceId),
-      isCurrent: async (revision) =>
-        revisionOverride === revision || repository.isCurrent(revision),
+      isCurrent: repository.isCurrent,
       listContributors: repository.listContributors,
     };
     let currentTime = "2026-07-27T10:00:00.000Z";
@@ -1222,6 +1221,9 @@ describe("content publication application", () => {
         schemaVersion: "1.1.0",
       },
     } as any;
+    await expect(
+      repository.isCurrent(revisionOverride!),
+    ).resolves.toBe(false);
     vi.mocked(publisher.reconcileCommit).mockResolvedValue({
       state: "not-found",
     });
