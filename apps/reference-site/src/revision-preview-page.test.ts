@@ -67,7 +67,7 @@ describe("revision preview page", () => {
       },
       inputs: {
         contentHash: "content-hash",
-        schemaVersion: "1.1.0",
+        schemaVersion: "1.2.0",
         rendererVersion: "renderer-a",
         productionBase: "production-a",
       },

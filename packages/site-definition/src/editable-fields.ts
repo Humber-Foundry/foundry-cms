@@ -8,6 +8,7 @@ import {
   type ServicesSection,
   type SiteDefinition,
 } from "./index";
+import { designContract } from "./design-tokens";
 
 export type SiteDefinitionEdit =
   | Readonly<{
@@ -24,8 +25,9 @@ export type SiteDefinitionEdit =
 type EditableSiteFieldBase = Readonly<{
   path: string;
   label: string;
-  group: "Page" | "Navigation" | "Footer" | "SEO";
+  group: "Page" | "Navigation" | "Footer" | "SEO" | "Design";
   multiline: boolean;
+  values?: ReadonlyArray<string>;
 }>;
 
 export type EditableSiteField =
@@ -74,6 +76,7 @@ type EditableFieldBindingInput = Readonly<{
   label: string;
   group: EditableSiteField["group"];
   multiline?: boolean;
+  values?: ReadonlyArray<string>;
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
@@ -92,6 +95,7 @@ function fieldBinding({
   value,
   multiline = false,
   format = "plainText",
+  values,
   write,
 }: EditableFieldBindingInput &
   Readonly<{
@@ -99,14 +103,84 @@ function fieldBinding({
     value: string | SerializedRichTextDocument;
   }>): EditableFieldBinding {
   return {
-    field: { path, label, group, value, multiline, format } as EditableSiteField,
+    field: {
+      path,
+      label,
+      group,
+      value,
+      multiline,
+      format,
+      ...(values === undefined ? {} : { values }),
+    } as EditableSiteField,
     write,
   };
 }
 function editableFieldBindings(
   definition: SiteDefinition,
 ): EditableFieldBinding[] {
+  const designTokenBinding = ({
+    path,
+    label,
+    value,
+    values,
+    write,
+  }: {
+    path: string;
+    label: string;
+    value: string;
+    values: ReadonlyArray<string>;
+    write(definition: MutableSiteDefinition, value: string): void;
+  }) =>
+    fieldBinding({
+      path,
+      label,
+      group: "Design",
+      value,
+      multiline: false,
+      values,
+      write,
+    });
   const fields: EditableFieldBinding[] = [
+    designTokenBinding({
+      path: "design.typography.heading",
+      label: designContract.tokens["typography.heading"].label,
+      value: definition.design.typography.heading,
+      values: designContract.tokens["typography.heading"].values,
+      write: (draft, value) => {
+        draft.design.typography.heading =
+          value as SiteDefinition["design"]["typography"]["heading"];
+      },
+    }),
+    designTokenBinding({
+      path: "design.colour.accent",
+      label: designContract.tokens["colour.accent"].label,
+      value: definition.design.colour.accent,
+      values: designContract.tokens["colour.accent"].values,
+      write: (draft, value) => {
+        draft.design.colour.accent =
+          value as SiteDefinition["design"]["colour"]["accent"];
+      },
+    }),
+    designTokenBinding({
+      path: "design.spacing.section",
+      label: designContract.tokens["spacing.section"].label,
+      value: definition.design.spacing.section,
+      values: designContract.tokens["spacing.section"].values,
+      write: (draft, value) => {
+        draft.design.spacing.section =
+          value as SiteDefinition["design"]["spacing"]["section"];
+      },
+    }),
+    designTokenBinding({
+      path: "design.layout.contentWidth",
+      label: designContract.tokens["layout.contentWidth"].label,
+      value: definition.design.layout.contentWidth,
+      values: designContract.tokens["layout.contentWidth"].values,
+      write: (draft, value) => {
+        draft.design.layout.contentWidth =
+          value as SiteDefinition["design"]["layout"]["contentWidth"];
+      },
+    }),
     fieldBinding({
       path: `${definition.site.id}.name`,
       label: "Site name",
@@ -175,6 +249,23 @@ function editableFieldBindings(
   });
 
   definition.home.sections.forEach((section, sectionIndex) => {
+    const variant = designContract.variants[section.type];
+    fields.push(
+      fieldBinding({
+        path: `${section.id}.variant`,
+        label: variant.label,
+        group: "Design",
+        value: section.variant,
+        multiline: false,
+        values: variant.values,
+        write: (draft, value) => {
+          const draftSection = draft.home.sections[
+            sectionIndex
+          ] as unknown as Record<string, unknown>;
+          draftSection.variant = value;
+        },
+      }),
+    );
     const bindSectionField = (
       property: string,
       label: string,
@@ -401,7 +492,9 @@ export function updateEditableSiteField(
     return null;
   }
   if (
-    (edit.format ?? "plainText") !== binding.field.format
+    (edit.format ?? "plainText") !== binding.field.format ||
+    (binding.field.values !== undefined &&
+      !binding.field.values.includes(edit.value))
   ) {
     return null;
   }
@@ -449,6 +542,13 @@ export function applySiteDefinitionEdits(
       } catch {
         errors[edit.path] =
           "Rich text is invalid or contains unsupported or unsafe content.";
+      }
+    }
+    if (errors[edit.path] === undefined) {
+      const values = bindings.get(edit.path)!.field.values;
+      if (values !== undefined && !values.includes(edit.value)) {
+        errors[edit.path] =
+          `Choose a value registered by Site Definition ${definition.definitionVersion}.`;
       }
     }
   }

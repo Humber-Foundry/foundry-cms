@@ -14,6 +14,7 @@ import {
   pageCompositionContract,
   referencedPageComponentIds,
   serializeRichTextDocument,
+  siteDesignAttributes,
   type CallToActionSection,
   type HeroSection,
   type PageComponentType,
@@ -33,6 +34,20 @@ import { SiteSection } from "./site-renderer";
 type RegisteredComponents = {
   [Type in PageComponentType]: Extract<PageSection, { type: Type }>;
 };
+
+function DesignScopedSection({
+  definition,
+  section,
+}: {
+  definition: SiteDefinition;
+  section: PageSection;
+}) {
+  return (
+    <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
+      <SiteSection section={section} />
+    </div>
+  );
+}
 
 function newStableComponentId(type: PageComponentType): string {
   const typeSlug = type.replace(
@@ -88,6 +103,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
+        variant: { type: "custom", visible: false, render: () => <></> },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
         summary: { type: "textarea", label: "Summary" },
@@ -109,6 +125,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       render: ({
         id,
         type,
+        variant,
         eyebrow,
         title,
         summary,
@@ -119,6 +136,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
           section={{
             id,
             type,
+            variant,
             eyebrow,
             title,
             summary,
@@ -133,6 +151,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
+        variant: { type: "custom", visible: false, render: () => <></> },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
         introduction: { type: "textarea", label: "Introduction" },
@@ -142,9 +161,25 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         "services",
         "section_new_services",
       ) as ServicesSection,
-      render: ({ id, type, eyebrow, title, introduction, items }) => (
+      render: ({
+        id,
+        type,
+        variant,
+        eyebrow,
+        title,
+        introduction,
+        items,
+      }) => (
         <SiteSection
-          section={{ id, type, eyebrow, title, introduction, items }}
+          section={{
+            id,
+            type,
+            variant,
+            eyebrow,
+            title,
+            introduction,
+            items,
+          }}
         />
       ),
     },
@@ -153,6 +188,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
+        variant: { type: "custom", visible: false, render: () => <></> },
         quote: { type: "textarea", label: "Quote" },
         attribution: { type: "text", label: "Attribution" },
         metrics: { type: "custom", visible: false, render: () => <></> },
@@ -161,9 +197,9 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         "proof",
         "section_new_proof",
       ) as ProofSection,
-      render: ({ id, type, quote, attribution, metrics }) => (
+      render: ({ id, type, variant, quote, attribution, metrics }) => (
         <SiteSection
-          section={{ id, type, quote, attribution, metrics }}
+          section={{ id, type, variant, quote, attribution, metrics }}
         />
       ),
     },
@@ -172,6 +208,7 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
       fields: {
         id: { type: "custom", visible: false, render: () => <></> },
         type: { type: "custom", visible: false, render: () => <></> },
+        variant: { type: "custom", visible: false, render: () => <></> },
         eyebrow: { type: "text", label: "Eyebrow" },
         title: { type: "text", label: "Title" },
         body: {
@@ -197,9 +234,9 @@ export const visualComponentConfig: Config<RegisteredComponents> = {
         "callToAction",
         "section_new_call_to_action",
       ) as CallToActionSection,
-      render: ({ id, type, eyebrow, title, body, action }) => (
+      render: ({ id, type, variant, eyebrow, title, body, action }) => (
         <SiteSection
-          section={{ id, type, eyebrow, title, body, action }}
+          section={{ id, type, variant, eyebrow, title, body, action }}
         />
       ),
     },
@@ -219,6 +256,12 @@ export function createVisualComponentConfig(
     components: {
       hero: {
         ...visualComponentConfig.components.hero,
+        render: (props) => (
+          <DesignScopedSection
+            definition={definition}
+            section={props as HeroSection}
+          />
+        ),
         defaultProps: createDefaultPageSection(
           "hero",
           "section_new_hero",
@@ -230,6 +273,12 @@ export function createVisualComponentConfig(
       },
       services: {
         ...visualComponentConfig.components.services,
+        render: (props) => (
+          <DesignScopedSection
+            definition={definition}
+            section={props as ServicesSection}
+          />
+        ),
         defaultProps: createDefaultPageSection(
           "services",
           "section_new_services",
@@ -241,6 +290,12 @@ export function createVisualComponentConfig(
       },
       proof: {
         ...visualComponentConfig.components.proof,
+        render: (props) => (
+          <DesignScopedSection
+            definition={definition}
+            section={props as ProofSection}
+          />
+        ),
         defaultProps: createDefaultPageSection(
           "proof",
           "section_new_proof",
@@ -277,6 +332,12 @@ export function createVisualComponentConfig(
         } as NonNullable<
           (typeof visualComponentConfig.components.callToAction)["fields"]
         >,
+        render: (props) => (
+          <DesignScopedSection
+            definition={definition}
+            section={props as CallToActionSection}
+          />
+        ),
         defaultProps: createDefaultPageSection(
           "callToAction",
           "section_new_call_to_action",

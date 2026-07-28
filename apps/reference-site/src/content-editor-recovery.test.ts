@@ -17,6 +17,7 @@ import {
   excludeCompositionOwnedEdits,
   mergeRecoverySources,
   mergeStaleRecoveryEdits,
+  planStructuralFirstRecovery,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
@@ -662,6 +663,59 @@ describe("stale edit recovery", () => {
         "section_concurrent_proof",
       ]);
     }
+  });
+
+  it("does not project dependent fields when the structural base conflicts", () => {
+    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const recoveredAddition = createDefaultPageSection(
+      "proof",
+      "section_recovered_proof",
+      referenceSiteDefinition,
+    );
+    const concurrentAddition = createDefaultPageSection(
+      "services",
+      "section_concurrent_services",
+      referenceSiteDefinition,
+    );
+    const concurrent = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          ...referenceSiteDefinition.home.sections,
+          concurrentAddition,
+        ],
+      },
+    };
+    const plan = planStructuralFirstRecovery(concurrent, [
+      {
+        path: "section_recovered_proof.quote",
+        baseValue:
+          recoveredAddition.type === "proof"
+            ? recoveredAddition.quote
+            : "",
+        value: "Newer browser value",
+      },
+      {
+        path: "slot_home_sections",
+        baseValue: JSON.stringify(sourceComposition),
+        value: JSON.stringify({
+          ...sourceComposition,
+          components: [
+            ...sourceComposition.components,
+            recoveredAddition,
+          ],
+        }),
+      },
+    ]);
+
+    expect(plan.projected).toBe(false);
+    expect(
+      plan.destinationValues.has("section_recovered_proof.quote"),
+    ).toBe(false);
+    expect(
+      plan.destinationValues.has("section_concurrent_services.title"),
+    ).toBe(true);
   });
 
   it("surfaces a same-path concurrent change as a three-way conflict", () => {

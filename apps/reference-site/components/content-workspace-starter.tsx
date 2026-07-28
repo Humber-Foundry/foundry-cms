@@ -2,19 +2,218 @@
 
 import { useRef, useState } from "react";
 
-import { sendContentRevisionAttempt } from "../src/content-revision-client";
+import {
+  canonicalJson,
+  type ContentRevision,
+} from "@foundry/application";
+import {
+  isSiteDefinition,
+  pageCompositionContract,
+  type SiteDefinition,
+} from "@foundry/site-definition";
 
-type CreatedWorkspace = Readonly<{ workspaceId: string }>;
+import { sendContentRevisionAttempt } from "../src/content-revision-client";
+import { restorePreservedMedia } from "../src/content-media-recovery";
+import {
+  createContentEditorOutboxController,
+  type ContentEditorOutboxRecord,
+} from "../src/content-editor-outbox";
+import {
+  comparableRecoveryBaseValue,
+  comparableRecoveryValue,
+  preserveStaleEdits,
+  recoverStaleEdits,
+  type StaleRecoveryPointer,
+  type StaleRecoveryEdit,
+} from "../src/content-editor-recovery";
+import {
+  mediaManifestRecoveryPath,
+  mergeDurableAndOutboxRecoveryEdits,
+  upgradeLegacyRecoveryEdits,
+} from "../src/content-schema-recovery";
+
+type CreatedWorkspace = Readonly<{
+  workspaceId: string;
+  revision: number;
+  definition: SiteDefinition;
+}>;
+type PreservedContentRevision = Readonly<{
+  workspaceId: ContentRevision["workspaceId"];
+  revision: ContentRevision["revision"];
+  schemaVersion: ContentRevision["inputs"]["schemaVersion"];
+}>;
+
+function fullRecoveryValue(
+  edit: StaleRecoveryEdit,
+  property: "baseValue" | "value",
+): string {
+  if (edit.path !== pageCompositionContract.slot.id) {
+    return edit[property];
+  }
+  try {
+    return canonicalJson(JSON.parse(edit[property]));
+  } catch {
+    return edit[property];
+  }
+}
+
+function hasIdentityOnlyStructuralBase(edit: StaleRecoveryEdit): boolean {
+  if (edit.path !== pageCompositionContract.slot.id) {
+    return false;
+  }
+  try {
+    const composition: unknown = JSON.parse(edit.baseValue);
+    return (
+      typeof composition === "object" &&
+      composition !== null &&
+      "components" in composition &&
+      Array.isArray(composition.components) &&
+      composition.components.every(
+        (component) =>
+          typeof component === "object" &&
+          component !== null &&
+          Object.keys(component).every((key) =>
+            ["id", "type", "variant"].includes(key),
+          ),
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function workspaceCreationOperation(
+  preservedRevision: PreservedContentRevision | undefined,
+): "create_default_workspace" | "create_workspace" {
+  return preservedRevision === undefined
+    ? "create_default_workspace"
+    : "create_workspace";
+}
+
+export async function preparePreservedRevisionRecovery({
+  preservedRevision,
+  durableRecoveryEdits = [],
+  activeRecovery,
+  readOutbox = async (workspaceId) =>
+    createContentEditorOutboxController(workspaceId).read(
+      async () => false,
+    ),
+  storage = window.localStorage,
+  createRecoveryId = () => crypto.randomUUID(),
+}: {
+  preservedRevision: PreservedContentRevision | undefined;
+  durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
+  activeRecovery?: StaleRecoveryPointer;
+  readOutbox?: (
+    workspaceId: string,
+  ) => Promise<ContentEditorOutboxRecord | null>;
+  storage?: Pick<Storage, "getItem" | "removeItem" | "setItem">;
+  createRecoveryId?: () => string;
+}): Promise<StaleRecoveryPointer | undefined> {
+  if (preservedRevision === undefined) {
+    return undefined;
+  }
+  const record = await readOutbox(preservedRevision.workspaceId);
+  const chainedRecoveryEdits =
+    activeRecovery === undefined
+      ? []
+      : (() => {
+          const chained = recoverStaleEdits(
+            storage,
+            activeRecovery.id,
+            activeRecovery.sourceWorkspaceId,
+            new Map(),
+          );
+          if (!chained.available) {
+            throw new Error("stale_edit_recovery_unavailable");
+          }
+          return [...chained.recovered, ...chained.conflicts].map(
+            ({ path, value, baseValue }) => ({
+              path,
+              value,
+              baseValue,
+            }),
+          );
+        })();
+  const durableByPath = new Map(
+    durableRecoveryEdits.map((edit) => [edit.path, edit] as const),
+  );
+  const rebaseOverlay = (
+    edits: ReadonlyArray<StaleRecoveryEdit>,
+  ): StaleRecoveryEdit[] =>
+    edits.filter((edit) => {
+      const durable = durableByPath.get(edit.path);
+      if (durable === undefined) {
+        return true;
+      }
+      if (
+        fullRecoveryValue(edit, "value") ===
+        fullRecoveryValue(durable, "value")
+      ) {
+        return false;
+      }
+      if (
+        fullRecoveryValue(edit, "baseValue") !==
+          fullRecoveryValue(durable, "value") &&
+        !(
+          hasIdentityOnlyStructuralBase(edit) &&
+          comparableRecoveryBaseValue(edit) ===
+            comparableRecoveryValue(durable)
+        )
+      ) {
+        throw new Error("content_editor_recovery_revision_conflict");
+      }
+      return true;
+    });
+  if (
+    record !== null &&
+    record.baseRevision > preservedRevision.revision
+  ) {
+    throw new Error("content_editor_outbox_revision_conflict");
+  }
+  const safeOutboxEdits = rebaseOverlay(
+    upgradeLegacyRecoveryEdits(record?.edits ?? []),
+  );
+  const recoveryEdits = mergeDurableAndOutboxRecoveryEdits(
+    mergeDurableAndOutboxRecoveryEdits(
+      durableRecoveryEdits,
+      rebaseOverlay(upgradeLegacyRecoveryEdits(chainedRecoveryEdits)),
+    ),
+    safeOutboxEdits,
+  );
+  if (recoveryEdits.length === 0) {
+    return undefined;
+  }
+  const recovery = {
+    id: createRecoveryId(),
+    sourceWorkspaceId: preservedRevision.workspaceId,
+  };
+  if (
+    !preserveStaleEdits(
+      storage,
+      recovery.id,
+      recovery.sourceWorkspaceId,
+      recoveryEdits,
+    )
+  ) {
+    throw new Error("stale_edit_recovery_unavailable");
+  }
+  return recovery;
+}
 
 export function ContentWorkspaceStarter({
   csrfToken,
   staleRecovery,
+  preservedRevision,
+  durableRecoveryEdits,
 }: {
   csrfToken: string;
   staleRecovery?: Readonly<{
     id: string;
     sourceWorkspaceId: string;
   }>;
+  preservedRevision?: PreservedContentRevision;
+  durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
 }) {
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
@@ -23,15 +222,34 @@ export function ContentWorkspaceStarter({
     body: string;
     idempotencyKey: string;
   } | null>(null);
+  const pendingRecovery = useRef<
+    Promise<StaleRecoveryPointer | undefined> | undefined
+  >(undefined);
 
   async function startWorkspace() {
     pendingAttempt.current ??= {
-      body: JSON.stringify({ operation: "create_default_workspace" }),
+      body: JSON.stringify({
+        operation: workspaceCreationOperation(preservedRevision),
+      }),
       idempotencyKey: crypto.randomUUID(),
     };
     setStarting(true);
     setMessage("");
     try {
+      const mediaRecovery = durableRecoveryEdits?.find(
+        ({ path }) => path === mediaManifestRecoveryPath,
+      );
+      pendingRecovery.current ??= preparePreservedRevisionRecovery({
+        preservedRevision,
+        durableRecoveryEdits: durableRecoveryEdits?.filter(
+          ({ path }) => path !== mediaManifestRecoveryPath,
+        ),
+        activeRecovery: staleRecovery,
+      }).catch((error: unknown) => {
+        pendingRecovery.current = undefined;
+        throw error;
+      });
+      const preservedOutboxRecovery = await pendingRecovery.current;
       const result = await sendContentRevisionAttempt({
         attempt: pendingAttempt.current,
         mutationToken,
@@ -43,12 +261,28 @@ export function ContentWorkspaceStarter({
       const created = result.body as CreatedWorkspace;
       if (
         typeof created.workspaceId !== "string" ||
-        !/^workspace_[a-z0-9_]+$/u.test(created.workspaceId)
+        !/^workspace_[a-z0-9_]+$/u.test(created.workspaceId) ||
+        !Number.isSafeInteger(created.revision) ||
+        !isSiteDefinition(created.definition)
       ) {
         throw new Error("content_workspace_creation_invalid");
       }
+      const restoredMutationToken = await restorePreservedMedia({
+        edit: mediaRecovery,
+        created,
+        mutationToken: result.mutationToken,
+        idempotencyKey: pendingAttempt.current.idempotencyKey,
+        onMutationToken: setMutationToken,
+      });
+      setMutationToken(restoredMutationToken);
       const query = new URLSearchParams({ workspace: created.workspaceId });
-      if (staleRecovery !== undefined) {
+      if (preservedOutboxRecovery !== undefined) {
+        query.set("recovery", preservedOutboxRecovery.id);
+        query.set(
+          "recoverFrom",
+          preservedOutboxRecovery.sourceWorkspaceId,
+        );
+      } else if (staleRecovery !== undefined) {
         query.set("recovery", staleRecovery.id);
         query.set("recoverFrom", staleRecovery.sourceWorkspaceId);
       }
@@ -56,7 +290,9 @@ export function ContentWorkspaceStarter({
     } catch {
       setStarting(false);
       setMessage(
-        "The workspace could not be confirmed. Retry to check the same request.",
+        preservedRevision === undefined
+          ? "The workspace could not be confirmed. Retry to check the same request."
+          : "The fresh workspace could not be confirmed without preserving browser edits. Retry, or copy the edits from the preserved workspace before leaving it.",
       );
     }
   }
@@ -69,9 +305,18 @@ export function ContentWorkspaceStarter({
       <div className="dashboard-section-heading editor-heading">
         <div>
           <h2 id="content-workspace-heading">Content editor</h2>
-          <p>
-            Start a private draft workspace from the current published site.
-          </p>
+          {preservedRevision === undefined ? (
+            <p>
+              Start a private draft workspace from the current published site.
+            </p>
+          ) : (
+            <p>
+              Workspace <code>{preservedRevision.workspaceId}</code> revision{" "}
+              {preservedRevision.revision} is preserved under Site Definition{" "}
+              {preservedRevision.schemaVersion}. Start a fresh workspace to
+              edit the current schema.
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -79,7 +324,11 @@ export function ContentWorkspaceStarter({
           disabled={starting}
           onClick={startWorkspace}
         >
-          {starting ? "Starting…" : "Start workspace"}
+          {starting
+            ? "Starting…"
+            : preservedRevision === undefined
+              ? "Start workspace"
+              : "Start fresh workspace"}
         </button>
       </div>
       <p role="status" aria-live="polite" className="editor-message">

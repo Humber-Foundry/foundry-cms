@@ -41,6 +41,7 @@ import {
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
   mergeRecoverySources,
+  planStructuralFirstRecovery,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
@@ -302,7 +303,7 @@ export function ContentEditor({
       updateRichTextValidation(`visual:${source}`, invalid),
     [updateRichTextValidation],
   );
-  const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
+  const groups = ["Design", "Page", "Navigation", "Footer", "SEO"] as const;
   const editorLocked =
     !persistence.coordinated ||
     !persistence.ready ||
@@ -366,21 +367,18 @@ export function ContentEditor({
           );
           return;
         }
-        const currentValues = new Map([
-          ...workingFields.map(
-            (field) => [field.path, field.value] as const,
-          ),
-          [
-            pageCompositionContract.slot.id,
-            JSON.stringify(
-              toPageCompositionIdentity(state.workingDefinition),
-            ),
-          ] as const,
-        ]);
+        const {
+          orderedEdits,
+          destinationValues: currentValues,
+        } = planStructuralFirstRecovery(
+          state.workingDefinition,
+          recoveredEdits,
+        );
         const conflicts: StaleRecoveryConflict[] = [];
         let recoveredCount = 0;
         let alreadyAppliedCount = 0;
-        for (const edit of recoveredEdits) {
+        let recoveryDefinition = state.workingDefinition;
+        for (const edit of orderedEdits) {
           const currentValue = currentValues.get(edit.path);
           if (currentValue === undefined) {
             conflicts.push({
@@ -404,10 +402,11 @@ export function ContentEditor({
           }
           if (edit.path === pageCompositionContract.slot.id) {
             const result = applyStructuralRecovery(
-              initialRevision.definition,
+              recoveryDefinition,
               edit,
             );
             if (result.ok) {
+              recoveryDefinition = result.definition;
               dispatch({
                 type: "compose",
                 definition: result.definition,
@@ -422,24 +421,24 @@ export function ContentEditor({
               });
             }
           } else {
-            if (
-              updateEditableSiteField(
-                state.workingDefinition,
-                edit,
-              ) === null
-            ) {
+            const updatedDefinition = updateEditableSiteField(
+              recoveryDefinition,
+              edit,
+            );
+            if (updatedDefinition === null) {
               conflicts.push({
                 ...edit,
                 currentValue,
                 reason: "changed",
               });
             } else {
+              recoveryDefinition = updatedDefinition;
               dispatch({ type: "edit", ...edit });
               recoveredCount += 1;
             }
           }
         }
-        if (alreadyAppliedCount === recoveredEdits.length) {
+        if (alreadyAppliedCount === orderedEdits.length) {
           recoveryPending.current = [];
           void persistence.clear();
           setMessage(
@@ -573,6 +572,7 @@ export function ContentEditor({
   useEffect(() => {
     if (
       !persistence.coordinated ||
+      !persistence.ready ||
       staleRecovery === undefined ||
       recoveryApplied.current
     ) {
@@ -600,14 +600,14 @@ export function ContentEditor({
         ),
       ] as const,
     ]);
-    const { available, recovered, conflicts } = recoverStaleEdits(
+    let recovery = recoverStaleEdits(
       recoveryStorage,
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
       destinationValues,
       richTextPaths,
     );
-    if (!available) {
+    if (!recovery.available) {
       setRecoverySourcesReady(true);
       setMessage(
         "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
@@ -617,22 +617,48 @@ export function ContentEditor({
     if (initialStale) {
       recoveryPending.current = mergeRecoverySources(
         recoveryPending.current,
-        [...recovered, ...conflicts],
+        [...recovery.recovered, ...recovery.conflicts],
       );
       setRecoverySourcesReady(true);
       return;
     }
+    const projectedRecovery = planStructuralFirstRecovery(
+      state.workingDefinition,
+      recovery.recovered,
+    );
+    if (projectedRecovery.projected) {
+      recovery = recoverStaleEdits(
+        recoveryStorage,
+        staleRecovery.id,
+        staleRecovery.sourceWorkspaceId,
+        projectedRecovery.destinationValues,
+      );
+      if (!recovery.available) {
+        setRecoverySourcesReady(true);
+        setMessage(
+          "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
+        );
+        return;
+      }
+    }
     const applied: StaleRecoveryEdit[] = [];
-    const nextConflicts = [...conflicts];
-    for (const edit of recovered) {
+    const nextConflicts = [...recovery.conflicts];
+    const { orderedEdits: orderedRecovered } =
+      planStructuralFirstRecovery(
+        state.workingDefinition,
+        recovery.recovered,
+      );
+    let recoveryDefinition = state.workingDefinition;
+    for (const edit of orderedRecovered) {
       if (edit.path === pageCompositionContract.slot.id) {
         const result = resolveStructuralRecovery(
-          initialRevision.definition,
+          recoveryDefinition,
           edit,
           destinationValues.get(edit.path) ?? null,
         );
         if (result.ok) {
           applied.push(edit);
+          recoveryDefinition = result.definition;
           dispatch({
             type: "compose",
             definition: result.definition,
@@ -642,10 +668,11 @@ export function ContentEditor({
           nextConflicts.push(result.conflict);
         }
       } else {
-        if (
-          updateEditableSiteField(state.workingDefinition, edit) ===
-          null
-        ) {
+        const updatedDefinition = updateEditableSiteField(
+          recoveryDefinition,
+          edit,
+        );
+        if (updatedDefinition === null) {
           nextConflicts.push({
             ...edit,
             currentValue: destinationValues.get(edit.path) ?? null,
@@ -653,6 +680,7 @@ export function ContentEditor({
           });
         } else {
           applied.push(edit);
+          recoveryDefinition = updatedDefinition;
           dispatch({ type: "edit", ...edit });
         }
       }
@@ -675,6 +703,7 @@ export function ContentEditor({
   }, [
     initialStale,
     persistence.coordinated,
+    persistence.ready,
     staleRecovery,
     workingFields,
   ]);
@@ -1574,7 +1603,27 @@ export function ContentEditor({
                 return (
                   <label key={field.path}>
                     {fieldLabel}
-                    {field.multiline ? (
+                    {field.values !== undefined ? (
+                      <select
+                        disabled={editorLocked}
+                        value={field.value}
+                        aria-invalid={Boolean(state.errors[field.path])}
+                        aria-describedby={`${field.path}-error`}
+                        onChange={(event) =>
+                          edit({
+                            path: field.path,
+                            format: "plainText",
+                            value: event.target.value,
+                          })
+                        }
+                      >
+                        {field.values.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.multiline ? (
                       <textarea
                         rows={3}
                         disabled={editorLocked}

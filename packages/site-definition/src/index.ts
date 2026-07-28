@@ -4,11 +4,20 @@ import {
   validateRichTextDocument,
   type RichTextDocument,
 } from "./rich-text";
+import type {
+  CallToActionVariant,
+  HeroVariant,
+  ProofVariant,
+  ServicesVariant,
+  SiteDesign,
+} from "./design-tokens";
+import { designContract } from "./design-tokens";
 import publishedSite from "./published-site.json";
 import {
   projectPublishedSiteDefinition,
   projectSiteDefinitionSchema,
 } from "./site-definition-projection.mjs";
+import validateSiteDefinition from "./site-definition-validator.mjs";
 
 export * from "./rich-text";
 
@@ -57,52 +66,10 @@ export type SiteMediaOccurrence = Readonly<{
   crop: SiteMediaCrop | null;
 }>;
 
-export const siteDefinitionValidationKeywords = [
-  {
-    keyword: "xFoundryCropWithinSource",
-    schemaType: "boolean",
-    type: "object",
-    validate(
-      enabled: boolean,
-      crop: Readonly<{
-        x?: unknown;
-        y?: unknown;
-        width?: unknown;
-        height?: unknown;
-      }>,
-    ) {
-      return (
-        !enabled ||
-        (typeof crop.x === "number" &&
-          typeof crop.y === "number" &&
-          typeof crop.width === "number" &&
-          typeof crop.height === "number" &&
-          crop.x + crop.width <= 1 &&
-          crop.y + crop.height <= 1)
-      );
-    },
-  },
-  {
-    keyword: "xFoundryCanonicalRichText",
-    schemaType: "boolean",
-    type: "object",
-    validate(enabled: boolean, document: unknown) {
-      if (!enabled) {
-        return true;
-      }
-      try {
-        validateRichTextDocument(document as RichTextDocument);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  },
-] as const;
-
 export type HeroSection = Readonly<{
   id: string;
   type: "hero";
+  variant: HeroVariant;
   eyebrow: string;
   title: string;
   summary: string;
@@ -113,6 +80,7 @@ export type HeroSection = Readonly<{
 export type ServicesSection = Readonly<{
   id: string;
   type: "services";
+  variant: ServicesVariant;
   eyebrow: string;
   title: string;
   introduction: string;
@@ -129,6 +97,7 @@ export type ServicesSection = Readonly<{
 export type ProofSection = Readonly<{
   id: string;
   type: "proof";
+  variant: ProofVariant;
   quote: string;
   attribution: string;
   metrics: ReadonlyArray<
@@ -143,6 +112,7 @@ export type ProofSection = Readonly<{
 export type CallToActionSection = Readonly<{
   id: string;
   type: "callToAction";
+  variant: CallToActionVariant;
   eyebrow: string;
   title: string;
   body: RichTextDocument;
@@ -156,8 +126,9 @@ export type PageSection =
   | CallToActionSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.1.0";
-  schemaVersion: "1.1.0";
+  definitionVersion: "1.2.0";
+  schemaVersion: "1.2.0";
+  design: SiteDesign;
   site: Readonly<{
     id: SiteId;
     name: string;
@@ -176,7 +147,11 @@ export type SiteDefinition = Readonly<{
   }>;
 }>;
 
-export type SiteDefinitionSchemaVersion = "1.0.0" | "1.1.0";
+export type SiteDefinitionSchemaVersion = SiteDefinition["schemaVersion"];
+export type StoredSiteDefinitionSchemaVersion =
+  | "1.0.0"
+  | "1.1.0"
+  | SiteDefinitionSchemaVersion;
 
 function isSiteDefinitionRecord(
   value: unknown,
@@ -206,14 +181,67 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.1.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.2.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
-  required: ["definitionVersion", "schemaVersion", "site", "home"],
+  required: [
+    "definitionVersion",
+    "schemaVersion",
+    "design",
+    "site",
+    "home",
+  ],
   properties: {
-    definitionVersion: { const: "1.1.0" },
-    schemaVersion: { const: "1.1.0" },
+    definitionVersion: { const: "1.2.0" },
+    schemaVersion: { const: "1.2.0" },
+    design: {
+      type: "object",
+      additionalProperties: false,
+      required: ["typography", "colour", "spacing", "layout"],
+      properties: {
+        typography: {
+          type: "object",
+          additionalProperties: false,
+          required: ["heading"],
+          properties: {
+            heading: {
+              enum: designContract.tokens["typography.heading"].values,
+            },
+          },
+        },
+        colour: {
+          type: "object",
+          additionalProperties: false,
+          required: ["accent"],
+          properties: {
+            accent: {
+              enum: designContract.tokens["colour.accent"].values,
+            },
+          },
+        },
+        spacing: {
+          type: "object",
+          additionalProperties: false,
+          required: ["section"],
+          properties: {
+            section: {
+              enum: designContract.tokens["spacing.section"].values,
+            },
+          },
+        },
+        layout: {
+          type: "object",
+          additionalProperties: false,
+          required: ["contentWidth"],
+          properties: {
+            contentWidth: {
+              enum: designContract.tokens["layout.contentWidth"].values,
+            },
+          },
+        },
+      },
+    },
     site: {
       type: "object",
       additionalProperties: false,
@@ -384,6 +412,7 @@ export const siteDefinitionSchema = {
       required: [
         "id",
         "type",
+        "variant",
         "eyebrow",
         "title",
         "summary",
@@ -393,6 +422,7 @@ export const siteDefinitionSchema = {
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "hero" },
+        variant: { enum: designContract.variants.hero.values },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         summary: { $ref: "#/$defs/text" },
@@ -403,10 +433,19 @@ export const siteDefinitionSchema = {
     servicesSection: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "type", "eyebrow", "title", "introduction", "items"],
+      required: [
+        "id",
+        "type",
+        "variant",
+        "eyebrow",
+        "title",
+        "introduction",
+        "items",
+      ],
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "services" },
+        variant: { enum: designContract.variants.services.values },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         introduction: { $ref: "#/$defs/text" },
@@ -419,10 +458,18 @@ export const siteDefinitionSchema = {
     proofSection: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "type", "quote", "attribution", "metrics"],
+      required: [
+        "id",
+        "type",
+        "variant",
+        "quote",
+        "attribution",
+        "metrics",
+      ],
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "proof" },
+        variant: { enum: designContract.variants.proof.values },
         quote: { $ref: "#/$defs/text" },
         attribution: { $ref: "#/$defs/text" },
         metrics: {
@@ -434,10 +481,19 @@ export const siteDefinitionSchema = {
     callToActionSection: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "type", "eyebrow", "title", "body", "action"],
+      required: [
+        "id",
+        "type",
+        "variant",
+        "eyebrow",
+        "title",
+        "body",
+        "action",
+      ],
       properties: {
         id: { $ref: "#/$defs/id" },
         type: { const: "callToAction" },
+        variant: { enum: designContract.variants.callToAction.values },
         eyebrow: { $ref: "#/$defs/text" },
         title: { $ref: "#/$defs/text" },
         body: { $ref: "#/$defs/richTextDocument" },
@@ -447,9 +503,8 @@ export const siteDefinitionSchema = {
     richTextDocument: {
       type: "object",
       additionalProperties: false,
-      xFoundryCanonicalRichText: true,
       $comment:
-        "Cross-node canonicality, including adjacent equivalent mark runs and CommonMark delimiter flanking, is enforced by validateRichTextDocument through xFoundryCanonicalRichText.",
+        "Cross-node canonicality, including adjacent equivalent mark runs and CommonMark delimiter flanking, is enforced by validateRichTextDocument through isSiteDefinition.",
       required: ["version", "type", "children"],
       properties: {
         version: { const: RICH_TEXT_VERSION },
@@ -648,6 +703,23 @@ export const siteDefinitionSchema = {
   },
 } as const;
 
+export function isSiteDefinition(value: unknown): value is SiteDefinition {
+  if (!validateSiteDefinition(value)) {
+    return false;
+  }
+  try {
+    const definition = value as SiteDefinition;
+    definition.home.sections.forEach((section) => {
+      if (section.type === "callToAction") {
+        validateRichTextDocument(section.body);
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createReferenceSiteDefinition(
   published: unknown,
 ): SiteDefinition {
@@ -669,3 +741,4 @@ export const referenceSiteDefinition = createReferenceSiteDefinition(
 
 export * from "./editable-fields";
 export * from "./component-composition";
+export * from "./design-tokens";

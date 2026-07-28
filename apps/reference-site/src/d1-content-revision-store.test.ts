@@ -12,10 +12,7 @@ import {
   createContentRevisionApplication,
   createContentWorkspaceId,
 } from "@foundry/application";
-import {
-  listEditableSiteFields,
-  referenceSiteDefinition,
-} from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
   createD1ContentRevisionStore,
@@ -73,7 +70,7 @@ describe("D1 content revision store", () => {
       workspaceId: targetWorkspaceId,
       actorId,
       rendererVersion: "renderer-test-commit",
-      productionBase: "published:site_foundry_reference@1.0.0",
+      productionBase: "published:site_foundry_reference@1.1.0",
       now: () => now,
     });
   }
@@ -95,7 +92,7 @@ describe("D1 content revision store", () => {
     const command = {
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Persisted in D1" }],
       idempotencyKey: "d1-content-save-0001",
@@ -153,21 +150,23 @@ describe("D1 content revision store", () => {
     ).toEqual({ count: 0 });
   });
 
-  it("reads a preserved 1.0 workspace through the current recovery projection", async () => {
+  it("preserves immutable stored 1.0 revisions without rewriting their fingerprinted definition", async () => {
     const legacy = structuredClone(
       referenceSiteDefinition,
     ) as unknown as Record<string, any>;
     legacy.definitionVersion = "1.0.0";
     legacy.schemaVersion = "1.0.0";
-    legacy.home.sections[3].body = "A draft from before rich text.";
+    delete legacy.design;
+    legacy.home.sections.forEach(
+      (section: Record<string, unknown>) => delete section.variant,
+    );
     await database.batch([
       database
         .prepare(
           `INSERT INTO content_workspaces (
-             workspace_id, site_id, owner_actor_id,
-             production_base, schema_version, renderer_version,
-             current_revision, current_content_hash, lifecycle,
-             created_at, updated_at
+             workspace_id, site_id, owner_actor_id, production_base,
+             schema_version, renderer_version, current_revision,
+             current_content_hash, lifecycle, created_at, updated_at
            ) VALUES (?1, ?2, ?3, ?4, '1.0.0', ?5, 0, ?6, 'open', ?7, ?7)`,
         )
         .bind(
@@ -183,8 +182,8 @@ describe("D1 content revision store", () => {
         .prepare(
           `INSERT INTO content_revisions (
              workspace_id, revision, definition_json, content_hash,
-             schema_version, renderer_version, production_base,
-             request_hash, created_at, created_by
+             schema_version, renderer_version, production_base, request_hash,
+             created_at, created_by
            ) VALUES (?1, 0, ?2, ?3, '1.0.0', ?4, ?5, ?6, ?7, ?8)`,
         )
         .bind(
@@ -193,30 +192,25 @@ describe("D1 content revision store", () => {
           "legacy-content-hash",
           "renderer-test-commit",
           "published:site_foundry_reference@1.0.0",
-          "system:published-base",
+          "legacy-request-hash",
           "2026-07-26T12:00:00.000Z",
           "system:published-base",
         ),
     ]);
-
-    const application = createApplication();
-    const current = await application.queries.getCurrent();
-    const body = current.definition.home.sections.find(
-      (section) => section.type === "callToAction",
-    )?.body;
-
-    expect(current.inputs.schemaVersion).toBe("1.0.0");
-    expect(current.definition.schemaVersion).toBe("1.1.0");
-    expect(body).toEqual(
-      expect.objectContaining({
-        version: "1.0.0",
-        type: "document",
-      }),
+    const store = createD1ContentRevisionStore(
+      database,
+      referenceSiteDefinition.site.id,
+      workspaceId,
     );
-    expect(() => listEditableSiteFields(current.definition)).not.toThrow();
-    await expect(
-      application.queries.isRevisionCurrent(current),
-    ).resolves.toBe(false);
+    await store.requireAccess(editorActorId);
+
+    const restored = await store.getRevision(0);
+
+    expect(restored?.inputs.schemaVersion).toBe("1.0.0");
+    expect(restored?.definition).toEqual(legacy);
+    expect(
+      (restored?.definition as unknown as Record<string, unknown>).design,
+    ).toBeUndefined();
   });
 
   it("atomically rejects a media binding after the occurrence head advances", async () => {
@@ -375,7 +369,7 @@ describe("D1 content revision store", () => {
     await application.commands.save({
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "Current revision" }],
       idempotencyKey: "d1-content-save-0002",
@@ -385,7 +379,7 @@ describe("D1 content revision store", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.1.0",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Stale revision" }],
         idempotencyKey: "d1-content-save-0003",
@@ -401,7 +395,7 @@ describe("D1 content revision store", () => {
       firstApplication.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.1.0",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Concurrent first" }],
         idempotencyKey: "d1-content-concurrent-0001",
@@ -409,7 +403,7 @@ describe("D1 content revision store", () => {
       secondApplication.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.1.0",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Concurrent second" }],
         idempotencyKey: "d1-content-concurrent-0002",
@@ -443,7 +437,7 @@ describe("D1 content revision store", () => {
     const command = {
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "One retried save" }],
       idempotencyKey: "d1-content-concurrent-0003",
@@ -568,7 +562,7 @@ describe("D1 content revision store", () => {
     await application.commands.save({
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First input" }],
       idempotencyKey: "d1-content-save-0004",
@@ -578,7 +572,7 @@ describe("D1 content revision store", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId,
-        schemaVersion: "1.1.0",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Different input" }],
         idempotencyKey: "d1-content-save-0004",
@@ -597,7 +591,7 @@ describe("D1 content revision store", () => {
     await first.commands.save({
       actorId: editorActorId,
       workspaceId,
-      schemaVersion: "1.1.0",
+      schemaVersion: referenceSiteDefinition.schemaVersion,
       baseRevision: 0,
       edits: [{ path: "section_hero.title", value: "First workspace" }],
       idempotencyKey: sharedKey,
@@ -606,7 +600,7 @@ describe("D1 content revision store", () => {
       second.commands.save({
         actorId: editorActorId,
         workspaceId: otherWorkspaceId,
-        schemaVersion: "1.1.0",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Second workspace" }],
         idempotencyKey: sharedKey,

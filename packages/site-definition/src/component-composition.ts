@@ -9,6 +9,7 @@ import {
   validateRichTextDocument,
   type RichTextDocument,
 } from "./rich-text";
+import { designContract } from "./design-tokens";
 
 export type PageComponentType = PageSection["type"];
 
@@ -42,11 +43,19 @@ export const pageCompositionContract = Object.freeze({
   components: Object.freeze({
     hero: Object.freeze({
       label: "Hero",
-      editableProps: Object.freeze(["eyebrow", "title", "summary"]),
+      editableProps: Object.freeze([
+        "eyebrow",
+        "title",
+        "summary",
+      ]),
     }),
     services: Object.freeze({
       label: "Services",
-      editableProps: Object.freeze(["eyebrow", "title", "introduction"]),
+      editableProps: Object.freeze([
+        "eyebrow",
+        "title",
+        "introduction",
+      ]),
     }),
     proof: Object.freeze({
       label: "Proof",
@@ -84,6 +93,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: designContract.variants.hero.values[0],
         eyebrow: "Introduce this page",
         title: "A clear page headline",
         summary: "Explain the page in a short, useful sentence.",
@@ -102,6 +112,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: designContract.variants.services.values[0],
         eyebrow: "Services",
         title: "What we can make together",
         introduction: "Describe the work available here.",
@@ -118,6 +129,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: designContract.variants.proof.values[0],
         quote: "Add a principle or a piece of evidence.",
         attribution: "Source",
         metrics: [
@@ -132,6 +144,7 @@ export function createDefaultPageSection(
       return {
         id,
         type,
+        variant: designContract.variants.callToAction.values[0],
         eyebrow: "Next step",
         title: "Invite the reader to act",
         body: {
@@ -300,6 +313,14 @@ function validateSectionSchema(
   errors: Record<string, string>,
 ): boolean {
   const path = id;
+  if (
+    typeof section.variant !== "string" ||
+    !designContract.variants[type].values.includes(section.variant as never)
+  ) {
+    errors[`${path}.variant`] =
+      "Choose a variant registered for this component.";
+    return false;
+  }
   switch (type) {
     case "hero":
       return (
@@ -308,6 +329,7 @@ function validateSectionSchema(
           [
             "id",
             "type",
+            "variant",
             "eyebrow",
             "title",
             "summary",
@@ -319,7 +341,7 @@ function validateSectionSchema(
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "eyebrow", "title", "summary"],
+          ["id", "type", "variant", "eyebrow", "title", "summary"],
           path,
           errors,
         ) &&
@@ -330,13 +352,28 @@ function validateSectionSchema(
       return (
         validateObjectKeys(
           section,
-          ["id", "type", "eyebrow", "title", "introduction", "items"],
+          [
+            "id",
+            "type",
+            "variant",
+            "eyebrow",
+            "title",
+            "introduction",
+            "items",
+          ],
           path,
           errors,
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "eyebrow", "title", "introduction"],
+          [
+            "id",
+            "type",
+            "variant",
+            "eyebrow",
+            "title",
+            "introduction",
+          ],
           path,
           errors,
         ) &&
@@ -351,13 +388,20 @@ function validateSectionSchema(
       return (
         validateObjectKeys(
           section,
-          ["id", "type", "quote", "attribution", "metrics"],
+          [
+            "id",
+            "type",
+            "variant",
+            "quote",
+            "attribution",
+            "metrics",
+          ],
           path,
           errors,
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "quote", "attribution"],
+          ["id", "type", "variant", "quote", "attribution"],
           path,
           errors,
         ) &&
@@ -372,13 +416,21 @@ function validateSectionSchema(
       return (
         validateObjectKeys(
           section,
-          ["id", "type", "eyebrow", "title", "body", "action"],
+          [
+            "id",
+            "type",
+            "variant",
+            "eyebrow",
+            "title",
+            "body",
+            "action",
+          ],
           path,
           errors,
         ) &&
         validateTextFields(
           section,
-          ["id", "type", "eyebrow", "title"],
+          ["id", "type", "variant", "eyebrow", "title"],
           path,
           errors,
         ) &&
@@ -425,6 +477,7 @@ export function referencedPageComponentIds(
 function protectedShape(
   section: PageSection,
   normalizeNestedIds = false,
+  protectVariant = true,
 ): Record<string, unknown> {
   const registration = pageCompositionContract.components[section.type];
   const protectedSection = structuredClone(section) as unknown as Record<
@@ -432,6 +485,12 @@ function protectedShape(
     unknown
   >;
   delete protectedSection.id;
+  // Variants are owned by the outer controlled-design fields. Composition
+  // submissions carry them for rendering, so the domain boundary must protect
+  // them from stale or direct composition writes.
+  if (!protectVariant) {
+    delete protectedSection.variant;
+  }
   for (const property of registration.editableProps) {
     delete protectedSection[property];
   }
@@ -473,6 +532,7 @@ function equalProtectedShape(
   left: PageSection,
   right: PageSection,
   normalizeNestedIds = false,
+  protectVariant = true,
 ): boolean {
   const canonicalize = (value: unknown): unknown => {
     if (Array.isArray(value)) {
@@ -489,10 +549,14 @@ function equalProtectedShape(
   };
   return (
     JSON.stringify(
-      canonicalize(protectedShape(left, normalizeNestedIds)),
+      canonicalize(
+        protectedShape(left, normalizeNestedIds, protectVariant),
+      ),
     ) ===
     JSON.stringify(
-      canonicalize(protectedShape(right, normalizeNestedIds)),
+      canonicalize(
+        protectedShape(right, normalizeNestedIds, protectVariant),
+      ),
     )
   );
 }
@@ -678,10 +742,14 @@ export function applyPageComposition(
         equalProtectedShape(
           createDefaultPageSection(section.type, id, definition),
           section,
+          false,
+          false,
         ) ||
         equalProtectedShape(
           createDefaultPageSection(section.type, id, submittedContext),
           section,
+          false,
+          false,
         )
       );
     const duplicateScaffold =
@@ -689,13 +757,33 @@ export function applyPageComposition(
       hasCanonicalDuplicateIds(section) &&
       [...definition.home.sections, ...accepted]
         .filter((source) => source.type === section.type)
-        .some((source) => equalProtectedShape(source, section, true));
+        .some((source) =>
+          equalProtectedShape(source, section, true, false),
+        );
     const scaffoldAllowed =
       existing === undefined
         ? defaultScaffold || duplicateScaffold
         : equalProtectedShape(existing, section);
     if (!scaffoldAllowed) {
-      const protectedProperty = Object.keys(protectedShape(section))[1] ?? "type";
+      const submittedProtected = protectedShape(section);
+      const protectedProperty =
+        (existing === undefined
+          ? undefined
+          : Object.keys(submittedProtected).find((property) => {
+              const existingValue = protectedShape(existing)[property];
+              const submittedValue = submittedProtected[property];
+              return (
+                JSON.stringify(existingValue) !==
+                JSON.stringify(submittedValue)
+              );
+            })) ??
+        Object.keys(submittedProtected).find(
+          (property) => property !== "type" && property !== "variant",
+        ) ??
+        (Object.hasOwn(submittedProtected, "variant")
+          ? "variant"
+          : undefined) ??
+        "type";
       errors[`${id}.${protectedProperty}`] =
         "This component scaffolding is protected by the Site Definition.";
       continue;

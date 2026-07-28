@@ -14,7 +14,7 @@ const failedCommit = "b".repeat(40);
 const expectedCommit = "c".repeat(40);
 const publicationId = `publish_${"d".repeat(32)}`;
 const bytes =
-  '{"definitionVersion":"1.1.0","schemaVersion":"1.1.0",' +
+  '{"definitionVersion":"1.2.0","schemaVersion":"1.2.0",' +
   '"site":{"name":"New"},"home":{"media":[],"sections":[]}}\n';
 const richTextPath = "content/rich-text/section_contact/body.md";
 const richTextBytes = "A deterministic **Markdown** artifact.\n";
@@ -244,7 +244,7 @@ describe("exact production content authorization", () => {
 
   it("authorizes the first code-only reader upgrade against the fixed-base runtime hash", async () => {
     expect(fixedBaseRuntimeContentHash).toBe(
-      "19e5a86c6331fd0882880f8cbdabd8e62b2c557167b314b84ab0f195b69771d5",
+      "4aa6fd159782ff3dd54a16be5447fc6e367eca5f9870bbf116255e6282f6f8a3",
     );
     expect(fixedBaseRuntimeContentHash).not.toBe(
       trackedPublishedContentHash,

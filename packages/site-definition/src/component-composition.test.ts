@@ -116,6 +116,34 @@ describe("page component composition", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("rejects a stale composition variant for an existing component", () => {
+    const hero = referenceSiteDefinition.home.sections[0]!;
+    if (hero.type !== "hero") {
+      throw new Error("expected_hero_fixture");
+    }
+    const liveDefinition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          { ...hero, variant: "focused" },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    };
+    const staleComposition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+
+    expect(applyPageComposition(liveDefinition, staleComposition)).toEqual({
+      ok: false,
+      errors: {
+        "section_hero.variant":
+          "This component scaffolding is protected by the Site Definition.",
+      },
+    });
+  });
+
   it("derives new component scaffolding from earlier additions in one command", () => {
     const proof = referenceSiteDefinition.home.sections.find(
       (section) => section.type === "proof",

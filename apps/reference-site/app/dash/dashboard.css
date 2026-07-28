@@ -483,6 +483,7 @@
 }
 
 .editor-groups input,
+.editor-groups select,
 .editor-groups textarea {
   width: 100%;
   border: 1px solid #cbd2cd;

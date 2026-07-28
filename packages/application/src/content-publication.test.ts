@@ -21,6 +21,7 @@ import {
   createContentPublicationId,
   createInMemoryContentPublicationStore,
   hashContentPublicationArtifacts,
+  hashPublishedSiteDefinition,
   parseProductionBase,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
@@ -228,6 +229,148 @@ describe("content publication application", () => {
             "foundry.site-publication-artifacts.v2",
         },
       }),
+    );
+  });
+
+  it("rejects a stored legacy schema before creating a publication fingerprint", async () => {
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            schemaVersion: "1.0.0",
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+
+    const coherentLegacyDefinition = {
+      ...revisionApplication.saved.definition,
+      definitionVersion: "1.0.0",
+      schemaVersion: "1.0.0",
+    } as unknown as typeof revisionApplication.saved.definition;
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          definition: coherentLegacyDefinition,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            contentHash:
+              await hashPublishedSiteDefinition(coherentLegacyDefinition),
+            schemaVersion: "1.0.0",
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+  });
+
+  it.each([
+    [
+      "an unregistered design token",
+      (definition: Record<string, any>) => {
+        definition.design.colour.accent = "url(javascript:alert(1))";
+      },
+    ],
+    [
+      "a cross-component variant",
+      (definition: Record<string, any>) => {
+        definition.home.sections[0].variant = "cards";
+      },
+    ],
+    [
+      "an arbitrary URL",
+      (definition: Record<string, any>) => {
+        definition.site.navigation[0].href = "https://attacker.example";
+      },
+    ],
+    [
+      "an extra property",
+      (definition: Record<string, any>) => {
+        definition.design.rawCss = "body{display:none}";
+      },
+    ],
+  ])("rejects %s at the approval boundary", async (_name, mutate) => {
+    const malformed = structuredClone(
+      revisionApplication.saved.definition,
+    ) as unknown as Record<string, any>;
+    mutate(malformed);
+    const definition =
+      malformed as unknown as typeof revisionApplication.saved.definition;
+
+    await expect(
+      createContentApprovalFingerprint(
+        {
+          ...revisionApplication.saved,
+          definition,
+          inputs: {
+            ...revisionApplication.saved.inputs,
+            contentHash: await hashPublishedSiteDefinition(definition),
+          },
+        },
+        "channel-a",
+      ),
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_stale"));
+  });
+
+  it("fingerprints tokens and variants as design while ignoring copy-only changes", async () => {
+    const base = revisionApplication.saved;
+    const hero = base.definition.home.sections[0]!;
+    if (hero.type !== "hero") {
+      throw new TypeError("expected_hero_fixture");
+    }
+    const revisionWith = async (
+      definition: typeof base.definition,
+    ): Promise<typeof base> => ({
+      ...base,
+      definition,
+      inputs: {
+        ...base.inputs,
+        contentHash: await hashPublishedSiteDefinition(definition),
+      },
+    });
+    const copyRevision = await revisionWith({
+      ...base.definition,
+      home: {
+        ...base.definition.home,
+        sections: [
+          { ...hero, title: "Copy-only fingerprint change" },
+          ...base.definition.home.sections.slice(1),
+        ],
+      },
+    });
+    const tokenRevision = await revisionWith({
+      ...base.definition,
+      design: {
+        ...base.definition.design,
+        colour: { accent: "clay" },
+      },
+    });
+    const variantRevision = await revisionWith({
+      ...base.definition,
+      home: {
+        ...base.definition.home,
+        sections: [
+          { ...hero, variant: "focused" },
+          ...base.definition.home.sections.slice(1),
+        ],
+      },
+    });
+
+    const [baseFingerprint, copyFingerprint, tokenFingerprint, variantFingerprint] =
+      await Promise.all(
+        [base, copyRevision, tokenRevision, variantRevision].map((revision) =>
+          createContentApprovalFingerprint(revision, "channel-a"),
+        ),
+      );
+
+    expect(copyFingerprint.designHash).toBe(baseFingerprint.designHash);
+    expect(tokenFingerprint.designHash).not.toBe(baseFingerprint.designHash);
+    expect(variantFingerprint.designHash).not.toBe(
+      baseFingerprint.designHash,
     );
   });
 

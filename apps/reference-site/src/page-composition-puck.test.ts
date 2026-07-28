@@ -58,6 +58,48 @@ describe("Puck page-composition adapter", () => {
     expect(result).toEqual({ ok: true, definition });
   });
 
+  it("does not let stale Puck props overwrite the outer variant owner", () => {
+    const staleData = definitionToPuckData(referenceSiteDefinition);
+    const sourceHero = referenceSiteDefinition.home.sections[0]!;
+    const liveDefinition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          { ...sourceHero, variant: "focused" },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    } as SiteDefinition;
+    const hero = liveDefinition.home.sections[0]!;
+    if (hero.type !== "hero") {
+      throw new Error("expected_hero");
+    }
+    const staleHero = staleData.content[0]!;
+    if (staleHero.props.type !== "hero") {
+      throw new Error("expected_stale_hero");
+    }
+    staleData.content[0] = {
+      ...staleHero,
+      props: {
+        ...staleHero.props,
+        title: "An unrelated Puck edit",
+      },
+    };
+
+    const result = puckDataToDefinition(liveDefinition, staleData);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const recoveredHero = result.definition.home.sections[0]!;
+      expect(
+        recoveredHero.type === "hero"
+          ? [recoveredHero.variant, recoveredHero.title]
+          : null,
+      ).toEqual(["focused", "An unrelated Puck edit"]);
+    }
+  });
+
   it("maps a Puck insert, reorder, duplicate, remove, and field change to a valid definition", () => {
     const data = structuredClone(
       definitionToPuckData(referenceSiteDefinition),
@@ -87,6 +129,7 @@ describe("Puck page-composition adapter", () => {
         props: {
           id: "Puck-generated-insert",
           type: "callToAction",
+          variant: "moss",
           eyebrow: "New",
           title: "A new invitation",
           body: richBody("Take the next step."),

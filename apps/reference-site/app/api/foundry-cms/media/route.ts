@@ -464,22 +464,32 @@ export async function POST(request: Request) {
         baseRevision,
         workspaceOccurrence,
       );
-      const occurrence = await application.commands.replaceOccurrence({
+      const replaceCommand = {
         actorId,
         occurrenceId,
         assetId: createMediaAssetId(String(body.assetId ?? "")),
         baseRevision,
         workspaceId: binding.workspaceId,
         idempotencyKey,
+      } as const;
+      const requireReplay = body.requireReplay === true;
+      const occurrence = requireReplay
+        ? await application.queries.getReplacementReceipt(
+            replaceCommand,
+          )
+        : await application.commands.replaceOccurrence(replaceCommand);
+      if (occurrence === null) {
+        throw new ContentRevisionConflictError(binding.current.revision);
+      }
+      const result = await bindOccurrenceToContentRevision({
+        actorId,
+        idempotencyKey,
+        occurrence,
+        application,
+        binding,
       });
       return Response.json(
-        await bindOccurrenceToContentRevision({
-          actorId,
-          idempotencyKey,
-          occurrence,
-          application,
-          binding,
-        }),
+        requireReplay ? { ...result, mutationReplay: true } : result,
         { status: 201 },
       );
     }

@@ -7,6 +7,7 @@ import type {
   SuspectedSpamSubmission,
 } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
+import type { StaleRecoveryEdit } from "../src/content-editor-recovery";
 
 import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
@@ -14,6 +15,13 @@ import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { WorkspaceEditors } from "./workspace-editors";
+
+export function contentWorkspaceRequiresSchemaRecovery(
+  definition: SiteDefinition,
+  revision: ContentRevision,
+): boolean {
+  return revision.inputs.schemaVersion !== definition.schemaVersion;
+}
 
 export function DashboardShell({
   definition,
@@ -25,6 +33,7 @@ export function DashboardShell({
   initialPreviewUrl,
   initialContentStale,
   staleRecovery,
+  durableSchemaRecovery,
   formDeliveryHealth,
   failedFormDeliveries,
   suspectedSpam,
@@ -44,6 +53,7 @@ export function DashboardShell({
     id: string;
     sourceWorkspaceId: string;
   }>;
+  durableSchemaRecovery?: ReadonlyArray<StaleRecoveryEdit>;
   formDeliveryHealth: PublicFormDeliveryHealth;
   failedFormDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
@@ -102,6 +112,20 @@ export function DashboardShell({
           initialPreviewUrl === undefined ? (
             <ContentWorkspaceStarter
               csrfToken={contentMutationToken}
+              staleRecovery={staleRecovery}
+            />
+          ) : contentWorkspaceRequiresSchemaRecovery(
+              definition,
+              contentRevision,
+            ) ? (
+            <ContentWorkspaceStarter
+              csrfToken={contentMutationToken}
+              preservedRevision={{
+                workspaceId: contentRevision.workspaceId,
+                revision: contentRevision.revision,
+                schemaVersion: contentRevision.inputs.schemaVersion,
+              }}
+              durableRecoveryEdits={durableSchemaRecovery}
               staleRecovery={staleRecovery}
             />
           ) : (

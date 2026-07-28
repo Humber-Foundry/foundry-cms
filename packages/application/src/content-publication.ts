@@ -1,4 +1,5 @@
 import {
+  isSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
   type SiteDefinition,
   type SiteDefinitionSchemaVersion,
@@ -9,6 +10,7 @@ import type {
   ContentRevision,
   ContentWorkspaceId,
 } from "./content-revisions";
+import { canonicalJson } from "./deterministic-hash";
 import type { HumanMembershipId } from "./human-access";
 
 export const publishedSiteDefinitionPath =
@@ -326,19 +328,6 @@ export class ContentPublicationValidationError extends Error {
   }
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -413,13 +402,18 @@ export function hashPublishedSiteDefinition(
 function designProjection(definition: SiteDefinition) {
   return {
     definitionVersion: definition.definitionVersion,
+    design: definition.design,
     siteId: definition.site.id,
     navigation: definition.site.navigation.map(({ id, href }) => ({
       id,
       href,
     })),
     pageId: definition.home.id,
-    sections: definition.home.sections.map(({ id, type }) => ({ id, type })),
+    sections: definition.home.sections.map(({ id, type, variant }) => ({
+      id,
+      type,
+      variant,
+    })),
   };
 }
 
@@ -428,6 +422,12 @@ export async function createContentApprovalFingerprint(
   channelConfigurationHash: string,
   channel: ContentPublicationChannel = "site",
 ): Promise<ContentApprovalFingerprint> {
+  if (revision.inputs.schemaVersion !== revision.definition.schemaVersion) {
+    throw new ContentApprovalInvalidError("revision_stale");
+  }
+  if (!isSiteDefinition(revision.definition)) {
+    throw new ContentApprovalInvalidError("revision_stale");
+  }
   const artifactHash = await hashContentPublicationArtifacts(
     serializeContentPublicationArtifacts(revision.definition),
   );

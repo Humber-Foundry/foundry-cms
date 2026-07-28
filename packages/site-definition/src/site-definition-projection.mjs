@@ -1,4 +1,19 @@
 export const projectedRichTextVersion = "1.0.0";
+export const projectedSiteDefinitionVersion = "1.2.0";
+
+const projectedDefaultSiteDesign = Object.freeze({
+  typography: Object.freeze({ heading: "editorial" }),
+  colour: Object.freeze({ accent: "moss" }),
+  spacing: Object.freeze({ section: "relaxed" }),
+  layout: Object.freeze({ contentWidth: "standard" }),
+});
+
+const projectedDefaultComponentVariants = Object.freeze({
+  hero: "editorial",
+  services: "list",
+  proof: "panel",
+  callToAction: "moss",
+});
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -27,31 +42,49 @@ export function projectSiteDefinitionSchema(value) {
     throw new TypeError("site_definition_invalid");
   }
   if (
-    value.definitionVersion === "1.1.0" &&
-    value.schemaVersion === "1.1.0"
+    value.definitionVersion === projectedSiteDefinitionVersion &&
+    value.schemaVersion === projectedSiteDefinitionVersion
   ) {
     return value;
   }
   if (
-    value.definitionVersion !== "1.0.0" ||
-    value.schemaVersion !== "1.0.0"
+    value.definitionVersion !== value.schemaVersion ||
+    (value.schemaVersion !== "1.0.0" &&
+      value.schemaVersion !== "1.1.0")
   ) {
     throw new TypeError("site_definition_version_unsupported");
   }
   const projected = structuredClone(value);
-  projected.definitionVersion = "1.1.0";
-  projected.schemaVersion = "1.1.0";
+  const needsDesignProjection = projected.schemaVersion === "1.0.0";
+  projected.definitionVersion = projectedSiteDefinitionVersion;
+  projected.schemaVersion = projectedSiteDefinitionVersion;
+  if (needsDesignProjection) {
+    projected.design ??= projectedDefaultSiteDesign;
+  }
   projected.home.sections = projected.home.sections.map((section) => {
-    if (!isRecord(section) || section.type !== "callToAction") {
+    if (!isRecord(section) || typeof section.type !== "string") {
       return section;
     }
-    if (typeof section.body !== "string") {
+    if (
+      needsDesignProjection &&
+      section.type in projectedDefaultComponentVariants
+    ) {
+      section.variant ??=
+        projectedDefaultComponentVariants[section.type];
+    }
+    if (section.type !== "callToAction") {
+      return section;
+    }
+    if (typeof section.body === "string") {
+      return {
+        ...section,
+        body: projectPlainTextRichTextDocument(section.body),
+      };
+    }
+    if (!isRecord(section.body)) {
       throw new TypeError("site_definition_legacy_rich_text_invalid");
     }
-    return {
-      ...section,
-      body: projectPlainTextRichTextDocument(section.body),
-    };
+    return section;
   });
   return projected;
 }

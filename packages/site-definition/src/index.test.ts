@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
 
+import { siteDefinitionValidationKeywords } from "../scripts/site-definition-validation-keywords.mjs";
 import {
   applySiteDefinitionEdits,
   createReferenceSiteDefinition,
   DuplicateEditableSiteFieldPathError,
   createSiteId,
+  isSiteDefinition,
   listEditableSiteFields,
   serializeRichTextDocument,
   serializeSiteDefinitionRichTextForPublication,
@@ -15,7 +17,6 @@ import {
   type RichTextDocument,
   referenceSiteDefinition,
   siteDefinitionSchema,
-  siteDefinitionValidationKeywords,
   type SiteDefinition,
 } from "./index";
 import publishedSite from "./published-site.json";
@@ -28,17 +29,17 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.1.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.1.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.2.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.2.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.1.0",
+      "https://foundrycms.dev/schemas/site-definition/1.2.0",
     );
     expect(
       siteDefinitionSchema.$defs.richTextDocument.$comment,
-    ).toContain("validateRichTextDocument");
+    ).toContain("isSiteDefinition");
   });
 
   it("stages the rich-text schema upgrade without rewriting published bytes", () => {
@@ -51,8 +52,8 @@ describe("reference Site Definition", () => {
       (section) => section.type === "callToAction",
     );
 
-    expect(stored.definitionVersion).toBe("1.0.0");
-    expect(stored.schemaVersion).toBe("1.0.0");
+    expect(stored.definitionVersion).toBe("1.1.0");
+    expect(stored.schemaVersion).toBe("1.1.0");
     expect(typeof storedCallToAction?.body).toBe("string");
     expect(runtimeCallToAction).toEqual(
       expect.objectContaining({
@@ -94,6 +95,7 @@ describe("reference Site Definition", () => {
     expect(validate(referenceSiteDefinition), validate.errors?.toString()).toBe(
       true,
     );
+    expect(isSiteDefinition(referenceSiteDefinition)).toBe(true);
   });
 
   it("projects a preserved 1.0 definition into the current rich-text schema", () => {
@@ -111,8 +113,8 @@ describe("reference Site Definition", () => {
     )!;
 
     expect(upgraded).not.toBe(legacy);
-    expect(upgraded.definitionVersion).toBe("1.1.0");
-    expect(upgraded.schemaVersion).toBe("1.1.0");
+    expect(upgraded.definitionVersion).toBe("1.2.0");
+    expect(upgraded.schemaVersion).toBe("1.2.0");
     expect(callToAction).toEqual(
       expect.objectContaining({
         body: {
@@ -238,7 +240,7 @@ describe("reference Site Definition", () => {
       const document = malformed.home.sections[3].body;
       mutate(document);
 
-      expect(validate(malformed)).toBe(false);
+      expect(isSiteDefinition(malformed)).toBe(false);
       expect(() =>
         validateRichTextDocument(document as RichTextDocument),
       ).toThrow();
@@ -271,7 +273,7 @@ describe("reference Site Definition", () => {
     );
   });
 
-  it("continues to validate saved 1.0 definitions created before media manifests", () => {
+  it("keeps media optional for definitions saved before media manifests", () => {
     const legacy = structuredClone(referenceSiteDefinition) as unknown as Record<
       string,
       any
@@ -315,6 +317,24 @@ describe("reference Site Definition", () => {
       name: "an arbitrary off-site link target",
       change: (definition: Record<string, any>) => {
         definition.site.navigation[0].href = "https://example.com";
+      },
+    },
+    {
+      name: "an unknown design token",
+      change: (definition: Record<string, any>) => {
+        definition.design.colour.custom = "red";
+      },
+    },
+    {
+      name: "an executable design value",
+      change: (definition: Record<string, any>) => {
+        definition.design.colour.accent = "url(javascript:alert(1))";
+      },
+    },
+    {
+      name: "a variant registered for a different component",
+      change: (definition: Record<string, any>) => {
+        definition.home.sections[0].variant = "cards";
       },
     },
     {
@@ -364,6 +384,7 @@ describe("reference Site Definition", () => {
     change(malformed);
 
     expect(validate(malformed)).toBe(false);
+    expect(isSiteDefinition(malformed)).toBe(false);
   });
 
   it("exposes editable copy through stable item identifiers", () => {
@@ -618,9 +639,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.1.0.",
+        "section_missing.title": "This field is not in Site Definition 1.2.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.1.0.",
+        "section_hero.href": "This field is not in Site Definition 1.2.0.",
       },
     });
   });
@@ -634,7 +655,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.1.0.",
+        "This field is not in Site Definition 1.2.0.",
       );
     }
   });
