@@ -165,6 +165,29 @@ describe("D1 media asset store", () => {
     await expect(app.queries.getOccurrence(otherOccurrence)).resolves.toBeNull();
   });
 
+  it("replays overlapping identical occurrence mutations", async () => {
+    const app = application();
+    await upload(app);
+    const command = {
+      actorId,
+      workspaceId,
+      occurrenceId,
+      assetId,
+      baseRevision: 0,
+      idempotencyKey: "d1-overlapping-mutation-key",
+    } as const;
+
+    const [first, duplicate] = await Promise.all([
+      app.commands.replaceOccurrence(command),
+      app.commands.replaceOccurrence(command),
+    ]);
+
+    expect(duplicate).toEqual(first);
+    await expect(app.queries.getOccurrence(occurrenceId)).resolves.toEqual(
+      first,
+    );
+  });
+
   it("retains a tombstone so a deleted stable asset identity cannot be reused", async () => {
     const app = application();
     await upload(app);

@@ -85,7 +85,9 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
       if (existing !== undefined && existing !== context.requestHash) {
         throw new MediaValidationError("idempotencyKey");
       }
+      if (existing !== undefined) return false;
       claims.set(key, context.requestHash);
+      return true;
     },
     async replay(context) {
       const receipt = receipts.get(
@@ -96,6 +98,12 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
         throw new MediaValidationError("idempotencyKey");
       }
       return immutable(receipt.result);
+    },
+    async releaseClaim(context) {
+      const key = `${context.siteId}:${context.idempotencyKey}`;
+      if (!receipts.has(key) && claims.get(key) === context.requestHash) {
+        claims.delete(key);
+      }
     },
     async record(context, result) {
       const key = `${context.siteId}:${context.idempotencyKey}`;

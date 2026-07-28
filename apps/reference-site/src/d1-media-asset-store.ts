@@ -199,7 +199,9 @@ export function createD1MediaAssetStore(
         if (existing?.request_hash !== requestHash) {
           throw new MediaSiteAccessError();
         }
+        return false;
       }
+      return true;
     },
     async replay({ siteId, idempotencyKey, requestHash }) {
       const row = await database
@@ -215,6 +217,19 @@ export function createD1MediaAssetStore(
         throw new MediaSiteAccessError();
       }
       return restoreMutationResult(row.result_json);
+    },
+    async releaseClaim({ siteId, idempotencyKey, requestHash }) {
+      await database
+        .prepare(
+          `DELETE FROM media_mutation_claims
+           WHERE site_id = ?1 AND idempotency_key = ?2 AND request_hash = ?3
+             AND NOT EXISTS (
+               SELECT 1 FROM media_mutation_receipts
+               WHERE site_id = ?1 AND idempotency_key = ?2
+             )`,
+        )
+        .bind(siteId, idempotencyKey, requestHash)
+        .run();
     },
     async record({ siteId, idempotencyKey, requestHash }, result) {
       const saved = await database

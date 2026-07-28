@@ -24,13 +24,18 @@ function ascii(source: Uint8Array, start: number, end: number) {
   return String.fromCharCode(...source.slice(start, end));
 }
 
-function crc32(source: Uint8Array) {
+const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+  }
+  return value >>> 0;
+});
+
+function crc32(source: Uint8Array, start: number, end: number) {
   let crc = 0xffffffff;
-  for (const byte of source) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
+  for (let index = start; index < end; index += 1) {
+    crc = (crc >>> 8) ^ crcTable[(crc ^ source[index]!) & 0xff]!;
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
@@ -48,7 +53,7 @@ function png(source: Uint8Array): ImageSourceMetadata | null {
     if (end > source.byteLength) invalid();
     const type = ascii(source, offset + 4, offset + 8);
     const expectedCrc = view.getUint32(offset + 8 + length);
-    if (crc32(source.slice(offset + 4, offset + 8 + length)) !== expectedCrc) {
+    if (crc32(source, offset + 4, offset + 8 + length) !== expectedCrc) {
       invalid();
     }
     if (metadata === null) {
@@ -185,15 +190,26 @@ function avif(source: Uint8Array): ImageSourceMetadata | null {
   let sawMeta = false;
   let sawImagePayload = false;
   while (offset + 8 <= source.byteLength) {
-    const size = view.getUint32(offset);
+    const size32 = view.getUint32(offset);
     const type = ascii(source, offset + 4, offset + 8);
-    if (size < 8 || offset + size > source.byteLength) invalid();
+    let headerSize = 8;
+    let size = size32;
+    if (size32 === 1) {
+      if (offset + 16 > source.byteLength) invalid();
+      const extended = view.getBigUint64(offset + 8);
+      if (extended > BigInt(Number.MAX_SAFE_INTEGER)) invalid();
+      size = Number(extended);
+      headerSize = 16;
+    } else if (size32 === 0) {
+      size = source.byteLength - offset;
+    }
+    if (size < headerSize || offset + size > source.byteLength) invalid();
     if (type === "ftyp") {
-      const brands = ascii(source, offset + 8, offset + size);
+      const brands = ascii(source, offset + headerSize, offset + size);
       validBrand = brands.includes("avif") || brands.includes("avis");
     }
-    if (type === "meta") sawMeta = size > 12;
-    if (type === "mdat") sawImagePayload = size > 8;
+    if (type === "meta") sawMeta = size > headerSize + 4;
+    if (type === "mdat") sawImagePayload = size > headerSize;
     offset += size;
   }
   if (offset !== source.byteLength || !validBrand || !sawMeta || !sawImagePayload) {

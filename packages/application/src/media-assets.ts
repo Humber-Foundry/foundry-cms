@@ -151,7 +151,8 @@ export type MediaSourceStore = Readonly<{
 export type MediaAssetStore = Readonly<{
   claim(
     context: MediaMutationContext,
-  ): Promise<void>;
+  ): Promise<boolean>;
+  releaseClaim(context: MediaMutationContext): Promise<void>;
   replay(
     context: MediaMutationContext,
   ): Promise<MediaMutationResult | null>;
@@ -317,6 +318,19 @@ export function createMediaAssetApplication({
     return replay;
   }
 
+  async function claimMutation(
+    context: MediaMutationContext,
+    expectedKind: MediaMutationResult["kind"],
+  ) {
+    if (await assets.claim(context)) return null;
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const replay = await replayMutation(context, expectedKind);
+      if (replay !== null) return replay;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new MediaSiteAccessError();
+  }
+
   return Object.freeze({
     siteId,
     commands: Object.freeze({
@@ -368,44 +382,55 @@ export function createMediaAssetApplication({
         if (await assets.isAssetIdReserved(siteId, command.assetId)) {
           throw new MediaValidationError("assetId");
         }
-        await assets.claim(context);
-        const existing = await assets.getAsset(siteId, command.assetId);
-        if (existing !== null) {
-          if (
-            existing.sourceHash !== sourceHash ||
-            existing.fileName !== command.fileName ||
-            existing.contentType !== command.contentType ||
-            existing.byteLength !== command.byteLength ||
-            existing.width !== command.width ||
-            existing.height !== command.height
-          ) {
-            throw new MediaValidationError("assetId");
-          }
-          await assets.record(context, {
-            kind: "asset",
-            value: existing,
-          });
-          return existing;
+        const concurrent = await claimMutation(context, "asset");
+        if (concurrent !== null) {
+          return (concurrent as Extract<
+            MediaMutationResult,
+            { kind: "asset" }
+          >).value;
         }
-        const objectKey = `media/${siteId}/${command.assetId}/source`;
-        const asset: MediaAsset = {
-          siteId,
-          assetId: command.assetId,
-          objectKey,
-          sourceHash,
-          fileName: command.fileName,
-          contentType: command.contentType as MediaAsset["contentType"],
-          byteLength: command.byteLength,
-          width: command.width,
-          height: command.height,
-          createdAt: now(),
-          createdBy: command.actorId,
-        };
-        await sources.put(objectKey, command.source, {
-          contentType: asset.contentType,
-          sourceHash: asset.sourceHash,
-        });
-        return assets.createAsset(asset, context);
+        try {
+          const existing = await assets.getAsset(siteId, command.assetId);
+          if (existing !== null) {
+            if (
+              existing.sourceHash !== sourceHash ||
+              existing.fileName !== command.fileName ||
+              existing.contentType !== command.contentType ||
+              existing.byteLength !== command.byteLength ||
+              existing.width !== command.width ||
+              existing.height !== command.height
+            ) {
+              throw new MediaValidationError("assetId");
+            }
+            await assets.record(context, {
+              kind: "asset",
+              value: existing,
+            });
+            return existing;
+          }
+          const objectKey = `media/${siteId}/${command.assetId}/source`;
+          const asset: MediaAsset = {
+            siteId,
+            assetId: command.assetId,
+            objectKey,
+            sourceHash,
+            fileName: command.fileName,
+            contentType: command.contentType as MediaAsset["contentType"],
+            byteLength: command.byteLength,
+            width: command.width,
+            height: command.height,
+            createdAt: now(),
+            createdBy: command.actorId,
+          };
+          await sources.put(objectKey, command.source, {
+            contentType: asset.contentType,
+            sourceHash: asset.sourceHash,
+          });
+          return await assets.createAsset(asset, context);
+        } catch (error) {
+          await assets.releaseClaim(context);
+          throw error;
+        }
       },
       async replaceOccurrence(
         command: ReplaceMediaOccurrenceCommand,
@@ -425,23 +450,34 @@ export function createMediaAssetApplication({
         if ((await assets.getAsset(siteId, command.assetId)) === null) {
           throw new MediaSiteAccessError();
         }
-        await assets.claim(context);
-        const revision: MediaOccurrenceRevision = {
-          siteId,
-          occurrenceId: command.occurrenceId,
-          revision: command.baseRevision + 1,
-          assetId: command.assetId,
-          crop: null,
-          createdAt: now(),
-          createdBy: command.actorId,
-        };
-        await assets.saveOccurrence(
-          revision,
-          command.baseRevision,
-          "media.occurrence.replaced",
-          context,
-        );
-        return immutable(revision);
+        const concurrent = await claimMutation(context, "occurrence");
+        if (concurrent !== null) {
+          return (concurrent as Extract<
+            MediaMutationResult,
+            { kind: "occurrence" }
+          >).value;
+        }
+        try {
+          const revision: MediaOccurrenceRevision = {
+            siteId,
+            occurrenceId: command.occurrenceId,
+            revision: command.baseRevision + 1,
+            assetId: command.assetId,
+            crop: null,
+            createdAt: now(),
+            createdBy: command.actorId,
+          };
+          await assets.saveOccurrence(
+            revision,
+            command.baseRevision,
+            "media.occurrence.replaced",
+            context,
+          );
+          return immutable(revision);
+        } catch (error) {
+          await assets.releaseClaim(context);
+          throw error;
+        }
       },
       async cropOccurrence(
         command: CropMediaOccurrenceCommand,
@@ -459,28 +495,39 @@ export function createMediaAssetApplication({
           >).value;
         }
         assertCrop(command.crop);
-        await assets.claim(context);
-        const current = await assets.getOccurrence(
-          siteId,
-          command.occurrenceId,
-        );
-        if (current === null) {
-          throw new MediaSiteAccessError();
+        const concurrent = await claimMutation(context, "occurrence");
+        if (concurrent !== null) {
+          return (concurrent as Extract<
+            MediaMutationResult,
+            { kind: "occurrence" }
+          >).value;
         }
-        const revision: MediaOccurrenceRevision = {
-          ...current,
-          revision: command.baseRevision + 1,
-          crop: command.crop,
-          createdAt: now(),
-          createdBy: command.actorId,
-        };
-        await assets.saveOccurrence(
-          revision,
-          command.baseRevision,
-          "media.occurrence.cropped",
-          context,
-        );
-        return immutable(revision);
+        try {
+          const current = await assets.getOccurrence(
+            siteId,
+            command.occurrenceId,
+          );
+          if (current === null) {
+            throw new MediaSiteAccessError();
+          }
+          const revision: MediaOccurrenceRevision = {
+            ...current,
+            revision: command.baseRevision + 1,
+            crop: command.crop,
+            createdAt: now(),
+            createdBy: command.actorId,
+          };
+          await assets.saveOccurrence(
+            revision,
+            command.baseRevision,
+            "media.occurrence.cropped",
+            context,
+          );
+          return immutable(revision);
+        } catch (error) {
+          await assets.releaseClaim(context);
+          throw error;
+        }
       },
       async delete(command: {
         actorId: ContentActorId;
@@ -495,25 +542,31 @@ export function createMediaAssetApplication({
         if (replay !== null) {
           return;
         }
-        await assets.claim(context);
-        const asset = await assets.beginAssetDeletion(
-          siteId,
-          command.assetId,
-        );
-        const occurredAt = now();
-        await assets.tombstoneAssetDeletion(
-          siteId,
-          command.assetId,
-          command.actorId,
-          occurredAt,
-        );
-        await sources.delete(asset.objectKey);
-        await assets.completeAssetDeletion(
-          siteId,
-          command.assetId,
-          occurredAt,
-          context,
-        );
+        const concurrent = await claimMutation(context, "deleted");
+        if (concurrent !== null) return;
+        try {
+          const asset = await assets.beginAssetDeletion(
+            siteId,
+            command.assetId,
+          );
+          const occurredAt = now();
+          await assets.tombstoneAssetDeletion(
+            siteId,
+            command.assetId,
+            command.actorId,
+            occurredAt,
+          );
+          await sources.delete(asset.objectKey);
+          await assets.completeAssetDeletion(
+            siteId,
+            command.assetId,
+            occurredAt,
+            context,
+          );
+        } catch (error) {
+          await assets.releaseClaim(context);
+          throw error;
+        }
       },
     }),
     queries: Object.freeze({
