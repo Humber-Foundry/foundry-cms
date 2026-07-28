@@ -29,9 +29,8 @@ import {
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
 import {
-  clearContentEditorOutbox,
-  readContentEditorOutbox,
-  writeContentEditorOutbox,
+  createContentEditorOutboxController,
+  type ContentEditorOutboxRecord,
 } from "../src/content-editor-outbox";
 import { pageCompositionChanged } from "../src/page-composition-puck";
 import { VisualComponentEditor } from "./visual-component-editor";
@@ -100,7 +99,10 @@ export function ContentEditor({
   const recoveryApplied = useRef(false);
   const recoverySyncReady = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
-  const outboxQueue = useRef<Promise<void>>(Promise.resolve());
+  const outboxController = useMemo(
+    () => createContentEditorOutboxController(initialRevision.workspaceId),
+    [initialRevision.workspaceId],
+  );
   const lastAutosaveFingerprint = useRef<string | null>(null);
   const saveInFlight = useRef(false);
   const persistedFields = useMemo(
@@ -163,30 +165,18 @@ export function ContentEditor({
     }
   }, [state.status]);
 
-  function queueOutbox(operation: () => Promise<void>): Promise<void> {
-    const queued = outboxQueue.current.catch(() => undefined).then(operation);
-    outboxQueue.current = queued.catch(() => undefined);
-    return queued;
-  }
-
   function preserveOutboxWithoutAttempt(): void {
-    void queueOutbox(() =>
-      writeContentEditorOutbox({
-        workspaceId: initialRevision.workspaceId,
-        baseRevision: state.persistedRevision,
-        edits: recoverableEdits,
-      }),
-    ).catch(() => {
-      setMessage(
-        "Browser recovery storage could not be updated. Keep this tab open until these edits are resolved.",
-      );
-    });
+    void outboxController
+      .snapshot(state.persistedRevision, recoverableEdits)
+      .catch(() => {
+        setMessage(
+          "Browser recovery storage could not be updated. Keep this tab open until these edits are resolved.",
+        );
+      });
   }
 
   function outboxAttemptMatchesCurrentWorkspace(
-    record: NonNullable<
-      Awaited<ReturnType<typeof readContentEditorOutbox>>
-    >,
+    record: ContentEditorOutboxRecord,
   ): boolean {
     if (record.attempt === undefined) {
       return false;
@@ -208,7 +198,8 @@ export function ContentEditor({
 
   useEffect(() => {
     let cancelled = false;
-    void readContentEditorOutbox(initialRevision.workspaceId)
+    void outboxController
+      .read()
       .then((record) => {
         if (cancelled || record === null || record.edits.length === 0) {
           return;
@@ -280,9 +271,7 @@ export function ContentEditor({
         }
         if (alreadyAppliedCount === record.edits.length) {
           recoveryPending.current = [];
-          void queueOutbox(() =>
-            clearContentEditorOutbox(initialRevision.workspaceId),
-          );
+          void outboxController.clear();
           setMessage(
             `Revision ${state.persistedRevision} already contains the browser's last autosave.`,
           );
@@ -467,13 +456,10 @@ export function ContentEditor({
     const attempt = pendingAttempt.current;
     dispatch({ type: "saving" });
     try {
-      await queueOutbox(() =>
-        writeContentEditorOutbox({
-          workspaceId: initialRevision.workspaceId,
-          baseRevision: state.persistedRevision,
-          edits: recoverableEdits,
-          attempt,
-        }),
+      await outboxController.saveAttempt(
+        state.persistedRevision,
+        recoverableEdits,
+        attempt,
       );
     } catch {
       setMessage(
@@ -558,9 +544,7 @@ export function ContentEditor({
       pendingAttempt.current = null;
       let outboxCleared = true;
       try {
-        await queueOutbox(() =>
-          clearContentEditorOutbox(initialRevision.workspaceId),
-        );
+        await outboxController.clear();
       } catch {
         outboxCleared = false;
       }
@@ -614,6 +598,37 @@ export function ContentEditor({
       );
     }
   }
+
+  useEffect(() => {
+    if (
+      !outboxReady ||
+      pendingAttempt.current !== null ||
+      state.status === "saving" ||
+      state.status === "conflict" ||
+      state.status === "stale" ||
+      recoveryConflicts.length > 0
+    ) {
+      return;
+    }
+    const persistence =
+      recoverableEdits.length === 0
+        ? outboxController.clear()
+        : outboxController.snapshot(
+            state.persistedRevision,
+            recoverableEdits,
+          );
+    void persistence.catch(() => {
+      setMessage(
+        "Browser recovery storage could not record the latest edit. Keep this tab open until it is saved.",
+      );
+    });
+  }, [
+    outboxReady,
+    recoverableEdits,
+    recoveryConflicts,
+    state.persistedRevision,
+    state.status,
+  ]);
 
   useEffect(() => {
     if (
@@ -756,14 +771,12 @@ export function ContentEditor({
       (candidate) =>
         candidate.path !== conflict.path || resolution === "mine",
     );
-    void queueOutbox(() =>
-      recoveryPending.current.length === 0
-        ? clearContentEditorOutbox(initialRevision.workspaceId)
-        : writeContentEditorOutbox({
-            workspaceId: initialRevision.workspaceId,
-            baseRevision: state.persistedRevision,
-            edits: recoveryPending.current,
-          }),
+    void (recoveryPending.current.length === 0
+      ? outboxController.clear()
+      : outboxController.snapshot(
+          state.persistedRevision,
+          recoveryPending.current,
+        )
     ).catch(() => {
       setMessage(
         "That choice is active in this tab, but browser recovery storage could not be updated.",

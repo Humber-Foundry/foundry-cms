@@ -14,6 +14,12 @@ export type ContentEditorOutboxRecord = Readonly<{
   }>;
 }>;
 
+type ContentEditorOutboxDriver = Readonly<{
+  read(workspaceId: string): Promise<ContentEditorOutboxRecord | null>;
+  write(record: ContentEditorOutboxRecord): Promise<void>;
+  clear(workspaceId: string): Promise<void>;
+}>;
+
 function openOutbox(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(databaseName, 1);
@@ -127,4 +133,47 @@ export async function clearContentEditorOutbox(
   } finally {
     database.close();
   }
+}
+
+export function createContentEditorOutboxController(
+  workspaceId: string,
+  driver: ContentEditorOutboxDriver = {
+    read: readContentEditorOutbox,
+    write: writeContentEditorOutbox,
+    clear: clearContentEditorOutbox,
+  },
+) {
+  let queue = Promise.resolve();
+  const serialize = (operation: () => Promise<void>): Promise<void> => {
+    const result = queue.catch(() => undefined).then(operation);
+    queue = result.catch(() => undefined);
+    return result;
+  };
+  const record = (
+    baseRevision: number,
+    edits: ReadonlyArray<StaleRecoveryEdit>,
+    attempt?: ContentEditorOutboxRecord["attempt"],
+  ): Promise<void> =>
+    serialize(() =>
+      driver.write({
+        workspaceId,
+        baseRevision,
+        edits,
+        ...(attempt === undefined ? {} : { attempt }),
+      }),
+    );
+
+  return Object.freeze({
+    read: () => driver.read(workspaceId),
+    snapshot: (
+      baseRevision: number,
+      edits: ReadonlyArray<StaleRecoveryEdit>,
+    ) => record(baseRevision, edits),
+    saveAttempt: (
+      baseRevision: number,
+      edits: ReadonlyArray<StaleRecoveryEdit>,
+      attempt: NonNullable<ContentEditorOutboxRecord["attempt"]>,
+    ) => record(baseRevision, edits, attempt),
+    clear: () => serialize(() => driver.clear(workspaceId)),
+  });
 }

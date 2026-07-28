@@ -11,6 +11,7 @@ import {
   VisualComponentEditor,
   visualComponentConfig,
 } from "./visual-component-editor";
+import { ContentEditor } from "./content-editor";
 import {
   clearContentEditorOutbox,
   readContentEditorOutbox,
@@ -164,5 +165,62 @@ describe("visual component editor browser acceptance", () => {
     });
     await clearContentEditorOutbox(workspaceId);
     expect(await readContentEditorOutbox(workspaceId)).toBeNull();
+  });
+
+  it("records an accepted edit before the autosave debounce", async () => {
+    const workspaceId = "workspace_browser_snapshot";
+    await clearContentEditorOutbox(workspaceId);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-browser-test",
+          initialRevision: {
+            workspaceId,
+            revision: 4,
+            definition: referenceSiteDefinition,
+            inputs: {
+              contentHash: "browser-content-hash",
+              schemaVersion: "1.0.0",
+              rendererVersion: "renderer-browser",
+              productionBase: "published-browser",
+            },
+            createdAt: "2026-07-27T00:00:00.000Z",
+            createdBy: "membership-browser",
+          } as never,
+          initialPreviewUrl: "/preview/browser",
+          activeWorkspaceUrl: "/dash?workspace=browser",
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    const siteName = Array.from(host.querySelectorAll("input")).find(
+      (input) => input.value === referenceSiteDefinition.site.name,
+    );
+    expect(siteName).toBeDefined();
+    await userEvent.fill(siteName!, "Recovered immediately");
+
+    let record = await readContentEditorOutbox(workspaceId);
+    for (let index = 0; record === null && index < 5; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+      record = await readContentEditorOutbox(workspaceId);
+    }
+    expect(record).toEqual({
+      workspaceId,
+      baseRevision: 4,
+      edits: [
+        {
+          path: "site_foundry_reference.name",
+          baseValue: "Foundry Reference",
+          value: "Recovered immediately",
+        },
+      ],
+    });
+    await clearContentEditorOutbox(workspaceId);
   });
 });
