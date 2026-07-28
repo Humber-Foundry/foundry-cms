@@ -10,7 +10,7 @@ import type {
 
 import { ContentEditor } from "./content-editor";
 import { MediaManager } from "./media-manager";
-import { newestContentRevision } from "./workspace-revision";
+import { advanceWorkspaceRevisionHead } from "./workspace-revision";
 
 export function WorkspaceEditors({
   csrfToken,
@@ -31,18 +31,25 @@ export function WorkspaceEditors({
   mediaAssets: ReadonlyArray<MediaAsset>;
   mediaOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
 }) {
-  const [revisionHead, setRevisionHead] = useState(initialContentRevision);
-  const advanceRevisionHead = useCallback((incoming: ContentRevision) => {
-    setRevisionHead((current) =>
-      newestContentRevision(current, incoming),
-    );
-  }, []);
+  const [head, setHead] = useState({
+    revision: initialContentRevision,
+    previewUrl: initialPreviewUrl,
+  });
+  const advanceRevisionHead = useCallback(
+    (incoming: ContentRevision, previewUrl: string) => {
+      setHead((current) =>
+        advanceWorkspaceRevisionHead(current, incoming, previewUrl),
+      );
+    },
+    [],
+  );
   return (
     <>
       <ContentEditor
         csrfToken={csrfToken}
         initialRevision={initialContentRevision}
-        revisionHead={revisionHead}
+        revisionHead={head.revision}
+        revisionHeadPreviewUrl={head.previewUrl}
         onRevisionSaved={advanceRevisionHead}
         initialPreviewUrl={initialPreviewUrl}
         initialStale={initialContentStale}
@@ -53,7 +60,7 @@ export function WorkspaceEditors({
         csrfToken={csrfToken}
         initialAssets={mediaAssets}
         initialOccurrences={mediaOccurrences}
-        contentRevision={revisionHead}
+        contentRevision={head.revision}
         onRevisionSaved={advanceRevisionHead}
       />
     </>

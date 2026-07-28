@@ -39,7 +39,7 @@ export function MediaManager({
   initialAssets: ReadonlyArray<MediaAsset>;
   initialOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
   contentRevision?: ContentRevision;
-  onRevisionSaved(revision: ContentRevision): void;
+  onRevisionSaved(revision: ContentRevision, previewUrl: string): void;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
   const [occurrences, setOccurrences] = useState([...initialOccurrences]);
@@ -159,7 +159,7 @@ export function MediaManager({
         revision,
       ]);
       replaceAttempt.current = null;
-      onRevisionSaved(result.contentRevision);
+      onRevisionSaved(result.contentRevision, result.previewUrl);
       setPreviewUrl(result.previewUrl);
       setMessage("Only the selected occurrence was replaced.");
     } catch {
@@ -198,7 +198,7 @@ export function MediaManager({
         revision,
       ]);
       cropAttempt.current = null;
-      onRevisionSaved(result.contentRevision);
+      onRevisionSaved(result.contentRevision, result.previewUrl);
       setPreviewUrl(result.previewUrl);
       setMessage("Crop saved as revision data; the source is unchanged.");
     } catch {
