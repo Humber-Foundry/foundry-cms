@@ -137,6 +137,7 @@ type BlogPostAggregateState = Readonly<{
   currentRevision: number;
   liveRevision: number | null;
   lastVerifiedRevision: number | null;
+  lastVerifiedVisibility: BlogPost["visibility"] | "absent" | null;
   version: number;
 }>;
 
@@ -426,6 +427,7 @@ export function createInMemoryContentRevisionStore({
             liveRevision:
               post.visibility === "public" ? post.revision : null,
             lastVerifiedRevision: post.revision,
+            lastVerifiedVisibility: post.visibility,
             version: post.revision,
           });
         }
@@ -516,6 +518,8 @@ export function createInMemoryContentRevisionStore({
               blogPosts.get(transition.postId)?.liveRevision ?? null,
             lastVerifiedRevision:
               blogPosts.get(transition.postId)?.lastVerifiedRevision ?? null,
+            lastVerifiedVisibility:
+              blogPosts.get(transition.postId)?.lastVerifiedVisibility ?? null,
             version: (blogPosts.get(transition.postId)?.version ?? 0) + 1,
           });
         }
@@ -823,6 +827,7 @@ export function createContentRevisionApplication({
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
         }
+        await store.requireAccess(actorId);
         await store.recordRejectedBlogTransition({
           workspaceId,
           actorId,
@@ -1025,7 +1030,10 @@ export function createContentRevisionApplication({
             if (
               aggregate === null ||
               aggregate.liveRevision !== null ||
-              aggregate.lastVerifiedRevision !== aggregate.currentRevision
+              (
+                aggregate.lastVerifiedVisibility !== "unpublished" &&
+                aggregate.lastVerifiedVisibility !== "absent"
+              )
             ) {
               throw new ContentRevisionValidationError({
                 blog: "post_not_unpublished",

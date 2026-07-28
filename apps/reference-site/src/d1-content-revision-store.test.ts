@@ -49,6 +49,7 @@ describe("D1 content revision store", () => {
       "0007_content_publication.sql",
       "0008_media_assets.sql",
       "0011_blog_post_transition_audit.sql",
+      "0013_blog_post_verified_state.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -396,12 +397,40 @@ describe("D1 content revision store", () => {
       ),
     ]);
     await expect(
+      reloaded.commands.save({
+        actorId: editorActorId,
+        workspaceId,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 2,
+        edits: [
+          {
+            path: `${postId}.title`,
+            value: "Durable post, edited during publication",
+          },
+        ],
+        idempotencyKey: "d1-blog-edit-during-publication",
+      }),
+    ).resolves.toMatchObject({
+      revision: 3,
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              revision: 3,
+              title: "Durable post, edited during publication",
+            }),
+          ],
+        },
+      },
+    });
+    await expect(
       reloaded.commands.unpublishBlogPost({
         actorId: editorActorId,
         workspaceId,
         siteId: referenceSiteDefinition.site.id,
         schemaVersion: referenceSiteDefinition.schemaVersion,
-        baseRevision: 2,
+        baseRevision: 3,
         postId,
         idempotencyKey: "d1-blog-unpublish-conflicting-publication",
       }),
@@ -420,32 +449,32 @@ describe("D1 content revision store", () => {
       workspaceId,
       siteId: referenceSiteDefinition.site.id,
       schemaVersion: referenceSiteDefinition.schemaVersion,
-      baseRevision: 2,
+      baseRevision: 3,
       postId,
       idempotencyKey: "d1-live-blog-unpublish-post",
     });
 
     await expect(reloaded.queries.getCurrent()).resolves.toMatchObject({
-      revision: 3,
+      revision: 4,
       definition: {
         blog: {
           posts: [
             expect.objectContaining({
               id: postId,
-              revision: 3,
+              revision: 4,
               visibility: "unpublished",
             }),
           ],
         },
       },
     });
-    await expect(reloaded.queries.getRevision(2)).resolves.toMatchObject({
+    await expect(reloaded.queries.getRevision(3)).resolves.toMatchObject({
       definition: {
         blog: {
           posts: [
             expect.objectContaining({
               id: postId,
-              revision: 2,
+              revision: 3,
               visibility: "public",
             }),
           ],
@@ -463,7 +492,7 @@ describe("D1 content revision store", () => {
       database,
       referenceSiteDefinition.site.id,
       current.definition,
-      "2026-07-27T13:05:00.000Z",
+      "2026-07-27T12:31:00.000Z",
     );
     expect(
       await database
@@ -474,7 +503,7 @@ describe("D1 content revision store", () => {
         )
         .bind(referenceSiteDefinition.site.id, postId)
         .first(),
-    ).toEqual({ live_revision: null, last_verified_revision: 3 });
+    ).toEqual({ live_revision: null, last_verified_revision: 4 });
     expect(
       await database
         .prepare(
@@ -489,14 +518,14 @@ describe("D1 content revision store", () => {
       outcome: "accepted",
       post_id: postId,
       before_state_json: JSON.stringify({
-        revision: 2,
+        revision: 3,
         visibility: "public",
       }),
       after_state_json: JSON.stringify({
-        revision: 3,
+        revision: 4,
         visibility: "unpublished",
       }),
-      revision: 3,
+      revision: 4,
     });
 
     const hydrated = await hydrateManagedBlogPosts(
@@ -506,7 +535,7 @@ describe("D1 content revision store", () => {
     expect(hydrated.blog.posts).toEqual([
       expect.objectContaining({
         id: postId,
-        revision: 3,
+        revision: 4,
         visibility: "unpublished",
       }),
     ]);
@@ -533,14 +562,18 @@ describe("D1 content revision store", () => {
       idempotencyKey: "d1-republish-create-workspace",
     });
     await expect(
-      republishApplication.commands.republishBlogPost({
+      republishApplication.commands.save({
         actorId: editorActorId,
         workspaceId: republishWorkspaceId,
-        siteId: referenceSiteDefinition.site.id,
         schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
-        postId,
-        idempotencyKey: "d1-republish-blog-post",
+        edits: [
+          {
+            path: `${postId}.title`,
+            value: "Edited while verified unpublished",
+          },
+        ],
+        idempotencyKey: "d1-edit-verified-unpublished-post",
       }),
     ).resolves.toMatchObject({
       revision: 1,
@@ -548,12 +581,73 @@ describe("D1 content revision store", () => {
         blog: {
           posts: [
             expect.objectContaining({
+              revision: 5,
+              visibility: "unpublished",
+            }),
+          ],
+        },
+      },
+    });
+    const republished =
+      await republishApplication.commands.republishBlogPost({
+        actorId: editorActorId,
+        workspaceId: republishWorkspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 1,
+        postId,
+        idempotencyKey: "d1-republish-blog-post",
+      });
+    expect(republished).toMatchObject({
+      revision: 2,
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
               id: postId,
-              revision: 4,
+              revision: 6,
               visibility: "public",
             }),
           ],
         },
+      },
+    });
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      republished.definition,
+      "2026-07-27T13:20:00.000Z",
+    );
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      referenceSiteDefinition,
+      "2026-07-27T13:30:00.000Z",
+    );
+    expect(
+      await database
+        .prepare(
+          `SELECT live_revision, last_verified_visibility
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first(),
+    ).toEqual({
+      live_revision: null,
+      last_verified_visibility: "absent",
+    });
+    await expect(
+      hydrateManagedBlogPosts(database, referenceSiteDefinition),
+    ).resolves.toMatchObject({
+      blog: {
+        posts: [
+          expect.objectContaining({
+            id: postId,
+            revision: 6,
+            visibility: "unpublished",
+          }),
+        ],
       },
     });
   });
@@ -979,6 +1073,15 @@ describe("D1 content revision store", () => {
           body: createRichTextDocumentFromPlainText("Unauthorized."),
         },
         idempotencyKey: "d1-unauthorized-blog-post",
+      }),
+    ).rejects.toBeInstanceOf(ContentWorkspaceAccessError);
+    await expect(
+      outsider.commands.recordRejectedBlogPostCommand({
+        actorId: outsiderActorId,
+        postId: null,
+        commandType: "blog.post.create",
+        reasonCode: "unauthorized_probe",
+        requestId: "d1-unauthorized-rejected-audit",
       }),
     ).rejects.toBeInstanceOf(ContentWorkspaceAccessError);
     expect(

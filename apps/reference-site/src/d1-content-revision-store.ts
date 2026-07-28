@@ -80,21 +80,35 @@ export async function hydrateManagedBlogPosts(
 ): Promise<SiteDefinition> {
   const rows = await database
     .prepare(
-      `SELECT revision.snapshot_json
+      `SELECT revision.snapshot_json, post.last_verified_visibility
        FROM blog_posts AS post
        JOIN blog_post_revisions AS revision
          ON revision.site_id = post.site_id
         AND revision.post_id = post.post_id
         AND revision.revision = post.current_revision
-       WHERE post.site_id = ?1
+         WHERE post.site_id = ?1
          AND post.live_revision IS NULL
-         AND post.last_verified_revision = post.current_revision
+         AND (
+           (
+             post.last_verified_visibility = 'unpublished'
+             AND post.last_verified_revision = post.current_revision
+           )
+           OR post.last_verified_visibility = 'absent'
+         )
        ORDER BY post.post_id`,
     )
     .bind(definition.site.id)
-    .all<{ snapshot_json: string }>();
-  const managed = rows.results.map(({ snapshot_json }) =>
-    JSON.parse(snapshot_json) as BlogPost
+    .all<{
+      snapshot_json: string;
+      last_verified_visibility: "unpublished" | "absent";
+    }>();
+  const managed = rows.results.map(
+    ({ snapshot_json, last_verified_visibility }) => {
+      const post = JSON.parse(snapshot_json) as BlogPost;
+      return last_verified_visibility === "absent"
+        ? { ...post, visibility: "unpublished" as const }
+        : post;
+    },
   );
   const publishedIds = new Set(definition.blog.posts.map(({ id }) => id));
   const hydrated = {
@@ -119,50 +133,81 @@ export async function reconcileVerifiedBlogPostPublication(
   definition: SiteDefinition,
   verifiedAt: string,
 ): Promise<void> {
-  if (definition.blog.posts.length === 0) {
-    return;
-  }
-  const results = await database.batch(
-    definition.blog.posts.map((post) =>
+  const presentPostIds = definition.blog.posts.map(({ id }) => id);
+  const absentBindings = presentPostIds.map((_, index) => `?${index + 3}`);
+  const absentPostGuard =
+    absentBindings.length === 0
+      ? ""
+      : `AND post_id NOT IN (${absentBindings.join(", ")})`;
+  const results = await database.batch([
+    ...definition.blog.posts.map((post) =>
       database
         .prepare(
           `UPDATE blog_posts
            SET live_revision = ?1,
                last_verified_revision = ?2,
-               updated_at = ?3
-           WHERE site_id = ?4
-             AND post_id = ?5
+               last_verified_visibility = ?3,
+               last_verified_at = ?4,
+               updated_at = ?4
+           WHERE site_id = ?5
+             AND post_id = ?6
              AND (
-               last_verified_revision IS NULL
-               OR last_verified_revision <= ?2
+               last_verified_at IS NULL
+               OR last_verified_at <= ?4
              )`,
         )
         .bind(
           post.visibility === "public" ? post.revision : null,
           post.revision,
+          post.visibility,
           verifiedAt,
           siteId,
           post.id,
         ),
     ),
-  );
-  for (const [index, result] of results.entries()) {
+    database
+      .prepare(
+        `UPDATE blog_posts
+         SET live_revision = NULL,
+             last_verified_visibility = 'absent',
+             last_verified_at = ?1,
+             updated_at = ?1
+         WHERE site_id = ?2
+           AND live_revision IS NOT NULL
+           AND (
+             last_verified_at IS NULL
+             OR last_verified_at <= ?1
+           )
+           ${absentPostGuard}`,
+      )
+      .bind(verifiedAt, siteId, ...presentPostIds),
+  ]);
+  for (const [index, result] of results
+    .slice(0, definition.blog.posts.length)
+    .entries()) {
     if ((result.meta.changes ?? 0) > 0) {
       continue;
     }
     const post = definition.blog.posts[index]!;
     const aggregate = await database
       .prepare(
-        `SELECT last_verified_revision
+        `SELECT last_verified_revision, last_verified_at
          FROM blog_posts
          WHERE site_id = ?1 AND post_id = ?2`,
       )
       .bind(siteId, post.id)
-      .first<{ last_verified_revision: number | null }>();
+      .first<{
+        last_verified_revision: number | null;
+        last_verified_at: string | null;
+      }>();
     if (
       aggregate === null ||
       aggregate.last_verified_revision === null ||
-      aggregate.last_verified_revision < post.revision
+      (
+        aggregate.last_verified_revision < post.revision &&
+        (aggregate.last_verified_at === null ||
+          aggregate.last_verified_at <= verifiedAt)
+      )
     ) {
       throw new ContentRevisionConfigurationError();
     }
@@ -285,8 +330,10 @@ export function createD1ContentRevisionStore(
             .prepare(
               `INSERT INTO blog_posts (
                  site_id, post_id, collection_state, current_revision,
-                 live_revision, last_verified_revision, version, updated_at
-               ) VALUES (?1, ?2, 'active', ?3, ?4, ?3, ?3, ?5)
+                 live_revision, last_verified_revision,
+                 last_verified_visibility, last_verified_at,
+                 version, updated_at
+               ) VALUES (?1, ?2, 'active', ?3, ?4, ?3, ?5, ?6, ?3, ?6)
                ON CONFLICT (site_id, post_id) DO NOTHING`,
             )
             .bind(
@@ -294,6 +341,7 @@ export function createD1ContentRevisionStore(
               post.id,
               post.revision,
               post.visibility === "public" ? post.revision : null,
+              post.visibility,
               initialRevision.createdAt,
             ),
           database
@@ -453,7 +501,7 @@ export function createD1ContentRevisionStore(
       const row = await database
         .prepare(
           `SELECT current_revision, live_revision,
-                  last_verified_revision, version
+                  last_verified_revision, last_verified_visibility, version
            FROM blog_posts
            WHERE site_id = ?1 AND post_id = ?2`,
         )
@@ -462,6 +510,10 @@ export function createD1ContentRevisionStore(
           current_revision: number;
           live_revision: number | null;
           last_verified_revision: number | null;
+          last_verified_visibility:
+            | BlogPost["visibility"]
+            | "absent"
+            | null;
           version: number;
         }>();
       return row === null
@@ -470,6 +522,7 @@ export function createD1ContentRevisionStore(
             currentRevision: row.current_revision,
             liveRevision: row.live_revision,
             lastVerifiedRevision: row.last_verified_revision,
+            lastVerifiedVisibility: row.last_verified_visibility,
             version: row.version,
           };
     },
@@ -597,7 +650,9 @@ export function createD1ContentRevisionStore(
         })
         .join("\n");
       const blogPublicationGuard =
-        (command.blogTransitions?.length ?? 0) === 0
+        !command.blogTransitions?.some(
+          ({ commandType }) => commandType === "blog.post.unpublish",
+        )
           ? ""
           : `AND NOT EXISTS (
               SELECT 1 FROM content_publications
@@ -652,9 +707,11 @@ export function createD1ContentRevisionStore(
                 .prepare(
                   `INSERT INTO blog_posts (
                      site_id, post_id, collection_state, current_revision,
-                     live_revision, last_verified_revision, version, updated_at
+                     live_revision, last_verified_revision,
+                     last_verified_visibility, last_verified_at,
+                     version, updated_at
                    )
-                   SELECT ?1, ?2, 'active', ?3, NULL, NULL, 1, ?4
+                   SELECT ?1, ?2, 'active', ?3, NULL, NULL, NULL, NULL, 1, ?4
                    WHERE EXISTS (
                      SELECT 1 FROM content_revision_receipts
                      WHERE idempotency_key = ?5

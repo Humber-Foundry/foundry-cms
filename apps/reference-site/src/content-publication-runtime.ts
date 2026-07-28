@@ -147,7 +147,7 @@ export async function loadContentPublicationApplication(
         environment.FOUNDRY_DB!,
         referenceSiteDefinition.site.id,
         revision.definition,
-        publication.updatedAt,
+        publication.requestedAt,
       ),
     publishedRevisions: publisher,
     restoreSourcePublication,
