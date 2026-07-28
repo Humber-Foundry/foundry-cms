@@ -210,6 +210,45 @@ describe("GitHub content publisher", () => {
     ).resolves.toBe(bytes);
   });
 
+  it("cancels a raw historical artifact stream that exceeds the safe limit", async () => {
+    let chunksSent = 0;
+    let cancelled = false;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          chunksSent += 1;
+          controller.enqueue(new Uint8Array(1024 * 1024));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      {
+        headers: {
+          // A provider-supplied length cannot be trusted as the only bound.
+          "content-length": "1",
+        },
+      },
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(response);
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00Z"),
+    });
+
+    const artifact = await publisher.readPublishedArtifact({
+      commitSha: "c".repeat(40),
+      path: "packages/site-definition/src/published-site.json",
+    });
+
+    expect(cancelled).toBe(true);
+    expect(artifact).toBeNull();
+  });
+
   it("atomically creates one bot commit on the expected production head", async () => {
     const expectedHead = "a".repeat(40);
     const fetchMock = vi

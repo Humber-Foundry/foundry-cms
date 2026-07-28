@@ -129,7 +129,7 @@ const tokenCaches = new WeakMap<
   GitHubFetch,
   Map<string, Promise<CachedInstallationToken>>
 >();
-const maximumGitHubContentsBytes = 100 * 1024 * 1024;
+const maximumPublishedArtifactBytes = 16 * 1024 * 1024;
 
 function githubHeaders(token: string) {
   return {
@@ -555,15 +555,46 @@ export function createGitHubContentPublisher({
     if (!response.ok) {
       await readJson(response);
     }
-    const reportedLength = Number(response.headers.get("content-length"));
+    const contentLength = response.headers.get("content-length");
+    const reportedLength =
+      contentLength === null ? null : Number(contentLength);
     if (
+      reportedLength !== null &&
       Number.isFinite(reportedLength) &&
-      reportedLength > maximumGitHubContentsBytes
+      reportedLength > maximumPublishedArtifactBytes
     ) {
+      await response.body?.cancel();
       return null;
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    return bytes.byteLength <= maximumGitHubContentsBytes ? bytes : null;
+    if (response.body === null) {
+      return new Uint8Array();
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let byteLength = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          break;
+        }
+        byteLength += chunk.value.byteLength;
+        if (byteLength > maximumPublishedArtifactBytes) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(chunk.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
   }
 
   async function graphqlRequest(
