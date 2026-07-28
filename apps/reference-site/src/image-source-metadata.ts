@@ -4,9 +4,18 @@ export type ImageSourceMetadata = Readonly<{
   height: number;
 }>;
 
+const invalid = (): never => {
+  throw new TypeError("invalid_image_source");
+};
+
 function dimensions(width: number, height: number) {
-  if (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0) {
-    throw new TypeError("invalid_image_source");
+  if (
+    !Number.isSafeInteger(width) ||
+    width <= 0 ||
+    !Number.isSafeInteger(height) ||
+    height <= 0
+  ) {
+    invalid();
   }
   return { width, height };
 }
@@ -15,73 +24,194 @@ function ascii(source: Uint8Array, start: number, end: number) {
   return String.fromCharCode(...source.slice(start, end));
 }
 
+function crc32(source: Uint8Array) {
+  let crc = 0xffffffff;
+  for (const byte of source) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 function png(source: Uint8Array): ImageSourceMetadata | null {
   const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (!signature.every((byte, index) => source[index] === byte)) return null;
-  if (source.byteLength < 24 || ascii(source, 12, 16) !== "IHDR") throw new TypeError("invalid_image_source");
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
-  return { contentType: "image/png", ...dimensions(view.getUint32(16), view.getUint32(20)) };
+  let offset = 8;
+  let metadata: ImageSourceMetadata | null = null;
+  let sawImageData = false;
+  while (offset + 12 <= source.byteLength) {
+    const length = view.getUint32(offset);
+    const end = offset + 12 + length;
+    if (end > source.byteLength) invalid();
+    const type = ascii(source, offset + 4, offset + 8);
+    const expectedCrc = view.getUint32(offset + 8 + length);
+    if (crc32(source.slice(offset + 4, offset + 8 + length)) !== expectedCrc) {
+      invalid();
+    }
+    if (metadata === null) {
+      if (type !== "IHDR" || length !== 13) invalid();
+      metadata = {
+        contentType: "image/png",
+        ...dimensions(view.getUint32(offset + 8), view.getUint32(offset + 12)),
+      };
+    } else if (type === "IHDR") {
+      invalid();
+    }
+    if (type === "IDAT") sawImageData = sawImageData || length > 0;
+    if (type === "IEND") {
+      if (length !== 0 || !sawImageData || end !== source.byteLength) invalid();
+      return metadata;
+    }
+    offset = end;
+  }
+  return invalid();
 }
 
 function jpeg(source: Uint8Array): ImageSourceMetadata | null {
   if (source[0] !== 0xff || source[1] !== 0xd8) return null;
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
-  const frames = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+  const frames = new Set([
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce,
+    0xcf,
+  ]);
   let offset = 2;
-  while (offset + 3 < source.byteLength) {
-    if (source[offset] !== 0xff) break;
+  let metadata: ImageSourceMetadata | null = null;
+  let sawScan = false;
+  while (offset < source.byteLength) {
+    if (source[offset] !== 0xff) invalid();
     while (source[offset] === 0xff) offset += 1;
-    const marker = source[offset++]!;
-    if (marker === 0xd9 || marker === 0xda) break;
+    const marker = source[offset++];
+    if (marker === undefined) invalid();
+    if (marker === 0xd9) {
+      if (!sawScan || metadata === null || offset !== source.byteLength) invalid();
+      return metadata;
+    }
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
-    if (offset + 2 > source.byteLength) break;
+    if (offset + 2 > source.byteLength) invalid();
     const length = view.getUint16(offset);
-    if (length < 2 || offset + length > source.byteLength) break;
-    if (frames.has(marker) && length >= 7) {
-      return { contentType: "image/jpeg", ...dimensions(view.getUint16(offset + 5), view.getUint16(offset + 3)) };
+    if (length < 2 || offset + length > source.byteLength) invalid();
+    if (frames.has(marker)) {
+      if (length < 7 || metadata !== null) invalid();
+      metadata = {
+        contentType: "image/jpeg",
+        ...dimensions(view.getUint16(offset + 5), view.getUint16(offset + 3)),
+      };
     }
     offset += length;
+    if (marker !== 0xda) continue;
+    sawScan = true;
+    while (offset + 1 < source.byteLength) {
+      if (source[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const next = source[offset + 1]!;
+      if (next === 0x00 || (next >= 0xd0 && next <= 0xd7)) {
+        offset += 2;
+        continue;
+      }
+      break;
+    }
   }
-  throw new TypeError("invalid_image_source");
+  return invalid();
 }
 
 function webp(source: Uint8Array): ImageSourceMetadata | null {
-  if (ascii(source, 0, 4) !== "RIFF" || ascii(source, 8, 12) !== "WEBP") return null;
+  if (ascii(source, 0, 4) !== "RIFF" || ascii(source, 8, 12) !== "WEBP") {
+    return null;
+  }
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
-  const chunk = ascii(source, 12, 16);
-  if (chunk === "VP8X" && source.byteLength >= 30) {
-    const width = source[24]! | (source[25]! << 8) | (source[26]! << 16);
-    const height = source[27]! | (source[28]! << 8) | (source[29]! << 16);
-    return { contentType: "image/webp", ...dimensions(width + 1, height + 1) };
+  if (source.byteLength < 20 || view.getUint32(4, true) + 8 !== source.byteLength) {
+    invalid();
   }
-  if (chunk === "VP8 " && source.byteLength >= 30 && source[23] === 0x9d && source[24] === 0x01 && source[25] === 0x2a) {
-    return { contentType: "image/webp", ...dimensions(view.getUint16(26, true) & 0x3fff, view.getUint16(28, true) & 0x3fff) };
+  let offset = 12;
+  let metadata: ImageSourceMetadata | null = null;
+  let sawImagePayload = false;
+  while (offset + 8 <= source.byteLength) {
+    const type = ascii(source, offset, offset + 4);
+    const length = view.getUint32(offset + 4, true);
+    const data = offset + 8;
+    const end = data + length + (length % 2);
+    if (end > source.byteLength) invalid();
+    if (type === "VP8X") {
+      if (length !== 10 || metadata !== null) invalid();
+      const width = source[data + 4]! | (source[data + 5]! << 8) | (source[data + 6]! << 16);
+      const height = source[data + 7]! | (source[data + 8]! << 8) | (source[data + 9]! << 16);
+      metadata = { contentType: "image/webp", ...dimensions(width + 1, height + 1) };
+    } else if (type === "VP8 ") {
+      if (
+        length < 10 ||
+        source[data + 3] !== 0x9d ||
+        source[data + 4] !== 0x01 ||
+        source[data + 5] !== 0x2a
+      ) {
+        invalid();
+      }
+      sawImagePayload = true;
+      metadata ??= {
+        contentType: "image/webp",
+        ...dimensions(
+          view.getUint16(data + 6, true) & 0x3fff,
+          view.getUint16(data + 8, true) & 0x3fff,
+        ),
+      };
+    } else if (type === "VP8L") {
+      if (length < 5 || source[data] !== 0x2f) invalid();
+      sawImagePayload = true;
+      const bits = view.getUint32(data + 1, true);
+      metadata ??= {
+        contentType: "image/webp",
+        ...dimensions((bits & 0x3fff) + 1, ((bits >>> 14) & 0x3fff) + 1),
+      };
+    } else if (type === "ANMF") {
+      sawImagePayload = length > 16;
+    }
+    offset = end;
   }
-  if (chunk === "VP8L" && source.byteLength >= 25 && source[20] === 0x2f) {
-    const bits = view.getUint32(21, true);
-    return { contentType: "image/webp", ...dimensions((bits & 0x3fff) + 1, ((bits >>> 14) & 0x3fff) + 1) };
+  if (offset !== source.byteLength || metadata === null || !sawImagePayload) {
+    invalid();
   }
-  throw new TypeError("invalid_image_source");
+  return metadata;
 }
 
 function avif(source: Uint8Array): ImageSourceMetadata | null {
   if (source.byteLength < 16 || ascii(source, 4, 8) !== "ftyp") return null;
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
-  const ftypSize = Math.min(source.byteLength, view.getUint32(0));
-  const brands = ascii(source, 8, ftypSize);
-  if (!brands.includes("avif") && !brands.includes("avis")) return null;
-  for (let offset = 0; offset + 20 <= source.byteLength; offset += 1) {
-    if (ascii(source, offset + 4, offset + 8) !== "ispe") continue;
+  let offset = 0;
+  let validBrand = false;
+  let sawMeta = false;
+  let sawImagePayload = false;
+  while (offset + 8 <= source.byteLength) {
     const size = view.getUint32(offset);
-    if (size < 20 || offset + size > source.byteLength) continue;
-    return { contentType: "image/avif", ...dimensions(view.getUint32(offset + 12), view.getUint32(offset + 16)) };
+    const type = ascii(source, offset + 4, offset + 8);
+    if (size < 8 || offset + size > source.byteLength) invalid();
+    if (type === "ftyp") {
+      const brands = ascii(source, offset + 8, offset + size);
+      validBrand = brands.includes("avif") || brands.includes("avis");
+    }
+    if (type === "meta") sawMeta = size > 12;
+    if (type === "mdat") sawImagePayload = size > 8;
+    offset += size;
   }
-  throw new TypeError("invalid_image_source");
+  if (offset !== source.byteLength || !validBrand || !sawMeta || !sawImagePayload) {
+    invalid();
+  }
+  for (let index = 0; index + 20 <= source.byteLength; index += 1) {
+    if (ascii(source, index + 4, index + 8) !== "ispe") continue;
+    const size = view.getUint32(index);
+    if (size < 20 || index + size > source.byteLength) continue;
+    return {
+      contentType: "image/avif",
+      ...dimensions(view.getUint32(index + 12), view.getUint32(index + 16)),
+    };
+  }
+  return invalid();
 }
 
 export function inspectImageSource(source: Uint8Array): ImageSourceMetadata {
-  if (source.byteLength < 12) throw new TypeError("invalid_image_source");
-  const metadata = png(source) ?? jpeg(source) ?? webp(source) ?? avif(source);
-  if (metadata === null) throw new TypeError("invalid_image_source");
-  return metadata;
+  if (source.byteLength < 12) invalid();
+  return png(source) ?? jpeg(source) ?? webp(source) ?? avif(source) ?? invalid();
 }

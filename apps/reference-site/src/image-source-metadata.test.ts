@@ -1,18 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { inspectImageSource } from "./image-source-metadata";
 
+const validPng = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  ),
+);
+
 describe("image source metadata", () => {
-  it("reads PNG dimensions from the bytes", () => {
-    const source = new Uint8Array(24);
-    source.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    source.set([0x49, 0x48, 0x44, 0x52], 12);
-    const view = new DataView(source.buffer);
-    view.setUint32(16, 1600);
-    view.setUint32(20, 900);
-    expect(inspectImageSource(source)).toEqual({ contentType: "image/png", width: 1600, height: 900 });
+  it("reads dimensions from a structurally complete PNG", () => {
+    expect(inspectImageSource(validPng)).toEqual({
+      contentType: "image/png",
+      width: 1,
+      height: 1,
+    });
   });
 
-  it("rejects content that only claims to be an image", () => {
-    expect(() => inspectImageSource(new TextEncoder().encode("not an image"))).toThrow("invalid_image_source");
+  it.each([
+    ["PNG", validPng.slice(0, 24)],
+    ["JPEG", new Uint8Array([0xff, 0xd8, 0xff, 0xd9, ...new Uint8Array(8)])],
+    [
+      "WebP",
+      new TextEncoder().encode("RIFF\u0004\u0000\u0000\u0000WEBP"),
+    ],
+    [
+      "AVIF",
+      new Uint8Array([0, 0, 0, 16, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, 0, 0, 0, 0]),
+    ],
+  ])("rejects a truncated %s container", (_format, source) => {
+    expect(() => inspectImageSource(source)).toThrow("invalid_image_source");
   });
 });
