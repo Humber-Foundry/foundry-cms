@@ -4,6 +4,7 @@ import {
 import {
   defaultSiteDesign,
   designContract,
+  isSiteDefinition,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
@@ -47,41 +48,49 @@ function upgradeLegacyPageComponent(component: unknown): PageSection {
   } as PageSection;
 }
 
-function upgradeLegacyDefinition(
+export function upgradeSiteDefinitionForCurrentSchema(
   definition: SiteDefinition,
 ): SiteDefinition {
-  if (definition.schemaVersion === "1.1.0") {
-    return definition;
+  const upgraded =
+    definition.schemaVersion === "1.1.0"
+      ? definition
+      : (() => {
+          if ((definition.schemaVersion as string) !== "1.0.0") {
+            throw new Error("unsupported_site_definition_schema");
+          }
+          const legacy = definition as unknown as Omit<
+            SiteDefinition,
+            "definitionVersion" | "schemaVersion" | "design" | "home"
+          > & {
+            home: Omit<SiteDefinition["home"], "sections"> & {
+              sections: ReadonlyArray<Omit<PageSection, "variant">>;
+            };
+          };
+          return {
+            ...legacy,
+            definitionVersion: "1.1.0",
+            schemaVersion: "1.1.0",
+            design: defaultSiteDesign,
+            home: {
+              ...legacy.home,
+              sections: legacy.home.sections.map(
+                upgradeLegacyPageComponent,
+              ),
+            },
+          };
+        })();
+  if (!isSiteDefinition(upgraded)) {
+    throw new Error("invalid_site_definition");
   }
-  if ((definition.schemaVersion as string) !== "1.0.0") {
-    throw new Error("unsupported_site_definition_schema");
-  }
-  const legacy = definition as unknown as Omit<
-    SiteDefinition,
-    "definitionVersion" | "schemaVersion" | "design" | "home"
-  > & {
-    home: Omit<SiteDefinition["home"], "sections"> & {
-      sections: ReadonlyArray<Omit<PageSection, "variant">>;
-    };
-  };
-  return {
-    ...legacy,
-    definitionVersion: "1.1.0",
-    schemaVersion: "1.1.0",
-    design: defaultSiteDesign,
-    home: {
-      ...legacy.home,
-      sections: legacy.home.sections.map(upgradeLegacyPageComponent),
-    },
-  };
+  return upgraded;
 }
 
 export function durableSchemaRecoveryEdits(
   baseDefinition: SiteDefinition,
   currentDefinition: SiteDefinition,
 ): StaleRecoveryEdit[] {
-  const base = upgradeLegacyDefinition(baseDefinition);
-  const current = upgradeLegacyDefinition(currentDefinition);
+  const base = upgradeSiteDefinitionForCurrentSchema(baseDefinition);
+  const current = upgradeSiteDefinitionForCurrentSchema(currentDefinition);
   const baseFields = new Map(
     listEditableSiteFields(base).map(({ path, value }) => [path, value]),
   );

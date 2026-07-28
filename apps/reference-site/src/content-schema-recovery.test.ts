@@ -7,6 +7,7 @@ import {
   durableSchemaRecoveryEdits,
   mediaManifestRecoveryPath,
   mergeDurableAndOutboxRecoveryEdits,
+  upgradeSiteDefinitionForCurrentSchema,
 } from "./content-schema-recovery";
 import { applyStructuralRecovery } from "./content-editor-recovery";
 
@@ -25,6 +26,28 @@ function legacyDefinition(
 }
 
 describe("content schema recovery", () => {
+  it("upgrades a verified legacy publication into a valid current draft base", () => {
+    const legacy = legacyDefinition("Restored legacy release");
+
+    const restored = upgradeSiteDefinitionForCurrentSchema(legacy);
+
+    expect(restored).toEqual(
+      expect.objectContaining({
+        definitionVersion: "1.1.0",
+        schemaVersion: "1.1.0",
+        design: referenceSiteDefinition.design,
+        site: expect.objectContaining({
+          name: "Restored legacy release",
+        }),
+      }),
+    );
+    expect(
+      restored.home.sections.every(
+        ({ variant }) => typeof variant === "string",
+      ),
+    ).toBe(true);
+  });
+
   it("carries a durable legacy edit relative to immutable revision zero", () => {
     expect(
       durableSchemaRecoveryEdits(

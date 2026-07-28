@@ -18,6 +18,9 @@ import {
   findLatestContentWorkspaceIdForActor,
 } from "./d1-content-revision-store";
 import {
+  upgradeSiteDefinitionForCurrentSchema,
+} from "./content-schema-recovery";
+import {
   loadHumanAccessEnvironment,
   type HumanAccessEnvironment,
 } from "./human-access-environment";
@@ -252,10 +255,17 @@ export async function loadRestoredContentRevisionApplication(
   actorId: ContentActorId,
   definition: SiteDefinition,
 ) {
+  let currentDefinition: SiteDefinition;
+  try {
+    currentDefinition =
+      upgradeSiteDefinitionForCurrentSchema(definition);
+  } catch {
+    throw new ContentRevisionConfigurationError();
+  }
   if (
-    definition.site.id !== referenceSiteDefinition.site.id ||
-    definition.schemaVersion !== referenceSiteDefinition.schemaVersion ||
-    definition.definitionVersion !==
+    currentDefinition.site.id !== referenceSiteDefinition.site.id ||
+    currentDefinition.schemaVersion !== referenceSiteDefinition.schemaVersion ||
+    currentDefinition.definitionVersion !==
       referenceSiteDefinition.definitionVersion
   ) {
     throw new ContentRevisionConfigurationError();
@@ -274,7 +284,7 @@ export async function loadRestoredContentRevisionApplication(
       rendererVersion: localRuntime.__foundryLocalRendererVersion!,
       productionBaseCommit:
         `local-source:${localRuntime.__foundryLocalRendererVersion}`,
-      initialDefinition: definition,
+      initialDefinition: currentDefinition,
       initialCreatedBy: actorId,
     });
   }
@@ -294,7 +304,7 @@ export async function loadRestoredContentRevisionApplication(
     ),
     rendererVersion,
     productionBaseCommit: `git:${productionBaseCommit}`,
-    initialDefinition: definition,
+    initialDefinition: currentDefinition,
     initialCreatedBy: actorId,
   });
 }
