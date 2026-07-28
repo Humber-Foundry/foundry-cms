@@ -119,8 +119,14 @@ export function mergeDurableAndOutboxRecoveryEdits(
 ): StaleRecoveryEdit[] {
   return mergeRecoverySources(
     durableEdits,
-    outboxEdits.map(upgradeLegacyStructuralRecoveryEdit),
+    upgradeLegacyRecoveryEdits(outboxEdits),
   );
+}
+
+export function upgradeLegacyRecoveryEdits(
+  edits: ReadonlyArray<StaleRecoveryEdit>,
+): StaleRecoveryEdit[] {
+  return edits.map(upgradeLegacyStructuralRecoveryEdit);
 }
 
 function upgradeLegacyComposition(encoded: string): string {

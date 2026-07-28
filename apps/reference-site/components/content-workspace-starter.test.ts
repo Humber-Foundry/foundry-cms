@@ -164,6 +164,59 @@ describe("content workspace schema recovery", () => {
     ).rejects.toThrow("content_editor_recovery_revision_conflict");
   });
 
+  it("normalizes legacy structural ancestry before rebasing it", async () => {
+    const legacyProof = {
+      id: "section_saved_proof",
+      type: "proof",
+      quote: "Saved proof",
+      attribution: "Saved author",
+      metrics: [],
+    };
+    const currentProof = { ...legacyProof, variant: "panel" };
+    const composition = (components: ReadonlyArray<unknown>) =>
+      JSON.stringify({ slotId: "slot_home_sections", components });
+    const setItem = vi.fn();
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision: { ...preservedRevision, revision: 5 },
+        durableRecoveryEdits: [
+          {
+            path: "slot_home_sections",
+            baseValue: composition([]),
+            value: composition([currentProof]),
+          },
+        ],
+        readOutbox: async () => ({
+          workspaceId: preservedRevision.workspaceId,
+          baseRevision: 5,
+          edits: [
+            {
+              path: "slot_home_sections",
+              baseValue: composition([legacyProof]),
+              value: composition([
+                { ...legacyProof, quote: "Unsaved proof" },
+              ]),
+            },
+          ],
+        }),
+        storage: {
+          getItem: () => null,
+          removeItem: vi.fn(),
+          setItem,
+        },
+        createRecoveryId: () =>
+          "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      }),
+    ).resolves.toEqual({
+      id: "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      sourceWorkspaceId: "workspace_legacy",
+    });
+    expect(setItem).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining('\\"variant\\":\\"panel\\"'),
+    );
+  });
+
   it("copies an active recovery record through another schema transition", async () => {
     const recoveryId = "12345678-1234-4123-8123-123456789abc";
     const sourceWorkspaceId = "workspace_original";

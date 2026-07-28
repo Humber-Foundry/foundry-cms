@@ -17,6 +17,7 @@ import {
 } from "../src/content-editor-recovery";
 import {
   mergeDurableAndOutboxRecoveryEdits,
+  upgradeLegacyRecoveryEdits,
 } from "../src/content-schema-recovery";
 
 type CreatedWorkspace = Readonly<{ workspaceId: string }>;
@@ -104,11 +105,13 @@ export async function preparePreservedRevisionRecovery({
   ) {
     throw new Error("content_editor_outbox_revision_conflict");
   }
-  const safeOutboxEdits = rebaseOverlay(record?.edits ?? []);
+  const safeOutboxEdits = rebaseOverlay(
+    upgradeLegacyRecoveryEdits(record?.edits ?? []),
+  );
   const recoveryEdits = mergeDurableAndOutboxRecoveryEdits(
     mergeDurableAndOutboxRecoveryEdits(
       durableRecoveryEdits,
-      rebaseOverlay(chainedRecoveryEdits),
+      rebaseOverlay(upgradeLegacyRecoveryEdits(chainedRecoveryEdits)),
     ),
     safeOutboxEdits,
   );
