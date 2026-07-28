@@ -413,6 +413,49 @@ describe("GitHub content publisher", () => {
     });
   });
 
+  it("keeps a transient GraphQL mutation error unknown for reconciliation", async () => {
+    const expectedHead = "a".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(
+        json({
+          errors: [
+            {
+              type: "INTERNAL",
+              message: "Something went wrong while executing your query",
+            },
+          ],
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"2".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: "Publish",
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "unknown",
+      detail: "git_result_unknown",
+    });
+  });
+
   it("keeps a lost commit response unknown for reconciliation", async () => {
     const expectedHead = "a".repeat(40);
     const fetchMock = vi

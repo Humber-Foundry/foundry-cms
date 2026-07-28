@@ -181,6 +181,42 @@ function isExpectedHeadMismatch(error: unknown) {
   );
 }
 
+const definiteGraphQlMutationErrorCodes = new Set([
+  "BAD_USER_INPUT",
+  "UNPROCESSABLE",
+  "VALIDATION_FAILED",
+]);
+
+function isDefiniteGraphQlMutationRejection(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const message =
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  const directCode =
+    "type" in error && typeof error.type === "string"
+      ? error.type
+      : null;
+  const extensionCode =
+    "extensions" in error &&
+    typeof error.extensions === "object" &&
+    error.extensions !== null &&
+    "code" in error.extensions &&
+    typeof error.extensions.code === "string"
+      ? error.extensions.code
+      : null;
+  return (
+    isExpectedHeadMismatch({ responseMessage: message }) ||
+    /\bvalidation failed\b/iu.test(message) ||
+    (directCode !== null &&
+      definiteGraphQlMutationErrorCodes.has(directCode)) ||
+    (extensionCode !== null &&
+      definiteGraphQlMutationErrorCodes.has(extensionCode))
+  );
+}
+
 const ambiguousWriteResponseStatuses = new Set([408, 425, 429, 499]);
 
 function isDefiniteHttpRejection(error: unknown) {
@@ -611,7 +647,8 @@ export function createGitHubContentPublisher({
       }),
     );
     if (Array.isArray(body.errors) && body.errors.length > 0) {
-      const message = body.errors
+      const errors = body.errors as unknown[];
+      const message = errors
         .map((error: unknown) =>
           typeof error === "object" &&
           error !== null &&
@@ -622,7 +659,9 @@ export function createGitHubContentPublisher({
         )
         .join("; ");
       throw Object.assign(new Error("github_graphql_request_failed"), {
-        status: 422,
+        status: errors.every(isDefiniteGraphQlMutationRejection)
+          ? 422
+          : 500,
         responseMessage: message,
       });
     }

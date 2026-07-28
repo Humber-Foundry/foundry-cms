@@ -1565,16 +1565,17 @@ describe("content publication application", () => {
     vi.mocked(publisher.getProductionHead).mockResolvedValue(
       candidateCommitSha,
     );
+    getDeploymentStatus.mockResolvedValue("building");
     isReleaseLive.mockResolvedValue(false);
 
     await expect(
       app.commands.retryDeployment(publication.id, membershipId),
     ).resolves.toEqual(
       expect.objectContaining({
-        status: "committed",
+        status: "building",
         commitSha: candidateCommitSha,
-        detail: "deployment_retry_requested",
-        deploymentId: "build-123",
+        detail: "deployment_retry_reconciled",
+        deploymentId: null,
       }),
     );
     expect(publisher.reconcileCommit).toHaveBeenLastCalledWith(
@@ -1587,10 +1588,11 @@ describe("content publication application", () => {
       }),
     );
     expect(publisher.retryReference).not.toHaveBeenCalled();
-    expect(publisher.retryDeployment).toHaveBeenCalledWith({
-      commitSha: candidateCommitSha,
-      assertDispatch: expect.any(Function),
-    });
+    expect(getDeploymentStatus).toHaveBeenCalledWith(
+      candidateCommitSha,
+      undefined,
+    );
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
   it("preserves a retained candidate through a channel-configuration timeout", async () => {
@@ -1646,11 +1648,12 @@ describe("content publication application", () => {
       app.commands.retryDeployment(publication.id, membershipId),
     ).resolves.toEqual(
       expect.objectContaining({
-        status: "committed",
+        status: "building",
         commitSha: candidateCommitSha,
-        detail: "deployment_retry_requested",
+        detail: "deployment_retry_reconciled",
       }),
     );
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
   it("preserves a no-SHA Git outcome through a channel-configuration timeout", async () => {

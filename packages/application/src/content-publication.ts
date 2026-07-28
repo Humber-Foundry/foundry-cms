@@ -1920,7 +1920,13 @@ export function createContentPublicationApplication({
         } catch {
           // A missing marker still permits one explicitly requested retry.
         }
-        if (deploymentRetryDispatchWasAttempted(publication)) {
+        const reconciledCommitNeedsDeploymentCheck =
+          publication.detail === "git_commit_reconciled" &&
+          publication.deploymentRequestedAt === null;
+        if (
+          reconciledCommitNeedsDeploymentCheck ||
+          deploymentRetryDispatchWasAttempted(publication)
+        ) {
           const recordedDeploymentId =
             publication.deploymentId !== null &&
             !publication.deploymentId.startsWith("retry-dispatch:")
@@ -1948,7 +1954,8 @@ export function createContentPublicationApplication({
           }
           if (
             observed !== "failed" ||
-            recordedDeploymentId === undefined
+            (recordedDeploymentId === undefined &&
+              !reconciledCommitNeedsDeploymentCheck)
           ) {
             return publication;
           }
