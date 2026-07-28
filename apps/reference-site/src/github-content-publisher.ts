@@ -16,6 +16,7 @@ export type GitHubContentPublisherConfiguration = Readonly<{
   publicOrigin: string;
   deploymentCheckName: string;
   cloudflareAccountId: string;
+  cloudflareScriptTag: string;
   cloudflareBuildTriggerId: string;
   cloudflareApiToken: string;
 }>;
@@ -37,6 +38,7 @@ export type GitHubContentPublisherEnvironment = Readonly<{
   FOUNDRY_PUBLIC_ORIGIN?: string;
   FOUNDRY_DEPLOYMENT_CHECK_NAME?: string;
   FOUNDRY_CLOUDFLARE_ACCOUNT_ID?: string;
+  FOUNDRY_CLOUDFLARE_SCRIPT_TAG?: string;
   FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID?: string;
   FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
 }>;
@@ -85,6 +87,9 @@ export function readGitHubContentPublisherConfiguration(
       environment.FOUNDRY_DEPLOYMENT_CHECK_NAME?.trim() || "Cloudflare",
     cloudflareAccountId: requireValue(
       environment.FOUNDRY_CLOUDFLARE_ACCOUNT_ID,
+    ),
+    cloudflareScriptTag: requireValue(
+      environment.FOUNDRY_CLOUDFLARE_SCRIPT_TAG,
     ),
     cloudflareBuildTriggerId: requireValue(
       environment.FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID,
@@ -151,6 +156,37 @@ function isExplicitHttpRejection(error: unknown) {
     typeof error.status === "number" &&
     error.status >= 400 &&
     error.status < 500
+  );
+}
+
+function sortedStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string").sort()
+    : [];
+}
+
+function buildEnvironmentProjection(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("cloudflare_build_environment_invalid");
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => {
+        if (typeof entry !== "object" || entry === null) {
+          throw new Error("cloudflare_build_environment_invalid");
+        }
+        const variable = entry as Record<string, unknown>;
+        const isSecret = variable.is_secret === true;
+        return [
+          key,
+          {
+            isSecret,
+            value: isSecret ? null : variable.value,
+            secretVersion: isSecret ? variable.created_on : null,
+          },
+        ];
+      }),
   );
 }
 
@@ -341,7 +377,46 @@ export function createGitHubContentPublisher({
   }
 
   return {
-    getChannelConfigurationHash() {
+    async getChannelConfigurationHash() {
+      const root =
+        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+          configuration.cloudflareAccountId,
+        )}/builds`;
+      const requestOptions = {
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          authorization: `Bearer ${configuration.cloudflareApiToken}`,
+        },
+      };
+      const [triggersBody, environmentBody] = await Promise.all([
+        fetchImplementation(
+          `${root}/workers/${encodeURIComponent(
+            configuration.cloudflareScriptTag,
+          )}/triggers`,
+          requestOptions,
+        ).then(readJson),
+        fetchImplementation(
+          `${root}/triggers/${encodeURIComponent(
+            configuration.cloudflareBuildTriggerId,
+          )}/environment_variables`,
+          requestOptions,
+        ).then(readJson),
+      ]);
+      const trigger = Array.isArray(triggersBody.result)
+        ? triggersBody.result.find(
+            (candidate: any) =>
+              candidate?.trigger_uuid ===
+              configuration.cloudflareBuildTriggerId,
+          )
+        : undefined;
+      if (
+        typeof trigger !== "object" ||
+        trigger === null ||
+        trigger.external_script_id !== configuration.cloudflareScriptTag
+      ) {
+        throw new Error("cloudflare_build_configuration_invalid");
+      }
+      const repository = trigger.repo_connection;
       return sha256(
         JSON.stringify({
           appId: configuration.appId,
@@ -352,8 +427,26 @@ export function createGitHubContentPublisher({
           publicOrigin: configuration.publicOrigin,
           deploymentCheckName: configuration.deploymentCheckName,
           cloudflareAccountId: configuration.cloudflareAccountId,
+          cloudflareScriptTag: configuration.cloudflareScriptTag,
           cloudflareBuildTriggerId:
             configuration.cloudflareBuildTriggerId,
+          buildConfiguration: {
+            repository: {
+              connectionId: repository?.repo_connection_uuid,
+              providerType: repository?.provider_type,
+              providerAccountId: repository?.provider_account_id,
+              repositoryId: repository?.repo_id,
+            },
+            buildCommand: trigger.build_command,
+            deployCommand: trigger.deploy_command,
+            rootDirectory: trigger.root_directory,
+            branchIncludes: sortedStrings(trigger.branch_includes),
+            branchExcludes: sortedStrings(trigger.branch_excludes),
+            pathIncludes: sortedStrings(trigger.path_includes),
+            pathExcludes: sortedStrings(trigger.path_excludes),
+            buildCachingEnabled: trigger.build_caching_enabled,
+            environment: buildEnvironmentProjection(environmentBody.result),
+          },
         }),
       );
     },
@@ -438,7 +531,7 @@ export function createGitHubContentPublisher({
         }
         return { state: "committed", commitSha: commit.sha };
       } catch (error) {
-        if (!gitSideEffectStarted || isExplicitHttpRejection(error)) {
+        if (!gitSideEffectStarted) {
           return { state: "failed", detail: "git_operation_failed" };
         }
         return {
@@ -518,9 +611,15 @@ export function createGitHubContentPublisher({
             return "building";
           }
           if (build?.status === "stopped") {
+            if (
+              build.build_trigger_metadata?.commit_hash !== undefined &&
+              build.build_trigger_metadata.commit_hash !== commitSha
+            ) {
+              return "failed";
+            }
             return build.build_outcome === "success"
               ? "deployed"
-              : ["fail", "cancelled", "terminated"].includes(
+              : ["fail", "skipped", "cancelled", "terminated"].includes(
                     build.build_outcome,
                   )
                 ? "failed"

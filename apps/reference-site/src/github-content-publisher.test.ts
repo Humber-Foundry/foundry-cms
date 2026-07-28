@@ -38,6 +38,7 @@ const configurationInputs = {
   publicOrigin: "https://site.example",
   deploymentCheckName: "Cloudflare Workers",
   cloudflareAccountId: "account-123",
+  cloudflareScriptTag: "script-789",
   cloudflareBuildTriggerId: "trigger-456",
   cloudflareApiToken: "cloudflare-api-token",
 };
@@ -56,6 +57,7 @@ describe("GitHub content publisher", () => {
         FOUNDRY_GITHUB_REPOSITORY: "client-site",
         FOUNDRY_PUBLIC_ORIGIN: "https://site.example/path",
         FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "account-123",
+        FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "script-789",
         FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
         FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
       }),
@@ -73,6 +75,7 @@ describe("GitHub content publisher", () => {
         FOUNDRY_GITHUB_REPOSITORY: "client-site",
         FOUNDRY_PUBLIC_ORIGIN: "http://site.example",
         FOUNDRY_CLOUDFLARE_ACCOUNT_ID: "account-123",
+        FOUNDRY_CLOUDFLARE_SCRIPT_TAG: "script-789",
         FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID: "trigger-456",
         FOUNDRY_CLOUDFLARE_API_TOKEN: "cloudflare-api-token",
       }),
@@ -265,9 +268,56 @@ describe("GitHub content publisher", () => {
   });
 
   it("binds approvals to non-secret destination and deployment configuration", async () => {
+    const buildConfiguration = {
+      success: true,
+      result: [
+        {
+          trigger_uuid: "trigger-456",
+          external_script_id: "script-789",
+          build_command: "npm run build",
+          deploy_command: "npm run deploy",
+          root_directory: "/",
+          branch_includes: ["main"],
+          branch_excludes: [],
+          path_includes: ["**"],
+          path_excludes: [],
+          build_caching_enabled: true,
+          repo_connection: {
+            repo_connection_uuid: "connection-1",
+            provider_type: "github",
+            provider_account_id: "account-owner",
+            repo_id: "repository-1",
+          },
+        },
+      ],
+    };
+    const environmentConfiguration = {
+      success: true,
+      result: {
+        NODE_ENV: {
+          is_secret: false,
+          value: "production",
+          created_on: "2026-07-27T00:00:00Z",
+        },
+        DEPLOY_TOKEN: {
+          is_secret: true,
+          value: null,
+          created_on: "2026-07-27T00:00:00Z",
+        },
+      },
+    };
+    const configurationFetch = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (input) =>
+        json(
+          String(input).endsWith("/environment_variables")
+            ? environmentConfiguration
+            : buildConfiguration,
+        ),
+      );
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
-      fetch: vi.fn<typeof fetch>(),
+      fetch: configurationFetch,
     });
     const rotatedSecretPublisher = createGitHubContentPublisher({
       configuration: {
@@ -275,7 +325,7 @@ describe("GitHub content publisher", () => {
         privateKey: `${privateKey}\n`,
         cloudflareApiToken: "rotated-secret",
       },
-      fetch: vi.fn<typeof fetch>(),
+      fetch: configurationFetch,
     });
     const differentDestinationPublisher = createGitHubContentPublisher({
       configuration: {
@@ -283,7 +333,27 @@ describe("GitHub content publisher", () => {
         privateKey,
         productionBranch: "production",
       },
-      fetch: vi.fn<typeof fetch>(),
+      fetch: configurationFetch,
+    });
+    const changedBuildPublisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (input) =>
+          json(
+            String(input).endsWith("/environment_variables")
+              ? environmentConfiguration
+              : {
+                  ...buildConfiguration,
+                  result: [
+                    {
+                      ...buildConfiguration.result[0],
+                      deploy_command: "npm run deploy:changed",
+                    },
+                  ],
+                },
+          ),
+        ),
     });
 
     await expect(publisher.getChannelConfigurationHash()).resolves.toBe(
@@ -291,6 +361,11 @@ describe("GitHub content publisher", () => {
     );
     await expect(
       differentDestinationPublisher.getChannelConfigurationHash(),
+    ).resolves.not.toBe(
+      await publisher.getChannelConfigurationHash(),
+    );
+    await expect(
+      changedBuildPublisher.getChannelConfigurationHash(),
     ).resolves.not.toBe(
       await publisher.getChannelConfigurationHash(),
     );
@@ -338,6 +413,9 @@ describe("GitHub content publisher", () => {
         result: {
           status: "stopped",
           build_outcome: "success",
+          build_trigger_metadata: {
+            commit_hash: "c".repeat(40),
+          },
         },
       }),
     );
@@ -357,6 +435,46 @@ describe("GitHub content publisher", () => {
         },
       }),
     );
+  });
+
+  it("fails a skipped or wrong-commit manual build", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json({
+          success: true,
+          result: {
+            status: "stopped",
+            build_outcome: "skipped",
+            build_trigger_metadata: {
+              commit_hash: "c".repeat(40),
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          success: true,
+          result: {
+            status: "stopped",
+            build_outcome: "success",
+            build_trigger_metadata: {
+              commit_hash: "d".repeat(40),
+            },
+          },
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.getDeploymentStatus("c".repeat(40), "build-skipped"),
+    ).resolves.toBe("failed");
+    await expect(
+      publisher.getDeploymentStatus("c".repeat(40), "build-wrong"),
+    ).resolves.toBe("failed");
   });
 
   it("classifies an explicit non-fast-forward ref rejection as a moved head", async () => {
@@ -397,6 +515,46 @@ describe("GitHub content publisher", () => {
     ).resolves.toEqual({
       state: "blocked",
       detail: "production_head_moved",
+    });
+  });
+
+  it("preserves an exact candidate after another explicit ref rejection", async () => {
+    const expectedHead = "a".repeat(40);
+    const commitSha = "c".repeat(40);
+    const publishId = createContentPublicationId(
+      `publish_${"4".repeat(32)}`,
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(json({ sha: commitSha }))
+      .mockResolvedValueOnce(json({ message: "Reference rejected" }, 403));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId,
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${commitSha}`,
     });
   });
 

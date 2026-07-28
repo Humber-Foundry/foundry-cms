@@ -212,7 +212,7 @@ export type ContentPublisher = Readonly<{
 
 function reconciliationCandidate(detail: string | null): string | undefined {
   const candidate = detail?.match(
-    /^git_reference_result_unknown:([a-f0-9]{40}|[a-f0-9]{64})$/u,
+    /^git_reference_(?:result_unknown|not_advanced):([a-f0-9]{40}|[a-f0-9]{64})$/u,
   )?.[1];
   return candidate;
 }
@@ -686,6 +686,47 @@ export function createContentPublicationApplication({
     ) {
       return publication;
     }
+    const boundApproval = await store.findApproval(publication.approvalId);
+    if (boundApproval === null) {
+      return publication;
+    }
+    let channelFailure: "changed" | "unavailable" | null = null;
+    try {
+      if (
+        boundApproval.fingerprint.channelConfigurationHash !==
+        (await publisher.getChannelConfigurationHash())
+      ) {
+        channelFailure = "changed";
+      }
+    } catch {
+      channelFailure = "unavailable";
+    }
+    if (channelFailure !== null) {
+      const observedAt = now();
+      const channelCheckStartedAt =
+        publication.deploymentRequestedAt ?? publication.requestedAt;
+      if (
+        new Date(observedAt).getTime() -
+          new Date(channelCheckStartedAt).getTime() >=
+        deploymentSignalTimeoutMs
+      ) {
+        return store.updatePublication(
+          nextPublication(publication, {
+            status: "failed",
+            detail:
+              channelFailure === "changed"
+                ? "publication_channel_changed"
+                : "publication_channel_unavailable",
+            updatedAt: observedAt,
+          }),
+          {
+            expectedStatus: publication.status,
+            expectedUpdatedAt: publication.updatedAt,
+          },
+        );
+      }
+      return publication;
+    }
     if (publication.detail === "deployment_retry_dispatching") {
       const observedAt = now();
       const dispatchStartedAt =
@@ -765,7 +806,11 @@ export function createContentPublicationApplication({
                 reconciled.state === "not-found"
                   ? publication.status === "requested"
                     ? "publication_lease_expired"
-                    : "git_commit_not_found"
+                    : reconciliationCandidate(publication.detail) === undefined
+                      ? "git_commit_not_found"
+                      : `git_reference_not_advanced:${reconciliationCandidate(
+                          publication.detail,
+                        )}`
                   : "git_reconciliation_timeout",
               leaseToken: null,
               leaseExpiresAt: null,
@@ -980,6 +1025,18 @@ export function createContentPublicationApplication({
         );
         if (approval.workspaceId !== input.workspaceId) {
           throw new ContentApprovalInvalidError("approval_not_found");
+        }
+        const recoverableCandidate = await store.findLatestPublication(
+          approval.workspaceId,
+        );
+        if (
+          recoverableCandidate !== null &&
+          recoverableCandidate.status === "failed" &&
+          recoverableCandidate.approvalId === approval.id &&
+          recoverableCandidate.fingerprint === approval.fingerprint.value &&
+          reconciliationCandidate(recoverableCandidate.detail) !== undefined
+        ) {
+          return recoverableCandidate;
         }
         const activePublication = await store.findActivePublication();
         if (activePublication !== null) {
@@ -1197,12 +1254,38 @@ export function createContentPublicationApplication({
             "deployment_retry_not_available",
           );
         }
-        const { approval } = await requireApproval(
-          publication.approvalId,
-          requestedBy,
-        );
-        if (approval.fingerprint.value !== publication.fingerprint) {
+        const approval = await store.findApproval(publication.approvalId);
+        if (
+          approval === null ||
+          approval.fingerprint.value !== publication.fingerprint ||
+          approval.fingerprint.channelConfigurationHash !==
+            (await publisher.getChannelConfigurationHash()) ||
+          requestedBy.trim() === ""
+        ) {
           throw new ContentApprovalInvalidError("approval_stale");
+        }
+        try {
+          if (
+            await publisher.isReleaseLive({
+              commitSha: publication.commitSha,
+              contentHash: approval.fingerprint.contentHash,
+              schemaVersion: approval.fingerprint.schemaVersion,
+            })
+          ) {
+            return store.updatePublication(
+              nextPublication(publication, {
+                status: "verified-live",
+                detail: null,
+                updatedAt: now(),
+              }),
+              {
+                expectedStatus: "failed",
+                expectedUpdatedAt: publication.updatedAt,
+              },
+            );
+          }
+        } catch {
+          // A missing marker still permits one explicitly requested retry.
         }
         if ((await publisher.getProductionHead()) !== publication.commitSha) {
           throw new ContentPublicationValidationError(
@@ -1217,19 +1300,29 @@ export function createContentPublicationApplication({
         }
         const retryRequestedAt = now();
         const dispatchToken = `retry-dispatch:${crypto.randomUUID()}`;
-        const dispatching = await store.updatePublication(
-          nextPublication(publication, {
-            status: "committed",
-            detail: "deployment_retry_dispatching",
-            deploymentId: dispatchToken,
-            deploymentRequestedAt: retryRequestedAt,
-            updatedAt: retryRequestedAt,
-          }),
-          {
-            expectedStatus: "failed",
-            expectedUpdatedAt: publication.updatedAt,
-          },
-        );
+        let dispatching: ContentPublication;
+        try {
+          dispatching = await store.updatePublication(
+            nextPublication(publication, {
+              status: "committed",
+              detail: "deployment_retry_dispatching",
+              deploymentId: dispatchToken,
+              deploymentRequestedAt: retryRequestedAt,
+              updatedAt: retryRequestedAt,
+            }),
+            {
+              expectedStatus: "failed",
+              expectedUpdatedAt: publication.updatedAt,
+            },
+          );
+        } catch (error) {
+          if ((await store.findActivePublication()) !== null) {
+            throw new ContentPublicationValidationError(
+              "deployment_retry_in_progress",
+            );
+          }
+          throw error;
+        }
         if (
           dispatching.status !== "committed" ||
           dispatching.detail !== "deployment_retry_dispatching" ||

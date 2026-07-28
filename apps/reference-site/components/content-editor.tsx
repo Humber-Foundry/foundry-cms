@@ -475,7 +475,11 @@ export function ContentEditor({
       });
       setApprovalId(null);
       setPublication((current) =>
-        current !== null && publicationIsActive(current) ? current : null,
+        current !== null &&
+        (publicationIsActive(current) ||
+          (current.status === "failed" && current.commitSha !== null))
+          ? current
+          : null,
       );
       setPreviewedRevision(null);
       pendingApprovalAttempt.current = null;

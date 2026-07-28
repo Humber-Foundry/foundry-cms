@@ -113,6 +113,11 @@ dispatching a second build. If a Worker disappears while dispatching, the
 durable attempt becomes uncertain after one minute and terminal after the
 same bounded 15-minute recovery window rather than holding the global
 publication slot indefinitely.
+The trigger's deploy command must re-read the protected production ref
+immediately before promotion and abort unless it still equals
+`WORKERS_CI_COMMIT_SHA`. This deployment-time fence prevents an exact retry of
+an older commit from rolling production back after an external merge. The
+build result is also rejected if Cloudflare reports a different commit hash.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory
@@ -136,6 +141,7 @@ Set these non-secret values for each installation:
 - `FOUNDRY_PUBLIC_ORIGIN` (the canonical HTTPS public-site origin)
 - `FOUNDRY_DEPLOYMENT_CHECK_NAME` (defaults to `Cloudflare`)
 - `FOUNDRY_CLOUDFLARE_ACCOUNT_ID`
+- `FOUNDRY_CLOUDFLARE_SCRIPT_TAG`
 - `FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID`
 - `FOUNDRY_PRODUCTION_BASE` (a bootstrap fallback Git object ID)
 
@@ -145,6 +151,13 @@ Edit permission (called Workers CI Write in Cloudflare's newer permission
 vocabulary) used to trigger and inspect an exact manual build. Never put either
 secret, the GitHub App JWT, or an installation token in D1, logs, build output,
 or client bundles.
+
+Approval and every active refresh read the live Workers build trigger and its
+environment-variable metadata. The channel fingerprint covers repository
+identity, branch/path filters, build and deploy commands, root directory,
+caching, and sorted non-secret environment values. Secret values remain
+hidden; their Cloudflare creation timestamps act as rotation versions. A
+missing trigger or unreadable configuration fails closed.
 
 Workers Builds must expose `WORKERS_CI_COMMIT_SHA` during the build. Next
 embeds it as `FOUNDRY_RELEASE_COMMIT_SHA` in the release marker. A build without

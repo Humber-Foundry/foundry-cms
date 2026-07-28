@@ -26,6 +26,7 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_PUBLIC_ORIGIN?: string;
   FOUNDRY_DEPLOYMENT_CHECK_NAME?: string;
   FOUNDRY_CLOUDFLARE_ACCOUNT_ID?: string;
+  FOUNDRY_CLOUDFLARE_SCRIPT_TAG?: string;
   FOUNDRY_CLOUDFLARE_BUILD_TRIGGER_ID?: string;
   FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
 }>;
