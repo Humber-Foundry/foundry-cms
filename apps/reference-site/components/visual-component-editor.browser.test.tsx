@@ -42,6 +42,25 @@ function browserRevision(workspaceId: string) {
   } as never;
 }
 
+async function waitForEditorValue(
+  host: HTMLElement,
+  expected: string,
+): Promise<boolean> {
+  for (let index = 0; index < 50; index += 1) {
+    if (
+      Array.from(
+        host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          ".editor-groups input, .editor-groups textarea",
+        ),
+      ).some(({ value }) => value === expected)
+    ) {
+      return true;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+  }
+  return false;
+}
+
 describe("visual component editor browser acceptance", () => {
   const mounted: Array<ReturnType<typeof createRoot>> = [];
 
@@ -337,22 +356,12 @@ describe("visual component editor browser acceptance", () => {
       );
     });
 
-    let recovered = false;
-    for (let index = 0; index < 50 && !recovered; index += 1) {
-      recovered = Array.from(
-        host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-          ".editor-groups input, .editor-groups textarea",
-        ),
-      ).some(
-        ({ value }) =>
-          value === "Unsaved evidence after the durable addition",
-      );
-      if (!recovered) {
-        await new Promise((resolve) => window.setTimeout(resolve, 20));
-      }
-    }
-
-    expect(recovered).toBe(true);
+    expect(
+      await waitForEditorValue(
+        host,
+        "Unsaved evidence after the durable addition",
+      ),
+    ).toBe(true);
     expect(host.textContent).not.toContain(
       "some overlap newer values",
     );
@@ -368,6 +377,18 @@ describe("visual component editor browser acceptance", () => {
       "section_migrated_proof",
       referenceSiteDefinition,
     );
+    await clearContentEditorOutbox(destinationWorkspaceId);
+    await writeContentEditorOutbox({
+      workspaceId: destinationWorkspaceId,
+      baseRevision: 4,
+      edits: [
+        {
+          path: "site_foundry_reference.name",
+          baseValue: referenceSiteDefinition.site.name,
+          value: "Destination copy survives stale recovery",
+        },
+      ],
+    });
     expect(
       preserveStaleEdits(
         window.localStorage,
@@ -411,23 +432,18 @@ describe("visual component editor browser acceptance", () => {
       );
     });
 
-    let recovered = false;
-    for (let index = 0; index < 50 && !recovered; index += 1) {
-      recovered = Array.from(
-        host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-          ".editor-groups input, .editor-groups textarea",
-        ),
-      ).some(
-        ({ value }) =>
-          value ===
-          "Unsaved evidence carried into the upgraded workspace",
-      );
-      if (!recovered) {
-        await new Promise((resolve) => window.setTimeout(resolve, 20));
-      }
-    }
-
-    expect(recovered).toBe(true);
+    expect(
+      await waitForEditorValue(
+        host,
+        "Unsaved evidence carried into the upgraded workspace",
+      ),
+    ).toBe(true);
+    expect(
+      await waitForEditorValue(
+        host,
+        "Destination copy survives stale recovery",
+      ),
+    ).toBe(true);
     expect(host.textContent).not.toContain("some overlap newer values");
     expect(
       clearStaleEdits(
@@ -436,6 +452,7 @@ describe("visual component editor browser acceptance", () => {
         sourceWorkspaceId,
       ),
     ).toBe(true);
+    await clearContentEditorOutbox(destinationWorkspaceId);
   });
 
   it("keeps duplicate workspace tabs editable while coordinating browser persistence", async () => {

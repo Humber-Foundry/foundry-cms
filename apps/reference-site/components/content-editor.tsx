@@ -32,6 +32,7 @@ import {
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
   mergeRecoverySources,
+  planStructuralFirstRecovery,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
@@ -265,39 +266,13 @@ export function ContentEditor({
           );
           return;
         }
-        const orderedEdits = [
-          ...record.edits.filter(
-            ({ path }) => path === pageCompositionContract.slot.id,
-          ),
-          ...record.edits.filter(
-            ({ path }) => path !== pageCompositionContract.slot.id,
-          ),
-        ];
-        let projectedDefinition = state.workingDefinition;
-        for (const edit of orderedEdits) {
-          if (edit.path !== pageCompositionContract.slot.id) {
-            continue;
-          }
-          const projected = applyStructuralRecovery(
-            projectedDefinition,
-            edit,
-          );
-          if (projected.ok) {
-            projectedDefinition = projected.definition;
-          }
-        }
-        const projectedFields = listEditableSiteFields(projectedDefinition);
-        const currentValues = new Map([
-          ...projectedFields.map(
-            (field) => [field.path, field.value] as const,
-          ),
-          [
-            pageCompositionContract.slot.id,
-            JSON.stringify(
-              toPageCompositionIdentity(state.workingDefinition),
-            ),
-          ] as const,
-        ]);
+        const {
+          orderedEdits,
+          destinationValues: currentValues,
+        } = planStructuralFirstRecovery(
+          state.workingDefinition,
+          record.edits,
+        );
         const conflicts: StaleRecoveryConflict[] = [];
         let recoveredCount = 0;
         let alreadyAppliedCount = 0;
@@ -481,6 +456,7 @@ export function ContentEditor({
   useEffect(() => {
     if (
       !persistence.coordinated ||
+      !persistence.ready ||
       staleRecovery === undefined ||
       recoveryApplied.current
     ) {
@@ -529,31 +505,16 @@ export function ContentEditor({
       setRecoverySourcesReady(true);
       return;
     }
-    let projectedDefinition = state.workingDefinition;
-    for (const edit of recovery.recovered) {
-      if (edit.path !== pageCompositionContract.slot.id) {
-        continue;
-      }
-      const projected = applyStructuralRecovery(projectedDefinition, edit);
-      if (projected.ok) {
-        projectedDefinition = projected.definition;
-      }
-    }
-    if (projectedDefinition !== state.workingDefinition) {
-      const projectedDestinationValues = new Map([
-        ...listEditableSiteFields(projectedDefinition).map(
-          (field) => [field.path, field.value] as const,
-        ),
-        [
-          pageCompositionContract.slot.id,
-          destinationValues.get(pageCompositionContract.slot.id) ?? "",
-        ] as const,
-      ]);
+    const projectedRecovery = planStructuralFirstRecovery(
+      state.workingDefinition,
+      recovery.recovered,
+    );
+    if (projectedRecovery.projected) {
       recovery = recoverStaleEdits(
         recoveryStorage,
         staleRecovery.id,
         staleRecovery.sourceWorkspaceId,
-        projectedDestinationValues,
+        projectedRecovery.destinationValues,
       );
       if (!recovery.available) {
         setRecoverySourcesReady(true);
@@ -565,18 +526,15 @@ export function ContentEditor({
     }
     const applied: StaleRecoveryEdit[] = [];
     const nextConflicts = [...recovery.conflicts];
-    const orderedRecovered = [
-      ...recovery.recovered.filter(
-        ({ path }) => path === pageCompositionContract.slot.id,
-      ),
-      ...recovery.recovered.filter(
-        ({ path }) => path !== pageCompositionContract.slot.id,
-      ),
-    ];
+    const { orderedEdits: orderedRecovered } =
+      planStructuralFirstRecovery(
+        state.workingDefinition,
+        recovery.recovered,
+      );
     for (const edit of orderedRecovered) {
       if (edit.path === pageCompositionContract.slot.id) {
         const result = resolveStructuralRecovery(
-          initialRevision.definition,
+          state.workingDefinition,
           edit,
           destinationValues.get(edit.path) ?? null,
         );
@@ -613,6 +571,7 @@ export function ContentEditor({
   }, [
     initialStale,
     persistence.coordinated,
+    persistence.ready,
     staleRecovery,
     workingFields,
   ]);

@@ -1,6 +1,8 @@
 import {
   applyPageComposition,
+  listEditableSiteFields,
   pageCompositionContract,
+  toPageCompositionIdentity,
   type PageSection,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -191,6 +193,47 @@ export function resolveStructuralRecovery(
           reason: "changed",
         },
       };
+}
+
+export function planStructuralFirstRecovery(
+  definition: SiteDefinition,
+  edits: ReadonlyArray<StaleRecoveryEdit>,
+): Readonly<{
+  orderedEdits: StaleRecoveryEdit[];
+  destinationValues: ReadonlyMap<string, string>;
+  projected: boolean;
+}> {
+  const orderedEdits = [
+    ...edits.filter(
+      ({ path }) => path === pageCompositionContract.slot.id,
+    ),
+    ...edits.filter(
+      ({ path }) => path !== pageCompositionContract.slot.id,
+    ),
+  ];
+  let projectedDefinition = definition;
+  for (const edit of orderedEdits) {
+    if (edit.path !== pageCompositionContract.slot.id) {
+      continue;
+    }
+    const projected = applyStructuralRecovery(projectedDefinition, edit);
+    if (projected.ok) {
+      projectedDefinition = projected.definition;
+    }
+  }
+  return {
+    orderedEdits,
+    destinationValues: new Map([
+      ...listEditableSiteFields(projectedDefinition).map(
+        (field) => [field.path, field.value] as const,
+      ),
+      [
+        pageCompositionContract.slot.id,
+        JSON.stringify(toPageCompositionIdentity(definition)),
+      ] as const,
+    ]),
+    projected: projectedDefinition !== definition,
+  };
 }
 
 export function excludeCompositionOwnedEdits(
