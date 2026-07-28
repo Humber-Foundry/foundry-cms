@@ -9,11 +9,17 @@ type CreatedWorkspace = Readonly<{ workspaceId: string }>;
 export function ContentWorkspaceStarter({
   csrfToken,
   staleRecovery,
+  preservedRevision,
 }: {
   csrfToken: string;
   staleRecovery?: Readonly<{
     id: string;
     sourceWorkspaceId: string;
+  }>;
+  preservedRevision?: Readonly<{
+    workspaceId: string;
+    revision: number;
+    schemaVersion: string;
   }>;
 }) {
   const [message, setMessage] = useState("");
@@ -69,9 +75,18 @@ export function ContentWorkspaceStarter({
       <div className="dashboard-section-heading editor-heading">
         <div>
           <h2 id="content-workspace-heading">Content editor</h2>
-          <p>
-            Start a private draft workspace from the current published site.
-          </p>
+          {preservedRevision === undefined ? (
+            <p>
+              Start a private draft workspace from the current published site.
+            </p>
+          ) : (
+            <p>
+              Workspace <code>{preservedRevision.workspaceId}</code> revision{" "}
+              {preservedRevision.revision} is preserved under Site Definition{" "}
+              {preservedRevision.schemaVersion}. Start a fresh workspace to
+              edit the current schema.
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -79,7 +94,11 @@ export function ContentWorkspaceStarter({
           disabled={starting}
           onClick={startWorkspace}
         >
-          {starting ? "Starting…" : "Start workspace"}
+          {starting
+            ? "Starting…"
+            : preservedRevision === undefined
+              ? "Start workspace"
+              : "Start fresh workspace"}
         </button>
       </div>
       <p role="status" aria-live="polite" className="editor-message">

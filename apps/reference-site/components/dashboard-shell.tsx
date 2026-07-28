@@ -13,6 +13,13 @@ import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
 
+export function contentWorkspaceRequiresSchemaRecovery(
+  definition: SiteDefinition,
+  revision: ContentRevision,
+): boolean {
+  return revision.inputs.schemaVersion !== definition.schemaVersion;
+}
+
 export function DashboardShell({
   definition,
   currentMembership,
@@ -95,6 +102,18 @@ export function DashboardShell({
             <ContentWorkspaceStarter
               csrfToken={contentMutationToken}
               staleRecovery={staleRecovery}
+            />
+          ) : contentWorkspaceRequiresSchemaRecovery(
+              definition,
+              contentRevision,
+            ) ? (
+            <ContentWorkspaceStarter
+              csrfToken={contentMutationToken}
+              preservedRevision={{
+                workspaceId: contentRevision.workspaceId,
+                revision: contentRevision.revision,
+                schemaVersion: contentRevision.inputs.schemaVersion,
+              }}
             />
           ) : (
             <ContentEditor
