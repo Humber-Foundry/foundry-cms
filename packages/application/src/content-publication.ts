@@ -247,6 +247,7 @@ export class ContentPublicationValidationError extends Error {
     | "preview_confirmation_required"
     | "idempotency_key_invalid"
     | "production_base_invalid"
+    | "publication_no_changes"
     | "deployment_retry_not_available"
     | "deployment_retry_head_moved"
     | "deployment_retry_in_progress";
@@ -1050,13 +1051,18 @@ export function createContentPublicationApplication({
         ) {
           return recoverableCandidate;
         }
+        const base = parseProductionBase(
+          approval.fingerprint.productionBase,
+        );
+        if (approval.fingerprint.contentHash === base.contentHash) {
+          throw new ContentPublicationValidationError(
+            "publication_no_changes",
+          );
+        }
         const activePublication = await store.findActivePublication();
         if (activePublication !== null) {
           await refreshPublication(activePublication.id);
         }
-        const base = parseProductionBase(
-          approval.fingerprint.productionBase,
-        );
         const [headResult, baseIsLiveResult] = await Promise.allSettled([
           publisher.getProductionHead(),
           publisher.isReleaseLive({

@@ -195,6 +195,48 @@ describe("content publication application", () => {
     expect(createCommit).not.toHaveBeenCalled();
   });
 
+  it("rejects a no-op publication before creating Git objects", async () => {
+    const noOpRevision = {
+      ...revisionApplication.saved,
+      inputs: {
+        ...revisionApplication.saved.inputs,
+        productionBase:
+          `git:${productionCommit}@content:` +
+          revisionApplication.saved.inputs.contentHash,
+      },
+    };
+    const noOpRepository: ContentPublicationRevisionRepository = {
+      getRevision: async (_workspaceId, revision) =>
+        revision === noOpRevision.revision ? noOpRevision : null,
+      getCurrent: async () => noOpRevision,
+      isCurrent: async () => true,
+      listContributors: async () => [editorId],
+    };
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: noOpRepository,
+      publisher,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: noOpRevision.revision,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-no-op-revision-0001",
+      }),
+    ).rejects.toEqual(
+      new ContentPublicationValidationError("publication_no_changes"),
+    );
+    expect(createCommit).not.toHaveBeenCalled();
+  });
+
   it("invalidates approval when a later render-affecting revision exists", async () => {
     const { app, approval } = await approve();
     await revisionApplication.application.commands.save({
