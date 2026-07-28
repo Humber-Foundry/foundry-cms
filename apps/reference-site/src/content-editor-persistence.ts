@@ -68,6 +68,7 @@ export function createContentEditorTabLease(
           new BroadcastChannel(
             `foundry-cms:content-editor:${workspaceId}:scope-liveness`,
           ),
+  probeTimeoutMilliseconds = 2_000,
 ): ContentEditorTabLease {
   const lockManager = locks === false ? undefined : locks;
   let releaseHeld!: () => void;
@@ -131,7 +132,10 @@ export function createContentEditorTabLease(
             pendingProbes.delete(probeId);
             resolve(isLive);
           };
-          const timeout = globalThis.setTimeout(() => finish(false), 50);
+          const timeout = globalThis.setTimeout(
+            () => finish(false),
+            probeTimeoutMilliseconds,
+          );
           pendingProbes.set(probeId, finish);
           channel.postMessage({
             kind: "probe",

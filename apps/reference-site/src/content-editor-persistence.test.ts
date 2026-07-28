@@ -154,7 +154,18 @@ describe("content editor persistence lifecycle", () => {
         postMessage(message) {
           for (const candidate of channels) {
             if (candidate !== entry) {
-              candidate.listener?.({ data: message } as MessageEvent);
+              const deliver = () =>
+                candidate.listener?.({ data: message } as MessageEvent);
+              if (
+                typeof message === "object" &&
+                message !== null &&
+                "kind" in message &&
+                message.kind === "alive"
+              ) {
+                setTimeout(deliver, 75);
+              } else {
+                deliver();
+              }
             }
           }
         },
@@ -178,12 +189,14 @@ describe("content editor persistence lifecycle", () => {
       "tab_first",
       false,
       createChannel,
+      150,
     );
     const second = createContentEditorTabLease(
       "workspace_without_locks",
       "tab_second",
       false,
       createChannel,
+      150,
     );
     await Promise.all([first.ready, second.ready]);
 
