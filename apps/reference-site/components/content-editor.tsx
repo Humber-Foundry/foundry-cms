@@ -508,13 +508,13 @@ export function ContentEditor({
         ),
       ] as const,
     ]);
-    const { available, recovered, conflicts } = recoverStaleEdits(
+    let recovery = recoverStaleEdits(
       recoveryStorage,
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
       destinationValues,
     );
-    if (!available) {
+    if (!recovery.available) {
       setRecoverySourcesReady(true);
       setMessage(
         "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
@@ -524,14 +524,56 @@ export function ContentEditor({
     if (initialStale) {
       recoveryPending.current = mergeRecoverySources(
         recoveryPending.current,
-        [...recovered, ...conflicts],
+        [...recovery.recovered, ...recovery.conflicts],
       );
       setRecoverySourcesReady(true);
       return;
     }
+    let projectedDefinition = state.workingDefinition;
+    for (const edit of recovery.recovered) {
+      if (edit.path !== pageCompositionContract.slot.id) {
+        continue;
+      }
+      const projected = applyStructuralRecovery(projectedDefinition, edit);
+      if (projected.ok) {
+        projectedDefinition = projected.definition;
+      }
+    }
+    if (projectedDefinition !== state.workingDefinition) {
+      const projectedDestinationValues = new Map([
+        ...listEditableSiteFields(projectedDefinition).map(
+          (field) => [field.path, field.value] as const,
+        ),
+        [
+          pageCompositionContract.slot.id,
+          destinationValues.get(pageCompositionContract.slot.id) ?? "",
+        ] as const,
+      ]);
+      recovery = recoverStaleEdits(
+        recoveryStorage,
+        staleRecovery.id,
+        staleRecovery.sourceWorkspaceId,
+        projectedDestinationValues,
+      );
+      if (!recovery.available) {
+        setRecoverySourcesReady(true);
+        setMessage(
+          "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
+        );
+        return;
+      }
+    }
     const applied: StaleRecoveryEdit[] = [];
-    const nextConflicts = [...conflicts];
-    for (const edit of recovered) {
+    const nextConflicts = [...recovery.conflicts];
+    const orderedRecovered = [
+      ...recovery.recovered.filter(
+        ({ path }) => path === pageCompositionContract.slot.id,
+      ),
+      ...recovery.recovered.filter(
+        ({ path }) => path !== pageCompositionContract.slot.id,
+      ),
+    ];
+    for (const edit of orderedRecovered) {
       if (edit.path === pageCompositionContract.slot.id) {
         const result = resolveStructuralRecovery(
           initialRevision.definition,

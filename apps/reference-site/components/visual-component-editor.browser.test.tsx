@@ -18,6 +18,10 @@ import {
 } from "./visual-component-editor";
 import { ContentEditor } from "./content-editor";
 import {
+  clearStaleEdits,
+  preserveStaleEdits,
+} from "../src/content-editor-recovery";
+import {
   clearContentEditorOutbox,
   readContentEditorOutbox,
   writeContentEditorOutbox,
@@ -353,6 +357,85 @@ describe("visual component editor browser acceptance", () => {
       "some overlap newer values",
     );
     await clearContentEditorOutbox(workspaceId);
+  });
+
+  it("restores a migrated component before applying its dependent stale-workspace fields", async () => {
+    const destinationWorkspaceId = "workspace_browser_migrated_recovery";
+    const sourceWorkspaceId = "workspace_browser_legacy_recovery";
+    const recoveryId = "recovery_browser_structural_dependency";
+    const addedProof = createDefaultPageSection(
+      "proof",
+      "section_migrated_proof",
+      referenceSiteDefinition,
+    );
+    expect(
+      preserveStaleEdits(
+        window.localStorage,
+        recoveryId,
+        sourceWorkspaceId,
+        [
+          {
+            path: "section_migrated_proof.quote",
+            baseValue: addedProof.type === "proof" ? addedProof.quote : "",
+            value: "Unsaved evidence carried into the upgraded workspace",
+          },
+          {
+            path: "slot_home_sections",
+            baseValue: JSON.stringify(
+              toPageComposition(referenceSiteDefinition),
+            ),
+            value: JSON.stringify({
+              ...toPageComposition(referenceSiteDefinition),
+              components: [
+                ...referenceSiteDefinition.home.sections,
+                addedProof,
+              ],
+            }),
+          },
+        ],
+      ),
+    ).toBe(true);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    flushSync(() => {
+      root.render(
+        createElement(ContentEditor, {
+          csrfToken: "csrf-migrated-structural-recovery",
+          initialRevision: browserRevision(destinationWorkspaceId),
+          initialPreviewUrl: "/preview/migrated-structural-recovery",
+          activeWorkspaceUrl: "/dash?workspace=migrated-structural-recovery",
+          staleRecovery: { id: recoveryId, sourceWorkspaceId },
+        }),
+      );
+    });
+
+    let recovered = false;
+    for (let index = 0; index < 50 && !recovered; index += 1) {
+      recovered = Array.from(
+        host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          ".editor-groups input, .editor-groups textarea",
+        ),
+      ).some(
+        ({ value }) =>
+          value ===
+          "Unsaved evidence carried into the upgraded workspace",
+      );
+      if (!recovered) {
+        await new Promise((resolve) => window.setTimeout(resolve, 20));
+      }
+    }
+
+    expect(recovered).toBe(true);
+    expect(host.textContent).not.toContain("some overlap newer values");
+    expect(
+      clearStaleEdits(
+        window.localStorage,
+        recoveryId,
+        sourceWorkspaceId,
+      ),
+    ).toBe(true);
   });
 
   it("keeps duplicate workspace tabs editable while coordinating browser persistence", async () => {
