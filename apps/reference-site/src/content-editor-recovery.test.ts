@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createDefaultPageSection,
+  referenceSiteDefinition,
+  serializeRichTextDocument,
+  toPageComposition,
+  toPageCompositionIdentity,
+} from "@foundry/site-definition";
+
+import {
+  applyStructuralRecovery,
+  comparableRecoveryValue,
   clearStaleEdits,
+  excludeCompositionOwnedEdits,
+  mergeRecoverySources,
   mergeStaleRecoveryEdits,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
+  resolveStructuralRecovery,
   synchronizeStaleEdits,
 } from "./content-editor-recovery";
 
@@ -31,6 +44,102 @@ const edit = {
 };
 
 describe("stale edit recovery", () => {
+  it("preserves the rich-text discriminator through durable recovery", () => {
+    const storage = createStorage();
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const baseValue = serializeRichTextDocument(callToAction.body);
+    const value = serializeRichTextDocument({
+      ...callToAction.body,
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "text",
+              text: "Recovered safely",
+              marks: ["italic"],
+            },
+          ],
+        },
+      ],
+    });
+    const richEdit = {
+      path: `${callToAction.id}.body`,
+      format: "richText" as const,
+      baseValue,
+      value,
+    };
+
+    expect(
+      preserveStaleEdits(storage, "rich-recovery", "workspace-old", [
+        richEdit,
+      ]),
+    ).toBe(true);
+    expect(
+      recoverStaleEdits(
+        storage,
+        "rich-recovery",
+        "workspace-old",
+        new Map([[richEdit.path, baseValue]]),
+      ).recovered,
+    ).toEqual([richEdit]);
+  });
+
+  it("compares a structural command by stable composition identity", () => {
+    expect(
+      comparableRecoveryValue({
+        path: "slot_home_sections",
+        baseValue: "",
+        value: JSON.stringify({
+          slotId: "slot_home_sections",
+          components: [
+            {
+              ...referenceSiteDefinition.home.sections[0],
+              title: "Copy already saved by another attempt",
+            },
+          ],
+        }),
+      }),
+    ).toBe(
+      JSON.stringify({
+        slotId: "slot_home_sections",
+        components: [
+          {
+            id: referenceSiteDefinition.home.sections[0]!.id,
+            type: referenceSiteDefinition.home.sections[0]!.type,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("acknowledges stale-workspace edits already present at the destination", () => {
+    const storage = createStorage();
+    expect(
+      preserveStaleEdits(storage, "already-applied", "workspace-old", [
+        edit,
+      ]),
+    ).toBe(true);
+
+    expect(
+      recoverStaleEdits(
+        storage,
+        "already-applied",
+        "workspace-old",
+        new Map([[edit.path, edit.value]]),
+      ),
+    ).toEqual({
+      available: true,
+      recovered: [],
+      conflicts: [],
+    });
+  });
+
   it("forwards an active recovery when its destination later becomes stale", () => {
     const active = {
       id: "recovery-chain",
@@ -91,6 +200,33 @@ describe("stale edit recovery", () => {
     ).toEqual(merged);
   });
 
+  it("merges disjoint durable recovery sources before forwarding", () => {
+    const fromOutbox = {
+      ...edit,
+      value: "Recovered from IndexedDB",
+    };
+    const fromStaleWorkspace = {
+      path: "page_home.seo.title",
+      value: "Recovered from local storage",
+      baseValue: "Old SEO title",
+    };
+
+    expect(
+      mergeRecoverySources([fromOutbox], [fromStaleWorkspace]),
+    ).toEqual([fromOutbox, fromStaleWorkspace]);
+    expect(
+      mergeRecoverySources(
+        [edit],
+        [{ ...edit, value: "Edited again in the next workspace" }],
+      ),
+    ).toEqual([
+      {
+        ...edit,
+        value: "Edited again in the next workspace",
+      },
+    ]);
+  });
+
   it("does not resurrect a recovered edit reverted before another stale hop", () => {
     expect(mergeStaleRecoveryEdits([edit], [], new Set())).toEqual([]);
   });
@@ -133,6 +269,256 @@ describe("stale edit recovery", () => {
         destination,
       ),
     ).toEqual({ available: true, recovered: [], conflicts: [] });
+  });
+
+  it("preserves one canonical structural slot command for stale recovery", () => {
+    const storage = createStorage();
+    const composition = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify({
+        slotId: "slot_home_sections",
+        components: [{ id: "section_hero", type: "hero" }],
+      }),
+      value: JSON.stringify({
+        slotId: "slot_home_sections",
+        components: [
+          { id: "section_hero", type: "hero" },
+          { id: "section_proof", type: "proof" },
+        ],
+      }),
+    };
+    preserveStaleEdits(
+      storage,
+      "recovery-structure",
+      "workspace-first",
+      [composition],
+    );
+
+    expect(
+      recoverStaleEdits(
+        storage,
+        "recovery-structure",
+        "workspace-first",
+        new Map([[composition.path, composition.baseValue]]),
+      ).recovered,
+    ).toEqual([composition]);
+  });
+
+  it("does not duplicate fields already owned by a structural recovery command", () => {
+    const section = createDefaultPageSection(
+      "callToAction",
+      "section_new_contact",
+    );
+    if (section.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const edits = [
+      {
+        path: "section_new_contact.title",
+        baseValue: "",
+        value: section.title,
+      },
+      {
+        path: "section_new_contact_action.label",
+        baseValue: "",
+        value: section.action.label,
+      },
+      {
+        path: "page_home.seo.title",
+        baseValue: "Old",
+        value: "New",
+      },
+    ];
+
+    expect(excludeCompositionOwnedEdits(edits, [section])).toEqual([
+      edits[2],
+    ]);
+  });
+
+  it("uses one fail-closed structural recovery path", () => {
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: "",
+      value: JSON.stringify(toPageComposition(referenceSiteDefinition)),
+    };
+
+    expect(
+      applyStructuralRecovery(referenceSiteDefinition, edit),
+    ).toEqual({
+      ok: true,
+      definition: referenceSiteDefinition,
+    });
+    expect(
+      applyStructuralRecovery(referenceSiteDefinition, {
+        ...edit,
+        value: "{malformed",
+      }),
+    ).toEqual({ ok: false });
+  });
+
+  it("retains a recovered structural edit as a conflict when revalidation fails", () => {
+    const currentValue = JSON.stringify(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const composition = toPageComposition(referenceSiteDefinition);
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: currentValue,
+      value: JSON.stringify({
+        ...composition,
+        components: composition.components.filter(
+          ({ id }) => id !== "section_contact",
+        ),
+      }),
+    };
+
+    expect(
+      resolveStructuralRecovery(
+        referenceSiteDefinition,
+        edit,
+        currentValue,
+      ),
+    ).toEqual({
+      ok: false,
+      conflict: {
+        ...edit,
+        currentValue,
+        reason: "changed",
+      },
+    });
+  });
+
+  it("recovers structure without overwriting disjoint concurrent copy", () => {
+    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const reordered = {
+      ...sourceComposition,
+      components: [...sourceComposition.components].reverse(),
+    };
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(
+        toPageCompositionIdentity(referenceSiteDefinition),
+      ),
+      value: JSON.stringify(reordered),
+    };
+    const concurrent = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          {
+            ...referenceSiteDefinition.home.sections[0]!,
+            title: "Concurrent headline",
+          },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    };
+    const storage = createStorage();
+    preserveStaleEdits(
+      storage,
+      "recovery-disjoint-copy",
+      "workspace-disjoint-copy",
+      [edit],
+    );
+    const recovered = recoverStaleEdits(
+      storage,
+      "recovery-disjoint-copy",
+      "workspace-disjoint-copy",
+      new Map([
+        [
+          edit.path,
+          JSON.stringify(toPageCompositionIdentity(concurrent)),
+        ],
+      ]),
+    );
+    const result = applyStructuralRecovery(concurrent, edit);
+
+    expect(recovered.conflicts).toEqual([]);
+    expect(recovered.recovered).toEqual([edit]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.definition.home.sections[0]?.id).toBe(
+        "section_contact",
+      );
+      const hero = result.definition.home.sections.find(
+        ({ id }) => id === "section_hero",
+      );
+      expect(hero?.type === "hero" ? hero.title : undefined).toBe(
+        "Concurrent headline",
+      );
+    }
+  });
+
+  it("rejects removal of a component with concurrent copy changes", () => {
+    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(sourceComposition),
+      value: JSON.stringify({
+        ...sourceComposition,
+        components: sourceComposition.components.filter(
+          ({ id }) => id !== "section_hero",
+        ),
+      }),
+    };
+    const concurrent = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          {
+            ...referenceSiteDefinition.home.sections[0]!,
+            title: "Concurrent headline that must survive",
+          },
+          ...referenceSiteDefinition.home.sections.slice(1),
+        ],
+      },
+    };
+
+    expect(applyStructuralRecovery(concurrent, edit)).toEqual({
+      ok: false,
+    });
+  });
+
+  it("preserves a component added after the structural recovery baseline", () => {
+    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const edit = {
+      path: "slot_home_sections",
+      baseValue: JSON.stringify(sourceComposition),
+      value: JSON.stringify({
+        ...sourceComposition,
+        components: [...sourceComposition.components].reverse(),
+      }),
+    };
+    const concurrentAddition = createDefaultPageSection(
+      "proof",
+      "section_concurrent_proof",
+      referenceSiteDefinition,
+    );
+    const concurrent = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          ...referenceSiteDefinition.home.sections,
+          concurrentAddition,
+        ],
+      },
+    };
+
+    const result = applyStructuralRecovery(concurrent, edit);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.definition.home.sections.map(({ id }) => id)).toEqual([
+        "section_contact",
+        "section_proof",
+        "section_services",
+        "section_hero",
+        "section_concurrent_proof",
+      ]);
+    }
   });
 
   it("surfaces a same-path concurrent change as a three-way conflict", () => {

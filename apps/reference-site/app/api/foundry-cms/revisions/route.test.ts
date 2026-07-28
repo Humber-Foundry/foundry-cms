@@ -7,6 +7,10 @@ import {
   ContentRevisionValidationError,
   ContentWorkspaceAccessError,
 } from "@foundry/application";
+import {
+  referenceSiteDefinition,
+  serializeRichTextDocument,
+} from "@foundry/site-definition";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
@@ -133,6 +137,159 @@ describe("content revision endpoint", () => {
           "/api/foundry-cms/revisions?workspaceId=workspace_home&revision=3",
       }),
     );
+  });
+
+  it("preserves a canonical rich-text edit at the API boundary", async () => {
+    mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "d1-bookmark",
+      definition: referenceSiteDefinition,
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.1.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const value = serializeRichTextDocument(callToAction.body);
+
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.1.0",
+        baseRevision: 2,
+        edits: [
+          {
+            path: `${callToAction.id}.body`,
+            format: "richText",
+            value,
+          },
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edits: [
+          {
+            path: `${callToAction.id}.body`,
+            format: "richText",
+            value,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("rejects unsafe rich text before calling the application", async () => {
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.1.0",
+        baseRevision: 2,
+        edits: [
+          {
+            path: "section_contact.body",
+            format: "richText",
+            value: JSON.stringify({
+              version: "1.0.0",
+              type: "document",
+              children: [
+                {
+                  type: "paragraph",
+                  children: [
+                    {
+                      type: "text",
+                      text: "Unsafe",
+                      marks: [
+                        { type: "link", href: "javascript:alert(1)" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: "validation_failed",
+      fields: {
+        "section_contact.body":
+          "Rich text is invalid or contains unsupported or unsafe content.",
+      },
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it("passes registered component composition through the shared revision command", async () => {
+    mocks.save.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 3,
+      bookmark: "d1-bookmark",
+      definition: { schemaVersion: "1.1.0" },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: "1.1.0",
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    const composition = {
+      slotId: "slot_home_sections",
+      components: [
+        {
+          id: "section_new_proof",
+          type: "proof",
+          quote: "Evidence",
+          attribution: "Source",
+          metrics: [],
+        },
+      ],
+    };
+
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.1.0",
+        baseRevision: 2,
+        edits: [],
+        composition,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edits: [],
+        composition,
+      }),
+    );
+  });
+
+  it("rejects a save without copy edits or component composition", async () => {
+    const response = await POST(
+      request({
+        workspaceId: "workspace_home",
+        schemaVersion: "1.1.0",
+        baseRevision: 2,
+        edits: [],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 
   it("creates a workspace only through an authenticated mutation", async () => {

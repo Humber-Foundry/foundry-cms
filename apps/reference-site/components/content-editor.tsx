@@ -5,6 +5,9 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ContentRevision } from "@foundry/application";
 import {
   listEditableSiteFields,
+  pageCompositionContract,
+  toPageComposition,
+  toPageCompositionIdentity,
   type EditableSiteField,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
@@ -15,16 +18,29 @@ import {
 } from "../src/content-editor-history";
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
+  applyStructuralRecovery,
   clearStaleEdits,
+  comparableRecoveryBaseValue,
+  comparableRecoveryValue,
+  excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
+  mergeRecoverySources,
   preserveStaleEdits,
   recoveryToForward,
   recoverStaleEdits,
+  resolveStructuralRecovery,
   synchronizeStaleEdits,
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
+import {
+  outboxAttemptMatchesWorkspace,
+  useContentEditorAutosave,
+  useContentEditorPersistence,
+} from "../src/content-editor-persistence";
+import { pageCompositionChanged } from "../src/page-composition-puck";
 import { RichTextEditor } from "./rich-text-editor";
+import { VisualComponentEditor } from "./visual-component-editor";
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
 
@@ -85,10 +101,6 @@ export function ContentEditor({
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
-  const pendingAttempt = useRef<{
-    body: string;
-    idempotencyKey: string;
-  } | null>(null);
   const pendingWorkspaceAttempt = useRef<{
     body: string;
     idempotencyKey: string;
@@ -97,6 +109,10 @@ export function ContentEditor({
   const recoveryApplied = useRef(false);
   const recoverySyncReady = useRef(false);
   const recoveryPending = useRef<StaleRecoveryEdit[]>([]);
+  const [recoverySourcesReady, setRecoverySourcesReady] = useState(
+    staleRecovery === undefined,
+  );
+  const saveInFlight = useRef(false);
   const persistedFields = useMemo(
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
@@ -105,12 +121,212 @@ export function ContentEditor({
     () => listEditableSiteFields(state.workingDefinition),
     [state.workingDefinition],
   );
-  const edits = changedFields(persistedFields, workingFields);
+  const edits = useMemo(
+    () => changedFields(persistedFields, workingFields),
+    [persistedFields, workingFields],
+  );
+  const composition = useMemo(
+    () =>
+      pageCompositionChanged(
+        state.persistedDefinition,
+        state.workingDefinition,
+      )
+        ? toPageComposition(state.workingDefinition)
+        : undefined,
+    [state.persistedDefinition, state.workingDefinition],
+  );
+  const recoverableEdits = useMemo<StaleRecoveryEdit[]>(
+    () => {
+      const fieldEdits = edits.map((edit) => ({
+        ...edit,
+        baseValue:
+          persistedFields.find((field) => field.path === edit.path)?.value ??
+          "",
+      }));
+      return composition === undefined
+        ? fieldEdits
+        : [
+            {
+              path: pageCompositionContract.slot.id,
+              value: JSON.stringify(composition),
+              baseValue: JSON.stringify(
+                toPageComposition(state.persistedDefinition),
+              ),
+            },
+            ...excludeCompositionOwnedEdits(
+              fieldEdits,
+              composition.components.filter(
+                (component) =>
+                  !state.persistedDefinition.home.sections.some(
+                    ({ id }) => id === component.id,
+                  ),
+              ),
+            ),
+          ];
+    },
+    [composition, edits, persistedFields, state.persistedDefinition],
+  );
+  const persistence = useContentEditorPersistence({
+    workspaceId: initialRevision.workspaceId,
+    baseRevision: state.persistedRevision,
+    edits: recoverableEdits,
+    editorStatus: state.status,
+    recoveryBlocked: recoveryConflicts.length > 0,
+    onStorageError: setMessage,
+  });
   const groups = ["Page", "Navigation", "Footer", "SEO"] as const;
-  const editorLocked = state.status === "saving" || state.status === "stale";
+  const editorLocked =
+    !persistence.coordinated ||
+    !persistence.ready ||
+    state.status === "saving" ||
+    state.status === "stale" ||
+    recoveryConflicts.length > 0;
+
+  useEffect(() => {
+    if (state.status !== "saving") {
+      saveInFlight.current = false;
+    }
+  }, [state.status]);
+
+  function preserveOutboxWithoutAttempt(): void {
+    void persistence
+      .preserveWithoutAttempt()
+      .catch(() => {
+        setMessage(
+          "Browser recovery storage could not be updated. Keep this tab open until these edits are resolved.",
+        );
+      });
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    void persistence
+      .read()
+      .then((record) => {
+        if (cancelled || record === null || record.edits.length === 0) {
+          return;
+        }
+        recoveryPending.current = mergeRecoverySources(
+          recoveryPending.current,
+          record.edits,
+        );
+        if (initialStale) {
+          setMessage(
+            "Unsaved browser edits were recovered. Start a fresh workspace to carry them forward.",
+          );
+          return;
+        }
+        const currentValues = new Map([
+          ...workingFields.map(
+            (field) => [field.path, field.value] as const,
+          ),
+          [
+            pageCompositionContract.slot.id,
+            JSON.stringify(
+              toPageCompositionIdentity(state.workingDefinition),
+            ),
+          ] as const,
+        ]);
+        const conflicts: StaleRecoveryConflict[] = [];
+        let recoveredCount = 0;
+        let alreadyAppliedCount = 0;
+        for (const edit of record.edits) {
+          const currentValue = currentValues.get(edit.path);
+          if (currentValue === undefined) {
+            conflicts.push({
+              ...edit,
+              currentValue: null,
+              reason: "missing",
+            });
+            continue;
+          }
+          if (currentValue === comparableRecoveryValue(edit)) {
+            alreadyAppliedCount += 1;
+            continue;
+          }
+          if (currentValue !== comparableRecoveryBaseValue(edit)) {
+            conflicts.push({
+              ...edit,
+              currentValue,
+              reason: "changed",
+            });
+            continue;
+          }
+          if (edit.path === pageCompositionContract.slot.id) {
+            const result = applyStructuralRecovery(
+              initialRevision.definition,
+              edit,
+            );
+            if (result.ok) {
+              dispatch({
+                type: "compose",
+                definition: result.definition,
+                refreshProjection: true,
+              });
+              recoveredCount += 1;
+            } else {
+              conflicts.push({
+                ...edit,
+                currentValue,
+                reason: "changed",
+              });
+            }
+          } else {
+            dispatch({ type: "edit", ...edit });
+            recoveredCount += 1;
+          }
+        }
+        if (alreadyAppliedCount === record.edits.length) {
+          recoveryPending.current = [];
+          void persistence.clear();
+          setMessage(
+            `Revision ${state.persistedRevision} already contains the browser's last autosave.`,
+          );
+          return;
+        }
+        setRecoveryConflicts(conflicts);
+        if (
+          conflicts.length === 0 &&
+          record.baseRevision === state.persistedRevision &&
+          outboxAttemptMatchesWorkspace(
+            record,
+            initialRevision.workspaceId,
+          )
+        ) {
+          persistence.restoreAttempt(record.attempt!);
+        }
+        if (conflicts.length > 0) {
+          setMessage(
+            "Unsaved browser edits were recovered, but some overlap newer values. Resolve each one before saving.",
+          );
+        } else if (recoveredCount > 0) {
+          setMessage(
+            record.baseRevision === state.persistedRevision
+              ? "Unsaved browser edits were recovered. Review and save them when ready."
+              : "Unsaved browser edits were safely rebased onto the latest revision. Review and save them when ready.",
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMessage(
+            "Browser recovery storage is unavailable. Keep this tab open until your edits are saved.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          persistence.finishHydration();
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (
+      !persistence.coordinated ||
       staleRecovery === undefined ||
       recoveryApplied.current
     ) {
@@ -121,44 +337,93 @@ export function ContentEditor({
     try {
       recoveryStorage = window.localStorage;
     } catch {
+      setRecoverySourcesReady(true);
       setMessage(
         "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
       );
       return;
     }
+    const destinationValues = new Map([
+      ...workingFields.map(
+        (field) => [field.path, field.value] as const,
+      ),
+      [
+        pageCompositionContract.slot.id,
+        JSON.stringify(
+          toPageCompositionIdentity(state.workingDefinition),
+        ),
+      ] as const,
+    ]);
     const { available, recovered, conflicts } = recoverStaleEdits(
       recoveryStorage,
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
-      new Map(workingFields.map((field) => [field.path, field.value])),
+      destinationValues,
     );
     if (!available) {
+      setRecoverySourcesReady(true);
       setMessage(
         "Browser recovery storage is unavailable. The fresh workspace remains usable; return to the preserved old workspace to copy unsaved edits.",
       );
       return;
     }
-    recoveryPending.current = [...recovered, ...conflicts];
     if (initialStale) {
+      recoveryPending.current = mergeRecoverySources(
+        recoveryPending.current,
+        [...recovered, ...conflicts],
+      );
+      setRecoverySourcesReady(true);
       return;
     }
+    const applied: StaleRecoveryEdit[] = [];
+    const nextConflicts = [...conflicts];
     for (const edit of recovered) {
-      dispatch({ type: "edit", ...edit });
+      if (edit.path === pageCompositionContract.slot.id) {
+        const result = resolveStructuralRecovery(
+          initialRevision.definition,
+          edit,
+          destinationValues.get(edit.path) ?? null,
+        );
+        if (result.ok) {
+          applied.push(edit);
+          dispatch({
+            type: "compose",
+            definition: result.definition,
+            refreshProjection: true,
+          });
+        } else {
+          nextConflicts.push(result.conflict);
+        }
+      } else {
+        applied.push(edit);
+        dispatch({ type: "edit", ...edit });
+      }
     }
-    setRecoveryConflicts(conflicts);
-    if (conflicts.length > 0) {
+    recoveryPending.current = mergeRecoverySources(
+      recoveryPending.current,
+      [...applied, ...nextConflicts],
+    );
+    setRecoveryConflicts(nextConflicts);
+    if (nextConflicts.length > 0) {
       setMessage(
         "Some unsaved edits overlap newer values or changed field paths. Choose how to resolve each one.",
       );
-    } else if (recovered.length > 0) {
+    } else if (applied.length > 0) {
       setMessage(
         "Unsaved edits were recovered in this fresh workspace. Review and save them when ready.",
       );
     }
-  }, [initialStale, staleRecovery, workingFields]);
+    setRecoverySourcesReady(true);
+  }, [
+    initialStale,
+    persistence.coordinated,
+    staleRecovery,
+    workingFields,
+  ]);
 
   useEffect(() => {
     if (
+      !persistence.coordinated ||
       staleRecovery === undefined ||
       initialStale ||
       !recoveryApplied.current ||
@@ -170,16 +435,9 @@ export function ContentEditor({
       recoverySyncReady.current = true;
       return;
     }
-    const persistedValues = new Map(
-      persistedFields.map((field) => [field.path, field.value]),
-    );
-    const current = edits.map((edit) => ({
-      ...edit,
-      baseValue: persistedValues.get(edit.path) ?? "",
-    }));
     const pending = mergeStaleRecoveryEdits(
       recoveryPending.current,
-      current,
+      recoverableEdits,
       new Set(recoveryConflicts.map((conflict) => conflict.path)),
     );
     try {
@@ -208,28 +466,33 @@ export function ContentEditor({
     }
   }, [
     activeWorkspaceUrl,
-    edits,
+    recoverableEdits,
     initialStale,
+    persistence.coordinated,
     persistedFields,
     recoveryConflicts,
     staleRecovery,
   ]);
 
   async function save() {
-    if (pendingAttempt.current === null) {
-      pendingAttempt.current = {
-        body: JSON.stringify({
-          workspaceId: initialRevision.workspaceId,
-          schemaVersion: state.persistedDefinition.schemaVersion,
-          baseRevision: state.persistedRevision,
-          edits,
-        }),
-        idempotencyKey: crypto.randomUUID(),
-      };
+    if (
+      saveInFlight.current ||
+      !persistence.coordinated ||
+      !persistence.ready
+    ) {
+      return;
     }
+    saveInFlight.current = true;
     dispatch({ type: "saving" });
-    setMessage("");
-    const attempt = pendingAttempt.current;
+    const attempt = await persistence.beginAttempt(
+      JSON.stringify({
+        workspaceId: initialRevision.workspaceId,
+        schemaVersion: state.persistedDefinition.schemaVersion,
+        baseRevision: state.persistedRevision,
+        edits,
+        ...(composition === undefined ? {} : { composition }),
+      }),
+    );
     try {
       const result = await sendContentRevisionAttempt({
         attempt,
@@ -245,7 +508,7 @@ export function ContentEditor({
         typeof body.fields === "object" &&
         body.fields !== null
       ) {
-        pendingAttempt.current = null;
+        preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
           errors: body.fields as Record<string, string>,
@@ -260,7 +523,7 @@ export function ContentEditor({
         "error" in body &&
         body.error === "revision_conflict"
       ) {
-        pendingAttempt.current = null;
+        preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
           conflict: "conflict",
@@ -284,7 +547,7 @@ export function ContentEditor({
           (body.acknowledgedRevision as number) >= 0
             ? (body.acknowledgedRevision as number)
             : undefined;
-        pendingAttempt.current = null;
+        preserveOutboxWithoutAttempt();
         dispatch({
           type: "failed",
           conflict: "stale",
@@ -302,7 +565,12 @@ export function ContentEditor({
         throw new Error("content_revision_save_failed");
       }
       const saved = body as SaveResponse;
-      pendingAttempt.current = null;
+      let outboxCleared = true;
+      try {
+        await persistence.acknowledge();
+      } catch {
+        outboxCleared = false;
+      }
       if (staleRecovery !== undefined) {
         try {
           const recoveryStorage = window.localStorage;
@@ -317,11 +585,8 @@ export function ContentEditor({
             window.history.replaceState(null, "", activeWorkspaceUrl);
           } else {
             const unresolved = recoveryConflicts.map(
-              ({ path, value, baseValue }) => ({
-                path,
-                value,
-                baseValue,
-              }),
+              ({ currentValue: _currentValue, reason: _reason, ...edit }) =>
+                edit,
             );
             recoveryPending.current = unresolved;
             preserveStaleEdits(
@@ -341,7 +606,11 @@ export function ContentEditor({
         revision: saved.revision,
       });
       setPreviewUrl(saved.previewUrl);
-      setMessage(`Revision ${saved.revision} saved.`);
+      setMessage(
+        outboxCleared
+          ? `Revision ${saved.revision} saved.`
+          : `Revision ${saved.revision} saved, but the local browser recovery record could not be cleared.`,
+      );
     } catch {
       dispatch({ type: "failed", errors: {} });
       setMessage(
@@ -350,12 +619,37 @@ export function ContentEditor({
     }
   }
 
-  function edit(path: string, value: string) {
-    pendingAttempt.current = null;
-    dispatch({ type: "edit", path, value });
+  useContentEditorAutosave({
+    enabled:
+      persistence.coordinated &&
+      persistence.ready &&
+      state.status === "dirty" &&
+      recoverableEdits.length > 0 &&
+      recoveryConflicts.length === 0,
+    fingerprint: JSON.stringify(recoverableEdits),
+    onSave: () => void save(),
+  });
+
+  function edit(edit: SiteDefinitionEdit) {
+    if (
+      saveInFlight.current ||
+      !persistence.coordinated ||
+      !persistence.ready
+    ) {
+      return;
+    }
+    persistence.discardAttempt();
+    dispatch({ type: "edit", ...edit });
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
+    if (
+      !persistence.coordinated ||
+      !persistence.ready ||
+      !recoverySourcesReady
+    ) {
+      return;
+    }
     const forwardedRecovery =
       destination === "fresh"
         ? recoveryToForward(
@@ -366,25 +660,15 @@ export function ContentEditor({
     const recoveryId = forwardedRecovery?.id ?? crypto.randomUUID();
     const recoverySourceWorkspaceId =
       forwardedRecovery?.sourceWorkspaceId ?? initialRevision.workspaceId;
-    const persistedValues = new Map(
-      persistedFields.map((field) => [field.path, field.value]),
+    const editsToPreserve = mergeStaleRecoveryEdits(
+      recoveryPending.current,
+      recoverableEdits,
+      new Set(
+        initialStale
+          ? recoveryPending.current.map((edit) => edit.path)
+          : recoveryConflicts.map((conflict) => conflict.path),
+      ),
     );
-    const recoveryEdits = edits.map((edit) => ({
-      ...edit,
-      baseValue: persistedValues.get(edit.path) ?? "",
-    }));
-    const editsToPreserve =
-      forwardedRecovery === undefined
-        ? recoveryEdits
-        : mergeStaleRecoveryEdits(
-            recoveryPending.current,
-            recoveryEdits,
-            new Set(
-              initialStale
-                ? recoveryPending.current.map((edit) => edit.path)
-                : recoveryConflicts.map((conflict) => conflict.path),
-            ),
-          );
     try {
       if (
         !preserveStaleEdits(
@@ -438,8 +722,31 @@ export function ContentEditor({
     conflict: StaleRecoveryConflict,
     resolution: "latest" | "mine",
   ) {
+    if (!persistence.coordinated || !persistence.ready) {
+      return;
+    }
     if (resolution === "mine" && conflict.currentValue !== null) {
-      edit(conflict.path, conflict.value);
+      if (conflict.path === pageCompositionContract.slot.id) {
+        const result = applyStructuralRecovery(
+          state.workingDefinition,
+          conflict,
+        );
+        if (result.ok) {
+          persistence.discardAttempt();
+          dispatch({
+            type: "compose",
+            definition: result.definition,
+            refreshProjection: true,
+          });
+        } else {
+          setMessage(
+            "That structural recovery no longer fits the current Site Definition. It remains preserved until you keep the latest structure.",
+          );
+          return;
+        }
+      } else {
+        edit(conflict);
+      }
     }
     const remaining = recoveryConflicts.filter(
       (candidate) => candidate.path !== conflict.path,
@@ -448,6 +755,14 @@ export function ContentEditor({
       (candidate) =>
         candidate.path !== conflict.path || resolution === "mine",
     );
+    void (recoveryPending.current.length === 0
+      ? persistence.clear()
+      : persistence.snapshot(recoveryPending.current)
+    ).catch(() => {
+      setMessage(
+        "That choice is active in this tab, but browser recovery storage could not be updated.",
+      );
+    });
     setRecoveryConflicts(remaining);
     if (staleRecovery !== undefined) {
       try {
@@ -494,7 +809,12 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.past.length === 0 || editorLocked}
-            onClick={() => dispatch({ type: "undo" })}
+            onClick={() => {
+              if (!saveInFlight.current) {
+                persistence.discardAttempt();
+                dispatch({ type: "undo" });
+              }
+            }}
           >
             Undo
           </button>
@@ -502,7 +822,12 @@ export function ContentEditor({
             type="button"
             className="copy-button"
             disabled={state.future.length === 0 || editorLocked}
-            onClick={() => dispatch({ type: "redo" })}
+            onClick={() => {
+              if (!saveInFlight.current) {
+                persistence.discardAttempt();
+                dispatch({ type: "redo" });
+              }
+            }}
           >
             Redo
           </button>
@@ -510,8 +835,9 @@ export function ContentEditor({
             type="button"
             className="button button-primary"
             disabled={
-              edits.length === 0 ||
-              editorLocked
+              (edits.length === 0 && composition === undefined) ||
+              editorLocked ||
+              recoveryConflicts.length > 0
             }
             onClick={save}
           >
@@ -534,7 +860,12 @@ export function ContentEditor({
           <button
             type="button"
             className="copy-button"
-            disabled={creatingWorkspace}
+            disabled={
+              creatingWorkspace ||
+              !persistence.coordinated ||
+              !persistence.ready ||
+              !recoverySourcesReady
+            }
             onClick={() =>
               void recoverEdits(
                 state.status === "stale" ? "fresh" : "current",
@@ -569,6 +900,7 @@ export function ContentEditor({
                       <button
                         type="button"
                         className="copy-button"
+                        disabled={!persistence.coordinated}
                         onClick={() =>
                           resolveRecoveryConflict(edit, "latest")
                         }
@@ -578,6 +910,7 @@ export function ContentEditor({
                       <button
                         type="button"
                         className="copy-button"
+                        disabled={!persistence.coordinated}
                         onClick={() => resolveRecoveryConflict(edit, "mine")}
                       >
                         Use my value
@@ -593,6 +926,7 @@ export function ContentEditor({
                     <button
                       type="button"
                       className="copy-button"
+                      disabled={!persistence.coordinated}
                       onClick={() =>
                         resolveRecoveryConflict(edit, "latest")
                       }
@@ -606,6 +940,18 @@ export function ContentEditor({
           </ul>
         </div>
       ) : null}
+      <VisualComponentEditor
+        key={`${state.persistedRevision}:${state.projectionVersion}`}
+        definition={state.workingDefinition}
+        disabled={editorLocked}
+        onChange={(definition) => {
+          if (saveInFlight.current) {
+            return;
+          }
+          persistence.discardAttempt();
+          dispatch({ type: "compose", definition });
+        }}
+      />
       <div className="editor-groups">
         {groups.map((group) => (
           <fieldset key={group}>
@@ -625,7 +971,13 @@ export function ContentEditor({
                       value={field.value}
                       invalid={Boolean(state.errors[field.path])}
                       describedBy={`${field.path}-error`}
-                      onChange={(value) => edit(field.path, value)}
+                      onChange={(value) =>
+                        edit({
+                          path: field.path,
+                          format: "richText",
+                          value,
+                        })
+                      }
                     />
                   ) : field.multiline ? (
                     <textarea
@@ -634,7 +986,13 @@ export function ContentEditor({
                       value={field.value}
                       aria-invalid={Boolean(state.errors[field.path])}
                       aria-describedby={`${field.path}-error`}
-                      onChange={(event) => edit(field.path, event.target.value)}
+                      onChange={(event) =>
+                        edit({
+                          path: field.path,
+                          format: "plainText",
+                          value: event.target.value,
+                        })
+                      }
                     />
                   ) : (
                     <input
@@ -642,7 +1000,13 @@ export function ContentEditor({
                       value={field.value}
                       aria-invalid={Boolean(state.errors[field.path])}
                       aria-describedby={`${field.path}-error`}
-                      onChange={(event) => edit(field.path, event.target.value)}
+                      onChange={(event) =>
+                        edit({
+                          path: field.path,
+                          format: "plainText",
+                          value: event.target.value,
+                        })
+                      }
                     />
                   )}
                   <small id={`${field.path}-error`}>

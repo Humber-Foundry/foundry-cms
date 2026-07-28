@@ -407,7 +407,11 @@ export function updateEditableSiteField(
   const draft = structuredClone(
     definition,
   ) as unknown as MutableSiteDefinition;
-  binding.write(draft, edit.value);
+  try {
+    binding.write(draft, edit.value);
+  } catch {
+    return null;
+  }
   return draft as unknown as SiteDefinition;
 }
 

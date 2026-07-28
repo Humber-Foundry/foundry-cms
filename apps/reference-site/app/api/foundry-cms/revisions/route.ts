@@ -11,6 +11,7 @@ import {
 } from "@foundry/application";
 import {
   createSerializedRichTextDocument,
+  type PageComposition,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
 
@@ -41,6 +42,7 @@ type SaveBody = {
   schemaVersion: "1.1.0";
   baseRevision: number;
   edits: SiteDefinitionEdit[];
+  composition?: PageComposition;
 };
 
 export async function GET(request: Request) {
@@ -140,10 +142,30 @@ function parseSaveBody(
     (candidate.baseRevision as number) < 0 ||
     typeof candidate.workspaceId !== "string" ||
     typeof candidate.schemaVersion !== "string" ||
-    !Array.isArray(candidate.edits) ||
-    candidate.edits.length === 0
+    !Array.isArray(candidate.edits)
   ) {
     return { ok: false };
+  }
+  const composition =
+    typeof candidate.composition === "object" &&
+    candidate.composition !== null &&
+    "slotId" in candidate.composition &&
+    candidate.composition.slotId === "slot_home_sections" &&
+    "components" in candidate.composition &&
+    Array.isArray(candidate.composition.components)
+      ? (candidate.composition as PageComposition)
+      : undefined;
+  if (candidate.edits.length === 0 && composition === undefined) {
+    return { ok: false };
+  }
+  if (candidate.composition !== undefined && composition === undefined) {
+    return {
+      ok: false,
+      fields: {
+        composition:
+          "Provide a registered slot and its component collection.",
+      },
+    };
   }
   const errors = Object.create(null) as Record<string, string>;
   const edits: SiteDefinitionEdit[] = [];
@@ -195,6 +217,7 @@ function parseSaveBody(
         schemaVersion: candidate.schemaVersion as "1.1.0",
         baseRevision: candidate.baseRevision as number,
         edits,
+        ...(composition === undefined ? {} : { composition }),
       },
     };
   } catch {
@@ -272,6 +295,9 @@ export async function POST(request: Request) {
       schemaVersion: body.schemaVersion,
       baseRevision: body.baseRevision,
       edits: body.edits,
+      ...(body.composition === undefined
+        ? {}
+        : { composition: body.composition }),
       idempotencyKey,
     });
     return Response.json(

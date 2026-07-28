@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { publicScriptPaths } from "./public-script-paths.mjs";
+import {
+  publicScriptPaths,
+  publicStylePaths,
+} from "./public-script-paths.mjs";
 
 describe("publicScriptPaths", () => {
   it("finds scripts and preload-only JavaScript without duplicates", () => {
@@ -16,6 +19,20 @@ describe("publicScriptPaths", () => {
       "/_next/direct.js",
       "/_next/preloaded.js",
       "/_next/module.js",
+    ]);
+  });
+
+  it("finds public stylesheets without duplicates", () => {
+    const html = [
+      '<link rel="stylesheet" href="/_next/public.css">',
+      '<link href="/_next/route.css" rel="stylesheet">',
+      '<link rel="preload" as="style" href="/_next/ignored.css">',
+      '<link rel="stylesheet" href="/_next/public.css">',
+    ].join("");
+
+    expect(publicStylePaths(html)).toEqual([
+      "/_next/public.css",
+      "/_next/route.css",
     ]);
   });
 });

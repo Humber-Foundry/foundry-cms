@@ -346,6 +346,37 @@
   font-size: 0.8rem;
 }
 
+.visual-component-editor {
+  margin: 1.25rem 0 1.5rem;
+  border-top: 1px solid #e6e9e6;
+  padding-top: 1.25rem;
+}
+
+.visual-component-editor h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.visual-component-editor code {
+  font-size: 0.75rem;
+}
+
+.puck-editor-frame {
+  overflow: hidden;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.65rem;
+  background: var(--white);
+}
+
+.puck-editor-frame:focus-within {
+  outline: 3px solid #477a5d;
+  outline-offset: 3px;
+}
+
+.puck-editor-frame[aria-disabled="true"] {
+  opacity: 0.65;
+}
+
 .editor-recovery-conflicts {
   border: 1px solid #dce1dc;
   border-radius: 0.65rem;
