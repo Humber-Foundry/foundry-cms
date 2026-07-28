@@ -571,12 +571,63 @@ export function richTextDocumentHasVisibleText(
   );
 }
 
+function canonicalRichTextText(node: RichTextText): RichTextText {
+  return {
+    type: "text",
+    text: node.text,
+    marks: node.marks.map((mark) =>
+      typeof mark === "string"
+        ? mark
+        : { type: "link", href: mark.href },
+    ),
+  };
+}
+
+function canonicalRichTextParagraph(
+  node: RichTextParagraph,
+): RichTextParagraph {
+  return {
+    type: "paragraph",
+    children: node.children.map(canonicalRichTextText),
+  };
+}
+
+function canonicalRichTextBlock(node: RichTextBlock): RichTextBlock {
+  switch (node.type) {
+    case "paragraph":
+      return canonicalRichTextParagraph(node);
+    case "heading":
+      return {
+        type: "heading",
+        level: node.level,
+        children: node.children.map(canonicalRichTextText),
+      };
+    case "blockquote":
+      return {
+        type: "blockquote",
+        children: node.children.map(canonicalRichTextParagraph),
+      };
+    case "bulletList":
+    case "orderedList":
+      return {
+        type: node.type,
+        children: node.children.map((item) => ({
+          type: "listItem",
+          children: item.children.map(canonicalRichTextParagraph),
+        })),
+      };
+  }
+}
+
 export function serializeRichTextDocument(
   document: RichTextDocument,
 ): SerializedRichTextDocument {
-  return JSON.stringify(
-    validateRichTextDocument(document),
-  ) as SerializedRichTextDocument;
+  const validated = validateRichTextDocument(document);
+  return JSON.stringify({
+    version: validated.version,
+    type: "document",
+    children: validated.children.map(canonicalRichTextBlock),
+  }) as SerializedRichTextDocument;
 }
 
 export function parseSerializedRichTextDocument(

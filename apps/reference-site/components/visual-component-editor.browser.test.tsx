@@ -342,6 +342,73 @@ describe("visual component editor browser acceptance", () => {
     );
   });
 
+  it("edits rich text at the caret directly on the rendered page", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    let latest = referenceSiteDefinition;
+
+    flushSync(() => {
+      root.render(
+        createElement(VisualComponentEditor, {
+          definition: referenceSiteDefinition,
+          disabled: false,
+          iframeEnabled: false,
+          onChange: (definition) => {
+            latest = definition;
+          },
+        }),
+      );
+    });
+    let editable: HTMLElement | null = null;
+    for (let index = 0; index < 30 && editable === null; index += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+      editable = host.querySelector<HTMLElement>(
+        ".site-canvas .contact [contenteditable=true]",
+      );
+    }
+
+    expect(editable).not.toBeNull();
+    expect(
+      host.querySelector(".site-canvas .contact .rich-text-toolbar"),
+    ).not.toBeNull();
+    editable!.focus();
+    await userEvent.keyboard("{End} Caret edit.");
+    for (
+      let index = 0;
+      index < 30 &&
+      !latest.home.sections.some(
+        (section) =>
+          section.type === "callToAction" &&
+          JSON.stringify(section.body).includes("Caret edit."),
+      );
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+
+    expect(
+      latest.home.sections.find(
+        (section) => section.type === "callToAction",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          children: expect.arrayContaining([
+            expect.objectContaining({
+              children: expect.arrayContaining([
+                expect.objectContaining({
+                  text: expect.stringContaining("Caret edit."),
+                }),
+              ]),
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("keeps protected props out of the editable field controls", () => {
     expect(Object.keys(visualComponentConfig.components.hero.fields!)).toEqual([
       "id",

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createUsePuck,
   Puck,
+  registerOverlayPortal,
   type Config,
   type Data,
 } from "@puckeditor/core";
@@ -59,6 +60,91 @@ function newStableComponentId(type: PageComponentType): string {
 
 const useVisualPuck = createUsePuck();
 const ignoreRichTextValidation = () => undefined;
+
+function RenderedCallToActionSection({
+  definition,
+  section,
+  disabled,
+  onValidationChange,
+}: {
+  definition: SiteDefinition;
+  section: CallToActionSection;
+  disabled: boolean;
+  onValidationChange(source: string, invalid: boolean): void;
+}) {
+  const dispatch = useVisualPuck((state) => state.dispatch);
+  const getSelectorForId = useVisualPuck(
+    (state) => state.getSelectorForId,
+  );
+  const portalRef = useRef<HTMLDivElement>(null);
+  const pageSection: CallToActionSection = {
+    id: section.id,
+    type: section.type,
+    variant: section.variant,
+    eyebrow: section.eyebrow,
+    title: section.title,
+    body: section.body,
+    action: section.action,
+  };
+
+  useEffect(() => {
+    if (portalRef.current === null) {
+      return;
+    }
+    return registerOverlayPortal(portalRef.current, {
+      disableDragOnFocus: true,
+    });
+  }, []);
+
+  return (
+    <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
+      <SiteSection
+        section={pageSection}
+        callToActionBody={
+          <div
+            ref={portalRef}
+            data-rendered-rich-text-editor={section.id}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <RichTextEditor
+              id={`${section.id}-rendered-body-editor`}
+              value={serializeRichTextDocument(section.body)}
+              disabled={disabled}
+              invalid={false}
+              describedBy={`${section.id}_title`}
+              label="Body"
+              onChange={(nextValue) => {
+                const selector = getSelectorForId(section.id);
+                if (selector === undefined) {
+                  return;
+                }
+                dispatch({
+                  type: "replace",
+                  destinationIndex: selector.index,
+                  destinationZone: selector.zone,
+                  data: {
+                    type: "callToAction",
+                    props: {
+                      ...pageSection,
+                      body: parseSerializedRichTextDocument(nextValue),
+                    },
+                  },
+                  recordHistory: true,
+                });
+              }}
+              onValidationChange={(invalid) =>
+                onValidationChange(
+                  `${section.id}.body.rendered`,
+                  invalid,
+                )
+              }
+            />
+          </div>
+        }
+      />
+    </div>
+  );
+}
 
 function InsertComponentActions({ disabled }: { disabled: boolean }) {
   const dispatch = useVisualPuck((state) => state.dispatch);
@@ -250,6 +336,7 @@ export function createVisualComponentConfig(
     source: string,
     invalid: boolean,
   ) => void = ignoreRichTextValidation,
+  disabled = false,
 ): Config<RegisteredComponents> {
   return {
     ...visualComponentConfig,
@@ -333,9 +420,11 @@ export function createVisualComponentConfig(
           (typeof visualComponentConfig.components.callToAction)["fields"]
         >,
         render: (props) => (
-          <DesignScopedSection
+          <RenderedCallToActionSection
             definition={definition}
             section={props as CallToActionSection}
+            disabled={disabled}
+            onValidationChange={onValidationChange}
           />
         ),
         defaultProps: createDefaultPageSection(
@@ -376,8 +465,9 @@ export function VisualComponentEditor({
         referencedPageComponentIds(definition),
         definition,
         onValidationChange,
+        disabled,
       ),
-    [definition, onValidationChange],
+    [definition, disabled, onValidationChange],
   );
   const [message, setMessage] = useState("");
   const active = useRef(true);

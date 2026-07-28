@@ -85,7 +85,8 @@ continuing.
 There are two previews with distinct promises:
 
 - The Puck iframe is the immediate interactive projection of local and saved
-  editor state.
+  editor state. Supported rich text is caret-editable in the rendered
+  component itself; the inspector remains a secondary editing surface.
 - The canonical approval preview is an authenticated, same-origin URL for one
   persisted `workspaceId + revision`.
 

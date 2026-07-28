@@ -2,10 +2,12 @@ import { HtmlRenderer, Parser } from "commonmark";
 import { describe, expect, it } from "vitest";
 
 import {
+  createSerializedRichTextDocument,
   RichTextValidationError,
   fromTipTapDocument,
   parseRichTextMarkdown,
   richTextDocumentHasVisibleText,
+  serializeRichTextDocument,
   serializeRichTextToMarkdown,
   toTipTapDocument,
   validateRichTextDocument,
@@ -98,6 +100,45 @@ const supportedDocument: RichTextDocument = {
 };
 
 describe("rich text contract", () => {
+  it("serializes equivalent AST objects in one canonical key order", () => {
+    const canonical: RichTextDocument = {
+      version: "1.0.0",
+      type: "document",
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "text",
+              text: "Read the guide",
+              marks: [{ type: "link", href: "/guide" }],
+            },
+          ],
+        },
+      ],
+    };
+    const reordered = JSON.stringify({
+      children: [
+        {
+          children: [
+            {
+              marks: [{ href: "/guide", type: "link" }],
+              text: "Read the guide",
+              type: "text",
+            },
+          ],
+          type: "paragraph",
+        },
+      ],
+      type: "document",
+      version: "1.0.0",
+    });
+
+    expect(createSerializedRichTextDocument(reordered)).toBe(
+      serializeRichTextDocument(canonical),
+    );
+  });
+
   it("round-trips supported TipTap JSON through an engine-neutral document", () => {
     const tipTap = toTipTapDocument(supportedDocument);
 
