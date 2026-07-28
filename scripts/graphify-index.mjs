@@ -611,10 +611,11 @@ function refresh() {
     "staging",
     `${context.head}-${process.pid}-${randomUUID()}`,
   );
-  const sourceRoot = realpathSync(
-    mkdtempSync(join(tmpdir(), "foundry-graphify-source-")),
-  );
+  let sourceRoot;
   try {
+    sourceRoot = realpathSync(
+      mkdtempSync(join(tmpdir(), "foundry-graphify-source-")),
+    );
     if (existsSync(existing)) {
       verifySnapshot(context, context.head);
       refreshLock.renew();
@@ -699,7 +700,9 @@ function refresh() {
     console.log(`Published immutable Graphify snapshot: ${context.head}`);
   } finally {
     rmSync(staging, { recursive: true, force: true });
-    rmSync(sourceRoot, { recursive: true, force: true });
+    if (sourceRoot) {
+      rmSync(sourceRoot, { recursive: true, force: true });
+    }
     refreshLock.release();
   }
 }

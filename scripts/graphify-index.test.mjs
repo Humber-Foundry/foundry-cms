@@ -259,6 +259,7 @@ function runIndex(repository, arguments_, options = {}) {
             GRAPHIFY_FAKE_DELAY_MS: String(options.delayMs ?? 0),
             GRAPHIFY_FAKE_REPLACE_LOCK: options.replaceLock ? "1" : "0",
             GRAPHIFY_INDEX_CACHE_DIR: cache,
+            ...options.env,
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -855,6 +856,23 @@ describe("commit-pinned Graphify index", () => {
       "Another Graphify refresh is already running",
     );
     expect(getRefreshLock(root)).toBe(liveOid);
+  });
+
+  it("releases the refresh lock when temporary source setup fails", () => {
+    const { root } = createRepository();
+    const invalidTemporaryDirectory = join(
+      mkdtempSync(join(tmpdir(), "foundry-graphify-invalid-tmp-")),
+      "not-a-directory",
+    );
+    writeFileSync(invalidTemporaryDirectory, "not a directory\n");
+
+    const result = runIndex(root, ["refresh"], {
+      env: { TMPDIR: invalidTemporaryDirectory },
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain("ENOTDIR");
+    expect(getRefreshLock(root)).toBeNull();
   });
 
   it("bounds locks owned by an unverifiable hostname", () => {
