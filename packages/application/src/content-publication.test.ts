@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
 } from "@foundry/site-definition";
@@ -233,6 +235,159 @@ describe("content publication application", () => {
         },
       }),
     );
+  });
+
+  it("publishes a post through the exact site fingerprint and verified-live pipeline", async () => {
+    createCommit
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      })
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "d".repeat(40),
+      });
+    const savedPost = await revisionApplication.application.commands
+      .createBlogPost({
+        actorId: editorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 1,
+        post: {
+          id: createBlogPostId("post_exact_pipeline"),
+          slug: "exact-pipeline",
+          title: "Exact pipeline",
+          excerpt: "Published through the site pipeline.",
+          seo: {
+            title: "Exact pipeline | Foundry",
+            description: "A post using the exact site publication pipeline.",
+          },
+          body: createRichTextDocumentFromPlainText("Exact post body."),
+        },
+        idempotencyKey: "create-exact-pipeline-post",
+      });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    isReleaseLive.mockResolvedValue(true);
+    const app = application();
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: savedPost.revision,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-exact-pipeline-post",
+    });
+    expect(publication).toMatchObject({
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+    });
+    expect(createCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentHash: approval.fingerprint.contentHash,
+        artifactHash: approval.fingerprint.artifactHash,
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "content/rich-text/post_exact_pipeline/body.md",
+            bytes: "Exact post body\\.\n",
+          }),
+        ]),
+      }),
+    );
+    await app.commands.refresh(publication.id);
+    await app.commands.refresh(publication.id);
+    await expect(app.queries.get(publication.id)).resolves.toMatchObject({
+      status: "verified-live",
+      commitSha: "c".repeat(40),
+      fingerprint: approval.fingerprint.value,
+    });
+
+    const removalWorkspaceId = createContentWorkspaceId(
+      "workspace_unpublish_post",
+    );
+    const removalStore = createInMemoryContentRevisionStore();
+    const removalRevisions = createContentRevisionApplication({
+      siteDefinition: savedPost.definition,
+      initialDefinition: savedPost.definition,
+      store: removalStore,
+      workspaceId: removalWorkspaceId,
+      actorId: editorId,
+      rendererVersion: "renderer-v1",
+      productionBase:
+        `git:${"c".repeat(40)}@content:${approval.fingerprint.contentHash}`,
+      now: () => "2026-07-27T10:06:00.000Z",
+    });
+    await removalRevisions.commands.create({
+      actorId: editorId,
+      workspaceId: removalWorkspaceId,
+      idempotencyKey: "create-unpublish-workspace",
+    });
+    const removalRevision =
+      await removalRevisions.commands.unpublishBlogPost({
+        actorId: editorId,
+        workspaceId: removalWorkspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        postId: createBlogPostId("post_exact_pipeline"),
+        idempotencyKey: "create-unpublish-revision",
+      });
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    const removalApplication = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: {
+        getRevision: async (_workspace, revision) =>
+          removalRevisions.queries.getRevision(revision),
+        getCurrent: async () => removalRevisions.queries.getCurrent(),
+        isCurrent: async (revision) =>
+          removalRevisions.queries.isRevisionCurrent(revision),
+        listContributors: async () => [editorId],
+      },
+      publisher,
+      now: () => "2026-07-27T10:07:00.000Z",
+    });
+    const removalApproval = await removalApplication.commands.approve({
+      workspaceId: removalWorkspaceId,
+      revision: removalRevision.revision,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const removalPublication = await removalApplication.commands.publish({
+      workspaceId: removalWorkspaceId,
+      approvalId: removalApproval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-unpublish-revision",
+    });
+
+    expect(removalPublication).toMatchObject({
+      approvalId: removalApproval.id,
+      requestedBy: membershipId,
+      fingerprint: removalApproval.fingerprint.value,
+    });
+    const removalCommit = createCommit.mock.calls[1]?.[0];
+    const removalJson = removalCommit?.artifacts.find(
+      ({ path }) =>
+        path === "packages/site-definition/src/published-site.json",
+    );
+    expect(JSON.parse(removalJson?.bytes ?? "{}")).toMatchObject({
+      blog: { posts: [] },
+    });
+    await expect(removalRevisions.queries.getRevision(0)).resolves.toMatchObject({
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: "post_exact_pipeline",
+              revision: 1,
+            }),
+          ],
+        },
+      },
+    });
   });
 
   it("rejects a stored legacy schema before creating a publication fingerprint", async () => {

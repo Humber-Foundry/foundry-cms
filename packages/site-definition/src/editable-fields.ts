@@ -1,6 +1,7 @@
 import {
   parseSerializedRichTextDocument,
   richTextDocumentHasVisibleText,
+  isSiteDefinition,
   serializeRichTextDocument,
   serializeRichTextToMarkdown,
   type ProofSection,
@@ -25,7 +26,7 @@ export type SiteDefinitionEdit =
 type EditableSiteFieldBase = Readonly<{
   path: string;
   label: string;
-  group: "Page" | "Navigation" | "Footer" | "SEO" | "Design";
+  group: "Page" | "Navigation" | "Footer" | "SEO" | "Design" | "Blog";
   multiline: boolean;
   values?: ReadonlyArray<string>;
 }>;
@@ -440,6 +441,59 @@ function editableFieldBindings(
     }
   });
 
+  definition.blog.posts.forEach((post, postIndex) => {
+    const bindPostField = (
+      property: "slug" | "title" | "excerpt",
+      label: string,
+      multiline = false,
+    ) => {
+      fields.push(
+        fieldBinding({
+          path: `${post.id}.${property}`,
+          label,
+          group: "Blog",
+          value: post[property],
+          multiline,
+          write: (draft, value) => {
+            draft.blog.posts[postIndex]![property] = value;
+          },
+        }),
+      );
+    };
+    bindPostField("slug", "Post slug");
+    bindPostField("title", "Post title");
+    bindPostField("excerpt", "Post excerpt", true);
+    for (const property of ["title", "description"] as const) {
+      fields.push(
+        fieldBinding({
+          path: `${post.id}.seo.${property}`,
+          label: `Post SEO ${property}`,
+          group: "Blog",
+          value: post.seo[property],
+          multiline: property === "description",
+          write: (draft, value) => {
+            draft.blog.posts[postIndex]!.seo[property] = value;
+          },
+        }),
+      );
+    }
+    fields.push(
+      fieldBinding({
+        path: `${post.id}.body`,
+        label: "Post body",
+        group: "Blog",
+        value: serializeRichTextDocument(post.body),
+        multiline: true,
+        format: "richText",
+        write: (draft, value) => {
+          (
+            draft.blog.posts[postIndex] as unknown as Record<string, unknown>
+          ).body = parseSerializedRichTextDocument(value);
+        },
+      }),
+    );
+  });
+
   const paths = new Set<string>();
   for (const binding of fields) {
     if (paths.has(binding.field.path)) {
@@ -559,8 +613,46 @@ export function applySiteDefinitionEdits(
   const draft = structuredClone(
     definition,
   ) as unknown as MutableSiteDefinition;
+  const editedPostIds = new Set<string>();
   for (const edit of edits) {
     bindings.get(edit.path)!.write(draft, edit.value);
+    const post = definition.blog.posts.find(({ id }) =>
+      edit.path.startsWith(`${id}.`)
+    );
+    if (post !== undefined) {
+      editedPostIds.add(post.id);
+    }
+  }
+  for (const postId of editedPostIds) {
+    const post = draft.blog.posts.find(({ id }) => id === postId);
+    if (post !== undefined) {
+      post.revision += 1;
+    }
+  }
+  const postsBySlug = new Map<string, string[]>();
+  for (const post of draft.blog.posts) {
+    const postIds = postsBySlug.get(post.slug) ?? [];
+    postIds.push(post.id);
+    postsBySlug.set(post.slug, postIds);
+  }
+  const duplicateSlugErrors = Object.create(null) as Record<string, string>;
+  for (const postIds of postsBySlug.values()) {
+    if (postIds.length < 2) {
+      continue;
+    }
+    for (const postId of postIds) {
+      duplicateSlugErrors[`${postId}.slug`] =
+        "Choose a URL slug that is unique within this site.";
+    }
+  }
+  if (Object.keys(duplicateSlugErrors).length > 0) {
+    return { ok: false, errors: duplicateSlugErrors };
+  }
+  if (!isSiteDefinition(draft)) {
+    return {
+      ok: false,
+      errors: { blog: "The blog post does not match the current schema." },
+    };
   }
   return {
     ok: true,

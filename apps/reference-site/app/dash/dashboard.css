@@ -98,6 +98,50 @@
   padding: clamp(1.5rem, 4vw, 3.5rem);
 }
 
+.blog-post-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.blog-post-form label {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.blog-post-form label:nth-of-type(n + 3),
+.blog-post-form button {
+  grid-column: 1 / -1;
+}
+
+.blog-post-form input,
+.blog-post-form textarea {
+  padding: 0.75rem;
+  border: 1px solid #cbd5d0;
+  border-radius: 0.4rem;
+  font: inherit;
+}
+
+.blog-post-operations {
+  padding: 0;
+  margin: 1.5rem 0 0;
+  list-style: none;
+}
+
+.blog-post-operations li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.75rem;
+  border-top: 1px solid #dce3df;
+}
+
+.blog-post-operations li div,
+.blog-post-operations li span {
+  display: block;
+}
+
 .notice {
   display: flex;
   gap: 0.75rem;

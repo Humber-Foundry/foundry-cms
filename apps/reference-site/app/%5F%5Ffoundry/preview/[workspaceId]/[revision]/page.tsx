@@ -26,7 +26,12 @@ export default async function RevisionPreviewPage(
   props: RevisionPreviewPageProps,
 ) {
   const revision = await loadRevisionPreview(props);
-  const { accessToken } = await props.searchParams;
+  const { accessToken, capability, bookmark } = await props.searchParams;
+  const previewQuery = new URLSearchParams({
+    capability: typeof capability === "string" ? capability : "",
+    bookmark: typeof bookmark === "string" ? bookmark : "",
+    ...(typeof accessToken === "string" ? { accessToken } : {}),
+  });
   return (
     <>
       <aside className="preview-provenance" aria-label="Preview provenance">
@@ -63,6 +68,10 @@ export default async function RevisionPreviewPage(
         mediaDelivery="authenticated"
         mediaAccessToken={
           typeof accessToken === "string" ? accessToken : undefined
+        }
+        blogPostHref={(slug) =>
+          `/__foundry/preview/${revision.workspaceId}/${revision.revision}` +
+          `/blog/${encodeURIComponent(slug)}?${previewQuery.toString()}`
         }
       />
     </>

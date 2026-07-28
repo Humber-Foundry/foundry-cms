@@ -15,6 +15,7 @@ import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { WorkspaceEditors } from "./workspace-editors";
+import { BlogPostControls } from "./blog-post-controls";
 
 export function contentWorkspaceRequiresSchemaRecovery(
   definition: SiteDefinition,
@@ -129,17 +130,23 @@ export function DashboardShell({
               staleRecovery={staleRecovery}
             />
           ) : (
-            <WorkspaceEditors
-              csrfToken={contentMutationToken}
-              contentRevision={contentRevision}
-              initialPreviewUrl={initialPreviewUrl}
-              initialContentStale={initialContentStale}
-              activeWorkspaceUrl={activeWorkspaceUrl}
-              staleRecovery={staleRecovery}
-              mediaAssets={mediaAssets}
-              mediaOccurrences={mediaOccurrences}
-              mediaWorkspaceId={mediaWorkspaceId}
-            />
+            <>
+              <WorkspaceEditors
+                csrfToken={contentMutationToken}
+                contentRevision={contentRevision}
+                initialPreviewUrl={initialPreviewUrl}
+                initialContentStale={initialContentStale}
+                activeWorkspaceUrl={activeWorkspaceUrl}
+                staleRecovery={staleRecovery}
+                mediaAssets={mediaAssets}
+                mediaOccurrences={mediaOccurrences}
+                mediaWorkspaceId={mediaWorkspaceId}
+              />
+              <BlogPostControls
+                revision={contentRevision}
+                csrfToken={contentMutationToken}
+              />
+            </>
           )}
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">

@@ -13,9 +13,7 @@ const liveCommit = "a".repeat(40);
 const failedCommit = "b".repeat(40);
 const expectedCommit = "c".repeat(40);
 const publicationId = `publish_${"d".repeat(32)}`;
-const bytes =
-  '{"definitionVersion":"1.2.0","schemaVersion":"1.2.0",' +
-  '"site":{"name":"New"},"home":{"media":[],"sections":[]}}\n';
+const bytes = `${canonicalJson(referenceSiteDefinition)}\n`;
 const currentDefinitionWithoutMedia = structuredClone(
   referenceSiteDefinition,
 );

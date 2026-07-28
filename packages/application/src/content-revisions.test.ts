@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDefaultPageSection,
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
+  createSiteId,
   referenceSiteDefinition,
   toPageComposition,
   type PageSection,
@@ -36,7 +39,7 @@ const applicationInputs = {
 
 const commandInputs = {
   workspaceId: applicationInputs.workspaceId,
-  schemaVersion: "1.2.0",
+  schemaVersion: "1.3.0",
 } as const;
 
 async function createWorkspace(
@@ -74,6 +77,216 @@ async function legacyRequestHash(value: unknown): Promise<string> {
 }
 
 describe("content revision application", () => {
+  it("creates and edits a first-class post through immutable site revisions", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-blog-workspace-0001");
+    const postId = createBlogPostId("post_first");
+    const created = await application.commands.createBlogPost({
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: referenceSiteDefinition.site.id,
+      baseRevision: 0,
+      post: {
+        id: postId,
+        slug: "first-post",
+        title: "First post",
+        excerpt: "The first post excerpt.",
+        seo: {
+          title: "First post | Foundry",
+          description: "The first post from Foundry.",
+        },
+        body: createRichTextDocumentFromPlainText("Original body."),
+      },
+      idempotencyKey: "create-blog-post-0001",
+    });
+    expect(created.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 1,
+      title: "First post",
+    });
+
+    const fieldEdited = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 1,
+      edits: [{ path: `${postId}.title`, value: "First post via editor" }],
+      idempotencyKey: "edit-blog-post-fields-0001",
+    });
+    expect(fieldEdited.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 2,
+      title: "First post via editor",
+    });
+
+    const edited = await application.commands.editBlogPost({
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: referenceSiteDefinition.site.id,
+      baseRevision: 2,
+      postId,
+      post: {
+        slug: "first-post",
+        title: "First post, revised",
+        excerpt: "The revised excerpt.",
+        seo: {
+          title: "First post, revised | Foundry",
+          description: "The revised first post from Foundry.",
+        },
+        body: createRichTextDocumentFromPlainText("Revised body."),
+      },
+      idempotencyKey: "edit-blog-post-0001",
+    });
+    expect(edited.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 3,
+      title: "First post, revised",
+    });
+    expect(
+      (await application.queries.getRevision(1))?.definition.blog.posts[0],
+    ).toMatchObject({ revision: 1, title: "First post" });
+
+    await expect(
+      application.commands.unpublishBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: referenceSiteDefinition.site.id,
+        baseRevision: 3,
+        postId,
+        idempotencyKey: "unpublish-blog-post-0001",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_not_live" },
+    });
+    expect(
+      (await application.queries.getRevision(2))?.definition.blog.posts[0],
+    ).toMatchObject({ revision: 2, title: "First post via editor" });
+  });
+
+  it("unpublishes only a post present in the immutable published base", async () => {
+    const postId = createBlogPostId("post_live");
+    const liveDefinition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: postId,
+            revision: 1,
+            slug: "live-post",
+            title: "Live post",
+            excerpt: "This post is currently live.",
+            seo: {
+              title: "Live post | Foundry",
+              description: "A live post ready to be unpublished.",
+            },
+            body: createRichTextDocumentFromPlainText("Live body."),
+          },
+        ],
+      },
+    };
+    const application = createContentRevisionApplication({
+      siteDefinition: liveDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-live-blog-workspace-0001");
+
+    const unpublished = await application.commands.unpublishBlogPost({
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: liveDefinition.site.id,
+      baseRevision: 0,
+      postId,
+      idempotencyKey: "unpublish-live-blog-post-0001",
+    });
+
+    expect(unpublished.definition.blog.posts).toEqual([]);
+    expect(
+      (await application.queries.getRevision(0))?.definition.blog.posts[0],
+    ).toMatchObject({ id: postId, revision: 1, title: "Live post" });
+  });
+
+  it("replays blog commands and fails closed for concurrency, invalid schemas, and cross-site IDs", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-blog-workspace-0002");
+    const command = {
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: referenceSiteDefinition.site.id,
+      baseRevision: 0,
+      post: {
+        id: createBlogPostId("post_concurrent"),
+        slug: "concurrent-post",
+        title: "Concurrent post",
+        excerpt: "A concurrency test.",
+        seo: {
+          title: "Concurrent post | Foundry",
+          description: "A concurrency test post.",
+        },
+        body: createRichTextDocumentFromPlainText("Body."),
+      },
+      idempotencyKey: "create-blog-post-0002",
+    } as const;
+    const created = await application.commands.createBlogPost(command);
+    await expect(application.commands.createBlogPost(command)).resolves.toEqual(
+      created,
+    );
+    await expect(
+      application.commands.createBlogPost({
+        ...command,
+        baseRevision: 1,
+        idempotencyKey: "create-blog-post-0003",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_already_exists" },
+    });
+    await expect(
+      application.commands.createBlogPost({
+        ...command,
+        siteId: createSiteId("site_other"),
+        baseRevision: 1,
+        idempotencyKey: "create-blog-post-0004",
+        post: { ...command.post, id: createBlogPostId("post_other") },
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "cross_site_identifier" },
+    });
+    const results = await Promise.allSettled([
+      application.commands.editBlogPost({
+        ...command,
+        baseRevision: 1,
+        postId: command.post.id,
+        post: { ...command.post, title: "Winner A" },
+        idempotencyKey: "edit-blog-concurrent-a",
+      }),
+      application.commands.editBlogPost({
+        ...command,
+        baseRevision: 1,
+        postId: command.post.id,
+        post: { ...command.post, title: "Winner B" },
+        idempotencyKey: "edit-blog-concurrent-b",
+      }),
+    ]);
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1,
+    );
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(
+      1,
+    );
+    expect(
+      (results.find(({ status }) => status === "rejected") as PromiseRejectedResult)
+        .reason,
+    ).toBeInstanceOf(ContentRevisionConflictError);
+  });
+
   it("keeps reads side-effect free until an explicit create command", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -175,21 +388,21 @@ describe("content revision application", () => {
     );
     expect(saved.inputs).toEqual({
       contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      schemaVersion: "1.2.0",
+      schemaVersion: "1.3.0",
       rendererVersion: "renderer-commit-a",
       productionBase: "published:site_foundry_reference@1.1.0",
     });
     expect(Object.isFrozen(saved)).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.2.0",
+        schemaVersion: "1.3.0",
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.2.0",
+        schemaVersion: "1.3.0",
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
       }),
@@ -201,7 +414,7 @@ describe("content revision application", () => {
           inputs: { ...saved.inputs, schemaVersion: "1.0.0" },
         },
         {
-          schemaVersion: "1.2.0",
+          schemaVersion: "1.3.0",
           rendererVersion: "renderer-commit-a",
           productionBase: applicationInputs.productionBase,
         },
@@ -927,7 +1140,7 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: createContentWorkspaceId("workspace_other"),
-        schemaVersion: "1.2.0",
+        schemaVersion: "1.3.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong workspace" }],
         idempotencyKey: "save-section-hero-0007",
@@ -941,14 +1154,14 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: applicationInputs.workspaceId,
-        schemaVersion: "2.0.0" as "1.2.0",
+        schemaVersion: "2.0.0" as "1.3.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong schema" }],
         idempotencyKey: "save-section-hero-0008",
       }),
     ).rejects.toEqual(
       new ContentRevisionValidationError({
-        schemaVersion: "Use Site Definition schema 1.2.0.",
+        schemaVersion: "Use Site Definition schema 1.3.0.",
       }),
     );
   });

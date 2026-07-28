@@ -52,6 +52,27 @@ commit and advancement of the configured production branch are therefore one
 optimistic compare-and-swap. A moved ref is blocked and is never silently
 rebased.
 
+Site Definition 1.3 makes blog posts part of that same artifact set rather than
+introducing a parallel publishing path. Each post has a site-scoped stable ID,
+an incrementing post revision, slug, title, excerpt, SEO metadata, and canonical
+rich-text body. Its body is serialized to
+`content/rich-text/<post-id>/body.md`; all other post fields remain in the
+canonical Site Definition JSON. Creating or editing a post therefore creates
+an ordinary immutable content-workspace revision. The exact post preview uses
+that saved revision, and approval, Git compare-and-swap, Cloudflare deployment,
+and two-read live-marker verification use the existing publication
+transaction described here.
+
+Unpublishing is a guarded successor publication, not deletion of history. The
+command is accepted only when the post exists in revision 0, the immutable
+published base of that workspace. It creates a new draft definition without
+the post; the previous revision and its audit evidence remain in D1. After
+human preview and approval, the same exact-revision transaction removes the
+post from canonical JSON and deletes its obsolete managed Markdown from the
+production artifact set. Rejected blog commands are recorded in an append-only
+D1 rejection audit with the authenticated actor, workspace, request identity,
+command type, and stable reason code.
+
 Schema reader upgrades are staged separately from published-content migration.
 A code release may add an in-memory projection for an older stored Site
 Definition, but it keeps the tracked published bytes unchanged. The canonical

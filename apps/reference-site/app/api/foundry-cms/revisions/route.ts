@@ -14,6 +14,9 @@ import {
 } from "@foundry/application";
 import {
   createSerializedRichTextDocument,
+  createBlogPostId,
+  parseSerializedRichTextDocument,
+  referenceSiteDefinition,
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -55,6 +58,114 @@ type SaveBody = {
   composition?: PageComposition;
 };
 
+type BlogMutationBody =
+  | Readonly<{
+      operation: "create_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      post: Omit<SiteDefinition["blog"]["posts"][number], "revision">;
+    }>
+  | Readonly<{
+      operation: "edit_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      postId: SiteDefinition["blog"]["posts"][number]["id"];
+      post: Omit<SiteDefinition["blog"]["posts"][number], "id" | "revision">;
+    }>
+  | Readonly<{
+      operation: "unpublish_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      postId: SiteDefinition["blog"]["posts"][number]["id"];
+    }>;
+
+function parseBlogMutation(value: unknown): BlogMutationBody | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.operation !== "create_blog_post" &&
+    candidate.operation !== "edit_blog_post" &&
+    candidate.operation !== "unpublish_blog_post"
+  ) {
+    return null;
+  }
+  if (
+    typeof candidate.workspaceId !== "string" ||
+    candidate.schemaVersion !== referenceSiteDefinition.schemaVersion ||
+    !Number.isSafeInteger(candidate.baseRevision) ||
+    (candidate.baseRevision as number) < 0
+  ) {
+    throw new TypeError("blog_command_invalid");
+  }
+  const common = {
+    workspaceId: createContentWorkspaceId(candidate.workspaceId),
+    schemaVersion: candidate.schemaVersion,
+    baseRevision: candidate.baseRevision as number,
+  };
+  if (candidate.operation === "unpublish_blog_post") {
+    if (typeof candidate.postId !== "string") {
+      throw new TypeError("blog_command_invalid");
+    }
+    return {
+      operation: candidate.operation,
+      ...common,
+      postId: createBlogPostId(candidate.postId),
+    };
+  }
+  if (typeof candidate.post !== "object" || candidate.post === null) {
+    throw new TypeError("blog_command_invalid");
+  }
+  const post = candidate.post as Record<string, unknown>;
+  if (
+    typeof post.slug !== "string" ||
+    typeof post.title !== "string" ||
+    typeof post.excerpt !== "string" ||
+    typeof post.seo !== "object" ||
+    post.seo === null ||
+    typeof (post.seo as Record<string, unknown>).title !== "string" ||
+    typeof (post.seo as Record<string, unknown>).description !== "string" ||
+    typeof post.body !== "string"
+  ) {
+    throw new TypeError("blog_command_invalid");
+  }
+  const content = {
+    slug: post.slug,
+    title: post.title,
+    excerpt: post.excerpt,
+    seo: {
+      title: (post.seo as Record<string, string>).title!,
+      description: (post.seo as Record<string, string>).description!,
+    },
+    body: parseSerializedRichTextDocument(
+      createSerializedRichTextDocument(post.body),
+    ),
+  };
+  if (candidate.operation === "create_blog_post") {
+    if (typeof post.id !== "string") {
+      throw new TypeError("blog_command_invalid");
+    }
+    return {
+      operation: candidate.operation,
+      ...common,
+      post: { id: createBlogPostId(post.id), ...content },
+    };
+  }
+  if (typeof candidate.postId !== "string") {
+    throw new TypeError("blog_command_invalid");
+  }
+  return {
+    operation: candidate.operation,
+    ...common,
+    postId: createBlogPostId(candidate.postId),
+    post: content,
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const authenticated = await loadHumanIdentityRequestContext(
@@ -67,6 +178,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceParameter = url.searchParams.get("workspaceId");
     const revisionParameter = url.searchParams.get("revision");
+    const postParameter = url.searchParams.get("post");
     const mediaAccessToken = url.searchParams.get("accessToken");
     if (workspaceParameter === null && revisionParameter === null) {
       return Response.json(
@@ -103,6 +215,14 @@ export async function GET(request: Request) {
     ) {
       return Response.json({ error: "preview_unavailable" }, { status: 409 });
     }
+    if (
+      postParameter !== null &&
+      !revision.definition.blog.posts.some(
+        ({ slug }) => slug === postParameter,
+      )
+    ) {
+      return Response.json({ error: "preview_unavailable" }, { status: 409 });
+    }
     const capability = await createRevisionPreviewCapability({
       identity: access.identity,
       workspaceId,
@@ -132,7 +252,11 @@ export async function GET(request: Request) {
         : { accessToken: mediaAccessToken }),
     });
     const previewUrl =
-      `/__foundry/preview/${workspaceId}/${revisionNumber}?${previewQuery.toString()}`;
+      `/__foundry/preview/${workspaceId}/${revisionNumber}` +
+      (postParameter === null
+        ? ""
+        : `/blog/${encodeURIComponent(postParameter)}`) +
+      `?${previewQuery.toString()}`;
     return Response.redirect(new URL(previewUrl, request.url), 307);
   } catch (error) {
     if (
@@ -281,6 +405,60 @@ export async function POST(request: Request) {
     const submitted: unknown = await request.json();
     const actorId = createContentActorId(access.membership.id);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    const blogMutation = parseBlogMutation(submitted);
+    if (blogMutation !== null) {
+      const application = await loadContentRevisionApplication(
+        blogMutation.workspaceId,
+        actorId,
+      );
+      const command = {
+        actorId,
+        workspaceId: blogMutation.workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: blogMutation.schemaVersion,
+        baseRevision: blogMutation.baseRevision,
+        idempotencyKey,
+      };
+      const saved =
+        blogMutation.operation === "create_blog_post"
+          ? await application.commands.createBlogPost({
+              ...command,
+              post: blogMutation.post,
+            })
+          : blogMutation.operation === "edit_blog_post"
+            ? await application.commands.editBlogPost({
+                ...command,
+                postId: blogMutation.postId,
+                post: blogMutation.post,
+              })
+            : await application.commands.unpublishBlogPost({
+                ...command,
+                postId: blogMutation.postId,
+              });
+      const selectedPost =
+        blogMutation.operation === "unpublish_blog_post"
+          ? undefined
+          : saved.definition.blog.posts.find(
+              ({ id }) =>
+                id ===
+                (blogMutation.operation === "create_blog_post"
+                  ? blogMutation.post.id
+                  : blogMutation.postId),
+            );
+      const previewQuery =
+        selectedPost === undefined
+          ? ""
+          : `&post=${encodeURIComponent(selectedPost.slug)}`;
+      return Response.json(
+        {
+          ...saved,
+          previewUrl:
+            `${revisionPreviewGatewayUrl(saved.workspaceId, saved.revision)}` +
+            previewQuery,
+        },
+        { status: 201 },
+      );
+    }
     const operation =
       typeof submitted === "object" &&
       submitted !== null &&
@@ -484,7 +662,7 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
-    if (error instanceof SyntaxError) {
+    if (error instanceof SyntaxError || error instanceof TypeError) {
       return Response.json({ error: "invalid_command" }, { status: 400 });
     }
     throw error;

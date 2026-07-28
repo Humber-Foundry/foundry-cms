@@ -48,8 +48,8 @@ describe("content schema recovery", () => {
 
     expect(restored).toEqual(
       expect.objectContaining({
-        definitionVersion: "1.2.0",
-        schemaVersion: "1.2.0",
+        definitionVersion: "1.3.0",
+        schemaVersion: "1.3.0",
         design: referenceSiteDefinition.design,
         home: expect.objectContaining({ media: [] }),
         site: expect.objectContaining({

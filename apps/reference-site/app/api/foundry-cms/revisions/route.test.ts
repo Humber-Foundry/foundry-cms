@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   loadIdentity: vi.fn(),
   create: vi.fn(),
   save: vi.fn(),
+  createBlogPost: vi.fn(),
+  editBlogPost: vi.fn(),
+  unpublishBlogPost: vi.fn(),
   loadApplication: vi.fn(),
   requireExistingAccess: vi.fn(),
   createMutationToken: vi.fn(),
@@ -87,7 +90,13 @@ describe("content revision endpoint", () => {
     mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.requireExistingAccess.mockResolvedValue(undefined);
     mocks.loadApplication.mockResolvedValue({
-      commands: { create: mocks.create, save: mocks.save },
+      commands: {
+        create: mocks.create,
+        save: mocks.save,
+        createBlogPost: mocks.createBlogPost,
+        editBlogPost: mocks.editBlogPost,
+        unpublishBlogPost: mocks.unpublishBlogPost,
+      },
       queries: {
         getRevisionWithBookmark: mocks.getRevisionWithBookmark,
         isRevisionCurrent: mocks.isRevisionCurrent,
@@ -160,6 +169,87 @@ describe("content revision endpoint", () => {
           "/api/foundry-cms/revisions?workspaceId=workspace_home&revision=3",
       }),
     );
+  });
+
+  it("creates a schema-valid post through the authenticated revision boundary", async () => {
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      ({ type }) => type === "callToAction",
+    );
+    if (callToAction?.type !== "callToAction") {
+      throw new Error("call_to_action_fixture_missing");
+    }
+    const body = callToAction.body;
+    mocks.createBlogPost.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 1,
+      bookmark: "d1-bookmark",
+      definition: {
+        ...referenceSiteDefinition,
+        blog: {
+          id: "blog",
+          posts: [
+            {
+              id: "post_route",
+              revision: 1,
+              slug: "route-post",
+              title: "Route post",
+              excerpt: "Created through the route.",
+              seo: {
+                title: "Route post | Foundry",
+                description: "Created through the authenticated route.",
+              },
+              body,
+            },
+          ],
+        },
+      },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    const response = await POST(
+      request({
+        operation: "create_blog_post",
+        workspaceId: "workspace_home",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        post: {
+          id: "post_route",
+          slug: "route-post",
+          title: "Route post",
+          excerpt: "Created through the route.",
+          seo: {
+            title: "Route post | Foundry",
+            description: "Created through the authenticated route.",
+          },
+          body: serializeRichTextDocument(body),
+        },
+      }, "create-blog-route-0001"),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.createBlogPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "membership-editor",
+        workspaceId: "workspace_home",
+        siteId: referenceSiteDefinition.site.id,
+        baseRevision: 0,
+        idempotencyKey: "create-blog-route-0001",
+        post: expect.objectContaining({
+          id: "post_route",
+          slug: "route-post",
+          body,
+        }),
+      }),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      revision: 1,
+      previewUrl:
+        "/api/foundry-cms/revisions?workspaceId=workspace_home&revision=1&post=route-post",
+    });
   });
 
   it("preserves a canonical rich-text edit at the API boundary", async () => {

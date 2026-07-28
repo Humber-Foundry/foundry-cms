@@ -12,7 +12,11 @@ import {
   createContentRevisionApplication,
   createContentWorkspaceId,
 } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
+  referenceSiteDefinition,
+} from "@foundry/site-definition";
 
 import {
   createD1ContentRevisionStore,
@@ -40,6 +44,7 @@ describe("D1 content revision store", () => {
     for (const name of [
       "0005_content_revisions.sql",
       "0008_media_assets.sql",
+      "0011_blog_post_rejection_audit.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -59,12 +64,13 @@ describe("D1 content revision store", () => {
     actorId = editorActorId,
     targetWorkspaceId = workspaceId,
     now = "2026-07-27T12:00:00.000Z",
+    siteDefinition = referenceSiteDefinition,
   ) {
     return createContentRevisionApplication({
-      siteDefinition: referenceSiteDefinition,
+      siteDefinition,
       store: createD1ContentRevisionStore(
         database,
-        referenceSiteDefinition.site.id,
+        siteDefinition.site.id,
         targetWorkspaceId,
       ),
       workspaceId: targetWorkspaceId,
@@ -148,6 +154,177 @@ describe("D1 content revision store", () => {
         .bind(workspaceId)
         .first<{ count: number }>(),
     ).toEqual({ count: 0 });
+  });
+
+  it("persists blog revisions, rejection audit, and live unpublish history in D1", async () => {
+    const application = createApplication();
+    await createWorkspace(application, "d1-blog-create-workspace");
+    const postId = createBlogPostId("post_durable");
+    await application.commands.createBlogPost({
+      actorId: editorActorId,
+      workspaceId,
+      siteId: referenceSiteDefinition.site.id,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 0,
+      post: {
+        id: postId,
+        slug: "durable-post",
+        title: "Durable post",
+        excerpt: "Persisted in D1.",
+        seo: {
+          title: "Durable post | Foundry",
+          description: "A post whose immutable history is persisted in D1.",
+        },
+        body: createRichTextDocumentFromPlainText("Durable body."),
+      },
+      idempotencyKey: "d1-blog-create-post",
+    });
+    await expect(
+      application.commands.createBlogPost({
+        actorId: editorActorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 1,
+        post: {
+          id: postId,
+          slug: "durable-post",
+          title: "Duplicate durable post",
+          excerpt: "This duplicate must fail closed.",
+          seo: {
+            title: "Duplicate durable post | Foundry",
+            description: "This duplicate must fail closed.",
+          },
+          body: createRichTextDocumentFromPlainText("Duplicate."),
+        },
+        idempotencyKey: "d1-blog-duplicate-post",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_already_exists" },
+    });
+    await expect(
+      application.commands.unpublishBlogPost({
+        actorId: editorActorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 1,
+        postId,
+        idempotencyKey: "d1-blog-unpublish-post",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_not_live" },
+    });
+
+    const reloaded = createApplication();
+    await expect(reloaded.queries.getCurrent()).resolves.toMatchObject({
+      revision: 1,
+      definition: {
+        blog: {
+          posts: [expect.objectContaining({ id: postId, revision: 1 })],
+        },
+      },
+    });
+    await expect(reloaded.queries.getRevision(1)).resolves.toMatchObject({
+      definition: {
+        blog: {
+          posts: [expect.objectContaining({ id: postId, revision: 1 })],
+        },
+      },
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM content_revision_audit_events
+           WHERE workspace_id = ?1`,
+        )
+        .bind(workspaceId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
+    expect(
+      await database
+        .prepare(
+          `SELECT command_type, reason_code, request_id
+           FROM blog_post_rejection_audit_events
+           WHERE workspace_id = ?1 AND request_id = ?2`,
+        )
+        .bind(workspaceId, "d1-blog-duplicate-post")
+        .first(),
+    ).toEqual({
+      command_type: "blog.post.create",
+      reason_code: "post_already_exists",
+      request_id: "d1-blog-duplicate-post",
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT command_type, reason_code
+           FROM blog_post_rejection_audit_events
+           WHERE workspace_id = ?1 AND request_id = ?2`,
+        )
+        .bind(workspaceId, "d1-blog-unpublish-post")
+        .first(),
+    ).toEqual({
+      command_type: "blog.post.unpublish",
+      reason_code: "post_not_live",
+    });
+
+    const liveWorkspaceId = createContentWorkspaceId(
+      "workspace_live_blog",
+    );
+    const liveDefinition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: postId,
+            revision: 1,
+            slug: "durable-post",
+            title: "Durable post",
+            excerpt: "Persisted in D1.",
+            seo: {
+              title: "Durable post | Foundry",
+              description: "A post whose immutable history is persisted in D1.",
+            },
+            body: createRichTextDocumentFromPlainText("Durable body."),
+          },
+        ],
+      },
+    };
+    const liveApplication = createApplication(
+      editorActorId,
+      liveWorkspaceId,
+      "2026-07-27T13:00:00.000Z",
+      liveDefinition,
+    );
+    await liveApplication.commands.create({
+      actorId: editorActorId,
+      workspaceId: liveWorkspaceId,
+      idempotencyKey: "d1-live-blog-create-workspace",
+    });
+    await liveApplication.commands.unpublishBlogPost({
+      actorId: editorActorId,
+      workspaceId: liveWorkspaceId,
+      siteId: liveDefinition.site.id,
+      schemaVersion: liveDefinition.schemaVersion,
+      baseRevision: 0,
+      postId,
+      idempotencyKey: "d1-live-blog-unpublish-post",
+    });
+
+    await expect(liveApplication.queries.getCurrent()).resolves.toMatchObject({
+      revision: 1,
+      definition: { blog: { posts: [] } },
+    });
+    await expect(liveApplication.queries.getRevision(0)).resolves.toMatchObject({
+      definition: {
+        blog: {
+          posts: [expect.objectContaining({ id: postId, revision: 1 })],
+        },
+      },
+    });
   });
 
   it("preserves immutable stored 1.0 revisions without rewriting their fingerprinted definition", async () => {

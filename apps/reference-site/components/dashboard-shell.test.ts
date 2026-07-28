@@ -9,7 +9,7 @@ describe("dashboard content-workspace compatibility", () => {
   const revision = {
     definition: referenceSiteDefinition,
     inputs: {
-      schemaVersion: "1.2.0",
+      schemaVersion: "1.3.0",
     },
   } as unknown as ContentRevision;
 

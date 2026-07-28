@@ -2,6 +2,12 @@ import {
   applyPageComposition,
   applySiteDefinitionEdits,
   bindSiteMediaOccurrence,
+  createBlogPostDefinition,
+  editBlogPostDefinition,
+  unpublishBlogPostDefinition,
+  BlogPostSchemaError,
+  type BlogPost,
+  type BlogPostId,
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -71,6 +77,27 @@ export type SaveContentRevisionCommand = Readonly<{
   composition?: PageComposition;
   idempotencyKey: string;
 }>;
+
+type BlogPostMutationCommand = Readonly<{
+  actorId: ContentActorId;
+  workspaceId: ContentWorkspaceId;
+  siteId: SiteDefinition["site"]["id"];
+  schemaVersion: SiteDefinition["schemaVersion"];
+  baseRevision: number;
+  idempotencyKey: string;
+}>;
+
+export type CreateBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{ post: Omit<BlogPost, "revision"> }>;
+
+export type EditBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{
+    postId: BlogPostId;
+    post: Omit<BlogPost, "id" | "revision">;
+  }>;
+
+export type UnpublishBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{ postId: BlogPostId }>;
 
 function compositionWithAuthoritativeVariants(
   definition: SiteDefinition,
@@ -177,6 +204,14 @@ export type ContentRevisionStore = Readonly<{
   persist(
     command: PersistContentRevisionCommand,
   ): Promise<SavedContentRevision>;
+  recordRejection(input: {
+    workspaceId: ContentWorkspaceId;
+    actorId: ContentActorId;
+    commandType: string;
+    reasonCode: string;
+    requestId: string;
+    occurredAt: string;
+  }): Promise<void>;
 }>;
 
 export class ContentRevisionConflictError extends Error {
@@ -368,6 +403,7 @@ export function createInMemoryContentRevisionStore({
             `local:${revision.workspaceId}:${revision.revision}`,
           );
     },
+    async recordRejection() {},
     async replay(idempotencyKey, requestHash) {
       const receipt = receipts.get(idempotencyKey);
       if (receipt === undefined) {
@@ -471,6 +507,136 @@ export function createContentRevisionApplication({
     return initialization;
   };
 
+  function assertMutationCommand(command: {
+    actorId: ContentActorId;
+    workspaceId: ContentWorkspaceId;
+    idempotencyKey: string;
+  }) {
+    if (command.actorId !== actorId) {
+      throw new ContentWorkspaceAccessError();
+    }
+    if (!isValidContentMutationIdempotencyKey(command.idempotencyKey)) {
+      throw new ContentRevisionValidationError({
+        idempotencyKey: "Use a 16–128 character idempotency key.",
+      });
+    }
+    if (command.workspaceId !== workspaceId) {
+      throw new ContentRevisionValidationError({
+        workspaceId: "This workspace is not available.",
+      });
+    }
+  }
+
+  async function persistDefinitionMutation(input: {
+    command: {
+      actorId: ContentActorId;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      idempotencyKey: string;
+    };
+    requestIdentity: unknown;
+    mutate(base: SiteDefinition): SiteDefinition;
+  }) {
+    await store.requireAccess(actorId);
+    const currentProductionBase = await resolveProductionBase();
+    const requestHash = await sha256CanonicalJson(input.requestIdentity);
+    const replay = await store.replay(
+      input.command.idempotencyKey,
+      requestHash,
+    );
+    if (replay !== null) {
+      if (
+        !isContentRevisionRenderableBy(replay, {
+          schemaVersion: siteDefinition.schemaVersion,
+          rendererVersion,
+          productionBase: currentProductionBase,
+        })
+      ) {
+        throw new ContentRevisionStaleError(replay.revision);
+      }
+      return replay;
+    }
+    if (input.command.schemaVersion !== siteDefinition.schemaVersion) {
+      throw new ContentRevisionValidationError({
+        schemaVersion:
+          `Use Site Definition schema ${siteDefinition.schemaVersion}.`,
+      });
+    }
+    const base = await store.getRevision(input.command.baseRevision);
+    if (base === null) {
+      const current = await store.getCurrent();
+      throw new ContentRevisionConflictError(current.revision);
+    }
+    if (
+      !isContentRevisionRenderableBy(base, {
+        schemaVersion: siteDefinition.schemaVersion,
+        rendererVersion,
+        productionBase: currentProductionBase,
+      })
+    ) {
+      throw new ContentRevisionStaleError();
+    }
+    let definition: SiteDefinition;
+    try {
+      definition = input.mutate(base.definition);
+    } catch (error) {
+      if (error instanceof BlogPostSchemaError) {
+        throw new ContentRevisionValidationError({
+          blog: error.code,
+        });
+      }
+      throw error;
+    }
+    const nextRevision: ContentRevision = {
+      workspaceId,
+      revision: input.command.baseRevision + 1,
+      definition,
+      inputs: {
+        contentHash: await sha256CanonicalJson(definition),
+        schemaVersion: definition.schemaVersion,
+        rendererVersion,
+        productionBase: base.inputs.productionBase,
+      },
+      createdAt: now(),
+      createdBy: input.command.actorId,
+    };
+    return store.persist({
+      baseRevision: input.command.baseRevision,
+      idempotencyKey: input.command.idempotencyKey,
+      requestHash,
+      revision: nextRevision,
+    });
+  }
+
+  async function executeBlogMutation<Result>(
+    commandType: string,
+    command: BlogPostMutationCommand,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    assertMutationCommand(command);
+    try {
+      return await operation();
+    } catch (error) {
+      await store.recordRejection({
+        workspaceId,
+        actorId,
+        commandType,
+        reasonCode:
+          error instanceof ContentRevisionValidationError &&
+          typeof error.fields.blog === "string"
+            ? error.fields.blog
+            : error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)
+            ? error.message
+            : "blog_post_command_rejected",
+        requestId: isValidContentMutationIdempotencyKey(command.idempotencyKey)
+          ? command.idempotencyKey
+          : "invalid",
+        occurredAt: now(),
+      });
+      throw error;
+    }
+  }
+
   return Object.freeze({
     workspaceId,
     rendererVersion,
@@ -517,109 +683,103 @@ export function createContentRevisionApplication({
         return store.getCurrent();
       },
       async save(command: SaveContentRevisionCommand) {
-        if (command.actorId !== actorId) {
-          throw new ContentWorkspaceAccessError();
-        }
-        if (
-          !isValidContentMutationIdempotencyKey(command.idempotencyKey)
-        ) {
-          throw new ContentRevisionValidationError({
-            idempotencyKey: "Use a 16–128 character idempotency key.",
-          });
-        }
-        if (command.workspaceId !== workspaceId) {
-          throw new ContentRevisionValidationError({
-            workspaceId: "This workspace is not available.",
-          });
-        }
-        await store.requireAccess(actorId);
-        const currentProductionBase = await resolveProductionBase();
-        const requestHash = await sha256CanonicalJson({
-          actorId: command.actorId,
-          workspaceId: command.workspaceId,
-          schemaVersion: command.schemaVersion,
-          baseRevision: command.baseRevision,
-          edits: command.edits,
-          ...(command.composition === undefined
-            ? {}
-            : { composition: command.composition }),
-        });
-        const replay = await store.replay(
-          command.idempotencyKey,
-          requestHash,
-        );
-        if (replay !== null) {
-          if (
-            !isContentRevisionRenderableBy(replay, {
-              schemaVersion: siteDefinition.schemaVersion,
-              rendererVersion,
-              productionBase: currentProductionBase,
-            })
-          ) {
-            throw new ContentRevisionStaleError(replay.revision);
-          }
-          return replay;
-        }
-        if (command.schemaVersion !== siteDefinition.schemaVersion) {
-          throw new ContentRevisionValidationError({
-            schemaVersion:
-              `Use Site Definition schema ${siteDefinition.schemaVersion}.`,
-          });
-        }
-        const base = await store.getRevision(command.baseRevision);
-        if (base === null) {
-          const current = await store.getCurrent();
-          throw new ContentRevisionConflictError(current.revision);
-        }
-        if (
-          !isContentRevisionRenderableBy(base, {
-            schemaVersion: siteDefinition.schemaVersion,
-            rendererVersion,
-            productionBase: currentProductionBase,
-          })
-        ) {
-          throw new ContentRevisionStaleError();
-        }
-        const composed =
-          command.composition === undefined
-            ? { ok: true as const, definition: base.definition }
-            : applyPageComposition(
-                base.definition,
-                compositionWithAuthoritativeVariants(
-                  base.definition,
-                  command.composition,
-                  command.edits,
-                ),
-              );
-        if (!composed.ok) {
-          throw new ContentRevisionValidationError(composed.errors);
-        }
-        const edited = applySiteDefinitionEdits(
-          composed.definition,
-          command.edits,
-        );
-        if (!edited.ok) {
-          throw new ContentRevisionValidationError(edited.errors);
-        }
-        const nextRevision: ContentRevision = {
-          workspaceId,
-          revision: command.baseRevision + 1,
-          definition: edited.definition,
-          inputs: {
-            contentHash: await sha256CanonicalJson(edited.definition),
-            schemaVersion: edited.definition.schemaVersion,
-            rendererVersion,
-            productionBase: base.inputs.productionBase,
+        assertMutationCommand(command);
+        return persistDefinitionMutation({
+          command,
+          requestIdentity: {
+            actorId: command.actorId,
+            workspaceId: command.workspaceId,
+            schemaVersion: command.schemaVersion,
+            baseRevision: command.baseRevision,
+            edits: command.edits,
+            ...(command.composition === undefined
+              ? {}
+              : { composition: command.composition }),
           },
-          createdAt: now(),
-          createdBy: command.actorId,
-        };
-        return store.persist({
-          baseRevision: command.baseRevision,
-          idempotencyKey: command.idempotencyKey,
-          requestHash,
-          revision: nextRevision,
+          mutate(baseDefinition) {
+            const composed =
+              command.composition === undefined
+                ? { ok: true as const, definition: baseDefinition }
+                : applyPageComposition(
+                  baseDefinition,
+                  compositionWithAuthoritativeVariants(
+                    baseDefinition,
+                    command.composition,
+                    command.edits,
+                  ),
+                );
+            if (!composed.ok) {
+              throw new ContentRevisionValidationError(composed.errors);
+            }
+            const edited = applySiteDefinitionEdits(
+              composed.definition,
+              command.edits,
+            );
+            if (!edited.ok) {
+              throw new ContentRevisionValidationError(edited.errors);
+            }
+            return edited.definition;
+          },
         });
+      },
+      async createBlogPost(command: CreateBlogPostCommand) {
+        return executeBlogMutation("blog.post.create", command, () =>
+          persistDefinitionMutation({
+            command,
+            requestIdentity: { operation: "create_blog_post", ...command },
+            mutate: (definition) =>
+              createBlogPostDefinition(
+                definition,
+                command.siteId,
+                command.post,
+              ),
+          }),
+        );
+      },
+      async editBlogPost(command: EditBlogPostCommand) {
+        return executeBlogMutation("blog.post.edit", command, () =>
+          persistDefinitionMutation({
+            command,
+            requestIdentity: { operation: "edit_blog_post", ...command },
+            mutate: (definition) =>
+              editBlogPostDefinition(
+                definition,
+                command.siteId,
+                command.postId,
+                command.post,
+              ),
+          }),
+        );
+      },
+      async unpublishBlogPost(command: UnpublishBlogPostCommand) {
+        return executeBlogMutation("blog.post.unpublish", command, () =>
+          (async () => {
+            await store.requireAccess(actorId);
+            const publishedBase = await store.getRevision(0);
+            return persistDefinitionMutation({
+              command,
+              requestIdentity: {
+                operation: "unpublish_blog_post",
+                ...command,
+              },
+              mutate: (definition) => {
+                if (
+                  publishedBase === null ||
+                  !publishedBase.definition.blog.posts.some(
+                    ({ id }) => id === command.postId,
+                  )
+                ) {
+                  throw new BlogPostSchemaError("post_not_live");
+                }
+                return unpublishBlogPostDefinition(
+                  definition,
+                  command.siteId,
+                  command.postId,
+                );
+              },
+            });
+          })(),
+        );
       },
       async saveMediaOccurrence(command: SaveContentMediaOccurrenceCommand) {
         if (command.actorId !== actorId) {

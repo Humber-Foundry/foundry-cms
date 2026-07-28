@@ -24,6 +24,7 @@ export type ContentSerializationVersion =
 export type ContentPublicationSchemaVersion =
   | "1.0.0"
   | "1.1.0"
+  | "1.2.0"
   | SiteDefinitionSchemaVersion;
 const publicationLeaseDurationMs = 5 * 60 * 1_000;
 

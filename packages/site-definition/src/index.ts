@@ -41,6 +41,31 @@ export function createSiteId(value: string): SiteId {
 
 export type SiteHref = `#${string}` | `mailto:${string}`;
 
+declare const blogPostIdBrand: unique symbol;
+export type BlogPostId = string & {
+  readonly [blogPostIdBrand]: "BlogPostId";
+};
+
+export function createBlogPostId(value: string): BlogPostId {
+  if (!/^post_[a-z0-9_]+$/u.test(value)) {
+    throw new TypeError("blog_post_id_invalid");
+  }
+  return value as BlogPostId;
+}
+
+export type BlogPost = Readonly<{
+  id: BlogPostId;
+  revision: number;
+  slug: string;
+  title: string;
+  excerpt: string;
+  seo: Readonly<{
+    title: string;
+    description: string;
+  }>;
+  body: RichTextDocument;
+}>;
+
 export type SiteLink = Readonly<{
   id: string;
   label: string;
@@ -126,8 +151,8 @@ export type PageSection =
   | CallToActionSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.2.0";
-  schemaVersion: "1.2.0";
+  definitionVersion: "1.3.0";
+  schemaVersion: "1.3.0";
   design: SiteDesign;
   site: Readonly<{
     id: SiteId;
@@ -145,12 +170,17 @@ export type SiteDefinition = Readonly<{
     }>;
     sections: ReadonlyArray<PageSection>;
   }>;
+  blog: Readonly<{
+    id: "blog";
+    posts: ReadonlyArray<BlogPost>;
+  }>;
 }>;
 
 export type SiteDefinitionSchemaVersion = SiteDefinition["schemaVersion"];
 export type StoredSiteDefinitionSchemaVersion =
   | "1.0.0"
   | "1.1.0"
+  | "1.2.0"
   | SiteDefinitionSchemaVersion;
 
 function isSiteDefinitionRecord(
@@ -164,7 +194,9 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
   if (
     !isSiteDefinitionRecord(upgraded) ||
     !isSiteDefinitionRecord(upgraded.home) ||
-    !Array.isArray(upgraded.home.sections)
+    !Array.isArray(upgraded.home.sections) ||
+    !isSiteDefinitionRecord(upgraded.blog) ||
+    !Array.isArray(upgraded.blog.posts)
   ) {
     throw new TypeError("site_definition_invalid");
   }
@@ -176,12 +208,18 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
       validateRichTextDocument(section.body as RichTextDocument);
     }
   }
+  for (const post of upgraded.blog.posts) {
+    if (!isSiteDefinitionRecord(post)) {
+      throw new TypeError("site_definition_invalid");
+    }
+    validateRichTextDocument(post.body as RichTextDocument);
+  }
   return upgraded as SiteDefinition;
 }
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.2.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.3.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
@@ -191,10 +229,11 @@ export const siteDefinitionSchema = {
     "design",
     "site",
     "home",
+    "blog",
   ],
   properties: {
-    definitionVersion: { const: "1.2.0" },
-    schemaVersion: { const: "1.2.0" },
+    definitionVersion: { const: "1.3.0" },
+    schemaVersion: { const: "1.3.0" },
     design: {
       type: "object",
       additionalProperties: false,
@@ -313,6 +352,18 @@ export const siteDefinitionSchema = {
         },
       },
     },
+    blog: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "posts"],
+      properties: {
+        id: { const: "blog" },
+        posts: {
+          type: "array",
+          items: { $ref: "#/$defs/blogPost" },
+        },
+      },
+    },
   },
   $defs: {
     id: {
@@ -343,6 +394,40 @@ export const siteDefinitionSchema = {
         { pattern: "^#[a-z][a-z0-9_]*$" },
         { pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
       ],
+    },
+    blogPost: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "id",
+        "revision",
+        "slug",
+        "title",
+        "excerpt",
+        "seo",
+        "body",
+      ],
+      properties: {
+        id: { type: "string", pattern: "^post_[a-z0-9_]+$" },
+        revision: { type: "integer", minimum: 1 },
+        slug: {
+          type: "string",
+          pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          maxLength: 120,
+        },
+        title: { $ref: "#/$defs/text" },
+        excerpt: { $ref: "#/$defs/text" },
+        seo: {
+          type: "object",
+          additionalProperties: false,
+          required: ["title", "description"],
+          properties: {
+            title: { $ref: "#/$defs/text" },
+            description: { $ref: "#/$defs/text" },
+          },
+        },
+        body: { $ref: "#/$defs/richTextDocument" },
+      },
     },
     mediaOccurrence: {
       type: "object",
@@ -714,6 +799,16 @@ export function isSiteDefinition(value: unknown): value is SiteDefinition {
         validateRichTextDocument(section.body);
       }
     });
+    const postIds = new Set<string>();
+    const postSlugs = new Set<string>();
+    definition.blog.posts.forEach((post) => {
+      validateRichTextDocument(post.body);
+      if (postIds.has(post.id) || postSlugs.has(post.slug)) {
+        throw new TypeError("blog_post_identity_duplicate");
+      }
+      postIds.add(post.id);
+      postSlugs.add(post.slug);
+    });
     return true;
   } catch {
     return false;
@@ -742,3 +837,4 @@ export const referenceSiteDefinition = createReferenceSiteDefinition(
 export * from "./editable-fields";
 export * from "./component-composition";
 export * from "./design-tokens";
+export * from "./blog";

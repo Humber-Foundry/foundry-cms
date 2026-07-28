@@ -333,6 +333,24 @@ export function createD1ContentRevisionStore(
         requireBookmark(session.getBookmark()),
       );
     },
+    async recordRejection(input) {
+      await database
+        .prepare(
+          `INSERT INTO blog_post_rejection_audit_events (
+             workspace_id, actor_id, command_type, reason_code,
+             request_id, occurred_at
+           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+        )
+        .bind(
+          input.workspaceId,
+          input.actorId,
+          input.commandType,
+          input.reasonCode,
+          input.requestId,
+          input.occurredAt,
+        )
+        .run();
+    },
     async persist(command) {
       if (database.withSession === undefined) {
         throw new Error("content_revision_sessions_unavailable");
