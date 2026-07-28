@@ -612,8 +612,7 @@ export function createGitHubContentPublisher({
           }
           if (build?.status === "stopped") {
             if (
-              build.build_trigger_metadata?.commit_hash !== undefined &&
-              build.build_trigger_metadata.commit_hash !== commitSha
+              build.build_trigger_metadata?.commit_hash !== commitSha
             ) {
               return "failed";
             }
