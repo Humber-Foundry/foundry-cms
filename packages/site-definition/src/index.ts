@@ -112,7 +112,7 @@ export type SiteDefinition = Readonly<{
   }>;
   home: Readonly<{
     id: string;
-    media: ReadonlyArray<SiteMediaOccurrence>;
+    media?: ReadonlyArray<SiteMediaOccurrence>;
     seo: Readonly<{
       title: string;
       description: string;

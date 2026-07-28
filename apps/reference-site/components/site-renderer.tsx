@@ -18,9 +18,11 @@ function occurrenceFor(
 export function SiteSection({
   section,
   definition,
+  mediaDelivery,
 }: {
   section: PageSection;
   definition: SiteDefinition;
+  mediaDelivery: "authenticated" | "published";
 }) {
   switch (section.type) {
     case "hero": {
@@ -38,6 +40,7 @@ export function SiteSection({
             <MediaOccurrence
               className="site-media site-media-hero"
               occurrence={occurrence}
+              delivery={mediaDelivery}
             />
           )}
           <div className="action-row">
@@ -70,6 +73,7 @@ export function SiteSection({
             <MediaOccurrence
               className="site-media site-media-detail"
               occurrence={occurrence}
+              delivery={mediaDelivery}
             />
           )}
           <ol className="service-list">
@@ -136,8 +140,10 @@ export function SiteSection({
 
 export function SiteRenderer({
   definition,
+  mediaDelivery = "published",
 }: {
   definition: SiteDefinition;
+  mediaDelivery?: "authenticated" | "published";
 }) {
   return (
     <>
@@ -160,6 +166,7 @@ export function SiteRenderer({
             key={section.id}
             section={section}
             definition={definition}
+            mediaDelivery={mediaDelivery}
           />
         ))}
       </main>

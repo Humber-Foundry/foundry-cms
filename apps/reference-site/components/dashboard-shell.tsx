@@ -9,12 +9,12 @@ import type {
 } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
 
-import { ContentEditor } from "./content-editor";
 import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
 import { MediaManager } from "./media-manager";
+import { WorkspaceEditors } from "./workspace-editors";
 
 export function DashboardShell({
   definition,
@@ -99,26 +99,30 @@ export function DashboardShell({
           </div>
           {contentRevision === undefined ||
           initialPreviewUrl === undefined ? (
-            <ContentWorkspaceStarter
-              csrfToken={contentMutationToken}
-              staleRecovery={staleRecovery}
-            />
+            <>
+              <ContentWorkspaceStarter
+                csrfToken={contentMutationToken}
+                staleRecovery={staleRecovery}
+              />
+              <MediaManager
+                csrfToken={mutationToken}
+                initialAssets={mediaAssets}
+                initialOccurrences={mediaOccurrences}
+                onRevisionSaved={() => undefined}
+              />
+            </>
           ) : (
-            <ContentEditor
+            <WorkspaceEditors
               csrfToken={contentMutationToken}
-              initialRevision={contentRevision}
+              contentRevision={contentRevision}
               initialPreviewUrl={initialPreviewUrl}
-              initialStale={initialContentStale}
+              initialContentStale={initialContentStale}
               activeWorkspaceUrl={activeWorkspaceUrl}
               staleRecovery={staleRecovery}
+              mediaAssets={mediaAssets}
+              mediaOccurrences={mediaOccurrences}
             />
           )}
-          <MediaManager
-            csrfToken={mutationToken}
-            initialAssets={mediaAssets}
-            initialOccurrences={mediaOccurrences}
-            initialContentRevision={contentRevision}
-          />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">
               <div>

@@ -7,10 +7,12 @@ export function MediaOccurrence({
   occurrence,
   className,
   children,
+  delivery = "authenticated",
 }: {
   occurrence: SiteMediaOccurrence;
   className?: string;
   children?: ReactNode;
+  delivery?: "authenticated" | "published";
 }) {
   const crop =
     occurrence.crop === null
@@ -23,9 +25,13 @@ export function MediaOccurrence({
     >
       <div className="media-crop-frame" style={crop?.frame}>
         <img
-          src={`/api/foundry-cms/media?assetId=${encodeURIComponent(
-            occurrence.asset.assetId,
-          )}`}
+          src={
+            delivery === "published"
+              ? `/api/media/${encodeURIComponent(occurrence.asset.assetId)}`
+              : `/api/foundry-cms/media?assetId=${encodeURIComponent(
+                  occurrence.asset.assetId,
+                )}`
+          }
           alt=""
           style={crop?.image}
         />

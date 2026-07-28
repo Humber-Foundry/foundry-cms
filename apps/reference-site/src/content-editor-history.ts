@@ -30,6 +30,11 @@ export type ContentEditorAction =
       revision: number;
     }>
   | Readonly<{
+      type: "externalRevision";
+      definition: SiteDefinition;
+      revision: number;
+    }>
+  | Readonly<{
       type: "failed";
       errors: Readonly<Record<string, string>>;
       conflict?: "conflict" | "stale";
@@ -160,6 +165,21 @@ export function contentEditorReducer(
         workingDefinition: action.definition,
         projectionVersion: state.projectionVersion + 1,
         status: "saved",
+        errors: {},
+      };
+    case "externalRevision":
+      return {
+        ...state,
+        persistedDefinition: action.definition,
+        persistedRevision: action.revision,
+        workingDefinition: {
+          ...state.workingDefinition,
+          home: {
+            ...state.workingDefinition.home,
+            media: action.definition.home.media,
+          },
+        },
+        status: state.status === "saved" ? "saved" : state.status,
         errors: {},
       };
     case "failed":

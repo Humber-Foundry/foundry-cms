@@ -101,7 +101,7 @@ async function bindOccurrenceToContentRevision({
   application: Awaited<ReturnType<typeof loadMediaAssetApplication>>;
 }) {
   const workspaceId = createContentWorkspaceId(String(body.workspaceId ?? ""));
-  const contentBaseRevision = Number(body.contentBaseRevision);
+  let contentBaseRevision = Number(body.contentBaseRevision);
   if (!Number.isSafeInteger(contentBaseRevision) || contentBaseRevision < 0) {
     throw new MediaValidationError("contentBaseRevision");
   }
@@ -118,27 +118,42 @@ async function bindOccurrenceToContentRevision({
     workspaceId,
     actorId,
   );
-  const contentRevision =
-    await contentApplication.commands.saveMediaOccurrence({
-      actorId,
-      workspaceId,
-      schemaVersion: "1.0.0",
-      baseRevision: contentBaseRevision,
-      occurrence: {
-        occurrenceId: requireRenderedMediaOccurrenceId(
-          occurrence.occurrenceId,
-        ),
-        revision: occurrence.revision,
-        asset: {
-          assetId: asset.assetId,
-          width: asset.width,
-          height: asset.height,
-          contentType: asset.contentType,
-        },
-        crop: occurrence.crop,
-      },
-      idempotencyKey: contentIdempotencyKey,
-    });
+  const boundOccurrence = {
+    occurrenceId: requireRenderedMediaOccurrenceId(occurrence.occurrenceId),
+    revision: occurrence.revision,
+    asset: {
+      assetId: asset.assetId,
+      width: asset.width,
+      height: asset.height,
+      contentType: asset.contentType,
+    },
+    crop: occurrence.crop,
+  } as const;
+  let contentRevision;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      contentRevision =
+        await contentApplication.commands.saveMediaOccurrence({
+          actorId,
+          workspaceId,
+          schemaVersion: "1.0.0",
+          baseRevision: contentBaseRevision,
+          occurrence: boundOccurrence,
+          idempotencyKey: contentIdempotencyKey,
+        });
+      break;
+    } catch (error) {
+      if (!(error instanceof ContentRevisionConflictError) || attempt === 2) {
+        throw error;
+      }
+      contentBaseRevision = (
+        await contentApplication.queries.getCurrent()
+      ).revision;
+    }
+  }
+  if (contentRevision === undefined) {
+    throw new ContentRevisionConflictError(contentBaseRevision);
+  }
   return {
     occurrence,
     contentRevision,

@@ -57,7 +57,10 @@ export default async function RevisionPreviewPage(
           Return to editor
         </a>
       </aside>
-      <SiteRenderer definition={revision.definition} />
+      <SiteRenderer
+        definition={revision.definition}
+        mediaDelivery="authenticated"
+      />
     </>
   );
 }

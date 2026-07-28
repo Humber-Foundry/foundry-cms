@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type {
   ContentRevision,
@@ -28,18 +28,17 @@ export function MediaManager({
   csrfToken,
   initialAssets,
   initialOccurrences,
-  initialContentRevision,
+  contentRevision,
+  onRevisionSaved,
 }: {
   csrfToken: string;
   initialAssets: ReadonlyArray<MediaAsset>;
   initialOccurrences: ReadonlyArray<MediaOccurrenceRevision>;
-  initialContentRevision?: ContentRevision;
+  contentRevision?: ContentRevision;
+  onRevisionSaved(revision: ContentRevision): void;
 }) {
   const [assets, setAssets] = useState([...initialAssets]);
   const [occurrences, setOccurrences] = useState([...initialOccurrences]);
-  const [contentRevision, setContentRevision] = useState(
-    initialContentRevision,
-  );
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string>(
@@ -52,16 +51,22 @@ export function MediaManager({
     width: 1,
     height: 1,
   });
+  const [previewUrl, setPreviewUrl] = useState<string>();
+  const replaceAttempt = useRef<JsonAttempt | null>(null);
+  const cropAttempt = useRef<JsonAttempt | null>(null);
+  const deleteAttempt = useRef<JsonAttempt | null>(null);
 
-  async function mutateJson(body: unknown) {
+  type JsonAttempt = Readonly<{ body: unknown; idempotencyKey: string }>;
+
+  async function mutateJson(attempt: JsonAttempt) {
     const response = await fetch("/api/foundry-cms/media", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "idempotency-key": crypto.randomUUID(),
+        "idempotency-key": attempt.idempotencyKey,
         "x-foundry-csrf": csrfToken,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(attempt.body),
     });
     const result: unknown = response.status === 204 ? null : await response.json();
     if (!response.ok) throw new Error("media_mutation_failed");
@@ -106,14 +111,18 @@ export function MediaManager({
     setBusy(true);
     try {
     if (contentRevision === undefined) return;
-    const result = (await mutateJson({
+    replaceAttempt.current ??= {
+      idempotencyKey: crypto.randomUUID(),
+      body: {
         operation: "replace",
         occurrenceId,
         assetId: selectedAsset,
         baseRevision: current?.revision ?? 0,
         workspaceId: contentRevision.workspaceId,
         contentBaseRevision: contentRevision.revision,
-      })) as {
+      },
+    };
+    const result = (await mutateJson(replaceAttempt.current)) as {
         occurrence: MediaOccurrenceRevision;
         contentRevision: ContentRevision;
         previewUrl: string;
@@ -123,7 +132,9 @@ export function MediaManager({
         ...items.filter((item) => item.occurrenceId !== occurrenceId),
         revision,
       ]);
-      setContentRevision(result.contentRevision);
+      replaceAttempt.current = null;
+      onRevisionSaved(result.contentRevision);
+      setPreviewUrl(result.previewUrl);
       setMessage("Only the selected occurrence was replaced.");
     } catch {
       setMessage("The occurrence changed elsewhere or could not be replaced.");
@@ -139,14 +150,18 @@ export function MediaManager({
     if (current === undefined || contentRevision === undefined) return;
     setBusy(true);
     try {
-      const result = (await mutateJson({
-        operation: "crop",
-        occurrenceId,
-        baseRevision: current.revision,
-        crop,
-        workspaceId: contentRevision.workspaceId,
-        contentBaseRevision: contentRevision.revision,
-      })) as {
+      cropAttempt.current ??= {
+        idempotencyKey: crypto.randomUUID(),
+        body: {
+          operation: "crop",
+          occurrenceId,
+          baseRevision: current.revision,
+          crop,
+          workspaceId: contentRevision.workspaceId,
+          contentBaseRevision: contentRevision.revision,
+        },
+      };
+      const result = (await mutateJson(cropAttempt.current)) as {
         occurrence: MediaOccurrenceRevision;
         contentRevision: ContentRevision;
         previewUrl: string;
@@ -156,7 +171,9 @@ export function MediaManager({
         ...items.filter((item) => item.occurrenceId !== occurrenceId),
         revision,
       ]);
-      setContentRevision(result.contentRevision);
+      cropAttempt.current = null;
+      onRevisionSaved(result.contentRevision);
+      setPreviewUrl(result.previewUrl);
       setMessage("Crop saved as revision data; the source is unchanged.");
     } catch {
       setMessage("The crop could not be saved.");
@@ -169,7 +186,12 @@ export function MediaManager({
     if (selectedAsset === "") return;
     setBusy(true);
     try {
-      await mutateJson({ operation: "delete", assetId: selectedAsset });
+      deleteAttempt.current ??= {
+        idempotencyKey: crypto.randomUUID(),
+        body: { operation: "delete", assetId: selectedAsset },
+      };
+      await mutateJson(deleteAttempt.current);
+      deleteAttempt.current = null;
       const remaining = assets.filter(
         (asset) => asset.assetId !== selectedAsset,
       );
@@ -212,7 +234,11 @@ export function MediaManager({
             Occurrence ID
             <select
               value={occurrenceId}
-              onChange={(event) => setOccurrenceId(event.target.value)}
+              onChange={(event) => {
+                replaceAttempt.current = null;
+                cropAttempt.current = null;
+                setOccurrenceId(event.target.value);
+              }}
             >
               {renderedMediaOccurrenceIds.map((id) => (
                 <option key={id} value={id}>
@@ -227,7 +253,11 @@ export function MediaManager({
             Source asset
             <select
               value={selectedAsset}
-              onChange={(event) => setSelectedAsset(event.target.value)}
+              onChange={(event) => {
+                replaceAttempt.current = null;
+                deleteAttempt.current = null;
+                setSelectedAsset(event.target.value);
+              }}
             >
               {assets.map((asset) => (
                 <option key={asset.assetId} value={asset.assetId}>
@@ -285,10 +315,13 @@ export function MediaManager({
                   step={0.01}
                   value={crop[field]}
                   onChange={(event) =>
-                    setCrop((current) => ({
-                      ...current,
-                      [field]: Number(event.target.value),
-                    }))
+                    {
+                      cropAttempt.current = null;
+                      setCrop((current) => ({
+                        ...current,
+                        [field]: Number(event.target.value),
+                      }));
+                    }
                   }
                 />
               </label>
@@ -322,6 +355,11 @@ export function MediaManager({
               </MediaOccurrence>
             );
           })}
+          {previewUrl === undefined ? null : (
+            <p>
+              <a href={previewUrl}>Preview this exact media revision</a>
+            </p>
+          )}
         </div>
       ) : (
         <p>Upload an image to create the first stable media asset.</p>

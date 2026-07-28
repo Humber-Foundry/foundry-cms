@@ -99,6 +99,8 @@ export function ContentEditor({
   initialStale = false,
   activeWorkspaceUrl,
   staleRecovery,
+  revisionHead,
+  onRevisionSaved,
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
@@ -109,6 +111,8 @@ export function ContentEditor({
     id: string;
     sourceWorkspaceId: string;
   }>;
+  revisionHead: ContentRevision;
+  onRevisionSaved(revision: ContentRevision): void;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -165,6 +169,16 @@ export function ContentEditor({
     () => listEditableSiteFields(state.persistedDefinition),
     [state.persistedDefinition],
   );
+  useEffect(() => {
+    if (revisionHead.revision > state.persistedRevision) {
+      pendingAttempt.current = null;
+      dispatch({
+        type: "externalRevision",
+        definition: revisionHead.definition,
+        revision: revisionHead.revision,
+      });
+    }
+  }, [revisionHead, state.persistedRevision]);
   const workingFields = useMemo(
     () => listEditableSiteFields(state.workingDefinition),
     [state.workingDefinition],
@@ -747,6 +761,7 @@ export function ContentEditor({
       setPreviewedRevision(null);
       pendingApprovalAttempt.current = null;
       pendingPublicationAttempt.current = null;
+      onRevisionSaved(saved);
       setPreviewUrl(saved.previewUrl);
       setMessage(
         outboxCleared

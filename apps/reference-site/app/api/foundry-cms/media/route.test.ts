@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ContentRevisionConflictError } from "@foundry/application";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getAsset: vi.fn(),
   saveMediaOccurrence: vi.fn(),
   loadContentApplication: vi.fn(),
+  getCurrentContent: vi.fn(),
 }));
 vi.mock("../../../../src/human-access-runtime", () => ({
   authorizeAuthenticatedHumanIdentity: mocks.authorize,
@@ -63,7 +65,9 @@ describe("media endpoint", () => {
     });
     mocks.loadContentApplication.mockResolvedValue({
       commands: { saveMediaOccurrence: mocks.saveMediaOccurrence },
+      queries: { getCurrent: mocks.getCurrentContent },
     });
+    mocks.getCurrentContent.mockResolvedValue({ revision: 3 });
     mocks.loadApplication.mockResolvedValue({
       commands: {
         upload: mocks.upload,
@@ -78,6 +82,45 @@ describe("media endpoint", () => {
         getAsset: mocks.getAsset,
       },
     });
+  });
+
+  it("reconciles a content-head race without duplicating the occurrence mutation", async () => {
+    mocks.replace.mockResolvedValue({
+      occurrenceId: "occurrence_home_hero",
+      revision: 2,
+      assetId: "asset_replacement",
+      crop: null,
+    });
+    mocks.saveMediaOccurrence
+      .mockRejectedValueOnce(new ContentRevisionConflictError(3))
+      .mockResolvedValueOnce({
+        workspaceId: "workspace_editor",
+        revision: 4,
+      });
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "recover-compound-media-0001",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.replace).toHaveBeenCalledOnce();
+    expect(mocks.saveMediaOccurrence).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ baseRevision: 3 }),
+    );
   });
 
   it("derives the editor actor and changes only the requested occurrence", async () => {

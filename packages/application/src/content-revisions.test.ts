@@ -329,19 +329,19 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 1,
       occurrence: {
-        ...first.definition.home.media[0]!,
+        ...first.definition.home.media![0]!,
         revision: 2,
         crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
       },
       idempotencyKey: "save-media-hero-0002",
     });
 
-    expect(first.definition.home.media[0]).toMatchObject({
+    expect(first.definition.home.media![0]).toMatchObject({
       occurrenceId: "occurrence_home_hero",
       revision: 1,
       crop: null,
     });
-    expect(cropped.definition.home.media[0]).toMatchObject({
+    expect(cropped.definition.home.media![0]).toMatchObject({
       revision: 2,
       crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
     });

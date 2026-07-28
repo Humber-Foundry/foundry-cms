@@ -232,4 +232,50 @@ describe("content editor history", () => {
     expect(stale.status).toBe("stale");
     expect(stale.persistedRevision).toBe(4);
   });
+
+  it("advances a shared media revision head without discarding unsaved copy", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 1,
+    });
+    const edited = contentEditorReducer(initial, {
+      type: "edit",
+      path: "section_hero.title",
+      value: "Unsaved headline",
+    });
+    const definition = {
+      ...structuredClone(referenceSiteDefinition),
+      home: {
+        ...structuredClone(referenceSiteDefinition.home),
+        media: [
+          {
+            occurrenceId: "occurrence_home_hero" as const,
+            revision: 1,
+            asset: {
+              assetId: "asset_hero",
+              width: 1600,
+              height: 900,
+              contentType: "image/png" as const,
+            },
+            crop: null,
+          },
+        ],
+      },
+    };
+
+    const synchronized = contentEditorReducer(edited, {
+      type: "externalRevision",
+      definition,
+      revision: 2,
+    });
+
+    expect(synchronized.persistedRevision).toBe(2);
+    expect(synchronized.workingDefinition.home.media).toEqual(
+      definition.home.media,
+    );
+    expect(synchronized.workingDefinition.home.sections[0]).toMatchObject({
+      title: "Unsaved headline",
+    });
+    expect(synchronized.status).toBe("dirty");
+  });
 });

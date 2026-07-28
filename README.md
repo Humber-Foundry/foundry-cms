@@ -128,8 +128,12 @@ only for that occurrence; cropping appends normalized crop data and never
 rewrites the R2 source. The selected occurrence revision and asset presentation
 metadata are then fingerprinted into the Editor's immutable content revision;
 the exact preview renders that bound manifest, while the public route continues
-to render only the Git-published Site Definition. All mutations are idempotent
-and audited. Deletion first
+to render only the Git-published Site Definition. Published source delivery
+checks the requested asset against that Git manifest before reading private R2.
+The media and content receipts share a stable retry key, so a raced content head
+is reconciled against the latest revision and an ambiguous response can be
+retried without appending another occurrence. All mutations are idempotent and
+audited. Deletion first
 reserves an unreferenced asset in D1, fences new references, removes its source,
 and then tombstones its stable identity. Any current or historical occurrence
 revision rejects deletion so immutable previews never acquire a broken media
