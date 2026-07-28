@@ -129,6 +129,7 @@ const tokenCaches = new WeakMap<
   GitHubFetch,
   Map<string, Promise<CachedInstallationToken>>
 >();
+const maximumGitHubContentsBytes = 100 * 1024 * 1024;
 
 function githubHeaders(token: string) {
   return {
@@ -540,6 +541,31 @@ export function createGitHubContentPublisher({
     );
   }
 
+  async function requestRawContents(token: string, path: string) {
+    const response = await fetchImplementation(
+      api(`${repositoryPath}${path}`),
+      {
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          ...githubHeaders(token),
+          accept: "application/vnd.github.raw+json",
+        },
+      },
+    );
+    if (!response.ok) {
+      await readJson(response);
+    }
+    const reportedLength = Number(response.headers.get("content-length"));
+    if (
+      Number.isFinite(reportedLength) &&
+      reportedLength > maximumGitHubContentsBytes
+    ) {
+      return null;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return bytes.byteLength <= maximumGitHubContentsBytes ? bytes : null;
+  }
+
   async function graphqlRequest(
     token: string,
     query: string,
@@ -797,10 +823,10 @@ export function createGitHubContentPublisher({
       commitSha: string;
       path: string;
     }) {
-      let body: unknown;
+      let bytes: Uint8Array | null;
       try {
         const token = await installationToken();
-        body = await request(
+        bytes = await requestRawContents(
           token,
           `/contents/${input.path
             .split("/")
@@ -813,7 +839,6 @@ export function createGitHubContentPublisher({
         }
         throw error;
       }
-      const bytes = decodeGitHubBlob(body);
       if (bytes === null) {
         return null;
       }

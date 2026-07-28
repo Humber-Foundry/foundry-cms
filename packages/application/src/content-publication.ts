@@ -1410,10 +1410,15 @@ export function createContentPublicationApplication({
         const recoverableCandidate = await store.findLatestPublication(
           approval.workspaceId,
         );
+        const definiteGitFailureCanBeRetried =
+          recoverableCandidate?.status === "failed" &&
+          recoverableCandidate.commitSha === null &&
+          recoverableCandidate.detail === "git_operation_failed";
         if (
           recoverableCandidate !== null &&
           recoverableCandidate.approvalId === approval.id &&
-          recoverableCandidate.fingerprint === approval.fingerprint.value
+          recoverableCandidate.fingerprint === approval.fingerprint.value &&
+          !definiteGitFailureCanBeRetried
         ) {
           return activeStatuses.has(recoverableCandidate.status)
             ? (await refreshPublication(recoverableCandidate.id)) ??

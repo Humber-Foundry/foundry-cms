@@ -464,6 +464,48 @@ describe("content publication application", () => {
     );
   });
 
+  it("starts a new publication after a definite Git rejection is repaired", async () => {
+    createCommit
+      .mockResolvedValueOnce({
+        state: "failed",
+        detail: "git_operation_failed",
+      })
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      });
+    const { app, approval } = await approve();
+
+    const failed = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-definite-git-failure",
+    });
+    expect(failed).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha: null,
+        detail: "git_operation_failed",
+      }),
+    );
+
+    const retried = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-after-git-repair",
+    });
+    expect(retried).toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(retried.id).not.toBe(failed.id);
+    expect(createCommit).toHaveBeenCalledTimes(2);
+  });
+
   it("does not publish an approval through a different workspace boundary", async () => {
     const { app, approval } = await approve();
 

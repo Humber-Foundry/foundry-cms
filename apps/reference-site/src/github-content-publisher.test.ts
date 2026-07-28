@@ -163,12 +163,7 @@ describe("GitHub content publisher", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json({ token: "installation-token" }))
-      .mockResolvedValueOnce(
-        json({
-          encoding: "base64",
-          content: Buffer.from(bytes).toString("base64"),
-        }),
-      );
+      .mockResolvedValueOnce(new Response(bytes));
     const publisher = createGitHubContentPublisher({
       configuration: { ...configurationInputs, privateKey },
       fetch: fetchMock,
@@ -186,6 +181,33 @@ describe("GitHub content publisher", () => {
       "https://api.github.com/repos/client-owner/client-site/contents/" +
         `packages/site-definition/src/published-site.json?ref=${commitSha}`,
     );
+    expect(fetchMock.mock.calls[1]![1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          accept: "application/vnd.github.raw+json",
+        }),
+      }),
+    );
+  });
+
+  it("reads historical published artifacts larger than the JSON contents limit", async () => {
+    const bytes = JSON.stringify({ content: "x".repeat(1_100_000) });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(new Response(bytes));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00Z"),
+    });
+
+    await expect(
+      publisher.readPublishedArtifact({
+        commitSha: "c".repeat(40),
+        path: "packages/site-definition/src/published-site.json",
+      }),
+    ).resolves.toBe(bytes);
   });
 
   it("atomically creates one bot commit on the expected production head", async () => {
