@@ -20,6 +20,7 @@ import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import {
   applyStructuralRecovery,
   clearStaleEdits,
+  comparableRecoveryValue,
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
   preserveStaleEdits,
@@ -222,7 +223,7 @@ export function ContentEditor({
             });
             continue;
           }
-          if (currentValue === edit.value) {
+          if (currentValue === comparableRecoveryValue(edit)) {
             alreadyAppliedCount += 1;
             continue;
           }

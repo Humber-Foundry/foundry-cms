@@ -11,7 +11,14 @@ function memoryDriver() {
     records,
     driver: {
       async read(workspaceId: string) {
-        return structuredClone(records.get(workspaceId) ?? null);
+        const record =
+          records.get(workspaceId) ??
+          (workspaceId.includes("::")
+            ? undefined
+            : [...records.values()].find(({ workspaceId: candidate }) =>
+                candidate.startsWith(`${workspaceId}::`),
+              ));
+        return structuredClone(record ?? null);
       },
       async write(record: ContentEditorOutboxRecord) {
         records.set(record.workspaceId, structuredClone(record));
@@ -102,22 +109,30 @@ describe("content editor outbox controller", () => {
   });
 
   it("keeps a closed tab's snapshot discoverable by the next workspace owner", async () => {
-    const { driver } = memoryDriver();
+    const { driver, records } = memoryDriver();
     const closedTab = createContentEditorOutboxController(
       "workspace_shared",
       driver,
+      "tab_closed",
     );
     await closedTab.snapshot(2, [edit]);
 
     const reopenedTab = createContentEditorOutboxController(
       "workspace_shared",
       driver,
+      "tab_reopened",
     );
     await expect(reopenedTab.read()).resolves.toEqual({
       workspaceId: "workspace_shared",
       baseRevision: 2,
       edits: [edit],
     });
+    expect(records.has("workspace_shared::tab_closed")).toBe(false);
+    expect(records.get("workspace_shared::tab_reopened")?.edits).toEqual([
+      edit,
+    ]);
+    await reopenedTab.clear();
+    expect(records.has("workspace_shared::tab_reopened")).toBe(false);
   });
 
   it("keeps concurrent tab attempts in separate recovery records", async () => {

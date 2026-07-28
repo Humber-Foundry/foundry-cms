@@ -25,6 +25,44 @@ export type StaleRecoveryPointer = Readonly<{
   sourceWorkspaceId: string;
 }>;
 
+export function comparableRecoveryValue(edit: StaleRecoveryEdit): string {
+  if (edit.path !== pageCompositionContract.slot.id) {
+    return edit.value;
+  }
+  try {
+    const composition: unknown = JSON.parse(edit.value);
+    if (
+      typeof composition !== "object" ||
+      composition === null ||
+      !("slotId" in composition) ||
+      typeof composition.slotId !== "string" ||
+      !("components" in composition) ||
+      !Array.isArray(composition.components)
+    ) {
+      return edit.value;
+    }
+    const components = composition.components.map((component) => {
+      if (
+        typeof component !== "object" ||
+        component === null ||
+        !("id" in component) ||
+        typeof component.id !== "string" ||
+        !("type" in component) ||
+        typeof component.type !== "string"
+      ) {
+        throw new Error("invalid_component");
+      }
+      return { id: component.id, type: component.type };
+    });
+    return JSON.stringify({
+      slotId: composition.slotId,
+      components,
+    });
+  } catch {
+    return edit.value;
+  }
+}
+
 export function applyStructuralRecovery(
   definition: SiteDefinition,
   edit: StaleRecoveryEdit,

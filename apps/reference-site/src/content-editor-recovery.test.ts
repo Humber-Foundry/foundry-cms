@@ -9,6 +9,7 @@ import {
 
 import {
   applyStructuralRecovery,
+  comparableRecoveryValue,
   clearStaleEdits,
   excludeCompositionOwnedEdits,
   mergeStaleRecoveryEdits,
@@ -41,6 +42,34 @@ const edit = {
 };
 
 describe("stale edit recovery", () => {
+  it("compares a structural command by stable composition identity", () => {
+    expect(
+      comparableRecoveryValue({
+        path: "slot_home_sections",
+        baseValue: "",
+        value: JSON.stringify({
+          slotId: "slot_home_sections",
+          components: [
+            {
+              ...referenceSiteDefinition.home.sections[0],
+              title: "Copy already saved by another attempt",
+            },
+          ],
+        }),
+      }),
+    ).toBe(
+      JSON.stringify({
+        slotId: "slot_home_sections",
+        components: [
+          {
+            id: referenceSiteDefinition.home.sections[0]!.id,
+            type: referenceSiteDefinition.home.sections[0]!.type,
+          },
+        ],
+      }),
+    );
+  });
+
   it("forwards an active recovery when its destination later becomes stale", () => {
     const active = {
       id: "recovery-chain",

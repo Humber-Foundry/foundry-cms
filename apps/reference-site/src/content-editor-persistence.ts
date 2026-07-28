@@ -106,15 +106,10 @@ export function useContentEditorPersistence({
 }) {
   const controller = useMemo(
     () => {
-      let tabId = crypto.randomUUID();
-      try {
-        const key = "foundry-cms:content-editor-tab";
-        tabId = window.sessionStorage.getItem(key) ?? tabId;
-        window.sessionStorage.setItem(key, tabId);
-      } catch {
-        // The random in-memory tab scope still prevents this mounted editor
-        // from clearing another tab's durable command.
-      }
+      // A document-local identity is intentionally not stored in
+      // sessionStorage: browsers copy that storage when a tab is duplicated.
+      // A reload claims any previous durable record into this fresh scope.
+      const tabId = crypto.randomUUID();
       return createContentEditorOutboxController(
         workspaceId,
         undefined,

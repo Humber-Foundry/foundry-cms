@@ -72,7 +72,7 @@ function isOutboxAttempt(
   );
 }
 
-export async function readContentEditorOutbox(
+async function readContentEditorOutboxEntry(
   workspaceId: string,
 ): Promise<ContentEditorOutboxRecord | null> {
   const database = await openOutbox();
@@ -125,13 +125,22 @@ export async function readContentEditorOutbox(
     ) {
       return null;
     }
-    return {
-      ...(candidate as ContentEditorOutboxRecord),
-      workspaceId: workspaceId.split("::")[0]!,
-    };
+    return candidate as ContentEditorOutboxRecord;
   } finally {
     database.close();
   }
+}
+
+export async function readContentEditorOutbox(
+  workspaceId: string,
+): Promise<ContentEditorOutboxRecord | null> {
+  const record = await readContentEditorOutboxEntry(workspaceId);
+  return record === null
+    ? null
+    : {
+        ...record,
+        workspaceId: workspaceId.split("::")[0]!,
+      };
 }
 
 export async function writeContentEditorOutbox(
@@ -180,7 +189,7 @@ export async function clearContentEditorOutbox(
 export function createContentEditorOutboxController(
   workspaceId: string,
   driver: ContentEditorOutboxDriver = {
-    read: readContentEditorOutbox,
+    read: readContentEditorOutboxEntry,
     write: writeContentEditorOutbox,
     clear: clearContentEditorOutbox,
   },
@@ -217,9 +226,16 @@ export function createContentEditorOutboxController(
         (storageId === workspaceId
           ? null
           : await driver.read(workspaceId));
-      return stored === null
-        ? null
-        : { ...stored, workspaceId };
+      if (stored === null) {
+        return null;
+      }
+      if (stored.workspaceId !== storageId) {
+        await serialize(async () => {
+          await driver.write({ ...stored, workspaceId: storageId });
+          await driver.clear(stored.workspaceId);
+        });
+      }
+      return { ...stored, workspaceId };
     },
     snapshot: (
       baseRevision: number,
