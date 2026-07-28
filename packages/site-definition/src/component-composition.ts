@@ -601,16 +601,29 @@ export function applyPageComposition(
         "An existing component cannot change its registered type.";
       continue;
     }
+    const submittedContextSections = [
+      ...definition.home.sections,
+      ...accepted.filter(
+        ({ id: acceptedId }) => !existingById.has(acceptedId),
+      ),
+    ];
+    const submittedContext = {
+      ...definition,
+      home: {
+        ...definition.home,
+        sections: submittedContextSections,
+      },
+    } as SiteDefinition;
     const defaultScaffold =
       existing === undefined &&
       equalProtectedShape(
-        createDefaultPageSection(section.type, id, definition),
+        createDefaultPageSection(section.type, id, submittedContext),
         section,
       );
     const duplicateScaffold =
       existing === undefined &&
       hasCanonicalDuplicateIds(section) &&
-      definition.home.sections
+      submittedContextSections
         .filter((source) => source.type === section.type)
         .some((source) => equalProtectedShape(source, section, true));
     const scaffoldAllowed =

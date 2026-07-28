@@ -5,6 +5,7 @@ import {
   createDefaultPageSection,
   pageCompositionContract,
   referenceSiteDefinition,
+  remapPageSectionNestedIds,
   toPageComposition,
   type SiteDefinition,
 } from "./index";
@@ -88,6 +89,64 @@ describe("page component composition", () => {
       "section_proof",
       "section_contact",
     ]);
+  });
+
+  it("validates components added and duplicated in the same command", () => {
+    const first = createDefaultPageSection(
+      "proof",
+      "section_added_proof",
+      referenceSiteDefinition,
+    );
+    const duplicate = remapPageSectionNestedIds({
+      ...structuredClone(first),
+      id: "section_added_proof_copy",
+    });
+
+    const result = applyPageComposition(referenceSiteDefinition, {
+      slotId: "slot_home_sections",
+      components: [
+        ...referenceSiteDefinition.home.sections,
+        first,
+        duplicate,
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("derives new component scaffolding from earlier additions in one command", () => {
+    const proof = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "proof",
+    )!;
+    const base = {
+      ...referenceSiteDefinition,
+      site: { ...referenceSiteDefinition.site, navigation: [] },
+      home: { ...referenceSiteDefinition.home, sections: [proof] },
+    } as SiteDefinition;
+    const callToAction = createDefaultPageSection(
+      "callToAction",
+      "section_added_contact",
+      base,
+    );
+    const withCallToAction = {
+      ...base,
+      home: {
+        ...base.home,
+        sections: [...base.home.sections, callToAction],
+      },
+    } as SiteDefinition;
+    const hero = createDefaultPageSection(
+      "hero",
+      "section_added_hero",
+      withCallToAction,
+    );
+
+    expect(
+      applyPageComposition(base, {
+        slotId: "slot_home_sections",
+        components: [proof, callToAction, hero],
+      }).ok,
+    ).toBe(true);
   });
 
   it("round-trips the canonical slot payload with stable component identifiers", () => {
