@@ -134,6 +134,179 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function validateObjectKeys(
+  value: unknown,
+  expected: ReadonlyArray<string>,
+  path: string,
+  errors: Record<string, string>,
+): value is Record<string, unknown> {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== expected.length ||
+    Object.keys(value).some((key) => !expected.includes(key))
+  ) {
+    errors[path] = "Use only fields registered by the Site Definition.";
+    return false;
+  }
+  return true;
+}
+
+function validateTextFields(
+  value: Record<string, unknown>,
+  fields: ReadonlyArray<string>,
+  path: string,
+  errors: Record<string, string>,
+): boolean {
+  let valid = true;
+  for (const field of fields) {
+    if (
+      typeof value[field] !== "string" ||
+      (value[field] as string).trim() === ""
+    ) {
+      errors[`${path}.${field}`] = "Enter at least one visible character.";
+      valid = false;
+    }
+  }
+  return valid;
+}
+
+function validateLink(
+  value: unknown,
+  path: string,
+  errors: Record<string, string>,
+): boolean {
+  if (!validateObjectKeys(value, ["id", "label", "href"], path, errors)) {
+    return false;
+  }
+  const textValid = validateTextFields(value, ["id", "label"], path, errors);
+  const hrefValid =
+    typeof value.href === "string" &&
+    (/^#[a-z][a-z0-9_]*$/u.test(value.href) ||
+      /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value.href));
+  if (!hrefValid) {
+    errors[`${path}.href`] = "Use a registered page anchor or email link.";
+  }
+  return textValid && hrefValid;
+}
+
+function validateItemArray(
+  value: unknown,
+  path: string,
+  fields: ReadonlyArray<string>,
+  errors: Record<string, string>,
+): boolean {
+  if (!Array.isArray(value)) {
+    errors[path] = "Use the registered component item list.";
+    return false;
+  }
+  let valid = true;
+  value.forEach((item, index) => {
+    const itemPath = `${path}.${index}`;
+    if (!validateObjectKeys(item, fields, itemPath, errors)) {
+      valid = false;
+      return;
+    }
+    if (!validateTextFields(item, fields, itemPath, errors)) {
+      valid = false;
+    }
+  });
+  return valid;
+}
+
+function validateSectionSchema(
+  section: Record<string, unknown>,
+  type: PageComponentType,
+  id: string,
+  errors: Record<string, string>,
+): boolean {
+  const path = id;
+  switch (type) {
+    case "hero":
+      return (
+        validateObjectKeys(
+          section,
+          [
+            "id",
+            "type",
+            "eyebrow",
+            "title",
+            "summary",
+            "primaryAction",
+            "secondaryAction",
+          ],
+          path,
+          errors,
+        ) &&
+        validateTextFields(
+          section,
+          ["id", "type", "eyebrow", "title", "summary"],
+          path,
+          errors,
+        ) &&
+        validateLink(section.primaryAction, `${path}.primaryAction`, errors) &&
+        validateLink(section.secondaryAction, `${path}.secondaryAction`, errors)
+      );
+    case "services":
+      return (
+        validateObjectKeys(
+          section,
+          ["id", "type", "eyebrow", "title", "introduction", "items"],
+          path,
+          errors,
+        ) &&
+        validateTextFields(
+          section,
+          ["id", "type", "eyebrow", "title", "introduction"],
+          path,
+          errors,
+        ) &&
+        validateItemArray(
+          section.items,
+          `${path}.items`,
+          ["id", "number", "title", "description"],
+          errors,
+        )
+      );
+    case "proof":
+      return (
+        validateObjectKeys(
+          section,
+          ["id", "type", "quote", "attribution", "metrics"],
+          path,
+          errors,
+        ) &&
+        validateTextFields(
+          section,
+          ["id", "type", "quote", "attribution"],
+          path,
+          errors,
+        ) &&
+        validateItemArray(
+          section.metrics,
+          `${path}.metrics`,
+          ["id", "value", "label"],
+          errors,
+        )
+      );
+    case "callToAction":
+      return (
+        validateObjectKeys(
+          section,
+          ["id", "type", "eyebrow", "title", "body", "action"],
+          path,
+          errors,
+        ) &&
+        validateTextFields(
+          section,
+          ["id", "type", "eyebrow", "title", "body"],
+          path,
+          errors,
+        ) &&
+        validateLink(section.action, `${path}.action`, errors)
+      );
+  }
+}
+
 export function referencedPageComponentIds(
   definition: SiteDefinition,
   sections: ReadonlyArray<PageSection> = definition.home.sections,
@@ -292,6 +465,24 @@ export function applyPageComposition(
   const accepted: PageSection[] = [];
   const ids = new Set<string>();
   const nestedIds = new Set<string>();
+  const seedProtectedIds = (entry: unknown): void => {
+    if (Array.isArray(entry)) {
+      entry.forEach(seedProtectedIds);
+      return;
+    }
+    if (!isRecord(entry)) {
+      return;
+    }
+    for (const [key, nested] of Object.entries(entry)) {
+      if (key === "id" && typeof nested === "string") {
+        nestedIds.add(nested);
+      } else {
+        seedProtectedIds(nested);
+      }
+    }
+  };
+  seedProtectedIds(definition.site);
+  seedProtectedIds({ id: definition.home.id, seo: definition.home.seo });
   for (const candidate of value.components) {
     if (!isRecord(candidate)) {
       errors[pageCompositionContract.slot.id] =
@@ -315,6 +506,10 @@ export function applyPageComposition(
     ) {
       errors[`${id}.type`] =
         "This component is not registered for the page slot.";
+      continue;
+    }
+    const type = candidate.type as PageComponentType;
+    if (!validateSectionSchema(candidate, type, id, errors)) {
       continue;
     }
     const section = candidate as unknown as PageSection;

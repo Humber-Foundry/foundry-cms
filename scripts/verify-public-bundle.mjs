@@ -1,7 +1,10 @@
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { publicScriptPaths } from "./lib/public-script-paths.mjs";
+import {
+  publicScriptPaths,
+  publicStylePaths,
+} from "./lib/public-script-paths.mjs";
 import { assertReferencePage } from "./lib/reference-page.mjs";
 
 const appRoot = resolve("apps/reference-site");
@@ -42,6 +45,16 @@ if (publicScripts.some((source) => source.includes(privateMarker))) {
   throw new Error("Protected dashboard code leaked into the public route bundle.");
 }
 
+const publicStylesToCheck = publicStylePaths(publicHtml);
+const publicStyles = await Promise.all(
+  publicStylesToCheck.map((stylePath) =>
+    readFile(resolve(nextRoot, stylePath.replace("/_next/", "")), "utf8"),
+  ),
+);
+if (publicStyles.some((source) => source.includes("--puck-color-"))) {
+  throw new Error("Protected visual-editor styles leaked into the public route.");
+}
+
 const staticFiles = await readdir(resolve(nextRoot, "static/chunks"), {
   recursive: true,
 });
@@ -59,5 +72,5 @@ if (!allClientScripts.some((source) => source.includes(privateMarker))) {
 }
 
 console.log(
-  `Verified ${publicScriptsToCheck.length} public route scripts exclude protected dashboard code.`,
+  `Verified ${publicScriptsToCheck.length} public scripts and ${publicStylesToCheck.length} public styles exclude protected dashboard code.`,
 );

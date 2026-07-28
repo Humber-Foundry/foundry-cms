@@ -172,6 +172,78 @@ describe("page component composition", () => {
 
   it.each([
     {
+      name: "a missing nested field",
+      change: (composition: Record<string, any>) => {
+        delete composition.components[0].primaryAction.label;
+      },
+      path: "section_hero.primaryAction",
+    },
+    {
+      name: "an unknown nested field",
+      change: (composition: Record<string, any>) => {
+        composition.components[0].primaryAction.script = "injected";
+      },
+      path: "section_hero.primaryAction",
+    },
+    {
+      name: "blank nested copy",
+      change: (composition: Record<string, any>) => {
+        composition.components[0].primaryAction.label = "   ";
+      },
+      path: "section_hero.primaryAction.label",
+    },
+  ])("rejects malformed schema content: $name", ({ change, path }) => {
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    ) as unknown as Record<string, any>;
+    change(composition);
+
+    expect(
+      applyPageComposition(referenceSiteDefinition, composition),
+    ).toEqual({
+      ok: false,
+      errors: expect.objectContaining({
+        [path]: expect.any(String),
+      }),
+    });
+  });
+
+  it("rejects nested identifiers that collide with protected IDs outside the page slot", () => {
+    const original = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const callToAction = original.components[3]!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const composition = {
+      ...original,
+      components: [
+        ...original.components,
+        {
+          ...structuredClone(callToAction),
+          id: "section_second_contact",
+          action: {
+            ...structuredClone(callToAction.action),
+            id: "nav_work",
+          },
+        },
+      ],
+    };
+
+    expect(
+      applyPageComposition(referenceSiteDefinition, composition),
+    ).toEqual({
+      ok: false,
+      errors: {
+        "section_second_contact.id":
+          "Every component and nested item needs a unique stable identifier.",
+      },
+    });
+  });
+
+  it.each([
+    {
       name: "an unknown slot",
       change: (composition: Record<string, any>) => {
         composition.slotId = "slot_routes";
