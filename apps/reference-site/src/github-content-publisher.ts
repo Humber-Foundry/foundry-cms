@@ -909,7 +909,7 @@ export function createGitHubContentPublisher({
   }
 
   return {
-    async getChannelConfigurationHash() {
+    async getChannelConfigurationHash(serializationVersion) {
       const root =
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
           configuration.cloudflareAccountId,
@@ -982,6 +982,9 @@ export function createGitHubContentPublisher({
           )
         : undefined;
       const repository = trigger?.repo_connection;
+      const legacySerialization =
+        serializationVersion ===
+        "foundry.site-definition.canonical-json.v1";
       if (
         typeof trigger !== "object" ||
         trigger === null ||
@@ -1004,19 +1007,26 @@ export function createGitHubContentPublisher({
           trigger.path_includes,
           trigger.path_excludes,
         ) ||
-        !cloudflareWatchFilterAllows(
-          "content/rich-text/foundry-probe.md",
-          trigger.path_includes,
-          trigger.path_excludes,
-        ) ||
-        !cloudflareWatchFilterAllows(
-          "content/rich-text/nested/foundry-probe.md",
-          trigger.path_includes,
-          trigger.path_excludes,
-        )
+        (!legacySerialization &&
+          (!cloudflareWatchFilterAllows(
+            "content/rich-text/foundry-probe.md",
+            trigger.path_includes,
+            trigger.path_excludes,
+          ) ||
+            !cloudflareWatchFilterAllows(
+              "content/rich-text/nested/foundry-probe.md",
+              trigger.path_includes,
+              trigger.path_excludes,
+            )))
       ) {
         throw new Error("cloudflare_build_configuration_invalid");
       }
+      const pathIncludes = sortedStrings(trigger.path_includes);
+      const fingerprintPathIncludes = legacySerialization
+        ? pathIncludes.filter(
+            (path) => path !== "content/rich-text/*",
+          )
+        : pathIncludes;
       return sha256(
         JSON.stringify({
           appId: configuration.appId,
@@ -1043,7 +1053,7 @@ export function createGitHubContentPublisher({
             rootDirectory: trigger.root_directory,
             branchIncludes: sortedStrings(trigger.branch_includes),
             branchExcludes: sortedStrings(trigger.branch_excludes),
-            pathIncludes: sortedStrings(trigger.path_includes),
+            pathIncludes: fingerprintPathIncludes,
             pathExcludes: sortedStrings(trigger.path_excludes),
             buildCachingEnabled: trigger.build_caching_enabled,
             environment: buildEnvironmentProjection(environment),

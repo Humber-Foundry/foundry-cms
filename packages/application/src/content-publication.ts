@@ -286,7 +286,9 @@ export type PublicationCommitResult =
   | Readonly<{ state: "unknown"; detail: string }>;
 
 export type ContentPublisher = Readonly<{
-  getChannelConfigurationHash(): Promise<string>;
+  getChannelConfigurationHash(
+    serializationVersion?: ContentSerializationVersion,
+  ): Promise<string>;
   getProductionHead(): Promise<string>;
   isReleaseLive(expected: {
     commitSha: string;
@@ -975,6 +977,34 @@ export function createContentPublicationApplication({
     return selected;
   }
 
+  async function approvalChannelConfigurationMatches(
+    approval: ContentApproval,
+  ) {
+    try {
+      if (
+        approval.fingerprint.channelConfigurationHash ===
+        (await publisher.getChannelConfigurationHash())
+      ) {
+        return true;
+      }
+    } catch (error) {
+      if (
+        approval.fingerprint.serializationVersion !==
+        "foundry.site-definition.canonical-json.v1"
+      ) {
+        throw error;
+      }
+    }
+    return (
+      approval.fingerprint.serializationVersion ===
+        "foundry.site-definition.canonical-json.v1" &&
+      approval.fingerprint.channelConfigurationHash ===
+        (await publisher.getChannelConfigurationHash(
+          "foundry.site-definition.canonical-json.v1",
+        ))
+    );
+  }
+
   async function requireApproval(
     approvalId: ContentApprovalId,
     actorId: HumanMembershipId,
@@ -997,8 +1027,6 @@ export function createContentPublicationApplication({
             approval.workspaceId,
             approval.revision,
           );
-    const channelConfigurationHash =
-      await publisher.getChannelConfigurationHash();
     if (
       approval.fingerprint.serializationVersion ===
       "foundry.site-definition.canonical-json.v1"
@@ -1007,8 +1035,7 @@ export function createContentPublicationApplication({
         revision.definition,
       );
       if (
-        approval.fingerprint.channelConfigurationHash !==
-          channelConfigurationHash ||
+        !(await approvalChannelConfigurationMatches(approval)) ||
         approval.fingerprint.contentHash !==
           (await hashPublishedSiteDefinition(revision.definition)) ||
         approval.fingerprint.artifactHash !==
@@ -1023,6 +1050,8 @@ export function createContentPublicationApplication({
         throw new ContentApprovalInvalidError("approval_stale");
       }
     } else {
+      const channelConfigurationHash =
+        await publisher.getChannelConfigurationHash();
       const fingerprint = await createContentApprovalFingerprint(
         revision,
         channelConfigurationHash,
@@ -1205,44 +1234,53 @@ export function createContentPublicationApplication({
     }
     let channelFailure: "changed" | "unavailable" | null = null;
     try {
-      if (
-        boundApproval.fingerprint.channelConfigurationHash !==
-        (await publisher.getChannelConfigurationHash())
-      ) {
+      if (!(await approvalChannelConfigurationMatches(boundApproval))) {
         channelFailure = "changed";
       }
     } catch {
       channelFailure = "unavailable";
     }
-    if (channelFailure !== null) {
+    const handleChannelFailure = (
+      currentPublication: ContentPublication,
+      failure: Exclude<typeof channelFailure, null>,
+    ) => {
       const observedAt = now();
       const channelCheckStartedAt =
-        publication.deploymentRequestedAt ?? publication.requestedAt;
+        currentPublication.deploymentRequestedAt ??
+        currentPublication.requestedAt;
       if (
         new Date(observedAt).getTime() -
           new Date(channelCheckStartedAt).getTime() >=
         deploymentSignalTimeoutMs
       ) {
         return store.updatePublication(
-          nextPublication(publication, {
+          nextPublication(currentPublication, {
             status: "failed",
             detail:
-              deploymentRetryDispatchWasAttempted(publication)
+              deploymentRetryDispatchWasAttempted(currentPublication)
                 ? "deployment_retry_timeout"
-                : contentPublicationHasUnresolvedGitOutcome(publication)
-                ? publication.detail
-                : channelFailure === "changed"
+                : contentPublicationHasUnresolvedGitOutcome(
+                    currentPublication,
+                  )
+                ? currentPublication.detail
+                : failure === "changed"
                   ? "publication_channel_changed"
                   : "publication_channel_unavailable",
             updatedAt: observedAt,
           }),
           {
-            expectedStatus: publication.status,
-            expectedUpdatedAt: publication.updatedAt,
+            expectedStatus: currentPublication.status,
+            expectedUpdatedAt: currentPublication.updatedAt,
           },
         );
       }
-      return publication;
+      return Promise.resolve(currentPublication);
+    };
+    if (
+      channelFailure !== null &&
+      !contentPublicationHasUnresolvedGitOutcome(publication)
+    ) {
+      return handleChannelFailure(publication, channelFailure);
     }
     if (publication.detail === "deployment_retry_dispatching") {
       const observedAt = now();
@@ -1321,6 +1359,9 @@ export function createContentPublicationApplication({
           return currentPublication;
         }
       } else {
+        if (channelFailure !== null) {
+          return handleChannelFailure(publication, channelFailure);
+        }
         const observedAt = now();
         const candidateCommitSha = reconciliationCandidate(
           publication.detail,
@@ -1356,6 +1397,9 @@ export function createContentPublicationApplication({
         }
         return publication;
       }
+    }
+    if (channelFailure !== null) {
+      return handleChannelFailure(currentPublication, channelFailure);
     }
     if (commitSha === null) {
       return publication;

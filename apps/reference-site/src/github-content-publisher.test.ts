@@ -953,6 +953,25 @@ describe("GitHub content publisher", () => {
         path_excludes: [],
       }).getChannelConfigurationHash(),
     ).rejects.toThrow("cloudflare_build_configuration_invalid");
+    const legacyChannelPublisher = publisherForBuildTrigger({
+      ...buildConfiguration.result[0],
+      path_includes: ["packages/site-definition/*"],
+      path_excludes: [],
+    });
+    await expect(
+      publisher.getChannelConfigurationHash(
+        "foundry.site-definition.canonical-json.v1",
+      ),
+    ).resolves.toBe(
+      await legacyChannelPublisher.getChannelConfigurationHash(
+        "foundry.site-definition.canonical-json.v1",
+      ),
+    );
+    await expect(
+      publisher.getChannelConfigurationHash(
+        "foundry.site-definition.canonical-json.v1",
+      ),
+    ).resolves.not.toBe(await publisher.getChannelConfigurationHash());
     await expect(
       publisherForBuildTrigger({
         ...buildConfiguration.result[0],

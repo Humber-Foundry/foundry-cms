@@ -29,13 +29,14 @@ preview for the current saved revision. The approval fingerprint binds:
   Cloudflare account, and build trigger.
 
 Any later revision, production-base, or channel-configuration change makes
-that evidence unusable before Git is contacted. Private-key and API-token
-values are deliberately excluded. For secrets configured in the Workers build
-trigger, Cloudflare's non-secret creation timestamp remains in the channel
-fingerprint as a rotation version, so rotating one intentionally requires a
-fresh preview and approval without exposing its value. D1 inserts the approval
-only while the workspace still points to that revision, and publication
-requires the command workspace to equal the approval workspace.
+that evidence unusable before Git is contacted, except for the narrow legacy
+watch-filter transition described below. Private-key and API-token values are
+deliberately excluded. For secrets configured in the Workers build trigger,
+Cloudflare's non-secret creation timestamp remains in the channel fingerprint
+as a rotation version, so rotating one intentionally requires a fresh preview
+and approval without exposing its value. D1 inserts the approval only while the
+workspace still points to that revision, and publication requires the command
+workspace to equal the approval workspace.
 
 ## Deterministic Git publication
 
@@ -65,6 +66,13 @@ reconciled, or safely retried with its original single-file byte hash and v1
 HMAC payload; new approvals use the v2 JSON-plus-Markdown manifest. Once a
 legacy release is restored as a current draft, its next human-approved
 publication advances through v2 rather than rewriting the historical evidence.
+The required Cloudflare watch-filter expansion is the only compatible channel
+transition: for a retained v1 approval, the live adapter also computes the old
+fingerprint by removing the exact `content/rich-text/*` include while retaining
+every other repository, destination, trigger, branch, exclusion, environment,
+and secret-rotation field. A cryptographic match to that projection permits the
+single-JSON v1 operation; any other channel difference still vetoes it. New
+approvals always require the complete live v2 filter configuration.
 
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author
@@ -108,6 +116,9 @@ delayed not-found result. Reload recovery prioritizes any active
 publication over newer terminal contenders. A later publish request first
 reconciles that global active operation, so a crashed Worker does not require
 someone to revisit the originating workspace before the slot can be released.
+An unresolved Git outcome is reconciled read-only before an incompatible or
+unavailable channel is made terminal; an exact landed commit is recorded first,
+but the channel failure still vetoes every subsequent external mutation.
 If either production-base check observes drift, the approval receives a
 durable `production_changed` invalidation before the request is rejected.
 Recovery runs before validating a later request's production base, allowing a

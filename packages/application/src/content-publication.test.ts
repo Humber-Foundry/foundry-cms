@@ -1224,6 +1224,14 @@ describe("content publication application", () => {
     await expect(
       repository.isCurrent(revisionOverride!),
     ).resolves.toBe(false);
+    vi.mocked(
+      publisher.getChannelConfigurationHash,
+    ).mockImplementation(async (serializationVersion) =>
+      serializationVersion ===
+      "foundry.site-definition.canonical-json.v1"
+        ? "channel-a"
+        : "channel-b",
+    );
     vi.mocked(publisher.reconcileCommit).mockResolvedValue({
       state: "not-found",
     });
@@ -2056,6 +2064,52 @@ describe("content publication application", () => {
     isReleaseLive.mockResolvedValue(false);
     await app.commands.retryDeployment(publication.id, membershipId);
     expect(publisher.reconcileCommit).toHaveBeenCalled();
+  });
+
+  it("records an exact ambiguous commit before rejecting a changed channel", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const commitSha = "c".repeat(40);
+    createCommit.mockRejectedValue(new Error("atomic_response_lost"));
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-no-sha-channel-changed",
+    });
+    vi.mocked(publisher.getChannelConfigurationHash).mockResolvedValue(
+      "channel-b",
+    );
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "committed",
+      commitSha,
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        commitSha,
+        detail: "publication_channel_changed",
+      }),
+    );
+    expect(publisher.reconcileCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publishId: publication.id,
+        candidateCommitSha: undefined,
+      }),
+    );
   });
 
   it("invalidates a retained candidate before ref retry when its live base changes", async () => {
