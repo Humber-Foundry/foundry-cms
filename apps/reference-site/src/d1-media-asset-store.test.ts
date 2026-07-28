@@ -348,5 +348,14 @@ describe("D1 media asset store", () => {
         competitor,
       ),
     ).rejects.toEqual(new MediaSiteAccessError());
+    await expect(
+      store.completeAssetDeletion(
+        siteId,
+        assetId,
+        "2026-07-27T12:00:00.000Z",
+        competitor,
+      ),
+    ).rejects.toEqual(new MediaSiteAccessError());
+    await expect(store.replay(competitor)).resolves.toBeNull();
   });
 });

@@ -787,6 +787,38 @@ export function createD1MediaAssetStore(
       const results = await database.batch([
         database
           .prepare(
+            `INSERT INTO media_mutation_receipts (
+               site_id, idempotency_key, request_hash, result_json, created_at
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5
+             WHERE EXISTS (
+               SELECT 1 FROM media_asset_deletions
+               WHERE site_id = ?1 AND asset_id = ?7
+                 AND idempotency_key = ?2 AND request_hash = ?3
+             )
+               AND EXISTS (
+                 SELECT 1 FROM media_assets
+                 WHERE site_id = ?1 AND asset_id = ?7
+                   AND deleted_at IS NOT NULL
+               )
+               AND EXISTS (
+               SELECT 1 FROM media_mutation_claims
+               WHERE site_id = ?1 AND idempotency_key = ?2
+                 AND request_hash = ?3 AND claim_token = ?6
+             )
+             ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
+          )
+          .bind(
+            siteId,
+            idempotencyKey,
+            requestHash,
+            JSON.stringify({ kind: "deleted", assetId }),
+            occurredAt,
+            context.claimToken,
+            assetId,
+          ),
+        database
+          .prepare(
             `DELETE FROM media_asset_deletions
              WHERE site_id = ?1 AND asset_id = ?2
                AND idempotency_key = ?3 AND request_hash = ?4
@@ -808,29 +840,11 @@ export function createD1MediaAssetStore(
             context.requestHash,
             context.claimToken,
           ),
-        database
-          .prepare(
-            `INSERT INTO media_mutation_receipts (
-               site_id, idempotency_key, request_hash, result_json, created_at
-             )
-             SELECT ?1, ?2, ?3, ?4, ?5
-             WHERE EXISTS (
-               SELECT 1 FROM media_mutation_claims
-               WHERE site_id = ?1 AND idempotency_key = ?2
-                 AND request_hash = ?3 AND claim_token = ?6
-             )
-             ON CONFLICT (site_id, idempotency_key) DO NOTHING`,
-          )
-          .bind(
-            siteId,
-            idempotencyKey,
-            requestHash,
-            JSON.stringify({ kind: "deleted", assetId }),
-            occurredAt,
-            context.claimToken,
-          ),
       ]);
-      if ((results[0]?.meta.changes ?? 0) === 0) {
+      if (
+        (results[0]?.meta.changes ?? 0) === 0 ||
+        (results[1]?.meta.changes ?? 0) === 0
+      ) {
         const replay = await this.replay(context);
         if (replay?.kind === "deleted") return;
         throw new MediaSiteAccessError();
