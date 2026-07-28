@@ -157,9 +157,13 @@ export async function assertExactProductionContent({
       encoding: "utf8",
     }),
   readChangedPaths = (from, to) =>
-    execFileSync("git", ["diff", "--name-only", from, to], {
-      encoding: "utf8",
-    }),
+    execFileSync(
+      "git",
+      ["diff", "--no-renames", "--name-only", from, to],
+      {
+        encoding: "utf8",
+      },
+    ),
   readCommitMessage = (commit) =>
     execFileSync("git", ["show", "-s", "--format=%B", commit], {
       encoding: "utf8",

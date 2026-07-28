@@ -161,7 +161,7 @@ describe("exact production content authorization", () => {
     expect(options.readCommitParents).not.toHaveBeenCalled();
   });
 
-  it("does not let equal JSON content bypass a managed Markdown delta", async () => {
+  it("does not let a rename out of the managed tree bypass equal JSON content", async () => {
     await expect(
       assertExactProductionContent(
         inputs({
@@ -169,7 +169,9 @@ describe("exact production content authorization", () => {
             commitSha: liveCommit,
             contentHash,
           }),
-          readChangedPaths: vi.fn().mockReturnValue(`${richTextPath}\n`),
+          readChangedPaths: vi
+            .fn()
+            .mockReturnValue(`${richTextPath}\ndocs/body.md\n`),
           readCommitMessage: vi
             .fn()
             .mockReturnValue("Ordinary code commit\n"),
