@@ -264,6 +264,65 @@ describe("stale edit recovery", () => {
     ).toEqual(merged);
   });
 
+  it("preserves rich-text format while chaining recovered edits", () => {
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      (section) => section.type === "callToAction",
+    )!;
+    if (callToAction.type !== "callToAction") {
+      throw new Error("expected_call_to_action_fixture");
+    }
+    const baseValue = serializeRichTextDocument(callToAction.body);
+    const recoveredValue = serializeRichTextDocument({
+      ...callToAction.body,
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", text: "Recovered once", marks: [] },
+          ],
+        },
+      ],
+    });
+    const editedAgainValue = serializeRichTextDocument({
+      ...callToAction.body,
+      children: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", text: "Edited again", marks: ["bold"] },
+          ],
+        },
+      ],
+    });
+    const pending = {
+      path: `${callToAction.id}.body`,
+      format: "richText" as const,
+      baseValue,
+      value: recoveredValue,
+    };
+    const currentWithoutDiscriminator = {
+      path: pending.path,
+      baseValue: recoveredValue,
+      value: editedAgainValue,
+    };
+    const expected = {
+      ...currentWithoutDiscriminator,
+      format: "richText",
+      baseValue,
+    };
+
+    expect(
+      mergeStaleRecoveryEdits(
+        [pending],
+        [currentWithoutDiscriminator],
+        new Set(),
+      ),
+    ).toEqual([expected]);
+    expect(
+      mergeRecoverySources([pending], [currentWithoutDiscriminator]),
+    ).toEqual([expected]);
+  });
+
   it("merges disjoint durable recovery sources before forwarding", () => {
     const fromOutbox = {
       ...edit,

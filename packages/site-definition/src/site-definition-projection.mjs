@@ -91,6 +91,9 @@ export function projectSiteDefinitionSchema(value) {
 
 export function projectPublishedSiteDefinition(value) {
   const projected = projectSiteDefinitionSchema(value);
+  if (projected === value) {
+    return projected;
+  }
   return {
     ...projected,
     home: {

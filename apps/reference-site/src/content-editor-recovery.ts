@@ -366,6 +366,18 @@ export function recoveryToForward(
   return destinationIsStale ? activeRecovery : undefined;
 }
 
+function chainRecoveryEdit(
+  earlier: StaleRecoveryEdit | undefined,
+  current: StaleRecoveryEdit,
+): StaleRecoveryEdit {
+  const format = current.format ?? earlier?.format;
+  return {
+    ...current,
+    ...(format === undefined ? {} : { format }),
+    baseValue: earlier?.baseValue ?? current.baseValue,
+  } as StaleRecoveryEdit;
+}
+
 export function mergeRecoverySources(
   ...sources: ReadonlyArray<ReadonlyArray<StaleRecoveryEdit>>
 ): StaleRecoveryEdit[] {
@@ -373,10 +385,7 @@ export function mergeRecoverySources(
   for (const source of sources) {
     for (const edit of source) {
       const earlier = merged.get(edit.path);
-      merged.set(edit.path, {
-        ...edit,
-        baseValue: earlier?.baseValue ?? edit.baseValue,
-      });
+      merged.set(edit.path, chainRecoveryEdit(earlier, edit));
     }
   }
   return [...merged.values()];
@@ -398,10 +407,7 @@ export function mergeStaleRecoveryEdits(
   );
   for (const edit of current) {
     const earlier = merged.get(edit.path);
-    merged.set(edit.path, {
-      ...edit,
-      baseValue: earlier?.baseValue ?? edit.baseValue,
-    });
+    merged.set(edit.path, chainRecoveryEdit(earlier, edit));
   }
   return [...merged.values()];
 }

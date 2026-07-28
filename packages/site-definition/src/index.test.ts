@@ -65,6 +65,19 @@ describe("reference Site Definition", () => {
     );
   });
 
+  it("does not inject optional media into an already-current definition", () => {
+    const current = structuredClone(referenceSiteDefinition);
+    const { media: _media, ...homeWithoutMedia } = current.home;
+
+    const loaded = createReferenceSiteDefinition({
+      ...current,
+      home: homeWithoutMedia,
+    });
+
+    expect(Object.hasOwn(loaded.home, "media")).toBe(false);
+    expect(isSiteDefinition(loaded)).toBe(true);
+  });
+
   it("rejects unpaired UTF-16 surrogates in the text schema without rejecting scalar pairs", () => {
     const textPattern = new RegExp(
       siteDefinitionSchema.$defs.richTextText.properties.text.pattern,

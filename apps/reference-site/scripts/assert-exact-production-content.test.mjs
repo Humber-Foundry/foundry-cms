@@ -16,6 +16,15 @@ const publicationId = `publish_${"d".repeat(32)}`;
 const bytes =
   '{"definitionVersion":"1.2.0","schemaVersion":"1.2.0",' +
   '"site":{"name":"New"},"home":{"media":[],"sections":[]}}\n';
+const currentDefinitionWithoutMedia = structuredClone(
+  referenceSiteDefinition,
+);
+delete currentDefinitionWithoutMedia.home.media;
+const currentBytesWithoutMedia =
+  `${JSON.stringify(currentDefinitionWithoutMedia)}\n`;
+const currentContentHashWithoutMedia = canonicalHash(
+  currentDefinitionWithoutMedia,
+);
 const richTextPath = "content/rich-text/section_contact/body.md";
 const richTextBytes = "A deterministic **Markdown** artifact.\n";
 const signingSecret = "publication-signing-secret-32-bytes";
@@ -86,17 +95,18 @@ function artifactHash(artifacts = defaultArtifacts()) {
 function signedMessage(
   parent = liveCommit,
   artifacts = defaultArtifacts(),
+  expectedContentHash = contentHash,
 ) {
   const message =
     `Publish\n\nFoundry-Publish-Id: ${publicationId}\n` +
-    `Foundry-Content-Hash: ${contentHash}`;
+    `Foundry-Content-Hash: ${expectedContentHash}`;
   const signature = createHmac("sha256", signingSecret)
     .update(
       [
         "foundry-publication-signature-v2",
         parent,
         artifactHash(artifacts),
-        contentHash,
+        expectedContentHash,
         message,
       ].join("\0"),
     )
@@ -293,6 +303,38 @@ describe("exact production content authorization", () => {
   it("allows one exact Foundry JSON and Markdown artifact commit on the live release", async () => {
     await expect(
       assertExactProductionContent(inputs()),
+    ).resolves.toBeUndefined();
+  });
+
+  it("preserves the publisher hash for a current definition without optional media", async () => {
+    const artifacts = [
+      {
+        path: "packages/site-definition/src/published-site.json",
+        bytes: currentBytesWithoutMedia,
+      },
+      { path: richTextPath, bytes: richTextBytes },
+    ];
+
+    await expect(
+      assertExactProductionContent(
+        inputs({
+          readCommitMessage: vi.fn().mockReturnValue(
+            `${signedMessage(
+              liveCommit,
+              artifacts,
+              currentContentHashWithoutMedia,
+            )}\n`,
+          ),
+          readPublishedContent: vi
+            .fn()
+            .mockReturnValue(currentBytesWithoutMedia),
+          readArtifact: vi.fn((_commit, path) =>
+            path === richTextPath
+              ? richTextBytes
+              : currentBytesWithoutMedia,
+          ),
+        }),
+      ),
     ).resolves.toBeUndefined();
   });
 
