@@ -49,6 +49,29 @@ async function createWorkspace(
   });
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function legacyRequestHash(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(value)),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 describe("content revision application", () => {
   it("keeps reads side-effect free until an explicit create command", async () => {
     const application = createContentRevisionApplication({
@@ -123,6 +146,43 @@ describe("content revision application", () => {
     );
   });
 
+  it("keeps pre-composition request hashes stable for retry compatibility", async () => {
+    const baseStore = createInMemoryContentRevisionStore();
+    let observedRequestHash = "";
+    const store = {
+      ...baseStore,
+      async replay(idempotencyKey: string, requestHash: string) {
+        observedRequestHash = requestHash;
+        return baseStore.replay(idempotencyKey, requestHash);
+      },
+    };
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store,
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-legacy-hash");
+    const edits = [{ path: "section_hero.title", value: "Retry me" }];
+
+    await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits,
+      idempotencyKey: "legacy-copy-only-save",
+    });
+
+    await expect(
+      legacyRequestHash({
+        actorId: editorActorId,
+        workspaceId: commandInputs.workspaceId,
+        schemaVersion: commandInputs.schemaVersion,
+        baseRevision: 0,
+        edits,
+      }),
+    ).resolves.toBe(observedRequestHash);
+  });
+
   it("creates an immutable revision through the registered page-composition command", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -161,6 +221,49 @@ describe("content revision application", () => {
     await expect(application.queries.getRevision(0)).resolves.toEqual(
       expect.objectContaining({ definition: referenceSiteDefinition }),
     );
+  });
+
+  it("combines structural composition with allowed nested copy edits", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-compose-copy");
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const hero = composition.components[0]!;
+    if (hero.type !== "hero") {
+      throw new Error("expected_hero_fixture");
+    }
+    (hero.primaryAction as { label: string }).label = "Start here";
+    const reorderedComposition = {
+      ...composition,
+      components: [
+        composition.components[1]!,
+        composition.components[0]!,
+        ...composition.components.slice(2),
+      ],
+    };
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [{ path: "action_start.label", value: "Start here" }],
+      composition: reorderedComposition,
+      idempotencyKey: "compose-with-nested-copy",
+    });
+
+    expect(saved.definition.home.sections[0]?.id).toBe(
+      "section_services",
+    );
+    const savedHero = saved.definition.home.sections[1]!;
+    expect(savedHero.type).toBe("hero");
+    if (savedHero.type === "hero") {
+      expect(savedHero.primaryAction.label).toBe("Start here");
+    }
   });
 
   it("rejects composition outside the registered slot before persistence", async () => {

@@ -138,6 +138,38 @@ describe("page component composition", () => {
     });
   });
 
+  it("allows nested human-readable copy while protecting nested identity and links", () => {
+    const composition = structuredClone(
+      toPageComposition(referenceSiteDefinition),
+    );
+    const hero = composition.components[0]!;
+    if (hero.type !== "hero") {
+      throw new Error("expected_hero_fixture");
+    }
+    (hero.primaryAction as { label: string }).label =
+      "A revised action label";
+
+    expect(
+      applyPageComposition(referenceSiteDefinition, composition),
+    ).toEqual({
+      ok: true,
+      definition: expect.objectContaining({
+        home: expect.objectContaining({
+          sections: expect.arrayContaining([
+            expect.objectContaining({
+              id: "section_hero",
+              primaryAction: expect.objectContaining({
+                id: "action_start",
+                label: "A revised action label",
+                href: "#section_contact",
+              }),
+            }),
+          ]),
+        }),
+      }),
+    });
+  });
+
   it.each([
     {
       name: "an unknown slot",

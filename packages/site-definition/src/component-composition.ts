@@ -177,24 +177,38 @@ function protectedShape(
   for (const property of registration.editableProps) {
     delete protectedSection[property];
   }
-  const normalizeIds = (value: unknown): unknown => {
+  const normalizeProtectedShape = (
+    value: unknown,
+    root = false,
+  ): unknown => {
     if (Array.isArray(value)) {
-      return value.map(normalizeIds);
+      return value.map((nested) => normalizeProtectedShape(nested));
     }
     if (isRecord(value)) {
       return Object.fromEntries(
         Object.entries(value)
+          .filter(
+            ([key, nested]) =>
+              root ||
+              typeof nested !== "string" ||
+              key === "id" ||
+              key === "type" ||
+              key === "href",
+          )
           .map(([key, nested]) => [
             key,
             key === "id" && normalizeNestedIds
               ? "$stableId"
-              : normalizeIds(nested),
+              : normalizeProtectedShape(nested),
           ]),
       );
     }
     return value;
   };
-  return normalizeIds(protectedSection) as Record<string, unknown>;
+  return normalizeProtectedShape(protectedSection, true) as Record<
+    string,
+    unknown
+  >;
 }
 
 function equalProtectedShape(

@@ -16,7 +16,11 @@ export type ContentEditorState = Readonly<{
 
 export type ContentEditorAction =
   | Readonly<{ type: "edit"; path: string; value: string }>
-  | Readonly<{ type: "compose"; definition: SiteDefinition }>
+  | Readonly<{
+      type: "compose";
+      definition: SiteDefinition;
+      refreshProjection?: boolean;
+    }>
   | Readonly<{ type: "undo" }>
   | Readonly<{ type: "redo" }>
   | Readonly<{ type: "saving" }>
@@ -85,8 +89,14 @@ export function contentEditorReducer(
         workingDefinition: action.definition,
         past: [...state.past, state.workingDefinition],
         future: [],
+        projectionVersion:
+          state.projectionVersion +
+          (action.refreshProjection ? 1 : 0),
         status:
-          action.definition === state.persistedDefinition ? "saved" : "dirty",
+          JSON.stringify(action.definition) ===
+          JSON.stringify(state.persistedDefinition)
+            ? "saved"
+            : "dirty",
         errors: {},
       };
     case "undo": {

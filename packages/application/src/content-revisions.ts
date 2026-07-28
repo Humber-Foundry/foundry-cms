@@ -437,7 +437,9 @@ export function createContentRevisionApplication({
           schemaVersion: command.schemaVersion,
           baseRevision: command.baseRevision,
           edits: command.edits,
-          composition: command.composition,
+          ...(command.composition === undefined
+            ? {}
+            : { composition: command.composition }),
         });
         const replay = await store.replay(
           command.idempotencyKey,

@@ -260,7 +260,11 @@ export function ContentEditor({
               edit,
             );
             if (result.ok) {
-              dispatch({ type: "compose", definition: result.definition });
+              dispatch({
+                type: "compose",
+                definition: result.definition,
+                refreshProjection: true,
+              });
               recoveredCount += 1;
             } else {
               conflicts.push({
@@ -369,7 +373,11 @@ export function ContentEditor({
           edit,
         );
         if (result.ok) {
-          dispatch({ type: "compose", definition: result.definition });
+          dispatch({
+            type: "compose",
+            definition: result.definition,
+            refreshProjection: true,
+          });
         }
       } else {
         dispatch({ type: "edit", ...edit });
@@ -726,7 +734,11 @@ export function ContentEditor({
         );
         if (result.ok) {
           pendingAttempt.current = null;
-          dispatch({ type: "compose", definition: result.definition });
+          dispatch({
+            type: "compose",
+            definition: result.definition,
+            refreshProjection: true,
+          });
         } else {
           setMessage(
             "That structural recovery no longer fits the current Site Definition. It remains preserved until you keep the latest structure.",

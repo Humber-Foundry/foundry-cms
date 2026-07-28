@@ -60,6 +60,52 @@ describe("content editor history", () => {
     expect(undone.persistedRevision).toBe(4);
   });
 
+  it("marks a semantically restored composition as saved", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const changed = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections].reverse(),
+      },
+    } as SiteDefinition;
+    const dirty = contentEditorReducer(initial, {
+      type: "compose",
+      definition: changed,
+    });
+    const restored = contentEditorReducer(dirty, {
+      type: "compose",
+      definition: structuredClone(referenceSiteDefinition),
+    });
+
+    expect(restored.status).toBe("saved");
+  });
+
+  it("refreshes the Puck projection for externally recovered composition", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const recovered = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections].reverse(),
+      },
+    } as SiteDefinition;
+
+    const next = contentEditorReducer(initial, {
+      type: "compose",
+      definition: recovered,
+      refreshProjection: true,
+    });
+
+    expect(next.projectionVersion).toBe(initial.projectionVersion + 1);
+  });
+
   it("can undo after save while preserving the newly persisted revision", () => {
     const initial = createContentEditorState({
       definition: referenceSiteDefinition,
