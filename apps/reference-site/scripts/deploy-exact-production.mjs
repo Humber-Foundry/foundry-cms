@@ -107,6 +107,13 @@ function waitForProcess(
   });
 }
 
+function isUnreapedProcessError(error, failurePrefix) {
+  return (
+    error instanceof Error &&
+    error.message === `${failurePrefix}:timeout_unreaped`
+  );
+}
+
 export function cloudflareProductionEnvironment(
   environment,
   overrides = {},
@@ -1098,7 +1105,14 @@ export async function activateExactVersion({
           };
           if (reconciled.state === "active") {
             activationError = undefined;
-            activationProcessError = undefined;
+            if (
+              !isUnreapedProcessError(
+                activationProcessError,
+                "exact_version_activation_failed",
+              )
+            ) {
+              activationProcessError = undefined;
+            }
           } else {
             activationError = new Error("exact_activation_superseded");
           }
@@ -1132,7 +1146,13 @@ export async function activateExactVersion({
         }
         throw headError;
       }
-      if (activationError === undefined) {
+      if (
+        activationError === undefined &&
+        !isUnreapedProcessError(
+          activationProcessError,
+          "exact_version_activation_failed",
+        )
+      ) {
         activationProcessError = undefined;
       }
     }

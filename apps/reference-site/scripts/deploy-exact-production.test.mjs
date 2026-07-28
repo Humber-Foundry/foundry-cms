@@ -591,6 +591,53 @@ describe("guarded exact production deployment", () => {
     await close(upstream);
   });
 
+  it("fails closed when an activated child remains unreaped after both termination signals", async () => {
+    const upstream = createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          request.method === "GET"
+            ? deploymentResult()
+            : activationResult(),
+        ),
+      );
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    const assertHead = vi.fn();
+    const activation = new EventEmitter();
+    activation.kill = vi.fn(() => true);
+    activation.unref = vi.fn();
+
+    await expect(
+      activate({
+        versionId,
+        assertHead,
+        activationWaitTimeoutMs: 10,
+        activationTerminationGraceMs: 10,
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) => {
+          queueMicrotask(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(200);
+          });
+          return activation;
+        },
+      }),
+    ).rejects.toThrow(
+      "exact_version_activation_failed:timeout_unreaped",
+    );
+
+    expect(activation.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+    expect(activation.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+    expect(activation.unref).toHaveBeenCalledTimes(1);
+    expect(assertHead).toHaveBeenCalledTimes(3);
+    await close(upstream);
+  });
+
   it("awaits an in-flight activation after the child exits without reading the response", async () => {
     let acceptedActivations = 0;
     const upstream = createServer((request, response) => {
