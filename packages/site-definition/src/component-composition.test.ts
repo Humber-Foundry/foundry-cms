@@ -118,10 +118,17 @@ describe("page component composition", () => {
     const proof = referenceSiteDefinition.home.sections.find(
       (section) => section.type === "proof",
     )!;
+    const replacedCallToAction =
+      referenceSiteDefinition.home.sections.find(
+        (section) => section.type === "callToAction",
+      )!;
     const base = {
       ...referenceSiteDefinition,
       site: { ...referenceSiteDefinition.site, navigation: [] },
-      home: { ...referenceSiteDefinition.home, sections: [proof] },
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [proof, replacedCallToAction],
+      },
     } as SiteDefinition;
     const callToAction = createDefaultPageSection(
       "callToAction",
@@ -132,7 +139,7 @@ describe("page component composition", () => {
       ...base,
       home: {
         ...base.home,
-        sections: [...base.home.sections, callToAction],
+        sections: [proof, callToAction],
       },
     } as SiteDefinition;
     const hero = createDefaultPageSection(
@@ -141,12 +148,13 @@ describe("page component composition", () => {
       withCallToAction,
     );
 
-    expect(
-      applyPageComposition(base, {
-        slotId: "slot_home_sections",
-        components: [proof, callToAction, hero],
-      }).ok,
-    ).toBe(true);
+    const result = applyPageComposition(base, {
+      slotId: "slot_home_sections",
+      components: [proof, callToAction, hero],
+    });
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
   });
 
   it("round-trips the canonical slot payload with stable component identifiers", () => {

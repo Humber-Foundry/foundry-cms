@@ -80,6 +80,26 @@ export function puckDataToDefinition(
       },
     };
   }
+  const submittedIds = new Set(
+    value.content.flatMap((item) => {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        !("type" in item) ||
+        !isPageComponentType(item.type) ||
+        !("props" in item) ||
+        typeof item.props !== "object" ||
+        item.props === null
+      ) {
+        return [];
+      }
+      const id = stableComponentId(
+        item.type,
+        "id" in item.props ? item.props.id : undefined,
+      );
+      return id === null ? [] : [id];
+    }),
+  );
   const ids = new Set<string>();
   const components: PageSection[] = [];
   for (const item of value.content) {
@@ -123,10 +143,13 @@ export function puckDataToDefinition(
       home: {
         ...definition.home,
         sections: [
-          ...definition.home.sections,
-          ...components.filter(
-            ({ id: submittedId }) =>
-              !definition.home.sections.some(({ id }) => id === submittedId),
+          ...components,
+          ...definition.home.sections.filter(
+            ({ id: existingId }) =>
+              submittedIds.has(existingId) &&
+              !components.some(
+                ({ id: submittedId }) => submittedId === existingId,
+              ),
           ),
         ],
       },
@@ -150,7 +173,7 @@ export function puckDataToDefinition(
     // non-editable scaffold from its source component.
     const duplicateSource =
       existing === undefined
-        ? submittedContext.home.sections.find((source) => {
+        ? [...definition.home.sections, ...components].find((source) => {
             if (source.type !== componentType) {
               return false;
             }

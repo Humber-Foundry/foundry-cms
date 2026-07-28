@@ -544,6 +544,13 @@ export function applyPageComposition(
   const existingById = new Map(
     definition.home.sections.map((section) => [section.id, section]),
   );
+  const submittedIds = new Set(
+    value.components.flatMap((candidate) =>
+      isRecord(candidate) && typeof candidate.id === "string"
+        ? [candidate.id]
+        : [],
+    ),
+  );
   const accepted: PageSection[] = [];
   const ids = new Set<string>();
   const nestedIds = new Set<string>();
@@ -602,9 +609,11 @@ export function applyPageComposition(
       continue;
     }
     const submittedContextSections = [
-      ...definition.home.sections,
-      ...accepted.filter(
-        ({ id: acceptedId }) => !existingById.has(acceptedId),
+      ...accepted,
+      ...definition.home.sections.filter(
+        ({ id: existingId }) =>
+          submittedIds.has(existingId) &&
+          !accepted.some(({ id: acceptedId }) => acceptedId === existingId),
       ),
     ];
     const submittedContext = {
@@ -616,14 +625,20 @@ export function applyPageComposition(
     } as SiteDefinition;
     const defaultScaffold =
       existing === undefined &&
-      equalProtectedShape(
-        createDefaultPageSection(section.type, id, submittedContext),
-        section,
+      (
+        equalProtectedShape(
+          createDefaultPageSection(section.type, id, definition),
+          section,
+        ) ||
+        equalProtectedShape(
+          createDefaultPageSection(section.type, id, submittedContext),
+          section,
+        )
       );
     const duplicateScaffold =
       existing === undefined &&
       hasCanonicalDuplicateIds(section) &&
-      submittedContextSections
+      [...definition.home.sections, ...accepted]
         .filter((source) => source.type === section.type)
         .some((source) => equalProtectedShape(source, section, true));
     const scaffoldAllowed =

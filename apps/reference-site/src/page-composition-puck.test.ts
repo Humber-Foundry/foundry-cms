@@ -102,10 +102,17 @@ describe("Puck page-composition adapter", () => {
     const proof = referenceSiteDefinition.home.sections.find(
       (section) => section.type === "proof",
     )!;
+    const replacedCallToAction =
+      referenceSiteDefinition.home.sections.find(
+        (section) => section.type === "callToAction",
+      )!;
     const base = {
       ...referenceSiteDefinition,
       site: { ...referenceSiteDefinition.site, navigation: [] },
-      home: { ...referenceSiteDefinition.home, sections: [proof] },
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [proof, replacedCallToAction],
+      },
     } as SiteDefinition;
     const result = puckDataToDefinition(base, {
       root: { props: {} },
