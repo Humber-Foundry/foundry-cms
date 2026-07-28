@@ -767,9 +767,6 @@ export function ContentEditor({
       pendingApprovalAttempt.current = null;
       pendingPublicationAttempt.current = null;
       onRevisionSaved(saved, saved.previewUrl);
-      if (saved.revision >= revisionHead.revision) {
-        setPreviewUrl(saved.previewUrl);
-      }
       setMessage(
         outboxCleared
           ? `Revision ${saved.revision} saved.`
