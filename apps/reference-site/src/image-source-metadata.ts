@@ -274,6 +274,7 @@ function avif(source: Uint8Array): ImageSourceMetadata | null {
       null;
     while (offset < end) {
       const box = boxAt(offset, end);
+      if (box.type === "irot" || box.type === "imir") invalid();
       if (box.type === "ispe") {
         if (box.size < box.headerSize + 12) invalid();
         const candidate = dimensions(

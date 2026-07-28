@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   listOccurrences: vi.fn(),
   getSource: vi.fn(),
   getAsset: vi.fn(),
+  getOccurrence: vi.fn(),
   saveMediaOccurrence: vi.fn(),
   loadContentApplication: vi.fn(),
   getCurrentContent: vi.fn(),
@@ -63,6 +64,12 @@ describe("media endpoint", () => {
       height: 900,
       contentType: "image/png",
     });
+    mocks.getOccurrence.mockResolvedValue({
+      occurrenceId: "occurrence_home_hero",
+      revision: 2,
+      assetId: "asset_replacement",
+      crop: null,
+    });
     mocks.saveMediaOccurrence.mockResolvedValue({
       workspaceId: "workspace_editor",
       revision: 3,
@@ -91,6 +98,7 @@ describe("media endpoint", () => {
         listOccurrences: mocks.listOccurrences,
         getSource: mocks.getSource,
         getAsset: mocks.getAsset,
+        getOccurrence: mocks.getOccurrence,
       },
     });
   });
@@ -198,6 +206,12 @@ describe("media endpoint", () => {
     mocks.saveMediaOccurrence.mockRejectedValue(
       new ContentRevisionConflictError(3),
     );
+    mocks.getOccurrence.mockResolvedValueOnce({
+      occurrenceId: "occurrence_home_hero",
+      revision: 3,
+      assetId: "asset_newer",
+      crop: null,
+    });
     mocks.getCurrentContent
       .mockResolvedValueOnce({
         revision: 2,
@@ -237,6 +251,70 @@ describe("media endpoint", () => {
 
     expect(response.status).toBe(409);
     expect(mocks.saveMediaOccurrence).toHaveBeenCalledOnce();
+  });
+
+  it("rebases when inherited media has the same revision number but different content", async () => {
+    mocks.replace.mockResolvedValue({
+      occurrenceId: "occurrence_home_hero",
+      revision: 2,
+      assetId: "asset_replacement",
+      crop: null,
+    });
+    mocks.saveMediaOccurrence
+      .mockRejectedValueOnce(new ContentRevisionConflictError(3))
+      .mockResolvedValueOnce({
+        workspaceId: "workspace_editor",
+        revision: 4,
+      });
+    mocks.getCurrentContent
+      .mockResolvedValueOnce({
+        revision: 2,
+        definition: { home: { media: [] } },
+      })
+      .mockResolvedValueOnce({
+        revision: 3,
+        definition: {
+          home: {
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 2,
+                asset: {
+                  assetId: "asset_inherited",
+                  width: 800,
+                  height: 600,
+                  contentType: "image/png",
+                },
+                crop: null,
+              },
+            ],
+          },
+        },
+      });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "rebase-inherited-media-0001",
+        },
+        body: JSON.stringify({
+          operation: "replace",
+          occurrenceId: "occurrence_home_hero",
+          assetId: "asset_replacement",
+          baseRevision: 1,
+          workspaceId: "workspace_editor",
+          contentBaseRevision: 2,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.saveMediaOccurrence).toHaveBeenCalledTimes(2);
+    expect(mocks.saveMediaOccurrence).toHaveBeenLastCalledWith(
+      expect.objectContaining({ baseRevision: 3 }),
+    );
   });
 
   it("validates workspace access before appending a media occurrence", async () => {

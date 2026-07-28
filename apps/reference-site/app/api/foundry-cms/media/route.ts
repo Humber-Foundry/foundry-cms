@@ -91,6 +91,84 @@ export async function GET(request: Request) {
   }
 }
 
+type CropCoordinates = Readonly<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> | null;
+
+function sameCrop(left: CropCoordinates, right: CropCoordinates) {
+  return (
+    left === right ||
+    (left !== null &&
+      right !== null &&
+      left.x === right.x &&
+      left.y === right.y &&
+      left.width === right.width &&
+      left.height === right.height)
+  );
+}
+
+function isSameWorkspaceOccurrence(
+  current: Readonly<{
+    occurrenceId: string;
+    revision: number;
+    assetId: string;
+    crop: CropCoordinates;
+  }> | null,
+  expected: Readonly<{
+    occurrenceId: string;
+    revision: number;
+    assetId: string;
+    crop: CropCoordinates;
+  }>,
+) {
+  return (
+    current !== null &&
+    current.occurrenceId === expected.occurrenceId &&
+    current.revision === expected.revision &&
+    current.assetId === expected.assetId &&
+    sameCrop(current.crop, expected.crop)
+  );
+}
+
+function isSameContentOccurrence(
+  current: Readonly<{
+    occurrenceId: string;
+    revision: number;
+    asset: Readonly<{
+      assetId: string;
+      width: number;
+      height: number;
+      contentType: string;
+    }>;
+    crop: CropCoordinates;
+  }> | undefined,
+  expected: Readonly<{
+    occurrenceId: string;
+    revision: number;
+    asset: Readonly<{
+      assetId: string;
+      width: number;
+      height: number;
+      contentType: string;
+    }>;
+    crop: CropCoordinates;
+  }>,
+) {
+  return (
+    current !== undefined &&
+    current.occurrenceId === expected.occurrenceId &&
+    current.revision === expected.revision &&
+    current.asset.assetId === expected.asset.assetId &&
+    current.asset.width === expected.asset.width &&
+    current.asset.height === expected.asset.height &&
+    current.asset.contentType === expected.asset.contentType &&
+    sameCrop(current.crop, expected.crop)
+  );
+}
+
 async function bindOccurrenceToContentRevision({
   actorId,
   idempotencyKey,
@@ -153,19 +231,15 @@ async function bindOccurrenceToContentRevision({
         (candidate) =>
           candidate.occurrenceId === boundOccurrence.occurrenceId,
       );
-      if (
-        currentBinding !== undefined &&
-        currentBinding.revision > boundOccurrence.revision
-      ) {
-        throw error;
-      }
-      if (
-        currentBinding !== undefined &&
-        currentBinding.revision === boundOccurrence.revision
-      ) {
+      if (isSameContentOccurrence(currentBinding, boundOccurrence)) {
         contentRevision = current;
         break;
       }
+      const mediaHead = await application.queries.getOccurrence(
+        workspaceId,
+        occurrence.occurrenceId,
+      );
+      if (!isSameWorkspaceOccurrence(mediaHead, occurrence)) throw error;
       contentBaseRevision = current.revision;
     }
   }
