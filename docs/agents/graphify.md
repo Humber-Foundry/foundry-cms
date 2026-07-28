@@ -51,12 +51,13 @@ After a verified merge:
    ```
 
 The refresh acquires an ownership-aware shared lock with Git's atomic
-compare-and-swap ref update, archives the pinned commit to an immutable
-temporary source tree, performs code-only extraction, validates the result,
-rechecks the publishing worktree, and atomically publishes the commit-addressed
-snapshot. Every indexed source path is checked against the pinned tree and
-rewritten repository-relative, so query output remains usable after the
-temporary archive is removed. It refuses feature commits and dirty worktrees.
+compare-and-swap ref update, materializes every blob from the pinned tree
+without applying `.gitattributes` archive transformations, performs code-only
+extraction, validates the result, rechecks the publishing worktree, and
+atomically publishes the commit-addressed snapshot. Every indexed source path
+is checked against the pinned tree and rewritten repository-relative, so query
+output remains usable after the temporary source tree is removed. It refuses
+feature commits and dirty worktrees.
 If the same snapshot already exists, it verifies that snapshot while still
 applying cache retention rather than rebuilding it. Each refresh retains the 20
 most recent snapshots plus the merge-base snapshot of every active,
@@ -118,7 +119,10 @@ The wrapper:
 7. removes all relationships when a new file, an indexed source change, or a
    resolver-consumed configuration change could invalidate relationships
    sourced from otherwise unchanged files; and
-8. runs a budget-capped Graphify query against a temporary filtered graph.
+8. runs a budget-capped Graphify query against a temporary filtered graph; and
+9. revalidates HEAD, merge base, ignore rules, changed paths, and
+   relationship-invalidating Git classifications before emitting output,
+   failing closed if repository state changed during the query.
 
 Every result begins with the graph base, branch head, scope, and number of
 branch-modified files excluded. When all relationships are excluded, the result

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
@@ -82,7 +83,13 @@ function createFakeGraphify() {
     executable,
     `#!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 const args = process.argv.slice(2);
@@ -117,6 +124,33 @@ if (args[0] === "extract") {
     );
   }
   const sourceRoot = args[1];
+  const expectedSources = JSON.parse(
+    process.env.GRAPHIFY_FAKE_EXPECTED_SOURCES ?? "{}",
+  );
+  for (const [path, expectation] of Object.entries(expectedSources)) {
+    if (expectation.symlink !== undefined) {
+      if (
+        !lstatSync(join(sourceRoot, path)).isSymbolicLink() ||
+        readlinkSync(join(sourceRoot, path)) !== expectation.symlink
+      ) {
+        console.error(\`source symlink differs from commit tree: \${path}\`);
+        process.exit(3);
+      }
+      continue;
+    }
+    const actual = readFileSync(join(sourceRoot, path)).toString("base64");
+    const expectedBase64 =
+      typeof expectation === "string" ? expectation : expectation.base64;
+    const executable = (lstatSync(join(sourceRoot, path)).mode & 0o111) !== 0;
+    if (
+      actual !== expectedBase64 ||
+      (expectation.executable !== undefined &&
+        executable !== expectation.executable)
+    ) {
+      console.error(\`source bytes differ from commit tree: \${path}\`);
+      process.exit(3);
+    }
+  }
   const output = args[args.indexOf("--out") + 1];
   const graphDirectory = join(output, "graphify-out");
   mkdirSync(graphDirectory, { recursive: true });
@@ -183,6 +217,32 @@ if (args[0] === "query") {
   }
   for (const edge of graph.links ?? graph.edges ?? []) {
     console.log(\`EDGE \${edge.source} -> \${edge.target}\`);
+  }
+  const mutation = process.env.GRAPHIFY_FAKE_QUERY_MUTATION;
+  const repository = process.env.GRAPHIFY_FAKE_REPOSITORY_ROOT;
+  if (mutation === "worktree") {
+    writeFileSync(
+      join(repository, "src", "stable.ts"),
+      "export const stable = 'concurrent';\\n",
+    );
+  } else if (mutation === "ignore") {
+    writeFileSync(join(repository, ".gitignore"), "/src/stable.ts\\n");
+  } else if (mutation === "head") {
+    execFileSync(
+      "git",
+      ["commit", "--allow-empty", "-m", "concurrent query change"],
+      { cwd: repository },
+    );
+  } else if (mutation === "merge-base") {
+    execFileSync(
+      "git",
+      ["update-ref", "refs/remotes/origin/main", "HEAD"],
+      { cwd: repository },
+    );
+  } else if (mutation === "relationships") {
+    execFileSync("git", ["rm", "--cached", "src/unindexed.txt"], {
+      cwd: repository,
+    });
   }
   process.exit(0);
 }
@@ -273,6 +333,11 @@ function runIndex(repository, arguments_, options = {}) {
                   : "0",
             GRAPHIFY_FAKE_DELAY_MS: String(options.delayMs ?? 0),
             GRAPHIFY_FAKE_REPLACE_LOCK: options.replaceLock ? "1" : "0",
+            GRAPHIFY_FAKE_EXPECTED_SOURCES: JSON.stringify(
+              options.expectedSources ?? {},
+            ),
+            GRAPHIFY_FAKE_QUERY_MUTATION:
+              options.queryMutation ?? "",
             GRAPHIFY_INDEX_CACHE_DIR: cache,
             ...options.env,
           },
@@ -310,6 +375,9 @@ function runIndexAsync(repository, arguments_, options) {
           GRAPHIFY_FAKE_WARNING: "0",
           GRAPHIFY_FAKE_DELAY_MS: String(options.delayMs ?? 0),
           GRAPHIFY_FAKE_REPLACE_LOCK: "0",
+          GRAPHIFY_FAKE_EXPECTED_SOURCES: "{}",
+          GRAPHIFY_FAKE_QUERY_MUTATION:
+            options.queryMutation ?? "",
           GRAPHIFY_INDEX_CACHE_DIR: options.cache,
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -359,6 +427,53 @@ describe("commit-pinned Graphify index", () => {
         source_file: "src/stable.ts",
       }),
     );
+  });
+
+  it("extracts exact commit-tree bytes despite export attributes", () => {
+    const { root } = createRepository();
+    writeFileSync(
+      join(root, ".gitattributes"),
+      "src/stable.ts export-subst\nsrc/changed.ts export-ignore\n",
+    );
+    writeFileSync(
+      join(root, "src", "stable.ts"),
+      "export const commit = '$Format:%H$';\n",
+    );
+    writeFileSync(
+      join(root, "src", "changed.ts"),
+      "export const exportIgnored = true;\n",
+    );
+    writeFileSync(join(root, "src", "tool.sh"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(root, "src", "tool.sh"), 0o755);
+    symlinkSync("stable.ts", join(root, "src", "stable-link"));
+    const main = commitAll(root, "add export attributes");
+    git(root, "update-ref", "refs/remotes/origin/main", main);
+
+    const result = runIndex(root, ["refresh"], {
+      expectedSources: {
+        "src/stable.ts": execFileSync(
+          "git",
+          ["show", `${main}:src/stable.ts`],
+          { cwd: root },
+        ).toString("base64"),
+        "src/changed.ts": execFileSync(
+          "git",
+          ["show", `${main}:src/changed.ts`],
+          { cwd: root },
+        ).toString("base64"),
+        "src/tool.sh": {
+          base64: execFileSync(
+            "git",
+            ["show", `${main}:src/tool.sh`],
+            { cwd: root },
+          ).toString("base64"),
+          executable: true,
+        },
+        "src/stable-link": { symlink: "stable.ts" },
+      },
+    });
+
+    expect(result.status, result.output).toBe(0);
   });
 
   it("stores a credential-free repository identity across remote credential rotation", () => {
@@ -452,6 +567,54 @@ describe("commit-pinned Graphify index", () => {
     expect(result.output).toContain("NODE Stable");
     expect(result.output).not.toContain("NODE Changed");
   });
+
+  it.each([
+    "worktree",
+    "ignore",
+    "head",
+    "merge-base",
+    "relationships",
+  ])(
+    "emits no query output when %s state changes during Graphify",
+    (queryMutation) => {
+      const { root } = createRepository();
+      const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+      const graphify = createFakeGraphify();
+      const graph = writeFakeGraph(root);
+      if (queryMutation === "relationships") {
+        writeFileSync(join(root, "src", "unindexed.txt"), "initial\n");
+        const main = commitAll(root, "add unindexed source");
+        git(root, "update-ref", "refs/remotes/origin/main", main);
+      }
+      expect(
+        runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+      ).toBe(0);
+      git(root, "checkout", "-b", "feature");
+      if (queryMutation === "merge-base") {
+        writeFileSync(
+          join(root, "src", "feature.ts"),
+          "export const feature = true;\n",
+        );
+        commitAll(root, "feature commit");
+      } else if (queryMutation === "relationships") {
+        writeFileSync(join(root, "src", "unindexed.txt"), "modified\n");
+      }
+
+      const result = runIndex(root, ["query", "stable"], {
+        cache,
+        graphify,
+        graph,
+        queryMutation,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.output).toContain(
+        "Repository state changed while Graphify was querying",
+      );
+      expect(result.output).not.toContain("Graph base:");
+      expect(result.output).not.toContain("NODE Stable");
+    },
+  );
 
   it("excludes staged and unstaged files before querying", () => {
     const { root } = createRepository();

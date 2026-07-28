@@ -3,6 +3,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -11,6 +12,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
@@ -515,23 +517,81 @@ function assertRefreshWorktree(context) {
   }
 }
 
-function archiveCommit(context, destination) {
+function materializeCommitTree(context, destination) {
   mkdirSync(destination, { recursive: true });
-  const archive = runGit(
+  const listing = runGit(
     context.repositoryRoot,
-    ["archive", "--format=tar", context.head],
+    ["ls-tree", "-r", "-z", "--full-tree", context.head],
     { binary: true },
   );
-  const result = spawnSync("tar", ["-xf", "-", "-C", destination], {
-    input: archive,
-    encoding: "utf8",
+  const entries = splitNullDelimited(listing.toString("utf8")).map(
+    (record) => {
+      const match = record.match(
+        /^(\d+) (blob|commit) ([0-9a-f]+)\t(.+)$/su,
+      );
+      if (!match) {
+        fail("Could not parse the pinned commit tree.");
+      }
+      const [, mode, type, objectId, path] = match;
+      if (
+        type !== "blob" ||
+        !["100644", "100755", "120000"].includes(mode)
+      ) {
+        fail(
+          `Pinned tree contains unsupported entry ${path} (${mode} ${type}).`,
+        );
+      }
+      const target = join(destination, path);
+      const relativeTarget = relative(destination, target);
+      if (
+        relativeTarget === ".." ||
+        relativeTarget.startsWith(`..${sep}`) ||
+        isAbsolute(relativeTarget)
+      ) {
+        fail(`Pinned tree contains an unsafe path: ${path}`);
+      }
+      mkdirSync(dirname(target), { recursive: true });
+      return { mode, objectId, path, target };
+    },
+  );
+  if (entries.length === 0) return;
+  const batch = runGit(context.repositoryRoot, ["cat-file", "--batch"], {
+    binary: true,
+    input: Buffer.from(
+      `${entries.map((entry) => entry.objectId).join("\n")}\n`,
+    ),
   });
-  if (result.error || result.status !== 0) {
-    fail(
-      `Could not unpack immutable source archive: ${
-        result.error?.message ?? result.stderr?.trim() ?? result.status
-      }`,
-    );
+  let cursor = 0;
+  for (const { mode, objectId, path, target } of entries) {
+    const headerEnd = batch.indexOf(0x0a, cursor);
+    if (headerEnd === -1) {
+      fail(`Could not read pinned blob for ${path}.`);
+    }
+    const [returnedId, type, sizeText] = batch
+      .subarray(cursor, headerEnd)
+      .toString("ascii")
+      .split(" ");
+    const size = Number.parseInt(sizeText, 10);
+    const bytesStart = headerEnd + 1;
+    const bytesEnd = bytesStart + size;
+    if (
+      returnedId !== objectId ||
+      type !== "blob" ||
+      !Number.isSafeInteger(size) ||
+      size < 0 ||
+      bytesEnd >= batch.length ||
+      batch[bytesEnd] !== 0x0a
+    ) {
+      fail(`Could not read pinned blob for ${path}.`);
+    }
+    const bytes = batch.subarray(bytesStart, bytesEnd);
+    cursor = bytesEnd + 1;
+    if (mode === "120000") {
+      symlinkSync(bytes.toString("utf8"), target);
+    } else {
+      writeFileSync(target, bytes);
+      chmodSync(target, mode === "100755" ? 0o755 : 0o644);
+    }
   }
 }
 
@@ -696,7 +756,7 @@ function refresh() {
       return;
     }
     mkdirSync(dirname(staging), { recursive: true });
-    archiveCommit(context, sourceRoot);
+    materializeCommitTree(context, sourceRoot);
     runGraphify(
       [
         "extract",
@@ -973,13 +1033,43 @@ function parseQuery(arguments_) {
   return { question, budget, useDfs };
 }
 
-function branchSnapshot(context) {
+function captureQueryState(context) {
+  const head = gitText(context.repositoryRoot, "rev-parse", "HEAD");
   const baseSha = gitText(
     context.repositoryRoot,
     "merge-base",
     "HEAD",
     "refs/remotes/origin/main",
   );
+  return {
+    head,
+    baseSha,
+    changed: changedPaths(context, baseSha),
+  };
+}
+
+function samePaths(left, right) {
+  return (
+    left.size === right.size &&
+    [...left].every((path) => right.has(path))
+  );
+}
+
+function assertQueryStateUnchanged(initial, current) {
+  if (
+    initial.head !== current.head ||
+    initial.baseSha !== current.baseSha ||
+    !samePaths(initial.changed, current.changed) ||
+    !samePaths(initial.invalidators, current.invalidators)
+  ) {
+    fail(
+      "Repository state changed while Graphify was querying. " +
+        "No query output was emitted; rerun against the current source state.",
+    );
+  }
+}
+
+function branchSnapshot(context, baseSha) {
   const root = snapshotDirectory(context.cacheRoot, baseSha);
   if (!existsSync(root)) {
     fail(
@@ -993,8 +1083,9 @@ function branchSnapshot(context) {
 function query(arguments_) {
   const parsed = parseQuery(arguments_);
   const context = repositoryContext();
-  const snapshot = branchSnapshot(context);
-  const changed = changedPaths(context, snapshot.baseSha);
+  const initialState = captureQueryState(context);
+  const snapshot = branchSnapshot(context, initialState.baseSha);
+  const changed = initialState.changed;
   assertBranchIgnoreRulesMatchSnapshot(changed);
   const invalidators = relationshipInvalidators(
     context,
@@ -1002,6 +1093,7 @@ function query(arguments_) {
     changed,
     snapshot.graph,
   );
+  initialState.invalidators = invalidators;
   const filtered = filterGraph(
     snapshot.graph,
     changed,
@@ -1013,8 +1105,30 @@ function query(arguments_) {
   const filteredGraphPath = join(temporaryDirectory, "graph.json");
   try {
     writeFileSync(filteredGraphPath, JSON.stringify(filtered));
+    const graphifyArguments = [
+      "query",
+      parsed.question,
+      "--budget",
+      String(parsed.budget),
+      "--graph",
+      filteredGraphPath,
+    ];
+    if (parsed.useDfs) graphifyArguments.push("--dfs");
+    const graphifyOutput = runGraphify(graphifyArguments, {
+      cwd: context.repositoryRoot,
+    });
+    const finalState = captureQueryState(context);
+    finalState.invalidators = relationshipInvalidators(
+      context,
+      finalState.baseSha,
+      finalState.changed,
+      snapshot.graph,
+    );
+    assertQueryStateUnchanged(initialState, finalState);
+    assertBranchIgnoreRulesMatchSnapshot(finalState.changed);
+
     console.log(`Graph base: ${snapshot.baseSha}`);
-    console.log(`Branch head: ${context.head}`);
+    console.log(`Branch head: ${initialState.head}`);
     console.log(`Graph scope: ${snapshot.metadata.scope}`);
     console.log(`Branch-modified files excluded: ${changed.size}`);
     for (const path of [...changed].sort().slice(0, 20)) {
@@ -1034,17 +1148,8 @@ function query(arguments_) {
         console.log(`  ... ${invalidators.size - 20} more`);
       }
     }
-    const graphifyArguments = [
-      "query",
-      parsed.question,
-      "--budget",
-      String(parsed.budget),
-      "--graph",
-      filteredGraphPath,
-    ];
-    if (parsed.useDfs) graphifyArguments.push("--dfs");
     process.stdout.write(
-      runGraphify(graphifyArguments, { cwd: context.repositoryRoot }),
+      graphifyOutput,
     );
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
