@@ -32,6 +32,7 @@ const loopbackRequestArrivalMs = 250;
 const loopbackRequestBodyTimeoutMs = 5_000;
 const loopbackShutdownTimeoutMs = 5_000;
 const activationProcessWaitTimeoutMs = 60_000;
+const activationProcessTerminationGraceMs = 5_000;
 const hopByHopHeaders = new Set([
   "connection",
   "content-length",
@@ -44,20 +45,38 @@ const hopByHopHeaders = new Set([
   "upgrade",
 ]);
 
-function waitForProcess(process, failurePrefix, timeoutMs) {
+function waitForProcess(
+  process,
+  failurePrefix,
+  timeoutMs,
+  terminationGraceMs = activationProcessTerminationGraceMs,
+) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let timeout;
+    let forceKillTimeout;
+    let reapTimeout;
+    let timedOut = false;
     const finish = (operation) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timeout);
+      clearTimeout(forceKillTimeout);
+      clearTimeout(reapTimeout);
       operation();
     };
-    process.once("error", (error) => finish(() => reject(error)));
+    process.once("error", (error) => {
+      if (!timedOut) {
+        finish(() => reject(error));
+      }
+    });
     process.once("exit", (code, signal) => {
+      if (timedOut) {
+        finish(() => reject(new Error(`${failurePrefix}:timeout`)));
+        return;
+      }
       if (code !== 0) {
         finish(() =>
           reject(
@@ -72,10 +91,17 @@ function waitForProcess(process, failurePrefix, timeoutMs) {
     });
     if (timeoutMs !== undefined) {
       timeout = setTimeout(() => {
-        finish(() => {
-          process.kill?.("SIGTERM");
-          reject(new Error(`${failurePrefix}:timeout`));
-        });
+        timedOut = true;
+        process.kill?.("SIGTERM");
+        forceKillTimeout = setTimeout(() => {
+          process.kill?.("SIGKILL");
+          reapTimeout = setTimeout(() => {
+            process.unref?.();
+            finish(() =>
+              reject(new Error(`${failurePrefix}:timeout_unreaped`)),
+            );
+          }, terminationGraceMs);
+        }, terminationGraceMs);
       }, timeoutMs);
     }
   });
@@ -766,6 +792,7 @@ export async function activateExactVersion({
   assertHead = assertExactProductionHead,
   environment = process.env,
   activationWaitTimeoutMs = activationProcessWaitTimeoutMs,
+  activationTerminationGraceMs = activationProcessTerminationGraceMs,
   loopbackBodyTimeoutMs = loopbackRequestBodyTimeoutMs,
   loopbackDrainTimeoutMs = loopbackShutdownTimeoutMs,
   startActivation,
@@ -779,6 +806,8 @@ export async function activateExactVersion({
     loopbackBodyTimeoutMs <= 0 ||
     !Number.isSafeInteger(activationWaitTimeoutMs) ||
     activationWaitTimeoutMs <= 0 ||
+    !Number.isSafeInteger(activationTerminationGraceMs) ||
+    activationTerminationGraceMs <= 0 ||
     !Number.isSafeInteger(loopbackDrainTimeoutMs) ||
     loopbackDrainTimeoutMs <= 0
   ) {
@@ -1030,6 +1059,7 @@ export async function activateExactVersion({
         activation,
         "exact_version_activation_failed",
         activationWaitTimeoutMs,
+        activationTerminationGraceMs,
       );
     } catch (error) {
       activationProcessError = error;

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { writeFileSync } from "node:fs";
 import {
@@ -541,31 +542,51 @@ describe("guarded exact production deployment", () => {
     });
     const upstreamBaseUrl = await listen(upstream);
     const assertHead = vi.fn();
-    const kill = vi.fn();
+    let activationChild;
 
     await expect(
       activate({
         versionId,
         assertHead,
-        activationWaitTimeoutMs: 50,
+        activationWaitTimeoutMs: 1_000,
+        activationTerminationGraceMs: 100,
         upstreamBaseUrl,
         startActivation: ({ localApiBaseUrl }) => {
-          const process = new EventEmitter();
-          process.kill = kill;
-          queueMicrotask(async () => {
-            await loadDeploymentBaseline(localApiBaseUrl);
-            const response = await fetch(
-              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
-              { method: "POST", body: exactActivationBody },
-            );
-            expect(response.status).toBe(200);
-          });
-          return process;
+          const endpoint =
+            `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`;
+          activationChild = spawn(
+            process.execPath,
+            [
+              "-e",
+              `
+                process.on("SIGTERM", () => {});
+                setInterval(() => {}, 1_000);
+                (async () => {
+                  await (await fetch(process.argv[1])).arrayBuffer();
+                  const response = await fetch(process.argv[1], {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: process.env.FOUNDRY_TEST_ACTIVATION_BODY,
+                  });
+                  if (!response.ok) process.exit(2);
+                })().catch(() => process.exit(3));
+              `,
+              endpoint,
+            ],
+            {
+              stdio: "ignore",
+              env: {
+                ...process.env,
+                FOUNDRY_TEST_ACTIVATION_BODY: exactActivationBody,
+              },
+            },
+          );
+          return activationChild;
         },
       }),
     ).resolves.toBeUndefined();
 
-    expect(kill).toHaveBeenCalledWith("SIGTERM");
+    expect(activationChild.signalCode).toBe("SIGKILL");
     expect(assertHead).toHaveBeenCalledTimes(3);
     await close(upstream);
   });

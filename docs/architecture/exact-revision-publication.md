@@ -163,7 +163,8 @@ token-bearing production requests only to the fixed Cloudflare API origin; an
 ambient base-URL variable cannot redirect them. Request-body reads, the
 Wrangler activation process, and shutdown draining have hard deadlines; after
 Wrangler exits or exceeds its deadline, the controller closes request
-acceptance, aborts overdue
+acceptance, gives the child a bounded termination grace period, escalates to a
+forced kill when necessary, reaps it, and aborts overdue
 upstream work, and drains every in-flight handler before classifying the
 result. Before promotion it records and freezes the currently serving
 deployment and traffic allocation. If an
