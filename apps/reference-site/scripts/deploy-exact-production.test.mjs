@@ -568,6 +568,73 @@ describe("guarded exact production deployment", () => {
     await close(upstream);
   });
 
+  it("reconciles an accepted activation whose response was lost before applying the final head fence", async () => {
+    const deployments = [
+      { id: "deployment-before", versionId: previousVersionId },
+    ];
+    let postCount = 0;
+    const upstream = createServer(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const body = Buffer.concat(chunks).toString("utf8");
+      if (request.method === "GET") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify(deploymentHistoryResult(deployments)),
+        );
+        return;
+      }
+      postCount += 1;
+      if (postCount === 1) {
+        deployments.unshift({
+          id: "deployment-accepted-without-response",
+          versionId,
+        });
+        response.destroy();
+        return;
+      }
+      deployments.unshift({
+        id: "deployment-rollback",
+        versionId: JSON.parse(body).versions[0].version_id,
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(activationResult("deployment-rollback")));
+    });
+    const upstreamBaseUrl = await listen(upstream);
+    let headCheck = 0;
+
+    await expect(
+      activate({
+        versionId,
+        assertHead: vi.fn(() => {
+          headCheck += 1;
+          if (headCheck === 3) {
+            throw new Error("exact_production_head_moved");
+          }
+        }),
+        upstreamBaseUrl,
+        startActivation: ({ localApiBaseUrl }) =>
+          activationProcess(async () => {
+            await loadDeploymentBaseline(localApiBaseUrl);
+            const response = await fetch(
+              `${localApiBaseUrl}/accounts/a/workers/scripts/site/deployments`,
+              { method: "POST", body: exactActivationBody },
+            );
+            expect(response.status).toBe(502);
+          }),
+      }),
+    ).rejects.toThrow("exact_production_head_moved");
+
+    expect(postCount).toBe(2);
+    expect(deployments[0]).toEqual({
+      id: "deployment-rollback",
+      versionId: previousVersionId,
+    });
+    await close(upstream);
+  });
+
   it("does not roll back a deployment that a newer one superseded", async () => {
     const methods = [];
     let activated = false;

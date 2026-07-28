@@ -147,6 +147,7 @@ describe("production deployment baseline provisioning", () => {
     };
     const fetchImplementation = vi
       .fn()
+      .mockResolvedValueOnce(json([]))
       .mockResolvedValueOnce(json({ id: 42 }, 201))
       .mockResolvedValueOnce(json(ruleset))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
@@ -163,12 +164,12 @@ describe("production deployment baseline provisioning", () => {
     });
     await release();
 
-    expect(fetchImplementation).toHaveBeenCalledTimes(4);
-    expect(fetchImplementation.mock.calls[0]?.[0]).toBe(
+    expect(fetchImplementation).toHaveBeenCalledTimes(5);
+    expect(fetchImplementation.mock.calls[1]?.[0]).toBe(
       "https://api.github.com/repos/owner/repo/rulesets",
     );
     expect(
-      JSON.parse(fetchImplementation.mock.calls[0]?.[1]?.body),
+      JSON.parse(fetchImplementation.mock.calls[1]?.[1]?.body),
     ).toEqual({
       name: "Foundry production baseline lock: main",
       target: "branch",
@@ -186,6 +187,10 @@ describe("production deployment baseline provisioning", () => {
       url,
       init?.method,
     ])).toEqual([
+      [
+        "https://api.github.com/repos/owner/repo/rulesets?includes_parents=false&targets=branch&per_page=100",
+        "GET",
+      ],
       ["https://api.github.com/repos/owner/repo/rulesets", "POST"],
       ["https://api.github.com/repos/owner/repo/rulesets/42", "GET"],
       ["https://api.github.com/repos/owner/repo/rulesets/42", "DELETE"],
@@ -196,6 +201,7 @@ describe("production deployment baseline provisioning", () => {
   it("fails closed when the temporary ruleset has a bypass actor", async () => {
     const fetchImplementation = vi
       .fn()
+      .mockResolvedValueOnce(json([]))
       .mockResolvedValueOnce(json({ id: 42 }, 201))
       .mockResolvedValueOnce(
         json({
@@ -226,6 +232,102 @@ describe("production deployment baseline provisioning", () => {
       }),
     ).rejects.toThrow("production_baseline_branch_lock_failed");
 
-    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
+  });
+
+  it("reuses an exact retained ruleset after an interrupted provisioning run", async () => {
+    const ruleset = {
+      id: 42,
+      name: "Foundry production baseline lock: main",
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+        ref_name: {
+          include: ["refs/heads/main"],
+          exclude: [],
+        },
+      },
+      rules: [{ type: "update" }],
+    };
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json([{ id: 42, name: ruleset.name, target: "branch" }]),
+      )
+      .mockResolvedValueOnce(json(ruleset))
+      .mockRejectedValueOnce(new Error("delete_response_lost"))
+      .mockResolvedValueOnce(json({ message: "Not Found" }, 404));
+
+    const release = await acquireProductionBranchLock({
+      environment: {
+        FOUNDRY_GITHUB_OWNER: "owner",
+        FOUNDRY_GITHUB_REPOSITORY: "repo",
+        FOUNDRY_PRODUCTION_BRANCH: "main",
+        FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN: "token",
+      },
+      fetchImplementation,
+    });
+    await expect(release()).resolves.toBeUndefined();
+
+    expect(fetchImplementation.mock.calls.map(([, init]) => init?.method))
+      .toEqual(["GET", "GET", "DELETE", "GET"]);
+  });
+
+  it("reports an unverified unlock when absence cannot be read back", async () => {
+    const ruleset = {
+      id: 42,
+      name: "Foundry production baseline lock: main",
+      target: "branch",
+      enforcement: "active",
+      bypass_actors: [],
+      conditions: {
+        ref_name: {
+          include: ["refs/heads/main"],
+          exclude: [],
+        },
+      },
+      rules: [{ type: "update" }],
+    };
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json([{ id: 42, name: ruleset.name, target: "branch" }]),
+      )
+      .mockResolvedValueOnce(json(ruleset))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockRejectedValueOnce(new Error("ruleset_read_failed"));
+
+    const release = await acquireProductionBranchLock({
+      environment: {
+        FOUNDRY_GITHUB_OWNER: "owner",
+        FOUNDRY_GITHUB_REPOSITORY: "repo",
+        FOUNDRY_PRODUCTION_BRANCH: "main",
+        FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN: "token",
+      },
+      fetchImplementation,
+    });
+
+    await expect(release()).rejects.toThrow(
+      "production_baseline_branch_unlock_unverified",
+    );
+  });
+
+  it("rejects a branch pattern before creating a ruleset", async () => {
+    const fetchImplementation = vi.fn();
+
+    await expect(
+      acquireProductionBranchLock({
+        environment: {
+          FOUNDRY_GITHUB_OWNER: "owner",
+          FOUNDRY_GITHUB_REPOSITORY: "repo",
+          FOUNDRY_PRODUCTION_BRANCH: "release/*",
+          FOUNDRY_BASELINE_PROVISION_GITHUB_TOKEN: "token",
+        },
+        fetchImplementation,
+      }),
+    ).rejects.toThrow("production_baseline_branch_lock_not_configured");
+
+    expect(fetchImplementation).not.toHaveBeenCalled();
   });
 });

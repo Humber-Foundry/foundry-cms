@@ -23,6 +23,7 @@ const activationPathPattern =
   /^\/client\/v4\/accounts\/[^/]+\/workers\/scripts\/[^/]+\/deployments$/u;
 const maximumActivationBodyBytes = 64 * 1024;
 const cloudflareRequestTimeoutMs = 30_000;
+const activationReconciliationAttempts = 5;
 const hopByHopHeaders = new Set([
   "connection",
   "content-length",
@@ -264,6 +265,63 @@ async function readDeploymentList({
   return deploymentList(parseCloudflareResult(body));
 }
 
+function isExactVersionDeployment(deployment, versionId) {
+  return (
+    deployment?.versions.length === 1 &&
+    deployment.versions[0]?.version_id === versionId &&
+    deployment.versions[0].percentage === 100
+  );
+}
+
+async function reconcileActivationAttempt({
+  activationPath,
+  baseline,
+  headers,
+  upstreamBaseUrl,
+  versionId,
+}) {
+  let lastError;
+  let readSucceeded = false;
+  for (
+    let attempt = 0;
+    attempt < activationReconciliationAttempts;
+    attempt += 1
+  ) {
+    try {
+      const deployments = await readDeploymentList({
+        activationPath,
+        headers,
+        upstreamBaseUrl,
+      });
+      readSucceeded = true;
+      const baselineIndex = deployments.findIndex(
+        ({ deploymentId: candidate }) =>
+          candidate === baseline.deploymentId,
+      );
+      const activatedIndex = deployments.findIndex((deployment) =>
+        isExactVersionDeployment(deployment, versionId),
+      );
+      if (activatedIndex >= 0 && baselineIndex > activatedIndex) {
+        return {
+          state: activatedIndex === 0 ? "active" : "superseded",
+          deployment: deployments[activatedIndex],
+        };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt + 1 < activationReconciliationAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  if (!readSucceeded) {
+    throw new Error("exact_activation_reconciliation_failed", {
+      cause: lastError,
+    });
+  }
+  return { state: "not-found" };
+}
+
 function productionActivationPath(environment) {
   const accountId = environment.FOUNDRY_CLOUDFLARE_ACCOUNT_ID?.trim();
   const scriptName =
@@ -429,6 +487,7 @@ export async function activateExactVersion({
   let activationAttempted = false;
   let activationError;
   let activationRecord;
+  let activationRequest;
   let baseline;
   const server = createServer(async (request, response) => {
     try {
@@ -493,6 +552,10 @@ export async function activateExactVersion({
             return;
           }
           assertHead();
+          activationRequest = {
+            activationPath: requestUrl.pathname,
+            headers: new Headers(headers),
+          };
         } catch (error) {
           activationError = error;
           rejectActivation(response, "Production head moved.");
@@ -589,6 +652,44 @@ export async function activateExactVersion({
       await waitForProcess(activation, "exact_version_activation_failed");
     } catch (error) {
       activationProcessError = error;
+    }
+    if (
+      activationCount === 0 &&
+      activationRequest !== undefined &&
+      baseline !== undefined
+    ) {
+      try {
+        const reconciled = await reconcileActivationAttempt({
+          ...activationRequest,
+          baseline,
+          upstreamBaseUrl,
+          versionId,
+        });
+        if (
+          reconciled.state === "active" ||
+          reconciled.state === "superseded"
+        ) {
+          activationCount = 1;
+          activationRecord = {
+            activatedDeploymentId:
+              reconciled.deployment.deploymentId,
+            ...activationRequest,
+          };
+          if (reconciled.state === "active") {
+            activationError = undefined;
+            activationProcessError = undefined;
+          } else {
+            activationError = new Error("exact_activation_superseded");
+          }
+        }
+      } catch (error) {
+        activationError = new AggregateError(
+          [activationError, error].filter(
+            (candidate) => candidate !== undefined,
+          ),
+          "exact_activation_reconciliation_failed",
+        );
+      }
     }
     if (activationCount === 1) {
       try {

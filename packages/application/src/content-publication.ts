@@ -1260,7 +1260,7 @@ export function createContentPublicationApplication({
         publicationId: ContentPublicationId,
         requestedBy: HumanMembershipId,
       ) {
-        const publication = await store.findPublication(publicationId);
+        let publication = await store.findPublication(publicationId);
         if (
           publication !== null &&
           activeStatuses.has(publication.status) &&
@@ -1291,6 +1291,35 @@ export function createContentPublicationApplication({
           approval.fingerprint.value !== publication.fingerprint
         ) {
           throw new ContentApprovalInvalidError("approval_stale");
+        }
+        if (
+          publication.commitSha === null &&
+          candidateCommitSha !== undefined
+        ) {
+          const reconciled = await publisher.reconcileCommit(
+            publication.id,
+            candidateCommitSha,
+          );
+          if (reconciled.state === "committed") {
+            const reconciledAt = now();
+            publication = await store.updatePublication(
+              nextPublication(publication, {
+                status: "failed",
+                commitSha: reconciled.commitSha,
+                detail: "git_commit_reconciled",
+                leaseToken: null,
+                leaseExpiresAt: null,
+                updatedAt: reconciledAt,
+              }),
+              {
+                expectedStatus: "failed",
+                expectedUpdatedAt: publication.updatedAt,
+              },
+            );
+            if (publication.commitSha !== candidateCommitSha) {
+              return publication;
+            }
+          }
         }
         if (
           publication.commitSha === null &&

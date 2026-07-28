@@ -917,6 +917,65 @@ describe("content publication application", () => {
     );
   });
 
+  it("reconciles a retained candidate that reached production before retrying its deployment", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const candidateCommitSha = "c".repeat(40);
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${candidateCommitSha}`,
+    });
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-reconcile-before-retry",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "committed",
+      commitSha: candidateCommitSha,
+    });
+    vi.mocked(publisher.getProductionHead).mockResolvedValue(
+      candidateCommitSha,
+    );
+    isReleaseLive.mockResolvedValue(false);
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: candidateCommitSha,
+        detail: "deployment_retry_requested",
+        deploymentId: "build-123",
+      }),
+    );
+    expect(publisher.reconcileCommit).toHaveBeenLastCalledWith(
+      publication.id,
+      candidateCommitSha,
+    );
+    expect(publisher.retryReference).not.toHaveBeenCalled();
+    expect(publisher.retryDeployment).toHaveBeenCalledWith(
+      candidateCommitSha,
+    );
+  });
+
   it.each([
     ["requested", "committed"],
     ["building", "building"],

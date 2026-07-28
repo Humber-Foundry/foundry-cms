@@ -132,21 +132,23 @@ actual Cloudflare `POST /deployments` request before forwarding it. It requires
 exactly one bounded activation payload naming only the uploaded version at 100
 percent, checks the fence after receiving that payload, and verifies the fence
 again after success. Before promotion it records the currently serving
-deployment and traffic allocation. If the protected ref moves after Cloudflare
-accepts the promotion, the controller re-reads the latest deployment and
-restores that prior allocation only when its stale deployment has not already
-been superseded. Because Cloudflare does not expose a conditional deployment
-write, the controller also inspects deployment history after compensation and
-restores any newer deployment that raced its rollback. Every direct Cloudflare
-request has a bounded timeout. A build compares its published-content path
-with the live release marker: content may advance only through one direct,
-signature-verified Foundry publication commit. This quarantines a content
-commit whose earlier deployment failed so a later code build cannot publish
-it without the exact retry. The activation proxy accepts only the fingerprinted
-Cloudflare account and Worker script path. Together these deployment-time
-fences prevent an older or unapproved revision from becoming the public site
-after an external merge. The build result is also rejected if Cloudflare
-reports a different commit hash.
+deployment and traffic allocation. If an activation response is lost, the
+controller reconciles the uploaded version against deployment history before
+deciding whether the promotion succeeded. If the protected ref moves after
+Cloudflare accepts the promotion, including an activation recovered from a
+lost response, the controller restores the prior allocation only when its stale
+deployment has not already been superseded. Because Cloudflare does not expose
+a conditional deployment write, the controller also inspects deployment
+history after compensation and restores any newer deployment that raced its
+rollback. Every direct Cloudflare request has a bounded timeout. A build
+compares its published-content path with the live release marker: content may
+advance only through one direct, signature-verified Foundry publication
+commit. This quarantines a content commit whose earlier deployment failed so a
+later code build cannot publish it without the exact retry. The activation
+proxy accepts only the fingerprinted Cloudflare account and Worker script
+path. Together these deployment-time fences prevent an older or unapproved
+revision from becoming the public site after an external merge. The build
+result is also rejected if Cloudflare reports a different commit hash.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory
@@ -208,11 +210,14 @@ ruleset targeting only the exact production ref with the `update` restriction
 and no bypass actors, checks the local, build, and remote commits, deploys only
 the configured account and Worker name, checks the protected head again, and
 requires the exact authorized commit in the live release marker before deleting
-the temporary ruleset and verifying its absence. On any failure after the
-ruleset is created, it remains active for operator diagnosis; it must not be
-manually removed until the deployment and marker are reconciled. Remove both
-one-time values afterward. Normal `npm run deploy` requires that verified
-serving baseline and never falls back to an unguarded first upload.
+the temporary ruleset and verifying its absence. A rerun discovers, validates,
+and reuses the exact retained ruleset rather than creating a second lock. A
+lost deletion response is resolved by reading the ruleset: a verified `404`
+completes release, while an unreadable result is reported as an unverified
+unlock state. On a provisioning failure before release, the retained ruleset
+must not be manually removed until the deployment and marker are reconciled.
+Remove both one-time values afterward. Normal `npm run deploy` requires that
+verified serving baseline and never falls back to an unguarded first upload.
 
 Workers Builds must expose `WORKERS_CI_COMMIT_SHA` during the build. Next
 embeds it as `FOUNDRY_RELEASE_COMMIT_SHA` in the release marker. A build without

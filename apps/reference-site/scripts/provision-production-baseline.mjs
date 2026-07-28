@@ -11,6 +11,7 @@ import { assertProductionDeploymentAbsent } from "./deploy-exact-production.mjs"
 import { assertExactProductionHead } from "./assert-exact-production-head.mjs";
 
 const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
+const branchPattern = /^[A-Za-z0-9._/-]+$/u;
 
 function waitForProcess(process) {
   return new Promise((resolve, reject) => {
@@ -62,6 +63,35 @@ function isExactProductionLockRuleset(ruleset, { name, qualifiedName }) {
   );
 }
 
+async function findProductionLockRuleset({
+  fetchImplementation,
+  headers,
+  name,
+  rulesetsUrl,
+}) {
+  const response = await fetchImplementation(
+    `${rulesetsUrl}?includes_parents=false&targets=branch&per_page=100`,
+    {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  const rulesets = await response.json().catch(() => null);
+  if (!response.ok || !Array.isArray(rulesets)) {
+    throw new Error("production_baseline_branch_lock_unavailable");
+  }
+  const matches = rulesets.filter((ruleset) => ruleset?.name === name);
+  if (
+    matches.length > 1 ||
+    (matches.length === 1 &&
+      (!Number.isSafeInteger(matches[0]?.id) || matches[0].id <= 0))
+  ) {
+    throw new Error("production_baseline_branch_lock_invalid");
+  }
+  return matches[0]?.id ?? null;
+}
+
 export async function acquireProductionBranchLock({
   environment = process.env,
   fetchImplementation = fetch,
@@ -77,7 +107,7 @@ export async function acquireProductionBranchLock({
     owner.length === 0 ||
     repository === undefined ||
     repository.length === 0 ||
-    branch.length === 0 ||
+    !branchPattern.test(branch) ||
     token === undefined ||
     token.length === 0
   ) {
@@ -89,35 +119,61 @@ export async function acquireProductionBranchLock({
   const rulesetsUrl = `https://api.github.com/repos/${encodeURIComponent(
     owner,
   )}/${encodeURIComponent(repository)}/rulesets`;
-  const createResponse = await fetchImplementation(rulesetsUrl, {
-    method: "POST",
+  let rulesetId = await findProductionLockRuleset({
+    fetchImplementation,
     headers,
-    body: JSON.stringify({
-      name,
-      target: "branch",
-      enforcement: "active",
-      bypass_actors: [],
-      conditions: {
-        ref_name: {
-          include: [qualifiedName],
-          exclude: [],
-        },
-      },
-      rules: [{ type: "update" }],
-    }),
-    signal: AbortSignal.timeout(30_000),
+    name,
+    rulesetsUrl,
   });
-  const created = await createResponse.json().catch(() => null);
-  if (
-    createResponse.status !== 201 ||
-    typeof created !== "object" ||
-    created === null ||
-    !Number.isSafeInteger(created.id) ||
-    created.id <= 0
-  ) {
-    throw new Error("production_baseline_branch_lock_unavailable");
+  if (rulesetId === null) {
+    let createFailed = false;
+    try {
+      const createResponse = await fetchImplementation(rulesetsUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name,
+          target: "branch",
+          enforcement: "active",
+          bypass_actors: [],
+          conditions: {
+            ref_name: {
+              include: [qualifiedName],
+              exclude: [],
+            },
+          },
+          rules: [{ type: "update" }],
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const created = await createResponse.json().catch(() => null);
+      if (
+        createResponse.status === 201 &&
+        typeof created === "object" &&
+        created !== null &&
+        Number.isSafeInteger(created.id) &&
+        created.id > 0
+      ) {
+        rulesetId = created.id;
+      } else {
+        createFailed = true;
+      }
+    } catch {
+      createFailed = true;
+    }
+    if (createFailed) {
+      rulesetId = await findProductionLockRuleset({
+        fetchImplementation,
+        headers,
+        name,
+        rulesetsUrl,
+      });
+    }
+    if (rulesetId === null) {
+      throw new Error("production_baseline_branch_lock_unavailable");
+    }
   }
-  const rulesetUrl = `${rulesetsUrl}/${created.id}`;
+  const rulesetUrl = `${rulesetsUrl}/${rulesetId}`;
   const verifyResponse = await fetchImplementation(rulesetUrl, {
     method: "GET",
     headers,
@@ -127,28 +183,42 @@ export async function acquireProductionBranchLock({
   if (
     !verifyResponse.ok ||
     !isExactProductionLockRuleset(verified, { name, qualifiedName }) ||
-    verified.id !== created.id
+    verified.id !== rulesetId
   ) {
     throw new Error("production_baseline_branch_lock_failed");
   }
 
   return async function releaseBranchLock() {
-    const deleteResponse = await fetchImplementation(rulesetUrl, {
-      method: "DELETE",
-      headers,
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (deleteResponse.status !== 204) {
+    let deleteWasAccepted = false;
+    try {
+      const deleteResponse = await fetchImplementation(rulesetUrl, {
+        method: "DELETE",
+        headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+      deleteWasAccepted = deleteResponse.status === 204;
+    } catch {
+      // A lost response can still mean GitHub deleted the ruleset.
+    }
+    let absentResponse;
+    try {
+      absentResponse = await fetchImplementation(rulesetUrl, {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (error) {
+      throw new Error("production_baseline_branch_unlock_unverified", {
+        cause: error,
+      });
+    }
+    if (absentResponse.status === 404) {
+      return;
+    }
+    if (deleteWasAccepted && absentResponse.ok) {
       throw new Error("production_baseline_branch_unlock_failed");
     }
-    const absentResponse = await fetchImplementation(rulesetUrl, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (absentResponse.status !== 404) {
-      throw new Error("production_baseline_branch_unlock_failed");
-    }
+    throw new Error("production_baseline_branch_unlock_unverified");
   };
 }
 
