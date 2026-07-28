@@ -9,7 +9,6 @@ import {
   referenceSiteDefinition,
   siteDefinitionSchema,
   type SiteDefinition,
-  upgradeStoredSiteDefinition,
 } from "./index";
 
 describe("reference Site Definition", () => {
@@ -47,32 +46,6 @@ describe("reference Site Definition", () => {
     expect(validate(referenceSiteDefinition), validate.errors?.toString()).toBe(
       true,
     );
-  });
-
-  it("upgrades stored 1.0 revisions with their deterministic legacy defaults", () => {
-    const legacy = structuredClone(
-      referenceSiteDefinition,
-    ) as unknown as Record<string, any>;
-    legacy.definitionVersion = "1.0.0";
-    legacy.schemaVersion = "1.0.0";
-    delete legacy.design;
-    legacy.home.sections.forEach(
-      (section: Record<string, unknown>) => delete section.variant,
-    );
-
-    const upgraded = upgradeStoredSiteDefinition(legacy);
-
-    expect(upgraded.definitionVersion).toBe("1.1.0");
-    expect(upgraded.schemaVersion).toBe("1.1.0");
-    expect(upgraded.design).toEqual(referenceSiteDefinition.design);
-    expect(
-      upgraded.home.sections.map(({ type, variant }) => [type, variant]),
-    ).toEqual([
-      ["hero", "editorial"],
-      ["services", "list"],
-      ["proof", "panel"],
-      ["callToAction", "moss"],
-    ]);
   });
 
   it.each([

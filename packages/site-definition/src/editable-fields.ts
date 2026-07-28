@@ -73,49 +73,59 @@ function fieldBinding({
 function editableFieldBindings(
   definition: SiteDefinition,
 ): EditableFieldBinding[] {
-  const fields: EditableFieldBinding[] = [
+  const designTokenBinding = ({
+    path,
+    label,
+    value,
+    values,
+    write,
+  }: Pick<EditableSiteField, "path" | "label" | "value" | "values"> & {
+    write(definition: MutableSiteDefinition, value: string): void;
+  }) =>
     fieldBinding({
+      path,
+      label,
+      group: "Design",
+      value,
+      multiline: false,
+      values,
+      write,
+    });
+  const fields: EditableFieldBinding[] = [
+    designTokenBinding({
       path: "design.typography.heading",
       label: designContract.tokens["typography.heading"].label,
-      group: "Design",
       value: definition.design.typography.heading,
-      multiline: false,
       values: designContract.tokens["typography.heading"].values,
       write: (draft, value) => {
         draft.design.typography.heading =
           value as SiteDefinition["design"]["typography"]["heading"];
       },
     }),
-    fieldBinding({
+    designTokenBinding({
       path: "design.colour.accent",
       label: designContract.tokens["colour.accent"].label,
-      group: "Design",
       value: definition.design.colour.accent,
-      multiline: false,
       values: designContract.tokens["colour.accent"].values,
       write: (draft, value) => {
         draft.design.colour.accent =
           value as SiteDefinition["design"]["colour"]["accent"];
       },
     }),
-    fieldBinding({
+    designTokenBinding({
       path: "design.spacing.section",
       label: designContract.tokens["spacing.section"].label,
-      group: "Design",
       value: definition.design.spacing.section,
-      multiline: false,
       values: designContract.tokens["spacing.section"].values,
       write: (draft, value) => {
         draft.design.spacing.section =
           value as SiteDefinition["design"]["spacing"]["section"];
       },
     }),
-    fieldBinding({
+    designTokenBinding({
       path: "design.layout.contentWidth",
       label: designContract.tokens["layout.contentWidth"].label,
-      group: "Design",
       value: definition.design.layout.contentWidth,
-      multiline: false,
       values: designContract.tokens["layout.contentWidth"].values,
       write: (draft, value) => {
         draft.design.layout.contentWidth =

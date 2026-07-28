@@ -16,7 +16,6 @@ import {
   withContentRevisionBookmark,
 } from "@foundry/application";
 import {
-  upgradeStoredSiteDefinition,
   type SiteDefinition,
   type SiteId,
   type StoredSiteDefinitionSchemaVersion,
@@ -75,7 +74,7 @@ function toRevision(row: RevisionRow): ContentRevision {
   return {
     workspaceId: row.workspace_id,
     revision: row.revision,
-    definition: upgradeStoredSiteDefinition(JSON.parse(row.definition_json)),
+    definition: JSON.parse(row.definition_json) as SiteDefinition,
     inputs: {
       contentHash: row.content_hash,
       schemaVersion: row.schema_version,

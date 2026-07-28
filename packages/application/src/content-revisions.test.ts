@@ -131,15 +131,30 @@ describe("content revision application", () => {
     expect(Object.isFrozen(saved)).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
+        schemaVersion: "1.1.0",
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
       }),
+    ).toBe(false);
+    expect(
+      isContentRevisionRenderableBy(
+        {
+          ...saved,
+          inputs: { ...saved.inputs, schemaVersion: "1.0.0" },
+        },
+        {
+          schemaVersion: "1.1.0",
+          rendererVersion: "renderer-commit-a",
+          productionBase: applicationInputs.productionBase,
+        },
+      ),
     ).toBe(false);
     await expect(application.queries.getRevision(0)).resolves.toEqual(
       expect.objectContaining({ definition: referenceSiteDefinition }),

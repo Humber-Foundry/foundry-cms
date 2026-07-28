@@ -113,54 +113,6 @@ export type SiteDefinition = Readonly<{
 
 export type StoredSiteDefinitionSchemaVersion = "1.0.0" | "1.1.0";
 
-export function upgradeStoredSiteDefinition(value: unknown): SiteDefinition {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("site_definition_invalid");
-  }
-  const candidate = structuredClone(value) as Record<string, any>;
-  if (
-    candidate.definitionVersion === "1.0.0" &&
-    candidate.schemaVersion === "1.0.0" &&
-    candidate.design === undefined &&
-    Array.isArray(candidate.home?.sections)
-  ) {
-    candidate.definitionVersion = "1.1.0";
-    candidate.schemaVersion = "1.1.0";
-    candidate.design = structuredClone(defaultSiteDesign);
-    for (const section of candidate.home.sections) {
-      if (
-        typeof section !== "object" ||
-        section === null ||
-        section.variant !== undefined
-      ) {
-        continue;
-      }
-      switch (section.type) {
-        case "hero":
-          section.variant = designContract.variants.hero.values[0];
-          break;
-        case "services":
-          section.variant = designContract.variants.services.values[0];
-          break;
-        case "proof":
-          section.variant = designContract.variants.proof.values[0];
-          break;
-        case "callToAction":
-          section.variant =
-            designContract.variants.callToAction.values[0];
-          break;
-      }
-    }
-  }
-  if (
-    candidate.definitionVersion !== "1.1.0" ||
-    candidate.schemaVersion !== "1.1.0"
-  ) {
-    throw new TypeError("site_definition_version_unsupported");
-  }
-  return candidate as SiteDefinition;
-}
-
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://foundrycms.dev/schemas/site-definition/1.1.0",

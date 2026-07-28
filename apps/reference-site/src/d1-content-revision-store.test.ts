@@ -145,7 +145,7 @@ describe("D1 content revision store", () => {
     ).toEqual({ count: 0 });
   });
 
-  it("restores stored 1.0 revisions with deterministic legacy design defaults", async () => {
+  it("preserves immutable stored 1.0 revisions without rewriting their fingerprinted definition", async () => {
     const legacy = structuredClone(
       referenceSiteDefinition,
     ) as unknown as Record<string, any>;
@@ -202,13 +202,10 @@ describe("D1 content revision store", () => {
     const restored = await store.getRevision(0);
 
     expect(restored?.inputs.schemaVersion).toBe("1.0.0");
-    expect(restored?.definition.schemaVersion).toBe("1.1.0");
-    expect(restored?.definition.design).toEqual(
-      referenceSiteDefinition.design,
-    );
+    expect(restored?.definition).toEqual(legacy);
     expect(
-      restored?.definition.home.sections.map(({ variant }) => variant),
-    ).toEqual(["editorial", "list", "panel", "moss"]);
+      (restored?.definition as unknown as Record<string, unknown>).design,
+    ).toBeUndefined();
   });
 
   it("allows explicit collaborators and rejects outsiders", async () => {

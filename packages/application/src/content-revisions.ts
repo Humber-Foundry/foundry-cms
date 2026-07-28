@@ -195,11 +195,13 @@ export function withContentRevisionBookmark(
 export function isContentRevisionRenderableBy(
   revision: ContentRevision,
   inputs: Readonly<{
+    schemaVersion: SiteDefinition["schemaVersion"];
     rendererVersion: string;
     productionBase: string;
   }>,
 ): boolean {
   return (
+    revision.inputs.schemaVersion === inputs.schemaVersion &&
     revision.inputs.rendererVersion === inputs.rendererVersion &&
     revision.inputs.productionBase === inputs.productionBase
   );
@@ -393,6 +395,7 @@ export function createContentRevisionApplication({
       async isRevisionCurrent(revision: ContentRevision) {
         await store.requireAccess(actorId);
         return isContentRevisionRenderableBy(revision, {
+          schemaVersion: siteDefinition.schemaVersion,
           rendererVersion,
           productionBase: await resolveProductionBase(),
         });
@@ -449,6 +452,7 @@ export function createContentRevisionApplication({
         if (replay !== null) {
           if (
             !isContentRevisionRenderableBy(replay, {
+              schemaVersion: siteDefinition.schemaVersion,
               rendererVersion,
               productionBase: currentProductionBase,
             })
@@ -470,6 +474,7 @@ export function createContentRevisionApplication({
         }
         if (
           !isContentRevisionRenderableBy(base, {
+            schemaVersion: siteDefinition.schemaVersion,
             rendererVersion,
             productionBase: currentProductionBase,
           })
