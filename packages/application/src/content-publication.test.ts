@@ -94,6 +94,10 @@ describe("content publication application", () => {
       isReleaseLive,
       createCommit,
       reconcileCommit: vi.fn().mockResolvedValue({ state: "not-found" }),
+      retryReference: vi.fn().mockResolvedValue({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      }),
       getDeploymentStatus,
       retryDeployment: vi.fn().mockResolvedValue({
         state: "requested",
@@ -713,6 +717,24 @@ describe("content publication application", () => {
       }),
     ).resolves.toEqual(failed);
     expect(createCommit).toHaveBeenCalledTimes(1);
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+        detail: null,
+      }),
+    );
+    expect(publisher.retryReference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publishId: publication.id,
+        candidateCommitSha: "c".repeat(40),
+        expectedHead: productionCommit,
+        path: "packages/site-definition/src/published-site.json",
+      }),
+    );
   });
 
   it.each([
@@ -1128,7 +1150,42 @@ describe("content publication application", () => {
     expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
-  it("preserves deployment retry authority after a newer draft revision", async () => {
+  it("rechecks the channel after claiming a deployment retry", async () => {
+    const { app, approval } = await approve();
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-channel-race",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    let channelHash = "channel-a";
+    vi.mocked(publisher.getChannelConfigurationHash).mockImplementation(
+      async () => channelHash,
+    );
+    let productionHeadReads = 0;
+    vi.mocked(publisher.getProductionHead).mockImplementation(async () => {
+      productionHeadReads += 1;
+      if (productionHeadReads === 1) {
+        channelHash = "channel-b";
+      }
+      return "c".repeat(40);
+    });
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "approval_stale",
+      }),
+    );
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
+  });
+
+  it("invalidates deployment retry authority after a newer draft revision", async () => {
     const { app, approval } = await approve();
     const publication = await app.commands.publish({
       workspaceId,
@@ -1151,14 +1208,8 @@ describe("content publication application", () => {
 
     await expect(
       app.commands.retryDeployment(publication.id, membershipId),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        status: "committed",
-        detail: "deployment_retry_requested",
-        commitSha: "c".repeat(40),
-      }),
-    );
-    expect(publisher.retryDeployment).toHaveBeenCalledWith("c".repeat(40));
+    ).rejects.toEqual(new ContentApprovalInvalidError("revision_not_current"));
+    expect(publisher.retryDeployment).not.toHaveBeenCalled();
   });
 
   it("reconciles an ambiguous deployment retry from the exact live marker", async () => {

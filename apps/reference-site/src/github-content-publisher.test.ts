@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { exportPKCS8, generateKeyPair } from "jose";
+import { createHash } from "node:crypto";
 
 import {
   createContentActorId,
@@ -366,9 +367,7 @@ describe("GitHub content publisher", () => {
     );
     await expect(
       changedBuildPublisher.getChannelConfigurationHash(),
-    ).resolves.not.toBe(
-      await publisher.getChannelConfigurationHash(),
-    );
+    ).rejects.toThrow("cloudflare_build_configuration_invalid");
   });
 
   it("retries a Cloudflare build for the exact committed revision", async () => {
@@ -518,6 +517,43 @@ describe("GitHub content publisher", () => {
     });
   });
 
+  it("classifies an explicit commit creation rejection as failed", async () => {
+    const expectedHead = "a".repeat(40);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(json({ message: "Validation Failed" }, 422));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"3".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish"),
+        revision: 3,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes: "{}\n",
+        message: "Publish",
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "failed",
+      detail: "git_operation_failed",
+    });
+  });
+
   it("preserves an exact candidate after another explicit ref rejection", async () => {
     const expectedHead = "a".repeat(40);
     const commitSha = "c".repeat(40);
@@ -556,6 +592,66 @@ describe("GitHub content publisher", () => {
       state: "unknown",
       detail: `git_reference_result_unknown:${commitSha}`,
     });
+  });
+
+  it("verifies and retries only the exact retained commit ref", async () => {
+    const expectedHead = "a".repeat(40);
+    const commitSha = "c".repeat(40);
+    const bytes = "{}\n";
+    const blobSha = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(bytes)}\0${bytes}`)
+      .digest("hex");
+    const publishId = createContentPublicationId(
+      `publish_${"5".repeat(32)}`,
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(
+        json({
+          message: `Publish\n\nFoundry-Publish-Id: ${publishId}`,
+          parents: [{ sha: expectedHead }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          status: "ahead",
+          ahead_by: 1,
+          total_commits: 1,
+          files: [
+            {
+              filename:
+                "packages/site-definition/src/published-site.json",
+              status: "modified",
+              sha: blobSha,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(json({ object: { sha: commitSha } }));
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+    });
+
+    await expect(
+      publisher.retryReference({
+        publishId,
+        candidateCommitSha: commitSha,
+        expectedHead,
+        path: "packages/site-definition/src/published-site.json",
+        bytes,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({ state: "committed", commitSha });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://api.github.com/repos/client-owner/client-site/git/refs/heads/main",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ sha: commitSha, force: false }),
+      }),
+    );
   });
 
   it("does not advance the production ref after the publication lease is lost", async () => {

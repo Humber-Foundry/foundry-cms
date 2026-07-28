@@ -43,6 +43,9 @@ const localPublisher: ContentPublisher = {
   async reconcileCommit() {
     return { state: "not-found" };
   },
+  async retryReference() {
+    throw new ContentRevisionConfigurationError();
+  },
   async getDeploymentStatus() {
     return "unknown";
   },

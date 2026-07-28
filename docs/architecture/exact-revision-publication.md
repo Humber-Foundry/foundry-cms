@@ -113,11 +113,18 @@ dispatching a second build. If a Worker disappears while dispatching, the
 durable attempt becomes uncertain after one minute and terminal after the
 same bounded 15-minute recovery window rather than holding the global
 publication slot indefinitely.
-The trigger's deploy command must re-read the protected production ref
-immediately before promotion and abort unless it still equals
-`WORKERS_CI_COMMIT_SHA`. This deployment-time fence prevents an exact retry of
-an older commit from rolling production back after an external merge. The
-build result is also rejected if Cloudflare reports a different commit hash.
+Any later edit invalidates that retry authority; the newer revision must be
+previewed and approved instead. A retained commit whose ref update was
+ambiguous can be retried through the same explicit action. Foundry verifies its
+publish trailer, sole expected parent, and sole exact content-file change
+before attempting the non-force ref compare-and-swap again.
+The only accepted trigger deploy command is `npm run deploy`. That shipped
+script builds, runs `scripts/assert-exact-production-head.mjs`, and only then
+promotes. The guard re-reads `origin`'s protected production ref immediately
+before promotion and aborts unless it still equals `WORKERS_CI_COMMIT_SHA`.
+This deployment-time fence prevents an exact retry of an older commit from
+rolling production back after an external merge. The build result is also
+rejected if Cloudflare reports a different commit hash.
 The dashboard backs active polling off from 2.5 to 30 seconds, continues after
 transient refresh failures, and keeps an active publication visible while the
 editor starts a new draft. GitHub installation tokens are reused in memory

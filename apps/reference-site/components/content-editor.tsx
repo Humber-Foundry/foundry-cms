@@ -63,6 +63,16 @@ function publicationIsActive(publication: PublicationRecord): boolean {
   return !["verified-live", "blocked", "failed"].includes(publication.status);
 }
 
+function publicationCanRetry(publication: PublicationRecord): boolean {
+  return (
+    publication.status === "failed" &&
+    (publication.commitSha !== null ||
+      /^git_reference_not_advanced:[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(
+        publication.detail ?? "",
+      ))
+  );
+}
+
 function changedFields(
   persisted: ReadonlyArray<EditableSiteField>,
   working: ReadonlyArray<EditableSiteField>,
@@ -475,11 +485,7 @@ export function ContentEditor({
       });
       setApprovalId(null);
       setPublication((current) =>
-        current !== null &&
-        (publicationIsActive(current) ||
-          (current.status === "failed" && current.commitSha !== null))
-          ? current
-          : null,
+        current !== null && publicationIsActive(current) ? current : null,
       );
       setPreviewedRevision(null);
       pendingApprovalAttempt.current = null;
@@ -619,7 +625,7 @@ export function ContentEditor({
   }
 
   async function retryDeployment() {
-    if (publication?.status !== "failed" || publication.commitSha === null) {
+    if (publication === null || !publicationCanRetry(publication)) {
       return;
     }
     pendingDeploymentRetryAttempt.current ??= {
@@ -898,8 +904,7 @@ export function ContentEditor({
               publicationBusy ||
               approvalId === null ||
               (publication !== null && publicationIsActive(publication)) ||
-              (publication?.status === "failed" &&
-                publication.commitSha !== null) ||
+              (publication !== null && publicationCanRetry(publication)) ||
               edits.length > 0 ||
               state.status !== "saved"
             }
@@ -909,15 +914,14 @@ export function ContentEditor({
               ? "Publishing…"
               : "Publish approved revision"}
           </button>
-          {publication?.status === "failed" &&
-          publication.commitSha !== null ? (
+          {publication !== null && publicationCanRetry(publication) ? (
             <button
               type="button"
               className="copy-button"
               disabled={publicationBusy}
               onClick={() => void retryDeployment()}
             >
-              {publicationBusy ? "Retrying…" : "Retry exact commit"}
+              {publicationBusy ? "Retrying…" : "Retry exact publication"}
             </button>
           ) : null}
         </div>

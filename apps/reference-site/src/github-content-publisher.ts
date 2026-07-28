@@ -200,6 +200,18 @@ async function sha256(value: string) {
     .join("");
 }
 
+async function gitBlobSha(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const header = new TextEncoder().encode(`blob ${bytes.byteLength}\0`);
+  const payload = new Uint8Array(header.byteLength + bytes.byteLength);
+  payload.set(header);
+  payload.set(bytes, header.byteLength);
+  const digest = await crypto.subtle.digest("SHA-1", payload);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function trailerMatches(message: unknown, publishId: ContentPublicationId) {
   return (
     typeof message === "string" &&
@@ -412,7 +424,8 @@ export function createGitHubContentPublisher({
       if (
         typeof trigger !== "object" ||
         trigger === null ||
-        trigger.external_script_id !== configuration.cloudflareScriptTag
+        trigger.external_script_id !== configuration.cloudflareScriptTag ||
+        trigger.deploy_command !== "npm run deploy"
       ) {
         throw new Error("cloudflare_build_configuration_invalid");
       }
@@ -531,6 +544,12 @@ export function createGitHubContentPublisher({
         }
         return { state: "committed", commitSha: commit.sha };
       } catch (error) {
+        if (
+          createdCommitSha === undefined &&
+          isExplicitHttpRejection(error)
+        ) {
+          return { state: "failed", detail: "git_operation_failed" };
+        }
         if (!gitSideEffectStarted) {
           return { state: "failed", detail: "git_operation_failed" };
         }
@@ -585,6 +604,92 @@ export function createGitHubContentPublisher({
           : { state: "not-found" };
       } catch {
         return { state: "unknown" };
+      }
+    },
+    async retryReference(input) {
+      let refUpdateStarted = false;
+      try {
+        if (!(await input.assertLease())) {
+          return { state: "blocked", detail: "publication_lease_lost" };
+        }
+        const token = await installationToken();
+        if ((await productionHead(token)) !== input.expectedHead) {
+          return { state: "blocked", detail: "production_head_moved" };
+        }
+        const [candidate, comparison, expectedBlobSha] = await Promise.all([
+          request(token, `/git/commits/${input.candidateCommitSha}`),
+          request(
+            token,
+            `/compare/${input.expectedHead}...${input.candidateCommitSha}`,
+          ),
+          gitBlobSha(input.bytes),
+        ]);
+        const parents = Array.isArray(candidate.parents)
+          ? candidate.parents
+          : [];
+        const files = Array.isArray(comparison.files) ? comparison.files : [];
+        if (
+          !trailerMatches(candidate.message, input.publishId) ||
+          parents.length !== 1 ||
+          parents[0]?.sha !== input.expectedHead ||
+          comparison.status !== "ahead" ||
+          comparison.ahead_by !== 1 ||
+          comparison.total_commits !== 1 ||
+          files.length !== 1 ||
+          files[0]?.filename !== input.path ||
+          files[0]?.status !== "modified" ||
+          files[0]?.sha !== expectedBlobSha
+        ) {
+          return {
+            state: "failed",
+            detail: "git_reference_candidate_invalid",
+          };
+        }
+        if (!(await input.assertLease())) {
+          return { state: "blocked", detail: "publication_lease_lost" };
+        }
+        refUpdateStarted = true;
+        try {
+          await request(
+            token,
+            `/git/refs/heads/${configuration.productionBranch
+              .split("/")
+              .map(encodeURIComponent)
+              .join("/")}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({
+                sha: input.candidateCommitSha,
+                force: false,
+              }),
+            },
+          );
+        } catch (error) {
+          if (isNonFastForwardRefError(error)) {
+            return { state: "blocked", detail: "production_head_moved" };
+          }
+          if (isExplicitHttpRejection(error)) {
+            return {
+              state: "failed",
+              detail: "git_reference_update_failed",
+            };
+          }
+          throw error;
+        }
+        return {
+          state: "committed",
+          commitSha: input.candidateCommitSha,
+        };
+      } catch {
+        return refUpdateStarted
+          ? {
+              state: "unknown",
+              detail: `git_reference_result_unknown:${input.candidateCommitSha}`,
+            }
+          : {
+              state: "failed",
+              detail: "git_reference_candidate_unverified",
+            };
       }
     },
     async getDeploymentStatus(commitSha, deploymentId) {

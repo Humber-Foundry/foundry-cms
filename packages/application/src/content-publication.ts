@@ -198,6 +198,14 @@ export type ContentPublisher = Readonly<{
     | Readonly<{ state: "committed"; commitSha: string }>
     | Readonly<{ state: "not-found" | "unknown" }>
   >;
+  retryReference(input: {
+    publishId: ContentPublicationId;
+    candidateCommitSha: string;
+    expectedHead: string;
+    path: typeof publishedSiteDefinitionPath;
+    bytes: string;
+    assertLease(): Promise<boolean>;
+  }): Promise<PublicationCommitResult>;
   getDeploymentStatus(
     commitSha: string,
     deploymentId?: string,
@@ -1240,34 +1248,160 @@ export function createContentPublicationApplication({
         if (
           publication !== null &&
           activeStatuses.has(publication.status) &&
-          publication.commitSha !== null &&
-          publication.detail?.startsWith("deployment_retry_")
+          (publication.detail?.startsWith("deployment_retry_") ||
+            reconciliationCandidate(publication.detail) !== undefined)
         ) {
           return publication;
         }
+        const candidateCommitSha =
+          publication === null
+            ? undefined
+            : reconciliationCandidate(publication.detail);
         if (
           publication === null ||
           publication.status !== "failed" ||
-          publication.commitSha === null
+          (publication.commitSha === null &&
+            candidateCommitSha === undefined)
         ) {
           throw new ContentPublicationValidationError(
             "deployment_retry_not_available",
           );
         }
-        const approval = await store.findApproval(publication.approvalId);
+        const { approval, revision } = await requireApproval(
+          publication.approvalId,
+          requestedBy,
+        );
         if (
-          approval === null ||
-          approval.fingerprint.value !== publication.fingerprint ||
-          approval.fingerprint.channelConfigurationHash !==
-            (await publisher.getChannelConfigurationHash()) ||
-          requestedBy.trim() === ""
+          approval.fingerprint.value !== publication.fingerprint
         ) {
           throw new ContentApprovalInvalidError("approval_stale");
+        }
+        if (
+          publication.commitSha === null &&
+          candidateCommitSha !== undefined
+        ) {
+          if (
+            (await publisher.getProductionHead()) !== publication.expectedHead
+          ) {
+            await store.invalidateApproval({
+              approvalId: approval.id,
+              invalidatedAt: now(),
+              reason: "production_changed",
+            });
+            throw new ContentPublicationValidationError(
+              "deployment_retry_head_moved",
+            );
+          }
+          if ((await store.findActivePublication()) !== null) {
+            throw new ContentPublicationValidationError(
+              "deployment_retry_in_progress",
+            );
+          }
+          const retryRequestedAt = now();
+          const leaseToken = crypto.randomUUID();
+          let dispatching: ContentPublication;
+          try {
+            dispatching = await store.updatePublication(
+              nextPublication(publication, {
+                status: "requested",
+                detail: `git_reference_result_unknown:${candidateCommitSha}`,
+                deploymentRequestedAt: retryRequestedAt,
+                leaseToken,
+                leaseExpiresAt: new Date(
+                  new Date(retryRequestedAt).getTime() +
+                    publicationLeaseDurationMs,
+                ).toISOString(),
+                updatedAt: retryRequestedAt,
+              }),
+              {
+                expectedStatus: "failed",
+                expectedUpdatedAt: publication.updatedAt,
+              },
+            );
+          } catch (error) {
+            if ((await store.findActivePublication()) !== null) {
+              throw new ContentPublicationValidationError(
+                "deployment_retry_in_progress",
+              );
+            }
+            throw error;
+          }
+          if (
+            dispatching.status !== "requested" ||
+            dispatching.leaseToken !== leaseToken
+          ) {
+            return dispatching;
+          }
+          const assertLease = async () => {
+            try {
+              await requireApproval(publication.approvalId, requestedBy);
+            } catch {
+              return false;
+            }
+            const leaseNow = now();
+            return store.renewPublicationLease({
+              publicationId: publication.id,
+              leaseToken,
+              now: leaseNow,
+              leaseExpiresAt: new Date(
+                new Date(leaseNow).getTime() + publicationLeaseDurationMs,
+              ).toISOString(),
+            });
+          };
+          const result = await publisher.retryReference({
+            publishId: publication.id,
+            candidateCommitSha,
+            expectedHead: publication.expectedHead,
+            path: publishedSiteDefinitionPath,
+            bytes: serializePublishedSiteDefinition(revision.definition),
+            assertLease,
+          });
+          const updatedAt = now();
+          if (
+            result.state === "blocked" &&
+            result.detail === "production_head_moved"
+          ) {
+            await store.invalidateApproval({
+              approvalId: approval.id,
+              invalidatedAt: updatedAt,
+              reason: "production_changed",
+            });
+          }
+          return store.updatePublication(
+            nextPublication(dispatching, {
+              status: result.state,
+              commitSha:
+                result.state === "committed"
+                  ? result.commitSha
+                  : null,
+              detail:
+                result.state === "committed"
+                  ? null
+                  : result.state === "unknown"
+                    ? `git_reference_result_unknown:${candidateCommitSha}`
+                    : result.detail === "git_reference_candidate_invalid"
+                      ? result.detail
+                      : `git_reference_not_advanced:${candidateCommitSha}`,
+              leaseToken: null,
+              leaseExpiresAt: null,
+              updatedAt,
+            }),
+            {
+              expectedLeaseToken: leaseToken,
+              expectedLeaseValidAt: updatedAt,
+            },
+          );
+        }
+        const commitSha = publication.commitSha;
+        if (commitSha === null) {
+          throw new ContentPublicationValidationError(
+            "deployment_retry_not_available",
+          );
         }
         try {
           if (
             await publisher.isReleaseLive({
-              commitSha: publication.commitSha,
+              commitSha,
               contentHash: approval.fingerprint.contentHash,
               schemaVersion: approval.fingerprint.schemaVersion,
             })
@@ -1287,7 +1421,7 @@ export function createContentPublicationApplication({
         } catch {
           // A missing marker still permits one explicitly requested retry.
         }
-        if ((await publisher.getProductionHead()) !== publication.commitSha) {
+        if ((await publisher.getProductionHead()) !== commitSha) {
           throw new ContentPublicationValidationError(
             "deployment_retry_head_moved",
           );
@@ -1330,7 +1464,23 @@ export function createContentPublicationApplication({
         ) {
           return dispatching;
         }
-        const result = await publisher.retryDeployment(publication.commitSha);
+        try {
+          await requireApproval(publication.approvalId, requestedBy);
+        } catch {
+          return store.updatePublication(
+            nextPublication(dispatching, {
+              status: "failed",
+              detail: "approval_stale",
+              deploymentId: null,
+              updatedAt: now(),
+            }),
+            {
+              expectedStatus: "committed",
+              expectedUpdatedAt: dispatching.updatedAt,
+            },
+          );
+        }
+        const result = await publisher.retryDeployment(commitSha);
         const status =
           result.state === "failed"
             ? "failed"
