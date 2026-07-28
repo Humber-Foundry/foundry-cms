@@ -8,6 +8,7 @@ import {
   pageCompositionContract,
   toPageComposition,
   toPageCompositionIdentity,
+  updateEditableSiteField,
   type EditableSiteField,
   type SiteDefinitionEdit,
 } from "@foundry/site-definition";
@@ -30,6 +31,7 @@ import {
   recoverStaleEdits,
   resolveStructuralRecovery,
   synchronizeStaleEdits,
+  upgradeLegacyRichTextRecoveryEdit,
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
@@ -121,6 +123,15 @@ export function ContentEditor({
     () => listEditableSiteFields(state.workingDefinition),
     [state.workingDefinition],
   );
+  const richTextPaths = useMemo(
+    () =>
+      new Set(
+        workingFields
+          .filter((field) => field.format === "richText")
+          .map((field) => field.path),
+      ),
+    [workingFields],
+  );
   const edits = useMemo(
     () => changedFields(persistedFields, workingFields),
     [persistedFields, workingFields],
@@ -206,9 +217,12 @@ export function ContentEditor({
         if (cancelled || record === null || record.edits.length === 0) {
           return;
         }
+        const recoveredEdits = record.edits.map((edit) =>
+          upgradeLegacyRichTextRecoveryEdit(edit, richTextPaths),
+        );
         recoveryPending.current = mergeRecoverySources(
           recoveryPending.current,
-          record.edits,
+          recoveredEdits,
         );
         if (initialStale) {
           setMessage(
@@ -230,7 +244,7 @@ export function ContentEditor({
         const conflicts: StaleRecoveryConflict[] = [];
         let recoveredCount = 0;
         let alreadyAppliedCount = 0;
-        for (const edit of record.edits) {
+        for (const edit of recoveredEdits) {
           const currentValue = currentValues.get(edit.path);
           if (currentValue === undefined) {
             conflicts.push({
@@ -272,11 +286,24 @@ export function ContentEditor({
               });
             }
           } else {
-            dispatch({ type: "edit", ...edit });
-            recoveredCount += 1;
+            if (
+              updateEditableSiteField(
+                state.workingDefinition,
+                edit,
+              ) === null
+            ) {
+              conflicts.push({
+                ...edit,
+                currentValue,
+                reason: "changed",
+              });
+            } else {
+              dispatch({ type: "edit", ...edit });
+              recoveredCount += 1;
+            }
           }
         }
-        if (alreadyAppliedCount === record.edits.length) {
+        if (alreadyAppliedCount === recoveredEdits.length) {
           recoveryPending.current = [];
           void persistence.clear();
           setMessage(
@@ -359,6 +386,7 @@ export function ContentEditor({
       staleRecovery.id,
       staleRecovery.sourceWorkspaceId,
       destinationValues,
+      richTextPaths,
     );
     if (!available) {
       setRecoverySourcesReady(true);
@@ -395,8 +423,19 @@ export function ContentEditor({
           nextConflicts.push(result.conflict);
         }
       } else {
-        applied.push(edit);
-        dispatch({ type: "edit", ...edit });
+        if (
+          updateEditableSiteField(state.workingDefinition, edit) ===
+          null
+        ) {
+          nextConflicts.push({
+            ...edit,
+            currentValue: destinationValues.get(edit.path) ?? null,
+            reason: "changed",
+          });
+        } else {
+          applied.push(edit);
+          dispatch({ type: "edit", ...edit });
+        }
       }
     }
     recoveryPending.current = mergeRecoverySources(
@@ -630,16 +669,20 @@ export function ContentEditor({
     onSave: () => void save(),
   });
 
-  function edit(edit: SiteDefinitionEdit) {
+  function edit(edit: SiteDefinitionEdit): boolean {
     if (
       saveInFlight.current ||
       !persistence.coordinated ||
       !persistence.ready
     ) {
-      return;
+      return false;
+    }
+    if (updateEditableSiteField(state.workingDefinition, edit) === null) {
+      return false;
     }
     persistence.discardAttempt();
     dispatch({ type: "edit", ...edit });
+    return true;
   }
 
   async function recoverEdits(destination: "current" | "fresh") {
@@ -745,7 +788,12 @@ export function ContentEditor({
           return;
         }
       } else {
-        edit(conflict);
+        if (!edit(conflict)) {
+          setMessage(
+            "That recovered value no longer fits the current Site Definition. It remains preserved until you keep the latest value.",
+          );
+          return;
+        }
       }
     }
     const remaining = recoveryConflicts.filter(

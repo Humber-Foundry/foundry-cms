@@ -1,4 +1,6 @@
 export const RICH_TEXT_VERSION = "1.0.0" as const;
+export const SAFE_RICH_TEXT_LINK_PATTERN =
+  "^(?:https?://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::[0-9]{1,4})?(?:[/?#][^\\u0000-\\u0020\\u007f\\\\]*)?|mailto:[^\\u0000-\\u0020\\u007f\\\\@]+@[^\\u0000-\\u0020\\u007f\\\\@]+\\.[^\\u0000-\\u0020\\u007f\\\\@]+|/(?!/)[^\\u0000-\\u0020\\u007f\\\\]*|#[A-Za-z][A-Za-z0-9_-]*)$";
 declare const serializedRichTextDocumentBrand: unique symbol;
 
 export type RichTextLinkMark = Readonly<{
@@ -83,6 +85,22 @@ export type RichTextDocument = Readonly<{
   children: ReadonlyArray<RichTextBlock>;
 }>;
 
+export function createRichTextDocumentFromPlainText(
+  value: string,
+): RichTextDocument {
+  return {
+    version: RICH_TEXT_VERSION,
+    type: "document",
+    children: value.split(/\r\n?|\n/u).map((text) => ({
+      type: "paragraph",
+      children:
+        text === ""
+          ? []
+          : [{ type: "text", text, marks: [] }],
+    })),
+  };
+}
+
 export type SerializedRichTextDocument = string & {
   readonly [serializedRichTextDocumentBrand]: "SerializedRichTextDocument";
 };
@@ -143,6 +161,11 @@ function assertOnlyKeys(
   }
 }
 
+const safeRichTextLinkPattern = new RegExp(
+  SAFE_RICH_TEXT_LINK_PATTERN,
+  "u",
+);
+
 function isSafeLink(href: string): boolean {
   if (
     href.length === 0 ||
@@ -152,23 +175,7 @@ function isSafeLink(href: string): boolean {
   ) {
     return false;
   }
-  if (href.startsWith("#")) {
-    return /^#[A-Za-z][A-Za-z0-9_-]*$/u.test(href);
-  }
-  if (href.startsWith("/")) {
-    return !href.startsWith("//") && !href.includes("\\");
-  }
-  try {
-    const parsed = new URL(href);
-    return (
-      parsed.protocol === "https:" ||
-      parsed.protocol === "http:" ||
-      (parsed.protocol === "mailto:" &&
-        /^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(parsed.pathname))
-    );
-  } catch {
-    return false;
-  }
+  return safeRichTextLinkPattern.test(href);
 }
 
 export function isSafeRichTextLink(href: string): boolean {

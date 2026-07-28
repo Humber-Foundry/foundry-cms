@@ -136,6 +136,14 @@ describe("reference Site Definition", () => {
         document.children[0].children[0].marks = ["italic", "bold"];
       },
     },
+    ...["https://?", "https://#", "http://[::1"].map((href) => ({
+      name: `a malformed absolute link (${href})`,
+      mutate(document: Record<string, any>) {
+        document.children[0].children[0].marks = [
+          { type: "link", href },
+        ];
+      },
+    })),
   ])(
     "keeps JSON Schema and runtime rich-text rejection aligned for $name",
     ({ mutate }) => {

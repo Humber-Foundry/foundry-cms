@@ -1,6 +1,8 @@
 import {
   applyPageComposition,
+  createRichTextDocumentFromPlainText,
   pageCompositionContract,
+  serializeRichTextDocument,
   type PageSection,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -24,6 +26,25 @@ export type StaleRecoveryPointer = Readonly<{
   id: string;
   sourceWorkspaceId: string;
 }>;
+
+export function upgradeLegacyRichTextRecoveryEdit(
+  edit: StaleRecoveryEdit,
+  richTextPaths: ReadonlySet<string>,
+): StaleRecoveryEdit {
+  if (!richTextPaths.has(edit.path) || edit.format !== undefined) {
+    return edit;
+  }
+  return {
+    path: edit.path,
+    format: "richText",
+    value: serializeRichTextDocument(
+      createRichTextDocumentFromPlainText(edit.value),
+    ),
+    baseValue: serializeRichTextDocument(
+      createRichTextDocumentFromPlainText(edit.baseValue),
+    ),
+  };
+}
 
 export function comparableRecoveryValue(edit: StaleRecoveryEdit): string {
   if (edit.path !== pageCompositionContract.slot.id) {
@@ -346,6 +367,7 @@ export function recoverStaleEdits(
   recoveryId: string,
   sourceWorkspaceId: string,
   destinationValues: ReadonlyMap<string, string>,
+  richTextPaths: ReadonlySet<string> = new Set(),
 ): Readonly<{
   available: boolean;
   recovered: StaleRecoveryEdit[];
@@ -363,7 +385,11 @@ export function recoverStaleEdits(
     }
     const recovered: StaleRecoveryEdit[] = [];
     const conflicts: StaleRecoveryConflict[] = [];
-    for (const edit of recovery.edits) {
+    for (const persistedEdit of recovery.edits) {
+      const edit = upgradeLegacyRichTextRecoveryEdit(
+        persistedEdit,
+        richTextPaths,
+      );
       const currentValue = destinationValues.get(edit.path);
       if (currentValue === undefined) {
         conflicts.push({ ...edit, currentValue: null, reason: "missing" });

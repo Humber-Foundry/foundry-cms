@@ -90,6 +90,45 @@ describe("stale edit recovery", () => {
     ).toEqual([richEdit]);
   });
 
+  it("upgrades a legacy plain CTA recovery record before comparison", () => {
+    const storage = createStorage();
+    const legacyEdit = {
+      path: "section_contact.body",
+      baseValue:
+        "Bring the rough notes, the constraints, and the thing that still feels unresolved. That is enough to start.",
+      value: "Recovered from a pre-rich-text browser outbox.",
+    };
+    preserveStaleEdits(
+      storage,
+      "legacy-rich-recovery",
+      "workspace-old",
+      [legacyEdit],
+    );
+    const currentBody = serializeRichTextDocument(
+      referenceSiteDefinition.home.sections[3]!.body,
+    );
+
+    const result = recoverStaleEdits(
+      storage,
+      "legacy-rich-recovery",
+      "workspace-old",
+      new Map([[legacyEdit.path, currentBody]]),
+      new Set([legacyEdit.path]),
+    );
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.recovered).toEqual([
+      {
+        path: legacyEdit.path,
+        format: "richText",
+        baseValue: currentBody,
+        value: expect.stringContaining(
+          "Recovered from a pre-rich-text browser outbox.",
+        ),
+      },
+    ]);
+  });
+
   it("compares a structural command by stable composition identity", () => {
     expect(
       comparableRecoveryValue({

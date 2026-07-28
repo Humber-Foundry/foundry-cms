@@ -1,5 +1,7 @@
 import {
+  createRichTextDocumentFromPlainText,
   RICH_TEXT_VERSION,
+  SAFE_RICH_TEXT_LINK_PATTERN,
   validateRichTextDocument,
   type RichTextDocument,
 } from "./rich-text";
@@ -113,20 +115,6 @@ function isSiteDefinitionRecord(
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function legacyTextToRichText(value: string): RichTextDocument {
-  return {
-    version: RICH_TEXT_VERSION,
-    type: "document",
-    children: value.split(/\r\n?|\n/u).map((text) => ({
-      type: "paragraph",
-      children:
-        text === ""
-          ? []
-          : [{ type: "text", text, marks: [] }],
-    })),
-  };
-}
-
 export function upgradeSiteDefinition(value: unknown): SiteDefinition {
   if (
     !isSiteDefinitionRecord(value) ||
@@ -176,7 +164,7 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
     }
     return {
       ...section,
-      body: legacyTextToRichText(section.body),
+      body: createRichTextDocumentFromPlainText(section.body),
     };
   });
   return upgraded as SiteDefinition;
@@ -450,8 +438,7 @@ export const siteDefinitionSchema = {
           type: "string",
           minLength: 1,
           maxLength: 2048,
-          pattern:
-            "^(?:https?://[^\\u0000-\\u0020\\u007f\\\\]+|mailto:[^\\u0000-\\u0020\\u007f\\\\@]+@[^\\u0000-\\u0020\\u007f\\\\@]+\\.[^\\u0000-\\u0020\\u007f\\\\@]+|/(?!/)[^\\u0000-\\u0020\\u007f\\\\]*|#[A-Za-z][A-Za-z0-9_-]*)$",
+          pattern: SAFE_RICH_TEXT_LINK_PATTERN,
         },
       },
     },

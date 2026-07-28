@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createUsePuck,
   Puck,
@@ -285,9 +285,17 @@ export function VisualComponentEditor({
     [definition],
   );
   const [message, setMessage] = useState("");
+  const active = useRef(true);
+
+  useEffect(
+    () => () => {
+      active.current = false;
+    },
+    [],
+  );
 
   function accept(data: Data<RegisteredComponents>) {
-    if (disabled) {
+    if (!active.current || disabled) {
       return;
     }
     const result = puckDataToDefinition(definition, data);

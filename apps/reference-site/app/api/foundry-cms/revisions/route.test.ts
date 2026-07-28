@@ -88,7 +88,7 @@ describe("content revision endpoint", () => {
     );
   }
 
-  it("saves through the authorized editor identity", async () => {
+  it("preserves an omitted legacy format for idempotent retry compatibility", async () => {
     mocks.save.mockResolvedValue({
       workspaceId: "workspace_home",
       revision: 3,
@@ -120,7 +120,6 @@ describe("content revision endpoint", () => {
       edits: [
         {
           path: "section_hero.title",
-          format: "plainText",
           value: "Changed",
         },
       ],

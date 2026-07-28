@@ -199,11 +199,18 @@ function parseSaveBody(
           "Rich text is invalid or contains unsupported or unsafe content.";
       }
     } else {
-      edits.push({
-        path: entry.path,
-        format: "plainText",
-        value: entry.value,
-      });
+      edits.push(
+        entry.format === "plainText"
+          ? {
+              path: entry.path,
+              format: "plainText",
+              value: entry.value,
+            }
+          : {
+              path: entry.path,
+              value: entry.value,
+            },
+      );
     }
   });
   if (Object.keys(errors).length > 0) {

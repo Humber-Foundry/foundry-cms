@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -32,6 +38,8 @@ export function RichTextEditor({
   onChange(value: SerializedRichTextDocument): void;
 }) {
   const [validationMessage, setValidationMessage] = useState("");
+  const latestValue = useRef(value);
+  latestValue.current = value;
   const document = useMemo(
     () => parseSerializedRichTextDocument(value),
     [value],
@@ -53,6 +61,9 @@ export function RichTextEditor({
         );
         return;
       }
+      if (serialized === latestValue.current) {
+        return;
+      }
       setValidationMessage("");
       onChange(serialized);
     },
@@ -62,7 +73,7 @@ export function RichTextEditor({
     editor?.setEditable(!disabled);
   }, [disabled, editor]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (editor === null) {
       return;
     }
