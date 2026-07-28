@@ -583,6 +583,9 @@ export function applySiteDefinitionEdits(
   );
   const errors = Object.create(null) as Record<string, string>;
   for (const edit of edits) {
+    const editedPostSlug = definition.blog.posts.some(
+      ({ id }) => edit.path === `${id}.slug`,
+    );
     if (!bindings.has(edit.path)) {
       errors[edit.path] =
         `This field is not in Site Definition ${definition.definitionVersion}.`;
@@ -595,6 +598,13 @@ export function applySiteDefinitionEdits(
       edit.value.trim() === ""
     ) {
       errors[edit.path] = "Enter at least one visible character.";
+    } else if (
+      editedPostSlug &&
+      (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(edit.value) ||
+        edit.value.length > 120)
+    ) {
+      errors[edit.path] =
+        "Use at most 120 lowercase letters, numbers, and single hyphens.";
     } else if (bindings.get(edit.path)!.field.format === "richText") {
       try {
         const document = parseSerializedRichTextDocument(edit.value);

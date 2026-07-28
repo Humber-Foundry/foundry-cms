@@ -468,8 +468,12 @@ describe("reference Site Definition", () => {
   });
 
   it("rejects a duplicate post slug through the generic field editor", () => {
-    const firstPostId = createBlogPostId("post_first");
-    const secondPostId = createBlogPostId("post_second");
+    const firstPostId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000005",
+    );
+    const secondPostId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000006",
+    );
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
       blog: {
@@ -478,6 +482,7 @@ describe("reference Site Definition", () => {
           {
             id: firstPostId,
             revision: 1,
+            collectionState: "active",
             visibility: "public",
             slug: "first",
             title: "First",
@@ -488,6 +493,7 @@ describe("reference Site Definition", () => {
           {
             id: secondPostId,
             revision: 1,
+            collectionState: "active",
             visibility: "public",
             slug: "second",
             title: "Second",
@@ -510,6 +516,17 @@ describe("reference Site Definition", () => {
           "Choose a URL slug that is unique within this site.",
         [`${secondPostId}.slug`]:
           "Choose a URL slug that is unique within this site.",
+      },
+    });
+    expect(
+      applySiteDefinitionEdits(definition, [
+        { path: `${secondPostId}.slug`, value: "Not Valid" },
+      ]),
+    ).toEqual({
+      ok: false,
+      errors: {
+        [`${secondPostId}.slug`]:
+          "Use at most 120 lowercase letters, numbers, and single hyphens.",
       },
     });
   });

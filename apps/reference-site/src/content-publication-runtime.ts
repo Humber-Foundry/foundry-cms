@@ -12,13 +12,17 @@ import {
   type ContentPublisher,
   type ContentWorkspaceId,
 } from "@foundry/application";
+import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
   loadContentRevisionApplication,
   loadRestoredContentRevisionApplication,
 } from "./content-revision-runtime";
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
-import { listContentRevisionContributors } from "./d1-content-revision-store";
+import {
+  listContentRevisionContributors,
+  reconcileVerifiedBlogPostPublication,
+} from "./d1-content-revision-store";
 import {
   createGitHubContentPublisher,
   readGitHubContentPublisherConfiguration,
@@ -138,6 +142,13 @@ export async function loadContentPublicationApplication(
         ),
     },
     publisher,
+    onVerifiedLive: (publication, revision) =>
+      reconcileVerifiedBlogPostPublication(
+        environment.FOUNDRY_DB!,
+        referenceSiteDefinition.site.id,
+        revision.definition,
+        publication.updatedAt,
+      ),
     publishedRevisions: publisher,
     restoreSourcePublication,
     draftRestorer: {

@@ -190,11 +190,16 @@ describe("content publication application", () => {
     ).resolves.toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  function application() {
+  function application(
+    onVerifiedLive?: Parameters<
+      typeof createContentPublicationApplication
+    >[0]["onVerifiedLive"],
+  ) {
     return createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),
       revisions: repository,
       publisher,
+      onVerifiedLive,
       now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
     });
   }
@@ -238,6 +243,9 @@ describe("content publication application", () => {
   });
 
   it("publishes a post through the exact site fingerprint and verified-live pipeline", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000009",
+    );
     createCommit
       .mockResolvedValueOnce({
         state: "committed",
@@ -255,7 +263,7 @@ describe("content publication application", () => {
         schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 1,
         post: {
-          id: createBlogPostId("post_exact_pipeline"),
+          id: postId,
           slug: "exact-pipeline",
           title: "Exact pipeline",
           excerpt: "Published through the site pipeline.",
@@ -269,7 +277,8 @@ describe("content publication application", () => {
       });
     getDeploymentStatus.mockResolvedValue("deployed");
     isReleaseLive.mockResolvedValue(true);
-    const app = application();
+    const onVerifiedLive = vi.fn();
+    const app = application(onVerifiedLive);
     const approval = await app.commands.approve({
       workspaceId,
       revision: savedPost.revision,
@@ -282,6 +291,7 @@ describe("content publication application", () => {
       requestedBy: membershipId,
       idempotencyKey: "publish-exact-pipeline-post",
     });
+    expect(onVerifiedLive).not.toHaveBeenCalled();
     expect(publication).toMatchObject({
       approvalId: approval.id,
       fingerprint: approval.fingerprint.value,
@@ -292,19 +302,30 @@ describe("content publication application", () => {
         artifactHash: approval.fingerprint.artifactHash,
         artifacts: expect.arrayContaining([
           expect.objectContaining({
-            path: "content/rich-text/post_exact_pipeline/body.md",
+            path: `content/rich-text/${postId}/body.md`,
             bytes: "Exact post body\\.\n",
           }),
         ]),
       }),
     );
     await app.commands.refresh(publication.id);
-    await app.commands.refresh(publication.id);
     await expect(app.queries.get(publication.id)).resolves.toMatchObject({
       status: "verified-live",
       commitSha: "c".repeat(40),
       fingerprint: approval.fingerprint.value,
     });
+    expect(onVerifiedLive).toHaveBeenCalledTimes(1);
+    expect(onVerifiedLive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: publication.id,
+        status: "verified-live",
+        revision: savedPost.revision,
+      }),
+      expect.objectContaining({
+        revision: savedPost.revision,
+        definition: savedPost.definition,
+      }),
+    );
 
     const removalWorkspaceId = createContentWorkspaceId(
       "workspace_unpublish_post",
@@ -333,7 +354,7 @@ describe("content publication application", () => {
         siteId: referenceSiteDefinition.site.id,
         schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
-        postId: createBlogPostId("post_exact_pipeline"),
+        postId,
         idempotencyKey: "create-unpublish-revision",
       });
     vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
@@ -374,19 +395,12 @@ describe("content publication application", () => {
         path === "packages/site-definition/src/published-site.json",
     );
     expect(JSON.parse(removalJson?.bytes ?? "{}")).toMatchObject({
-      blog: {
-        posts: [
-          expect.objectContaining({
-            id: "post_exact_pipeline",
-            visibility: "unpublished",
-          }),
-        ],
-      },
+      blog: { posts: [] },
     });
     expect(removalCommit?.artifacts).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "content/rich-text/post_exact_pipeline/body.md",
+          path: `content/rich-text/${postId}/body.md`,
         }),
       ]),
     );
@@ -395,13 +409,44 @@ describe("content publication application", () => {
         blog: {
           posts: [
             expect.objectContaining({
-              id: "post_exact_pipeline",
+              id: postId,
               revision: 1,
             }),
           ],
         },
       },
     });
+  });
+
+  it("retries verified-live reconciliation after the durable callback fails", async () => {
+    getDeploymentStatus.mockResolvedValue("deployed");
+    const onVerifiedLive = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("aggregate_write_unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const { app, approval } = await approve(application(onVerifiedLive));
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-with-reconciliation-retry",
+    });
+
+    await expect(app.commands.refresh(publication.id)).rejects.toThrow(
+      "aggregate_write_unavailable",
+    );
+    await expect(app.queries.get(publication.id)).resolves.toMatchObject({
+      status: "verified-live",
+    });
+
+    await expect(app.commands.refresh(publication.id)).resolves.toMatchObject({
+      status: "verified-live",
+    });
+    expect(onVerifiedLive).toHaveBeenCalledTimes(2);
+    expect(onVerifiedLive).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "verified-live" }),
+      expect.objectContaining({ revision: 1 }),
+    );
   });
 
   it("rejects a stored legacy schema before creating a publication fingerprint", async () => {

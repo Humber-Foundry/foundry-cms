@@ -456,12 +456,21 @@ export function serializePublishedSiteDefinition(
 export function serializeContentPublicationArtifacts(
   definition: SiteDefinition,
 ): ReadonlyArray<ContentPublicationArtifact> {
+  const publicDefinition: SiteDefinition = {
+    ...definition,
+    blog: {
+      ...definition.blog,
+      posts: definition.blog.posts.filter(
+        ({ visibility }) => visibility === "public",
+      ),
+    },
+  };
   return [
     {
       path: publishedSiteDefinitionPath,
-      bytes: serializePublishedSiteDefinition(definition),
+      bytes: serializePublishedSiteDefinition(publicDefinition),
     },
-    ...serializeSiteDefinitionRichTextForPublication(definition).map(
+    ...serializeSiteDefinitionRichTextForPublication(publicDefinition).map(
       ({ filePath, markdown }) => ({
         path: filePath,
         bytes: markdown,
@@ -936,6 +945,7 @@ export function createContentPublicationApplication({
   publishedRevisions,
   draftRestorer,
   restoreSourcePublication,
+  onVerifiedLive,
   now = () => new Date().toISOString(),
 }: {
   store: ContentPublicationStore;
@@ -944,8 +954,46 @@ export function createContentPublicationApplication({
   publishedRevisions?: ContentPublishedRevisionReader;
   draftRestorer?: ContentPublicationDraftRestorer;
   restoreSourcePublication?: ContentPublication;
+  onVerifiedLive?: (
+    publication: ContentPublication,
+    revision: ContentRevision,
+  ) => Promise<void>;
   now?: () => string;
 }) {
+  async function reconcileVerifiedPublication(
+    publication: ContentPublication,
+  ) {
+    if (
+      onVerifiedLive === undefined ||
+      publication.status !== "verified-live"
+    ) {
+      return;
+    }
+    const revision = await revisions.getRevision(
+      publication.workspaceId,
+      publication.revision,
+    );
+    if (revision === null) {
+      throw new Error("verified_publication_revision_missing");
+    }
+    await onVerifiedLive(publication, revision);
+  }
+
+  if (onVerifiedLive !== undefined) {
+    const durableStore = store;
+    store = {
+      ...durableStore,
+      async updatePublication(publication, options) {
+        const updated = await durableStore.updatePublication(
+          publication,
+          options,
+        );
+        await reconcileVerifiedPublication(updated);
+        return updated;
+      },
+    };
+  }
+
   async function requireBoundRevision(
     workspaceId: ContentWorkspaceId,
     revisionNumber: number,
@@ -1223,7 +1271,12 @@ export function createContentPublicationApplication({
       return null;
     }
     if (
-      publication.status === "verified-live" ||
+      publication.status === "verified-live"
+    ) {
+      await reconcileVerifiedPublication(publication);
+      return publication;
+    }
+    if (
       publication.status === "failed" ||
       publication.status === "blocked"
     ) {

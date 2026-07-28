@@ -54,8 +54,9 @@ rebased.
 
 Site Definition 1.3 makes blog posts part of that same artifact set rather than
 introducing a parallel publishing path. Each post has a site-scoped stable ID,
-an incrementing post revision, slug, title, excerpt, SEO metadata, and canonical
-rich-text body. Its body is serialized to
+an immutable UUID identity, an incrementing post revision, active
+collection state, target visibility, slug, title, excerpt, SEO metadata, and
+canonical rich-text body. Its body is serialized to
 `content/rich-text/<post-id>/body.md`; all other post fields remain in the
 canonical Site Definition JSON. Creating or editing a post therefore creates
 an ordinary immutable content-workspace revision. The exact post preview uses
@@ -63,17 +64,25 @@ that saved revision, and approval, Git compare-and-swap, Cloudflare deployment,
 and two-read live-marker verification use the existing publication
 transaction described here.
 
+Post identity and revision concurrency are site-global even though editing
+occurs in workspaces. D1 stores one `blog_posts` aggregate head per site/post,
+plus immutable UUID-keyed `blog_post_revisions`. Every create or successor
+revision compares the aggregate head in the same atomic batch as the content
+revision and receipt. Two workspaces may start from the same post revision, but
+only one can advance it; the loser fails closed and cannot acknowledge its
+definition.
+
 Unpublishing is a guarded successor publication, not deletion of history. The
-command is accepted only when the post exists as public content in revision 0,
-the immutable published base of that workspace. It creates a new immutable
-post revision whose target visibility is `unpublished`, retaining the stable
-identity and editable content in canonical JSON. Public renderers and managed
-rich-text serialization include only records with `public` target visibility,
-so after human preview and approval the same exact-revision transaction removes
-the route and its obsolete Markdown while preserving the post aggregate. The
-production-base/current-revision pair distinguishes never-published, live,
-live-with-draft, unpublishing, and unpublished states without treating a failed
-deployment as a successful transition.
+command is accepted only when the aggregate has a verified live revision. It
+creates a new immutable post revision whose target visibility is
+`unpublished`, retaining the stable identity and editable content in D1 and
+the workspace history. Public artifact serialization omits non-public records
+from both canonical JSON and managed Markdown, so the approved successor
+removes the route and public payload. The aggregate live pointer is changed
+only by a callback after the exact publication reaches `verified-live`; a
+failed callback is retried when the durable verified publication is refreshed.
+Republishing creates another attributed successor revision and runs through
+the same preview, approval, commit, deployment, and verification path.
 
 Accepted and rejected blog commands are recorded in an append-only D1
 transition audit with the authenticated actor, workspace, post target, request

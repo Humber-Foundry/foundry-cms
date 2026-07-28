@@ -84,7 +84,9 @@ describe("content revision application", () => {
       ...applicationInputs,
     });
     await createWorkspace(application, "create-blog-workspace-0001");
-    const postId = createBlogPostId("post_first");
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000001",
+    );
     const created = await application.commands.createBlogPost({
       actorId: editorActorId,
       ...commandInputs,
@@ -168,7 +170,9 @@ describe("content revision application", () => {
   });
 
   it("unpublishes only a post present in the immutable published base", async () => {
-    const postId = createBlogPostId("post_live");
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000002",
+    );
     const liveDefinition = {
       ...referenceSiteDefinition,
       blog: {
@@ -177,6 +181,7 @@ describe("content revision application", () => {
           {
             id: postId,
             revision: 1,
+            collectionState: "active" as const,
             visibility: "public" as const,
             slug: "live-post",
             title: "Live post",
@@ -236,6 +241,20 @@ describe("content revision application", () => {
     ).rejects.toMatchObject({
       fields: { blog: "post_already_exists" },
     });
+    const republished = await application.commands.republishBlogPost({
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: liveDefinition.site.id,
+      baseRevision: 1,
+      postId,
+      idempotencyKey: "republish-unpublished-blog-post",
+    });
+    expect(republished.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 3,
+      collectionState: "active",
+      visibility: "public",
+    });
   });
 
   it("replays blog commands and fails closed for concurrency, invalid schemas, and cross-site IDs", async () => {
@@ -251,7 +270,9 @@ describe("content revision application", () => {
       siteId: referenceSiteDefinition.site.id,
       baseRevision: 0,
       post: {
-        id: createBlogPostId("post_concurrent"),
+        id: createBlogPostId(
+          "00000000-0000-4000-8000-000000000003",
+        ),
         slug: "concurrent-post",
         title: "Concurrent post",
         excerpt: "A concurrency test.",
@@ -282,7 +303,12 @@ describe("content revision application", () => {
         siteId: createSiteId("site_other"),
         baseRevision: 1,
         idempotencyKey: "create-blog-post-0004",
-        post: { ...command.post, id: createBlogPostId("post_other") },
+        post: {
+          ...command.post,
+          id: createBlogPostId(
+            "00000000-0000-4000-8000-000000000004",
+          ),
+        },
       }),
     ).rejects.toMatchObject({
       fields: { blog: "cross_site_identifier" },

@@ -16,8 +16,11 @@ import { BlogPostRenderer } from "./blog-post-renderer";
 describe("SiteRenderer controlled design projection", () => {
   it("links and renders schema-bound public blog posts", () => {
     const postDefinition = {
-      id: createBlogPostId("post_renderer"),
+      id: createBlogPostId(
+        "00000000-0000-4000-8000-000000000007",
+      ),
       revision: 1,
+      collectionState: "active" as const,
       visibility: "public" as const,
       slug: "renderer-post",
       title: "Renderer post",

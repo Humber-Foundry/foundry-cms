@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   createBlogPost: vi.fn(),
   editBlogPost: vi.fn(),
   unpublishBlogPost: vi.fn(),
+  republishBlogPost: vi.fn(),
   recordRejectedBlogPostCommand: vi.fn(),
   loadApplication: vi.fn(),
   requireExistingAccess: vi.fn(),
@@ -61,6 +62,8 @@ vi.mock("../../../../src/preview-capability-runtime", () => ({
 
 import { GET, POST } from "./route";
 
+const routePostId = "00000000-0000-4000-8000-00000000000a";
+
 describe("content revision endpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -97,6 +100,7 @@ describe("content revision endpoint", () => {
         createBlogPost: mocks.createBlogPost,
         editBlogPost: mocks.editBlogPost,
         unpublishBlogPost: mocks.unpublishBlogPost,
+        republishBlogPost: mocks.republishBlogPost,
         recordRejectedBlogPostCommand:
           mocks.recordRejectedBlogPostCommand,
       },
@@ -192,8 +196,9 @@ describe("content revision endpoint", () => {
           id: "blog",
           posts: [
             {
-              id: "post_route",
+              id: routePostId,
               revision: 1,
+              collectionState: "active",
               visibility: "public",
               slug: "route-post",
               title: "Route post",
@@ -221,7 +226,7 @@ describe("content revision endpoint", () => {
         schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
         post: {
-          id: "post_route",
+          id: routePostId,
           slug: "route-post",
           title: "Route post",
           excerpt: "Created through the route.",
@@ -243,7 +248,7 @@ describe("content revision endpoint", () => {
         baseRevision: 0,
         idempotencyKey: "create-blog-route-0001",
         post: expect.objectContaining({
-          id: "post_route",
+          id: routePostId,
           slug: "route-post",
           body,
         }),
@@ -286,6 +291,39 @@ describe("content revision endpoint", () => {
       requestId: "malformed-blog-route-0001",
     });
     expect(mocks.createBlogPost).not.toHaveBeenCalled();
+  });
+
+  it("attributes malformed blog commands to an accessible submitted workspace", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "edit_blog_post",
+          workspaceId: "workspace_collaborator",
+          schemaVersion: referenceSiteDefinition.schemaVersion,
+          baseRevision: 1,
+          postId: routePostId,
+          post: { slug: "bad slug" },
+        },
+        "malformed-blog-route-0002",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireExistingAccess).toHaveBeenCalledWith(
+      "workspace_collaborator",
+      "membership-editor",
+    );
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_collaborator",
+      "membership-editor",
+    );
+    expect(mocks.recordRejectedBlogPostCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postId: routePostId,
+        commandType: "blog.post.edit",
+        requestId: "malformed-blog-route-0002",
+      }),
+    );
   });
 
   it("preserves a canonical rich-text edit at the API boundary", async () => {

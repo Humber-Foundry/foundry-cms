@@ -66,7 +66,7 @@ type BlogMutationBody =
       baseRevision: number;
       post: Omit<
         SiteDefinition["blog"]["posts"][number],
-        "revision" | "visibility"
+        "revision" | "collectionState" | "visibility"
       >;
     }>
   | Readonly<{
@@ -77,11 +77,18 @@ type BlogMutationBody =
       postId: SiteDefinition["blog"]["posts"][number]["id"];
       post: Omit<
         SiteDefinition["blog"]["posts"][number],
-        "id" | "revision" | "visibility"
+        "id" | "revision" | "collectionState" | "visibility"
       >;
     }>
   | Readonly<{
       operation: "unpublish_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      postId: SiteDefinition["blog"]["posts"][number]["id"];
+    }>
+  | Readonly<{
+      operation: "republish_blog_post";
       workspaceId: ReturnType<typeof createContentWorkspaceId>;
       schemaVersion: SiteDefinition["schemaVersion"];
       baseRevision: number;
@@ -96,7 +103,8 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
   if (
     candidate.operation !== "create_blog_post" &&
     candidate.operation !== "edit_blog_post" &&
-    candidate.operation !== "unpublish_blog_post"
+    candidate.operation !== "unpublish_blog_post" &&
+    candidate.operation !== "republish_blog_post"
   ) {
     return null;
   }
@@ -113,7 +121,10 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
     schemaVersion: candidate.schemaVersion,
     baseRevision: candidate.baseRevision as number,
   };
-  if (candidate.operation === "unpublish_blog_post") {
+  if (
+    candidate.operation === "unpublish_blog_post" ||
+    candidate.operation === "republish_blog_post"
+  ) {
     if (typeof candidate.postId !== "string") {
       throw new TypeError("blog_command_invalid");
     }
@@ -423,7 +434,8 @@ export async function POST(request: Request) {
         "operation" in submitted &&
         (submitted.operation === "create_blog_post" ||
           submitted.operation === "edit_blog_post" ||
-          submitted.operation === "unpublish_blog_post")
+          submitted.operation === "unpublish_blog_post" ||
+          submitted.operation === "republish_blog_post")
       ) {
         const candidate = submitted as Record<string, unknown>;
         const rawPostId =
@@ -440,7 +452,26 @@ export async function POST(request: Request) {
             // A malformed target is represented by the null audit target.
           }
         }
-        const workspaceId = await contentWorkspaceIdForActor(actorId);
+        let workspaceId = await contentWorkspaceIdForActor(actorId);
+        if (typeof candidate.workspaceId === "string") {
+          try {
+            const requestedWorkspaceId = createContentWorkspaceId(
+              candidate.workspaceId,
+            );
+            await requireExistingContentWorkspaceAccess(
+              requestedWorkspaceId,
+              actorId,
+            );
+            workspaceId = requestedWorkspaceId;
+          } catch (workspaceError) {
+            if (
+              !(workspaceError instanceof TypeError) &&
+              !(workspaceError instanceof ContentWorkspaceAccessError)
+            ) {
+              throw workspaceError;
+            }
+          }
+        }
         const application = await loadContentRevisionApplication(
           workspaceId,
           actorId,
@@ -450,10 +481,12 @@ export async function POST(request: Request) {
           postId,
           commandType:
             candidate.operation === "create_blog_post"
-              ? "blog.post.create"
-              : candidate.operation === "edit_blog_post"
-                ? "blog.post.edit"
-                : "blog.post.unpublish",
+                ? "blog.post.create"
+                : candidate.operation === "edit_blog_post"
+                  ? "blog.post.edit"
+                  : candidate.operation === "unpublish_blog_post"
+                    ? "blog.post.unpublish"
+                    : "blog.post.republish",
           reasonCode: "blog_command_invalid",
           requestId: idempotencyKey,
         });
@@ -486,10 +519,15 @@ export async function POST(request: Request) {
                 postId: blogMutation.postId,
                 post: blogMutation.post,
               })
-            : await application.commands.unpublishBlogPost({
-                ...command,
-                postId: blogMutation.postId,
-              });
+            : blogMutation.operation === "unpublish_blog_post"
+              ? await application.commands.unpublishBlogPost({
+                  ...command,
+                  postId: blogMutation.postId,
+                })
+              : await application.commands.republishBlogPost({
+                  ...command,
+                  postId: blogMutation.postId,
+                });
       const selectedPost =
         blogMutation.operation === "unpublish_blog_post"
           ? undefined

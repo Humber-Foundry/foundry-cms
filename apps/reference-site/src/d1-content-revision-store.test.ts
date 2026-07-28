@@ -21,6 +21,7 @@ import {
 import {
   createD1ContentRevisionStore,
   findLatestContentWorkspaceIdForActor,
+  reconcileVerifiedBlogPostPublication,
 } from "./d1-content-revision-store";
 
 describe("D1 content revision store", () => {
@@ -159,7 +160,9 @@ describe("D1 content revision store", () => {
   it("persists blog revisions, transition audit, and live unpublish history in D1", async () => {
     const application = createApplication();
     await createWorkspace(application, "d1-blog-create-workspace");
-    const postId = createBlogPostId("post_durable");
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000008",
+    );
     await application.commands.createBlogPost({
       actorId: editorActorId,
       workspaceId,
@@ -333,72 +336,74 @@ describe("D1 content revision store", () => {
       revision: 2,
     });
 
-    const liveWorkspaceId = createContentWorkspaceId(
-      "workspace_live_blog",
+    const current = await reloaded.queries.getCurrent();
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      current.definition,
+      "2026-07-27T12:30:00.000Z",
     );
-    const liveDefinition = {
-      ...referenceSiteDefinition,
-      blog: {
-        ...referenceSiteDefinition.blog,
-        posts: [
-          {
-            id: postId,
-            revision: 1,
-            visibility: "public" as const,
-            slug: "durable-post",
-            title: "Durable post",
-            excerpt: "Persisted in D1.",
-            seo: {
-              title: "Durable post | Foundry",
-              description: "A post whose immutable history is persisted in D1.",
-            },
-            body: createRichTextDocumentFromPlainText("Durable body."),
-          },
-        ],
-      },
-    };
-    const liveApplication = createApplication(
-      editorActorId,
-      liveWorkspaceId,
-      "2026-07-27T13:00:00.000Z",
-      liveDefinition,
-    );
-    await liveApplication.commands.create({
+
+    await reloaded.commands.unpublishBlogPost({
       actorId: editorActorId,
-      workspaceId: liveWorkspaceId,
-      idempotencyKey: "d1-live-blog-create-workspace",
-    });
-    await liveApplication.commands.unpublishBlogPost({
-      actorId: editorActorId,
-      workspaceId: liveWorkspaceId,
-      siteId: liveDefinition.site.id,
-      schemaVersion: liveDefinition.schemaVersion,
-      baseRevision: 0,
+      workspaceId,
+      siteId: referenceSiteDefinition.site.id,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 2,
       postId,
       idempotencyKey: "d1-live-blog-unpublish-post",
     });
 
-    await expect(liveApplication.queries.getCurrent()).resolves.toMatchObject({
-      revision: 1,
+    await expect(reloaded.queries.getCurrent()).resolves.toMatchObject({
+      revision: 3,
       definition: {
         blog: {
           posts: [
             expect.objectContaining({
               id: postId,
-              revision: 2,
+              revision: 3,
               visibility: "unpublished",
             }),
           ],
         },
       },
     });
-    await expect(liveApplication.queries.getRevision(0)).resolves.toMatchObject({
+    await expect(reloaded.queries.getRevision(2)).resolves.toMatchObject({
       definition: {
         blog: {
-          posts: [expect.objectContaining({ id: postId, revision: 1 })],
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              revision: 2,
+              visibility: "public",
+            }),
+          ],
         },
       },
     });
+    const unpublished = await reloaded.queries.getCurrent();
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      unpublished.definition,
+      "2026-07-27T13:00:00.000Z",
+    );
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      current.definition,
+      "2026-07-27T13:05:00.000Z",
+    );
+    expect(
+      await database
+        .prepare(
+          `SELECT live_revision, last_verified_revision
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first(),
+    ).toEqual({ live_revision: null, last_verified_revision: 3 });
     expect(
       await database
         .prepare(
@@ -407,21 +412,114 @@ describe("D1 content revision store", () => {
            FROM blog_post_transition_audit_events
            WHERE workspace_id = ?1 AND request_id = ?2`,
         )
-        .bind(liveWorkspaceId, "d1-live-blog-unpublish-post")
+        .bind(workspaceId, "d1-live-blog-unpublish-post")
         .first(),
     ).toEqual({
       outcome: "accepted",
       post_id: postId,
       before_state_json: JSON.stringify({
-        revision: 1,
+        revision: 2,
         visibility: "public",
       }),
       after_state_json: JSON.stringify({
-        revision: 2,
+        revision: 3,
         visibility: "unpublished",
       }),
-      revision: 1,
+      revision: 3,
     });
+  });
+
+  it("allows only one workspace to advance a shared post revision", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-00000000000b",
+    );
+    const definition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: postId,
+            revision: 1,
+            collectionState: "active" as const,
+            visibility: "public" as const,
+            slug: "shared-post",
+            title: "Shared post",
+            excerpt: "One aggregate shared across workspaces.",
+            seo: {
+              title: "Shared post | Foundry",
+              description: "One aggregate shared across workspaces.",
+            },
+            body: createRichTextDocumentFromPlainText("Shared body."),
+          },
+        ],
+      },
+    };
+    const otherWorkspaceId = createContentWorkspaceId(
+      "workspace_shared_blog_other",
+    );
+    const first = createApplication(
+      editorActorId,
+      workspaceId,
+      "2026-07-27T14:00:00.000Z",
+      definition,
+    );
+    const second = createApplication(
+      editorActorId,
+      otherWorkspaceId,
+      "2026-07-27T14:00:00.000Z",
+      definition,
+    );
+    await createWorkspace(first, "d1-shared-blog-create-first");
+    await createWorkspace(second, "d1-shared-blog-create-second");
+
+    const results = await Promise.allSettled([
+      first.commands.save({
+        actorId: editorActorId,
+        workspaceId,
+        schemaVersion: definition.schemaVersion,
+        baseRevision: 0,
+        edits: [{ path: `${postId}.title`, value: "First edit" }],
+        idempotencyKey: "d1-shared-blog-edit-first",
+      }),
+      second.commands.save({
+        actorId: editorActorId,
+        workspaceId: otherWorkspaceId,
+        schemaVersion: definition.schemaVersion,
+        baseRevision: 0,
+        edits: [{ path: `${postId}.title`, value: "Second edit" }],
+        idempotencyKey: "d1-shared-blog-edit-second",
+      }),
+    ]);
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1,
+    );
+    const rejected = results.find(({ status }) => status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: expect.any(ContentRevisionConflictError),
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT current_revision, version
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(definition.site.id, postId)
+        .first(),
+    ).toEqual({ current_revision: 2, version: 2 });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count, COUNT(DISTINCT revision_id) AS ids
+           FROM blog_post_revisions
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(definition.site.id, postId)
+        .first(),
+    ).toEqual({ count: 2, ids: 2 });
   });
 
   it("preserves immutable stored 1.0 revisions without rewriting their fingerprinted definition", async () => {

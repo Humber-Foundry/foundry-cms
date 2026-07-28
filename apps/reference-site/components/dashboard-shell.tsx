@@ -15,7 +15,6 @@ import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { WorkspaceEditors } from "./workspace-editors";
-import { BlogPostControls } from "./blog-post-controls";
 
 export function contentWorkspaceRequiresSchemaRecovery(
   definition: SiteDefinition,
@@ -141,10 +140,6 @@ export function DashboardShell({
                 mediaAssets={mediaAssets}
                 mediaOccurrences={mediaOccurrences}
                 mediaWorkspaceId={mediaWorkspaceId}
-              />
-              <BlogPostControls
-                revision={contentRevision}
-                csrfToken={contentMutationToken}
               />
             </>
           )}

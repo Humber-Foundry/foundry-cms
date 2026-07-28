@@ -8,7 +8,10 @@ import {
   serializeRichTextDocument,
 } from "@foundry/site-definition";
 
-import { sendContentRevisionAttempt } from "../src/content-revision-client";
+import {
+  sendContentRevisionAttempt,
+  type ContentRevisionAttempt,
+} from "../src/content-revision-client";
 
 function mutationKey(operation: string) {
   return `${operation}:${crypto.randomUUID()}`;
@@ -23,24 +26,34 @@ export function BlogPostControls({
 }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingAttempt, setPendingAttempt] =
+    useState<ContentRevisionAttempt | null>(null);
 
   async function send(body: unknown, operation: string) {
+    const attempt =
+      pendingAttempt ?? {
+        body: JSON.stringify(body),
+        idempotencyKey: mutationKey(operation),
+      };
+    setPendingAttempt(attempt);
     setBusy(true);
     setMessage("");
     try {
       const result = await sendContentRevisionAttempt({
-        attempt: {
-          body: JSON.stringify(body),
-          idempotencyKey: mutationKey(operation),
-        },
+        attempt,
         mutationToken: csrfToken,
       });
+      setPendingAttempt(null);
       if (!result.response.ok) {
         setMessage("The post change was rejected. Refresh and try again.");
         return;
       }
       window.location.assign(
         `/dash?workspace=${encodeURIComponent(revision.workspaceId)}`,
+      );
+    } catch {
+      setMessage(
+        "The result is not yet known. Retry the exact post change safely.",
       );
     } finally {
       setBusy(false);
@@ -74,7 +87,7 @@ export function BlogPostControls({
               schemaVersion: revision.definition.schemaVersion,
               baseRevision: revision.revision,
               post: {
-                id: `post_${crypto.randomUUID().replaceAll("-", "_")}`,
+                id: crypto.randomUUID(),
                 slug,
                 title,
                 excerpt,
@@ -109,7 +122,7 @@ export function BlogPostControls({
           Body
           <textarea name="body" required />
         </label>
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || pendingAttempt !== null}>
           Create post revision
         </button>
       </form>
@@ -124,25 +137,45 @@ export function BlogPostControls({
             </div>
             <button
               type="button"
-              disabled={busy || post.visibility === "unpublished"}
+              disabled={
+                busy ||
+                pendingAttempt !== null
+              }
               onClick={() => {
+                const operation =
+                  post.visibility === "public"
+                    ? "unpublish_blog_post"
+                    : "republish_blog_post";
                 void send(
                   {
-                    operation: "unpublish_blog_post",
+                    operation,
                     workspaceId: revision.workspaceId,
                     schemaVersion: revision.definition.schemaVersion,
                     baseRevision: revision.revision,
                     postId: post.id,
                   },
-                  "unpublish-blog-post",
+                  operation,
                 );
               }}
             >
-              Prepare unpublish
+              {post.visibility === "public"
+                ? "Prepare unpublish"
+                : "Prepare republish"}
             </button>
           </li>
         ))}
       </ul>
+      {pendingAttempt === null ? null : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            void send(JSON.parse(pendingAttempt.body), "retry-blog-post");
+          }}
+        >
+          Retry pending post change
+        </button>
+      )}
       {message === "" ? null : <p role="alert">{message}</p>}
     </section>
   );

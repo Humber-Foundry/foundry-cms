@@ -4,6 +4,7 @@ import {
   bindSiteMediaOccurrence,
   createBlogPostDefinition,
   editBlogPostDefinition,
+  republishBlogPostDefinition,
   unpublishBlogPostDefinition,
   BlogPostSchemaError,
   createBlogPostId,
@@ -89,15 +90,25 @@ type BlogPostMutationCommand = Readonly<{
 }>;
 
 export type CreateBlogPostCommand = BlogPostMutationCommand &
-  Readonly<{ post: Omit<BlogPost, "revision" | "visibility"> }>;
+  Readonly<{
+    post: Omit<
+      BlogPost,
+      "revision" | "collectionState" | "visibility"
+    >;
+  }>;
 
 export type EditBlogPostCommand = BlogPostMutationCommand &
   Readonly<{
     postId: BlogPostId;
-    post: Omit<BlogPost, "id" | "revision" | "visibility">;
+    post: Omit<
+      BlogPost,
+      "id" | "revision" | "collectionState" | "visibility"
+    >;
   }>;
 
 export type UnpublishBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{ postId: BlogPostId }>;
+export type RepublishBlogPostCommand = BlogPostMutationCommand &
   Readonly<{ postId: BlogPostId }>;
 
 type BlogPostAuditState = Readonly<{
@@ -107,12 +118,22 @@ type BlogPostAuditState = Readonly<{
 
 type BlogPostTransitionAudit = Readonly<{
   postId: BlogPostId | null;
-  commandType: "blog.post.create" | "blog.post.edit" | "blog.post.unpublish";
+  commandType:
+    | "blog.post.create"
+    | "blog.post.edit"
+    | "blog.post.unpublish"
+    | "blog.post.republish";
   requestId: string;
   reasonCode: string;
   beforeState: BlogPostAuditState;
   afterState: BlogPostAuditState;
   occurredAt: string;
+}>;
+
+type BlogPostAggregateState = Readonly<{
+  currentRevision: number;
+  liveRevision: number | null;
+  version: number;
 }>;
 
 function compositionWithAuthoritativeVariants(
@@ -194,7 +215,8 @@ type PersistContentRevisionCommand = Readonly<{
     crop: SiteMediaOccurrence["crop"];
   }>;
   blogTransitions?: ReadonlyArray<
-    Omit<BlogPostTransitionAudit, "reasonCode">
+    Omit<BlogPostTransitionAudit, "reasonCode" | "postId"> &
+      Readonly<{ postId: BlogPostId; revisionId: string }>
   >;
 }>;
 
@@ -220,6 +242,9 @@ export type ContentRevisionStore = Readonly<{
   getRevisionWithBookmark(
     revision: number,
   ): Promise<SavedContentRevision | null>;
+  getBlogPostAggregate(
+    postId: BlogPostId,
+  ): Promise<BlogPostAggregateState | null>;
   persist(
     command: PersistContentRevisionCommand,
   ): Promise<SavedContentRevision>;
@@ -382,6 +407,7 @@ export function createInMemoryContentRevisionStore({
   let currentRevision = 0;
   let ownerActorId: ContentActorId | undefined;
   const collaborators = new Set<ContentActorId>();
+  const blogPosts = new Map<BlogPostId, BlogPostAggregateState>();
 
   return {
     async initialize(initialRevision, initialOwnerActorId) {
@@ -390,6 +416,14 @@ export function createInMemoryContentRevisionStore({
         revisions.set(immutable.revision, immutable);
         currentRevision = immutable.revision;
         ownerActorId = initialOwnerActorId;
+        for (const post of initialRevision.definition.blog.posts) {
+          blogPosts.set(post.id, {
+            currentRevision: post.revision,
+            liveRevision:
+              post.visibility === "public" ? post.revision : null,
+            version: post.revision,
+          });
+        }
       }
     },
     async requireAccess(actorId) {
@@ -418,6 +452,9 @@ export function createInMemoryContentRevisionStore({
             `local:${revision.workspaceId}:${revision.revision}`,
           );
     },
+    async getBlogPostAggregate(postId) {
+      return blogPosts.get(postId) ?? null;
+    },
     async recordRejectedBlogTransition() {},
     async replay(idempotencyKey, requestHash) {
       const receipt = receipts.get(idempotencyKey);
@@ -444,6 +481,16 @@ export function createInMemoryContentRevisionStore({
         ) {
           throw new ContentRevisionConflictError(currentRevision);
         }
+        for (const transition of command.blogTransitions ?? []) {
+          const aggregate = blogPosts.get(transition.postId);
+          if (
+            (transition.beforeState === null && aggregate !== undefined) ||
+            (transition.beforeState !== null &&
+              aggregate?.currentRevision !== transition.beforeState.revision)
+          ) {
+            throw new ContentRevisionConflictError(currentRevision);
+          }
+        }
         const revision = immutableRevision(command.revision);
         const saved = deepFreeze(
           withContentRevisionBookmark(
@@ -457,6 +504,14 @@ export function createInMemoryContentRevisionStore({
           requestHash: command.requestHash,
           revision: saved,
         });
+        for (const transition of command.blogTransitions ?? []) {
+          blogPosts.set(transition.postId, {
+            currentRevision: transition.afterState!.revision,
+            liveRevision:
+              blogPosts.get(transition.postId)?.liveRevision ?? null,
+            version: (blogPosts.get(transition.postId)?.version ?? 0) + 1,
+          });
+        }
         return saved;
       };
       return mediaContentCoordinator !== undefined
@@ -629,6 +684,7 @@ export function createContentRevisionApplication({
         : {
             blogTransitions: input.blogTransitions.map((transition) => ({
               ...transition,
+              revisionId: crypto.randomUUID(),
               requestId: input.command.idempotencyKey,
               beforeState: blogPostAuditState(
                 base.definition,
@@ -649,6 +705,12 @@ export function createContentRevisionApplication({
     return post === undefined
       ? null
       : { revision: post.revision, visibility: post.visibility };
+  }
+
+  function blogAuditRequestId(value: string): string {
+    return isValidContentMutationIdempotencyKey(value)
+      ? value
+      : `invalid:${crypto.randomUUID()}`;
   }
 
   async function executeBlogMutation<Result>(
@@ -691,11 +753,7 @@ export function createContentRevisionApplication({
               : error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)
                 ? error.message
                 : "blog_post_command_rejected",
-          requestId: isValidContentMutationIdempotencyKey(
-            command.idempotencyKey,
-          )
-            ? command.idempotencyKey
-            : "invalid",
+          requestId: blogAuditRequestId(command.idempotencyKey),
           beforeState,
           afterState: beforeState,
           occurredAt: now(),
@@ -747,9 +805,7 @@ export function createContentRevisionApplication({
           postId: command.postId,
           commandType: command.commandType,
           reasonCode: command.reasonCode,
-          requestId: isValidContentMutationIdempotencyKey(command.requestId)
-            ? command.requestId
-            : "invalid",
+          requestId: blogAuditRequestId(command.requestId),
           beforeState: null,
           afterState: null,
           occurredAt: now(),
@@ -900,7 +956,9 @@ export function createContentRevisionApplication({
           () =>
           (async () => {
             await store.requireAccess(actorId);
-            const publishedBase = await store.getRevision(0);
+            const aggregate = await store.getBlogPostAggregate(
+              command.postId,
+            );
             return persistDefinitionMutation({
               command,
               requestIdentity: {
@@ -909,11 +967,8 @@ export function createContentRevisionApplication({
               },
               mutate: (definition) => {
                 if (
-                  publishedBase === null ||
-                  !publishedBase.definition.blog.posts.some(
-                    ({ id, visibility }) =>
-                      id === command.postId && visibility === "public",
-                  )
+                  aggregate?.liveRevision === null ||
+                  aggregate === null
                 ) {
                   throw new BlogPostSchemaError("post_not_live");
                 }
@@ -931,6 +986,33 @@ export function createContentRevisionApplication({
               ],
             });
           })(),
+        );
+      },
+      async republishBlogPost(command: RepublishBlogPostCommand) {
+        return executeBlogMutation(
+          "blog.post.republish",
+          command,
+          [command.postId],
+          () =>
+            persistDefinitionMutation({
+              command,
+              requestIdentity: {
+                operation: "republish_blog_post",
+                ...command,
+              },
+              mutate: (definition) =>
+                republishBlogPostDefinition(
+                  definition,
+                  command.siteId,
+                  command.postId,
+                ),
+              blogTransitions: [
+                {
+                  commandType: "blog.post.republish",
+                  postId: command.postId,
+                },
+              ],
+            }),
         );
       },
       async saveMediaOccurrence(command: SaveContentMediaOccurrenceCommand) {

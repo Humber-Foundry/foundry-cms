@@ -47,7 +47,11 @@ export type BlogPostId = string & {
 };
 
 export function createBlogPostId(value: string): BlogPostId {
-  if (!/^post_[a-z0-9_]+$/u.test(value)) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value,
+    )
+  ) {
     throw new TypeError("blog_post_id_invalid");
   }
   return value as BlogPostId;
@@ -56,6 +60,7 @@ export function createBlogPostId(value: string): BlogPostId {
 export type BlogPost = Readonly<{
   id: BlogPostId;
   revision: number;
+  collectionState: "active";
   visibility: "public" | "unpublished";
   slug: string;
   title: string;
@@ -402,6 +407,7 @@ export const siteDefinitionSchema = {
       required: [
         "id",
         "revision",
+        "collectionState",
         "visibility",
         "slug",
         "title",
@@ -410,8 +416,13 @@ export const siteDefinitionSchema = {
         "body",
       ],
       properties: {
-        id: { type: "string", pattern: "^post_[a-z0-9_]+$" },
+          id: {
+            type: "string",
+            pattern:
+              "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        },
         revision: { type: "integer", minimum: 1 },
+        collectionState: { const: "active" },
         visibility: { enum: ["public", "unpublished"] },
         slug: {
           type: "string",

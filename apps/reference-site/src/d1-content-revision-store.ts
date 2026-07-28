@@ -72,6 +72,41 @@ export async function listContentRevisionContributors(
   return rows.results.map((row) => restoreContentActorId(row.created_by));
 }
 
+export async function reconcileVerifiedBlogPostPublication(
+  database: D1DatabaseBinding,
+  siteId: SiteId,
+  definition: SiteDefinition,
+  verifiedAt: string,
+): Promise<void> {
+  if (definition.blog.posts.length === 0) {
+    return;
+  }
+  await database.batch(
+    definition.blog.posts.map((post) =>
+      database
+        .prepare(
+          `UPDATE blog_posts
+           SET live_revision = ?1,
+               last_verified_revision = ?2,
+               updated_at = ?3
+           WHERE site_id = ?4
+             AND post_id = ?5
+             AND (
+               last_verified_revision IS NULL
+               OR last_verified_revision <= ?2
+             )`,
+        )
+        .bind(
+          post.visibility === "public" ? post.revision : null,
+          post.revision,
+          verifiedAt,
+          siteId,
+          post.id,
+        ),
+    ),
+  );
+}
+
 type RevisionRow = {
   workspace_id: ContentWorkspaceId;
   revision: number;
@@ -182,6 +217,43 @@ export function createD1ContentRevisionStore(
 
   return {
     async initialize(initialRevision, ownerActorId) {
+      const initialBlogStatements = initialRevision.definition.blog.posts
+        .flatMap((post) => [
+          database
+            .prepare(
+              `INSERT INTO blog_posts (
+                 site_id, post_id, collection_state, current_revision,
+                 live_revision, last_verified_revision, version, updated_at
+               ) VALUES (?1, ?2, 'active', ?3, ?4, ?3, ?3, ?5)
+               ON CONFLICT (site_id, post_id) DO NOTHING`,
+            )
+            .bind(
+              siteId,
+              post.id,
+              post.revision,
+              post.visibility === "public" ? post.revision : null,
+              initialRevision.createdAt,
+            ),
+          database
+            .prepare(
+              `INSERT INTO blog_post_revisions (
+                 revision_id, site_id, post_id, revision, workspace_id,
+                 content_revision, snapshot_json, created_at, created_by
+               ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+               ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
+            )
+            .bind(
+              crypto.randomUUID(),
+              siteId,
+              post.id,
+              post.revision,
+              workspaceId,
+              initialRevision.revision,
+              JSON.stringify(post),
+              initialRevision.createdAt,
+              initialRevision.createdBy,
+            ),
+        ]);
       await database.batch([
         database
           .prepare(
@@ -231,6 +303,7 @@ export function createD1ContentRevisionStore(
             initialRevision.createdAt,
             initialRevision.createdBy,
           ),
+        ...initialBlogStatements,
       ]);
     },
     async requireAccess(actorId) {
@@ -313,6 +386,27 @@ export function createD1ContentRevisionStore(
             saved,
             requireBookmark(session.getBookmark()),
           );
+    },
+    async getBlogPostAggregate(postId) {
+      const row = await database
+        .prepare(
+          `SELECT current_revision, live_revision, version
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(siteId, postId)
+        .first<{
+          current_revision: number;
+          live_revision: number | null;
+          version: number;
+        }>();
+      return row === null
+        ? null
+        : {
+            currentRevision: row.current_revision,
+            liveRevision: row.live_revision,
+            version: row.version,
+          };
     },
     async replay(idempotencyKey, requestHash) {
       if (database.withSession === undefined) {
@@ -412,6 +506,31 @@ export function createD1ContentRevisionStore(
         mediaOccurrence?.crop === null || mediaOccurrence === undefined
           ? null
           : JSON.stringify(mediaOccurrence.crop);
+      const blogGuardBindings: Array<string | number> = [];
+      let blogGuardParameter = 18;
+      const blogTransitionGuards = (command.blogTransitions ?? [])
+        .map((transition) => {
+          const postParameter = blogGuardParameter;
+          blogGuardBindings.push(transition.postId);
+          blogGuardParameter += 1;
+          if (transition.beforeState === null) {
+            return `AND NOT EXISTS (
+              SELECT 1 FROM blog_posts
+              WHERE site_id = ?14 AND post_id = ?${postParameter}
+            )`;
+          }
+          const revisionParameter = blogGuardParameter;
+          blogGuardBindings.push(transition.beforeState.revision);
+          blogGuardParameter += 1;
+          return `AND EXISTS (
+            SELECT 1 FROM blog_posts
+            WHERE site_id = ?14
+              AND post_id = ?${postParameter}
+              AND current_revision = ?${revisionParameter}
+              AND collection_state = 'active'
+          )`;
+        })
+        .join("\n");
 
       const blogTransitionStatements = (command.blogTransitions ?? []).map(
         (transition) =>
@@ -429,6 +548,7 @@ export function createD1ContentRevisionStore(
                  WHERE idempotency_key = ?5
                    AND workspace_id = ?1
                    AND revision = ?8
+                   AND request_hash = ?10
                )
                ON CONFLICT (workspace_id, request_id, outcome, post_id)
                DO NOTHING`,
@@ -447,7 +567,105 @@ export function createD1ContentRevisionStore(
                 : JSON.stringify(transition.afterState),
               command.revision.revision,
               command.revision.createdAt,
+              command.requestHash,
             ),
+      );
+      const blogAggregateStatements = (command.blogTransitions ?? []).map(
+        (transition) =>
+          transition.beforeState === null
+            ? session
+                .prepare(
+                  `INSERT INTO blog_posts (
+                     site_id, post_id, collection_state, current_revision,
+                     live_revision, last_verified_revision, version, updated_at
+                   )
+                   SELECT ?1, ?2, 'active', ?3, NULL, NULL, 1, ?4
+                   WHERE EXISTS (
+                     SELECT 1 FROM content_revision_receipts
+                     WHERE idempotency_key = ?5
+                       AND workspace_id = ?6
+                       AND revision = ?7
+                       AND request_hash = ?8
+                   )
+                   ON CONFLICT (site_id, post_id) DO NOTHING`,
+                )
+                .bind(
+                  siteId,
+                  transition.postId,
+                  transition.afterState!.revision,
+                  command.revision.createdAt,
+                  command.idempotencyKey,
+                  workspaceId,
+                  command.revision.revision,
+                  command.requestHash,
+                )
+            : session
+                .prepare(
+                  `UPDATE blog_posts
+                   SET current_revision = ?1,
+                       version = version + 1,
+                       updated_at = ?2
+                   WHERE site_id = ?3
+                     AND post_id = ?4
+                     AND current_revision = ?5
+                     AND EXISTS (
+                       SELECT 1 FROM content_revision_receipts
+                       WHERE idempotency_key = ?6
+                         AND workspace_id = ?7
+                         AND revision = ?8
+                         AND request_hash = ?9
+                     )`,
+                )
+                .bind(
+                  transition.afterState!.revision,
+                  command.revision.createdAt,
+                  siteId,
+                  transition.postId,
+                  transition.beforeState.revision,
+                  command.idempotencyKey,
+                  workspaceId,
+                  command.revision.revision,
+                  command.requestHash,
+                ),
+      );
+      const blogRevisionStatements = (command.blogTransitions ?? []).map(
+        (transition) => {
+          const post = command.revision.definition.blog.posts.find(
+            ({ id }) => id === transition.postId,
+          );
+          if (post === undefined) {
+            throw new ContentRevisionConfigurationError();
+          }
+          return session
+            .prepare(
+              `INSERT INTO blog_post_revisions (
+                 revision_id, site_id, post_id, revision, workspace_id,
+                 content_revision, snapshot_json, created_at, created_by
+               )
+               SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+               WHERE EXISTS (
+                 SELECT 1 FROM content_revision_receipts
+                 WHERE idempotency_key = ?10
+                   AND workspace_id = ?5
+                   AND revision = ?6
+                   AND request_hash = ?11
+               )
+               ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
+            )
+            .bind(
+              transition.revisionId,
+              siteId,
+              transition.postId,
+              transition.afterState!.revision,
+              workspaceId,
+              command.revision.revision,
+              JSON.stringify(post),
+              command.revision.createdAt,
+              command.revision.createdBy,
+              command.idempotencyKey,
+              command.requestHash,
+            );
+        },
       );
       const results = await session.batch([
         session
@@ -482,7 +700,8 @@ export function createD1ContentRevisionStore(
                    AND media_revision.asset_id = ?16
                    AND media_revision.crop_json IS ?17
                )
-             )`,
+             )
+             ${blogTransitionGuards}`,
           )
           .bind(
             workspaceId,
@@ -502,6 +721,7 @@ export function createD1ContentRevisionStore(
             mediaOccurrence?.revision ?? null,
             mediaOccurrence?.assetId ?? null,
             mediaCrop,
+            ...blogGuardBindings,
           ),
         session
           .prepare(
@@ -593,6 +813,8 @@ export function createD1ContentRevisionStore(
             command.revision.createdAt,
             command.idempotencyKey,
           ),
+        ...blogAggregateStatements,
+        ...blogRevisionStatements,
         ...blogTransitionStatements,
       ]);
 

@@ -11,6 +11,7 @@ export class BlogPostSchemaError extends Error {
     readonly code:
       | "cross_site_identifier"
       | "post_already_exists"
+      | "post_already_live"
       | "post_not_found"
       | "post_not_live"
       | "slug_already_exists"
@@ -37,7 +38,10 @@ function requireValid(definition: SiteDefinition): SiteDefinition {
 export function createBlogPostDefinition(
   definition: SiteDefinition,
   siteId: SiteId,
-  post: Omit<BlogPost, "revision" | "visibility">,
+  post: Omit<
+    BlogPost,
+    "revision" | "collectionState" | "visibility"
+  >,
 ): SiteDefinition {
   requireSite(definition, siteId);
   if (definition.blog.posts.some(({ id }) => id === post.id)) {
@@ -52,7 +56,12 @@ export function createBlogPostDefinition(
       ...definition.blog,
       posts: [
         ...definition.blog.posts,
-        { ...post, revision: 1, visibility: "public" },
+        {
+          ...post,
+          revision: 1,
+          collectionState: "active",
+          visibility: "public",
+        },
       ],
     },
   });
@@ -62,7 +71,10 @@ export function editBlogPostDefinition(
   definition: SiteDefinition,
   siteId: SiteId,
   postId: BlogPostId,
-  replacement: Omit<BlogPost, "id" | "revision" | "visibility">,
+  replacement: Omit<
+    BlogPost,
+    "id" | "revision" | "collectionState" | "visibility"
+  >,
 ): SiteDefinition {
   requireSite(definition, siteId);
   const index = definition.blog.posts.findIndex(({ id }) => id === postId);
@@ -81,6 +93,7 @@ export function editBlogPostDefinition(
   posts[index] = {
     id: current.id,
     revision: current.revision + 1,
+    collectionState: current.collectionState,
     visibility: current.visibility,
     slug: replacement.slug,
     title: replacement.title,
@@ -117,6 +130,36 @@ export function unpublishBlogPostDefinition(
               ...post,
               revision: post.revision + 1,
               visibility: "unpublished" as const,
+            }
+          : post,
+      ),
+    },
+  });
+}
+
+export function republishBlogPostDefinition(
+  definition: SiteDefinition,
+  siteId: SiteId,
+  postId: BlogPostId,
+): SiteDefinition {
+  requireSite(definition, siteId);
+  const current = definition.blog.posts.find(({ id }) => id === postId);
+  if (current === undefined) {
+    throw new BlogPostSchemaError("post_not_found");
+  }
+  if (current.visibility === "public") {
+    throw new BlogPostSchemaError("post_already_live");
+  }
+  return requireValid({
+    ...definition,
+    blog: {
+      ...definition.blog,
+      posts: definition.blog.posts.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              revision: post.revision + 1,
+              visibility: "public" as const,
             }
           : post,
       ),

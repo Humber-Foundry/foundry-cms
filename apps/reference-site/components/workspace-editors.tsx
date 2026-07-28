@@ -11,6 +11,7 @@ import { ContentEditor } from "./content-editor";
 import { MediaManager } from "./media-manager";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { advanceWorkspaceRevisionHead } from "./workspace-revision";
+import { BlogPostControls } from "./blog-post-controls";
 
 export function WorkspaceEditors({
   csrfToken,
@@ -75,6 +76,7 @@ export function WorkspaceEditors({
         onContentStale={() => setContentStale(true)}
         onAccessGranted={setMediaAccessToken}
       />
+      <BlogPostControls revision={head.revision} csrfToken={csrfToken} />
     </>
   );
 }
