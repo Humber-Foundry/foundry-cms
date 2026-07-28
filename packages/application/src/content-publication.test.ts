@@ -576,6 +576,46 @@ describe("content publication application", () => {
     );
   });
 
+  it("durably retains a created candidate after its lease expires", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    createCommit.mockImplementation(async (input) => {
+      currentTime = "2026-07-27T10:06:01.000Z";
+      expect(await input.assertLease()).toBe(false);
+      return {
+        state: "unknown",
+        detail: `git_reference_result_unknown:${"c".repeat(40)}`,
+      };
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+
+    await expect(
+      app.commands.publish({
+        workspaceId,
+        approvalId: approval.id,
+        requestedBy: membershipId,
+        idempotencyKey: "publish-retain-expired-candidate",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "unknown",
+        commitSha: null,
+        detail: `git_reference_result_unknown:${"c".repeat(40)}`,
+        leaseToken: null,
+      }),
+    );
+  });
+
   it("loses the application lease when the approved revision stops being current", async () => {
     createCommit.mockImplementation(async (input) => {
       await revisionApplication.application.commands.save({

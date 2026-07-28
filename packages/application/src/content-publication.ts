@@ -1241,10 +1241,12 @@ export function createContentPublicationApplication({
             leaseExpiresAt: null,
             updatedAt,
           }),
-          {
-            expectedLeaseToken: leaseToken,
-            expectedLeaseValidAt: updatedAt,
-          },
+          reconciliationCandidate(result.detail) === undefined
+            ? {
+                expectedLeaseToken: leaseToken,
+                expectedLeaseValidAt: updatedAt,
+              }
+            : { expectedLeaseToken: leaseToken },
         );
       },
       async refresh(publicationId: ContentPublicationId) {
