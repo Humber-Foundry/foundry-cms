@@ -216,6 +216,12 @@ export function planStructuralFirstRecovery(
     if (edit.path !== pageCompositionContract.slot.id) {
       continue;
     }
+    if (
+      JSON.stringify(toPageCompositionIdentity(projectedDefinition)) !==
+      comparableRecoveryBaseValue(edit)
+    ) {
+      continue;
+    }
     const projected = applyStructuralRecovery(projectedDefinition, edit);
     if (projected.ok) {
       projectedDefinition = projected.definition;
