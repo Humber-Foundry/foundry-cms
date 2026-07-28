@@ -3046,6 +3046,75 @@ describe("content publication application", () => {
     expect(publisher.retryDeployment).toHaveBeenCalledTimes(1);
   });
 
+  it("dispatches a new manual build after the recorded build definitively fails", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-recorded-build-failed",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        detail: "deployment_retry_requested",
+        deploymentId: "build-123",
+      }),
+    );
+    currentTime = "2026-07-27T10:06:00.000Z";
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        deploymentId: "build-123",
+      }),
+    );
+    vi.mocked(publisher.retryDeployment).mockImplementationOnce(
+      async ({ assertDispatch }) =>
+        (await assertDispatch())
+          ? {
+              state: "requested",
+              deploymentId: "build-after-failure",
+            }
+          : {
+              state: "blocked",
+              detail: "deployment_retry_claim_lost",
+            },
+    );
+    getDeploymentStatus.mockClear();
+
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        detail: "deployment_retry_requested",
+        deploymentId: "build-after-failure",
+      }),
+    );
+    expect(getDeploymentStatus).toHaveBeenCalledWith(
+      "c".repeat(40),
+      "build-123",
+    );
+    expect(publisher.retryDeployment).toHaveBeenCalledTimes(2);
+  });
+
   it("reconciles a landed commit before rejecting a new stale-base approval", async () => {
     let currentTime = "2026-07-27T10:10:00.000Z";
     const store = createInMemoryContentPublicationStore();

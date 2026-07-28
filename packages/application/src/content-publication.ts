@@ -1921,9 +1921,14 @@ export function createContentPublicationApplication({
           // A missing marker still permits one explicitly requested retry.
         }
         if (deploymentRetryDispatchWasAttempted(publication)) {
+          const recordedDeploymentId =
+            publication.deploymentId !== null &&
+            !publication.deploymentId.startsWith("retry-dispatch:")
+              ? publication.deploymentId
+              : undefined;
           const observed = await publisher.getDeploymentStatus(
             commitSha,
-            publication.deploymentId ?? undefined,
+            recordedDeploymentId,
           );
           if (
             observed === "building" ||
@@ -1941,7 +1946,12 @@ export function createContentPublicationApplication({
               },
             );
           }
-          return publication;
+          if (
+            observed !== "failed" ||
+            recordedDeploymentId === undefined
+          ) {
+            return publication;
+          }
         }
         if ((await publisher.getProductionHead()) !== commitSha) {
           await store.invalidateApproval({
