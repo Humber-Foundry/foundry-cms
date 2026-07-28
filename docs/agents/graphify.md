@@ -33,6 +33,11 @@ Snapshot metadata binds the graph to:
 - the graph content hash; and
 - the repository-relative source-path format.
 
+Repository credentials are never written to snapshot metadata. Equivalent
+HTTPS, SSH, SCP-like, local-path, and file-URL remotes normalize to the same
+identity, so credential rotation or a transport-only remote change does not
+invalidate an otherwise matching snapshot.
+
 ## Foreman refresh
 
 After a verified merge:

@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -154,7 +154,12 @@ if (args[0] === "extract") {
   }
   if (process.env.GRAPHIFY_FAKE_WARNING === "resolver-failure") {
     console.error(
-      "WARNING: typescript_member_calls resolution failed, skipping: simulated failure",
+      "typescript_member_calls resolution failed, skipping: simulated failure",
+    );
+  }
+  if (process.env.GRAPHIFY_FAKE_WARNING === "non-warning-resolution") {
+    console.error(
+      "Graphify status: resolution failed during an earlier attempt; recovered.",
     );
   }
   if (process.env.GRAPHIFY_FAKE_MUTATE_REPOSITORY === "1") {
@@ -375,7 +380,7 @@ describe("commit-pinned Graphify index", () => {
       ),
     );
     expect(metadata.repository).toBe(
-      "https://example.test/foundry/cms.git",
+      "remote:example.test/foundry/cms",
     );
     expect(JSON.stringify(metadata)).not.toContain("initial-secret");
 
@@ -384,7 +389,37 @@ describe("commit-pinned Graphify index", () => {
       "remote",
       "set-url",
       "origin",
-      "https://replacement:rotated-secret@example.test/foundry/cms.git",
+      "git@example.test:foundry/cms.git",
+    );
+    const scpStatus = runIndex(root, ["status"], { cache: result.cache });
+
+    expect(scpStatus.status, scpStatus.output).toBe(0);
+    expect(scpStatus.output).toContain("Graph snapshot: verified (code)");
+
+    git(
+      root,
+      "remote",
+      "set-url",
+      "origin",
+      "ssh://git@example.test/foundry/cms.git",
+    );
+    const sshStatus = runIndex(root, ["status"], { cache: result.cache });
+
+    expect(sshStatus.status, sshStatus.output).toBe(0);
+    expect(sshStatus.output).toContain("Graph snapshot: verified (code)");
+  });
+
+  it("treats local-path and file URL remotes as the same repository", () => {
+    const { root } = createRepository();
+    const result = runIndex(root, ["refresh"]);
+    expect(result.status, result.output).toBe(0);
+
+    git(
+      root,
+      "remote",
+      "set-url",
+      "origin",
+      pathToFileURL(root).href,
     );
     const status = runIndex(root, ["status"], { cache: result.cache });
 
@@ -729,6 +764,16 @@ describe("commit-pinned Graphify index", () => {
     expect(
       existsSync(join(result.cache, "snapshots", main)),
     ).toBe(false);
+  });
+
+  it("accepts non-warning stderr that describes a recovered resolution failure", () => {
+    const { root } = createRepository();
+
+    const result = runIndex(root, ["refresh"], {
+      warning: "non-warning-resolution",
+    });
+
+    expect(result.status, result.output).toBe(0);
   });
 
   it("retains active and recent snapshots while pruning older cache entries", () => {

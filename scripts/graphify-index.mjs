@@ -23,6 +23,7 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const schemaVersion = "foundry.graphify-index/v1";
 const maximumQueryBudget = 3_000;
@@ -54,30 +55,60 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function credentialFreeRepositoryIdentity(remote) {
+function canonicalRepositoryPath(path) {
+  let decoded = path;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    // Preserve an unusual literal percent sequence rather than rejecting it.
+  }
+  return decoded
+    .replaceAll("\\", "/")
+    .replace(/^\/+/u, "")
+    .replace(/\/+$/u, "")
+    .replace(/\.git$/iu, "");
+}
+
+function canonicalLocalRepositoryIdentity(path, repositoryRoot) {
+  const absolute = resolve(repositoryRoot, path);
+  try {
+    return `local:${realpathSync(absolute)}`;
+  } catch {
+    return `local:${absolute}`;
+  }
+}
+
+function canonicalRepositoryIdentity(remote, repositoryRoot) {
   const value = remote.trim();
+  if (/^[a-z]:[\\/]/iu.test(value)) {
+    return canonicalLocalRepositoryIdentity(value, repositoryRoot);
+  }
   try {
     const url = new URL(value);
+    if (url.protocol === "file:") {
+      return canonicalLocalRepositoryIdentity(
+        fileURLToPath(url),
+        repositoryRoot,
+      );
+    }
     if (url.hostname) {
-      url.username = "";
-      url.password = "";
-      url.search = "";
-      url.hash = "";
-      url.hostname = url.hostname.toLowerCase();
-      return url.href;
+      const host = url.hostname.toLowerCase();
+      const port = url.port ? `:${url.port}` : "";
+      return `remote:${host}${port}/${canonicalRepositoryPath(url.pathname)}`;
     }
   } catch {
     // Fall through for SCP-like and local-path remotes.
   }
-  if (!/^[a-z]:[\\/]/iu.test(value)) {
-    const scpLike = value.match(
-      /^(?:[^@\s/]+@)?(\[[^\]]+\]|[^:/\s]+):(.+)$/u,
+  const scpLike = value.match(
+    /^(?:[^@\s/]+@)?(\[[^\]]+\]|[^:/\s]+):(.+)$/u,
+  );
+  if (scpLike) {
+    return (
+      `remote:${scpLike[1].toLowerCase()}/` +
+      canonicalRepositoryPath(scpLike[2])
     );
-    if (scpLike) {
-      return `${scpLike[1].toLowerCase()}:${scpLike[2]}`;
-    }
   }
-  return value;
+  return canonicalLocalRepositoryIdentity(value, repositoryRoot);
 }
 
 function repositoryContext() {
@@ -94,8 +125,9 @@ function repositoryContext() {
   return {
     repositoryRoot,
     cacheRoot,
-    repository: credentialFreeRepositoryIdentity(
+    repository: canonicalRepositoryIdentity(
       gitText(repositoryRoot, "remote", "get-url", "origin"),
+      repositoryRoot,
     ),
     head: gitText(repositoryRoot, "rev-parse", "HEAD"),
     originMain: gitText(
@@ -393,6 +425,18 @@ function graphifyExecutable() {
   return process.env.GRAPHIFY_BIN || "graphify";
 }
 
+function isIncompleteExtractionDiagnostic(line) {
+  const warning = line.match(/(?:^|\]\s*)warning:\s*(.*)$/iu);
+  if (warning) {
+    return /^(?:worker failed for|skipped |could not read |could not scan |failed to parse |\d+ source file\(s\) produced zero nodes)|classified as code but graphify has no AST extractor|contributed nothing to the graph because a dependency is missing|\bresolution failed(?:,\s*skipping)?/iu.test(
+      warning[1],
+    );
+  }
+  return /^(?:[a-z][a-z0-9_-]*|cross-file import|java (?:cross-file import|type-reference)|c# (?:cross-file import|type-reference)) resolution failed,\s*skipping:/iu.test(
+    line,
+  );
+}
+
 function runGraphify(arguments_, options = {}) {
   const result = spawnSync(graphifyExecutable(), arguments_, {
     cwd: options.cwd,
@@ -419,12 +463,7 @@ function runGraphify(arguments_, options = {}) {
       .split(/\r?\n/u)
       .map((line) => line.trim())
       .filter(Boolean)
-      .filter(
-        (line) =>
-          /warning:\s+(?:worker failed for|skipped |could not read |could not scan |failed to parse |\d+ source file\(s\) produced zero nodes)|classified as code but graphify has no AST extractor|contributed nothing to the graph because a dependency is missing|\bresolution failed(?:,\s*skipping)?/iu.test(
-            line,
-          ),
-      );
+      .filter(isIncompleteExtractionDiagnostic);
     if (extractionFailures.length > 0) {
       fail(
         "Graphify extraction reported incomplete results, so no snapshot was published:\n" +
