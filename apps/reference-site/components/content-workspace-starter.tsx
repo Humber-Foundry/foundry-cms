@@ -10,6 +10,8 @@ import {
   type ContentEditorOutboxRecord,
 } from "../src/content-editor-outbox";
 import {
+  comparableRecoveryBaseValue,
+  comparableRecoveryValue,
   preserveStaleEdits,
   recoverStaleEdits,
   type StaleRecoveryPointer,
@@ -91,10 +93,16 @@ export async function preparePreservedRevisionRecovery({
       if (durable === undefined) {
         return true;
       }
-      if (edit.value === durable.value) {
+      if (
+        comparableRecoveryValue(edit) ===
+        comparableRecoveryValue(durable)
+      ) {
         return false;
       }
-      if (edit.baseValue !== durable.value) {
+      if (
+        comparableRecoveryBaseValue(edit) !==
+        comparableRecoveryValue(durable)
+      ) {
         throw new Error("content_editor_recovery_revision_conflict");
       }
       return true;

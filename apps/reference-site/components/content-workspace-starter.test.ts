@@ -217,6 +217,61 @@ describe("content workspace schema recovery", () => {
     );
   });
 
+  it("compares structural ancestry independent of property order", async () => {
+    const durableProof = {
+      variant: "panel",
+      type: "proof",
+      id: "section_saved_proof",
+      metrics: [],
+      attribution: "Saved author",
+      quote: "Saved proof",
+    };
+    const legacyProof = {
+      id: "section_saved_proof",
+      type: "proof",
+      quote: "Saved proof",
+      attribution: "Saved author",
+      metrics: [],
+    };
+    const composition = (components: ReadonlyArray<unknown>) =>
+      JSON.stringify({ slotId: "slot_home_sections", components });
+    await expect(
+      preparePreservedRevisionRecovery({
+        preservedRevision: { ...preservedRevision, revision: 5 },
+        durableRecoveryEdits: [
+          {
+            path: "slot_home_sections",
+            baseValue: composition([]),
+            value: composition([durableProof]),
+          },
+        ],
+        readOutbox: async () => ({
+          workspaceId: preservedRevision.workspaceId,
+          baseRevision: 5,
+          edits: [
+            {
+              path: "slot_home_sections",
+              baseValue: composition([legacyProof]),
+              value: composition([
+                { ...legacyProof, quote: "Unsaved proof" },
+              ]),
+            },
+          ],
+        }),
+        storage: {
+          getItem: () => null,
+          removeItem: vi.fn(),
+          setItem: vi.fn(),
+        },
+        createRecoveryId: () =>
+          "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      }),
+    ).resolves.toEqual({
+      id: "abcdefab-cdef-4abc-8def-abcdefabcdef",
+      sourceWorkspaceId: "workspace_legacy",
+    });
+  });
+
   it("copies an active recovery record through another schema transition", async () => {
     const recoveryId = "12345678-1234-4123-8123-123456789abc";
     const sourceWorkspaceId = "workspace_original";
