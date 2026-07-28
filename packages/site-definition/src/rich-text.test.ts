@@ -1,3 +1,4 @@
+import { HtmlRenderer, Parser } from "commonmark";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,6 +11,13 @@ import {
   type RichTextDocument,
   type RichTextText,
 } from "./rich-text";
+
+const commonMarkParser = new Parser();
+const commonMarkHtmlRenderer = new HtmlRenderer();
+
+function renderCommonMark(markdown: string): string {
+  return commonMarkHtmlRenderer.render(commonMarkParser.parse(markdown));
+}
 
 const supportedDocument: RichTextDocument = {
   version: "1.0.0",
@@ -525,6 +533,190 @@ describe("rich text contract", () => {
       );
     },
   );
+
+  it.each([
+    {
+      name: "opening strong emphasis after alphanumeric text",
+      children: [
+        { type: "text", text: "a", marks: [] },
+        { type: "text", text: "!b", marks: ["bold"] },
+      ],
+      previousMarkdown: "a**\\!b**\n",
+      previousHtml: "<p>a**!b**</p>\n",
+      issuePath: "$.children[0].children[1].text",
+    },
+    {
+      name: "closing emphasis before alphanumeric text",
+      children: [
+        { type: "text", text: "b!", marks: ["italic"] },
+        { type: "text", text: "a", marks: [] },
+      ],
+      previousMarkdown: "*b\\!*a\n",
+      previousHtml: "<p>*b!*a</p>\n",
+      issuePath: "$.children[0].children[0].text",
+    },
+    {
+      name: "opening emphasis in a joined delimiter run",
+      children: [
+        { type: "text", text: "a", marks: ["bold"] },
+        { type: "text", text: "!b", marks: ["italic"] },
+      ],
+      previousMarkdown: "**a***\\!b*\n",
+      previousHtml: "<p><strong>a</strong>*!b*</p>\n",
+      issuePath: "$.children[0].children[1].text",
+    },
+    {
+      name: "closing emphasis in a joined delimiter run",
+      children: [
+        { type: "text", text: "b!", marks: ["italic"] },
+        { type: "text", text: "a", marks: ["bold"] },
+      ],
+      previousMarkdown: "*b\\!***a**\n",
+      previousHtml: "<p>*b!*<strong>a</strong></p>\n",
+      issuePath: "$.children[0].children[0].text",
+    },
+  ] satisfies ReadonlyArray<{
+    name: string;
+    children: RichTextText[];
+    previousMarkdown: string;
+    previousHtml: string;
+    issuePath: string;
+  }>)(
+    "rejects $name when CommonMark cannot preserve the marks",
+    ({ children, previousMarkdown, previousHtml, issuePath }) => {
+      expect(renderCommonMark(previousMarkdown)).toBe(previousHtml);
+      expect(() =>
+        serializeRichTextToMarkdown({
+          version: "1.0.0",
+          type: "document",
+          children: [{ type: "paragraph", children }],
+        }),
+      ).toThrow(
+        expect.objectContaining<Partial<RichTextValidationError>>({
+          issues: [
+            expect.objectContaining({
+              code: "serializer_ambiguity",
+              path: issuePath,
+            }),
+          ],
+        }),
+      );
+    },
+  );
+
+  it.each([
+    {
+      name: "punctuation at a line boundary",
+      children: [{ type: "text", text: "!b!", marks: ["bold"] }],
+      markdown: "**\\!b\\!**\n",
+      html: "<p><strong>!b!</strong></p>\n",
+    },
+    {
+      name: "punctuation on both sides of an opening delimiter",
+      children: [
+        { type: "text", text: "!", marks: [] },
+        { type: "text", text: "!b", marks: ["bold"] },
+      ],
+      markdown: "\\!**\\!b**\n",
+      html: "<p>!<strong>!b</strong></p>\n",
+    },
+    {
+      name: "joined bold and italic delimiter runs",
+      children: [
+        { type: "text", text: "a", marks: ["bold"] },
+        { type: "text", text: "b", marks: ["italic"] },
+      ],
+      markdown: "**a***b*\n",
+      html: "<p><strong>a</strong><em>b</em></p>\n",
+    },
+    {
+      name: "punctuation-flanked joined delimiter runs",
+      children: [
+        { type: "text", text: "a!", marks: ["bold"] },
+        { type: "text", text: "!b", marks: ["italic"] },
+      ],
+      markdown: "**a\\!***\\!b*\n",
+      html: "<p><strong>a!</strong><em>!b</em></p>\n",
+    },
+  ] satisfies ReadonlyArray<{
+    name: string;
+    children: RichTextText[];
+    markdown: string;
+    html: string;
+  }>)(
+    "preserves valid CommonMark formatting for $name",
+    ({ children, markdown, html }) => {
+      const serialized = serializeRichTextToMarkdown({
+        version: "1.0.0",
+        type: "document",
+        children: [{ type: "paragraph", children }],
+      });
+
+      expect(serialized).toBe(markdown);
+      expect(renderCommonMark(serialized)).toBe(html);
+    },
+  );
+
+  it("never accepts sampled inline boundaries that CommonMark reinterprets", () => {
+    const texts = ["a", "!a", "a!", "!", "(a)", "“a”"];
+    const markSets = [
+      [],
+      ["bold"],
+      ["italic"],
+      ["bold", "italic"],
+    ] satisfies ReadonlyArray<RichTextText["marks"]>;
+    const expectedHtml = (node: RichTextText) => {
+      const text = node.text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+      if (node.marks.includes("bold") && node.marks.includes("italic")) {
+        return `<em><strong>${text}</strong></em>`;
+      }
+      if (node.marks.includes("bold")) {
+        return `<strong>${text}</strong>`;
+      }
+      return node.marks.includes("italic") ? `<em>${text}</em>` : text;
+    };
+
+    for (const leftText of texts) {
+      for (const leftMarks of markSets) {
+        for (const rightText of texts) {
+          for (const rightMarks of markSets) {
+            if (JSON.stringify(leftMarks) === JSON.stringify(rightMarks)) {
+              continue;
+            }
+            const children: RichTextText[] = [
+              {
+                type: "text",
+                text: leftText,
+                marks: leftMarks,
+              },
+              {
+                type: "text",
+                text: rightText,
+                marks: rightMarks,
+              },
+            ];
+            let markdown: string;
+            try {
+              markdown = serializeRichTextToMarkdown({
+                version: "1.0.0",
+                type: "document",
+                children: [{ type: "paragraph", children }],
+              });
+            } catch (error) {
+              expect(error).toBeInstanceOf(RichTextValidationError);
+              continue;
+            }
+            expect(renderCommonMark(markdown), markdown).toBe(
+              `<p>${children.map(expectedHtml).join("")}</p>\n`,
+            );
+          }
+        }
+      }
+    }
+  });
 
   it.each([
     ["[run](javascript:alert\\(1\\))\n", "unsafe_link"],

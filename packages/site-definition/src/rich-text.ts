@@ -263,6 +263,120 @@ function validateParagraph(value: RichTextParagraph, path: string) {
   validateInlineChildren(value.children, `${path}.children`);
 }
 
+function firstCodePoint(value: string): string | undefined {
+  return Array.from(value)[0];
+}
+
+function lastCodePoint(value: string): string | undefined {
+  return Array.from(value).at(-1);
+}
+
+function isCommonMarkWhitespace(value: string | undefined): boolean {
+  return (
+    value === undefined ||
+    /[\t\n\f\r]/u.test(value) ||
+    /\p{Zs}/u.test(value)
+  );
+}
+
+function isCommonMarkPunctuation(value: string | undefined): boolean {
+  return value !== undefined && /[\p{P}\p{S}]/u.test(value);
+}
+
+function isLeftFlankingDelimiter(
+  before: string | undefined,
+  after: string | undefined,
+): boolean {
+  return (
+    !isCommonMarkWhitespace(after) &&
+    (!isCommonMarkPunctuation(after) ||
+      isCommonMarkWhitespace(before) ||
+      isCommonMarkPunctuation(before))
+  );
+}
+
+function isRightFlankingDelimiter(
+  before: string | undefined,
+  after: string | undefined,
+): boolean {
+  return (
+    !isCommonMarkWhitespace(before) &&
+    (!isCommonMarkPunctuation(before) ||
+      isCommonMarkWhitespace(after) ||
+      isCommonMarkPunctuation(after))
+  );
+}
+
+function hasEmphasisMark(node: RichTextText): boolean {
+  return node.marks.some((mark) => mark === "bold" || mark === "italic");
+}
+
+function hasLinkMark(node: RichTextText): boolean {
+  return node.marks.some(
+    (mark) => typeof mark === "object" && mark.type === "link",
+  );
+}
+
+function firstEscapedTextCodePoint(node: RichTextText): string | undefined {
+  return firstCodePoint(escapeMarkdownText(node.text));
+}
+
+function lastEscapedTextCodePoint(node: RichTextText): string | undefined {
+  return lastCodePoint(escapeMarkdownText(node.text));
+}
+
+function validateCommonMarkEmphasisBoundaries(
+  children: ReadonlyArray<RichTextText>,
+  path: string,
+) {
+  children.forEach((child, index) => {
+    if (!hasEmphasisMark(child)) {
+      return;
+    }
+    const previous = children[index - 1];
+    const next = children[index + 1];
+    const linked = hasLinkMark(child);
+    const beforeOpening = linked
+      ? "["
+      : previous === undefined
+        ? undefined
+        : hasEmphasisMark(previous) && !hasLinkMark(previous)
+          ? lastEscapedTextCodePoint(previous)
+          : lastCodePoint(serializeText(previous));
+    const afterClosing = linked
+      ? "]"
+      : next === undefined
+        ? undefined
+        : hasEmphasisMark(next) && !hasLinkMark(next)
+          ? firstEscapedTextCodePoint(next)
+          : firstCodePoint(serializeText(next));
+    if (
+      !isLeftFlankingDelimiter(
+        beforeOpening,
+        firstEscapedTextCodePoint(child),
+      )
+    ) {
+      issue(
+        "serializer_ambiguity",
+        `${path}[${index}].text`,
+        "Surrounding inline content prevents this emphasis mark from opening in canonical CommonMark.",
+      );
+    }
+    if (
+      !isRightFlankingDelimiter(
+        lastEscapedTextCodePoint(child),
+        afterClosing,
+      )
+    ) {
+      issue(
+        "serializer_ambiguity",
+        `${path}[${index}].text`,
+        "Surrounding inline content prevents this emphasis mark from closing in canonical CommonMark.",
+      );
+    }
+  });
+}
+
 function validateInlineChildren(
   children: ReadonlyArray<RichTextText>,
   path: string,
@@ -283,6 +397,7 @@ function validateInlineChildren(
       );
     }
   });
+  validateCommonMarkEmphasisBoundaries(children, path);
 }
 
 export function validateRichTextDocument(

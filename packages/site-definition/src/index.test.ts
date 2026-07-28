@@ -171,6 +171,15 @@ describe("reference Site Definition", () => {
         document.children[0].children[0].marks = ["bold"];
       },
     },
+    {
+      name: "non-flanking emphasis across inline nodes",
+      mutate(document: Record<string, any>) {
+        document.children[0].children = [
+          { type: "text", text: "a", marks: [] },
+          { type: "text", text: "!marked", marks: ["bold"] },
+        ];
+      },
+    },
     ...["https://?", "https://#", "http://[::1"].map((href) => ({
       name: `a malformed absolute link (${href})`,
       mutate(document: Record<string, any>) {

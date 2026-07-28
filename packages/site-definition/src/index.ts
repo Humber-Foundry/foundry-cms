@@ -82,6 +82,22 @@ export const siteDefinitionValidationKeywords = [
       );
     },
   },
+  {
+    keyword: "xFoundryCanonicalRichText",
+    schemaType: "boolean",
+    type: "object",
+    validate(enabled: boolean, document: unknown) {
+      if (!enabled) {
+        return true;
+      }
+      try {
+        validateRichTextDocument(document as RichTextDocument);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  },
 ] as const;
 
 export type HeroSection = Readonly<{
@@ -431,8 +447,9 @@ export const siteDefinitionSchema = {
     richTextDocument: {
       type: "object",
       additionalProperties: false,
+      xFoundryCanonicalRichText: true,
       $comment:
-        "Cross-node canonicality, including adjacent equivalent mark runs, is enforced by validateRichTextDocument.",
+        "Cross-node canonicality, including adjacent equivalent mark runs and CommonMark delimiter flanking, is enforced by validateRichTextDocument through xFoundryCanonicalRichText.",
       required: ["version", "type", "children"],
       properties: {
         version: { const: RICH_TEXT_VERSION },
