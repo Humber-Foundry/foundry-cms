@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,13 +66,39 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 if (args[0] === "extract") {
+  const sourceRoot = args[1];
   const output = args[args.indexOf("--out") + 1];
   const graphDirectory = join(output, "graphify-out");
   mkdirSync(graphDirectory, { recursive: true });
-  writeFileSync(
-    join(graphDirectory, "graph.json"),
+  const graph = JSON.parse(
     readFileSync(process.env.GRAPHIFY_FAKE_GRAPH, "utf8"),
   );
+  for (const item of [
+    ...(graph.nodes ?? []),
+    ...(graph.links ?? graph.edges ?? []),
+  ]) {
+    if (item.source_file?.startsWith(process.env.GRAPHIFY_FAKE_REPOSITORY_ROOT)) {
+      item.source_file =
+        sourceRoot +
+        item.source_file.slice(
+          process.env.GRAPHIFY_FAKE_REPOSITORY_ROOT.length,
+        );
+    }
+  }
+  writeFileSync(
+    join(graphDirectory, "graph.json"),
+    JSON.stringify(graph),
+  );
+  if (process.env.GRAPHIFY_FAKE_MUTATE_REPOSITORY === "1") {
+    writeFileSync(
+      join(
+        process.env.GRAPHIFY_FAKE_REPOSITORY_ROOT,
+        "src",
+        "stable.ts",
+      ),
+      "export const stable = false;\\n",
+    );
+  }
   process.exit(0);
 }
 if (args[0] === "query") {
@@ -148,6 +175,14 @@ function runIndex(repository, arguments_, options = {}) {
             ...process.env,
             GRAPHIFY_BIN: graphify,
             GRAPHIFY_FAKE_GRAPH: graph,
+            GRAPHIFY_FAKE_REPOSITORY_ROOT: git(
+              repository,
+              "rev-parse",
+              "--show-toplevel",
+            ),
+            GRAPHIFY_FAKE_MUTATE_REPOSITORY: options.mutateRepository
+              ? "1"
+              : "0",
             GRAPHIFY_INDEX_CACHE_DIR: cache,
           },
           stdio: ["ignore", "pipe", "pipe"],
@@ -243,6 +278,32 @@ describe("commit-pinned Graphify index", () => {
     expect(result.output).not.toContain("NODE Changed");
   });
 
+  it("excludes both sides of committed and staged renames", () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const graphify = createFakeGraphify();
+    const graph = writeFakeGraph(root);
+    expect(
+      runIndex(root, ["refresh"], { cache, graphify, graph }).status,
+    ).toBe(0);
+
+    git(root, "checkout", "-b", "feature");
+    git(root, "mv", "src/stable.ts", "src/stable-renamed.ts");
+    commitAll(root, "rename stable source");
+    git(root, "mv", "src/changed.ts", "src/changed-renamed.ts");
+
+    const result = runIndex(root, ["query", "stable changed"], {
+      cache,
+      graphify,
+      graph,
+    });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toContain("Branch-modified files excluded: 4");
+    expect(result.output).not.toContain("NODE Stable");
+    expect(result.output).not.toContain("NODE Changed");
+  });
+
   it("fails closed when a branch has integrated main without a matching snapshot", () => {
     const { root } = createRepository();
     const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
@@ -295,6 +356,30 @@ describe("commit-pinned Graphify index", () => {
     expect(query.output).toContain("Graph snapshot integrity check failed");
   });
 
+  it("rejects snapshot source-root metadata that does not match tracked paths", () => {
+    const { root, main } = createRepository();
+    const result = runIndex(root, ["refresh"]);
+    expect(result.status, result.output).toBe(0);
+    const metadataPath = join(
+      result.cache,
+      "snapshots",
+      main,
+      "metadata.json",
+    );
+    const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+    metadata.sourceRoot = tmpdir();
+    writeFileSync(metadataPath, JSON.stringify(metadata));
+
+    const query = runIndex(root, ["query", "stable"], {
+      cache: result.cache,
+    });
+
+    expect(query.status).not.toBe(0);
+    expect(query.output).toContain(
+      "Graph snapshot source path does not match",
+    );
+  });
+
   it("rejects a successful extractor process that emits an empty graph", () => {
     const { root } = createRepository();
     const emptyGraph = join(
@@ -338,5 +423,60 @@ describe("commit-pinned Graphify index", () => {
     expect(dirtyResult.output).toContain(
       "Graph snapshots require a clean main worktree",
     );
+  });
+
+  it("refuses publication if the main worktree changes during extraction", () => {
+    const { root, main } = createRepository();
+    const result = runIndex(root, ["refresh"], {
+      mutateRepository: true,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain(
+      "Graph snapshots require a clean main worktree",
+    );
+    expect(
+      existsSync(join(result.cache, "snapshots", main)),
+    ).toBe(false);
+  });
+
+  it("reclaims a dead refresh lock but preserves a live owner's lock", () => {
+    const { root } = createRepository();
+    const cache = mkdtempSync(join(tmpdir(), "foundry-graphify-cache-"));
+    const lock = join(cache, "refresh.lock");
+    mkdirSync(lock);
+    writeFileSync(
+      join(lock, "owner.json"),
+      JSON.stringify({
+        pid: 999_999,
+        hostname: hostname(),
+        startedAt: new Date(0).toISOString(),
+      }),
+    );
+
+    const reclaimed = runIndex(root, ["refresh"], { cache });
+    expect(reclaimed.status, reclaimed.output).toBe(0);
+    expect(existsSync(lock)).toBe(false);
+
+    const liveCache = mkdtempSync(
+      join(tmpdir(), "foundry-graphify-cache-"),
+    );
+    const liveLock = join(liveCache, "refresh.lock");
+    mkdirSync(liveLock);
+    writeFileSync(
+      join(liveLock, "owner.json"),
+      JSON.stringify({
+        pid: process.pid,
+        hostname: hostname(),
+        startedAt: new Date().toISOString(),
+      }),
+    );
+
+    const blocked = runIndex(root, ["refresh"], { cache: liveCache });
+    expect(blocked.status).not.toBe(0);
+    expect(blocked.output).toContain(
+      "Another Graphify refresh is already running",
+    );
+    expect(existsSync(liveLock)).toBe(true);
   });
 });

@@ -45,10 +45,14 @@ After a verified merge:
    npm run graphify:refresh
    ```
 
-The refresh acquires a shared lock, performs deterministic code-only
-extraction, validates the result, and atomically publishes the commit-addressed
-snapshot. It refuses feature commits and dirty worktrees. If the same snapshot
-already exists, it verifies that snapshot rather than rebuilding it.
+The refresh acquires an ownership-aware shared lock, archives the pinned commit
+to an immutable temporary source tree, performs code-only extraction, validates
+the result, rechecks the publishing worktree, and atomically publishes the
+commit-addressed snapshot. It refuses feature commits and dirty worktrees. If
+the same snapshot already exists, it verifies that snapshot rather than
+rebuilding it. A later refresh reclaims a lock left by a process that no longer
+exists. It also reclaims a lock older than four hours, while preserving a live
+refresher's lock during the bounded refresh window.
 
 Graphify's AST workers may be denied by an agent sandbox even when its process
 exits successfully. The wrapper rejects an empty graph. If the refresh reports

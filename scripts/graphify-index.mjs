@@ -7,11 +7,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import {
   dirname,
   isAbsolute,
@@ -25,6 +26,7 @@ import {
 const schemaVersion = "foundry.graphify-index/v1";
 const maximumQueryBudget = 3_000;
 const defaultQueryBudget = 1_200;
+const maximumRefreshLockAgeMs = 4 * 60 * 60 * 1_000;
 
 function fail(message) {
   throw new Error(message);
@@ -88,6 +90,21 @@ function manifestHash(repositoryRoot, commitSha) {
   );
 }
 
+function trackedPaths(repositoryRoot, commitSha) {
+  return new Set(
+    splitNullDelimited(
+      runGit(repositoryRoot, [
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "-z",
+        "--full-tree",
+        commitSha,
+      ]),
+    ),
+  );
+}
+
 function readJson(path, label) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
@@ -120,6 +137,8 @@ function verifySnapshot(context, commitSha) {
 
   if (
     metadata.schemaVersion !== schemaVersion ||
+    metadata.ref !== "refs/remotes/origin/main" ||
+    metadata.scope !== "code" ||
     metadata.commitSha !== commitSha ||
     metadata.treeSha !==
       gitText(context.repositoryRoot, "rev-parse", `${commitSha}^{tree}`) ||
@@ -131,24 +150,92 @@ function verifySnapshot(context, commitSha) {
     fail(`Graph snapshot integrity check failed for ${commitSha}`);
   }
   validateGraph(graph, graphFile);
+  const tracked = trackedPaths(context.repositoryRoot, commitSha);
+  for (const item of [
+    ...graph.nodes,
+    ...(graph.links ?? graph.edges),
+  ]) {
+    if (!item.source_file) continue;
+    const source = repositoryRelativeSource(
+      item.source_file,
+      metadata.sourceRoot,
+    );
+    if (source === null || !tracked.has(source)) {
+      fail(
+        `Graph snapshot source path does not match ${commitSha}: ` +
+          item.source_file,
+      );
+    }
+  }
   return { root, metadata, graph };
+}
+
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
 }
 
 function acquireRefreshLock(cacheRoot) {
   const lock = join(cacheRoot, "refresh.lock");
   mkdirSync(cacheRoot, { recursive: true });
-  try {
-    mkdirSync(lock);
-  } catch (error) {
-    if (error?.code === "EEXIST") {
-      fail("Another Graphify refresh is already running.");
+  while (true) {
+    const candidate = join(
+      cacheRoot,
+      `refresh.lock.candidate-${process.pid}-${randomUUID()}`,
+    );
+    mkdirSync(candidate);
+    writeFileSync(
+      join(candidate, "owner.json"),
+      JSON.stringify({
+        pid: process.pid,
+        hostname: hostname(),
+        startedAt: new Date().toISOString(),
+      }),
+    );
+    try {
+      renameSync(candidate, lock);
+      break;
+    } catch (error) {
+      rmSync(candidate, { recursive: true, force: true });
+      if (error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY") {
+        throw error;
+      }
+      const owner = readJson(
+        join(lock, "owner.json"),
+        "Graphify refresh lock owner",
+      );
+      const startedAt = Date.parse(owner.startedAt);
+      const age = Date.now() - startedAt;
+      const active =
+        owner.hostname !== hostname() ||
+        (!Number.isFinite(age) ||
+          (age < maximumRefreshLockAgeMs && processIsAlive(owner.pid)));
+      if (active) {
+        fail("Another Graphify refresh is already running.");
+      }
+      const stale = join(
+        cacheRoot,
+        `refresh.lock.stale-${process.pid}-${randomUUID()}`,
+      );
+      try {
+        renameSync(lock, stale);
+        rmSync(stale, { recursive: true, force: true });
+      } catch (reclaimError) {
+        if (
+          reclaimError?.code !== "ENOENT" &&
+          reclaimError?.code !== "EEXIST" &&
+          reclaimError?.code !== "ENOTEMPTY"
+        ) {
+          throw reclaimError;
+        }
+      }
     }
-    throw error;
   }
-  writeFileSync(
-    join(lock, "owner.json"),
-    JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
-  );
   return () => rmSync(lock, { recursive: true, force: true });
 }
 
@@ -192,9 +279,14 @@ function graphifyVersion(context) {
   return result.stdout.trim();
 }
 
-function refresh() {
-  const context = repositoryContext();
-  if (context.head !== context.originMain) {
+function assertRefreshWorktree(context) {
+  const head = gitText(context.repositoryRoot, "rev-parse", "HEAD");
+  const originMain = gitText(
+    context.repositoryRoot,
+    "rev-parse",
+    "refs/remotes/origin/main",
+  );
+  if (head !== context.head || originMain !== context.head) {
     fail(
       "Graph snapshots can only be refreshed at the exact origin/main commit.",
     );
@@ -209,6 +301,31 @@ function refresh() {
   ) {
     fail("Graph snapshots require a clean main worktree.");
   }
+}
+
+function archiveCommit(context, destination) {
+  mkdirSync(destination, { recursive: true });
+  const archive = runGit(
+    context.repositoryRoot,
+    ["archive", "--format=tar", context.head],
+    { binary: true },
+  );
+  const result = spawnSync("tar", ["-xf", "-", "-C", destination], {
+    input: archive,
+    encoding: "utf8",
+  });
+  if (result.error || result.status !== 0) {
+    fail(
+      `Could not unpack immutable source archive: ${
+        result.error?.message ?? result.stderr?.trim() ?? result.status
+      }`,
+    );
+  }
+}
+
+function refresh() {
+  const context = repositoryContext();
+  assertRefreshWorktree(context);
 
   const existing = snapshotDirectory(context.cacheRoot, context.head);
   if (existsSync(existing)) {
@@ -223,6 +340,9 @@ function refresh() {
     "staging",
     `${context.head}-${process.pid}-${randomUUID()}`,
   );
+  const sourceRoot = realpathSync(
+    mkdtempSync(join(tmpdir(), "foundry-graphify-source-")),
+  );
   try {
     if (existsSync(existing)) {
       verifySnapshot(context, context.head);
@@ -230,16 +350,17 @@ function refresh() {
       return;
     }
     mkdirSync(dirname(staging), { recursive: true });
+    archiveCommit(context, sourceRoot);
     runGraphify(
       [
         "extract",
-        context.repositoryRoot,
+        sourceRoot,
         "--code-only",
         "--no-cluster",
         "--out",
         staging,
       ],
-      { cwd: context.repositoryRoot },
+      { cwd: sourceRoot },
     );
     const stagedGraphPath = graphPath(staging);
     const graphBytes = readFileSync(stagedGraphPath);
@@ -259,7 +380,7 @@ function refresh() {
       ),
       graphifyVersion: graphifyVersion(context),
       generatedAt: new Date().toISOString(),
-      sourceRoot: context.repositoryRoot,
+      sourceRoot,
       sourceManifestSha256: manifestHash(
         context.repositoryRoot,
         context.head,
@@ -267,6 +388,7 @@ function refresh() {
       graphSha256: sha256(graphBytes),
       scope: "code",
     };
+    assertRefreshWorktree(context);
     writeFileSync(
       join(staging, "metadata.json"),
       `${JSON.stringify(metadata, null, 2)}\n`,
@@ -288,6 +410,7 @@ function refresh() {
     console.log(`Published immutable Graphify snapshot: ${context.head}`);
   } finally {
     rmSync(staging, { recursive: true, force: true });
+    rmSync(sourceRoot, { recursive: true, force: true });
     releaseLock();
   }
 }
@@ -298,9 +421,29 @@ function splitNullDelimited(value) {
 
 function changedPaths(context, baseSha) {
   const commands = [
-    ["diff", "--name-only", "-z", "--diff-filter=ACDMRTUXB", `${baseSha}...HEAD`],
-    ["diff", "--name-only", "-z", "--diff-filter=ACDMRTUXB"],
-    ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACDMRTUXB"],
+    [
+      "diff",
+      "--no-renames",
+      "--name-only",
+      "-z",
+      "--diff-filter=ACDMRTUXB",
+      `${baseSha}...HEAD`,
+    ],
+    [
+      "diff",
+      "--no-renames",
+      "--name-only",
+      "-z",
+      "--diff-filter=ACDMRTUXB",
+    ],
+    [
+      "diff",
+      "--cached",
+      "--no-renames",
+      "--name-only",
+      "-z",
+      "--diff-filter=ACDMRTUXB",
+    ],
     ["ls-files", "--others", "--exclude-standard", "-z"],
   ];
   return new Set(
