@@ -324,7 +324,20 @@ export function createInMemoryMediaAssetStore(): MediaAssetStore {
           reservation.idempotencyKey !== context.idempotencyKey ||
           reservation.requestHash !== context.requestHash
         ) {
-          throw new MediaSiteAccessError();
+          const reservedMutationKey =
+            `${siteId}:${reservation.idempotencyKey}`;
+          const reservedClaim = claims.get(reservedMutationKey);
+          if (
+            receipts.has(reservedMutationKey) ||
+            (reservedClaim !== undefined &&
+              Date.now() - reservedClaim.claimedAt < 30_000)
+          ) {
+            throw new MediaSiteAccessError();
+          }
+          deletionReservations.set(key, {
+            idempotencyKey: context.idempotencyKey,
+            requestHash: context.requestHash,
+          });
         }
         return asset;
       }

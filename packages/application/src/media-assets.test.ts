@@ -466,7 +466,7 @@ describe("media asset application", () => {
     );
   });
 
-  it("keeps an interrupted source deletion hidden and recoverable", async () => {
+  it("keeps an interrupted source deletion hidden and recoverable after reload", async () => {
     const baseAssets = createInMemoryMediaAssetStore();
     let failCompletion = true;
     const assets = {
@@ -501,7 +501,12 @@ describe("media asset application", () => {
     );
     await expect(application.queries.getAsset(assetC)).resolves.toBeNull();
     await expect(sources.readForTest(uploaded.objectKey)).resolves.toBeNull();
-    await expect(application.commands.delete(command)).resolves.toBeUndefined();
+    await expect(
+      application.commands.delete({
+        ...command,
+        idempotencyKey: "recover-interrupted-delete-after-reload",
+      }),
+    ).resolves.toBeUndefined();
     await expect(application.queries.audit()).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
