@@ -91,6 +91,16 @@ function readListCursor(params: unknown): string | null | undefined {
   return params.cursor ?? null;
 }
 
+function readsJsonMediaType(request: Request) {
+  return (
+    request.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase() === "application/json"
+  );
+}
+
 export function createMcpProtocolRuntime({
   canonicalOrigin,
   siteId,
@@ -144,7 +154,7 @@ export function createMcpProtocolRuntime({
     let offset = 0;
     if (cursor !== null) {
       try {
-        const binding = await context.waitFor(cursors.decode(cursor));
+        const binding = await context.run(() => cursors.decode(cursor));
         if (
           binding.siteId !== siteId ||
           binding.actorId !== principal.actorId ||
@@ -166,7 +176,7 @@ export function createMcpProtocolRuntime({
       values: page,
       nextCursor:
         nextOffset < values.length
-          ? await context.waitFor(
+          ? await context.run(() =>
               cursors.encode({
                 siteId,
                 actorId: principal.actorId,
@@ -285,7 +295,7 @@ export function createMcpProtocolRuntime({
     const windowStartedAt = new Date(
       Math.floor(now().getTime() / 60_000) * 60_000,
     ).toISOString();
-    const [siteBudget, connectionBudget] = await context.waitFor(
+    const [siteBudget, connectionBudget] = await context.run(() =>
       Promise.all([
         store.consumeRateLimit({
           siteId,
@@ -346,7 +356,7 @@ export function createMcpProtocolRuntime({
           tools.get(rpc.params.name) !== null))
         ? requestedOperation
         : "unknown";
-    return (await context.waitFor(
+    return (await context.run(() =>
       store.consumeRateLimit({
         siteId,
         bucketKey: `${principal.connectionId}:${operation}`,
@@ -592,10 +602,7 @@ export function createMcpProtocolRuntime({
       if (
         !accept.includes("application/json") ||
         !accept.includes("text/event-stream") ||
-        request.headers
-          .get("content-type")
-          ?.toLowerCase()
-          .startsWith("application/json") !== true
+        !readsJsonMediaType(request)
       ) {
         return jsonResponse({ error: "unsupported_media_type" }, 415);
       }
@@ -615,7 +622,7 @@ export function createMcpProtocolRuntime({
       }
       let principal: McpConnectionPrincipal | Response;
       try {
-        principal = await context.waitFor(authenticate());
+        principal = await context.run(authenticate);
       } catch (error) {
         return error instanceof RequestDeadlineExceededError
           ? jsonResponse(
@@ -630,7 +637,7 @@ export function createMcpProtocolRuntime({
       let bodyFailure: Response | null = null;
       try {
         value = JSON.parse(
-          await context.waitFor(
+          await context.run(() =>
             readBoundedText(request, rpcBodyLimitBytes, context.signal),
           ),
         );

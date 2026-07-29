@@ -84,12 +84,14 @@ const dashboardFetch = createDashboardIdentityBoundary<
 
 async function fetch(
   request: Request,
-  environment: HumanAccessEnvironment & McpProductionEnvironment,
+  environment: McpProductionEnvironment,
   context: ExecutionContext,
 ) {
   if (isMcpProductionRequest(request)) {
     try {
-      return await createProductionMcpRuntime(environment).fetch(request);
+      return await createProductionMcpRuntime(environment, context).fetch(
+        request,
+      );
     } catch {
       return new Response(
         JSON.stringify({ error: "mcp_service_unavailable" }),

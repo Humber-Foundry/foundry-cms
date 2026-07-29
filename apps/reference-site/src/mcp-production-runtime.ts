@@ -130,6 +130,7 @@ export function isMcpProductionRequest(request: Request): boolean {
 
 export function createProductionMcpRuntime(
   environment: McpProductionEnvironment,
+  context?: Readonly<{ waitUntil(promise: Promise<unknown>): void }>,
 ) {
   const canonicalOrigin = requireSetting(
     environment.FOUNDRY_CANONICAL_ORIGIN,
@@ -178,6 +179,7 @@ export function createProductionMcpRuntime(
     registeredClients: readMcpRegisteredClients(
       environment.FOUNDRY_MCP_CLIENTS,
     ),
+    defer: (promise) => context?.waitUntil(promise),
     authorizationPath,
     ownerRevocationPath: revocationPath,
     async authenticateOwner(request, intent) {

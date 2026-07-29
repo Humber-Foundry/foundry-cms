@@ -18,6 +18,7 @@ import {
   isRecord,
   jsonResponse,
   readBoundedText,
+  RequestDeadlineExceededError,
   sha256,
   type RequestExecutionContext,
 } from "./mcp-http-support";
@@ -134,6 +135,7 @@ export function createMcpHttpRuntime({
     base64UrlEncode(crypto.getRandomValues(new Uint8Array(32))),
   createRefreshFamilyId = () => crypto.randomUUID(),
   requestTimeoutMs = rpcTimeoutMs,
+  defer = () => {},
   now = () => new Date(),
 }: {
   resourceUri: string;
@@ -164,6 +166,7 @@ export function createMcpHttpRuntime({
   createRefreshToken?: () => string;
   createRefreshFamilyId?: () => string;
   requestTimeoutMs?: number;
+  defer?: (promise: Promise<unknown>) => void;
   now?: () => Date;
 }) {
   const resource = new URL(resourceUri);
@@ -214,16 +217,14 @@ export function createMcpHttpRuntime({
     }
     let principal: McpConnectionPrincipal;
     try {
-      const { payload, protectedHeader } = await jwtVerify(
-        authorization.slice("Bearer ".length),
-        signingKey,
-        {
+      const { payload, protectedHeader } = await context.run(() =>
+        jwtVerify(authorization.slice("Bearer ".length), signingKey, {
           algorithms: ["HS256"],
           issuer: authorizationIssuer,
           audience: resourceUri,
           clockTolerance: 5,
           currentDate: now(),
-        },
+        }),
       );
       if (
         protectedHeader.alg !== "HS256" ||
@@ -244,10 +245,11 @@ export function createMcpHttpRuntime({
         siteId,
         scopes: [mcpInitialScope],
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof RequestDeadlineExceededError) throw error;
       return authenticationFailure();
     }
-    const current = await context.waitFor(
+    const current = await context.run(() =>
       store.findCurrentConnection({
         connectionId: principal.connectionId,
         siteId,
@@ -701,7 +703,10 @@ export function createMcpHttpRuntime({
       ) {
         return jsonResponse({ error: "not_found" }, 404);
       }
-      const execution = createRequestExecutionContext(requestTimeoutMs);
+      const execution = createRequestExecutionContext(
+        requestTimeoutMs,
+        defer,
+      );
       try {
         return await protocol.handle(
           request,

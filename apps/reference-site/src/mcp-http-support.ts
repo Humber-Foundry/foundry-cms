@@ -60,11 +60,14 @@ export class RequestDeadlineExceededError extends Error {
 export type RequestExecutionContext = Readonly<{
   signal: AbortSignal;
   throwIfExpired(): void;
-  waitFor<Result>(operation: Promise<Result>): Promise<Result>;
-  settleBeforeThrow<Result>(operation: Promise<Result>): Promise<Result>;
+  run<Result>(operation: () => Promise<Result>): Promise<Result>;
+  finishDurably<Result>(operation: () => Promise<Result>): Promise<Result>;
 }>;
 
-export function createRequestExecutionContext(milliseconds: number) {
+export function createRequestExecutionContext(
+  milliseconds: number,
+  defer: (promise: Promise<unknown>) => void = () => {},
+) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), milliseconds);
   const throwIfExpired = () => {
@@ -72,45 +75,49 @@ export function createRequestExecutionContext(milliseconds: number) {
       throw new RequestDeadlineExceededError();
     }
   };
+  function waitForStarted<Result>(operation: Promise<Result>) {
+    return new Promise<Result>((resolve, reject) => {
+      const expired = () => {
+        cleanup();
+        reject(new RequestDeadlineExceededError());
+      };
+      const cleanup = () => {
+        controller.signal.removeEventListener("abort", expired);
+      };
+      controller.signal.addEventListener("abort", expired, { once: true });
+      operation.then(
+        (result) => {
+          cleanup();
+          try {
+            throwIfExpired();
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          }
+        },
+        (error: unknown) => {
+          cleanup();
+          reject(error);
+        },
+      );
+    });
+  }
   const context: RequestExecutionContext = {
     signal: controller.signal,
     throwIfExpired,
-    waitFor<Result>(operation: Promise<Result>) {
+    run<Result>(operation: () => Promise<Result>) {
       throwIfExpired();
-      return new Promise<Result>((resolve, reject) => {
-        const expired = () => {
-          cleanup();
-          reject(new RequestDeadlineExceededError());
-        };
-        const cleanup = () => {
-          controller.signal.removeEventListener("abort", expired);
-        };
-        controller.signal.addEventListener("abort", expired, { once: true });
-        operation.then(
-          (result) => {
-            cleanup();
-            try {
-              throwIfExpired();
-              resolve(result);
-            } catch (error) {
-              reject(error);
-            }
-          },
-          (error: unknown) => {
-            cleanup();
-            reject(error);
-          },
-        );
-      });
+      return waitForStarted(operation());
     },
-    async settleBeforeThrow<Result>(operation: Promise<Result>) {
+    async finishDurably<Result>(operation: () => Promise<Result>) {
       throwIfExpired();
+      const started = operation();
       try {
-        const result = await operation;
-        throwIfExpired();
-        return result;
+        return await waitForStarted(started);
       } catch (error) {
-        throwIfExpired();
+        if (error instanceof RequestDeadlineExceededError) {
+          defer(started.then(() => undefined, () => undefined));
+        }
         throw error;
       }
     },

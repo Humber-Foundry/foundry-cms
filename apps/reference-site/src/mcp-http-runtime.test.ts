@@ -257,6 +257,7 @@ function fixture(
     createInvocationId: () => crypto.randomUUID(),
     now: () => now.toISOString(),
   });
+  const deferredWork: Array<Promise<unknown>> = [];
   const runtime = createMcpHttpRuntime({
     resourceUri,
     authorizationIssuer: canonicalOrigin,
@@ -287,9 +288,10 @@ function fixture(
     })(),
     createRefreshFamilyId: () => "44444444-4444-4444-8444-444444444444",
     requestTimeoutMs: options.requestTimeoutMs,
+    defer: (promise) => deferredWork.push(promise),
     now: () => now,
   });
-  return { runtime, ...state };
+  return { runtime, deferredWork, ...state };
 }
 
 async function authorize(
@@ -1272,6 +1274,15 @@ describe("production MCP HTTP runtime", () => {
       },
     ],
     [
+      "JSON lookalike media",
+      {
+        origin: canonicalOrigin,
+        accept: "application/json, text/event-stream",
+        contentType: "application/jsonp",
+        protocolVersion: "2025-11-25",
+      },
+    ],
+    [
       "unsupported protocol",
       {
         origin: canonicalOrigin,
@@ -1398,7 +1409,7 @@ describe("production MCP HTTP runtime", () => {
     expect(unavailable.rateLimitInputs).toEqual([]);
   });
 
-  it("settles an in-flight audit before releasing a deadline response", async () => {
+  it("hands an in-flight audit to deferred Worker work before timing out", async () => {
     let releaseAudit: (() => void) | undefined;
     const stalledAudit = new Promise<void>((resolve) => {
       releaseAudit = resolve;
@@ -1424,10 +1435,8 @@ describe("production MCP HTTP runtime", () => {
       });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(responseSettled).toBe(false);
+    expect(responseSettled).toBe(true);
     expect(state.audit).toEqual([]);
-
-    releaseAudit?.();
     const response = await pendingResponse;
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
@@ -1439,6 +1448,10 @@ describe("production MCP HTTP runtime", () => {
         data: { code: "TEMPORARILY_UNAVAILABLE" },
       },
     });
+    expect(state.deferredWork).toHaveLength(1);
+
+    releaseAudit?.();
+    await Promise.all(state.deferredWork);
     expect(state.audit).toHaveLength(1);
   });
 
