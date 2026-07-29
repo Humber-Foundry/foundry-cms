@@ -658,12 +658,21 @@ export function createMcpProtocolRuntime({
         );
       } catch (error) {
         return error instanceof RequestDeadlineExceededError
-          ? jsonResponse(
-              { error: "temporarily_unavailable" },
+          ? rpcError(
+              requestId,
+              -32001,
+              "Request deadline exceeded",
+              { code: "TEMPORARILY_UNAVAILABLE" },
               503,
               { "retry-after": "1" },
             )
-          : jsonResponse({ error: "temporarily_unavailable" }, 503);
+          : rpcError(
+              requestId,
+              -32001,
+              "The service is temporarily unavailable.",
+              { code: "TEMPORARILY_UNAVAILABLE" },
+              503,
+            );
       }
       if (ingressLimited !== null) return ingressLimited;
       if (bodyFailure !== null) return bodyFailure;
@@ -749,6 +758,7 @@ export function createMcpProtocolRuntime({
               "Request deadline exceeded",
               { code: "TEMPORARILY_UNAVAILABLE" },
               503,
+              { "retry-after": "1" },
             )
           : rpcError(value.id, -32603, "Internal error", undefined, 500);
       }

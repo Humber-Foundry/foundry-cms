@@ -1306,6 +1306,65 @@ describe("production MCP HTTP runtime", () => {
     });
   });
 
+  it("correlates stalled and rejected ingress limiter dependencies", async () => {
+    let releaseLimiter: (() => void) | undefined;
+    const stalledLimiter = new Promise<void>((resolve) => {
+      releaseLimiter = resolve;
+    });
+    const stalled = fixture({
+      requestTimeoutMs: 10,
+      beforeConsumeRateLimit: async (call) => {
+        if (call === 1) await stalledLimiter;
+      },
+    });
+    const stalledToken = await authorizeAndExchange(stalled.runtime);
+    const stalledResponse = await stalled.runtime.fetch(
+      rpcRequest(stalledToken.accessToken, {
+        jsonrpc: "2.0",
+        id: "stalled-ingress",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(stalledResponse.status).toBe(503);
+    expect(stalledResponse.headers.get("retry-after")).toBe("1");
+    await expect(stalledResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "stalled-ingress",
+      error: {
+        code: -32001,
+        message: "Request deadline exceeded",
+        data: { code: "TEMPORARILY_UNAVAILABLE" },
+      },
+    });
+    releaseLimiter?.();
+
+    const rejected = fixture({
+      beforeConsumeRateLimit: async (call) => {
+        if (call === 1) throw new Error("D1 unavailable");
+      },
+    });
+    const rejectedToken = await authorizeAndExchange(rejected.runtime);
+    const rejectedResponse = await rejected.runtime.fetch(
+      rpcRequest(rejectedToken.accessToken, {
+        jsonrpc: "2.0",
+        id: "rejected-ingress",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(rejectedResponse.status).toBe(503);
+    await expect(rejectedResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "rejected-ingress",
+      error: {
+        code: -32001,
+        message: "The service is temporarily unavailable.",
+        data: { code: "TEMPORARILY_UNAVAILABLE" },
+      },
+    });
+  });
+
   it.each([
     [
       "foreign Origin",
