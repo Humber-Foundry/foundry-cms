@@ -58,4 +58,23 @@ describe("newsletter unsubscribe tokens", () => {
       providerEventId: expect.stringMatching(/^unsubscribe:[a-f0-9]{64}$/u),
     });
   });
+
+  it("places the opaque token in the query before any configured fragment", async () => {
+    const adapter = createSignedNewsletterDeliveryAdapter({
+      unsubscribeUrl:
+        "https://example.org/newsletter/unsubscribe#preferences",
+      secret: "unsubscribe-test-secret-with-32-bytes",
+    });
+    const url = await adapter.createUnsubscribeUrl({
+      identityKey: "c".repeat(64),
+      expiresAt: "2026-08-30T00:00:00.000Z",
+    });
+    const parsed = new URL(url);
+
+    expect(parsed.hash).toBe("#preferences");
+    expect(parsed.searchParams.get("token")).not.toBeNull();
+    await expect(
+      adapter.consumeUnsubscribeToken(parsed.searchParams.get("token")!),
+    ).resolves.toMatchObject({ identityKey: "c".repeat(64) });
+  });
 });

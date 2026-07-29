@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CampaignValidationError } from "@foundry/application";
+import {
+  CampaignIdempotencyError,
+  CampaignValidationError,
+} from "@foundry/application";
 
 vi.mock("server-only", () => ({}));
 
@@ -147,6 +150,36 @@ describe("campaign endpoint", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ replayed: true });
+  });
+
+  it("reports a missing shared request key as an invalid command", async () => {
+    mocks.createStandalone.mockRejectedValueOnce(
+      new CampaignIdempotencyError("campaign_idempotency_key_invalid"),
+    );
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create_standalone",
+          input: {
+            subject: "Campaign",
+            previewText: "Preview",
+            callToAction: { label: "Read", href: "https://example.com" },
+            emailContent: {
+              version: "1.0.0",
+              type: "document",
+              children: [],
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "campaign_idempotency_key_invalid",
+    });
   });
 
   it("audits malformed authenticated commands", async () => {

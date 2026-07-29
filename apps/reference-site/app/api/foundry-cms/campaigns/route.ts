@@ -186,7 +186,13 @@ export async function POST(request: Request) {
       return Response.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof CampaignIdempotencyError) {
-      return Response.json({ error: error.message }, { status: 409 });
+      return Response.json(
+        { error: error.message },
+        {
+          status:
+            error.code === "campaign_idempotency_key_invalid" ? 400 : 409,
+        },
+      );
     }
     if (error instanceof CampaignNotFoundError) {
       return Response.json({ error: error.message }, { status: 404 });

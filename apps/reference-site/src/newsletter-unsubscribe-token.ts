@@ -106,6 +106,7 @@ export async function verifyNewsletterUnsubscribeToken({
 }
 
 const unsubscribeTokenPlaceholder = "{{foundry.unsubscribe.token}}";
+const unsubscribeTokenSentinel = "FOUNDRY_UNSUBSCRIBE_TOKEN";
 
 function unsubscribePlaceholder(baseUrl: string) {
   const parsed = new URL(baseUrl);
@@ -117,8 +118,10 @@ function unsubscribePlaceholder(baseUrl: string) {
     throw new TypeError("unsubscribe_url_invalid");
   }
   parsed.searchParams.delete("token");
-  const separator = parsed.search === "" ? "?" : "&";
-  return `${parsed.toString()}${separator}token=${unsubscribeTokenPlaceholder}`;
+  parsed.searchParams.set("token", unsubscribeTokenSentinel);
+  return parsed
+    .toString()
+    .replace(unsubscribeTokenSentinel, unsubscribeTokenPlaceholder);
 }
 
 export function createSignedNewsletterDeliveryAdapter({

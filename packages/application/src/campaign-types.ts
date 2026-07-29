@@ -336,9 +336,14 @@ export class CampaignValidationError extends Error {
 }
 
 export class CampaignIdempotencyError extends Error {
-  constructor(code: "campaign_idempotency_key_reused") {
+  readonly code:
+    | "campaign_idempotency_key_invalid"
+    | "campaign_idempotency_key_reused";
+
+  constructor(code: CampaignIdempotencyError["code"]) {
     super(code);
     this.name = "CampaignIdempotencyError";
+    this.code = code;
   }
 }
 

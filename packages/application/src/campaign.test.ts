@@ -195,6 +195,29 @@ describe("campaign authoring and rendering", () => {
     expect(store.listAuditEvents()).toHaveLength(1);
   });
 
+  it("rejects and audits a missing durable request key at the shared command seam", async () => {
+    const { application, store } = createFixture();
+
+    await expect(
+      application.commands.createStandalone({
+        actor: editor,
+        requestId: "",
+        input: standaloneInput,
+      }),
+    ).rejects.toMatchObject({
+      code: "campaign_idempotency_key_invalid",
+    });
+    expect(store.listAuditEvents()).toMatchObject([
+      {
+        actorId: editorMembership.id,
+        requestId: "campaign:missing",
+        action: "campaign.create",
+        outcome: "rejected",
+        reason: "campaign_idempotency_key_invalid",
+      },
+    ]);
+  });
+
   it("replays terminal stale-write rejections without contradictory accepted audit", async () => {
     const { application, store } = createFixture();
     const created = await application.commands.createStandalone({

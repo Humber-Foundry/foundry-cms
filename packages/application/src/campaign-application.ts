@@ -150,6 +150,33 @@ export function createCampaignApplication({
     commandName: CampaignCommandName;
     input: unknown;
   }): Promise<CampaignCommandKey> {
+    if (
+      requestId.length > 200 ||
+      !/^[A-Za-z0-9][A-Za-z0-9:._-]*$/u.test(requestId)
+    ) {
+      const action =
+        commandName === "campaign.edit"
+          ? "campaign.edit"
+          : "campaign.create";
+      await store.recordAudit(
+        auditEvent({
+          actorId: author.id,
+          targetId: "campaign:unknown",
+          revisionId: null,
+          requestId:
+            requestId === "" ? "campaign:missing" : requestId.slice(0, 200),
+          action,
+          outcome: "rejected",
+          reason: "campaign_idempotency_key_invalid",
+          beforeState: null,
+          afterState: null,
+          occurredAt: clock().toISOString(),
+        }),
+      );
+      throw new CampaignIdempotencyError(
+        "campaign_idempotency_key_invalid",
+      );
+    }
     return Object.freeze({
       siteId,
       actorId: author.id,

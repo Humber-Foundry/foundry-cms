@@ -40,6 +40,14 @@ type ReceiptRow = {
   completed_at: string;
 };
 
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
+    return value;
+  }
+  for (const nested of Object.values(value)) deepFreeze(nested);
+  return Object.freeze(value);
+}
+
 function toCampaign(row: CampaignRow): Campaign {
   return Object.freeze({
     id: createCampaignId(row.id),
@@ -78,8 +86,8 @@ function toReceipt(row: ReceiptRow): CampaignCommandReceipt {
   return Object.freeze({
     ...key,
     outcome: "accepted",
-    campaign: Object.freeze(result.campaign),
-    revision: Object.freeze(result.revision),
+    campaign: deepFreeze(result.campaign),
+    revision: deepFreeze(result.revision),
     reason: null,
   });
 }
@@ -391,7 +399,7 @@ export function createD1CampaignStore(
         .first<RevisionRow>();
       return row === null
         ? null
-        : Object.freeze(JSON.parse(row.revision_json) as CampaignRevision);
+        : deepFreeze(JSON.parse(row.revision_json) as CampaignRevision);
     },
     async listCampaigns(siteId) {
       const rows = await database
