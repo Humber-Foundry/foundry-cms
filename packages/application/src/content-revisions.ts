@@ -705,7 +705,7 @@ export function createContentRevisionApplication({
                 throw new ContentRevisionConfigurationError();
               }
               const artifact = await createBlogPostArtifactFingerprint({
-                siteId: definition.site.id,
+                definition,
                 post,
                 schemaVersion: definition.schemaVersion,
                 rendererVersion,

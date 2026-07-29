@@ -1,5 +1,5 @@
 import {
-  siteDesignAttributes,
+  createBlogPostRenderModel,
   type BlogPost,
   type SiteDefinition,
 } from "@foundry/site-definition";
@@ -13,32 +13,38 @@ export function BlogPostRenderer({
   definition: SiteDefinition;
   post: BlogPost;
 }) {
+  const model = createBlogPostRenderModel(definition, post);
+  if ("absent" in model) {
+    return null;
+  }
   return (
-    <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
+    <div className="site-canvas" {...model.designAttributes}>
       <header className="site-header">
-        <a className="wordmark" href="/" aria-label={`${definition.site.name} home`}>
-          <span aria-hidden="true">F</span>
-          {definition.site.name}
+        <a className="wordmark" href="/" aria-label={model.wordmark.label}>
+          <span aria-hidden="true">{model.wordmark.mark}</span>
+          {model.wordmark.name}
         </a>
         <nav aria-label="Primary navigation">
-          <a href="/">Home</a>
+          {model.navigation.map((item) => (
+            <a key={item.href} href={item.href}>{item.label}</a>
+          ))}
         </nav>
       </header>
       <main className="blog-post">
         <article>
           <header>
-            <p className="eyebrow">Journal</p>
-            <h1>{post.title}</h1>
-            <p className="blog-post-excerpt">{post.excerpt}</p>
+            <p className="eyebrow">{model.eyebrow}</p>
+            <h1>{model.title}</h1>
+            <p className="blog-post-excerpt">{model.excerpt}</p>
           </header>
           <div className="rich-text">
-            <RichTextRenderer document={post.body} />
+            <RichTextRenderer document={model.body} />
           </div>
         </article>
       </main>
       <footer className="site-footer">
-        <p>{definition.site.footer}</p>
-        <p>Site Definition v{definition.definitionVersion}</p>
+        <p>{model.footer}</p>
+        <p>Site Definition v{model.definitionVersion}</p>
       </footer>
     </div>
   );

@@ -69,7 +69,11 @@ Each post revision also has its own deterministic, site-scoped UUIDv5 identity
 and `foundry.post-artifact.v1` fingerprint. The fingerprint length-delimits and
 hashes the post ID, post-revision ID, canonical post-content hash, schema
 version, renderer version, serialization version, and the exact rendered-route
-bytes hash (or route-absence artifact for unpublish). D1 persists that evidence
+model bytes hash (or route-absence artifact for unpublish). The canonical model
+is also consumed by the React renderer and covers every variable route input:
+design attributes, site chrome, metadata, post copy, rich text, and definition
+version; the renderer version binds the static markup and renderer code. D1
+persists that evidence
 with the immutable `blog_post_revisions` row, and the site approval stores the
 ordered post-artifact evidence inside its own fingerprint. Preview, approval,
 Git publication, and verified-live reconciliation therefore identify both the

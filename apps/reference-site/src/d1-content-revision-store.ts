@@ -353,7 +353,7 @@ export function createD1ContentRevisionStore(
         await Promise.all(
           initialRevision.definition.blog.posts.map(async (post) => {
             const artifact = await createBlogPostArtifactFingerprint({
-              siteId,
+              definition: initialRevision.definition,
               post,
               schemaVersion: initialRevision.definition.schemaVersion,
               rendererVersion: initialRevision.inputs.rendererVersion,

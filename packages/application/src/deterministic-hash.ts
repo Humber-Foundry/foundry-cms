@@ -12,11 +12,20 @@ export function canonicalJson(value: unknown): string {
 }
 
 export async function sha256CanonicalJson(value: unknown): Promise<string> {
-  const digest = await crypto.subtle.digest(
+  return sha256Text(canonicalJson(value));
+}
+
+export async function sha256TextBytes(value: string): Promise<Uint8Array> {
+  return new Uint8Array(
+    await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(canonicalJson(value)),
+      new TextEncoder().encode(value),
+    ),
   );
-  return Array.from(new Uint8Array(digest), (byte) =>
+}
+
+export async function sha256Text(value: string): Promise<string> {
+  return Array.from(await sha256TextBytes(value), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
 }

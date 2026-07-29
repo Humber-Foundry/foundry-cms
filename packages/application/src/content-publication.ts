@@ -15,7 +15,7 @@ import {
   createBlogPostArtifactFingerprints,
   type BlogPostArtifactFingerprint,
 } from "./blog-artifacts";
-import { canonicalJson } from "./deterministic-hash";
+import { canonicalJson, sha256Text } from "./deterministic-hash";
 import type { HumanMembershipId } from "./human-access";
 
 export const publishedSiteDefinitionPath =
@@ -443,16 +443,6 @@ export class ContentPublicationValidationError extends Error {
   }
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 export function serializePublishedSiteDefinition(
   definition: SiteDefinition,
 ): string {
@@ -530,16 +520,16 @@ export async function hashContentPublicationArtifacts(
     sorted.map(async ({ path, bytes }) => ({
       path,
       byteLength: new TextEncoder().encode(bytes).byteLength,
-      sha256: await sha256(bytes),
+      sha256: await sha256Text(bytes),
     })),
   );
-  return sha256(canonicalJson(manifest));
+  return sha256Text(canonicalJson(manifest));
 }
 
 export function hashPublishedSiteDefinition(
   definition: SiteDefinition,
 ): Promise<string> {
-  return sha256(canonicalJson(definition));
+  return sha256Text(canonicalJson(definition));
 }
 
 function designProjection(definition: SiteDefinition) {
@@ -574,7 +564,7 @@ export async function createContentApprovalFingerprint(
   const artifactHash = await hashContentPublicationArtifacts(
     serializeContentPublicationArtifacts(revision.definition),
   );
-  const canonicalDefinitionHash = await sha256(
+  const canonicalDefinitionHash = await sha256Text(
     canonicalJson(revision.definition),
   );
   if (
@@ -583,7 +573,7 @@ export async function createContentApprovalFingerprint(
   ) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
-  const designHash = await sha256(canonicalJson(designProjection(
+  const designHash = await sha256Text(canonicalJson(designProjection(
     revision.definition,
   )));
   const publishedContentHash = await hashPublishedSiteDefinition(
@@ -611,7 +601,7 @@ export async function createContentApprovalFingerprint(
   } as const;
   return {
     ...binding,
-    value: await sha256(canonicalJson(binding)),
+    value: await sha256Text(canonicalJson(binding)),
   };
 }
 
@@ -1110,7 +1100,7 @@ export function createContentPublicationApplication({
         approval.fingerprint.contentHash !==
           (await hashPublishedSiteDefinition(revision.definition)) ||
         approval.fingerprint.artifactHash !==
-          (await sha256(serializedDefinition)) ||
+          (await sha256Text(serializedDefinition)) ||
         approval.fingerprint.schemaVersion !==
           revision.definition.schemaVersion ||
         approval.fingerprint.rendererVersion !==
@@ -2572,7 +2562,7 @@ export function createContentPublicationApplication({
           approval.fingerprint.serializationVersion ===
           "foundry.site-definition.canonical-json.v1"
         ) {
-          artifactHash = await sha256(bytes);
+          artifactHash = await sha256Text(bytes);
         } else {
           let artifacts: ReadonlyArray<ContentPublicationArtifact>;
           try {

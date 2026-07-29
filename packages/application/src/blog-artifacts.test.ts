@@ -10,24 +10,25 @@ import { createBlogPostArtifactFingerprint } from "./blog-artifacts";
 
 describe("blog post artifact fingerprint", () => {
   it("binds the exact stable revision and rendered post inputs", async () => {
-    const fingerprint = await createBlogPostArtifactFingerprint({
-      siteId: referenceSiteDefinition.site.id,
-      post: {
-        id: createBlogPostId(
-          "00000000-0000-4000-8000-000000000009",
-        ),
-        revision: 1,
-        collectionState: "active",
-        targetVisibility: "public",
-        slug: "exact-pipeline",
-        title: "Exact pipeline",
-        excerpt: "Published through the site pipeline.",
-        seo: {
-          title: "Exact pipeline | Foundry",
-          description: "A post using the exact site publication pipeline.",
-        },
-        body: createRichTextDocumentFromPlainText("Exact post body."),
+    const post = {
+      id: createBlogPostId(
+        "00000000-0000-4000-8000-000000000009",
+      ),
+      revision: 1,
+      collectionState: "active" as const,
+      targetVisibility: "public" as const,
+      slug: "exact-pipeline",
+      title: "Exact pipeline",
+      excerpt: "Published through the site pipeline.",
+      seo: {
+        title: "Exact pipeline | Foundry",
+        description: "A post using the exact site publication pipeline.",
       },
+      body: createRichTextDocumentFromPlainText("Exact post body."),
+    };
+    const fingerprint = await createBlogPostArtifactFingerprint({
+      definition: referenceSiteDefinition,
+      post,
       schemaVersion: referenceSiteDefinition.schemaVersion,
       rendererVersion: "renderer-v1",
     });
@@ -42,9 +43,30 @@ describe("blog post artifact fingerprint", () => {
       rendererVersion: "renderer-v1",
       serializationVersion: "foundry.post-artifact.v1",
       renderedBytesHash:
-        "f37d0d3bd2ae81ed05b4b5620e9c899220ec4c5d2cf4d8a94609e205fed84d55",
+        "b01cd91ebeef5240c3c983a6ab7ef67a14ea70b7889992bdb622984cfac156cd",
       value:
-        "b5ac05a73b2f5ebf335900915c4ddd572c790e71ae500e36f90a955107feff84",
+        "5dee585a5c3e361d9386427ba610ea927535c6fa407affbd952d88e7c276be1e",
     });
+
+    const changedChrome = await createBlogPostArtifactFingerprint({
+      definition: {
+        ...referenceSiteDefinition,
+        site: {
+          ...referenceSiteDefinition.site,
+          footer: "Changed route chrome",
+        },
+      },
+      post,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      rendererVersion: "renderer-v1",
+    });
+    expect(changedChrome).toMatchObject({
+      postRevisionId: fingerprint.postRevisionId,
+      contentHash: fingerprint.contentHash,
+    });
+    expect(changedChrome.renderedBytesHash).not.toBe(
+      fingerprint.renderedBytesHash,
+    );
+    expect(changedChrome.value).not.toBe(fingerprint.value);
   });
 });

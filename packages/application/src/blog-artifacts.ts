@@ -1,12 +1,16 @@
 import {
-  serializeRichTextToMarkdown,
+  createBlogPostRenderModel,
   type BlogPost,
   type BlogPostId,
   type SiteDefinition,
   type SiteId,
 } from "@foundry/site-definition";
 
-import { canonicalJson } from "./deterministic-hash";
+import {
+  canonicalJson,
+  sha256Text,
+  sha256TextBytes,
+} from "./deterministic-hash";
 
 export const blogPostArtifactSerializationVersion =
   "foundry.post-artifact.v1";
@@ -60,21 +64,6 @@ export function isBlogPostArtifactFingerprint(
   );
 }
 
-async function sha256Bytes(value: string): Promise<Uint8Array> {
-  return new Uint8Array(
-    await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(value),
-    ),
-  );
-}
-
-async function sha256(value: string): Promise<string> {
-  return [...(await sha256Bytes(value))]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function lengthDelimited(parts: ReadonlyArray<string>): string {
   const encoder = new TextEncoder();
   return parts
@@ -90,7 +79,7 @@ export async function createBlogPostRevisionId(
   if (!Number.isSafeInteger(revision) || revision < 1) {
     throw new TypeError("blog_post_revision_invalid");
   }
-  const bytes = await sha256Bytes(
+  const bytes = await sha256TextBytes(
     lengthDelimited([
       "foundry.post-revision-id.v1",
       siteId,
@@ -113,39 +102,22 @@ export async function createBlogPostRevisionId(
   ].join("-") as BlogPostRevisionId;
 }
 
-function serializeRenderedPostArtifact(post: BlogPost): string {
-  return canonicalJson(
-    post.targetVisibility === "public"
-      ? {
-          route: `/blog/${post.slug}`,
-          metadata: post.seo,
-          title: post.title,
-          excerpt: post.excerpt,
-          body: serializeRichTextToMarkdown(post.body),
-        }
-      : {
-          route: `/blog/${post.slug}`,
-          absent: true,
-        },
-  );
-}
-
 export async function createBlogPostArtifactFingerprint(input: {
-  siteId: SiteId;
+  definition: SiteDefinition;
   post: BlogPost;
   schemaVersion: SiteDefinition["schemaVersion"];
   rendererVersion: string;
 }): Promise<BlogPostArtifactFingerprint> {
   const postRevisionId = await createBlogPostRevisionId(
-    input.siteId,
+    input.definition.site.id,
     input.post.id,
     input.post.revision,
   );
-  const contentHash = await sha256(canonicalJson(input.post));
-  const renderedBytesHash = await sha256(
-    serializeRenderedPostArtifact(input.post),
+  const contentHash = await sha256Text(canonicalJson(input.post));
+  const renderedBytesHash = await sha256Text(
+    canonicalJson(createBlogPostRenderModel(input.definition, input.post)),
   );
-  const value = await sha256(
+  const value = await sha256Text(
     lengthDelimited([
       blogPostArtifactSerializationVersion,
       input.post.id,
@@ -176,7 +148,7 @@ export async function createBlogPostArtifactFingerprints(
   return Promise.all(
     revision.definition.blog.posts.map((post) =>
       createBlogPostArtifactFingerprint({
-        siteId: revision.definition.site.id,
+        definition: revision.definition,
         post,
         schemaVersion: revision.inputs.schemaVersion,
         rendererVersion: revision.inputs.rendererVersion,
