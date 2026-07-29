@@ -82,7 +82,6 @@ function toolOutputSchema(result: unknown) {
 const annotations = {
   readOnlyHint: true,
   destructiveHint: false,
-  idempotentHint: true,
   openWorldHint: false,
 } as const;
 

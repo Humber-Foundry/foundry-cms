@@ -305,13 +305,22 @@ export function createMcpProtocolRuntime({
       : rateLimitedResponse();
   }
 
-  function rateLimitedResponse() {
+  function rateLimitedResponse(id?: RpcRequest["id"]) {
     const retryAfter = Math.max(1, 60 - now().getUTCSeconds());
-    return jsonResponse(
-      { error: "rate_limited", retryAfterMs: retryAfter * 1_000 },
-      429,
-      { "retry-after": String(retryAfter) },
-    );
+    return id === undefined
+      ? jsonResponse(
+          { error: "rate_limited", retryAfterMs: retryAfter * 1_000 },
+          429,
+          { "retry-after": String(retryAfter) },
+        )
+      : rpcError(
+          id,
+          -32003,
+          "Rate limited",
+          { code: "RATE_LIMITED", retryAfterMs: retryAfter * 1_000 },
+          429,
+          { "retry-after": String(retryAfter) },
+        );
   }
 
   async function applyOperationRateLimit(
@@ -345,7 +354,7 @@ export function createMcpProtocolRuntime({
       }),
     ))
       ? null
-      : rateLimitedResponse();
+      : rateLimitedResponse(rpc.id);
   }
 
   async function dispatch(

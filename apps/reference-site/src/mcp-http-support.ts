@@ -306,6 +306,7 @@ export function rpcError(
   message: string,
   data?: unknown,
   status = 200,
+  headers: HeadersInit = {},
 ) {
   return jsonResponse(
     {
@@ -318,5 +319,6 @@ export function rpcError(
       },
     },
     status,
+    headers,
   );
 }

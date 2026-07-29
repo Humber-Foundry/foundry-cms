@@ -18,6 +18,7 @@ import {
   isRecord,
   jsonResponse,
   readBoundedText,
+  RequestDeadlineExceededError,
   sha256,
   type RequestExecutionContext,
 } from "./mcp-http-support";
@@ -264,7 +265,8 @@ export function createMcpHttpRuntime({
         );
       }
       return principal;
-    } catch {
+    } catch (error) {
+      if (error instanceof RequestDeadlineExceededError) throw error;
       return authenticationFailure();
     }
   }

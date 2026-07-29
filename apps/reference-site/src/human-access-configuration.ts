@@ -40,10 +40,6 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_CLOUDFLARE_API_TOKEN?: string;
   FOUNDRY_PUBLICATION_SIGNING_SECRET?: string;
   FOUNDRY_MEDIA?: PrivateMediaBucket;
-  FOUNDRY_MCP_OAUTH_SIGNING_KEY?: string;
-  FOUNDRY_MCP_CLIENTS?: string;
-  FOUNDRY_SITE_LOCALE?: string;
-  FOUNDRY_SITE_TIME_ZONE?: string;
 }>;
 
 export class HumanAccessConfigurationError extends Error {

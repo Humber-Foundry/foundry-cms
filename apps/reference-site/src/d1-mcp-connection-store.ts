@@ -1,8 +1,11 @@
-import type {
-  McpConnectionGrant,
-  McpConnectionSummary,
-  McpConnectionStore,
-  McpReadAuditEvent,
+import {
+  mcpContractVersion,
+  mcpInitialScope,
+  mcpProtocolVersion,
+  type McpConnectionGrant,
+  type McpConnectionSummary,
+  type McpConnectionStore,
+  type McpReadAuditEvent,
 } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
 
@@ -121,7 +124,7 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                id, actor_id, site_id, oauth_client_id, redirect_uri,
                scopes_json, status, created_by_membership_id, created_at
              )
-             SELECT ?1, ?2, ?3, ?4, ?5, '["site.read"]', 'active', ?6, ?7
+             SELECT ?1, ?2, ?3, ?4, ?5, ?8, 'active', ?6, ?7
              WHERE EXISTS (
                SELECT 1 FROM human_memberships
                WHERE id = ?6
@@ -138,6 +141,7 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
             input.redirectUri,
             input.ownerMembershipId,
             input.now,
+            JSON.stringify([mcpInitialScope]),
           ),
         database
           .prepare(
@@ -166,8 +170,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                human_actor_id, revocation_reason, occurred_at, contract_version
              )
              SELECT ?1, ?2, ?3, ?4, 'foundry.connection.authorize',
-                    ?7, '2025-11-25', '["site.read"]', 'allowed', NULL,
-                    ?8, NULL, ?5, 'foundry.mcp.v1'
+                    ?7, ?9, ?10, 'allowed', NULL,
+                    ?8, NULL, ?5, ?11
              WHERE EXISTS (
                SELECT 1 FROM mcp_authorization_codes
                WHERE code_hash = ?6 AND connection_id = ?2
@@ -182,6 +186,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
             input.codeHash,
             input.inputHash,
             input.ownerMembershipId,
+            mcpProtocolVersion,
+            JSON.stringify([mcpInitialScope]),
+            mcpContractVersion,
           ),
       ]);
       if (
@@ -319,8 +326,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                human_actor_id, revocation_reason, occurred_at, contract_version
              )
              SELECT ?1, id, actor_id, site_id, 'foundry.connection.revoke',
-                    ?5, '2025-11-25', scopes_json, 'allowed', NULL,
-                    ?6, ?7, ?2, 'foundry.mcp.v1'
+                    ?5, ?8, scopes_json, 'allowed', NULL,
+                    ?6, ?7, ?2, ?9
              FROM mcp_connections
              WHERE id = ?3 AND site_id = ?4 AND status = 'revoked'
                AND revoked_at = ?2`,
@@ -333,6 +340,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
             input.inputHash,
             input.ownerMembershipId,
             input.reason,
+            mcpProtocolVersion,
+            mcpContractVersion,
           ),
       ]);
       return (
@@ -426,9 +435,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                  contract_version
                ) VALUES (
                  ?1, ?2, ?3, ?4, 'foundry.connection.refresh_reuse',
-                 ?5, '2025-11-25', ?6, 'denied',
+                 ?5, ?8, ?6, 'denied',
                  'CONNECTION_REVOKED', NULL, 'refresh_token_reuse', ?7,
-                 'foundry.mcp.v1'
+                 ?9
                )`,
             )
             .bind(
@@ -439,6 +448,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
               input.tokenHash,
               existing.scopes_json,
               input.now,
+              mcpProtocolVersion,
+              mcpContractVersion,
             ),
         ]);
         return { state: "reuse_detected" };

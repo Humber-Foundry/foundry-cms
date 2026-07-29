@@ -54,7 +54,7 @@ function createStore({
   beforeFindCurrentConnection,
   beforeConsumeRateLimit,
 }: {
-  allowRateLimit?: boolean;
+  allowRateLimit?: boolean | ((call: number) => boolean);
   beforeFindCurrentConnection?: (call: number) => Promise<void>;
   beforeConsumeRateLimit?: (call: number) => Promise<void>;
 } = {}) {
@@ -171,7 +171,9 @@ function createStore({
       rateLimitCount += 1;
       await beforeConsumeRateLimit?.(rateLimitCount);
       rateLimitInputs.push(input);
-      return allowRateLimit;
+      return typeof allowRateLimit === "function"
+        ? allowRateLimit(rateLimitCount)
+        : allowRateLimit;
     },
     async recordInvocation(event) {
       audit.push(event);
@@ -188,7 +190,7 @@ function createStore({
 
 function fixture(
   options: {
-    allowRateLimit?: boolean;
+    allowRateLimit?: boolean | ((call: number) => boolean);
     contentCount?: number;
     requestTimeoutMs?: number;
     beforeFindCurrentConnection?: (call: number) => Promise<void>;
@@ -1168,7 +1170,7 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
 
-    const limited = fixture({ allowRateLimit: false });
+    const limited = fixture({ allowRateLimit: (call) => call < 3 });
     const limitedToken = await authorizeAndExchange(limited.runtime);
     const rateLimited = await limited.runtime.fetch(
       rpcRequest(limitedToken.accessToken, {
@@ -1180,6 +1182,18 @@ describe("production MCP HTTP runtime", () => {
     );
     expect(rateLimited.status).toBe(429);
     expect(Number(rateLimited.headers.get("retry-after"))).toBeGreaterThan(0);
+    await expect(rateLimited.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: 12,
+      error: {
+        code: -32003,
+        message: "Rate limited",
+        data: {
+          code: "RATE_LIMITED",
+          retryAfterMs: expect.any(Number),
+        },
+      },
+    });
   });
 
   it.each([
@@ -1276,6 +1290,36 @@ describe("production MCP HTTP runtime", () => {
     releaseApplicationLookup?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(state.audit).toEqual([]);
+  });
+
+  it("reports authentication dependency expiry as temporary unavailability", async () => {
+    let releaseAuthenticationLookup: (() => void) | undefined;
+    const stalled = new Promise<void>((resolve) => {
+      releaseAuthenticationLookup = resolve;
+    });
+    const state = fixture({
+      requestTimeoutMs: 10,
+      beforeFindCurrentConnection: async (call) => {
+        if (call === 1) await stalled;
+      },
+    });
+    const { accessToken } = await authorizeAndExchange(state.runtime);
+    const response = await state.runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "authentication-deadline",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "temporarily_unavailable",
+    });
+    expect(state.rateLimitInputs).toEqual([]);
+
+    releaseAuthenticationLookup?.();
   });
 
   it("correlates malformed resource URIs and unexpected post-parse failures", async () => {
