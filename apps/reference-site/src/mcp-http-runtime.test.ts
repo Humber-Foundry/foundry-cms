@@ -53,10 +53,12 @@ function createStore({
   allowRateLimit = true,
   beforeFindCurrentConnection,
   beforeConsumeRateLimit,
+  beforeRecordInvocation,
 }: {
   allowRateLimit?: boolean | ((call: number) => boolean);
   beforeFindCurrentConnection?: (call: number) => Promise<void>;
   beforeConsumeRateLimit?: (call: number) => Promise<void>;
+  beforeRecordInvocation?: () => Promise<void>;
 } = {}) {
   const connections = new Map<string, McpConnectionGrant>();
   const codes = new Map<
@@ -176,6 +178,7 @@ function createStore({
         : allowRateLimit;
     },
     async recordInvocation(event) {
+      await beforeRecordInvocation?.();
       audit.push(event);
     },
   };
@@ -195,6 +198,7 @@ function fixture(
     requestTimeoutMs?: number;
     beforeFindCurrentConnection?: (call: number) => Promise<void>;
     beforeConsumeRateLimit?: (call: number) => Promise<void>;
+    beforeRecordInvocation?: () => Promise<void>;
   } = {},
 ) {
   const state = createStore(options);
@@ -1222,6 +1226,30 @@ describe("production MCP HTTP runtime", () => {
         },
       },
     });
+
+    const ingressLimited = fixture({ allowRateLimit: false });
+    const ingressToken = await authorizeAndExchange(ingressLimited.runtime);
+    const ingressResponse = await ingressLimited.runtime.fetch(
+      rpcRequest(ingressToken.accessToken, {
+        jsonrpc: "2.0",
+        id: "ingress-rate-limit",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(ingressResponse.status).toBe(429);
+    await expect(ingressResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "ingress-rate-limit",
+      error: {
+        code: -32003,
+        message: "Rate limited",
+        data: {
+          code: "RATE_LIMITED",
+          retryAfterMs: expect.any(Number),
+        },
+      },
+    });
   });
 
   it.each([
@@ -1368,6 +1396,50 @@ describe("production MCP HTTP runtime", () => {
       error: "temporarily_unavailable",
     });
     expect(unavailable.rateLimitInputs).toEqual([]);
+  });
+
+  it("settles an in-flight audit before releasing a deadline response", async () => {
+    let releaseAudit: (() => void) | undefined;
+    const stalledAudit = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+    const state = fixture({
+      requestTimeoutMs: 10,
+      beforeRecordInvocation: async () => stalledAudit,
+    });
+    const { accessToken } = await authorizeAndExchange(state.runtime);
+    let responseSettled = false;
+    const pendingResponse = state.runtime
+      .fetch(
+        rpcRequest(accessToken, {
+          jsonrpc: "2.0",
+          id: "audit-deadline",
+          method: "resources/read",
+          params: { uri: "foundry://site" },
+        }),
+      )
+      .then((response) => {
+        responseSettled = true;
+        return response;
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(responseSettled).toBe(false);
+    expect(state.audit).toEqual([]);
+
+    releaseAudit?.();
+    const response = await pendingResponse;
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "audit-deadline",
+      error: {
+        code: -32001,
+        message: "Request deadline exceeded",
+        data: { code: "TEMPORARILY_UNAVAILABLE" },
+      },
+    });
+    expect(state.audit).toHaveLength(1);
   });
 
   it("correlates malformed resource URIs and unexpected post-parse failures", async () => {

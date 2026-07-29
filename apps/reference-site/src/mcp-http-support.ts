@@ -61,6 +61,7 @@ export type RequestExecutionContext = Readonly<{
   signal: AbortSignal;
   throwIfExpired(): void;
   waitFor<Result>(operation: Promise<Result>): Promise<Result>;
+  settleBeforeThrow<Result>(operation: Promise<Result>): Promise<Result>;
 }>;
 
 export function createRequestExecutionContext(milliseconds: number) {
@@ -101,6 +102,17 @@ export function createRequestExecutionContext(milliseconds: number) {
           },
         );
       });
+    },
+    async settleBeforeThrow<Result>(operation: Promise<Result>) {
+      throwIfExpired();
+      try {
+        const result = await operation;
+        throwIfExpired();
+        return result;
+      } catch (error) {
+        throwIfExpired();
+        throw error;
+      }
     },
   };
   return {

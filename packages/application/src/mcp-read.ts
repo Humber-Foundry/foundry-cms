@@ -72,6 +72,7 @@ export type McpCursorCodec = Readonly<{
 export type McpExecutionContext = Readonly<{
   throwIfExpired(): void;
   waitFor<Result>(operation: Promise<Result>): Promise<Result>;
+  settleBeforeThrow<Result>(operation: Promise<Result>): Promise<Result>;
 }>;
 
 export type McpReadErrorCode =
@@ -259,6 +260,7 @@ export function createMcpReadApplication({
   const uninterruptedContext: McpExecutionContext = {
     throwIfExpired() {},
     waitFor: (operation) => operation,
+    settleBeforeThrow: (operation) => operation,
   };
 
   async function loadConnection(
@@ -314,7 +316,7 @@ export function createMcpReadApplication({
       }
       const result = await run(context);
       context.throwIfExpired();
-      await context.waitFor(
+      await context.settleBeforeThrow(
         connections.recordInvocation({
           invocationId,
           connectionId: principal.connectionId,
@@ -358,7 +360,7 @@ export function createMcpReadApplication({
         safeError.message,
         { invocationId, observedAt },
       );
-      await context.waitFor(
+      await context.settleBeforeThrow(
         connections.recordInvocation({
           invocationId,
           connectionId: principal.connectionId,

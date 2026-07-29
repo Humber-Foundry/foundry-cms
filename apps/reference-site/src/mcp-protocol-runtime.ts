@@ -280,6 +280,7 @@ export function createMcpProtocolRuntime({
   async function applyIngressRateLimits(
     principal: McpConnectionPrincipal,
     context: McpExecutionContext,
+    requestId: RpcRequest["id"] | null,
   ) {
     const windowStartedAt = new Date(
       Math.floor(now().getTime() / 60_000) * 60_000,
@@ -302,10 +303,10 @@ export function createMcpProtocolRuntime({
     );
     return siteBudget && connectionBudget
       ? null
-      : rateLimitedResponse();
+      : rateLimitedResponse(requestId);
   }
 
-  function rateLimitedResponse(id?: RpcRequest["id"]) {
+  function rateLimitedResponse(id?: RpcRequest["id"] | null) {
     const retryAfter = Math.max(1, 60 - now().getUTCSeconds());
     return id === undefined
       ? jsonResponse(
@@ -625,9 +626,38 @@ export function createMcpProtocolRuntime({
           : jsonResponse({ error: "temporarily_unavailable" }, 503);
       }
       if (principal instanceof Response) return principal;
+      let value: unknown;
+      let bodyFailure: Response | null = null;
+      try {
+        value = JSON.parse(
+          await context.waitFor(
+            readBoundedText(request, rpcBodyLimitBytes, context.signal),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof RequestBodyLimitError) {
+          value = null;
+          bodyFailure = jsonResponse({ error: "request_too_large" }, 413);
+        } else if (error instanceof RequestDeadlineExceededError) {
+          return jsonResponse(
+            { error: "temporarily_unavailable" },
+            503,
+            { "retry-after": "1" },
+          );
+        } else {
+          value = null;
+          bodyFailure = rpcError(null, -32700, "Parse error");
+        }
+      }
+      const requestId =
+        isRecord(value) && isRequestId(value.id) ? value.id : null;
       let ingressLimited: Response | null;
       try {
-        ingressLimited = await applyIngressRateLimits(principal, context);
+        ingressLimited = await applyIngressRateLimits(
+          principal,
+          context,
+          requestId,
+        );
       } catch (error) {
         return error instanceof RequestDeadlineExceededError
           ? jsonResponse(
@@ -638,26 +668,7 @@ export function createMcpProtocolRuntime({
           : jsonResponse({ error: "temporarily_unavailable" }, 503);
       }
       if (ingressLimited !== null) return ingressLimited;
-      let value: unknown;
-      try {
-        value = JSON.parse(
-          await context.waitFor(
-            readBoundedText(request, rpcBodyLimitBytes, context.signal),
-          ),
-        );
-      } catch (error) {
-        if (error instanceof RequestBodyLimitError) {
-          return jsonResponse({ error: "request_too_large" }, 413);
-        }
-        if (error instanceof RequestDeadlineExceededError) {
-          return jsonResponse(
-            { error: "temporarily_unavailable" },
-            503,
-            { "retry-after": "1" },
-          );
-        }
-        return rpcError(null, -32700, "Parse error");
-      }
+      if (bodyFailure !== null) return bodyFailure;
       if (!isRecord(value) || value.jsonrpc !== "2.0") {
         return rpcError(
           isRecord(value) && isRequestId(value.id) ? value.id : null,
