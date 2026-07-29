@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { sha256Text, type NewsletterTestRequest } from "@foundry/application";
+import {
+  sha256Text,
+  type NewsletterDeliveryAdapter,
+  type NewsletterTestRequest,
+} from "@foundry/application";
 
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 
@@ -62,12 +66,25 @@ function response(status: number, body?: unknown) {
   });
 }
 
+async function prepareRequest(
+  adapter: NewsletterDeliveryAdapter,
+): Promise<NewsletterTestRequest> {
+  const preparation = await adapter.prepareTest(request);
+  if (preparation.outcome !== "prepared") {
+    throw new Error(`test preparation failed: ${preparation.outcome}`);
+  }
+  return {
+    ...request,
+    providerCampaignId: preparation.providerCampaignId,
+    foundrySendProof: preparation.foundrySendProof,
+  };
+}
+
 describe("Brevo newsletter delivery adapter", () => {
-  it("creates one fresh draft, sends to explicit recipients, and accepts only reconciled testSent evidence", async () => {
+  it("durably prepares one fresh draft before sending to explicit recipients", async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(response(201, { id: 17 }))
-      .mockResolvedValueOnce(response(204))
       .mockResolvedValueOnce(
         response(200, {
           id: 17,
@@ -77,18 +94,21 @@ describe("Brevo newsletter delivery adapter", () => {
           subject: request.subject,
           previewText: request.previewText,
           htmlContent: "<html><body>Exact body</body></html>",
-          testSent: true,
+          testSent: false,
         }),
-      );
+      )
+      .mockResolvedValueOnce(response(204));
     const adapter = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher,
     });
 
-    await expect(adapter.sendTest(request)).resolves.toEqual({
+    const prepared = await prepareRequest(adapter);
+    await expect(adapter.sendTest(prepared)).resolves.toEqual({
       outcome: "accepted",
       providerCampaignId: "17",
       providerReceipt: expect.stringMatching(/^brevo:test:/u),
@@ -102,7 +122,7 @@ describe("Brevo newsletter delivery adapter", () => {
       }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(
-      2,
+      3,
       "https://api.brevo.com/v3/emailCampaigns/17/sendTest",
       expect.objectContaining({
         method: "POST",
@@ -111,6 +131,71 @@ describe("Brevo newsletter delivery adapter", () => {
         }),
       }),
     );
+  });
+
+  it("keeps canonical send proof stable across Brevo credential rotation", async () => {
+    const existingCampaign = {
+      id: 17,
+      name: "foundry-test-40000000-0000-4000-8000-000000000001",
+      tag: "f-test-8000000000000001",
+      sender: { id: 42 },
+      subject: request.subject,
+      previewText: request.previewText,
+      htmlContent: "<html><body>Exact body</body></html>",
+      testSent: false,
+    };
+    const createAdapter = (apiKey: string) =>
+      createBrevoNewsletterDeliveryAdapter({
+        apiKey,
+        configurationFingerprint,
+        accountScopeFingerprint: "8".repeat(64),
+        installationProofKey: "p".repeat(64),
+        senderIds: { sender_primary: 42 },
+        fetcher: vi.fn().mockResolvedValue(response(200, existingCampaign)),
+      });
+    const knownCampaignRequest = {
+      ...request,
+      providerCampaignId: "17",
+    };
+
+    const beforeRotation =
+      await createAdapter("first-test-key").prepareTest(
+        knownCampaignRequest,
+      );
+    const afterRotation =
+      await createAdapter("rotated-test-key").prepareTest(
+        knownCampaignRequest,
+      );
+
+    expect(beforeRotation).toMatchObject({
+      outcome: "prepared",
+      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(afterRotation).toEqual(beforeRotation);
+  });
+
+  it("refuses the provider test write without the persisted exact proof", async () => {
+    const fetcher = vi.fn();
+    const adapter = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
+      senderIds: { sender_primary: 42 },
+      fetcher,
+    });
+
+    await expect(
+      adapter.sendTest({
+        ...request,
+        providerCampaignId: "17",
+        foundrySendProof: null,
+      }),
+    ).resolves.toEqual({
+      outcome: "rejected",
+      code: "foundry_send_proof_invalid",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("does not accept a matching provider draft sent outside Foundry", async () => {
@@ -135,6 +220,7 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher,
     });
@@ -156,6 +242,7 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(429)),
     });
@@ -174,6 +261,7 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(503)),
     });
@@ -188,6 +276,7 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(404)),
     });
@@ -206,8 +295,6 @@ describe("Brevo newsletter delivery adapter", () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(response(201, { id: 17 }))
-      .mockRejectedValueOnce(new Error("response_lost_after_send"))
-      .mockResolvedValueOnce(response(404))
       .mockResolvedValueOnce(
         response(200, {
           id: 17,
@@ -219,28 +306,38 @@ describe("Brevo newsletter delivery adapter", () => {
           htmlContent: "<html><body>Exact body</body></html>",
           testSent: false,
         }),
+      )
+      .mockRejectedValueOnce(new Error("response_lost_after_send"))
+      .mockResolvedValueOnce(response(404))
+      .mockResolvedValueOnce(
+        response(200, {
+          id: 17,
+          name: "foundry-test-40000000-0000-4000-8000-000000000001",
+          tag: "f-test-8000000000000001",
+          sender: { id: 42 },
+          subject: request.subject,
+          previewText: request.previewText,
+          htmlContent: "<html><body>Exact body</body></html>",
+          testSent: true,
+        }),
       );
     const adapter = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher,
     });
 
-    const ambiguous = await adapter.sendTest(request);
+    const prepared = await prepareRequest(adapter);
+    const ambiguous = await adapter.sendTest(prepared);
     expect(ambiguous).toMatchObject({
       outcome: "ambiguous",
       providerCampaignId: "17",
       foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
     });
-    const reconciliationRequest = {
-      ...request,
-      foundrySendProof:
-        ambiguous.outcome === "ambiguous"
-          ? (ambiguous.foundrySendProof ?? null)
-          : null,
-    };
+    const reconciliationRequest = prepared;
     await expect(
       adapter.reconcileTest({
         request: reconciliationRequest,
@@ -261,7 +358,7 @@ describe("Brevo newsletter delivery adapter", () => {
       providerCampaignId: "17",
       foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
     });
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(5);
   });
 
   it("keeps server errors ambiguous because either provider write may have applied", async () => {
@@ -269,10 +366,11 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(503)),
     });
-    await expect(createAmbiguous.sendTest(request)).resolves.toEqual({
+    await expect(createAmbiguous.prepareTest(request)).resolves.toEqual({
       outcome: "ambiguous",
     });
 
@@ -280,10 +378,11 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(429)),
     });
-    await expect(createRateLimited.sendTest(request)).resolves.toEqual({
+    await expect(createRateLimited.prepareTest(request)).resolves.toEqual({
       outcome: "ambiguous",
       code: "provider_rate_limited",
     });
@@ -292,13 +391,27 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi
         .fn()
         .mockResolvedValueOnce(response(201, { id: 19 }))
+        .mockResolvedValueOnce(
+          response(200, {
+            id: 19,
+            name: "foundry-test-40000000-0000-4000-8000-000000000001",
+            tag: "f-test-8000000000000001",
+            sender: { id: 42 },
+            subject: request.subject,
+            previewText: request.previewText,
+            htmlContent: "<html><body>Exact body</body></html>",
+          }),
+        )
         .mockResolvedValueOnce(response(503)),
     });
-    await expect(sendAmbiguous.sendTest(request)).resolves.toEqual({
+    await expect(
+      sendAmbiguous.sendTest(await prepareRequest(sendAmbiguous)),
+    ).resolves.toEqual({
       outcome: "ambiguous",
       providerCampaignId: "19",
       foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -308,13 +421,27 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi
         .fn()
         .mockResolvedValueOnce(response(201, { id: 20 }))
+        .mockResolvedValueOnce(
+          response(200, {
+            id: 20,
+            name: "foundry-test-40000000-0000-4000-8000-000000000001",
+            tag: "f-test-8000000000000001",
+            sender: { id: 42 },
+            subject: request.subject,
+            previewText: request.previewText,
+            htmlContent: "<html><body>Exact body</body></html>",
+          }),
+        )
         .mockResolvedValueOnce(response(429)),
     });
-    await expect(sendRateLimited.sendTest(request)).resolves.toEqual({
+    await expect(
+      sendRateLimited.sendTest(await prepareRequest(sendRateLimited)),
+    ).resolves.toEqual({
       outcome: "ambiguous",
       providerCampaignId: "20",
       foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
@@ -343,6 +470,7 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint,
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher,
     });
@@ -368,6 +496,7 @@ describe("Brevo newsletter delivery adapter", () => {
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
+      installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi
         .fn()

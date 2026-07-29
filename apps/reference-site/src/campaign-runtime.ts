@@ -220,6 +220,9 @@ export async function loadCampaignRequestContext(
         senderIdentity: "unknown" as const,
       };
     },
+    async prepareTest() {
+      return { outcome: "rejected" as const, code: "provider_unavailable" };
+    },
     async sendTest() {
       return { outcome: "rejected" as const, code: "provider_unavailable" };
     },
@@ -254,6 +257,8 @@ export async function loadCampaignRequestContext(
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
     const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
+    const installationProofKey =
+      environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";
     const accountScopeFingerprint =
       environment.FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT?.trim() ?? "";
     if (!/^[a-f0-9]{64}$/u.test(accountScopeFingerprint)) {
@@ -273,12 +278,15 @@ export async function loadCampaignRequestContext(
       version: "foundry.brevo-test-configuration.v1",
       accountScopeFingerprint,
       senderIds,
+      installationProofKeyFingerprint:
+        await sha256Text(installationProofKey),
       adapterVersion: "brevo-test-v1",
     });
     testAdapter = createBrevoNewsletterDeliveryAdapter({
       apiKey,
       configurationFingerprint,
       accountScopeFingerprint,
+      installationProofKey,
       senderIds,
     });
   }

@@ -87,9 +87,25 @@ export type NewsletterTestReconciliation =
   | Readonly<{ outcome: "not_sent"; providerCampaignId: string }>
   | Readonly<{ outcome: "not_found" }>;
 
+export type NewsletterTestPreparation =
+  | Readonly<{
+      outcome: "prepared";
+      providerCampaignId: string;
+      foundrySendProof: string;
+    }>
+  | Readonly<{
+      outcome: "ambiguous";
+      providerCampaignId?: string;
+      code?: string;
+    }>
+  | Readonly<{ outcome: "rejected"; code: string }>;
+
 export interface NewsletterDeliveryAdapter {
   capabilities(): Promise<NewsletterDeliveryCapabilities>;
   health(): Promise<NewsletterDeliveryHealth>;
+  prepareTest(
+    input: NewsletterTestRequest,
+  ): Promise<NewsletterTestPreparation>;
   sendTest(input: NewsletterTestRequest): Promise<NewsletterTestOutcome>;
   reconcileTest(input: {
     request: NewsletterTestRequest;
@@ -923,6 +939,96 @@ export function createCampaignTestDeliveryApplication({
           state: "failed" as const,
           attemptLeaseUntil: null,
           failureCode: "provider_test_daily_recipient_limit",
+          updatedAt: clock().toISOString(),
+        }),
+      );
+    }
+    if (
+      operation.providerCampaignId === null ||
+      operation.foundrySendProof === null
+    ) {
+      let preparation: NewsletterTestPreparation;
+      try {
+        preparation = await adapter.prepareTest({
+          executionId: operation.executionId,
+          providerCampaignId: operation.providerCampaignId,
+          foundrySendProof: operation.foundrySendProof,
+          renderedCampaign: rendered,
+          subject: revision.subject,
+          previewText: revision.previewText,
+          senderIdentityId: revision.senderIdentityId,
+          recipients: configuredRecipients,
+          binding: operation.binding,
+        });
+      } catch {
+        preparation = { outcome: "ambiguous" };
+      }
+      const preparationTimestamp = clock().toISOString();
+      if (preparation.outcome === "rejected") {
+        return recordOperation(
+          Object.freeze({
+            ...operation,
+            state: "failed" as const,
+            attemptLeaseUntil: null,
+            failureCode: preparation.code,
+            updatedAt: preparationTimestamp,
+          }),
+        );
+      }
+      if (preparation.outcome === "ambiguous") {
+        return recordOperation(
+          Object.freeze({
+            ...operation,
+            state: "ambiguous" as const,
+            attemptLeaseUntil: null,
+            providerCampaignId:
+              preparation.providerCampaignId === undefined
+                ? operation.providerCampaignId
+                : validateProviderText(
+                    preparation.providerCampaignId,
+                    "provider_campaign_id_invalid",
+                  ),
+            failureCode: preparation.code ?? null,
+            updatedAt: preparationTimestamp,
+          }),
+        );
+      }
+      operation = await recordOperation(
+        Object.freeze({
+          ...operation,
+          providerCampaignId: validateProviderText(
+            preparation.providerCampaignId,
+            "provider_campaign_id_invalid",
+          ),
+          foundrySendProof: validateFingerprint(
+            preparation.foundrySendProof,
+            "foundry_send_proof_invalid",
+          ),
+          updatedAt: preparationTimestamp,
+        }),
+      );
+      if (operation.state !== "attempting") return operation;
+    }
+    const preWriteOperation = await store.findByRequest({
+      siteId,
+      actorId,
+      requestId,
+    });
+    if (
+      preWriteOperation === null ||
+      preWriteOperation.state !== "attempting" ||
+      preWriteOperation.updatedAt !== operation.updatedAt
+    ) {
+      return preWriteOperation ?? operation;
+    }
+    const preWriteRevision = await currentCampaignRevision(campaignId);
+    if (preWriteRevision.revision.id !== operation.campaignRevisionId) {
+      return recordOperation(
+        Object.freeze({
+          ...operation,
+          state: "cancelled" as const,
+          attemptLeaseUntil: null,
+          failureCode: "campaign_revision_changed",
           updatedAt: clock().toISOString(),
         }),
       );

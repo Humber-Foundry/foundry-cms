@@ -168,6 +168,11 @@ function capableAdapter(
       credential: "verified",
       senderIdentity: "verified",
     }),
+    prepareTest: vi.fn().mockResolvedValue({
+      outcome: "prepared",
+      providerCampaignId: "brevo-campaign-17",
+      foundrySendProof: "9".repeat(64),
+    }),
     sendTest: vi.fn().mockResolvedValue({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
@@ -222,13 +227,55 @@ describe("campaign test delivery", () => {
     expect(adapter.sendTest).toHaveBeenCalledWith(
       expect.objectContaining({
         executionId: result.executionId,
-        providerCampaignId: null,
+        providerCampaignId: "brevo-campaign-17",
+        foundrySendProof: "9".repeat(64),
         recipients: [
           { id: "owner-primary", address: "owner-primary@example.test" },
         ],
       }),
     );
     expect(JSON.stringify(deliveryStore.list())).not.toContain("@");
+  });
+
+  it("persists the exact Foundry send proof before invoking the provider test write", async () => {
+    let durableOperation:
+      | (() => ReturnType<
+          ReturnType<typeof createInMemoryCampaignTestDeliveryStore>["list"]
+        >[number])
+      | undefined;
+    const sendTest = vi.fn(
+      async (
+        request: Parameters<NewsletterDeliveryAdapter["sendTest"]>[0],
+      ) => {
+        expect(durableOperation?.()).toMatchObject({
+          state: "attempting",
+          providerCampaignId: request.providerCampaignId,
+          foundrySendProof: request.foundrySendProof,
+        });
+        return {
+          outcome: "accepted" as const,
+          providerCampaignId: request.providerCampaignId!,
+          providerReceipt: "brevo-test-durable-proof-1",
+        };
+      },
+    );
+    const fixture = createFixture(capableAdapter({ sendTest }));
+    durableOperation = () => fixture.deliveryStore.list()[0]!;
+    const created = await createCampaign(fixture.campaignApplication);
+
+    const result = await fixture.application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-durable-proof-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+
+    expect(result).toMatchObject({
+      state: "accepted",
+      providerCampaignId: "brevo-campaign-17",
+      foundrySendProof: "9".repeat(64),
+    });
+    expect(sendTest).toHaveBeenCalledTimes(1);
   });
 
   it("reconciles an ambiguous outcome before completing the same logical test", async () => {
@@ -270,17 +317,21 @@ describe("campaign test delivery", () => {
   });
 
   it("retries with the stable execution identity only after reconciliation proves no delivery", async () => {
-    const sendTest = vi
+    const prepareTest = vi
       .fn()
+      .mockResolvedValueOnce({ outcome: "ambiguous" })
       .mockResolvedValueOnce({
-        outcome: "ambiguous",
-      })
-      .mockResolvedValueOnce({
-        outcome: "accepted",
+        outcome: "prepared",
         providerCampaignId: "brevo-campaign-21",
-        providerReceipt: "brevo-test-retried-21",
+        foundrySendProof: "8".repeat(64),
       });
+    const sendTest = vi.fn().mockResolvedValue({
+      outcome: "accepted",
+      providerCampaignId: "brevo-campaign-21",
+      providerReceipt: "brevo-test-retried-21",
+    });
     const adapter = capableAdapter({
+      prepareTest,
       sendTest,
       reconcileTest: vi.fn().mockResolvedValue({ outcome: "not_found" }),
     });
@@ -297,7 +348,14 @@ describe("campaign test delivery", () => {
     const second = await application.commands.requestTest(request);
 
     expect(second.state).toBe("accepted");
-    expect(sendTest).toHaveBeenNthCalledWith(
+    expect(sendTest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionId: first.executionId,
+        providerCampaignId: "brevo-campaign-21",
+        foundrySendProof: "8".repeat(64),
+      }),
+    );
+    expect(prepareTest).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         executionId: first.executionId,
@@ -458,18 +516,11 @@ describe("campaign test delivery", () => {
     await expect(first).resolves.toMatchObject({ state: "accepted" });
   });
 
-  it("recovers a crashed writer only after a reconciliation quarantine", async () => {
+  it("keeps a crashed writer ambiguous after its reconciliation quarantine", async () => {
     let now = new Date("2026-07-29T19:05:00.000Z");
-    const sendTest = vi
-      .fn()
-      .mockImplementationOnce(
-        () => new Promise<never>(() => undefined),
-      )
-      .mockResolvedValueOnce({
-        outcome: "accepted",
-        providerCampaignId: "brevo-campaign-23",
-        providerReceipt: "brevo-test-accepted-23",
-      });
+    const sendTest = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
     const adapter = capableAdapter({ sendTest });
     const { application, campaignApplication } = createFixture(
       adapter,
@@ -490,20 +541,22 @@ describe("campaign test delivery", () => {
 
     expect(quarantined).toMatchObject({
       state: "ambiguous",
-      providerCampaignId: null,
+      providerCampaignId: "brevo-campaign-17",
+      foundrySendProof: "9".repeat(64),
       attemptLeaseUntil: "2026-07-29T19:07:01.000Z",
     });
     expect(sendTest).toHaveBeenCalledTimes(1);
 
     now = new Date("2026-07-29T19:07:02.000Z");
-    await expect(
-      application.commands.requestTest(request),
-    ).resolves.toMatchObject({
-      state: "accepted",
-      providerCampaignId: "brevo-campaign-23",
+    const stillAmbiguous =
+      await application.commands.requestTest(request);
+    expect(stillAmbiguous).toMatchObject({
+      state: "ambiguous",
+      providerCampaignId: "brevo-campaign-17",
+      foundrySendProof: "9".repeat(64),
     });
     expect(adapter.reconcileTest).toHaveBeenCalledTimes(2);
-    expect(sendTest).toHaveBeenCalledTimes(2);
+    expect(sendTest).toHaveBeenCalledTimes(1);
   });
 
   it("blocks a second request identity while the revision has an unresolved test", async () => {

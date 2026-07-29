@@ -12,6 +12,10 @@ Install these values in the client-owned Worker configuration:
 
 - `FOUNDRY_BREVO_API_KEY` — a client-created Worker secret with the narrow
   Brevo authority required by the newsletter adapter.
+- `FOUNDRY_CAMPAIGN_TEST_PROOF_KEY` — a stable, installation-specific Worker
+  secret used only to bind the durable pre-send intent to the exact execution,
+  provider campaign, configuration, and recipient set. Rotate it separately
+  from the Brevo credential and only after open test operations are resolved.
 - `FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT` — a 64-character one-way account
   binding produced by provisioning. The raw Brevo account identifier stays out
   of source and application evidence. Provisioning computes SHA-256 over
@@ -62,18 +66,21 @@ provisioned scope.
 
 Every logical test creates a fresh Brevo draft tagged with its stable execution
 identity. Foundry reconciles Brevo's `testSent` state and the exact draft
-content before accepting evidence. A matching draft with `testSent` is
-accepted only when the operation also retains the exact Foundry-owned proof
-that the API test-send call was invoked for that provider campaign and
-recipient-set fingerprint. A timeout or lost response enters reconciliation
-before another provider write. Deletion of a known provider campaign remains
-ambiguous because its missing draft does not prove its test was not delivered.
-Only a create attempt with no known provider campaign ID and a complete search
-proving no matching draft may create another draft. An expired in-flight writer
+content before persisting a canonical Foundry send-intent proof and making the
+test-send call. Only a successful response to that exact Foundry call creates
+accepted evidence. Brevo's generic `testSent` flag cannot turn an ambiguous
+response into accepted evidence because it does not identify the invoker or
+recipient set. A timeout or lost response therefore remains ambiguous, even if
+the matching draft later reports `testSent`. Deletion of a known provider
+campaign also remains ambiguous because its missing draft does not prove its
+test was not delivered. Only a create attempt with no known provider campaign
+ID and a complete search proving no matching draft may create another draft.
+An expired in-flight writer
 remains reconciliation-only so a slow first call cannot race a replacement
 call. Automatic retry is possible only after the adapter has returned an
 ambiguous result and a later reconciliation definitively proves the known
-draft was not sent. A crashed call enters a one-minute reconciliation
+draft was not sent before any send-intent proof was persisted. A crashed call
+enters a one-minute reconciliation
 quarantine after the provider request's 30-second deadline; Foundry blocks a
 second execution for that revision while recovery remains unresolved.
 Editing a campaign revision cancels every open test for the replaced revision
