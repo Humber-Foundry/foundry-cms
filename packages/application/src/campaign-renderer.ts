@@ -223,10 +223,26 @@ export async function renderCampaignRevision(
 ): Promise<RenderedCampaign> {
   const bytes = renderCampaignBytes(revision);
   const htmlFingerprint = await sha256Text(
-    lengthDelimitedText(["foundry.campaign-artifact.v1", "html", bytes.html]),
+    lengthDelimitedText([
+      "foundry.campaign-artifact.v1",
+      revision.campaignId,
+      revision.id,
+      "html",
+      revision.schemaVersion,
+      revision.rendererVersion,
+      bytes.html,
+    ]),
   );
   const textFingerprint = await sha256Text(
-    lengthDelimitedText(["foundry.campaign-artifact.v1", "text", bytes.text]),
+    lengthDelimitedText([
+      "foundry.campaign-artifact.v1",
+      revision.campaignId,
+      revision.id,
+      "text",
+      revision.schemaVersion,
+      revision.rendererVersion,
+      bytes.text,
+    ]),
   );
   const htmlBytesHash = await sha256Text(bytes.html);
   const textBytesHash = await sha256Text(bytes.text);

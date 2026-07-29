@@ -15,9 +15,6 @@ type CampaignRow = {
   site_id: string;
   lifecycle_state: CampaignLifecycleState;
   current_revision_id: string;
-  test_delivery_id: string | null;
-  bulk_authorization_id: string | null;
-  active_schedule_id: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -33,9 +30,6 @@ function toCampaign(row: CampaignRow): Campaign {
     siteId: row.site_id as SiteId,
     lifecycleState: row.lifecycle_state,
     currentRevisionId: createCampaignRevisionId(row.current_revision_id),
-    testDeliveryId: row.test_delivery_id,
-    bulkAuthorizationId: row.bulk_authorization_id,
-    activeScheduleId: row.active_schedule_id,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -44,7 +38,6 @@ function toCampaign(row: CampaignRow): Campaign {
 
 const campaignProjection = `
   SELECT id, site_id, lifecycle_state, current_revision_id,
-    test_delivery_id, bulk_authorization_id, active_schedule_id,
     version, created_at, updated_at
   FROM campaigns
 `;
@@ -107,18 +100,14 @@ export function createD1CampaignStore(
           .prepare(
             `INSERT INTO campaigns (
                id, site_id, lifecycle_state, current_revision_id,
-               test_delivery_id, bulk_authorization_id, active_schedule_id,
                version, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
           )
           .bind(
             campaign.id,
             campaign.siteId,
             campaign.lifecycleState,
             campaign.currentRevisionId,
-            campaign.testDeliveryId,
-            campaign.bulkAuthorizationId,
-            campaign.activeScheduleId,
             campaign.version,
             campaign.createdAt,
             campaign.updatedAt,
@@ -188,10 +177,8 @@ export function createD1CampaignStore(
           .prepare(
             `UPDATE campaigns
              SET lifecycle_state = ?1, current_revision_id = ?2,
-               test_delivery_id = ?3, bulk_authorization_id = ?4,
-               active_schedule_id = ?5,
-               version = ?6, updated_at = ?7
-             WHERE site_id = ?8 AND id = ?9 AND version = ?10
+               version = ?3, updated_at = ?4
+             WHERE site_id = ?5 AND id = ?6 AND version = ?7
                AND EXISTS (
                  SELECT 1 FROM campaign_revisions WHERE id = ?2
                )`,
@@ -199,9 +186,6 @@ export function createD1CampaignStore(
           .bind(
             campaign.lifecycleState,
             campaign.currentRevisionId,
-            campaign.testDeliveryId,
-            campaign.bulkAuthorizationId,
-            campaign.activeScheduleId,
             campaign.version,
             campaign.updatedAt,
             campaign.siteId,

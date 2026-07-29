@@ -71,29 +71,13 @@ export type CampaignChannelConfiguration = Readonly<{
 export type CampaignAuthoringInput =
   CampaignEditableInput & CampaignChannelConfiguration;
 
-export type CampaignLifecycleState =
-  | "draft"
-  | "test_pending"
-  | "tested"
-  | "test_failed"
-  | "approved"
-  | "scheduled"
-  | "schedule_missed"
-  | "preparing_send"
-  | "provider_queued"
-  | "sending"
-  | "sent"
-  | "send_failed"
-  | "cancelled";
+export type CampaignLifecycleState = "draft";
 
 export type Campaign = Readonly<{
   id: CampaignId;
   siteId: SiteId;
   lifecycleState: CampaignLifecycleState;
   currentRevisionId: CampaignRevisionId;
-  testDeliveryId: string | null;
-  bulkAuthorizationId: string | null;
-  activeScheduleId: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -122,12 +106,7 @@ export type CampaignRevision = Readonly<
   }
 >;
 
-export type CampaignMcpActor = Readonly<{
-  type: "mcp";
-  connectionId: string;
-  siteId: SiteId;
-}>;
-export type CampaignActor = ExternalHumanIdentity | CampaignMcpActor;
+export type CampaignActor = ExternalHumanIdentity;
 export type CampaignAuthor = Readonly<{ id: string }>;
 
 export type CampaignArtifact = Readonly<{
@@ -192,20 +171,24 @@ export type CampaignApplication = Readonly<{
   commands: Readonly<{
     createStandalone(input: {
       actor: CampaignActor;
+      requestId: string;
       input: CampaignEditableInput;
     }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
     createFromPost(input: {
       actor: CampaignActor;
+      requestId: string;
       sourcePostRevisionId: string;
     }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
     edit(input: {
       actor: CampaignActor;
+      requestId: string;
       campaignId: CampaignId;
       expectedVersion: number;
       input: CampaignEditableInput;
     }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
     recordRejectedCommand(input: {
       actor: CampaignActor;
+      requestId: string;
       reason: string;
       targetId?: string;
       action?: CampaignAuditEvent["action"];
@@ -241,6 +224,7 @@ export type CampaignApplicationDependencies = Readonly<{
     actor: CampaignActor,
     capability: "campaign.author",
   ): Promise<CampaignAuthor>;
+  identifyActor(actor: CampaignActor): string;
   findPostRevision(
     siteId: SiteId,
     revisionId: string,

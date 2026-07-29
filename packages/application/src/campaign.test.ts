@@ -21,6 +21,7 @@ import {
   createCampaignApplication,
   createCampaignId,
   createCampaignRevisionId,
+  renderCampaignRevision,
   type CampaignEditableInput,
 } from "./campaign";
 import { createInMemoryCampaignStore } from "./in-memory-campaign-store";
@@ -109,14 +110,12 @@ function createFixture() {
     store,
     authorize: async (actor, capability) => {
       requestedCapabilities.push(capability);
-      if ("type" in actor) {
-        return { id: actor.connectionId };
-      }
       if (actor.binding.subject !== editor.binding.subject) {
         throw new AccessDeniedError("capability_not_authorized");
       }
       return editorMembership;
     },
+    identifyActor: () => editorMembership.id,
     findPostRevision: async (requestedSiteId, revisionId) =>
       requestedSiteId === siteId && revisionId === sourcePostRevisionId
         ? sourcePost
@@ -143,6 +142,7 @@ describe("campaign authoring and rendering", () => {
 
     const created = await application.commands.createStandalone({
       actor: editor,
+      requestId: "campaign-create-standalone-1",
       input: standaloneInput,
     });
 
@@ -171,10 +171,12 @@ describe("campaign authoring and rendering", () => {
 
     const created = await application.commands.createFromPost({
       actor: editor,
+      requestId: "campaign-create-from-post-1",
       sourcePostRevisionId,
     });
     const edited = await application.commands.edit({
       actor: editor,
+      requestId: "campaign-edit-derived-1",
       campaignId: created.campaign.id,
       expectedVersion: 1,
       input: {
@@ -226,12 +228,14 @@ describe("campaign authoring and rendering", () => {
     const { application } = createFixture();
     const created = await application.commands.createStandalone({
       actor: editor,
+      requestId: "campaign-create-conflict-1",
       input: standaloneInput,
     });
 
     await expect(
       application.commands.edit({
         actor: editor,
+        requestId: "campaign-edit-conflict-1",
         campaignId: created.campaign.id,
         expectedVersion: 0,
         input: standaloneInput,
@@ -250,6 +254,7 @@ describe("campaign authoring and rendering", () => {
       siteId: otherSiteId,
       store: createInMemoryCampaignStore(),
       authorize: async () => ({ ...editorMembership, siteId: otherSiteId }),
+      identifyActor: () => editorMembership.id,
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 0 }),
       channelConfiguration,
@@ -259,6 +264,7 @@ describe("campaign authoring and rendering", () => {
     await expect(
       otherSiteApplication.commands.createFromPost({
         actor: editor,
+        requestId: "campaign-create-other-site-1",
         sourcePostRevisionId,
       }),
     ).rejects.toBeInstanceOf(CampaignNotFoundError);
@@ -268,6 +274,7 @@ describe("campaign authoring and rendering", () => {
     const { application } = createFixture();
     const created = await application.commands.createStandalone({
       actor: editor,
+      requestId: "campaign-create-render-1",
       input: standaloneInput,
     });
 
@@ -307,6 +314,17 @@ describe("campaign authoring and rendering", () => {
     expect(first.campaignFingerprint).toMatch(/^[a-f0-9]{64}$/u);
     expect(first.eligibleSubscriberCount).toBe(2);
     expect(JSON.stringify(first)).not.toContain("@");
+    const differentRenderer = await renderCampaignRevision(
+      {
+        ...created.revision,
+        rendererVersion: "2222222222222222222222222222222222222222",
+      },
+      2,
+    );
+    expect(differentRenderer.html.bytes).toBe(first.html.bytes);
+    expect(differentRenderer.html.fingerprint).not.toBe(
+      first.html.fingerprint,
+    );
   });
 
   it("resolves the canonical audience without exposing identities to an Editor", async () => {
@@ -373,11 +391,13 @@ describe("campaign authoring and rendering", () => {
     const { application, store } = createFixture();
     const created = await application.commands.createStandalone({
       actor: editor,
+      requestId: "campaign-create-audit-1",
       input: standaloneInput,
     });
     await expect(
       application.commands.createStandalone({
         actor: editor,
+        requestId: "campaign-create-invalid-1",
         input: { ...standaloneInput, subject: "" },
       }),
     ).rejects.toMatchObject({ message: "campaign_schema_invalid" });
@@ -386,13 +406,15 @@ describe("campaign authoring and rendering", () => {
       {
         action: "campaign.create",
         outcome: "accepted",
-        actorId: "human:https://access.example:editor",
+        actorId: editorMembership.id,
+        requestId: "campaign-create-audit-1",
         revisionId: created.revision.id,
       },
       {
         action: "campaign.create",
         outcome: "rejected",
-        actorId: "human:https://access.example:editor",
+        actorId: editorMembership.id,
+        requestId: "campaign-create-invalid-1",
         revisionId: null,
         reason: "campaign_schema_invalid",
       },

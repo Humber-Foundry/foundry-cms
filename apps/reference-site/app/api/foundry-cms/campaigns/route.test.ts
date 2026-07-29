@@ -89,6 +89,7 @@ describe("campaign endpoint", () => {
     expect(response.status).toBe(201);
     expect(mocks.createStandalone).toHaveBeenCalledWith({
       actor: identity,
+      requestId: "campaign-create-1",
       input: {
         subject: "Campaign",
         previewText: "Preview",
@@ -102,13 +103,17 @@ describe("campaign endpoint", () => {
     const response = await POST(
       new Request("https://foundry.example/api/foundry-cms/campaigns", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-invalid-command-1",
+        },
         body: JSON.stringify({ action: "unknown" }),
       }),
     );
     expect(response.status).toBe(400);
     expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
       actor: identity,
+      requestId: "campaign-invalid-command-1",
       reason: "campaign_command_invalid",
     });
   });
@@ -117,7 +122,10 @@ describe("campaign endpoint", () => {
     const response = await POST(
       new Request("https://foundry.example/api/foundry-cms/campaigns", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-invalid-id-1",
+        },
         body: JSON.stringify({
           action: "edit",
           campaignId: "not-a-campaign-id",
@@ -129,6 +137,7 @@ describe("campaign endpoint", () => {
     expect(response.status).toBe(400);
     expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
       actor: identity,
+      requestId: "campaign-invalid-id-1",
       action: "campaign.edit",
       targetId: "not-a-campaign-id",
       reason: "campaign_id_invalid",

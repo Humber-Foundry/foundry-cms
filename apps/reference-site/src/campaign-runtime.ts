@@ -26,7 +26,7 @@ import {
   loadHumanAccessRequestContext,
 } from "./human-access-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
-import { readCampaignChannelConfiguration } from "./human-access-configuration";
+import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
 import { referenceSiteApplication } from "./reference-installation";
 
@@ -139,17 +139,14 @@ export async function loadCampaignRequestContext(
       siteId: referenceSiteApplication.siteId,
       store,
       authorize: (actor, capability) =>
-        "binding" in actor
-          ? human.application.queries.requireCapability({
-              actor,
-              capability:
-                capability === "campaign.author"
-                  ? "content.write"
-                  : capability,
-            })
-          : Promise.reject(
-              new AccessDeniedError("capability_not_authorized"),
-            ),
+        human.application.queries.requireCapability({
+          actor,
+          capability:
+            capability === "campaign.author"
+              ? "content.write"
+              : capability,
+        }),
+      identifyActor: () => human.membership.id,
       findPostRevision,
       resolveAudience,
       channelConfiguration,

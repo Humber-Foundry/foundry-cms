@@ -113,51 +113,58 @@ export async function POST(request: Request) {
   try {
     const context = await loadCampaignRequestContext(request.headers);
     await verifyHumanMutation(request, context.identity);
-    const parsed = command(await request.json().catch(() => null));
-    if (parsed === null) {
-      await context.application.commands.recordRejectedCommand({
-        actor: context.identity,
-        reason: "campaign_command_invalid",
-      });
-      return Response.json(
-        { error: "campaign_command_invalid" },
-        { status: 400 },
-      );
-    }
-    let editedCampaignId;
-    if (parsed.action === "edit") {
-      try {
-        editedCampaignId = createCampaignId(parsed.campaignId);
-      } catch {
-        await context.application.commands.recordRejectedCommand({
-          actor: context.identity,
-          action: "campaign.edit",
-          targetId: parsed.campaignId,
-          reason: "campaign_id_invalid",
-        });
-        return Response.json(
-          { error: "campaign_command_invalid" },
-          { status: 400 },
-        );
-      }
-    }
+    const rawCommand = await request.json().catch(() => null);
+    const parsed = command(rawCommand);
+    const requestId = request.headers.get("idempotency-key") ?? "";
     return executeIdempotentHumanMutation({
       request,
       identity: context.identity,
-      command: parsed,
+      command: rawCommand,
       execute: async () => {
+        if (parsed === null) {
+          await context.application.commands.recordRejectedCommand({
+            actor: context.identity,
+            requestId,
+            reason: "campaign_command_invalid",
+          });
+          return Response.json(
+            { error: "campaign_command_invalid" },
+            { status: 400 },
+          );
+        }
+        let editedCampaignId;
+        if (parsed.action === "edit") {
+          try {
+            editedCampaignId = createCampaignId(parsed.campaignId);
+          } catch {
+            await context.application.commands.recordRejectedCommand({
+              actor: context.identity,
+              requestId,
+              action: "campaign.edit",
+              targetId: parsed.campaignId,
+              reason: "campaign_id_invalid",
+            });
+            return Response.json(
+              { error: "campaign_command_invalid" },
+              { status: 400 },
+            );
+          }
+        }
         const result = parsed.action === "create_standalone"
           ? await context.application.commands.createStandalone({
               actor: context.identity,
+              requestId,
               input: parsed.input,
             })
           : parsed.action === "create_from_post"
             ? await context.application.commands.createFromPost({
                 actor: context.identity,
+                requestId,
                 sourcePostRevisionId: parsed.sourcePostRevisionId,
               })
             : await context.application.commands.edit({
                 actor: context.identity,
+                requestId,
                 campaignId: editedCampaignId!,
                 expectedVersion: parsed.expectedVersion,
                 input: parsed.input,

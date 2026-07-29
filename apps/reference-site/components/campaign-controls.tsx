@@ -3,7 +3,6 @@
 import { useState } from "react";
 
 import {
-  renderRichTextPlain,
   type BlogPostArtifactFingerprint,
   type Campaign,
   type CampaignRevision,
@@ -11,8 +10,13 @@ import {
 } from "@foundry/application";
 import {
   createRichTextDocumentFromPlainText,
+  parseSerializedRichTextDocument,
+  serializeRichTextDocument,
+  type SerializedRichTextDocument,
   type BlogPost,
 } from "@foundry/site-definition";
+
+import { RichTextEditor } from "./rich-text-editor";
 
 export function CampaignControls({
   csrfToken,
@@ -35,6 +39,10 @@ export function CampaignControls({
     ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>
   >(initialCampaigns);
   const [selected, setSelected] = useState<CampaignRevision | null>(null);
+  const [selectedEmailContent, setSelectedEmailContent] =
+    useState<SerializedRichTextDocument | null>(null);
+  const [selectedEmailContentInvalid, setSelectedEmailContentInvalid] =
+    useState(false);
   const [rendered, setRendered] = useState<RenderedCampaign | null>(null);
 
   async function loadCampaigns(selectedCampaignId?: string) {
@@ -49,10 +57,14 @@ export function CampaignControls({
     };
     setCampaigns(body.campaigns);
     if (selectedCampaignId !== undefined) {
-      setSelected(
-        body.campaigns.find(
-          ({ campaign }) => campaign.id === selectedCampaignId,
-        )?.revision ?? null,
+      const refreshed = body.campaigns.find(
+        ({ campaign }) => campaign.id === selectedCampaignId,
+      )?.revision ?? null;
+      setSelected(refreshed);
+      setSelectedEmailContent(
+        refreshed === null
+          ? null
+          : serializeRichTextDocument(refreshed.emailContent),
       );
     }
     return body.campaigns;
@@ -183,7 +195,16 @@ export function CampaignControls({
                 Revision {revision.revisionNumber} · {campaign.lifecycleState}
               </span>
             </div>
-            <button type="button" onClick={() => setSelected(revision)}>
+            <button
+              type="button"
+              onClick={() => {
+                setSelected(revision);
+                setSelectedEmailContent(
+                  serializeRichTextDocument(revision.emailContent),
+                );
+                setSelectedEmailContentInvalid(false);
+              }}
+            >
               Edit
             </button>
             <button
@@ -224,8 +245,9 @@ export function CampaignControls({
                   label: String(data.get("callToActionLabel") ?? ""),
                   href: String(data.get("callToActionHref") ?? ""),
                 },
-                emailContent: createRichTextDocumentFromPlainText(
-                  String(data.get("emailContent") ?? ""),
+                emailContent: parseSerializedRichTextDocument(
+                  selectedEmailContent ??
+                    serializeRichTextDocument(selected.emailContent),
                 ),
               },
             });
@@ -260,15 +282,28 @@ export function CampaignControls({
               required
             />
           </label>
-          <label>
-            Email content
-            <textarea
-              name="emailContent"
-              defaultValue={renderRichTextPlain(selected.emailContent)}
-              required
+          <div>
+            <span id="campaign-email-content-label">Email content</span>
+            <p id="campaign-email-content-description">
+              Formatting and links are preserved in each immutable revision.
+            </p>
+            <RichTextEditor
+              id="campaign-email-content"
+              labelledBy="campaign-email-content-label"
+              describedBy="campaign-email-content-description"
+              value={
+                selectedEmailContent ??
+                serializeRichTextDocument(selected.emailContent)
+              }
+              disabled={false}
+              invalid={selectedEmailContentInvalid}
+              onChange={setSelectedEmailContent}
+              onValidationChange={setSelectedEmailContentInvalid}
             />
-          </label>
-          <button type="submit">Save independent revision</button>
+          </div>
+          <button type="submit" disabled={selectedEmailContentInvalid}>
+            Save independent revision
+          </button>
         </form>
       )}
       {rendered === null ? null : (

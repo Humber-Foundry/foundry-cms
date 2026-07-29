@@ -85,6 +85,7 @@ describe("D1 campaign store", () => {
         role: "editor",
         status: "active",
       }),
+      identifyActor: () => createHumanMembershipId("membership-editor"),
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 7 }),
       channelConfiguration: {
@@ -104,6 +105,7 @@ describe("D1 campaign store", () => {
     });
     const created = await application.commands.createStandalone({
       actor,
+      requestId: "campaign-create-durable-1",
       input: {
         subject: "Durable campaign",
         previewText: "Durable preview text.",
@@ -120,6 +122,7 @@ describe("D1 campaign store", () => {
     });
     await application.commands.edit({
       actor,
+      requestId: "campaign-edit-durable-1",
       campaignId: created.campaign.id,
       expectedVersion: 1,
       input: {

@@ -21,16 +21,20 @@ import {
   type CampaignRevision,
 } from "./campaign-types";
 
-function actorAuditId(actor: CampaignActor): string {
-  return "binding" in actor
-    ? `human:${actor.binding.issuer}:${actor.binding.subject}`
-    : `mcp:${actor.connectionId}`;
+function stableRejectionReason(error: unknown): string {
+  return error instanceof CampaignConflictError ||
+    error instanceof CampaignNotFoundError ||
+    error instanceof CampaignValidationError ||
+    (error instanceof Error && /^[a-z][a-z0-9_]+$/u.test(error.message))
+    ? error.message
+    : "campaign_command_rejected";
 }
 
 export function createCampaignApplication({
   siteId,
   store,
   authorize,
+  identifyActor,
   findPostRevision,
   resolveAudience,
   channelConfiguration,
@@ -52,22 +56,24 @@ export function createCampaignApplication({
 
   async function recordRejected(
     actor: CampaignActor,
+    requestId: string,
     action: CampaignAuditEvent["action"],
     reason: string,
     targetId: string,
+    beforeState: string | null = null,
   ) {
     const auditId = createId("audit");
     await store.recordAudit({
       id: auditId,
       siteId,
-      actorId: actorAuditId(actor),
+      actorId: identifyActor(actor),
       targetId,
       revisionId: null,
-      requestId: auditId,
+      requestId,
       action,
       outcome: "rejected",
       reason,
-      beforeState: null,
+      beforeState,
       afterState: null,
       occurredAt: clock().toISOString(),
     });
@@ -75,18 +81,22 @@ export function createCampaignApplication({
 
   async function audited<T>(
     actor: CampaignActor,
+    requestId: string,
     action: CampaignAuditEvent["action"],
     operation: () => Promise<T>,
     targetId = "campaign:new",
+    observedState: () => string | null = () => null,
   ): Promise<T> {
     try {
       return await operation();
     } catch (error) {
       await recordRejected(
         actor,
+        requestId,
         action,
-        error instanceof Error ? error.message : "campaign_command_rejected",
+        stableRejectionReason(error),
         targetId,
+        observedState(),
       );
       throw error;
     }
@@ -114,11 +124,13 @@ export function createCampaignApplication({
   async function createFirstRevision({
     author,
     auditActorId,
+    requestId,
     input,
     provenance,
   }: {
     author: CampaignAuthor;
     auditActorId: string;
+    requestId: string;
     input: CampaignEditableInput;
     provenance: CampaignProvenance;
   }) {
@@ -143,9 +155,6 @@ export function createCampaignApplication({
       siteId,
       lifecycleState: "draft",
       currentRevisionId: revisionId,
-      testDeliveryId: null,
-      bulkAuthorizationId: null,
-      activeScheduleId: null,
       version: 1,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -157,7 +166,7 @@ export function createCampaignApplication({
       actorId: auditActorId,
       targetId: campaign.id,
       revisionId: revision.id,
-      requestId: auditId,
+      requestId,
       action: "campaign.create",
       outcome: "accepted",
       reason: null,
@@ -174,25 +183,27 @@ export function createCampaignApplication({
   const commands: CampaignApplication["commands"] = Object.freeze({
     async recordRejectedCommand({
       actor,
+      requestId,
       reason,
       targetId = "campaign:unknown",
       action = "campaign.create",
     }) {
-      await recordRejected(actor, action, reason, targetId);
+      await recordRejected(actor, requestId, action, reason, targetId);
     },
-    async createStandalone({ actor, input }) {
-      return audited(actor, "campaign.create", async () => {
+    async createStandalone({ actor, requestId, input }) {
+      return audited(actor, requestId, "campaign.create", async () => {
         const author = await requireAuthor(actor);
         return createFirstRevision({
           author,
-          auditActorId: actorAuditId(actor),
+          auditActorId: author.id,
+          requestId,
           input,
           provenance: Object.freeze({ kind: "standalone" }),
         });
       });
     },
-    async createFromPost({ actor, sourcePostRevisionId }) {
-      return audited(actor, "campaign.create", async () => {
+    async createFromPost({ actor, requestId, sourcePostRevisionId }) {
+      return audited(actor, requestId, "campaign.create", async () => {
         const author = await requireAuthor(actor);
         const postRevisionId =
           createSourcePostRevisionId(sourcePostRevisionId);
@@ -200,7 +211,8 @@ export function createCampaignApplication({
         if (post === null) throw new CampaignNotFoundError();
         return createFirstRevision({
           author,
-          auditActorId: actorAuditId(actor),
+          auditActorId: author.id,
+          requestId,
           input: {
             subject: post.title,
             previewText: post.excerpt,
@@ -219,19 +231,17 @@ export function createCampaignApplication({
         });
       });
     },
-    async edit({ actor, campaignId, expectedVersion, input }) {
+    async edit({ actor, requestId, campaignId, expectedVersion, input }) {
+      let observedState: string | null = null;
       return audited(
         actor,
+        requestId,
         "campaign.edit",
         async () => {
           const author = await requireAuthor(actor);
           const current = await getCampaign(campaignId);
-          if (
-            current.version !== expectedVersion ||
-            ["preparing_send", "provider_queued", "sending", "sent"].includes(
-              current.lifecycleState,
-            )
-          ) {
+          observedState = JSON.stringify(current);
+          if (current.version !== expectedVersion) {
             throw new CampaignConflictError();
           }
           const currentRevision = await getRevision(
@@ -259,9 +269,6 @@ export function createCampaignApplication({
             ...current,
             lifecycleState: "draft",
             currentRevisionId: revisionId,
-            testDeliveryId: null,
-            bulkAuthorizationId: null,
-            activeScheduleId: null,
             version: current.version + 1,
             updatedAt: timestamp,
           });
@@ -269,10 +276,10 @@ export function createCampaignApplication({
           const audit: CampaignAuditEvent = Object.freeze({
             id: auditId,
             siteId,
-            actorId: actorAuditId(actor),
+            actorId: author.id,
             targetId: campaign.id,
             revisionId: revision.id,
-            requestId: auditId,
+            requestId,
             action: "campaign.edit",
             outcome: "accepted",
             reason: null,
@@ -293,6 +300,7 @@ export function createCampaignApplication({
           return Object.freeze({ campaign, revision });
         },
         campaignId,
+        () => observedState,
       );
     },
   });
