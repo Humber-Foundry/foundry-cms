@@ -180,6 +180,18 @@ describe("D1 campaign store", () => {
       });
     await expect(stale()).rejects.toBeInstanceOf(CampaignConflictError);
     await expect(stale()).rejects.toBeInstanceOf(CampaignConflictError);
+    await application.commands.recordRejectedCommand({
+      actor,
+      requestId: "campaign-malformed-durable-1",
+      reason: "campaign_command_invalid",
+      command: { action: "unknown" },
+    });
+    await application.commands.recordRejectedCommand({
+      actor,
+      requestId: "campaign-malformed-durable-1",
+      reason: "campaign_command_invalid",
+      command: { action: "unknown" },
+    });
 
     await expect(
       application.queries.getRevision({
@@ -192,7 +204,7 @@ describe("D1 campaign store", () => {
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_audit_events")
         .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 3 });
+    ).resolves.toEqual({ count: 5 });
     await expect(
       database
         .prepare(
@@ -204,7 +216,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { outcome: "accepted", count: 2 },
-        { outcome: "rejected", count: 1 },
+        { outcome: "rejected", count: 3 },
       ],
     });
     await expect(
@@ -218,7 +230,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { outcome: "accepted", count: 2 },
-        { outcome: "rejected", count: 1 },
+        { outcome: "rejected", count: 2 },
       ],
     });
     await expect(
@@ -283,6 +295,7 @@ describe("D1 campaign store", () => {
           targetId: failedCampaign.id,
           revisionId: failedRevision.id,
           requestId: failedCommand.requestId,
+          inputHash: failedCommand.inputHash,
           action: "campaign.create",
           outcome: "accepted",
           reason: null,
@@ -297,6 +310,7 @@ describe("D1 campaign store", () => {
           targetId: failedCampaign.id,
           revisionId: null,
           requestId: failedCommand.requestId,
+          inputHash: failedCommand.inputHash,
           action: "campaign.create",
           outcome: "rejected",
           reason: "campaign_revision_conflict",

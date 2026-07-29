@@ -4,6 +4,7 @@ import {
   validateCampaignInput,
 } from "./campaign-renderer";
 import { sha256CanonicalJson } from "./deterministic-hash";
+import { AccessDeniedError } from "./human-access";
 import {
   CampaignConflictError,
   CampaignIdempotencyError,
@@ -41,6 +42,9 @@ function rejectionError(reason: string): Error {
     return new CampaignConflictError();
   }
   if (reason === "campaign_not_found") return new CampaignNotFoundError();
+  if (reason === "capability_not_authorized") {
+    return new AccessDeniedError(reason);
+  }
   return new CampaignValidationError(reason);
 }
 
@@ -73,6 +77,7 @@ export function createCampaignApplication({
     targetId,
     revisionId,
     requestId,
+    inputHash,
     action,
     outcome,
     reason,
@@ -87,6 +92,7 @@ export function createCampaignApplication({
       targetId,
       revisionId,
       requestId,
+      inputHash,
       action,
       outcome,
       reason,
@@ -94,30 +100,6 @@ export function createCampaignApplication({
       afterState,
       occurredAt,
     });
-  }
-
-  async function recordRejected(
-    actor: CampaignActor,
-    requestId: string,
-    action: CampaignAuditEvent["action"],
-    reason: string,
-    targetId: string,
-    beforeState: string | null = null,
-  ) {
-    await store.recordAudit(
-      auditEvent({
-        actorId: identifyActor(actor),
-        targetId,
-        revisionId: null,
-        requestId,
-        action,
-        outcome: "rejected",
-        reason,
-        beforeState,
-        afterState: null,
-        occurredAt: clock().toISOString(),
-      }),
-    );
   }
 
   async function getCampaign(campaignId: Campaign["id"]) {
@@ -140,16 +122,17 @@ export function createCampaignApplication({
   }
 
   async function commandKey({
-    author,
+    actorId,
     requestId,
     commandName,
     input,
   }: {
-    author: CampaignAuthor;
+    actorId: string;
     requestId: string;
     commandName: CampaignCommandName;
     input: unknown;
   }): Promise<CampaignCommandKey> {
+    const inputHash = await sha256CanonicalJson(input);
     if (
       requestId.length > 200 ||
       !/^[A-Za-z0-9][A-Za-z0-9:._-]*$/u.test(requestId)
@@ -160,11 +143,12 @@ export function createCampaignApplication({
           : "campaign.create";
       await store.recordAudit(
         auditEvent({
-          actorId: author.id,
+          actorId,
           targetId: "campaign:unknown",
           revisionId: null,
           requestId:
             requestId === "" ? "campaign:missing" : requestId.slice(0, 200),
+          inputHash,
           action,
           outcome: "rejected",
           reason: "campaign_idempotency_key_invalid",
@@ -179,19 +163,38 @@ export function createCampaignApplication({
     }
     return Object.freeze({
       siteId,
-      actorId: author.id,
+      actorId,
       commandName,
       requestId,
-      inputHash: await sha256CanonicalJson(input),
+      inputHash,
     });
   }
 
-  function resolveReceipt(
+  async function resolveReceipt(
     result: CampaignCommandStoreResult,
-    expectedInputHash: string,
+    command: CampaignCommandKey,
+    action: CampaignAuditEvent["action"],
   ) {
     const { receipt } = result;
-    if (receipt.inputHash !== expectedInputHash) {
+    if (receipt.inputHash !== command.inputHash) {
+      await store.recordAudit(
+        auditEvent({
+          actorId: command.actorId,
+          targetId:
+            receipt.outcome === "accepted"
+              ? receipt.campaign.id
+              : "campaign:unknown",
+          revisionId: null,
+          requestId: command.requestId,
+          inputHash: command.inputHash,
+          action,
+          outcome: "rejected",
+          reason: "campaign_idempotency_key_reused",
+          beforeState: null,
+          afterState: null,
+          occurredAt: clock().toISOString(),
+        }),
+      );
       throw new CampaignIdempotencyError(
         "campaign_idempotency_key_reused",
       );
@@ -208,16 +211,56 @@ export function createCampaignApplication({
 
   async function replay(
     command: CampaignCommandKey,
-  ): Promise<
-    ReturnType<typeof resolveReceipt> | null
-  > {
+    action: CampaignAuditEvent["action"],
+  ) {
     const receipt = await store.findCommandReceipt(command);
     return receipt === null
       ? null
-      : resolveReceipt(
+      : await resolveReceipt(
           Object.freeze({ receipt, replayed: true }),
-          command.inputHash,
+          command,
+          action,
         );
+  }
+
+  async function authorizeCommand(
+    actor: CampaignActor,
+    command: CampaignCommandKey,
+    action: CampaignAuditEvent["action"],
+  ) {
+    try {
+      return await requireAuthor(actor);
+    } catch (error) {
+      const reason = stableRejectionReason(error);
+      const event = auditEvent({
+        actorId: command.actorId,
+        targetId: "campaign:unknown",
+        revisionId: null,
+        requestId: command.requestId,
+        inputHash: command.inputHash,
+        action,
+        outcome: "rejected",
+        reason,
+        beforeState: null,
+        afterState: null,
+        occurredAt: clock().toISOString(),
+      });
+      const result = await store.rejectCommand({
+        command,
+        audit: event,
+      });
+      if (
+        result.replayed &&
+        !(
+          result.receipt.outcome === "rejected" &&
+          result.receipt.reason === reason &&
+          result.receipt.inputHash === command.inputHash
+        )
+      ) {
+        await store.recordAudit(event);
+      }
+      throw error;
+    }
   }
 
   async function rejectCommand({
@@ -241,6 +284,7 @@ export function createCampaignApplication({
         targetId,
         revisionId: null,
         requestId: command.requestId,
+        inputHash: command.inputHash,
         action,
         outcome: "rejected",
         reason,
@@ -249,7 +293,7 @@ export function createCampaignApplication({
         occurredAt: clock().toISOString(),
       }),
     });
-    return resolveReceipt(result, command.inputHash);
+    return resolveReceipt(result, command, action);
   }
 
   async function createFirstRevision({
@@ -303,6 +347,7 @@ export function createCampaignApplication({
       targetId: campaign.id,
       revisionId: revision.id,
       requestId: command.requestId,
+      inputHash: command.inputHash,
       action: "campaign.create",
       outcome: "accepted",
       reason: null,
@@ -315,6 +360,7 @@ export function createCampaignApplication({
       targetId: campaign.id,
       revisionId: null,
       requestId: command.requestId,
+      inputHash: command.inputHash,
       action: "campaign.create",
       outcome: "rejected",
       reason: "campaign_revision_conflict",
@@ -330,7 +376,8 @@ export function createCampaignApplication({
         acceptedAudit,
         rejectedAudit,
       }),
-      command.inputHash,
+      command,
+      "campaign.create",
     );
   }
 
@@ -339,20 +386,67 @@ export function createCampaignApplication({
       actor,
       requestId,
       reason,
+      command: input,
       targetId = "campaign:unknown",
       action = "campaign.create",
+      commandName =
+        action === "campaign.edit"
+          ? "campaign.edit"
+          : "campaign.create_standalone",
     }) {
-      await recordRejected(actor, requestId, action, reason, targetId);
+      const command = await commandKey({
+        actorId: identifyActor(actor),
+        requestId,
+        commandName,
+        input,
+      });
+      await authorizeCommand(actor, command, action);
+      const existing = await store.findCommandReceipt(command);
+      if (
+        existing !== null &&
+        existing.inputHash !== command.inputHash
+      ) {
+        await resolveReceipt(
+          Object.freeze({ receipt: existing, replayed: true }),
+          command,
+          action,
+        );
+      }
+      if (existing !== null) return;
+      await store.rejectCommand({
+        command,
+        audit: auditEvent({
+          actorId: command.actorId,
+          targetId:
+            targetId.length <= 200 &&
+              /^[A-Za-z0-9:._-]+$/u.test(targetId)
+              ? targetId
+              : "campaign:invalid",
+          revisionId: null,
+          requestId: command.requestId,
+          inputHash: command.inputHash,
+          action,
+          outcome: "rejected",
+          reason,
+          beforeState: null,
+          afterState: null,
+          occurredAt: clock().toISOString(),
+        }),
+      });
     },
     async createStandalone({ actor, requestId, input }) {
-      const author = await requireAuthor(actor);
       const command = await commandKey({
-        author,
+        actorId: identifyActor(actor),
         requestId,
         commandName: "campaign.create_standalone",
         input,
       });
-      const existing = await replay(command);
+      const author = await authorizeCommand(
+        actor,
+        command,
+        "campaign.create",
+      );
+      const existing = await replay(command, "campaign.create");
       return existing ?? createFirstRevision({
         author,
         command,
@@ -361,14 +455,18 @@ export function createCampaignApplication({
       });
     },
     async createFromPost({ actor, requestId, sourcePostRevisionId }) {
-      const author = await requireAuthor(actor);
       const command = await commandKey({
-        author,
+        actorId: identifyActor(actor),
         requestId,
         commandName: "campaign.create_from_post",
         input: { sourcePostRevisionId },
       });
-      const existing = await replay(command);
+      const author = await authorizeCommand(
+        actor,
+        command,
+        "campaign.create",
+      );
+      const existing = await replay(command, "campaign.create");
       if (existing !== null) return existing;
       let postRevisionId;
       let post;
@@ -405,14 +503,18 @@ export function createCampaignApplication({
       });
     },
     async edit({ actor, requestId, campaignId, expectedVersion, input }) {
-      const author = await requireAuthor(actor);
       const command = await commandKey({
-        author,
+        actorId: identifyActor(actor),
         requestId,
         commandName: "campaign.edit",
         input: { campaignId, expectedVersion, input },
       });
-      const existing = await replay(command);
+      const author = await authorizeCommand(
+        actor,
+        command,
+        "campaign.edit",
+      );
+      const existing = await replay(command, "campaign.edit");
       if (existing !== null) return existing;
       let current: Campaign;
       let currentRevision: CampaignRevision;
@@ -465,6 +567,7 @@ export function createCampaignApplication({
         targetId: campaign.id,
         revisionId: revision.id,
         requestId,
+        inputHash: command.inputHash,
         action: "campaign.edit",
         outcome: "accepted",
         reason: null,
@@ -477,6 +580,7 @@ export function createCampaignApplication({
         targetId: campaign.id,
         revisionId: null,
         requestId,
+        inputHash: command.inputHash,
         action: "campaign.edit",
         outcome: "rejected",
         reason: "campaign_revision_conflict",
@@ -493,7 +597,8 @@ export function createCampaignApplication({
           acceptedAudit,
           rejectedAudit,
         }),
-        command.inputHash,
+        command,
+        "campaign.edit",
       );
     },
   });

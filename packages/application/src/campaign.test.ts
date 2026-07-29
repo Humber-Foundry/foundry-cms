@@ -119,7 +119,10 @@ function createFixture() {
       }
       return editorMembership;
     },
-    identifyActor: () => editorMembership.id,
+    identifyActor: (actor) =>
+      actor.binding.subject === owner.binding.subject
+        ? ownerMembership.id
+        : editorMembership.id,
     findPostRevision: async (requestedSiteId, revisionId) =>
       requestedSiteId === siteId && revisionId === sourcePostRevisionId
         ? sourcePost
@@ -192,7 +195,15 @@ describe("campaign authoring and rendering", () => {
         input: { ...standaloneInput, subject: "Changed input" },
       }),
     ).rejects.toBeInstanceOf(CampaignIdempotencyError);
-    expect(store.listAuditEvents()).toHaveLength(1);
+    expect(store.listAuditEvents()).toMatchObject([
+      { outcome: "accepted", action: "campaign.create" },
+      {
+        outcome: "rejected",
+        action: "campaign.create",
+        reason: "campaign_idempotency_key_reused",
+        inputHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      },
+    ]);
   });
 
   it("rejects and audits a missing durable request key at the shared command seam", async () => {
@@ -214,6 +225,52 @@ describe("campaign authoring and rendering", () => {
         action: "campaign.create",
         outcome: "rejected",
         reason: "campaign_idempotency_key_invalid",
+      },
+    ]);
+  });
+
+  it("validates the shared request envelope before persisting a malformed-command rejection", async () => {
+    const { application, store } = createFixture();
+
+    await expect(
+      application.commands.recordRejectedCommand({
+        actor: editor,
+        requestId: "",
+        reason: "campaign_command_invalid",
+        command: { action: "unknown" },
+      }),
+    ).rejects.toMatchObject({
+      code: "campaign_idempotency_key_invalid",
+    });
+    expect(store.listAuditEvents()).toMatchObject([
+      {
+        actorId: editorMembership.id,
+        requestId: "campaign:missing",
+        inputHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        outcome: "rejected",
+        reason: "campaign_idempotency_key_invalid",
+      },
+    ]);
+  });
+
+  it("durably audits and replays an authenticated actor's authorization rejection", async () => {
+    const { application, store } = createFixture();
+    const denied = () =>
+      application.commands.createStandalone({
+        actor: owner,
+        requestId: "campaign-create-denied-1",
+        input: standaloneInput,
+      });
+
+    await expect(denied()).rejects.toBeInstanceOf(AccessDeniedError);
+    await expect(denied()).rejects.toBeInstanceOf(AccessDeniedError);
+    expect(store.listAuditEvents()).toMatchObject([
+      {
+        actorId: ownerMembership.id,
+        requestId: "campaign-create-denied-1",
+        inputHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        outcome: "rejected",
+        reason: "capability_not_authorized",
       },
     ]);
   });

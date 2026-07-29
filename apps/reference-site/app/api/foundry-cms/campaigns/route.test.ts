@@ -198,6 +198,7 @@ describe("campaign endpoint", () => {
       actor: identity,
       requestId: "campaign-invalid-command-1",
       reason: "campaign_command_invalid",
+      command: { action: "unknown" },
     });
   });
 
@@ -224,6 +225,13 @@ describe("campaign endpoint", () => {
       action: "campaign.edit",
       targetId: "not-a-campaign-id",
       reason: "campaign_id_invalid",
+      command: {
+        action: "edit",
+        campaignId: "not-a-campaign-id",
+        expectedVersion: 1,
+        input: {},
+      },
+      commandName: "campaign.edit",
     });
     expect(mocks.edit).not.toHaveBeenCalled();
   });

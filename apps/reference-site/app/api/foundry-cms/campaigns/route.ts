@@ -125,6 +125,7 @@ export async function POST(request: Request) {
         actor: context.identity,
         requestId,
         reason: "campaign_command_invalid",
+        command: rawCommand,
       });
       return Response.json(
         { error: "campaign_command_invalid" },
@@ -142,6 +143,8 @@ export async function POST(request: Request) {
           action: "campaign.edit",
           targetId: parsed.campaignId,
           reason: "campaign_id_invalid",
+          command: rawCommand,
+          commandName: "campaign.edit",
         });
         return Response.json(
           { error: "campaign_command_invalid" },

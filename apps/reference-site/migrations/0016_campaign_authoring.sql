@@ -26,6 +26,7 @@ CREATE TABLE campaign_audit_events (
   actor_id TEXT NOT NULL,
   target_id TEXT NOT NULL,
   request_id TEXT NOT NULL,
+  input_hash TEXT NOT NULL,
   action TEXT NOT NULL,
   outcome TEXT NOT NULL CHECK (outcome IN ('accepted', 'rejected')),
   campaign_revision_id TEXT,

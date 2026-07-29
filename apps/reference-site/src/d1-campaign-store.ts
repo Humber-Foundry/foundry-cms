@@ -167,10 +167,11 @@ function auditInsert(
   return database
     .prepare(
       `INSERT INTO campaign_audit_events (
-         id, site_id, actor_id, target_id, request_id, action, outcome,
-         campaign_revision_id, reason, before_state, after_state, occurred_at
+         id, site_id, actor_id, target_id, request_id, input_hash, action,
+         outcome, campaign_revision_id, reason, before_state, after_state,
+         occurred_at
        )
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
        WHERE ${condition}`,
     )
     .bind(
@@ -179,6 +180,7 @@ function auditInsert(
       event.actorId,
       event.targetId,
       event.requestId,
+      event.inputHash,
       event.action,
       event.outcome,
       event.revisionId,
@@ -199,14 +201,15 @@ function commandAuditInsert(
   return database
     .prepare(
       `INSERT INTO campaign_audit_events (
-         id, site_id, actor_id, target_id, request_id, action, outcome,
-         campaign_revision_id, reason, before_state, after_state, occurred_at
+         id, site_id, actor_id, target_id, request_id, input_hash, action,
+         outcome, campaign_revision_id, reason, before_state, after_state,
+         occurred_at
        )
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
        WHERE EXISTS (
          SELECT 1 FROM campaign_command_receipts
-         WHERE site_id = ?13 AND actor_id = ?14 AND command_name = ?15
-           AND request_id = ?16 AND input_hash = ?17
+         WHERE site_id = ?14 AND actor_id = ?15 AND command_name = ?16
+           AND request_id = ?17 AND input_hash = ?18
            AND outcome = 'pending'
        ) ${domainCondition}`,
     )
@@ -216,6 +219,7 @@ function commandAuditInsert(
       event.actorId,
       event.targetId,
       event.requestId,
+      event.inputHash,
       event.action,
       event.outcome,
       event.revisionId,
@@ -328,7 +332,7 @@ export function createD1CampaignStore(
           command,
           `AND EXISTS (
             SELECT 1 FROM campaign_revisions
-            WHERE id = ?18 AND site_id = ?19 AND campaign_id = ?20
+            WHERE id = ?19 AND site_id = ?20 AND campaign_id = ?21
           )`,
           [revision.id, revision.siteId, revision.campaignId],
         ),
@@ -481,8 +485,8 @@ export function createD1CampaignStore(
           command,
           `AND EXISTS (
             SELECT 1 FROM campaigns
-            WHERE site_id = ?18 AND id = ?19
-              AND current_revision_id = ?20 AND version = ?21
+            WHERE site_id = ?19 AND id = ?20
+              AND current_revision_id = ?21 AND version = ?22
           )`,
           [
             campaign.siteId,

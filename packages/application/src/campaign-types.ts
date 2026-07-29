@@ -138,6 +138,7 @@ export type CampaignAuditEvent = Readonly<{
   targetId: string;
   revisionId: CampaignRevisionId | null;
   requestId: string;
+  inputHash: string;
   action: "campaign.create" | "campaign.edit";
   outcome: "accepted" | "rejected";
   reason: string | null;
@@ -265,8 +266,10 @@ export type CampaignApplication = Readonly<{
       actor: CampaignActor;
       requestId: string;
       reason: string;
+      command: unknown;
       targetId?: string;
       action?: CampaignAuditEvent["action"];
+      commandName?: CampaignCommandName;
     }): Promise<void>;
   }>;
   queries: Readonly<{
