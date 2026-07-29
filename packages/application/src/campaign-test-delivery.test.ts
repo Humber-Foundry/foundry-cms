@@ -76,6 +76,7 @@ function createFixture(
       id,
       address: `${id}@example.test`,
     })),
+  failConfirmationReceipt = false,
 ) {
   let sequence = 0;
   let campaignSequence = 0;
@@ -112,8 +113,15 @@ function createFixture(
     providerOwnershipEvidence,
     replayTestCommand: (command) =>
       campaignApplication.commands.replayTestCommand(command),
-    recordAcceptedTestCommand: (command) =>
-      campaignApplication.commands.recordAcceptedTestCommand(command),
+    recordAcceptedTestCommand: (command) => {
+      if (
+        failConfirmationReceipt &&
+        command.commandName === "campaign.confirm_test_receipt"
+      ) {
+        throw new Error("simulated_confirmation_receipt_failure");
+      }
+      return campaignApplication.commands.recordAcceptedTestCommand(command);
+    },
     clock,
     createExecutionId,
     recordRejectedCommand: async (command) => {
@@ -654,6 +662,63 @@ describe("campaign test delivery", () => {
     expect(adapter.sendTest).not.toHaveBeenCalled();
   });
 
+  it("returns durable cancellation when an edit wins a reconciliation race", async () => {
+    let completeReconciliation!: (
+      outcome: Awaited<
+        ReturnType<NewsletterDeliveryAdapter["reconcileTest"]>
+      >,
+    ) => void;
+    const reconcileTest = vi.fn(
+      () =>
+        new Promise<
+          Awaited<ReturnType<NewsletterDeliveryAdapter["reconcileTest"]>>
+        >((resolve) => {
+          completeReconciliation = resolve;
+        }),
+    );
+    const adapter = capableAdapter({
+      sendTest: vi.fn().mockResolvedValue({
+        outcome: "ambiguous",
+        providerCampaignId: "brevo-campaign-reconcile-race-1",
+      }),
+      reconcileTest,
+    });
+    const { application, campaignApplication, deliveryStore } =
+      createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-edit-reconcile-race-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+    await application.commands.requestTest(request);
+    const reconciling = application.commands.requestTest(request);
+    await vi.waitFor(() => expect(reconcileTest).toHaveBeenCalledTimes(1));
+
+    await campaignApplication.commands.edit({
+      actor,
+      requestId: "campaign-edit-reconcile-race-1",
+      campaignId: created.campaign.id,
+      expectedVersion: 1,
+      input: { ...input, subject: "Edit wins reconciliation race" },
+    });
+    completeReconciliation({
+      outcome: "accepted",
+      providerCampaignId: "brevo-campaign-reconcile-race-1",
+      providerReceipt: "brevo-test-reconcile-race-1",
+    });
+
+    await expect(reconciling).resolves.toMatchObject({
+      state: "cancelled",
+      evidence: null,
+      failureCode: "campaign_revision_changed",
+    });
+    expect(deliveryStore.list()).toEqual([
+      expect.objectContaining({ state: "cancelled", evidence: null }),
+    ]);
+  });
+
   it("limits configured recipients to five at the shared application boundary", async () => {
     const adapter = capableAdapter();
     const { application, campaignApplication } = createFixture(adapter);
@@ -949,6 +1014,56 @@ describe("campaign test delivery", () => {
       state: "evaluation_only",
       testDeliveryReady: false,
       ownershipEvidenceId: "provisioning-evaluation-1",
+    });
+  });
+
+  it("does not become ready when confirmation persists without its accepted command receipt", async () => {
+    const {
+      application,
+      campaignApplication,
+      deliveryStore,
+    } = createFixture(
+      capableAdapter(),
+      undefined,
+      undefined,
+      {
+        classification: "client_owned",
+        evidenceId: "provisioning-client-owned-fault-1",
+        accountScopeFingerprint: "8".repeat(64),
+        verifiedAt: "2026-07-29T18:00:00.000Z",
+      },
+      undefined,
+      true,
+    );
+    const created = await createCampaign(campaignApplication);
+    const operation = await application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-readiness-fault-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+
+    await expect(
+      application.commands.confirmReceipt({
+        actor,
+        requestId: "campaign-test-confirm-fault-1",
+        executionId: operation.executionId,
+      }),
+    ).rejects.toThrow("simulated_confirmation_receipt_failure");
+    await expect(
+      deliveryStore.findReceiptConfirmation({
+        siteId,
+        executionId: operation.executionId,
+      }),
+    ).resolves.not.toBeNull();
+    await expect(
+      application.queries.readiness({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.toMatchObject({
+      state: "owner_confirmation_required",
+      testDeliveryReady: false,
     });
   });
 

@@ -43,8 +43,10 @@ rows, evidence, API results, logs, and source control.
 5. Confirm the delivered message in the Owner's mailbox. An authenticated
    Owner records confirmation with `confirm_test_receipt` and the stable
    execution ID; the immutable confirmation and its accepted command receipt
-   are persisted in D1. Reusing its request key with another execution is
-   rejected and confirmation audits contain no recipient address.
+   are persisted in D1. Readiness requires both records, so an interrupted
+   command remains confirmation-required until its idempotent retry completes
+   the receipt. Reusing its request key with another execution is rejected and
+   confirmation audits contain no recipient address.
 6. Evaluate test-delivery readiness with the successful current test evidence.
    `ready`
    requires healthy credentials and sender identity, `client_owned`

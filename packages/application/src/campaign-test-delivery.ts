@@ -723,6 +723,20 @@ export function createCampaignTestDeliveryApplication({
         },
         providerCampaignId: operation.providerCampaignId,
       });
+      const postReconcileOperation = await store.findByRequest({
+        siteId,
+        actorId,
+        requestId,
+      });
+      if (
+        postReconcileOperation !== null &&
+        (postReconcileOperation.state === "accepted" ||
+          postReconcileOperation.state === "failed" ||
+          postReconcileOperation.state === "cancelled" ||
+          postReconcileOperation.updatedAt !== operation.updatedAt)
+      ) {
+        return postReconcileOperation;
+      }
       if (reconciled.outcome === "accepted") {
         return store.record(
           await acceptedOperation(
@@ -1163,6 +1177,25 @@ export function createCampaignTestDeliveryApplication({
           executionId: evidence.executionId,
         });
         if (confirmation === null) {
+          return Object.freeze({
+            ...base,
+            state: "owner_confirmation_required" as const,
+            testDeliveryReady: false,
+          });
+        }
+        const acceptedConfirmationReceipt = (
+          await replayTestCommand?.({
+            actor,
+            requestId: confirmation.requestId,
+            command: {
+              action: "confirm_test_receipt",
+              executionId: evidence.executionId,
+            },
+            targetId: evidence.executionId,
+            commandName: "campaign.confirm_test_receipt",
+          })
+        ) ?? null;
+        if (acceptedConfirmationReceipt === null) {
           return Object.freeze({
             ...base,
             state: "owner_confirmation_required" as const,
