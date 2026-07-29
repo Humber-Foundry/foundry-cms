@@ -159,9 +159,13 @@ export type CampaignAuditEvent = Readonly<{
   id: string;
   siteId: SiteId;
   actorId: string;
+  targetId: string;
+  requestId: string;
   action: "campaign.create" | "campaign.edit";
   outcome: "accepted" | "rejected";
   reason: string | null;
+  beforeState: string | null;
+  afterState: string | null;
   occurredAt: string;
 }>;
 
@@ -180,6 +184,7 @@ export interface CampaignStore {
     campaignId: CampaignId;
     revisionNumber: number;
   }): Promise<CampaignRevision | null>;
+  listCampaigns(siteId: SiteId): Promise<ReadonlyArray<Campaign>>;
   appendRevision(input: {
     expectedVersion: number;
     campaign: Campaign;
@@ -215,6 +220,10 @@ export type CampaignApplication = Readonly<{
       expectedVersion: number;
       input: CampaignAuthoringInput;
     }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
+    recordRejectedCommand(input: {
+      actor: CampaignActor;
+      reason: string;
+    }): Promise<void>;
   }>;
   queries: Readonly<{
     getCampaign(input: {
@@ -231,6 +240,11 @@ export type CampaignApplication = Readonly<{
       campaignId: CampaignId;
       revisionNumber?: number;
     }): Promise<RenderedCampaign>;
+    listCampaigns(input: {
+      actor: CampaignActor;
+    }): Promise<
+      ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>
+    >;
   }>;
 }>;
 
@@ -463,6 +477,8 @@ async function renderCampaign(
       bytes.text,
     ]),
   );
+  const htmlBytesHash = await sha256Text(bytes.html);
+  const textBytesHash = await sha256Text(bytes.text);
   const campaignFingerprint = await sha256Text(
     lengthDelimitedText([
       "foundry.campaign-send.v1",
@@ -470,8 +486,8 @@ async function renderCampaign(
       revision.id,
       revision.subject,
       revision.previewText,
-      htmlFingerprint,
-      textFingerprint,
+      htmlBytesHash,
+      textBytesHash,
       revision.senderIdentityId,
       revision.complianceFooter.version,
       revision.audienceDefinition.id,
@@ -535,26 +551,37 @@ export function createCampaignApplication({
   async function requireAuthor(actor: CampaignActor) {
     return authorize(actor, "campaign.author");
   }
-  const normalizedRendererVersion = requireText(rendererVersion, 200);
+  const normalizedRendererVersion = requireText(rendererVersion, 40);
+  if (!/^[a-f0-9]{40}$/u.test(normalizedRendererVersion)) {
+    throw new CampaignValidationError("campaign_renderer_commit_invalid");
+  }
 
   async function audited<T>(
     actor: CampaignActor,
     action: CampaignAuditEvent["action"],
     operation: () => Promise<T>,
+    targetId = "campaign:new",
   ): Promise<T> {
     const actorId =
-      "binding" in actor ? actor.binding.subject : actor.connectionId;
+      "binding" in actor
+        ? `human:${actor.binding.issuer}:${actor.binding.subject}`
+        : `mcp:${actor.connectionId}`;
     try {
       return await operation();
     } catch (error) {
+      const auditId = createId("audit");
       await store.recordAudit({
-        id: createId("audit"),
+        id: auditId,
         siteId,
         actorId,
+        targetId,
+        requestId: auditId,
         action,
         outcome: "rejected",
         reason:
           error instanceof Error ? error.message : "campaign_command_rejected",
+        beforeState: null,
+        afterState: null,
         occurredAt: clock().toISOString(),
       });
       throw error;
@@ -586,10 +613,12 @@ export function createCampaignApplication({
 
   async function createFirstRevision({
     author,
+    auditActorId,
     input,
     provenance,
   }: {
     author: CampaignAuthor;
+    auditActorId: string;
     input: CampaignAuthoringInput;
     provenance: CampaignProvenance;
   }) {
@@ -622,13 +651,18 @@ export function createCampaignApplication({
       createdAt: timestamp,
       updatedAt: timestamp,
     });
+    const auditId = createId("audit");
     const audit: CampaignAuditEvent = Object.freeze({
-      id: createId("audit"),
+      id: auditId,
       siteId,
-      actorId: author.id,
+      actorId: auditActorId,
+      targetId: campaign.id,
+      requestId: auditId,
       action: "campaign.create",
       outcome: "accepted",
       reason: null,
+      beforeState: null,
+      afterState: JSON.stringify(campaign),
       occurredAt: timestamp,
     });
     if (!(await store.create({ campaign, revision, audit }))) {
@@ -638,11 +672,34 @@ export function createCampaignApplication({
   }
 
   const commands: CampaignApplication["commands"] = Object.freeze({
+      async recordRejectedCommand({ actor, reason }) {
+        const auditId = createId("audit");
+        await store.recordAudit({
+          id: auditId,
+          siteId,
+          actorId:
+            "binding" in actor
+              ? `human:${actor.binding.issuer}:${actor.binding.subject}`
+              : `mcp:${actor.connectionId}`,
+          targetId: "campaign:unknown",
+          requestId: auditId,
+          action: "campaign.create",
+          outcome: "rejected",
+          reason,
+          beforeState: null,
+          afterState: null,
+          occurredAt: clock().toISOString(),
+        });
+      },
       async createStandalone({ actor, input }) {
         return audited(actor, "campaign.create", async () => {
           const author = await requireAuthor(actor);
           return createFirstRevision({
             author,
+            auditActorId:
+              "binding" in actor
+                ? `human:${actor.binding.issuer}:${actor.binding.subject}`
+                : `mcp:${actor.connectionId}`,
             input,
             provenance: Object.freeze({ kind: "standalone" }),
           });
@@ -666,6 +723,10 @@ export function createCampaignApplication({
           }
           return createFirstRevision({
             author,
+            auditActorId:
+              "binding" in actor
+                ? `human:${actor.binding.issuer}:${actor.binding.subject}`
+                : `mcp:${actor.connectionId}`,
             input: {
             subject: post.title,
             previewText: post.excerpt,
@@ -740,21 +801,31 @@ export function createCampaignApplication({
             expectedVersion,
             campaign,
             revision,
-            audit: Object.freeze({
-              id: createId("audit"),
+            audit: (() => {
+              const auditId = createId("audit");
+              return Object.freeze({
+              id: auditId,
               siteId,
-              actorId: author.id,
+              actorId:
+                "binding" in actor
+                  ? `human:${actor.binding.issuer}:${actor.binding.subject}`
+                  : `mcp:${actor.connectionId}`,
+              targetId: campaign.id,
+              requestId: auditId,
               action: "campaign.edit",
               outcome: "accepted",
               reason: null,
+              beforeState: JSON.stringify(current),
+              afterState: JSON.stringify(campaign),
               occurredAt: timestamp,
-            }),
+              });
+            })(),
           }))
         ) {
           throw new CampaignConflictError();
         }
           return Object.freeze({ campaign, revision });
-        });
+        }, campaignId);
       },
     });
   const queries: CampaignApplication["queries"] = Object.freeze({
@@ -765,6 +836,21 @@ export function createCampaignApplication({
       async getRevision({ actor, campaignId, revisionNumber }) {
         await requireAuthor(actor);
         return getRevision(campaignId, revisionNumber);
+      },
+      async listCampaigns({ actor }) {
+        await requireAuthor(actor);
+        const campaigns = await store.listCampaigns(siteId);
+        return Promise.all(
+          campaigns.map(async (campaign) =>
+            Object.freeze({
+              campaign,
+              revision: await getRevision(
+                campaign.id,
+                campaign.version,
+              ),
+            }),
+          ),
+        );
       },
       async render({ actor, campaignId, revisionNumber }) {
         await requireAuthor(actor);

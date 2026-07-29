@@ -14,34 +14,55 @@ import {
 } from "../../../../src/human-mutation-runtime";
 
 type CampaignCommand =
-  | Readonly<{ action: "create_standalone"; input: CampaignAuthoringInput }>
+  | Readonly<{
+      action: "create_standalone";
+      input: Omit<CampaignAuthoringInput, "complianceFooter">;
+    }>
   | Readonly<{
       action: "create_from_post";
       sourcePostRevisionId: string;
       senderIdentityId: string;
-      complianceFooter: CampaignAuthoringInput["complianceFooter"];
       audienceDefinition: CampaignAuthoringInput["audienceDefinition"];
     }>
   | Readonly<{
       action: "edit";
       campaignId: string;
       expectedVersion: number;
-      input: CampaignAuthoringInput;
+      input: Omit<CampaignAuthoringInput, "complianceFooter">;
     }>;
+
+const canonicalComplianceFooter = Object.freeze({
+  version: "reference-footer-v1",
+  content:
+    "Humber Foundry · 123 Harbour Street, Victoria, BC · Contact: mailto:hello@humberfoundry.ca · Unsubscribe: https://foundry.tinyskiff.xyz/newsletter/unsubscribe",
+});
 
 function command(value: unknown): CampaignCommand | null {
   if (typeof value !== "object" || value === null || !("action" in value)) {
     return null;
   }
-  return value as CampaignCommand;
+  return value.action === "create_standalone" ||
+    value.action === "create_from_post" ||
+    value.action === "edit"
+    ? (value as CampaignCommand)
+    : null;
 }
 
 export async function GET(request: Request) {
   try {
     const context = await loadCampaignRequestContext(request.headers);
-    const campaignId = createCampaignId(
-      new URL(request.url).searchParams.get("campaignId") ?? "",
-    );
+    const campaignIdValue =
+      new URL(request.url).searchParams.get("campaignId");
+    if (campaignIdValue === null) {
+      const campaigns = await context.application.queries.listCampaigns({
+        actor: context.identity,
+      });
+      return Response.json(
+        { campaigns },
+        { headers: { "cache-control": "private, no-store" } },
+      );
+    }
+    const campaignId = createCampaignId(campaignIdValue);
     const rendered = await context.application.queries.render({
       actor: context.identity,
       campaignId,
@@ -69,6 +90,10 @@ export async function POST(request: Request) {
     await verifyHumanMutation(request, context.identity);
     const parsed = command(await request.json().catch(() => null));
     if (parsed === null) {
+      await context.application.commands.recordRejectedCommand({
+        actor: context.identity,
+        reason: "campaign_command_invalid",
+      });
       return Response.json(
         { error: "campaign_command_invalid" },
         { status: 400 },
@@ -82,21 +107,27 @@ export async function POST(request: Request) {
         const result = parsed.action === "create_standalone"
           ? await context.application.commands.createStandalone({
               actor: context.identity,
-              input: parsed.input,
+              input: {
+                ...parsed.input,
+                complianceFooter: canonicalComplianceFooter,
+              },
             })
           : parsed.action === "create_from_post"
             ? await context.application.commands.createFromPost({
                 actor: context.identity,
                 sourcePostRevisionId: parsed.sourcePostRevisionId,
                 senderIdentityId: parsed.senderIdentityId,
-                complianceFooter: parsed.complianceFooter,
+                complianceFooter: canonicalComplianceFooter,
                 audienceDefinition: parsed.audienceDefinition,
               })
             : await context.application.commands.edit({
                 actor: context.identity,
                 campaignId: createCampaignId(parsed.campaignId),
                 expectedVersion: parsed.expectedVersion,
-                input: parsed.input,
+                input: {
+                  ...parsed.input,
+                  complianceFooter: canonicalComplianceFooter,
+                },
               });
         return Response.json(result, {
           status: parsed.action === "edit" ? 200 : 201,

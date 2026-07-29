@@ -29,7 +29,7 @@ import { referenceSiteApplication } from "./reference-installation";
 
 const localCampaignStore = createInMemoryCampaignStore();
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
-const rendererVersion = "foundry-campaign-renderer-v1";
+const developmentRendererCommit = "0000000000000000000000000000000000000000";
 
 async function localPostRevision(
   siteId: SiteId,
@@ -98,11 +98,19 @@ export async function loadCampaignRequestContext(
     store: localSubscriberStore,
   });
   let findPostRevision = localPostRevision;
+  let rendererCommit = developmentRendererCommit;
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
     if (environment.FOUNDRY_DB === undefined) {
       throw new Error("campaign_database_unavailable");
     }
+    if (
+      environment.FOUNDRY_RENDERER_COMMIT === undefined ||
+      !/^[a-f0-9]{40}$/u.test(environment.FOUNDRY_RENDERER_COMMIT)
+    ) {
+      throw new Error("campaign_renderer_commit_unavailable");
+    }
+    rendererCommit = environment.FOUNDRY_RENDERER_COMMIT;
     store = createD1CampaignStore(environment.FOUNDRY_DB);
     resolveAudience = createSubscriberLedgerAudienceResolver({
       siteId: referenceSiteApplication.siteId,
@@ -130,7 +138,7 @@ export async function loadCampaignRequestContext(
             ),
       findPostRevision,
       resolveAudience,
-      rendererVersion,
+      rendererVersion: rendererCommit,
       schemaVersion: "1.3.0",
     }),
   };

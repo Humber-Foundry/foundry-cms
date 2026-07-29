@@ -87,7 +87,7 @@ describe("D1 campaign store", () => {
       }),
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 7 }),
-      rendererVersion: "renderer-commit-1",
+      rendererVersion: "1111111111111111111111111111111111111111",
       schemaVersion: "1.3.0",
       createId: (kind) =>
         kind === "campaign"
@@ -116,6 +116,23 @@ describe("D1 campaign store", () => {
       actor,
       campaignId: created.campaign.id,
     });
+    await database
+      .prepare(
+        `UPDATE campaigns
+         SET lifecycle_state = 'tested', test_delivery_id = 'test-1'
+         WHERE site_id = ?1 AND id = ?2`,
+      )
+      .bind(siteId, created.campaign.id)
+      .run();
+    await application.commands.edit({
+      actor,
+      campaignId: created.campaign.id,
+      expectedVersion: 1,
+      input: {
+        ...created.revision,
+        subject: "Independently edited",
+      },
+    });
 
     await expect(
       application.queries.getRevision({
@@ -128,7 +145,7 @@ describe("D1 campaign store", () => {
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_audit_events")
         .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 1 });
+    ).resolves.toEqual({ count: 2 });
     await expect(
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_rendered_artifacts")
@@ -137,10 +154,24 @@ describe("D1 campaign store", () => {
     await expect(
       database
         .prepare(
+          "SELECT COUNT(*) AS count FROM campaign_provider_cancellation_outbox",
+        )
+        .first<{ count: number }>(),
+    ).resolves.toEqual({ count: 1 });
+    await expect(
+      database
+        .prepare(
           "UPDATE campaign_revisions SET revision_json = '{}' WHERE id = ?1",
         )
         .bind(created.revision.id)
         .run(),
     ).rejects.toThrow(/campaign_revision_is_immutable/u);
+    await expect(
+      database
+        .prepare(
+          "UPDATE campaign_audit_events SET outcome = 'rejected' WHERE outcome = 'accepted'",
+        )
+        .run(),
+    ).rejects.toThrow(/campaign_audit_is_immutable/u);
   });
 });

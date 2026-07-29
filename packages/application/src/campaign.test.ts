@@ -120,7 +120,7 @@ function createFixture() {
         ? sourcePost
         : null,
     resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
-    rendererVersion: "campaign-renderer-v1",
+    rendererVersion: "1111111111111111111111111111111111111111",
     schemaVersion: "1.3.0",
     clock: () => new Date("2026-07-29T07:00:00.000Z"),
     createId: (kind) =>
@@ -252,7 +252,7 @@ describe("campaign authoring and rendering", () => {
       authorize: async () => ({ ...editorMembership, siteId: otherSiteId }),
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 0 }),
-      rendererVersion: "campaign-renderer-v1",
+      rendererVersion: "1111111111111111111111111111111111111111",
       schemaVersion: "1.3.0",
     });
     await expect(
@@ -396,17 +396,17 @@ describe("campaign authoring and rendering", () => {
       {
         action: "campaign.create",
         outcome: "accepted",
-        actorId: editorMembership.id,
+        actorId: "human:https://access.example:editor",
       },
       {
         action: "campaign.create",
         outcome: "accepted",
-        actorId: "connection-1",
+        actorId: "mcp:connection-1",
       },
       {
         action: "campaign.create",
         outcome: "rejected",
-        actorId: editorMembership.id.replace("membership-", ""),
+        actorId: "human:https://access.example:editor",
         reason: "campaign_schema_invalid",
       },
     ]);

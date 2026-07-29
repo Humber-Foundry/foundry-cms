@@ -40,10 +40,36 @@ CREATE TABLE campaign_audit_events (
   id TEXT PRIMARY KEY,
   site_id TEXT NOT NULL,
   actor_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
   action TEXT NOT NULL,
   outcome TEXT NOT NULL CHECK (outcome IN ('accepted', 'rejected')),
   reason TEXT,
+  before_state TEXT,
+  after_state TEXT,
   occurred_at TEXT NOT NULL
+);
+
+CREATE TRIGGER campaign_audit_events_prevent_update
+BEFORE UPDATE ON campaign_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'campaign_audit_is_immutable');
+END;
+
+CREATE TRIGGER campaign_audit_events_prevent_delete
+BEFORE DELETE ON campaign_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'campaign_audit_is_immutable');
+END;
+
+CREATE TABLE campaign_provider_cancellation_outbox (
+  campaign_id TEXT NOT NULL,
+  superseded_revision_id TEXT NOT NULL,
+  replacement_revision_id TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'completed')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, superseded_revision_id),
+  FOREIGN KEY (replacement_revision_id) REFERENCES campaign_revisions(id)
 );
 
 CREATE TRIGGER campaign_revisions_prevent_update

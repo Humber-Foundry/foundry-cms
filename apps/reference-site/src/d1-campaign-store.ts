@@ -90,21 +90,26 @@ function auditInsert(
   return database
     .prepare(
       `INSERT INTO campaign_audit_events (
-         id, site_id, actor_id, action, outcome, reason, occurred_at
+         id, site_id, actor_id, target_id, request_id, action, outcome,
+         reason, before_state, after_state, occurred_at
        )
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
-       WHERE ?8 IS NULL OR EXISTS (
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+       WHERE ?12 IS NULL OR EXISTS (
          SELECT 1 FROM campaign_revisions
-         WHERE id = ?8 AND site_id = ?2
+         WHERE id = ?12 AND site_id = ?2
        )`,
     )
     .bind(
       event.id,
       event.siteId,
       event.actorId,
+      event.targetId,
+      event.requestId,
       event.action,
       event.outcome,
       event.reason,
+      event.beforeState,
+      event.afterState,
       event.occurredAt,
       campaignRevisionId ?? null,
     );
@@ -164,6 +169,16 @@ export function createD1CampaignStore(
         ? null
         : Object.freeze(JSON.parse(row.revision_json) as CampaignRevision);
     },
+    async listCampaigns(siteId) {
+      const rows = await database
+        .prepare(
+          `${campaignProjection}
+           WHERE site_id = ?1 ORDER BY updated_at DESC, id`,
+        )
+        .bind(siteId)
+        .all<CampaignRow>();
+      return rows.results.map(toCampaign);
+    },
     async appendRevision({ expectedVersion, campaign, revision, audit }) {
       const results = await database.batch([
         database
@@ -187,6 +202,25 @@ export function createD1CampaignStore(
             JSON.stringify(revision),
             revision.createdAt,
             expectedVersion,
+          ),
+        database
+          .prepare(
+            `INSERT INTO campaign_provider_cancellation_outbox (
+               campaign_id, superseded_revision_id,
+               replacement_revision_id, created_at
+             )
+             SELECT id, current_revision_id, ?1, ?2
+             FROM campaigns
+             WHERE site_id = ?3 AND id = ?4 AND version = ?5 AND ?6 = 1
+             ON CONFLICT DO NOTHING`,
+          )
+          .bind(
+            revision.id,
+            revision.createdAt,
+            campaign.siteId,
+            campaign.id,
+            expectedVersion,
+            campaign.providerCancellationRequired ? 1 : 0,
           ),
         database
           .prepare(
@@ -216,9 +250,12 @@ export function createD1CampaignStore(
           ),
         auditInsert(database, audit, revision.id),
       ]);
+      const expectedCancellationChanges =
+        campaign.providerCancellationRequired ? 1 : 0;
       return (results[0]?.meta.changes ?? 0) === 1 &&
-        (results[1]?.meta.changes ?? 0) === 1 &&
-        (results[2]?.meta.changes ?? 0) === 1;
+        (results[1]?.meta.changes ?? 0) === expectedCancellationChanges &&
+        (results[2]?.meta.changes ?? 0) === 1 &&
+        (results[3]?.meta.changes ?? 0) === 1;
     },
     async saveRenderedArtifacts(input) {
       const statements = [input.html, input.text].map((artifact) =>
@@ -272,16 +309,21 @@ export function createD1CampaignStore(
       await database
         .prepare(
           `INSERT INTO campaign_audit_events (
-             id, site_id, actor_id, action, outcome, reason, occurred_at
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+             id, site_id, actor_id, target_id, request_id, action, outcome,
+             reason, before_state, after_state, occurred_at
+           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
         )
         .bind(
           event.id,
           event.siteId,
           event.actorId,
+          event.targetId,
+          event.requestId,
           event.action,
           event.outcome,
           event.reason,
+          event.beforeState,
+          event.afterState,
           event.occurredAt,
         )
         .run();

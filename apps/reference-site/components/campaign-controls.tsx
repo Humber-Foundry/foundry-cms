@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   campaignAudienceDefinition,
   type BlogPostArtifactFingerprint,
+  type Campaign,
+  type CampaignRevision,
+  type RenderedCampaign,
 } from "@foundry/application";
 import {
   createRichTextDocumentFromPlainText,
@@ -24,6 +27,28 @@ export function CampaignControls({
   >;
 }) {
   const [message, setMessage] = useState("");
+  const [campaigns, setCampaigns] = useState<
+    ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>
+  >([]);
+  const [selected, setSelected] = useState<CampaignRevision | null>(null);
+  const [rendered, setRendered] = useState<RenderedCampaign | null>(null);
+
+  async function loadCampaigns() {
+    const response = await fetch("/api/foundry-cms/campaigns", {
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const body = (await response.json()) as {
+      campaigns: ReadonlyArray<
+        Readonly<{ campaign: Campaign; revision: CampaignRevision }>
+      >;
+    };
+    setCampaigns(body.campaigns);
+  }
+
+  useEffect(() => {
+    void loadCampaigns();
+  }, []);
 
   async function submit(command: unknown) {
     const response = await fetch("/api/foundry-cms/campaigns", {
@@ -40,6 +65,7 @@ export function CampaignControls({
         ? "Campaign revision saved."
         : "The campaign was rejected. Check the fields and retry.",
     );
+    if (response.ok) await loadCampaigns();
   }
 
   return (
@@ -78,11 +104,6 @@ export function CampaignControls({
               },
               emailContent: createRichTextDocumentFromPlainText(emailContent),
               senderIdentityId: "sender_primary",
-              complianceFooter: {
-                version: "reference-footer-v1",
-                content:
-                  "You are receiving this message from the reference installation.",
-              },
               audienceDefinition: campaignAudienceDefinition,
             },
           });
@@ -123,11 +144,6 @@ export function CampaignControls({
               action: "create_from_post",
               sourcePostRevisionId,
               senderIdentityId: "sender_primary",
-              complianceFooter: {
-                version: "reference-footer-v1",
-                content:
-                  "You are receiving this message from the reference installation.",
-              },
               audienceDefinition: campaignAudienceDefinition,
             });
           }}
@@ -147,6 +163,110 @@ export function CampaignControls({
           </label>
           <button type="submit">Derive campaign from post</button>
         </form>
+      )}
+      <ul className="blog-post-operations">
+        {campaigns.map(({ campaign, revision }) => (
+          <li key={campaign.id}>
+            <div>
+              <strong>{revision.subject}</strong>
+              <span>
+                Revision {revision.revisionNumber} · {campaign.lifecycleState}
+              </span>
+            </div>
+            <button type="button" onClick={() => setSelected(revision)}>
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void fetch(
+                  `/api/foundry-cms/campaigns?campaignId=${encodeURIComponent(
+                    campaign.id,
+                  )}`,
+                  { cache: "no-store" },
+                )
+                  .then((response) => response.json())
+                  .then((body: { rendered: RenderedCampaign }) =>
+                    setRendered(body.rendered),
+                  );
+              }}
+            >
+              Render preview
+            </button>
+          </li>
+        ))}
+      </ul>
+      {selected === null ? null : (
+        <form
+          key={selected.id}
+          className="blog-post-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            void submit({
+              action: "edit",
+              campaignId: selected.campaignId,
+              expectedVersion: selected.revisionNumber,
+              input: {
+                subject: String(data.get("subject") ?? ""),
+                previewText: String(data.get("previewText") ?? ""),
+                callToAction: {
+                  label: String(data.get("callToActionLabel") ?? ""),
+                  href: String(data.get("callToActionHref") ?? ""),
+                },
+                emailContent: createRichTextDocumentFromPlainText(
+                  String(data.get("emailContent") ?? ""),
+                ),
+                senderIdentityId: selected.senderIdentityId,
+                audienceDefinition: selected.audienceDefinition,
+              },
+            });
+          }}
+        >
+          <h3>Edit campaign revision</h3>
+          <label>
+            Subject
+            <input name="subject" defaultValue={selected.subject} required />
+          </label>
+          <label>
+            Preview text
+            <textarea
+              name="previewText"
+              defaultValue={selected.previewText}
+              required
+            />
+          </label>
+          <label>
+            Call-to-action label
+            <input
+              name="callToActionLabel"
+              defaultValue={selected.callToAction.label}
+              required
+            />
+          </label>
+          <label>
+            Call-to-action URL
+            <input
+              name="callToActionHref"
+              defaultValue={selected.callToAction.href}
+              required
+            />
+          </label>
+          <label>
+            Email content
+            <textarea name="emailContent" required />
+          </label>
+          <button type="submit">Save independent revision</button>
+        </form>
+      )}
+      {rendered === null ? null : (
+        <section aria-label="Rendered campaign preview">
+          <h3>Plain-text preview</h3>
+          <pre>{rendered.text.bytes}</pre>
+          <p>
+            HTML fingerprint: <code>{rendered.html.fingerprint}</code>
+          </p>
+        </section>
       )}
       {message === "" ? null : <p role="status">{message}</p>}
     </section>

@@ -39,6 +39,11 @@ export function createInMemoryCampaignStore(): CampaignStore & {
         revisions.get(`${siteId}:${campaignId}:${revisionNumber}`) ?? null
       );
     },
+    async listCampaigns(siteId) {
+      return [...campaigns.values()]
+        .filter((campaign) => campaign.siteId === siteId)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    },
     async appendRevision({ expectedVersion, campaign, revision, audit }) {
       const key = `${campaign.siteId}:${campaign.id}`;
       const current = campaigns.get(key);
