@@ -2,6 +2,7 @@ import {
   mcpContractVersion,
   mcpInitialScope,
   mcpProtocolVersion,
+  mcpSupportedScopes,
   type McpConnectionGrant,
   type McpConnectionSummary,
   type McpConnectionStore,
@@ -16,6 +17,7 @@ type ConnectionRow = Readonly<{
   actor_id: string;
   site_id: string;
   oauth_client_id: string;
+  redirect_uri: string;
   scopes_json: string;
   status: "active" | "revoked";
 }>;
@@ -23,17 +25,19 @@ type ConnectionRow = Readonly<{
 type AuthorizationCodeRow = Readonly<{
   connection_id: string;
   code_challenge: string;
+  granted_scopes_json: string;
 }>;
 
 export type ExchangedMcpAuthorizationCode = McpConnectionGrant &
   Readonly<{
     codeChallenge: string;
+    redirectUri: string;
   }>;
 
 export type McpRefreshRotation =
   | Readonly<{
       state: "rotated";
-      connection: McpConnectionGrant;
+      connection: McpConnectionGrant & Readonly<{ redirectUri: string }>;
     }>
   | Readonly<{ state: "reuse_detected" }>
   | Readonly<{ state: "invalid" }>;
@@ -58,8 +62,31 @@ function toConnection(row: ConnectionRow): McpConnectionGrant {
 
 export function createD1McpConnectionStore(database: D1DatabaseBinding) {
   const connectionProjection = `
-    SELECT id, actor_id, site_id, oauth_client_id, scopes_json, status
-    FROM mcp_connections
+    SELECT
+      connection.id,
+      connection.actor_id,
+      connection.site_id,
+      connection.oauth_client_id,
+      connection.redirect_uri,
+      COALESCE(
+        (
+          SELECT json_group_array(scope)
+          FROM (
+            SELECT scope
+            FROM mcp_connection_scopes
+            WHERE connection_id = connection.id
+            ORDER BY CASE scope
+              WHEN 'site.read' THEN 0
+              WHEN 'content.draft' THEN 1
+              WHEN 'design.draft' THEN 2
+              ELSE 99
+            END
+          )
+        ),
+        connection.scopes_json
+      ) AS scopes_json,
+      connection.status
+    FROM mcp_connections AS connection
   `;
 
   const store: McpConnectionStore & {
@@ -75,6 +102,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       expiresAt: string;
       now: string;
       inputHash: string;
+      scopes?: ReadonlyArray<string>;
+      stepUpConnectionId?: string;
+      stepUpExpectedScopes?: ReadonlyArray<string>;
     }): Promise<void>;
     exchangeAuthorizationCode(input: {
       codeHash: string;
@@ -117,6 +147,74 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
     } | null>;
   } = {
     async createAuthorizationGrant(input) {
+      const scopes = input.scopes ?? [mcpInitialScope];
+      if (
+        !scopes.includes(mcpInitialScope) ||
+        scopes.length !== new Set(scopes).size ||
+        scopes.some(
+          (scope) =>
+            !(mcpSupportedScopes as ReadonlyArray<string>).includes(scope),
+        ) ||
+        JSON.stringify(scopes) !==
+          JSON.stringify(
+            mcpSupportedScopes.filter((scope) => scopes.includes(scope)),
+          )
+      ) {
+        throw new TypeError("mcp_authorization_scope_invalid");
+      }
+      const existing =
+        input.stepUpConnectionId === undefined
+          ? undefined
+          : await database
+              .prepare(
+                `SELECT id, actor_id
+                 FROM mcp_connections
+                 WHERE id = ?1
+                   AND site_id = ?2
+                   AND oauth_client_id = ?3
+                   AND redirect_uri = ?4
+                   AND status = 'active'`,
+              )
+              .bind(
+                input.stepUpConnectionId,
+                input.siteId,
+                input.clientId,
+                input.redirectUri,
+              )
+              .first<{ id: string; actor_id: string }>() ?? undefined;
+      if (
+        (
+          input.stepUpConnectionId === undefined &&
+          input.stepUpExpectedScopes !== undefined
+        ) ||
+        (
+          input.stepUpConnectionId !== undefined &&
+          (
+            existing === undefined ||
+            input.stepUpExpectedScopes === undefined
+          )
+        )
+      ) {
+        throw new TypeError("mcp_authorization_connection_not_found");
+      }
+      const connectionId = existing?.id ?? input.connectionId;
+      const actorId = existing?.actor_id ?? input.actorId;
+      let expectedCurrentScopes: ReadonlyArray<string> = [];
+      if (existing !== undefined) {
+        const current = await store.findCurrentConnection({
+          connectionId,
+          siteId: input.siteId,
+        });
+        if (
+          current === null ||
+          JSON.stringify(current.scopes) !==
+            JSON.stringify(input.stepUpExpectedScopes) ||
+          current.scopes.some((scope) => !scopes.includes(scope))
+        ) {
+          throw new TypeError("mcp_authorization_scope_invalid");
+        }
+        expectedCurrentScopes = input.stepUpExpectedScopes!;
+      }
       const results = await database.batch([
         database
           .prepare(
@@ -131,11 +229,14 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                  AND site_id = ?3
                  AND role = 'owner'
                  AND status = 'active'
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM mcp_connections WHERE id = ?1
              )`,
           )
           .bind(
-            input.connectionId,
-            input.actorId,
+            connectionId,
+            actorId,
             input.siteId,
             input.clientId,
             input.redirectUri,
@@ -145,22 +246,78 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           ),
         database
           .prepare(
-            `INSERT INTO mcp_authorization_codes (
-               code_hash, connection_id, code_challenge, expires_at, created_at
+            `INSERT OR IGNORE INTO mcp_connection_scopes (connection_id, scope)
+             SELECT ?1, value
+             FROM json_each(?2)
+             WHERE EXISTS (
+               SELECT 1 FROM mcp_connections
+               WHERE id = ?1 AND site_id = ?3 AND status = 'active'
              )
-             SELECT ?1, ?2, ?3, ?4, ?5
+             AND EXISTS (
+               SELECT 1 FROM human_memberships
+               WHERE id = ?4
+                 AND site_id = ?3
+                 AND role = 'owner'
+                 AND status = 'active'
+             )
+             AND NOT EXISTS (
+               SELECT 1
+               FROM mcp_connection_scopes
+               WHERE connection_id = ?1
+                 AND scope NOT IN (SELECT value FROM json_each(?5))
+             )
+             AND (
+               SELECT COUNT(*)
+               FROM mcp_connection_scopes
+               WHERE connection_id = ?1
+             ) = (SELECT COUNT(*) FROM json_each(?5))`,
+          )
+          .bind(
+            connectionId,
+            JSON.stringify(scopes),
+            input.siteId,
+            input.ownerMembershipId,
+            JSON.stringify(expectedCurrentScopes),
+          ),
+        database
+          .prepare(
+            `INSERT INTO mcp_authorization_codes (
+               code_hash, connection_id, code_challenge, expires_at,
+               created_at, granted_scopes_json
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?8
              WHERE EXISTS (
                SELECT 1 FROM mcp_connections
                WHERE id = ?2 AND site_id = ?6 AND status = 'active'
-             )`,
+             )
+             AND EXISTS (
+               SELECT 1 FROM human_memberships
+               WHERE id = ?7
+                 AND site_id = ?6
+                 AND role = 'owner'
+                 AND status = 'active'
+             )
+             AND NOT EXISTS (
+               SELECT 1
+               FROM mcp_connection_scopes
+               WHERE connection_id = ?2
+                 AND scope NOT IN (SELECT value FROM json_each(?8))
+             )
+             AND (
+               SELECT COUNT(*)
+               FROM mcp_connection_scopes
+               WHERE connection_id = ?2
+             ) = (SELECT COUNT(*) FROM json_each(?8))`,
           )
           .bind(
             input.codeHash,
-            input.connectionId,
+            connectionId,
             input.codeChallenge,
             input.expiresAt,
             input.now,
             input.siteId,
+            input.ownerMembershipId,
+            JSON.stringify(scopes),
           ),
         database
           .prepare(
@@ -178,23 +335,34 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
              )`,
           )
           .bind(
-            `authorize:${input.connectionId}`,
-            input.connectionId,
-            input.actorId,
+            `authorize:${connectionId}:${input.codeHash}`,
+            connectionId,
+            actorId,
             input.siteId,
             input.now,
             input.codeHash,
             input.inputHash,
             input.ownerMembershipId,
             mcpProtocolVersion,
-            JSON.stringify([mcpInitialScope]),
+            JSON.stringify(scopes),
             mcpContractVersion,
           ),
       ]);
       if (
-        (results[0]?.meta.changes ?? 0) !== 1 ||
-        (results[1]?.meta.changes ?? 0) !== 1 ||
-        (results[2]?.meta.changes ?? 0) !== 1
+        (results[0]?.meta.changes ?? 0) !==
+          (existing === undefined ? 1 : 0) ||
+        (results[2]?.meta.changes ?? 0) !== 1 ||
+        (results[3]?.meta.changes ?? 0) !== 1
+      ) {
+        throw new TypeError("mcp_authorization_grant_not_created");
+      }
+      const granted = await store.findCurrentConnection({
+        connectionId,
+        siteId: input.siteId,
+      });
+      if (
+        granted === null ||
+        JSON.stringify(granted.scopes) !== JSON.stringify(scopes)
       ) {
         throw new TypeError("mcp_authorization_grant_not_created");
       }
@@ -218,7 +386,7 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                  AND connection.redirect_uri = ?5
                  AND connection.status = 'active'
              )
-           RETURNING connection_id, code_challenge`,
+           RETURNING connection_id, code_challenge, granted_scopes_json`,
         ).bind(
           input.now,
           input.codeHash,
@@ -232,7 +400,7 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         database.prepare(
           `INSERT INTO mcp_refresh_tokens (
              token_hash, family_id, connection_id, oauth_client_id,
-             expires_at, issued_at
+             expires_at, issued_at, scopes_json
            )
            SELECT
              code.refresh_token_hash,
@@ -240,7 +408,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
              code.connection_id,
              connection.oauth_client_id,
              code.refresh_expires_at,
-             code.consumed_at
+             code.consumed_at,
+             code.granted_scopes_json
            FROM mcp_authorization_codes AS code
            JOIN mcp_connections AS connection
              ON connection.id = code.connection_id
@@ -275,21 +444,25 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         return null;
       }
       const row = await database
-        .prepare(`${connectionProjection} WHERE id = ?1`)
+        .prepare(`${connectionProjection} WHERE connection.id = ?1`)
         .bind(consumed.connection_id)
         .first<ConnectionRow>();
       return row === null
         ? null
         : {
-            ...toConnection(row),
+            ...toConnection({
+              ...row,
+              scopes_json: consumed.granted_scopes_json,
+            }),
             codeChallenge: consumed.code_challenge,
+            redirectUri: row.redirect_uri,
           };
     },
     async findCurrentConnection(input) {
       const row = await database
         .prepare(
           `${connectionProjection}
-           WHERE id = ?1 AND site_id = ?2`,
+           WHERE connection.id = ?1 AND connection.site_id = ?2`,
         )
         .bind(input.connectionId, input.siteId)
         .first<ConnectionRow>();
@@ -325,12 +498,33 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                input_hash, protocol_version, scopes_json, outcome, reason,
                human_actor_id, revocation_reason, occurred_at, contract_version
              )
-             SELECT ?1, id, actor_id, site_id, 'foundry.connection.revoke',
-                    ?5, ?8, scopes_json, 'allowed', NULL,
+             SELECT ?1, connection.id, connection.actor_id,
+                    connection.site_id, 'foundry.connection.revoke',
+                    ?5, ?8,
+                    COALESCE(
+                      (
+                        SELECT json_group_array(scope)
+                        FROM (
+                          SELECT scope
+                          FROM mcp_connection_scopes
+                          WHERE connection_id = connection.id
+                          ORDER BY CASE scope
+                            WHEN 'site.read' THEN 0
+                            WHEN 'content.draft' THEN 1
+                            WHEN 'design.draft' THEN 2
+                            ELSE 99
+                          END
+                        )
+                      ),
+                      connection.scopes_json
+                    ),
+                    'allowed', NULL,
                     ?6, ?7, ?2, ?9
-             FROM mcp_connections
-             WHERE id = ?3 AND site_id = ?4 AND status = 'revoked'
-               AND revoked_at = ?2`,
+             FROM mcp_connections AS connection
+             WHERE connection.id = ?3
+               AND connection.site_id = ?4
+               AND connection.status = 'revoked'
+               AND connection.revoked_at = ?2`,
           )
           .bind(
             `revoke:${input.connectionId}:${input.now}`,
@@ -382,8 +576,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         .prepare(
           `SELECT
              token.family_id, token.connection_id, token.expires_at,
-             token.consumed_at, token.revoked_at,
-             connection.actor_id, connection.site_id, connection.scopes_json,
+             token.consumed_at, token.revoked_at, token.scopes_json,
+             connection.actor_id, connection.site_id,
+             connection.redirect_uri,
              connection.status AS connection_status
            FROM mcp_refresh_tokens AS token
            JOIN mcp_connections AS connection
@@ -399,6 +594,7 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           revoked_at: string | null;
           actor_id: string;
           site_id: string;
+          redirect_uri: string;
           scopes_json: string;
           connection_status: "active" | "revoked";
         }>();
@@ -469,9 +665,10 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           .prepare(
             `INSERT INTO mcp_refresh_tokens (
                token_hash, family_id, connection_id, oauth_client_id,
-               expires_at, issued_at
+               expires_at, issued_at, scopes_json
              )
-             SELECT ?1, family_id, connection_id, oauth_client_id, ?2, ?3
+             SELECT ?1, family_id, connection_id, oauth_client_id, ?2, ?3,
+                    scopes_json
              FROM mcp_refresh_tokens
              WHERE token_hash = ?4
                AND consumed_at = ?3
@@ -491,18 +688,21 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       ) {
         return store.rotateRefreshToken(input);
       }
-      const connection = await store.findCurrentConnection({
-        connectionId: existing.connection_id,
-        siteId: (
-          await database
-            .prepare(`SELECT site_id FROM mcp_connections WHERE id = ?1`)
-            .bind(existing.connection_id)
-            .first<{ site_id: string }>()
-        )?.site_id as SiteId,
-      });
-      return connection === null || connection.status !== "active"
-        ? { state: "invalid" }
-        : { state: "rotated", connection };
+      return {
+        state: "rotated",
+        connection: {
+          ...toConnection({
+            id: existing.connection_id,
+            actor_id: existing.actor_id,
+            site_id: existing.site_id,
+            oauth_client_id: input.clientId,
+            redirect_uri: existing.redirect_uri,
+            scopes_json: existing.scopes_json,
+            status: existing.connection_status,
+          }),
+          redirectUri: existing.redirect_uri,
+        },
+      };
     },
     async consumeRateLimit(input) {
       if (
@@ -550,7 +750,24 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         .prepare(
           `SELECT
              connection.id, connection.actor_id, connection.site_id,
-             connection.oauth_client_id, connection.scopes_json,
+             connection.oauth_client_id,
+             COALESCE(
+               (
+                 SELECT json_group_array(scope)
+                 FROM (
+                   SELECT scope
+                   FROM mcp_connection_scopes
+                   WHERE connection_id = connection.id
+                   ORDER BY CASE scope
+                     WHEN 'site.read' THEN 0
+                     WHEN 'content.draft' THEN 1
+                     WHEN 'design.draft' THEN 2
+                     ELSE 99
+                   END
+                 )
+               ),
+               connection.scopes_json
+             ) AS scopes_json,
              connection.status, connection.created_at, connection.revoked_at,
              MAX(audit.occurred_at) AS last_used_at
            FROM mcp_connections AS connection

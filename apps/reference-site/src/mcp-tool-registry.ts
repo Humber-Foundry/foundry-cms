@@ -1,23 +1,34 @@
 import {
+  createContentWorkspaceId,
+  mcpContentDraftScope,
   mcpContractVersion,
+  mcpDesignDraftScope,
+  type McpContentPatchOperation,
   type McpConnectionPrincipal,
   type McpExecutionContext,
+  type createMcpDraftApplication,
   type createMcpReadApplication,
 } from "@foundry/application";
-import { siteDefinitionSchema } from "@foundry/site-definition";
+import {
+  designContract,
+  listEditableSiteFields,
+  referenceSiteDefinition,
+  siteDefinitionSchema,
+  type RichTextDocument,
+} from "@foundry/site-definition";
 
 import { hasExactKeys, isRecord } from "./mcp-http-support";
 
 export type McpReadApplication = ReturnType<
   typeof createMcpReadApplication
->;
+> & Partial<ReturnType<typeof createMcpDraftApplication>>;
 
 function toolOutputSchema(result: unknown) {
   const meta = {
     type: "object",
     additionalProperties: false,
     properties: {
-      replayed: { const: false },
+      replayed: { type: "boolean" },
       observedAt: { type: "string", format: "date-time" },
     },
     required: ["replayed", "observedAt"],
@@ -53,6 +64,8 @@ function toolOutputSchema(result: unknown) {
                   "CONNECTION_REVOKED",
                   "OBJECT_NOT_FOUND",
                   "VALIDATION_FAILED",
+                  "STALE_REVISION",
+                  "IDEMPOTENCY_KEY_REUSED",
                   "TEMPORARILY_UNAVAILABLE",
                 ],
               },
@@ -62,12 +75,22 @@ function toolOutputSchema(result: unknown) {
                 type: "array",
                 items: { type: "string" },
               },
+              latestRevision: {
+                type: ["integer", "null"],
+                minimum: 0,
+              },
+              conflictResource: {
+                type: ["string", "null"],
+                format: "uri-reference",
+              },
             },
             required: [
               "code",
               "message",
               "retryable",
               "requiredScopes",
+              "latestRevision",
+              "conflictResource",
             ],
           },
           meta,
@@ -86,6 +109,317 @@ const annotations = {
 } as const;
 
 const taskExecution = { taskSupport: "forbidden" } as const;
+
+const mutationAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+const nonDestructiveMutationAnnotations = {
+  ...mutationAnnotations,
+  destructiveHint: false,
+} as const;
+
+const idempotencyKeySchema = {
+  type: "string",
+  format: "uuid",
+} as const;
+
+const workspaceIdSchema = {
+  type: "string",
+  pattern: "^workspace_[a-z0-9_]+$",
+} as const;
+
+const contentFields = listEditableSiteFields(referenceSiteDefinition)
+  .filter(({ group }) => group !== "Design");
+const contentFieldPaths = contentFields.map(({ path }) => path);
+const plainTextContentFieldPaths = contentFields
+  .filter(({ format }) => format === "plainText")
+  .map(({ path }) => path);
+const richTextContentFieldPaths = contentFields
+  .filter(({ format }) => format === "richText")
+  .map(({ path }) => path);
+const designVariantContracts =
+  referenceSiteDefinition.home.sections.map(({ id, type }) => ({
+    componentId: id,
+    values: designContract.variants[type].values,
+  }));
+const draftResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    workspaceId: { type: "string", pattern: "^workspace_[a-z0-9_]+$" },
+    revision: { type: "integer", minimum: 0 },
+    contentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    schemaVersion: { type: "string" },
+    validation: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        valid: { const: true },
+        issues: { type: "array", maxItems: 0 },
+      },
+      required: ["valid", "issues"],
+    },
+  },
+  required: [
+    "workspaceId",
+    "revision",
+    "contentHash",
+    "schemaVersion",
+    "validation",
+  ],
+} as const;
+const draftMutationResult = {
+  ...draftResult,
+  properties: {
+    ...draftResult.properties,
+    replayed: { type: "boolean" },
+  },
+  required: [...draftResult.required, "replayed"],
+} as const;
+const canonicalDefinitionResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: siteDefinitionSchema.properties,
+  required: siteDefinitionSchema.required,
+} as const;
+const canonicalRevisionResult = {
+  ...draftResult,
+  properties: {
+    ...draftResult.properties,
+    definition: canonicalDefinitionResult,
+    rendererVersion: { type: "string", minLength: 1 },
+    productionBase: {
+      type: "string",
+      pattern:
+        "^git:(?:[0-9a-f]{40}|[0-9a-f]{64})@content:[0-9a-f]{64}$",
+    },
+    createdAt: { type: "string", format: "date-time" },
+    createdBy: { type: "string", minLength: 1 },
+  },
+  required: [
+    ...draftResult.required,
+    "definition",
+    "rendererVersion",
+    "productionBase",
+    "createdAt",
+    "createdBy",
+  ],
+} as const;
+const workspaceResourceResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    workspaceId: workspaceIdSchema,
+    manifest: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        siteId: { type: "string", pattern: "^site_[a-z0-9_]+$" },
+        schemaVersion: { type: "string" },
+        rendererVersion: { type: "string", minLength: 1 },
+        productionBase: {
+          type: "string",
+          pattern:
+            "^git:(?:[0-9a-f]{40}|[0-9a-f]{64})@content:[0-9a-f]{64}$",
+        },
+      },
+      required: [
+        "siteId",
+        "schemaVersion",
+        "rendererVersion",
+        "productionBase",
+      ],
+    },
+    base: canonicalRevisionResult,
+    current: canonicalRevisionResult,
+    state: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        status: { const: "draft" },
+        baseRevision: { type: "integer", minimum: 0 },
+        currentRevision: { type: "integer", minimum: 0 },
+        contentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      },
+      required: [
+        "status",
+        "baseRevision",
+        "currentRevision",
+        "contentHash",
+      ],
+    },
+  },
+  required: ["workspaceId", "manifest", "base", "current", "state"],
+} as const;
+
+function validIdempotencyKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
+      .test(value)
+  );
+}
+
+function parseWorkspaceMutation(
+  input: unknown,
+  operationsRequired: boolean,
+) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(
+      input,
+      ["workspaceId", "expectedRevision", "idempotencyKey"],
+      operationsRequired ? ["operations"] : [],
+    ) ||
+    typeof input.workspaceId !== "string" ||
+    !Number.isSafeInteger(input.expectedRevision) ||
+    (input.expectedRevision as number) < 0 ||
+    !validIdempotencyKey(input.idempotencyKey)
+  ) {
+    return null;
+  }
+  try {
+    return {
+      workspaceId: createContentWorkspaceId(input.workspaceId),
+      expectedRevision: input.expectedRevision as number,
+      idempotencyKey: input.idempotencyKey,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePatchInput(input: unknown) {
+  const common = parseWorkspaceMutation(input, true);
+  if (
+    common === null ||
+    !isRecord(input) ||
+    !Array.isArray(input.operations) ||
+    input.operations.length < 1 ||
+    input.operations.length > 100
+  ) {
+    return null;
+  }
+  const operations: McpContentPatchOperation[] = [];
+  for (const operation of input.operations) {
+    if (
+      !isRecord(operation) ||
+      !hasExactKeys(operation, ["op", "field", "value"], ["format"]) ||
+      operation.op !== "set" ||
+      typeof operation.field !== "string" ||
+      !contentFieldPaths.includes(operation.field) ||
+      (operation.format !== undefined &&
+        operation.format !== "plainText" &&
+        operation.format !== "richText")
+    ) {
+      continue;
+    }
+    const contract = contentFields.find(
+      ({ path }) => path === operation.field,
+    )!;
+    if (
+      contract.format === "plainText" &&
+      (operation.format === undefined ||
+        operation.format === "plainText") &&
+      typeof operation.value === "string" &&
+      operation.value.length >= 1 &&
+      operation.value.length <= 200_000
+    ) {
+      operations.push({
+        op: "set",
+        field: operation.field,
+        value: operation.value,
+        ...(operation.format === undefined
+          ? {}
+          : { format: "plainText" as const }),
+      });
+      continue;
+    }
+    if (
+      contract.format === "richText" &&
+      operation.format === "richText" &&
+      isRecord(operation.value)
+    ) {
+      operations.push({
+        op: "set",
+        field: operation.field,
+        value: operation.value as RichTextDocument,
+        format: "richText" as const,
+      });
+    }
+  }
+  return operations.length === input.operations.length
+    ? { ...common, operations }
+    : null;
+}
+
+function parseDesignPatchInput(input: unknown) {
+  const common = parseWorkspaceMutation(input, true);
+  if (
+    common === null ||
+    !isRecord(input) ||
+    !Array.isArray(input.operations) ||
+    input.operations.length < 1 ||
+    input.operations.length > 100
+  ) {
+    return null;
+  }
+  const operations: Array<
+    | Readonly<{
+        op: "set_token";
+        token: keyof typeof designContract.tokens;
+        value: string;
+      }>
+    | Readonly<{
+        op: "set_variant";
+        componentId: string;
+        value: string;
+      }>
+  > = [];
+  for (const operation of input.operations) {
+    if (!isRecord(operation) || typeof operation.op !== "string") {
+      continue;
+    }
+    if (
+      operation.op === "set_token" &&
+      hasExactKeys(operation, ["op", "token", "value"]) &&
+      typeof operation.token === "string" &&
+      Object.hasOwn(designContract.tokens, operation.token) &&
+      typeof operation.value === "string"
+    ) {
+      operations.push({
+        op: "set_token" as const,
+        token: operation.token as keyof typeof designContract.tokens,
+        value: operation.value,
+      });
+      continue;
+    }
+    if (
+      operation.op === "set_variant" &&
+      hasExactKeys(operation, ["op", "componentId", "value"]) &&
+      typeof operation.componentId === "string" &&
+      typeof operation.value === "string" &&
+      designVariantContracts.some(
+        ({ componentId, values }) =>
+          componentId === operation.componentId &&
+          values.includes(operation.value as never),
+      )
+    ) {
+      operations.push({
+        op: "set_variant" as const,
+        componentId: operation.componentId,
+        value: operation.value,
+      });
+    }
+  }
+  return operations.length === input.operations.length
+    ? { ...common, operations }
+    : null;
+}
 
 const descriptors = {
   "foundry.site.get": {
@@ -262,6 +596,216 @@ const descriptors = {
     annotations,
     execution: taskExecution,
   },
+  "foundry.workspace.open": {
+    name: "foundry.workspace.open",
+    description:
+      "Open one site-scoped canonical draft workspace at revision zero.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        expectedRevision: { const: 0 },
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: ["expectedRevision", "idempotencyKey"],
+    },
+    outputSchema: toolOutputSchema(draftMutationResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.workspace.get": {
+    name: "foundry.workspace.get",
+    description: "Read an authorized site-scoped draft workspace.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+      },
+      required: ["workspaceId"],
+    },
+    outputSchema: toolOutputSchema(workspaceResourceResult),
+    annotations,
+    execution: taskExecution,
+  },
+  "foundry.content.patch": {
+    name: "foundry.content.patch",
+    description:
+      "Apply allowlisted content field edits to a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        operations: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          items: {
+            oneOf: [
+              {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  op: { const: "set" },
+                  field: { enum: plainTextContentFieldPaths },
+                  format: { const: "plainText" },
+                  value: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 200000,
+                  },
+                },
+                required: ["op", "field", "value"],
+              },
+              {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  op: { const: "set" },
+                  field: { enum: richTextContentFieldPaths },
+                  format: { const: "richText" },
+                  value: { $ref: "#/$defs/richTextDocument" },
+                },
+                required: ["op", "field", "format", "value"],
+              },
+            ],
+          },
+        },
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "operations",
+      ],
+      $defs: siteDefinitionSchema.$defs,
+    },
+    outputSchema: toolOutputSchema({
+      ...draftMutationResult,
+      properties: {
+        ...draftMutationResult.properties,
+        previewArtifact: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+        },
+      },
+      required: [...draftMutationResult.required, "previewArtifact"],
+    }),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.design.patch": {
+    name: "foundry.design.patch",
+    description:
+      "Apply registered design tokens or component variants to a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        operations: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          items: {
+            oneOf: [
+              ...Object.entries(designContract.tokens).map(
+                ([token, contract]) => ({
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    op: { const: "set_token" },
+                    token: { const: token },
+                    value: { enum: [...contract.values] },
+                  },
+                  required: ["op", "token", "value"],
+                }),
+              ),
+              ...designVariantContracts.map(
+                ({ componentId, values }) => ({
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    op: { const: "set_variant" },
+                    componentId: { const: componentId },
+                    value: { enum: [...values] },
+                  },
+                  required: ["op", "componentId", "value"],
+                }),
+              ),
+            ],
+          },
+        },
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "operations",
+      ],
+    },
+    outputSchema: toolOutputSchema({
+      ...draftMutationResult,
+      properties: {
+        ...draftMutationResult.properties,
+        previewArtifact: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+        },
+      },
+      required: [...draftMutationResult.required, "previewArtifact"],
+    }),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.preview.prepare": {
+    name: "foundry.preview.prepare",
+    description:
+      "Prepare an immutable canonical preview and a human review URL without creating approval.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+      ],
+    },
+    outputSchema: toolOutputSchema({
+      ...draftResult,
+      properties: {
+        ...draftResult.properties,
+        previewId: { type: "string", minLength: 1, maxLength: 200 },
+        previewArtifact: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+        },
+        approvalStatus: { const: "pending_human_review" },
+        replayed: { type: "boolean" },
+        humanReviewUrl: { type: "string", format: "uri" },
+      },
+      required: [
+        ...draftResult.required,
+        "previewId",
+        "previewArtifact",
+        "approvalStatus",
+        "replayed",
+        "humanReviewUrl",
+      ],
+    }),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
 } as const;
 
 export function createMcpToolRegistry(application: McpReadApplication) {
@@ -333,6 +877,109 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         contentId: input.contentId,
       }, context);
     },
+    "foundry.workspace.open": async (principal, input, context) => {
+      if (
+        !isRecord(input) ||
+        !hasExactKeys(input, ["expectedRevision", "idempotencyKey"]) ||
+        input.expectedRevision !== 0 ||
+        !validIdempotencyKey(input.idempotencyKey)
+      ) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.workspace.open",
+          input,
+          context,
+          [
+            principal.scopes.includes(mcpDesignDraftScope)
+              ? mcpDesignDraftScope
+              : mcpContentDraftScope,
+          ],
+        );
+      }
+      return application.openWorkspace!(principal, {
+        expectedRevision: 0,
+        idempotencyKey: input.idempotencyKey,
+      }, context);
+    },
+    "foundry.workspace.get": async (principal, input, context) => {
+      if (
+        !isRecord(input) ||
+        !hasExactKeys(input, ["workspaceId"]) ||
+        typeof input.workspaceId !== "string"
+      ) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.workspace.get",
+          input,
+          context,
+          [
+            principal.scopes.includes(mcpDesignDraftScope)
+              ? mcpDesignDraftScope
+              : mcpContentDraftScope,
+          ],
+        );
+      }
+      let workspaceId;
+      try {
+        workspaceId = createContentWorkspaceId(input.workspaceId);
+      } catch {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.workspace.get",
+          input,
+          context,
+          [
+            principal.scopes.includes(mcpDesignDraftScope)
+              ? mcpDesignDraftScope
+              : mcpContentDraftScope,
+          ],
+        );
+      }
+      return application.getWorkspace!(principal, workspaceId, context);
+    },
+    "foundry.content.patch": async (principal, input, context) => {
+      const parsed = parsePatchInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.content.patch",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.patchContent!(principal, parsed, context);
+    },
+    "foundry.design.patch": async (principal, input, context) => {
+      const parsed = parseDesignPatchInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.design.patch",
+          input,
+          context,
+          [mcpDesignDraftScope],
+        );
+      }
+      return application.patchDesign!(principal, parsed, context);
+    },
+    "foundry.preview.prepare": async (principal, input, context) => {
+      const parsed = parseWorkspaceMutation(input, false);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.preview.prepare",
+          input,
+          context,
+          [
+            principal.scopes.includes(mcpDesignDraftScope)
+              ? mcpDesignDraftScope
+              : mcpContentDraftScope,
+          ],
+        );
+      }
+      return application.preparePreview!(principal, parsed, context);
+    },
   } satisfies Record<
     keyof typeof descriptors,
     (
@@ -343,11 +990,51 @@ export function createMcpToolRegistry(application: McpReadApplication) {
   >;
 
   return {
-    list() {
-      return Object.values(descriptors);
+    list(principal: McpConnectionPrincipal) {
+      const supportsDrafts = application.openWorkspace !== undefined;
+      return Object.entries(descriptors)
+        .filter(([name]) => {
+          if (
+            name.startsWith("foundry.workspace.") ||
+            name === "foundry.content.patch" ||
+            name === "foundry.design.patch" ||
+            name === "foundry.preview.prepare"
+          ) {
+            if (!supportsDrafts) return false;
+          }
+          if (
+            name === "foundry.workspace.open" ||
+            name === "foundry.workspace.get" ||
+            name === "foundry.preview.prepare"
+          ) {
+            return (
+              principal.scopes.includes(mcpContentDraftScope) ||
+              principal.scopes.includes(mcpDesignDraftScope)
+            );
+          }
+          if (name === "foundry.content.patch") {
+            return principal.scopes.includes(mcpContentDraftScope);
+          }
+          if (name === "foundry.design.patch") {
+            return principal.scopes.includes(mcpDesignDraftScope);
+          }
+          return true;
+        })
+        .map(([, descriptor]) => descriptor);
     },
     get(name: string) {
       if (!Object.hasOwn(handlers, name)) return null;
+      if (
+        application.openWorkspace === undefined &&
+        (
+          name.startsWith("foundry.workspace.") ||
+          name === "foundry.content.patch" ||
+          name === "foundry.design.patch" ||
+          name === "foundry.preview.prepare"
+        )
+      ) {
+        return null;
+      }
       const toolName = name as keyof typeof handlers;
       return {
         descriptor: descriptors[toolName],

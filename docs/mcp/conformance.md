@@ -39,7 +39,11 @@ account.
 - Negotiate MCP `2025-11-25`; reject unsupported versions with a clear protocol
   error and test explicitly supported older versions if any.
 - Verify Streamable HTTP headers, Origin policy, content types, session
-  lifecycle, cancellation, pagination and list-changed notifications.
+  lifecycle, cancellation, pagination, honest `listChanged` declarations and
+  reinitialization with a replacement token after scope step-up.
+- For both read-only and stepped-up tokens, require the initialized session ID
+  on subsequent requests: missing is HTTP `400`, while unknown, stale or
+  wrong-token is HTTP `404`.
 - Validate every advertised input/output schema with the official MCP schema and
   an independent JSON Schema validator.
 - Fuzz unknown fields, wrong types, excessive depth/size, Unicode, empty arrays,
@@ -66,6 +70,11 @@ account.
 - Prove tokens in URI, body or cookie are not accepted.
 - Prove `site.read` is the minimal initial grant and each additional scope needs
   a fresh Owner step-up consent.
+- Direct-call an omitted draft tool and prove its authenticated `403`
+  `WWW-Authenticate` challenge contains `site.read` plus exactly the required
+  incremental draft scope.
+- Attempt step-up through another registered redirect URI for the same client
+  and prove it is rejected before consent.
 - Revoke an active connection and prove the next call fails despite an
   unexpired token and live MCP session.
 - Rotate refresh tokens; reuse an old refresh token and verify family
@@ -191,7 +200,9 @@ structured output and execution-error rendering
 resource/template/prompt discovery
 tool annotation display
 human-review URL handling or elicitation behavior
-scope step-up behavior
+scope step-up behavior, including use of the token response's opaque
+`connection_id` and signed `step_up_token`, exact-connection consent display,
+and rejection of missing, stale or cross-connection step-up proof
 reconnect/retry/idempotency behavior
 known client UX limitation
 ```

@@ -10,6 +10,7 @@ import {
 import {
   contentWorkspaceIdForActor,
   contentWorkspaceIdForMutation,
+  gitContentProductionBase,
   isGitObjectId,
   resolveContentReleaseInputs,
 } from "./content-revision-runtime";
@@ -60,6 +61,15 @@ describe("production base validation", () => {
     expect(isGitObjectId("b".repeat(64))).toBe(true);
     expect(isGitObjectId("c".repeat(41))).toBe(false);
     expect(isGitObjectId("d".repeat(63))).toBe(false);
+  });
+
+  it("binds the deployed git object and exact content hash", () => {
+    expect(
+      gitContentProductionBase("a".repeat(40), "b".repeat(64)),
+    ).toBe(`git:${"a".repeat(40)}@content:${"b".repeat(64)}`);
+    expect(() =>
+      gitContentProductionBase(`git:${"a".repeat(40)}`, "b".repeat(64)),
+    ).toThrow(ContentRevisionConfigurationError);
   });
 
   it("uses the embedded Workers build commit as both renderer and production base", () => {

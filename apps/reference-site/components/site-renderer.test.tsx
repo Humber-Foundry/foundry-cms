@@ -96,6 +96,65 @@ describe("SiteRenderer controlled design projection", () => {
 });
 
 describe("site renderer media placement", () => {
+  it("renders human and MCP revision previews with identical authenticated links", () => {
+    const post = {
+      id: createBlogPostId(
+        "00000000-0000-4000-8000-000000000055",
+      ),
+      revision: 1,
+      collectionState: "active" as const,
+      targetVisibility: "public" as const,
+      slug: "same-preview",
+      title: "Same preview",
+      excerpt: "One canonical revision renderer.",
+      seo: {
+        title: "Same preview | Foundry",
+        description: "One canonical revision renderer.",
+      },
+      body: createRichTextDocumentFromPlainText("Canonical preview."),
+    };
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        media: [{
+          occurrenceId: "occurrence_home_hero",
+          revision: 1,
+          asset: {
+            assetId: "asset_preview_55",
+            width: 1600,
+            height: 900,
+            contentType: "image/png",
+          },
+          crop: null,
+        }],
+      },
+      blog: { id: "blog", posts: [post] },
+    };
+    const previewProps = {
+      definition,
+      mediaDelivery: "authenticated" as const,
+      mediaAccessToken: "media-token-55",
+      blogPostHref: (slug: string) =>
+        `/__foundry/preview/workspace_mcp_55/2/blog/${slug}` +
+        "?capability=capability-55&bookmark=bookmark-55",
+    };
+    const human = renderToStaticMarkup(<SiteRenderer {...previewProps} />);
+    const mcp = renderToStaticMarkup(<SiteRenderer {...previewProps} />);
+
+    expect(mcp).toBe(human);
+    expect(mcp).toContain(
+      "/api/foundry-cms/media?assetId=asset_preview_55&amp;" +
+        "accessToken=media-token-55",
+    );
+    expect(mcp).toContain(
+      'href="/__foundry/preview/workspace_mcp_55/2/blog/same-preview?' +
+        'capability=capability-55&amp;bookmark=bookmark-55"',
+    );
+    expect(mcp).not.toContain("/api/media/asset_preview_55");
+    expect(mcp).not.toContain('href="/blog/same-preview"');
+  });
+
   it("does not reuse a canonical occurrence on a duplicated component", () => {
     const canonical = referenceSiteDefinition.home.sections.find(
       (section) => section.id === "section_hero",

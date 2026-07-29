@@ -48,6 +48,16 @@ export function isGitObjectId(value: string): boolean {
   return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value);
 }
 
+export function gitContentProductionBase(
+  commit: string,
+  contentHash: string,
+): string {
+  if (!isGitObjectId(commit) || !/^[a-f0-9]{64}$/u.test(contentHash)) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return `git:${commit}@content:${contentHash}`;
+}
+
 export function resolveContentReleaseInputs(
   environment: HumanAccessEnvironment,
   embeddedReleaseCommit = process.env.FOUNDRY_RELEASE_COMMIT_SHA,
@@ -172,7 +182,9 @@ function applicationFor({
     actorId,
     rendererVersion,
     productionBase: (contentHash) =>
-      `${productionBaseCommit}@content:${contentHash}`,
+      isGitObjectId(productionBaseCommit)
+        ? gitContentProductionBase(productionBaseCommit, contentHash)
+        : `${productionBaseCommit}@content:${contentHash}`,
   });
 }
 
@@ -251,7 +263,7 @@ export async function loadContentRevisionApplication(
       workspaceId,
     ),
     rendererVersion,
-    productionBaseCommit: `git:${productionBaseCommit}`,
+    productionBaseCommit,
     initialDefinition,
   });
 }
@@ -309,7 +321,7 @@ export async function loadRestoredContentRevisionApplication(
       workspaceId,
     ),
     rendererVersion,
-    productionBaseCommit: `git:${productionBaseCommit}`,
+    productionBaseCommit,
     initialDefinition: currentDefinition,
     initialCreatedBy: actorId,
   });

@@ -4,6 +4,8 @@ import type {
   ContentRevision,
   ContentRevisionStore,
   ContentWorkspaceId,
+  JoinedMcpMutationAudit,
+  JoinedMcpMutationResult,
 } from "@foundry/application";
 import {
   ContentRevisionConfigurationError,
@@ -36,6 +38,100 @@ type D1StatementPreparer = Pick<
   D1DatabaseBinding | D1DatabaseSessionBinding,
   "prepare"
 >;
+
+function prepareMcpMutationReceiptInsert(
+  target: D1StatementPreparer,
+  audit: JoinedMcpMutationAudit,
+  result: JoinedMcpMutationResult,
+  guard: Readonly<{
+    sql: string;
+    bindings: ReadonlyArray<unknown>;
+  }> = { sql: "1 = 1", bindings: [] },
+) {
+  return target
+    .prepare(
+      `INSERT INTO mcp_mutation_receipts (
+         site_id, actor_id, operation, idempotency_key, input_hash,
+         invocation_id, result_hash, result_state, workspace_id, revision,
+         content_hash, preview_id, replay_count, created_at
+       )
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'succeeded',
+              ?8, ?9, ?10, ?11, 0, ?12
+       WHERE ${guard.sql}
+       ON CONFLICT (site_id, actor_id, operation, idempotency_key)
+       DO UPDATE SET replay_count = replay_count + 1
+       WHERE input_hash = excluded.input_hash`,
+    )
+    .bind(
+      audit.siteId,
+      audit.actorId,
+      audit.operation,
+      audit.idempotencyKey,
+      audit.inputHash,
+      audit.invocationId,
+      result.resultHash,
+      result.workspaceId,
+      result.revision,
+      result.contentHash,
+      result.previewId ?? null,
+      audit.occurredAt,
+      ...guard.bindings,
+    );
+}
+
+function prepareJoinedMcpAuditInsert(
+  target: D1StatementPreparer,
+  audit: JoinedMcpMutationAudit,
+  result: JoinedMcpMutationResult,
+) {
+  return target
+    .prepare(
+      `INSERT INTO mcp_audit_events (
+         invocation_id, connection_id, actor_id, site_id, operation,
+         input_hash, protocol_version, scopes_json, outcome, reason,
+         human_actor_id, revocation_reason, occurred_at, contract_version,
+         idempotency_key, result_hash, replayed, workspace_id, revision,
+         content_hash, preview_id
+       )
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'allowed', NULL,
+              NULL, NULL, ?9, ?10,
+              receipt.idempotency_key, receipt.result_hash,
+              CASE WHEN receipt.invocation_id = ?1 THEN 0 ELSE 1 END,
+              receipt.workspace_id, receipt.revision, receipt.content_hash,
+              receipt.preview_id
+       FROM mcp_mutation_receipts AS receipt
+       WHERE receipt.site_id = ?4
+         AND receipt.actor_id = ?3
+         AND receipt.operation = ?5
+         AND receipt.idempotency_key = ?11
+         AND receipt.input_hash = ?6
+         AND receipt.result_state = 'succeeded'
+         AND receipt.result_hash = ?12
+         AND receipt.workspace_id = ?13
+         AND receipt.revision = ?14
+         AND receipt.content_hash = ?15
+         AND receipt.preview_id IS ?16
+       ON CONFLICT (invocation_id) DO NOTHING`,
+    )
+    .bind(
+      audit.invocationId,
+      audit.connectionId,
+      audit.actorId,
+      audit.siteId,
+      audit.operation,
+      audit.inputHash,
+      audit.protocolVersion,
+      JSON.stringify(audit.scopesEvaluated),
+      audit.occurredAt,
+      audit.contractVersion,
+      audit.idempotencyKey,
+      result.resultHash,
+      result.workspaceId,
+      result.revision,
+      result.contentHash,
+      result.previewId ?? null,
+    );
+}
 
 function prepareBlogRenderArtifactInsert(
   target: D1StatementPreparer,
@@ -558,6 +654,44 @@ export function createD1ContentRevisionStore(
     return findContentRevisionFrom(connection, workspaceId, revision);
   }
 
+  async function replayPersistedRevision(
+    session: D1DatabaseSessionBinding,
+    command: Parameters<ContentRevisionStore["persist"]>[0],
+    receipt: ReceiptRow,
+  ) {
+    assertContentRevisionIdempotency(
+      receipt.request_hash,
+      command.requestHash,
+    );
+    const revision = await getRevisionFrom(session, receipt.revision);
+    if (revision === null) {
+      throw new ContentRevisionConfigurationError();
+    }
+    const result = {
+      resultHash: revision.inputs.contentHash,
+      workspaceId,
+      revision: revision.revision,
+      contentHash: revision.inputs.contentHash,
+    };
+    if (command.joinedAudit !== undefined) {
+      await session.batch([
+        prepareMcpMutationReceiptInsert(
+          session,
+          command.joinedAudit,
+          result,
+        ),
+        prepareJoinedMcpAuditInsert(session, command.joinedAudit, result),
+      ]);
+    }
+    return {
+      revision: withContentRevisionBookmark(
+        revision,
+        requireBookmark(session.getBookmark()),
+      ),
+      replayed: true,
+    };
+  }
+
   async function getCurrentFrom(
     connection: Pick<D1DatabaseBinding, "prepare">,
   ) {
@@ -580,7 +714,7 @@ export function createD1ContentRevisionStore(
   }
 
   return {
-    async initialize(initialRevision, ownerActorId) {
+    async initialize(initialRevision, ownerActorId, joinedAudit) {
       const initialArtifacts = await Promise.all(
         initialRevision.definition.blog.posts.map((post) =>
           createBlogPostArtifactFingerprint({
@@ -597,7 +731,13 @@ export function createD1ContentRevisionStore(
           artifact: initialArtifacts[index]!,
         }),
       );
-      await database.batch([
+      const joinedResult: JoinedMcpMutationResult = {
+        resultHash: initialRevision.inputs.contentHash,
+        workspaceId,
+        revision: initialRevision.revision,
+        contentHash: initialRevision.inputs.contentHash,
+      };
+      const results = await database.batch([
         database
           .prepare(
             `INSERT INTO content_workspaces (
@@ -752,7 +892,42 @@ export function createD1ContentRevisionStore(
           artifacts: initialArtifacts,
           createdAt: initialRevision.createdAt,
         }),
+        ...(joinedAudit === undefined
+          ? []
+          : [
+              prepareMcpMutationReceiptInsert(
+                database,
+                joinedAudit,
+                joinedResult,
+                {
+                  sql: `EXISTS (
+                    SELECT 1
+                    FROM content_workspaces AS workspace
+                    JOIN content_revisions AS revision
+                      ON revision.workspace_id = workspace.workspace_id
+                     AND revision.revision = ?13
+                    WHERE workspace.workspace_id = ?14
+                      AND workspace.site_id = ?15
+                      AND workspace.owner_actor_id = ?16
+                      AND revision.content_hash = ?17
+                  )`,
+                  bindings: [
+                    initialRevision.revision,
+                    workspaceId,
+                    siteId,
+                    ownerActorId,
+                    initialRevision.inputs.contentHash,
+                  ],
+                },
+              ),
+              prepareJoinedMcpAuditInsert(
+                database,
+                joinedAudit,
+                joinedResult,
+              ),
+            ]),
       ]);
+      return (results[0]?.meta.changes ?? 0) === 1;
     },
     async requireAccess(actorId) {
       const access = await database
@@ -911,6 +1086,12 @@ export function createD1ContentRevisionStore(
         )
         .run();
     },
+    async recordJoinedMcpAudit(audit, result) {
+      await database.batch([
+        prepareMcpMutationReceiptInsert(database, audit, result),
+        prepareJoinedMcpAuditInsert(database, audit, result),
+      ]);
+    },
     async persist(command) {
       if (database.withSession === undefined) {
         throw new Error("content_revision_sessions_unavailable");
@@ -918,18 +1099,7 @@ export function createD1ContentRevisionStore(
       const session = database.withSession("first-primary");
       const existing = await findReceipt(session, command.idempotencyKey);
       if (existing !== null) {
-        assertContentRevisionIdempotency(
-          existing.request_hash,
-          command.requestHash,
-        );
-        const revision = (await getRevisionFrom(
-          session,
-          existing.revision,
-        ))!;
-        return withContentRevisionBookmark(
-          revision,
-          requireBookmark(session.getBookmark()),
-        );
+        return replayPersistedRevision(session, command, existing);
       }
 
       const current = await getCurrentFrom(session);
@@ -939,21 +1109,7 @@ export function createD1ContentRevisionStore(
           command.idempotencyKey,
         );
         if (racedReceipt !== null) {
-          assertContentRevisionIdempotency(
-            racedReceipt.request_hash,
-            command.requestHash,
-          );
-          const revision = await getRevisionFrom(
-            session,
-            racedReceipt.revision,
-          );
-          if (revision === null) {
-            throw new ContentRevisionConfigurationError();
-          }
-          return withContentRevisionBookmark(
-            revision,
-            requireBookmark(session.getBookmark()),
-          );
+          return replayPersistedRevision(session, command, racedReceipt);
         }
       }
       assertContentRevisionBase(command.baseRevision, current.revision);
@@ -962,8 +1118,35 @@ export function createD1ContentRevisionStore(
         mediaOccurrence?.crop === null || mediaOccurrence === undefined
           ? null
           : JSON.stringify(mediaOccurrence.crop);
+      const mcpMutationGuard =
+        command.joinedAudit === undefined
+          ? ""
+          : `AND (
+               NOT EXISTS (
+                 SELECT 1 FROM mcp_mutation_receipts
+                 WHERE site_id = ?18
+                   AND actor_id = ?19
+                   AND operation = ?20
+                   AND idempotency_key = ?21
+               )
+               OR EXISTS (
+                 SELECT 1 FROM mcp_mutation_receipts
+                 WHERE site_id = ?18
+                   AND actor_id = ?19
+                   AND operation = ?20
+                   AND idempotency_key = ?21
+                   AND input_hash = ?22
+                   AND result_state = 'succeeded'
+                   AND result_hash = ?4
+                   AND workspace_id = ?1
+                   AND revision = ?2
+                   AND content_hash = ?4
+                   AND preview_id IS NULL
+               )
+             )`;
       const blogGuardBindings: Array<string | number | null> = [];
-      let blogGuardParameter = 18;
+      let blogGuardParameter =
+        command.joinedAudit === undefined ? 18 : 23;
       const blogTransitionGuards = (command.blogTransitions ?? [])
         .map((transition) => {
           const bindGuardValue = (value: string | number | null) => {
@@ -1166,6 +1349,12 @@ export function createD1ContentRevisionStore(
           requestHash: command.requestHash,
         },
       });
+      const joinedResult: JoinedMcpMutationResult = {
+        resultHash: command.revision.inputs.contentHash,
+        workspaceId,
+        revision: command.revision.revision,
+        contentHash: command.revision.inputs.contentHash,
+      };
       const results = await session.batch([
         session
           .prepare(
@@ -1200,6 +1389,7 @@ export function createD1ContentRevisionStore(
                    AND media_revision.crop_json IS ?17
                )
              )
+             ${mcpMutationGuard}
              ${blogTransitionGuards}
              ${blogPublicationGuard}`,
           )
@@ -1221,6 +1411,15 @@ export function createD1ContentRevisionStore(
             mediaOccurrence?.revision ?? null,
             mediaOccurrence?.assetId ?? null,
             mediaCrop,
+            ...(command.joinedAudit === undefined
+              ? []
+              : [
+                  command.joinedAudit.siteId,
+                  command.joinedAudit.actorId,
+                  command.joinedAudit.operation,
+                  command.joinedAudit.idempotencyKey,
+                  command.joinedAudit.inputHash,
+                ]),
             ...blogGuardBindings,
           ),
         session
@@ -1317,31 +1516,82 @@ export function createD1ContentRevisionStore(
         ...blogRevisionStatements,
         blogArtifactStatement,
         ...blogTransitionStatements,
+        ...(command.joinedAudit === undefined
+          ? []
+          : [
+              prepareMcpMutationReceiptInsert(
+                session,
+                command.joinedAudit,
+                joinedResult,
+                {
+                  sql: `EXISTS (
+                    SELECT 1
+                    FROM content_revision_receipts AS receipt
+                    JOIN content_revisions AS revision
+                      ON revision.workspace_id = receipt.workspace_id
+                     AND revision.revision = receipt.revision
+                    WHERE receipt.idempotency_key = ?13
+                      AND receipt.workspace_id = ?14
+                      AND receipt.request_hash = ?15
+                      AND receipt.revision = ?16
+                      AND revision.content_hash = ?17
+                  )`,
+                  bindings: [
+                    command.idempotencyKey,
+                    workspaceId,
+                    command.requestHash,
+                    command.revision.revision,
+                    command.revision.inputs.contentHash,
+                  ],
+                },
+              ),
+              prepareJoinedMcpAuditInsert(
+                session,
+                command.joinedAudit,
+                joinedResult,
+              ),
+            ]),
       ]);
 
       if ((results[2]?.meta.changes ?? 0) > 0) {
-        return withContentRevisionBookmark(
-          command.revision,
-          requireBookmark(session.getBookmark()),
-        );
+        return {
+          revision: withContentRevisionBookmark(
+            command.revision,
+            requireBookmark(session.getBookmark()),
+          ),
+          replayed: false,
+        };
       }
       const racedReceipt = await findReceipt(
         session,
         command.idempotencyKey,
       );
       if (racedReceipt !== null) {
-        assertContentRevisionIdempotency(
-          racedReceipt.request_hash,
-          command.requestHash,
-        );
-        const revision = (await getRevisionFrom(
-          session,
-          racedReceipt.revision,
-        ))!;
-        return withContentRevisionBookmark(
-          revision,
-          requireBookmark(session.getBookmark()),
-        );
+        return replayPersistedRevision(session, command, racedReceipt);
+      }
+      if (command.joinedAudit !== undefined) {
+        const mutationReceipt = await session
+          .prepare(
+            `SELECT input_hash
+             FROM mcp_mutation_receipts
+             WHERE site_id = ?1
+               AND actor_id = ?2
+               AND operation = ?3
+               AND idempotency_key = ?4`,
+          )
+          .bind(
+            command.joinedAudit.siteId,
+            command.joinedAudit.actorId,
+            command.joinedAudit.operation,
+            command.joinedAudit.idempotencyKey,
+          )
+          .first<{ input_hash: string }>();
+        if (mutationReceipt !== null) {
+          assertContentRevisionIdempotency(
+            mutationReceipt.input_hash,
+            command.joinedAudit.inputHash,
+          );
+        }
       }
       throw new ContentRevisionConflictError(
         (await getCurrentFrom(session)).revision,

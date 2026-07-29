@@ -75,6 +75,28 @@ export type ContentRevision = Readonly<{
 export type SavedContentRevision = ContentRevision &
   Readonly<{ bookmark: string }>;
 
+export type JoinedMcpMutationAudit = Readonly<{
+  invocationId: string;
+  connectionId: string;
+  actorId: string;
+  siteId: SiteDefinition["site"]["id"];
+  operation: string;
+  inputHash: string;
+  protocolVersion: string;
+  scopesEvaluated: ReadonlyArray<string>;
+  idempotencyKey: string;
+  occurredAt: string;
+  contractVersion: string;
+}>;
+
+export type JoinedMcpMutationResult = Readonly<{
+  resultHash: string;
+  workspaceId: ContentWorkspaceId;
+  revision: number;
+  contentHash: string;
+  previewId?: string;
+}>;
+
 export type SaveContentRevisionCommand = Readonly<{
   actorId: ContentActorId;
   workspaceId: ContentWorkspaceId;
@@ -83,6 +105,7 @@ export type SaveContentRevisionCommand = Readonly<{
   edits: ReadonlyArray<SiteDefinitionEdit>;
   composition?: PageComposition;
   idempotencyKey: string;
+  joinedAudit?: JoinedMcpMutationAudit;
 }>;
 
 type BlogPostMutationCommand = Readonly<{
@@ -196,6 +219,7 @@ export type CreateContentWorkspaceCommand = Readonly<{
   actorId: ContentActorId;
   workspaceId: ContentWorkspaceId;
   idempotencyKey: string;
+  joinedAudit?: JoinedMcpMutationAudit;
 }>;
 
 export type SaveContentMediaOccurrenceCommand = Readonly<{
@@ -234,13 +258,15 @@ type PersistContentRevisionCommand = Readonly<{
       }>
   >;
   blogArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
+  joinedAudit?: JoinedMcpMutationAudit;
 }>;
 
 export type ContentRevisionStore = Readonly<{
   initialize(
     initialRevision: ContentRevision,
     ownerActorId: ContentActorId,
-  ): Promise<void>;
+    joinedAudit?: JoinedMcpMutationAudit,
+  ): Promise<boolean>;
   requireAccess(actorId: ContentActorId): Promise<void>;
   addCollaborator(
     ownerActorId: ContentActorId,
@@ -263,11 +289,20 @@ export type ContentRevisionStore = Readonly<{
   ): Promise<BlogPostAggregateState | null>;
   persist(
     command: PersistContentRevisionCommand,
-  ): Promise<SavedContentRevision>;
+  ): Promise<
+    Readonly<{
+      revision: SavedContentRevision;
+      replayed: boolean;
+    }>
+  >;
   recordRejectedBlogTransition(input: {
     workspaceId: ContentWorkspaceId;
     actorId: ContentActorId;
   } & BlogPostTransitionAudit): Promise<void>;
+  recordJoinedMcpAudit(
+    audit: JoinedMcpMutationAudit,
+    result: JoinedMcpMutationResult,
+  ): Promise<void>;
 }>;
 
 export class ContentRevisionConflictError extends Error {
@@ -442,7 +477,9 @@ export function createInMemoryContentRevisionStore({
             version: post.revision,
           });
         }
+        return true;
       }
+      return false;
     },
     async requireAccess(actorId) {
       if (actorId !== ownerActorId && !collaborators.has(actorId)) {
@@ -474,6 +511,7 @@ export function createInMemoryContentRevisionStore({
       return blogPosts.get(postId) ?? null;
     },
     async recordRejectedBlogTransition() {},
+    async recordJoinedMcpAudit() {},
     async replay(idempotencyKey, requestHash) {
       const receipt = receipts.get(idempotencyKey);
       if (receipt === undefined) {
@@ -490,7 +528,7 @@ export function createInMemoryContentRevisionStore({
             receipt.requestHash,
             command.requestHash,
           );
-          return receipt.revision;
+          return { revision: receipt.revision, replayed: true };
         }
         assertContentRevisionBase(command.baseRevision, currentRevision);
         if (
@@ -545,7 +583,7 @@ export function createInMemoryContentRevisionStore({
             });
           }
         }
-        return saved;
+        return { revision: saved, replayed: false };
       };
       return mediaContentCoordinator !== undefined
         ? mediaContentCoordinator.runExclusive(operation)
@@ -575,7 +613,7 @@ export function createContentRevisionApplication({
   productionBase: string | ((publishedContentHash: string) => string);
   now?: () => string;
 }) {
-  let initialization: Promise<void> | undefined;
+  let initialization: Promise<boolean> | undefined;
   let productionBaseResolution: Promise<string> | undefined;
   const resolveProductionBase = () => {
     productionBaseResolution ??= (async () => {
@@ -586,7 +624,7 @@ export function createContentRevisionApplication({
     })();
     return productionBaseResolution;
   };
-  const initialize = () => {
+  const initialize = (joinedAudit?: JoinedMcpMutationAudit) => {
     initialization ??= (async () => {
       const publishedContentHash =
         await sha256CanonicalJson(initialDefinition);
@@ -604,8 +642,9 @@ export function createContentRevisionApplication({
         createdAt: now(),
         createdBy: initialCreatedBy,
       });
-      await store.initialize(initial, actorId);
+      const created = await store.initialize(initial, actorId, joinedAudit);
       await store.requireAccess(actorId);
+      return created;
     })();
     return initialization;
   };
@@ -630,12 +669,13 @@ export function createContentRevisionApplication({
     }
   }
 
-  async function persistDefinitionMutation(input: {
+  async function persistDefinitionMutationWithReplay(input: {
     command: {
       actorId: ContentActorId;
       schemaVersion: SiteDefinition["schemaVersion"];
       baseRevision: number;
       idempotencyKey: string;
+      joinedAudit?: JoinedMcpMutationAudit;
     };
     requestIdentity: unknown;
     mutate(
@@ -667,7 +707,15 @@ export function createContentRevisionApplication({
       ) {
         throw new ContentRevisionStaleError(replay.revision);
       }
-      return replay;
+      if (input.command.joinedAudit !== undefined) {
+        await store.recordJoinedMcpAudit(input.command.joinedAudit, {
+          resultHash: replay.inputs.contentHash,
+          workspaceId: replay.workspaceId,
+          revision: replay.revision,
+          contentHash: replay.inputs.contentHash,
+        });
+      }
+      return { revision: replay, replayed: true as const };
     }
     if (input.command.schemaVersion !== siteDefinition.schemaVersion) {
       throw new ContentRevisionValidationError({
@@ -770,14 +818,24 @@ export function createContentRevisionApplication({
         rendererVersion,
       },
     });
-    return store.persist({
+    const persisted = await store.persist({
       baseRevision: input.command.baseRevision,
       idempotencyKey: input.command.idempotencyKey,
       requestHash,
       revision: nextRevision,
       blogArtifacts,
       ...(blogTransitions === undefined ? {} : { blogTransitions }),
+      ...(input.command.joinedAudit === undefined
+        ? {}
+        : { joinedAudit: input.command.joinedAudit }),
     });
+    return persisted;
+  }
+
+  async function persistDefinitionMutation(
+    input: Parameters<typeof persistDefinitionMutationWithReplay>[0],
+  ) {
+    return (await persistDefinitionMutationWithReplay(input)).revision;
   }
 
   function blogPostAuditState(
@@ -863,6 +921,81 @@ export function createContentRevisionApplication({
     }
   }
 
+  async function saveDefinitionMutation(command: SaveContentRevisionCommand) {
+    if (command.actorId !== actorId) {
+      throw new ContentWorkspaceAccessError();
+    }
+    if (command.workspaceId !== workspaceId) {
+      throw new ContentRevisionValidationError({
+        workspaceId: "This workspace is not available.",
+      });
+    }
+    await store.requireAccess(actorId);
+    const requestedBase = await store.getRevision(command.baseRevision);
+    const fieldDefinition =
+      requestedBase?.definition ?? (await store.getCurrent()).definition;
+    const blogPostIds = blogPostIdsForSiteDefinitionEdits(
+      fieldDefinition,
+      command.edits,
+    );
+    const operation = () =>
+      persistDefinitionMutationWithReplay({
+        command,
+        requestIdentity: {
+          actorId: command.actorId,
+          workspaceId: command.workspaceId,
+          schemaVersion: command.schemaVersion,
+          baseRevision: command.baseRevision,
+          edits: command.edits,
+          ...(command.composition === undefined
+            ? {}
+            : { composition: command.composition }),
+        },
+        mutate(baseDefinition) {
+          const composed =
+            command.composition === undefined
+              ? { ok: true as const, definition: baseDefinition }
+              : applyPageComposition(
+                  baseDefinition,
+                  compositionWithAuthoritativeVariants(
+                    baseDefinition,
+                    command.composition,
+                    command.edits,
+                  ),
+                );
+          if (!composed.ok) {
+            throw new ContentRevisionValidationError(composed.errors);
+          }
+          const edited = applySiteDefinitionEdits(
+            composed.definition,
+            command.edits,
+          );
+          if (!edited.ok) {
+            throw new ContentRevisionValidationError(edited.errors);
+          }
+          return edited.definition;
+        },
+        ...(blogPostIds.length === 0
+          ? {}
+          : {
+              blogTransitions: blogPostIds.map((postId) => ({
+                commandType: "blog.post.edit" as const,
+                postId,
+              })),
+            }),
+      });
+    if (blogPostIds.length === 0) {
+      assertMutationCommand(command);
+      return operation();
+    }
+    return executeBlogMutation(
+      "blog.post.edit",
+      command,
+      blogPostIds,
+      operation,
+    );
+  }
+
   return Object.freeze({
     workspaceId,
     rendererVersion,
@@ -928,81 +1061,49 @@ export function createContentRevisionApplication({
             workspaceId: "This workspace is not available.",
           });
         }
-        await initialize();
+        await initialize(command.joinedAudit);
         return store.getCurrent();
       },
-      async save(command: SaveContentRevisionCommand) {
+      async createWithReplay(command: CreateContentWorkspaceCommand) {
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
+        }
+        if (
+          !isValidContentMutationIdempotencyKey(command.idempotencyKey)
+        ) {
+          throw new ContentRevisionValidationError({
+            idempotencyKey: "Use a 16–128 character idempotency key.",
+          });
         }
         if (command.workspaceId !== workspaceId) {
           throw new ContentRevisionValidationError({
             workspaceId: "This workspace is not available.",
           });
         }
-        await store.requireAccess(actorId);
-        const requestedBase = await store.getRevision(command.baseRevision);
-        const fieldDefinition =
-          requestedBase?.definition ?? (await store.getCurrent()).definition;
-        const blogPostIds = blogPostIdsForSiteDefinitionEdits(
-          fieldDefinition,
-          command.edits,
-        );
-        const operation = () => persistDefinitionMutation({
-          command,
-          requestIdentity: {
-            actorId: command.actorId,
-            workspaceId: command.workspaceId,
-            schemaVersion: command.schemaVersion,
-            baseRevision: command.baseRevision,
-            edits: command.edits,
-            ...(command.composition === undefined
-              ? {}
-              : { composition: command.composition }),
-          },
-          mutate(baseDefinition) {
-            const composed =
-              command.composition === undefined
-                ? { ok: true as const, definition: baseDefinition }
-                : applyPageComposition(
-                  baseDefinition,
-                  compositionWithAuthoritativeVariants(
-                    baseDefinition,
-                    command.composition,
-                    command.edits,
-                  ),
-                );
-            if (!composed.ok) {
-              throw new ContentRevisionValidationError(composed.errors);
-            }
-            const edited = applySiteDefinitionEdits(
-              composed.definition,
-              command.edits,
-            );
-            if (!edited.ok) {
-              throw new ContentRevisionValidationError(edited.errors);
-            }
-            return edited.definition;
-          },
-          ...(blogPostIds.length === 0
-            ? {}
-            : {
-                blogTransitions: blogPostIds.map((postId) => ({
-                  commandType: "blog.post.edit" as const,
-                  postId,
-                })),
-              }),
-        });
-        if (blogPostIds.length === 0) {
-          assertMutationCommand(command);
-          return operation();
+        const alreadyInitialized = initialization !== undefined;
+        const created = await initialize(command.joinedAudit);
+        const initial = await store.getRevisionWithBookmark(0);
+        if (initial === null) {
+          throw new ContentRevisionConfigurationError();
         }
-        return executeBlogMutation(
-          "blog.post.edit",
-          command,
-          blogPostIds,
-          operation,
-        );
+        if (
+          alreadyInitialized &&
+          command.joinedAudit !== undefined
+        ) {
+          await store.recordJoinedMcpAudit(command.joinedAudit, {
+            resultHash: initial.inputs.contentHash,
+            workspaceId: initial.workspaceId,
+            revision: initial.revision,
+            contentHash: initial.inputs.contentHash,
+          });
+        }
+        return { revision: initial, replayed: alreadyInitialized || !created };
+      },
+      async save(command: SaveContentRevisionCommand) {
+        return (await saveDefinitionMutation(command)).revision;
+      },
+      async saveWithReplay(command: SaveContentRevisionCommand) {
+        return saveDefinitionMutation(command);
       },
       async createBlogPost(command: CreateBlogPostCommand) {
         return executeBlogMutation(
@@ -1208,7 +1309,8 @@ export function createContentRevisionApplication({
             rendererVersion,
           },
         });
-        return store.persist({
+        return (
+          await store.persist({
           baseRevision: command.baseRevision,
           idempotencyKey: command.idempotencyKey,
           requestHash,
@@ -1220,7 +1322,8 @@ export function createContentRevisionApplication({
             assetId: command.occurrence.asset.assetId,
             crop: command.occurrence.crop,
           },
-        });
+          })
+        ).revision;
       },
       async addCollaborator(collaboratorActorId: ContentActorId) {
         await store.requireAccess(actorId);
@@ -1229,3 +1332,7 @@ export function createContentRevisionApplication({
     }),
   });
 }
+
+export type ContentRevisionApplication = ReturnType<
+  typeof createContentRevisionApplication
+>;

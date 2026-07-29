@@ -260,8 +260,8 @@ export function DashboardShell({
                 <div>
                   <h2 id="agent-connections">Agent connections</h2>
                   <p>
-                    Every connection is read-only, bound to this site, and
-                    independently revocable.
+                    Every connection is bound to this site, limited to
+                    Owner-approved permissions, and independently revocable.
                   </p>
                 </div>
               </div>

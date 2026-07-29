@@ -12,11 +12,12 @@ and its AI use only the permissions you approve, on one site. It does not give
 the agent your dashboard login, Cloudflare account, GitHub account or email
 provider credentials.
 
-Start with the smallest useful permission. The current production connection
-grants exactly **Read site** (`site.read`). Draft editing and publication scopes
-remain contract designs and are not available from this connection.
+Start with the smallest useful permission. Every connection starts with exactly
+**Read site** (`site.read`). A site Owner can later grant **Draft content**
+(`content.draft`) or **Draft design** (`design.draft`) to that same connection
+and site. Publication, scheduling and campaign permissions remain unavailable.
 
-## Installation configuration for read-only connections
+## Installation configuration
 
 The shipped Worker serves the site-bound resource at
 `/api/foundry-mcp`. Its OAuth protected-resource metadata is at
@@ -26,7 +27,9 @@ authorization-server metadata is at
 
 Before enabling connections, the installation operator must:
 
-- apply D1 migration `0017_mcp_readonly_connections.sql`;
+- apply D1 migrations `0017_mcp_readonly_connections.sql`,
+  `0018_mcp_draft_scopes.sql`, `0019_mcp_preview_artifacts.sql` and
+  `0020_mcp_mutation_receipts.sql` in order;
 - set `FOUNDRY_MCP_OAUTH_SIGNING_KEY` as a Worker secret with at least 32
   random characters;
 - set `FOUNDRY_MCP_CLIENTS` to a non-secret JSON object whose keys are
@@ -77,12 +80,13 @@ per-tool minute buckets return HTTP `429` with `Retry-After` when exhausted.
 The address is not a secret, and it does not contain a token. Do not paste access
 tokens into prompts or settings fields. Authentication happens in the browser.
 
-## Future capability: safe publishing
+## Draft review and future safe publishing
 
-The workflow in this section is part of the approved MCP contract design, but
-it is not exposed by the current read-only server. A `site.read` connection
-cannot create drafts, prepare previews, approve, schedule, publish or send
-campaign tests.
+The current server can create canonical drafts and prepare previews only after
+an Owner grants the matching draft scope. A connection with only `site.read`
+cannot create drafts or prepare previews. No agent connection can approve,
+schedule, publish or send campaign tests through the currently delivered
+surface.
 
 An agent can draft and prepare a canonical preview. It cannot approve that
 preview for itself.
@@ -92,20 +96,15 @@ When a draft is ready:
 1. The agent gives you a **Review in Foundry** link.
 2. Open it and sign in to Foundry. Verify the page/post, design changes and
    revision shown.
-3. Choose **Approve this revision** only if the rendered result is correct.
-4. The agent may then request immediate publication or create the site/blog
-   schedule you asked for, if its connection has that permission.
-5. Foundry reports **Live** only after Git contains the approved revision and
-   the public site's release marker proves it is serving.
+3. If anything is wrong, ask the agent to edit the draft and prepare a new
+   exact revision.
+4. If it is correct, retain the exact revision for the future approval and
+   publication workflow. The current review link does not create an approval or
+   publish anything.
 
-Editing the draft, changing the site renderer or advancing the live site makes
-the approval stale. You will be asked to review again. This is intentional.
-
-Agent connections cannot send newsletters to an audience. If separately
-permitted, they can request one test of an exact campaign revision; Foundry
-sends it only to the verified test recipients configured by an Owner, and the
-agent cannot choose or read those addresses. A human Owner must still inspect
-the delivered test and use the separate bulk-send authorization workflow.
+A future approval capability will make an approval stale whenever the draft,
+site renderer or live site advances. Campaign tests and bulk sends also remain
+future capabilities; the current MCP surface cannot perform either action.
 
 ## Review or revoke
 
@@ -116,8 +115,20 @@ In **Agent connections**, you can:
 - retain attributable authorization, command, refresh-reuse and revocation
   audit history.
 
-This read-only release does not edit a connection's scopes. Revoke it and
-complete a new Owner approval if a replacement connection is needed.
+Every new connection starts with `site.read`. An Owner can approve an additive
+`content.draft` or `design.draft` step-up for that exact connection and site.
+Step-up preserves the connection and actor identity so its audit history stays
+continuous. OAuth token responses include an opaque `connection_id` and a
+short-lived `step_up_token`. Clients submit both with the ordered additive
+scope request; they do not decode the access-token JWT or accept a connection
+identifier from a tool result. The Owner consent page confirms the exact
+connection, its current permissions and the requested permissions. The
+step-up request must reuse the exact redirect URI bound to the existing
+authorization; another registered redirect for the same client is rejected
+before consent. After approval, the client receives a replacement token and
+must reconnect and reinitialize before the new tools and resource templates
+appear. Existing access tokens do not gain scopes. Removing a scope still
+requires revoking the connection.
 
 Revocation takes effect on the next request even if the client's sign-in token
 has not expired. It does not erase attribution or published Git history. Open
@@ -126,10 +137,11 @@ drafts remain available for a human to review, reassign or archive.
 Revoke immediately if the client device is lost, the client behaves
 unexpectedly, or a permission was granted by mistake.
 
-## Future capability: drafting and publishing example
+## Drafting and publishing example
 
-The following example documents a later scoped release. Its tools are not
-advertised by the current three-tool read-only catalog.
+The drafting and preview steps below are delivered when the Owner grants the
+matching draft scope. Publication and scheduling remain unavailable until their
+separate capabilities are delivered and granted.
 
 Owner request:
 
@@ -139,11 +151,14 @@ Owner request:
 
 Expected agent workflow:
 
+Steps 1–5 are available now. Steps 6–7 describe the future approval and
+publication contract and cannot run on the currently delivered server.
+
 1. Read `foundry://site`, content schema and existing published content with
    `site.read`.
 2. Call `foundry.workspace.open` with one idempotency key.
-3. Call `foundry.content.patch` with the current `baseRevision`, canonical rich
-   text and a new idempotency key.
+3. Call `foundry.content.patch` with the current `expectedRevision`, canonical
+   rich text and a new idempotency key.
 4. Call `foundry.preview.prepare` for the returned exact revision.
 5. Give the Owner the `humanReviewUrl` and stop publication work while approval
    is pending.

@@ -82,21 +82,46 @@ function createStore({
       familyId: string;
       connectionId: string;
       clientId: string;
+      redirectUri: string;
+      scopes: ReadonlyArray<string>;
       consumed: boolean;
       revoked: boolean;
     }
   >();
   const store: McpAuthorizationRuntimeStore = {
     async createAuthorizationGrant(input) {
-      connections.set(input.connectionId, {
-        connectionId: input.connectionId,
-        actorId: input.actorId,
+      const existing =
+        input.stepUpConnectionId === undefined
+          ? undefined
+          : connections.get(input.stepUpConnectionId);
+      if (
+        input.stepUpConnectionId !== undefined &&
+        (
+          existing === undefined ||
+          existing.siteId !== input.siteId ||
+          existing.clientId !== input.clientId ||
+          existing.status !== "active" ||
+          JSON.stringify(input.stepUpExpectedScopes) !==
+            JSON.stringify(existing.scopes)
+        )
+      ) {
+        throw new TypeError("mcp_authorization_connection_not_found");
+      }
+      const connection = {
+        connectionId: existing?.connectionId ?? input.connectionId,
+        actorId: existing?.actorId ?? input.actorId,
         siteId: input.siteId,
         clientId: input.clientId,
-        scopes: ["site.read"],
+        scopes: input.scopes,
         status: "active",
+      } as const;
+      connections.set(connection.connectionId, connection);
+      codes.set(input.codeHash, {
+        ...input,
+        connectionId: connection.connectionId,
+        actorId: connection.actorId,
+        consumed: false,
       });
-      codes.set(input.codeHash, { ...input, consumed: false });
     },
     async exchangeAuthorizationCode(input) {
       const code = codes.get(input.codeHash);
@@ -115,12 +140,16 @@ function createStore({
         familyId: input.refreshFamilyId,
         connectionId: code.connectionId,
         clientId: input.clientId,
+        redirectUri: code.redirectUri,
+        scopes: code.scopes,
         consumed: false,
         revoked: false,
       });
       return {
         ...connections.get(code.connectionId)!,
+        scopes: code.scopes,
         codeChallenge: code.codeChallenge,
+        redirectUri: code.redirectUri,
       };
     },
     async findCurrentConnection(input) {
@@ -166,7 +195,11 @@ function createStore({
       });
       return {
         state: "rotated",
-        connection: connections.get(existing.connectionId)!,
+        connection: {
+          ...connections.get(existing.connectionId)!,
+          scopes: existing.scopes,
+          redirectUri: existing.redirectUri,
+        },
       };
     },
     async consumeRateLimit(input) {
@@ -196,11 +229,15 @@ function fixture(
     allowRateLimit?: boolean | ((call: number) => boolean);
     contentCount?: number;
     requestTimeoutMs?: number;
+    draftResources?: boolean;
+    connectionIds?: ReadonlyArray<string>;
+    registeredRedirectUris?: ReadonlyArray<string>;
     beforeFindCurrentConnection?: (call: number) => Promise<void>;
     beforeConsumeRateLimit?: (call: number) => Promise<void>;
     beforeRecordInvocation?: () => Promise<void>;
   } = {},
 ) {
+  initializedSessions.clear();
   const state = createStore(options);
   const contentCount = options.contentCount ?? 0;
   const definition = {
@@ -257,7 +294,85 @@ function fixture(
     createInvocationId: () => crypto.randomUUID(),
     now: () => now.toISOString(),
   });
+  const application =
+    options.draftResources === true
+      ? Object.assign(readApplication, {
+          async openWorkspace() {
+            throw new Error("unused");
+          },
+          async getWorkspace() {
+            return {
+              contractVersion: "foundry.mcp.v1",
+              invocationId: "workspace-resource",
+              result: {
+                workspaceId: "workspace_resource",
+                manifest: {
+                  siteId: referenceSiteDefinition.site.id,
+                  schemaVersion: referenceSiteDefinition.schemaVersion,
+                  rendererVersion: "renderer-55",
+                  productionBase:
+                    `git:${"a".repeat(40)}@content:${"a".repeat(64)}`,
+                },
+                base: {
+                  workspaceId: "workspace_resource",
+                  revision: 0,
+                  contentHash: "a".repeat(64),
+                  schemaVersion: referenceSiteDefinition.schemaVersion,
+                  validation: { valid: true, issues: [] },
+                  definition: referenceSiteDefinition,
+                  rendererVersion: "renderer-55",
+                  productionBase:
+                    `git:${"a".repeat(40)}@content:${"a".repeat(64)}`,
+                  createdAt: now.toISOString(),
+                  createdBy: "mcp-agent-55",
+                },
+                current: {
+                  workspaceId: "workspace_resource",
+                  revision: 3,
+                  contentHash: "b".repeat(64),
+                  schemaVersion: referenceSiteDefinition.schemaVersion,
+                  validation: { valid: true, issues: [] },
+                  definition: referenceSiteDefinition,
+                  rendererVersion: "renderer-55",
+                  productionBase:
+                    `git:${"a".repeat(40)}@content:${"a".repeat(64)}`,
+                  createdAt: now.toISOString(),
+                  createdBy: "mcp-agent-55",
+                },
+                state: {
+                  status: "draft",
+                  baseRevision: 0,
+                  currentRevision: 3,
+                  contentHash: "b".repeat(64),
+                },
+              },
+              meta: { replayed: false, observedAt: now.toISOString() },
+            };
+          },
+          async getWorkspaceRevision() {
+            return {
+              contractVersion: "foundry.mcp.v1",
+              invocationId: "revision-resource",
+              result: {
+                workspaceId: "workspace_resource",
+                revision: 2,
+                contentHash: "c".repeat(64),
+                schemaVersion: referenceSiteDefinition.schemaVersion,
+                validation: { valid: true, issues: [] },
+                definition: referenceSiteDefinition,
+                rendererVersion: "renderer-55",
+                productionBase:
+                  `git:${"a".repeat(40)}@content:${"a".repeat(64)}`,
+                createdAt: now.toISOString(),
+                createdBy: "mcp-agent-55",
+              },
+              meta: { replayed: false, observedAt: now.toISOString() },
+            };
+          },
+        })
+      : readApplication;
   const deferredWork: Array<Promise<unknown>> = [];
+  let connectionSequence = 0;
   const runtime = createMcpHttpRuntime({
     resourceUri,
     authorizationIssuer: canonicalOrigin,
@@ -266,12 +381,12 @@ function fixture(
     siteId: referenceSiteDefinition.site.id,
     siteName: referenceSiteDefinition.site.name,
     store: state.store,
-    readApplication,
+    readApplication: application,
     cursors,
     registeredClients: {
       [clientId]: {
         name: "Test MCP Client",
-        redirectUris: [redirectUri],
+        redirectUris: options.registeredRedirectUris ?? [redirectUri],
       },
     },
     authenticateOwner: async () => ({
@@ -279,7 +394,9 @@ function fixture(
       csrfToken: "owner-bound-csrf",
     }),
     createAuthorizationCode: () => "opaque-authorization-code",
-    createConnectionId: () => "11111111-1111-4111-8111-111111111111",
+    createConnectionId: () =>
+      options.connectionIds?.[connectionSequence++] ??
+        "11111111-1111-4111-8111-111111111111",
     createActorId: () => "22222222-2222-4222-8222-222222222222",
     createTokenId: () => "33333333-3333-4333-8333-333333333333",
     createRefreshToken: (() => {
@@ -297,6 +414,11 @@ function fixture(
 async function authorize(
   runtime: ReturnType<typeof createMcpHttpRuntime>,
   verifier: string,
+  scope = "site.read",
+  stepUp?: Readonly<{
+    connectionId: string;
+    stepUpToken: string;
+  }>,
 ) {
   const challenge = await digest(verifier);
   const authorize = await runtime.fetch(
@@ -312,7 +434,13 @@ async function authorize(
         client_id: clientId,
         redirect_uri: redirectUri,
         resource: resourceUri,
-        scope: "site.read",
+        scope,
+        ...(stepUp === undefined
+          ? {}
+          : {
+              connection_id: stepUp.connectionId,
+              step_up_token: stepUp.stepUpToken,
+            }),
         state: "client-state",
         code_challenge: challenge,
         code_challenge_method: "S256",
@@ -328,9 +456,19 @@ async function authorize(
 
 async function authorizeAndExchange(
   runtime: ReturnType<typeof createMcpHttpRuntime>,
+  scope = "site.read",
+  stepUp?: Readonly<{
+    connectionId: string;
+    stepUpToken: string;
+  }>,
 ) {
   const verifier = "v".repeat(64);
-  const code = await authorize(runtime, verifier);
+  const code = await authorize(
+    runtime,
+    verifier,
+    scope,
+    stepUp,
+  );
   const token = await runtime.fetch(
     new Request(`${resourceUri}/oauth/token`, {
       method: "POST",
@@ -353,22 +491,32 @@ async function authorizeAndExchange(
     refresh_token: string;
     scope: string;
     token_type: string;
+    connection_id: string;
+    step_up_token: string;
   };
   expect(body).toEqual(
     expect.objectContaining({
       access_token: expect.any(String),
       refresh_token: expect.any(String),
-      scope: "site.read",
+      scope,
       token_type: "Bearer",
+      connection_id: expect.any(String),
+      step_up_token: expect.any(String),
     }),
   );
   return {
     accessToken: body.access_token,
     refreshToken: body.refresh_token,
+    connectionId: body.connection_id,
+    stepUpToken: body.step_up_token,
   };
 }
 
-function rpcRequest(token: string, body: unknown) {
+const initializedSessions = new Map<string, string>();
+
+function rpcRequest(token: string, body: unknown, sessionId?: string) {
+  const effectiveSessionId =
+    sessionId ?? initializedSessions.get(token);
   return new Request(resourceUri, {
     method: "POST",
     headers: {
@@ -377,9 +525,35 @@ function rpcRequest(token: string, body: unknown) {
       accept: "application/json, text/event-stream",
       "content-type": "application/json",
       "mcp-protocol-version": "2025-11-25",
+      ...(effectiveSessionId === undefined
+        ? {}
+        : { "mcp-session-id": effectiveSessionId }),
     },
     body: JSON.stringify(body),
   });
+}
+
+async function initializeMcpSession(
+  runtime: ReturnType<typeof createMcpHttpRuntime>,
+  accessToken: string,
+) {
+  const response = await runtime.fetch(
+    rpcRequest(accessToken, {
+      jsonrpc: "2.0",
+      id: `initialize:${accessToken}`,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1" },
+      },
+    }),
+  );
+  expect(response.status).toBe(200);
+  const sessionId = response.headers.get("mcp-session-id");
+  expect(sessionId).toEqual(expect.any(String));
+  initializedSessions.set(accessToken, sessionId!);
+  return sessionId!;
 }
 
 async function forgedToken(overrides: {
@@ -420,7 +594,7 @@ describe("production MCP HTTP runtime", () => {
     await expect(protectedMetadata.json()).resolves.toEqual({
       resource: resourceUri,
       authorization_servers: [canonicalOrigin],
-      scopes_supported: ["site.read"],
+      scopes_supported: ["site.read", "content.draft", "design.draft"],
       bearer_methods_supported: ["header"],
       resource_name: `${referenceSiteDefinition.site.name} — Foundry CMS`,
     });
@@ -437,9 +611,184 @@ describe("production MCP HTTP runtime", () => {
         token_endpoint: `${resourceUri}/oauth/token`,
         code_challenge_methods_supported: ["S256"],
         grant_types_supported: ["authorization_code", "refresh_token"],
-        scopes_supported: ["site.read"],
+        scopes_supported: ["site.read", "content.draft", "design.draft"],
       }),
     );
+  });
+
+  it("grants only the explicit Owner-approved draft scopes for this site", async () => {
+    const { runtime, connections } = fixture();
+    const grantedScope = "site.read content.draft";
+    const initial = await authorizeAndExchange(runtime);
+    const consentUrl = new URL(`${resourceUri}/oauth/authorize`);
+    for (const [name, value] of Object.entries({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      resource: resourceUri,
+      scope: grantedScope,
+      connection_id: initial.connectionId,
+      step_up_token: initial.stepUpToken,
+      state: "client-step-up-state",
+      code_challenge: await digest("c".repeat(64)),
+      code_challenge_method: "S256",
+    })) {
+      consentUrl.searchParams.set(name, value);
+    }
+    const consent = await runtime.fetch(new Request(consentUrl));
+    expect(consent.status).toBe(200);
+    const consentText = await consent.text();
+    expect(consentText).toContain(initial.connectionId);
+    expect(consentText).toContain(
+      "<dt>Current permissions</dt><dd>site.read</dd>",
+    );
+    expect(consentText).toContain(
+      "<dt>Requested permissions</dt><dd>site.read, content.draft</dd>",
+    );
+    await authorizeAndExchange(
+      runtime,
+      grantedScope,
+      initial,
+    );
+    const stored = [...connections.values()][0]!;
+    expect([...connections.values()]).toEqual([
+      expect.objectContaining({
+        siteId: referenceSiteDefinition.site.id,
+        scopes: ["site.read", "content.draft"],
+        connectionId: initial.connectionId,
+        actorId: stored.actorId,
+      }),
+    ]);
+    const staleStepUpProof = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          response_type: "code",
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          resource: resourceUri,
+          scope: "site.read content.draft design.draft",
+          connection_id: initial.connectionId,
+          step_up_token: initial.stepUpToken,
+          state: "client-step-up-state",
+          code_challenge: await digest("s".repeat(64)),
+          code_challenge_method: "S256",
+        }),
+      }),
+    );
+    expect(staleStepUpProof.status).toBe(400);
+
+    const verifier = "s".repeat(64);
+    const rejected = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          response_type: "code",
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          resource: resourceUri,
+          scope: "site.read content.*",
+          connection_id: initial.connectionId,
+          state: "client-state",
+          code_challenge: await digest(verifier),
+          code_challenge_method: "S256",
+        }),
+      }),
+    );
+    expect(rejected.status).toBe(400);
+    expect(connections.size).toBe(1);
+  });
+
+  it("binds step-up to the exact connection token returned to the client", async () => {
+    const firstConnectionId = "11111111-1111-4111-8111-111111111111";
+    const secondConnectionId = "55555555-5555-4555-8555-555555555555";
+    const { runtime, connections } = fixture({
+      connectionIds: [firstConnectionId, secondConnectionId],
+    });
+    const first = await authorizeAndExchange(runtime);
+    const second = await authorizeAndExchange(runtime);
+    const verifier = "s".repeat(64);
+    const stepUpBody = {
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      resource: resourceUri,
+      scope: "site.read content.draft",
+      connection_id: second.connectionId,
+      state: "client-step-up-state",
+      code_challenge: await digest(verifier),
+      code_challenge_method: "S256",
+    };
+    const missingProof = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(stepUpBody),
+      }),
+    );
+    expect(missingProof.status).toBe(400);
+    const wrongConnectionProof = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...stepUpBody,
+          step_up_token: first.stepUpToken,
+        }),
+      }),
+    );
+    expect(wrongConnectionProof.status).toBe(400);
+    expect(connections.get(first.connectionId)?.scopes).toEqual([
+      "site.read",
+    ]);
+    expect(connections.get(second.connectionId)?.scopes).toEqual([
+      "site.read",
+    ]);
+  });
+
+  it("binds step-up consent to the connection's original redirect URI", async () => {
+    const alternateRedirectUri = "https://client.example/alternate";
+    const { runtime, connections } = fixture({
+      registeredRedirectUris: [redirectUri, alternateRedirectUri],
+    });
+    const initial = await authorizeAndExchange(runtime);
+    const url = new URL(`${resourceUri}/oauth/authorize`);
+    for (const [name, value] of Object.entries({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: alternateRedirectUri,
+      resource: resourceUri,
+      scope: "site.read content.draft",
+      connection_id: initial.connectionId,
+      step_up_token: initial.stepUpToken,
+      state: "client-step-up-state",
+      code_challenge: await digest("a".repeat(64)),
+      code_challenge_method: "S256",
+    })) {
+      url.searchParams.set(name, value);
+    }
+    const consent = await runtime.fetch(new Request(url));
+    expect(consent.status).toBe(400);
+    await expect(consent.json()).resolves.toEqual({
+      error: "invalid_request",
+    });
+    expect(connections.get(initial.connectionId)?.scopes).toEqual([
+      "site.read",
+    ]);
   });
 
   it("renders a no-side-effect Owner consent page before creating a connection", async () => {
@@ -526,6 +875,40 @@ describe("production MCP HTTP runtime", () => {
   it("completes authorization code + PKCE and exposes typed read-only catalogs", async () => {
     const { runtime } = fixture();
     const { accessToken: token } = await authorizeAndExchange(runtime);
+    const missingSession = await runtime.fetch(
+      rpcRequest(token, {
+        jsonrpc: "2.0",
+        id: "read-without-session",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(missingSession.status).toBe(400);
+    await expect(missingSession.json()).resolves.toMatchObject({
+      error: {
+        code: -32600,
+        message: "MCP-Session-Id header required",
+      },
+    });
+    const unknownSession = await runtime.fetch(
+      rpcRequest(
+        token,
+        {
+          jsonrpc: "2.0",
+          id: "read-with-unknown-session",
+          method: "tools/list",
+          params: {},
+        },
+        "unknown-session",
+      ),
+    );
+    expect(unknownSession.status).toBe(404);
+    await expect(unknownSession.json()).resolves.toMatchObject({
+      error: {
+        code: -32001,
+        message: "MCP session not found",
+      },
+    });
 
     const initialize = await runtime.fetch(
       rpcRequest(token, {
@@ -549,6 +932,10 @@ describe("production MCP HTTP runtime", () => {
         }),
       }),
     });
+    initializedSessions.set(
+      token,
+      initialize.headers.get("mcp-session-id")!,
+    );
 
     const tools = await runtime.fetch(
       rpcRequest(token, {
@@ -643,6 +1030,7 @@ describe("production MCP HTTP runtime", () => {
   it("returns structured tool results and stable execution errors", async () => {
     const { runtime } = fixture();
     const { accessToken: token } = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, token);
 
     const list = await runtime.fetch(
       rpcRequest(token, {
@@ -700,6 +1088,7 @@ describe("production MCP HTTP runtime", () => {
   it("paginates resource discovery without repeating fixed resources", async () => {
     const { runtime } = fixture({ contentCount: 55 });
     const { accessToken } = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, accessToken);
     const first = await runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
@@ -741,9 +1130,272 @@ describe("production MCP HTTP runtime", () => {
     expect(secondBody.result).not.toHaveProperty("nextCursor");
   });
 
+  it("resolves actionable workspace and stale-revision resource URIs", async () => {
+    const { runtime } = fixture({ draftResources: true });
+    const initial = await authorizeAndExchange(runtime);
+    const { accessToken } = await authorizeAndExchange(
+      runtime,
+      "site.read content.draft",
+      initial,
+    );
+    const sessionId = await initializeMcpSession(runtime, accessToken);
+    for (const [uri, expected] of [
+      [
+        "foundry://workspaces/workspace_resource",
+        {
+          workspaceId: "workspace_resource",
+          base: { revision: 0 },
+          current: { revision: 3 },
+          state: { currentRevision: 3 },
+        },
+      ],
+      [
+        "foundry://workspaces/workspace_resource/revisions/2",
+        {
+          workspaceId: "workspace_resource",
+          revision: 2,
+          definition: {
+            site: { id: referenceSiteDefinition.site.id },
+          },
+        },
+      ],
+    ] as const) {
+      const response = await runtime.fetch(
+        rpcRequest(accessToken, {
+          jsonrpc: "2.0",
+          id: `read:${uri}`,
+          method: "resources/read",
+          params: { uri },
+        }, sessionId),
+      );
+      const body = (await response.json()) as {
+        result: { contents: Array<{ text: string }> };
+      };
+      expect(
+        JSON.parse(body.result.contents[0]!.text),
+      ).toMatchObject({
+        result: expected,
+      });
+    }
+  });
+
+  it("validates a canonical workspace tool result against its advertised schema", async () => {
+    const { runtime } = fixture({ draftResources: true });
+    const initial = await authorizeAndExchange(runtime);
+    const { accessToken } = await authorizeAndExchange(
+      runtime,
+      "site.read content.draft",
+      initial,
+    );
+    const sessionId = await initializeMcpSession(runtime, accessToken);
+    const descriptors: Array<{
+      name: string;
+      outputSchema: object;
+    }> = [];
+    let cursor: string | null = null;
+    do {
+      const listed = await runtime.fetch(
+        rpcRequest(accessToken, {
+          jsonrpc: "2.0",
+          id: `workspace-schema-list:${cursor ?? "first"}`,
+          method: "tools/list",
+          params: cursor === null ? {} : { cursor },
+        }, sessionId),
+      );
+      const listedBody = (await listed.json()) as {
+        result: {
+          tools: Array<{
+            name: string;
+            outputSchema: object;
+          }>;
+          nextCursor?: string;
+        };
+      };
+      descriptors.push(...listedBody.result.tools);
+      cursor = listedBody.result.nextCursor ?? null;
+    } while (cursor !== null);
+    const descriptor = descriptors.find(
+      ({ name }) => name === "foundry.workspace.get",
+    )!;
+    const response = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "workspace-schema-call",
+        method: "tools/call",
+        params: {
+          name: descriptor.name,
+          arguments: { workspaceId: "workspace_resource" },
+        },
+      }, sessionId),
+    );
+    const body = (await response.json()) as {
+      result: { structuredContent: unknown };
+    };
+    const validate = new Ajv2020({
+      strict: false,
+      formats: { "date-time": true },
+    }).compile(descriptor.outputSchema);
+
+    expect(
+      validate(body.result.structuredContent),
+      JSON.stringify(validate.errors),
+    ).toBe(true);
+    const invalidProductionBase = structuredClone(
+      body.result.structuredContent,
+    ) as {
+      result: {
+        manifest: { productionBase: string };
+      };
+    };
+    invalidProductionBase.result.manifest.productionBase = "branch-main";
+    expect(validate(invalidProductionBase)).toBe(false);
+  });
+
+  it("requires a new initialized session before a stepped-up token discovers draft capabilities", async () => {
+    const { runtime } = fixture({ draftResources: true });
+    const initial = await authorizeAndExchange(runtime);
+    const { accessToken: readToken } = initial;
+    const readSession = await initializeMcpSession(runtime, readToken);
+    const { accessToken } = await authorizeAndExchange(
+      runtime,
+      "site.read content.draft",
+      initial,
+    );
+    const staleSession = await runtime.fetch(
+      rpcRequest(
+        accessToken,
+        {
+          jsonrpc: "2.0",
+          id: "draft-with-old-session",
+          method: "tools/list",
+          params: {},
+        },
+        readSession,
+      ),
+    );
+    await expect(staleSession.json()).resolves.toMatchObject({
+      error: {
+        code: -32001,
+        message: "MCP session not found",
+      },
+    });
+    expect(staleSession.status).toBe(404);
+    const beforeInitialize = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "draft-before-initialize",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    await expect(beforeInitialize.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "draft-before-initialize",
+      error: {
+        code: -32600,
+        message: "MCP-Session-Id header required",
+      },
+    });
+    expect(beforeInitialize.status).toBe(400);
+
+    const rejectedInitialize = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "draft-invalid-initialize",
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+        },
+      }),
+    );
+    expect(rejectedInitialize.headers.get("mcp-session-id")).toBeNull();
+
+    const initialize = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "draft-initialize",
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1" },
+        },
+      }),
+    );
+    const sessionId = initialize.headers.get("mcp-session-id");
+    expect(sessionId).toEqual(expect.any(String));
+    await expect(initialize.json()).resolves.toMatchObject({
+      result: { protocolVersion: "2025-11-25" },
+    });
+    const afterInitialize = await runtime.fetch(
+      rpcRequest(
+        accessToken,
+        {
+          jsonrpc: "2.0",
+          id: "draft-after-initialize",
+          method: "resources/templates/list",
+          params: {},
+        },
+        sessionId!,
+      ),
+    );
+    await expect(afterInitialize.json()).resolves.toMatchObject({
+      result: {
+        resourceTemplates: expect.arrayContaining([
+          expect.objectContaining({
+            uriTemplate: "foundry://workspaces/{workspaceId}",
+          }),
+        ]),
+      },
+    });
+  });
+
+  it("advertises canonical draft resource templates only with a draft scope", async () => {
+    const { runtime } = fixture({ draftResources: true });
+    const initial = await authorizeAndExchange(runtime);
+    const { accessToken: readToken } = initial;
+    const readSession = await initializeMcpSession(runtime, readToken);
+
+    async function templateUris(accessToken: string, sessionId?: string) {
+      const response = await runtime.fetch(
+        rpcRequest(accessToken, {
+          jsonrpc: "2.0",
+          id: `templates:${accessToken}`,
+          method: "resources/templates/list",
+          params: {},
+        }, sessionId),
+      );
+      const body = (await response.json()) as {
+        result: {
+          resourceTemplates: Array<{ uriTemplate: string }>;
+        };
+      };
+      return body.result.resourceTemplates.map(({ uriTemplate }) =>
+        uriTemplate
+      );
+    }
+
+    await expect(templateUris(readToken, readSession)).resolves.toEqual([
+      "foundry://content/{kind}/{contentId}",
+    ]);
+    const { accessToken: draftToken } = await authorizeAndExchange(
+      runtime,
+      "site.read content.draft",
+      initial,
+    );
+    const draftSession = await initializeMcpSession(runtime, draftToken);
+    await expect(templateUris(draftToken, draftSession)).resolves.toEqual([
+      "foundry://content/{kind}/{contentId}",
+      "foundry://workspaces/{workspaceId}",
+      "foundry://workspaces/{workspaceId}/revisions/{revision}",
+    ]);
+  });
+
   it("conforms to MCP request, notification, ping, metadata, and protocol-version semantics", async () => {
     const { runtime } = fixture();
     const { accessToken } = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, accessToken);
 
     const notification = await runtime.fetch(
       rpcRequest(accessToken, {
@@ -867,9 +1519,10 @@ describe("production MCP HTTP runtime", () => {
     });
   });
 
-  it("returns schema-conforming tool errors for invalid tool arguments", async () => {
+  it("returns JSON-RPC invalid params for advertised-schema-invalid tool arguments", async () => {
     const { runtime, audit } = fixture();
     const { accessToken } = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, accessToken);
 
     const invalid = await runtime.fetch(
       rpcRequest(accessToken, {
@@ -882,30 +1535,89 @@ describe("production MCP HTTP runtime", () => {
         },
       }),
     );
-    await expect(invalid.json()).resolves.toEqual(
-      expect.objectContaining({
-        result: expect.objectContaining({
-          isError: true,
-          structuredContent: expect.objectContaining({
-            error: expect.objectContaining({
-              code: "VALIDATION_FAILED",
-            }),
-          }),
-        }),
+    await expect(invalid.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "invalid-tool-input",
+      error: { code: -32602, message: "Invalid tool arguments" },
+    });
+    expect(audit).toEqual([]);
+  });
+
+  it("authorizes a hidden draft tool before validating its arguments", async () => {
+    const { runtime } = fixture({ draftResources: true });
+    const initial = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, initial.accessToken);
+    const response = await runtime.fetch(
+      rpcRequest(initial.accessToken, {
+        jsonrpc: "2.0",
+        id: "hidden-draft-input",
+        method: "tools/call",
+        params: {
+          name: "foundry.content.patch",
+          arguments: { malformed: true },
+        },
       }),
     );
-    expect(audit).toContainEqual(
-      expect.objectContaining({
-        operation: "foundry.content.get",
-        outcome: "denied",
-        reason: "VALIDATION_FAILED",
-      }),
+
+    expect(response.status).toBe(403);
+    const challenge = response.headers.get("www-authenticate")!;
+    expect(challenge).toContain('error="insufficient_scope"');
+    expect(challenge).toContain(
+      `resource_metadata="${
+        canonicalOrigin
+      }/.well-known/oauth-protected-resource/api/foundry-mcp"`,
     );
+    expect(challenge).toContain('scope="site.read content.draft"');
+    await expect(response.json()).resolves.toMatchObject({
+      result: {
+        isError: true,
+        structuredContent: {
+          error: {
+            code: "INSUFFICIENT_SCOPE",
+            requiredScopes: ["content.draft"],
+          },
+        },
+      },
+    });
+    const challengedScope = /scope="([^"]+)"/u.exec(challenge)?.[1];
+    expect(challengedScope).toBe("site.read content.draft");
+    const steppedUp = await authorizeAndExchange(
+      runtime,
+      challengedScope,
+      initial,
+    );
+    const sessionId = await initializeMcpSession(
+      runtime,
+      steppedUp.accessToken,
+    );
+    const visibleInvalid = await runtime.fetch(
+      rpcRequest(
+        steppedUp.accessToken,
+        {
+          jsonrpc: "2.0",
+          id: "visible-draft-input",
+          method: "tools/call",
+          params: {
+            name: "foundry.content.patch",
+            arguments: { malformed: true },
+          },
+        },
+        sessionId,
+      ),
+    );
+    expect(visibleInvalid.status).toBe(200);
+    expect(visibleInvalid.headers.get("www-authenticate")).toBeNull();
+    await expect(visibleInvalid.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "visible-draft-input",
+      error: { code: -32602, message: "Invalid tool arguments" },
+    });
   });
 
   it("validates advertised success and error structuredContent with an independent JSON Schema validator", async () => {
     const { runtime } = fixture();
     const { accessToken } = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, accessToken);
     const listed = await runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
@@ -987,8 +1699,8 @@ describe("production MCP HTTP runtime", () => {
       ).toBe(true);
     }
 
-    const siteDescriptor = descriptors.find(
-      ({ name }) => name === "foundry.site.get",
+    const contentDescriptor = descriptors.find(
+      ({ name }) => name === "foundry.content.get",
     )!;
     const invalidResponse = await runtime.fetch(
       rpcRequest(accessToken, {
@@ -996,8 +1708,11 @@ describe("production MCP HTTP runtime", () => {
         id: "schema-error",
         method: "tools/call",
         params: {
-          name: siteDescriptor.name,
-          arguments: { unexpected: true },
+          name: contentDescriptor.name,
+          arguments: {
+            kind: "page",
+            contentId: "page_missing",
+          },
         },
       }),
     );
@@ -1005,7 +1720,7 @@ describe("production MCP HTTP runtime", () => {
       result: { structuredContent: unknown };
     };
     expect(
-      ajv.compile(siteDescriptor.outputSchema)(
+      ajv.compile(contentDescriptor.outputSchema)(
         invalidBody.result.structuredContent,
       ),
     ).toBe(true);
@@ -1014,6 +1729,7 @@ describe("production MCP HTTP runtime", () => {
   it("publishes honest lastModified annotations on every discovered resource", async () => {
     const { runtime } = fixture();
     const { accessToken } = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, accessToken);
     const response = await runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
@@ -1133,8 +1849,12 @@ describe("production MCP HTTP runtime", () => {
     const rotatedBody = (await rotated.json()) as {
       access_token: string;
       refresh_token: string;
+      connection_id: string;
+      step_up_token: string;
     };
     expect(rotatedBody.refresh_token).not.toBe(first.refreshToken);
+    expect(rotatedBody.connection_id).toBe(first.connectionId);
+    expect(rotatedBody.step_up_token).toEqual(expect.any(String));
 
     const reuse = await refresh(first.refreshToken);
     expect(reuse.status).toBe(400);
@@ -1219,6 +1939,8 @@ describe("production MCP HTTP runtime", () => {
   it("bounds request size, nesting, and durable request budgets", async () => {
     const ordinary = fixture();
     const { accessToken } = await authorizeAndExchange(ordinary.runtime);
+    await initializeMcpSession(ordinary.runtime, accessToken);
+    const rateInputsBeforeOversized = ordinary.rateLimitInputs.length;
     const oversized = await ordinary.runtime.fetch(
       new Request(resourceUri, {
         method: "POST",
@@ -1233,7 +1955,11 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(oversized.status).toBe(413);
-    expect(ordinary.rateLimitInputs.map(({ bucketKey }) => bucketKey)).toEqual([
+    expect(
+      ordinary.rateLimitInputs
+        .slice(rateInputsBeforeOversized)
+        .map(({ bucketKey }) => bucketKey),
+    ).toEqual([
       "site",
       "11111111-1111-4111-8111-111111111111",
     ]);
@@ -1256,8 +1982,12 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
 
-    const limited = fixture({ allowRateLimit: (call) => call < 3 });
+    const limited = fixture({ allowRateLimit: (call) => call < 6 });
     const limitedToken = await authorizeAndExchange(limited.runtime);
+    await initializeMcpSession(
+      limited.runtime,
+      limitedToken.accessToken,
+    );
     const rateLimited = await limited.runtime.fetch(
       rpcRequest(limitedToken.accessToken, {
         jsonrpc: "2.0",
@@ -1441,10 +2171,11 @@ describe("production MCP HTTP runtime", () => {
     const state = fixture({
       requestTimeoutMs: 10,
       beforeFindCurrentConnection: async (call) => {
-        if (call === 2) await stalled;
+        if (call === 3) await stalled;
       },
     });
     const { accessToken } = await authorizeAndExchange(state.runtime);
+    await initializeMcpSession(state.runtime, accessToken);
     const response = await state.runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
@@ -1530,6 +2261,7 @@ describe("production MCP HTTP runtime", () => {
       beforeRecordInvocation: async () => stalledAudit,
     });
     const { accessToken } = await authorizeAndExchange(state.runtime);
+    await initializeMcpSession(state.runtime, accessToken);
     let responseSettled = false;
     const pendingResponse = state.runtime
       .fetch(
@@ -1569,6 +2301,7 @@ describe("production MCP HTTP runtime", () => {
   it("correlates malformed resource URIs and unexpected post-parse failures", async () => {
     const malformed = fixture();
     const { accessToken } = await authorizeAndExchange(malformed.runtime);
+    await initializeMcpSession(malformed.runtime, accessToken);
     const malformedResponse = await malformed.runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
@@ -1588,10 +2321,14 @@ describe("production MCP HTTP runtime", () => {
 
     const unexpected = fixture({
       beforeConsumeRateLimit: async (call) => {
-        if (call === 3) throw new Error("dependency exploded");
+        if (call === 6) throw new Error("dependency exploded");
       },
     });
     const unexpectedToken = await authorizeAndExchange(unexpected.runtime);
+    await initializeMcpSession(
+      unexpected.runtime,
+      unexpectedToken.accessToken,
+    );
     const unexpectedResponse = await unexpected.runtime.fetch(
       rpcRequest(unexpectedToken.accessToken, {
         jsonrpc: "2.0",
@@ -1614,6 +2351,7 @@ describe("production MCP HTTP runtime", () => {
   it("normalizes adversarial method names into bounded durable rate keys", async () => {
     const state = fixture();
     const { accessToken } = await authorizeAndExchange(state.runtime);
+    await initializeMcpSession(state.runtime, accessToken);
     await state.runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
