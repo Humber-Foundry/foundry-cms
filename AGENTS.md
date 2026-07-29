@@ -47,7 +47,8 @@ targeting `main`.
 The Foreman is authorized to merge pull requests created by its delegated
 ticket workers after all `/implement` gates pass, required CI and branch
 protections are green, the final reviewed commit is current and mergeable, and
-the pull request closes only its ticket—not the parent specification.
+the pull request closes only its ticket—not the parent specification. This
+repository does not require an additional review loop beyond `/implement`.
 
 Foreman must use the repository's protected merge path or merge queue and may
 not bypass protections. After merging, it must verify the exact commit landed
