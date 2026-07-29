@@ -11,8 +11,10 @@ import {
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
   createBlogPostArtifactFingerprint,
+  createBlogPostRevisionId,
   createContentWorkspaceId,
   restoreContentActorId,
+  sha256CanonicalJson,
   assertContentRevisionBase,
   assertContentRevisionIdempotency,
   withContentRevisionBookmark,
@@ -152,7 +154,7 @@ export async function hydrateManagedBlogPosts(
        JOIN blog_post_revisions AS revision
          ON revision.site_id = post.site_id
         AND revision.post_id = post.post_id
-        AND revision.revision = post.current_revision
+        AND revision.revision_id = post.current_revision_id
        WHERE post.site_id = ?1
          AND post.live_revision IS NULL
          AND (
@@ -210,11 +212,22 @@ export async function reconcileVerifiedBlogPostPublication(
   verifiedAt: string,
 ): Promise<void> {
   const serializedPosts = JSON.stringify(
-    definition.blog.posts.map(({ id, revision, targetVisibility }) => ({
-      id,
-      revision,
-      targetVisibility,
-    })),
+    await Promise.all(
+      definition.blog.posts.map(async (post) => {
+        const contentHash = await sha256CanonicalJson(post);
+        return {
+          id: post.id,
+          revision: post.revision,
+          revisionId: await createBlogPostRevisionId(
+            definition.site.id,
+            post.id,
+            post.revision,
+            contentHash,
+          ),
+          targetVisibility: post.targetVisibility,
+        };
+      }),
+    ),
   );
   await database.batch([
     database
@@ -223,6 +236,7 @@ export async function reconcileVerifiedBlogPostPublication(
            SELECT
              json_extract(value, '$.id') AS post_id,
              json_extract(value, '$.revision') AS revision,
+             json_extract(value, '$.revisionId') AS revision_id,
              json_extract(value, '$.targetVisibility') AS target_visibility
            FROM json_each(?1)
          )
@@ -233,6 +247,16 @@ export async function reconcileVerifiedBlogPostPublication(
                    THEN incoming.revision
                  ELSE NULL
                END
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             current_revision = (
+               SELECT incoming.revision
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             current_revision_id = (
+               SELECT incoming.revision_id
                FROM incoming_posts AS incoming
                WHERE incoming.post_id = blog_posts.post_id
              ),
@@ -526,6 +550,7 @@ export function createD1ContentRevisionStore(
           .prepare(
             `INSERT INTO blog_posts (
                site_id, post_id, collection_state, current_revision,
+               current_revision_id,
                live_revision, last_verified_revision,
                last_verified_visibility, last_verified_publication_id,
                last_verified_publication_sequence,
@@ -536,6 +561,7 @@ export function createD1ContentRevisionStore(
                json_extract(entry.value, '$.post.id'),
                'active',
                json_extract(entry.value, '$.post.revision'),
+               json_extract(entry.value, '$.artifact.postRevisionId'),
                CASE
                  WHEN json_extract(
                    entry.value,
@@ -572,6 +598,7 @@ export function createD1ContentRevisionStore(
              WHERE 1 = 1
              ON CONFLICT (site_id, post_id) DO UPDATE SET
                current_revision = excluded.current_revision,
+               current_revision_id = excluded.current_revision_id,
                version = blog_posts.version + 1,
                updated_at = excluded.updated_at
              WHERE blog_posts.live_revision IS NULL
@@ -609,7 +636,7 @@ export function createD1ContentRevisionStore(
                json_extract(entry.value, '$.artifact.value')
              FROM json_each(?6) AS entry
              WHERE 1 = 1
-             ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
+             ON CONFLICT (revision_id) DO NOTHING`,
           )
           .bind(
             siteId,
@@ -848,14 +875,10 @@ export function createD1ContentRevisionStore(
               WHERE site_id = ?14 AND post_id = ?${postParameter}
             )`;
           }
-          const revisionParameter = blogGuardParameter;
-          blogGuardBindings.push(transition.beforeState.revision);
-          blogGuardParameter += 1;
           return `AND EXISTS (
             SELECT 1 FROM blog_posts
             WHERE site_id = ?14
               AND post_id = ?${postParameter}
-              AND current_revision = ?${revisionParameter}
               AND collection_state = 'active'
           )`;
         })
@@ -911,68 +934,43 @@ export function createD1ContentRevisionStore(
               command.requestHash,
             ),
       );
-      const blogAggregateStatements = (command.blogTransitions ?? []).map(
-        (transition) =>
-          transition.beforeState === null
-            ? session
-                .prepare(
+      const blogAggregateStatements = (command.blogTransitions ?? [])
+        .filter((transition) => transition.beforeState === null)
+        .map((transition) =>
+          session
+            .prepare(
                   `INSERT INTO blog_posts (
                      site_id, post_id, collection_state, current_revision,
+                     current_revision_id,
                      live_revision, last_verified_revision,
                      last_verified_visibility, last_verified_publication_id,
                      last_verified_publication_sequence,
                      version, updated_at
                    )
                    SELECT
-                     ?1, ?2, 'active', ?3, NULL, NULL, NULL, NULL, NULL, 1, ?4
+                     ?1, ?2, 'active', ?3, ?4,
+                     NULL, NULL, NULL, NULL, NULL, 1, ?5
                    WHERE EXISTS (
                      SELECT 1 FROM content_revision_receipts
-                     WHERE idempotency_key = ?5
-                       AND workspace_id = ?6
-                       AND revision = ?7
-                       AND request_hash = ?8
+                     WHERE idempotency_key = ?6
+                       AND workspace_id = ?7
+                       AND revision = ?8
+                       AND request_hash = ?9
                    )
                    ON CONFLICT (site_id, post_id) DO NOTHING`,
-                )
-                .bind(
-                  siteId,
-                  transition.postId,
-                  transition.afterState!.revision,
-                  command.revision.createdAt,
-                  command.idempotencyKey,
-                  workspaceId,
-                  command.revision.revision,
-                  command.requestHash,
-                )
-            : session
-                .prepare(
-                  `UPDATE blog_posts
-                   SET current_revision = ?1,
-                       version = version + 1,
-                       updated_at = ?2
-                   WHERE site_id = ?3
-                     AND post_id = ?4
-                     AND current_revision = ?5
-                     AND EXISTS (
-                       SELECT 1 FROM content_revision_receipts
-                       WHERE idempotency_key = ?6
-                         AND workspace_id = ?7
-                         AND revision = ?8
-                         AND request_hash = ?9
-                     )`,
-                )
-                .bind(
-                  transition.afterState!.revision,
-                  command.revision.createdAt,
-                  siteId,
-                  transition.postId,
-                  transition.beforeState.revision,
-                  command.idempotencyKey,
-                  workspaceId,
-                  command.revision.revision,
-                  command.requestHash,
-                ),
-      );
+              )
+              .bind(
+                siteId,
+                transition.postId,
+                transition.afterState!.revision,
+                transition.revisionId,
+                command.revision.createdAt,
+                command.idempotencyKey,
+                workspaceId,
+                command.revision.revision,
+                command.requestHash,
+              ),
+        );
       const blogRevisionStatements = (command.blogTransitions ?? []).map(
         (transition) => {
           const post = command.revision.definition.blog.posts.find(
@@ -1000,7 +998,7 @@ export function createD1ContentRevisionStore(
                    AND revision = ?6
                    AND request_hash = ?17
                )
-               ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
+               ON CONFLICT (revision_id) DO NOTHING`,
             )
             .bind(
               transition.revisionId,

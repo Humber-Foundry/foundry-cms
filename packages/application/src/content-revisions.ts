@@ -626,7 +626,7 @@ export function createContentRevisionApplication({
       idempotencyKey: string;
     };
     requestIdentity: unknown;
-    mutate(base: SiteDefinition): SiteDefinition;
+    mutate(base: SiteDefinition): SiteDefinition | Promise<SiteDefinition>;
     blogTransitions?: ReadonlyArray<Readonly<{
       postId: BlogPostId;
       commandType: BlogPostTransitionAudit["commandType"];
@@ -673,7 +673,7 @@ export function createContentRevisionApplication({
     }
     let definition: SiteDefinition;
     try {
-      definition = input.mutate(base.definition);
+      definition = await input.mutate(base.definition);
     } catch (error) {
       if (error instanceof BlogPostSchemaError) {
         throw new ContentRevisionValidationError({
@@ -1025,18 +1025,16 @@ export function createContentRevisionApplication({
           command,
           [command.postId],
           () =>
-          (async () => {
-            await store.requireAccess(actorId);
-            const aggregate = await store.getBlogPostAggregate(
-              command.postId,
-            );
-            return persistDefinitionMutation({
+            persistDefinitionMutation({
               command,
               requestIdentity: {
                 operation: "unpublish_blog_post",
                 ...command,
               },
-              mutate: (definition) => {
+              mutate: async (definition) => {
+                const aggregate = await store.getBlogPostAggregate(
+                  command.postId,
+                );
                 if (
                   aggregate?.liveRevision === null ||
                   aggregate === null
@@ -1055,8 +1053,7 @@ export function createContentRevisionApplication({
                   postId: command.postId,
                 },
               ],
-            });
-          })(),
+            }),
         );
       },
       async republishBlogPost(command: RepublishBlogPostCommand) {
@@ -1065,42 +1062,41 @@ export function createContentRevisionApplication({
           command,
           [command.postId],
           () =>
-          (async () => {
-            const aggregate = await store.getBlogPostAggregate(
-              command.postId,
-            );
-            if (
-              aggregate === null ||
-              aggregate.liveRevision !== null ||
-              (
-                aggregate.lastVerifiedVisibility !== "unpublished" &&
-                aggregate.lastVerifiedVisibility !== "absent"
-              )
-            ) {
-              throw new ContentRevisionValidationError({
-                blog: "post_not_unpublished",
-              });
-            }
-            return persistDefinitionMutation({
+            persistDefinitionMutation({
               command,
               requestIdentity: {
                 operation: "republish_blog_post",
                 ...command,
               },
-              mutate: (definition) =>
-                republishBlogPostDefinition(
+              mutate: async (definition) => {
+                const aggregate = await store.getBlogPostAggregate(
+                  command.postId,
+                );
+                if (
+                  aggregate === null ||
+                  aggregate.liveRevision !== null ||
+                  (
+                    aggregate.lastVerifiedVisibility !== "unpublished" &&
+                    aggregate.lastVerifiedVisibility !== "absent"
+                  )
+                ) {
+                  throw new ContentRevisionValidationError({
+                    blog: "post_not_unpublished",
+                  });
+                }
+                return republishBlogPostDefinition(
                   definition,
                   command.siteId,
                   command.postId,
-                ),
+                );
+              },
               blogTransitions: [
                 {
                   commandType: "blog.post.republish",
                   postId: command.postId,
                 },
               ],
-            });
-          })(),
+            }),
         );
       },
       async saveMediaOccurrence(command: SaveContentMediaOccurrenceCommand) {

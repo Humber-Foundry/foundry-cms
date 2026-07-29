@@ -75,9 +75,13 @@ export async function createBlogPostRevisionId(
   siteId: SiteId,
   postId: BlogPostId,
   revision: number,
+  contentHash: string,
 ): Promise<BlogPostRevisionId> {
   if (!Number.isSafeInteger(revision) || revision < 1) {
     throw new TypeError("blog_post_revision_invalid");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(contentHash)) {
+    throw new TypeError("blog_post_content_hash_invalid");
   }
   const bytes = await sha256TextBytes(
     lengthDelimited([
@@ -85,6 +89,7 @@ export async function createBlogPostRevisionId(
       siteId,
       postId,
       String(revision),
+      contentHash,
     ]),
   );
   const uuid = bytes.slice(0, 16);
@@ -108,12 +113,13 @@ export async function createBlogPostArtifactFingerprint(input: {
   schemaVersion: SiteDefinition["schemaVersion"];
   rendererVersion: string;
 }): Promise<BlogPostArtifactFingerprint> {
+  const contentHash = await sha256Text(canonicalJson(input.post));
   const postRevisionId = await createBlogPostRevisionId(
     input.definition.site.id,
     input.post.id,
     input.post.revision,
+    contentHash,
   );
-  const contentHash = await sha256Text(canonicalJson(input.post));
   const renderedBytesHash = await sha256Text(
     canonicalJson(createBlogPostRenderModel(input.definition, input.post)),
   );

@@ -281,16 +281,16 @@ describe("D1 content revision store", () => {
       before_state_json: JSON.stringify({
         revision: 2,
         targetVisibility: "public",
-        aggregateRevision: 2,
+        aggregateRevision: 1,
         liveRevision: null,
-        aggregateVersion: 2,
+        aggregateVersion: 1,
       }),
       after_state_json: JSON.stringify({
         revision: 2,
         targetVisibility: "public",
-        aggregateRevision: 2,
+        aggregateRevision: 1,
         liveRevision: null,
-        aggregateVersion: 2,
+        aggregateVersion: 1,
       }),
     });
     expect(
@@ -450,15 +450,16 @@ describe("D1 content revision store", () => {
       .bind("2026-07-27T12:33:00.000Z")
       .run();
 
-    await reloaded.commands.unpublishBlogPost({
-      actorId: editorActorId,
-      workspaceId,
-      siteId: referenceSiteDefinition.site.id,
-      schemaVersion: referenceSiteDefinition.schemaVersion,
-      baseRevision: 3,
-      postId,
-      idempotencyKey: "d1-live-blog-unpublish-post",
-    });
+    const unpublishedRevision =
+      await reloaded.commands.unpublishBlogPost({
+        actorId: editorActorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 3,
+        postId,
+        idempotencyKey: "d1-live-blog-unpublish-post",
+      });
 
     await expect(reloaded.queries.getCurrent()).resolves.toMatchObject({
       revision: 4,
@@ -487,14 +488,29 @@ describe("D1 content revision store", () => {
         },
       },
     });
-    const unpublished = await reloaded.queries.getCurrent();
     await reconcileVerifiedBlogPostPublication(
       database,
       referenceSiteDefinition.site.id,
-      unpublished.definition,
+      unpublishedRevision.definition,
       { id: "publication-blog-unpublished", sequence: 2 },
       "2026-07-27T13:00:00.000Z",
     );
+    await expect(
+      reloaded.commands.unpublishBlogPost({
+        actorId: editorActorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 3,
+        postId,
+        idempotencyKey: "d1-live-blog-unpublish-post",
+      }),
+    ).resolves.toMatchObject({
+      revision: unpublishedRevision.revision,
+      definition: unpublishedRevision.definition,
+      createdBy: unpublishedRevision.createdBy,
+      createdAt: unpublishedRevision.createdAt,
+    });
     await reconcileVerifiedBlogPostPublication(
       database,
       referenceSiteDefinition.site.id,
@@ -627,6 +643,22 @@ describe("D1 content revision store", () => {
       { id: "publication-blog-republished", sequence: 3 },
       "2026-07-27T13:20:00.000Z",
     );
+    await expect(
+      republishApplication.commands.republishBlogPost({
+        actorId: editorActorId,
+        workspaceId: republishWorkspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 1,
+        postId,
+        idempotencyKey: "d1-republish-blog-post",
+      }),
+    ).resolves.toMatchObject({
+      revision: republished.revision,
+      definition: republished.definition,
+      createdBy: republished.createdBy,
+      createdAt: republished.createdAt,
+    });
     await reconcileVerifiedBlogPostPublication(
       database,
       referenceSiteDefinition.site.id,
@@ -1036,7 +1068,7 @@ describe("D1 content revision store", () => {
     );
   });
 
-  it("allows only one workspace to advance a shared post revision", async () => {
+  it("allows parallel workspaces to branch from a shared post revision", async () => {
     const postId = createBlogPostId(
       "00000000-0000-4000-8000-00000000000b",
     );
@@ -1099,66 +1131,59 @@ describe("D1 content revision store", () => {
       }),
     ]);
 
-    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
-      1,
-    );
-    const rejected = results.find(({ status }) => status === "rejected");
-    expect(rejected).toMatchObject({
-      status: "rejected",
-      reason: expect.any(ContentRevisionConflictError),
-    });
-    const losingWorkspaceId =
-      results[0]?.status === "rejected" ? workspaceId : otherWorkspaceId;
-    const losingRequestId =
-      results[0]?.status === "rejected"
-        ? "d1-shared-blog-edit-first"
-        : "d1-shared-blog-edit-second";
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "fulfilled",
+        value: expect.objectContaining({
+          definition: expect.objectContaining({
+            blog: expect.objectContaining({
+              posts: [
+                expect.objectContaining({
+                  revision: 2,
+                  title: "First edit",
+                }),
+              ],
+            }),
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        status: "fulfilled",
+        value: expect.objectContaining({
+          definition: expect.objectContaining({
+            blog: expect.objectContaining({
+              posts: [
+                expect.objectContaining({
+                  revision: 2,
+                  title: "Second edit",
+                }),
+              ],
+            }),
+          }),
+        }),
+      }),
+    ]);
     expect(
       await database
         .prepare(
-          `SELECT outcome, before_state_json, after_state_json
-           FROM blog_post_transition_audit_events
-           WHERE workspace_id = ?1 AND request_id = ?2`,
-        )
-        .bind(losingWorkspaceId, losingRequestId)
-        .first(),
-    ).toEqual({
-      outcome: "rejected",
-      before_state_json: JSON.stringify({
-        revision: 1,
-        targetVisibility: "public",
-        aggregateRevision: 2,
-        liveRevision: 1,
-        aggregateVersion: 2,
-      }),
-      after_state_json: JSON.stringify({
-        revision: 1,
-        targetVisibility: "public",
-        aggregateRevision: 2,
-        liveRevision: 1,
-        aggregateVersion: 2,
-      }),
-    });
-    expect(
-      await database
-        .prepare(
-          `SELECT current_revision, version
+          `SELECT current_revision, live_revision, version
            FROM blog_posts
            WHERE site_id = ?1 AND post_id = ?2`,
         )
         .bind(definition.site.id, postId)
         .first(),
-    ).toEqual({ current_revision: 2, version: 2 });
+    ).toEqual({ current_revision: 1, live_revision: 1, version: 1 });
     expect(
       await database
         .prepare(
-          `SELECT COUNT(*) AS count, COUNT(DISTINCT revision_id) AS ids
+          `SELECT COUNT(*) AS count, COUNT(DISTINCT revision_id) AS ids,
+                  COUNT(DISTINCT content_hash) AS contents
            FROM blog_post_revisions
            WHERE site_id = ?1 AND post_id = ?2`,
         )
         .bind(definition.site.id, postId)
         .first(),
-    ).toEqual({ count: 2, ids: 2 });
+    ).toEqual({ count: 3, ids: 3, contents: 3 });
   });
 
   it("fails verified-live reconciliation when a post aggregate is missing", async () => {

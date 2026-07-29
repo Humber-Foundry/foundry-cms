@@ -82,13 +82,17 @@ fingerprint. Preview, approval, Git publication, and verified-live
 reconciliation therefore identify both the complete site artifact and every
 exact post rendering within it.
 
-Post identity and revision concurrency are site-global even though editing
-occurs in workspaces. D1 stores one `blog_posts` aggregate head per site/post,
-plus immutable UUID-keyed `blog_post_revisions`. Every create or successor
-revision compares the aggregate head in the same atomic batch as the content
-revision and receipt. Two workspaces may start from the same post revision, but
-only one can advance it; the loser fails closed and cannot acknowledge its
-definition.
+Post identity is site-global, while draft concurrency remains workspace-local.
+D1 stores one `blog_posts` verified-publication aggregate per site/post plus
+immutable UUID-keyed `blog_post_revisions`. Revision IDs bind the site, stable
+post ID, logical revision number, and canonical content hash, so two workspaces
+may independently create different successors from the same verified revision
+without colliding or changing production state. Each workspace still advances
+through the content-revision compare-and-swap and receipt transaction. The
+site-global aggregate advances only when an exact publication is verified live
+or when a verified-absent post is claimed for recovery. Publication base
+checks and approval invalidation make a branch stale after another workspace
+changes production.
 
 Unpublishing is a guarded successor publication, not deletion of history. The
 command is accepted only when the aggregate has a verified live revision and

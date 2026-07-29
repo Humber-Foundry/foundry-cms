@@ -3,6 +3,7 @@ CREATE TABLE blog_posts (
   post_id TEXT NOT NULL,
   collection_state TEXT NOT NULL CHECK (collection_state = 'active'),
   current_revision INTEGER NOT NULL CHECK (current_revision >= 1),
+  current_revision_id TEXT,
   live_revision INTEGER CHECK (live_revision IS NULL OR live_revision >= 1),
   last_verified_revision INTEGER CHECK (
     last_verified_revision IS NULL OR last_verified_revision >= 1
@@ -22,7 +23,6 @@ CREATE TABLE blog_post_revisions (
   snapshot_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   created_by TEXT NOT NULL,
-  UNIQUE (site_id, post_id, revision),
   FOREIGN KEY (site_id, post_id) REFERENCES blog_posts(site_id, post_id)
 );
 

@@ -35,7 +35,7 @@ describe("blog post artifact fingerprint", () => {
 
     expect(fingerprint).toEqual({
       postId: "00000000-0000-4000-8000-000000000009",
-      postRevisionId: "41ade042-9d57-5757-881b-d176d195e25d",
+      postRevisionId: "aaf81c86-ae9c-5b0f-93ae-ed5dc494f7b2",
       revision: 1,
       contentHash:
         "83c864bcf45653d03eaa20276ab3276b9a71b854c40fa802cf01e6fc7c9288cc",
@@ -45,7 +45,7 @@ describe("blog post artifact fingerprint", () => {
       renderedBytesHash:
         "b01cd91ebeef5240c3c983a6ab7ef67a14ea70b7889992bdb622984cfac156cd",
       value:
-        "5dee585a5c3e361d9386427ba610ea927535c6fa407affbd952d88e7c276be1e",
+        "aebfa7d9be0dbf60d169bc4047f255f340cf15870bbbed34fcdc8ef29a3dad18",
     });
 
     const changedChrome = await createBlogPostArtifactFingerprint({
