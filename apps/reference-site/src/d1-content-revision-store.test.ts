@@ -685,14 +685,18 @@ describe("D1 content revision store", () => {
       idempotencyKey: "d1-create-absent-recovery-workspace",
     });
     await expect(
-      absentRecoveryApplication.commands.republishBlogPost({
+      absentRecoveryApplication.commands.save({
         actorId: editorActorId,
         workspaceId: absentRecoveryWorkspaceId,
-        siteId: referenceSiteDefinition.site.id,
         schemaVersion: referenceSiteDefinition.schemaVersion,
         baseRevision: 0,
-        postId,
-        idempotencyKey: "d1-republish-restored-absent-post",
+        edits: [
+          {
+            path: `${postId}.title`,
+            value: "Edited only in the recovery workspace",
+          },
+        ],
+        idempotencyKey: "d1-edit-recovered-absent-post",
       }),
     ).resolves.toMatchObject({
       revision: 1,
@@ -702,6 +706,33 @@ describe("D1 content revision store", () => {
             expect.objectContaining({
               id: postId,
               revision: 8,
+              targetVisibility: "unpublished",
+            }),
+          ],
+        },
+      },
+    });
+    await expect(
+      hydrateManagedBlogPosts(database, referenceSiteDefinition),
+    ).resolves.toMatchObject({ blog: { posts: [] } });
+    await expect(
+      absentRecoveryApplication.commands.republishBlogPost({
+        actorId: editorActorId,
+        workspaceId: absentRecoveryWorkspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 1,
+        postId,
+        idempotencyKey: "d1-republish-restored-absent-post",
+      }),
+    ).resolves.toMatchObject({
+      revision: 2,
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              revision: 9,
               targetVisibility: "public",
             }),
           ],

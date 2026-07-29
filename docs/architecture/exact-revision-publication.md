@@ -107,10 +107,13 @@ a route removed by a newer verified release.
 Only after verified removal may the latest immutable snapshot be hydrated into
 a fresh management workspace. A post made absent by a verified historical
 restore is recovered as a new unpublished management revision, so it cannot
-reappear merely by approving the restored workspace. Republishing creates
-another attributed successor revision and runs through the same preview,
-approval, commit, deployment, and verification path. Never-published drafts
-and in-flight withdrawals are not hydrated across workspaces.
+reappear merely by approving the restored workspace. Recovery is claimed only
+while the aggregate still points at the last verified revision; once that
+successor exists, its later draft edits remain isolated to its workspace.
+Republishing creates another attributed successor revision and runs through
+the same preview, approval, commit, deployment, and verification path.
+Never-published drafts and in-flight withdrawals are not hydrated across
+workspaces.
 
 Accepted and rejected blog commands are recorded in an append-only D1
 transition audit with the authenticated actor, workspace, post target, request

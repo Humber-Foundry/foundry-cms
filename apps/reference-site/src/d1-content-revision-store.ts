@@ -160,7 +160,10 @@ export async function hydrateManagedBlogPosts(
              post.last_verified_visibility = 'unpublished'
              AND post.last_verified_revision = post.current_revision
            )
-           OR post.last_verified_visibility = 'absent'
+           OR (
+             post.last_verified_visibility = 'absent'
+             AND post.last_verified_revision = post.current_revision
+           )
          )
        ORDER BY post.post_id`,
     )
