@@ -450,11 +450,24 @@ export function serializePublishedSiteDefinition(
 }
 
 function publicSiteDefinition(definition: SiteDefinition): SiteDefinition {
+  const blog = (
+    definition as SiteDefinition & {
+      readonly blog?: SiteDefinition["blog"];
+    }
+  ).blog;
+  if (blog === undefined) {
+    if (
+      !["1.0.0", "1.1.0", "1.2.0"].includes(definition.schemaVersion)
+    ) {
+      throw new TypeError("site_definition_blog_missing");
+    }
+    return definition;
+  }
   return {
     ...definition,
     blog: {
-      ...definition.blog,
-      posts: definition.blog.posts.filter(
+      ...blog,
+      posts: blog.posts.filter(
         ({ targetVisibility }) => targetVisibility === "public",
       ),
     },
@@ -465,12 +478,23 @@ export function serializeContentPublicationArtifacts(
   definition: SiteDefinition,
 ): ReadonlyArray<ContentPublicationArtifact> {
   const publicDefinition = publicSiteDefinition(definition);
+  const richTextDefinition =
+    (
+      publicDefinition as SiteDefinition & {
+        readonly blog?: SiteDefinition["blog"];
+      }
+    ).blog === undefined
+      ? {
+          ...publicDefinition,
+          blog: { id: "blog" as const, posts: [] },
+        }
+      : publicDefinition;
   return [
     {
       path: publishedSiteDefinitionPath,
       bytes: serializePublishedSiteDefinition(publicDefinition),
     },
-    ...serializeSiteDefinitionRichTextForPublication(publicDefinition).map(
+    ...serializeSiteDefinitionRichTextForPublication(richTextDefinition).map(
       ({ filePath, markdown }) => ({
         path: filePath,
         bytes: markdown,

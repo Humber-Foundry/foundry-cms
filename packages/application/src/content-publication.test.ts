@@ -1368,6 +1368,52 @@ describe("content publication application", () => {
     );
   });
 
+  it("preserves the legacy v2 artifact contract when the historical definition has no blog", async () => {
+    const legacyDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    legacyDefinition.definitionVersion = "1.2.0";
+    legacyDefinition.schemaVersion = "1.2.0";
+    delete legacyDefinition.blog;
+    const legacyRichTextDefinition = {
+      ...legacyDefinition,
+      blog: { id: "blog", posts: [] },
+    };
+
+    await expect(
+      hashContentPublicationArtifacts(
+        serializeContentPublicationArtifacts(legacyDefinition),
+      ),
+    ).resolves.toBe(
+      await hashContentPublicationArtifacts([
+        {
+          path: "packages/site-definition/src/published-site.json",
+          bytes: serializePublishedSiteDefinition(legacyDefinition),
+        },
+        ...serializeSiteDefinitionRichTextForPublication(
+          legacyRichTextDefinition,
+        ).map(({ filePath, markdown }) => ({
+          path: filePath,
+          bytes: markdown,
+        })),
+      ]),
+    );
+    expect(
+      serializeContentPublicationArtifacts(legacyDefinition)[0]!.bytes,
+    ).toBe(serializePublishedSiteDefinition(legacyDefinition));
+  });
+
+  it("rejects a current publication definition whose blog data is missing", () => {
+    const invalidDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    delete invalidDefinition.blog;
+
+    expect(() =>
+      serializeContentPublicationArtifacts(invalidDefinition),
+    ).toThrow("site_definition_blog_missing");
+  });
+
   it("reconciles and explicitly retries an ambiguous legacy v1 publication after rollout", async () => {
     const backingStore = createInMemoryContentPublicationStore();
     let approvalOverride: Awaited<

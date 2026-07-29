@@ -211,9 +211,23 @@ export async function reconcileVerifiedBlogPostPublication(
   publication: Readonly<{ id: string; sequence: number }>,
   verifiedAt: string,
 ): Promise<void> {
+  const blog = (
+    definition as SiteDefinition & {
+      readonly blog?: SiteDefinition["blog"];
+    }
+  ).blog;
+  if (blog === undefined) {
+    if (
+      !["1.0.0", "1.1.0", "1.2.0"].includes(definition.schemaVersion)
+    ) {
+      throw new ContentRevisionConfigurationError();
+    }
+    return;
+  }
+  const blogPosts = blog.posts;
   const serializedPosts = JSON.stringify(
     await Promise.all(
-      definition.blog.posts.map(async (post) => {
+      blogPosts.map(async (post) => {
         const contentHash = await sha256CanonicalJson(post);
         return {
           id: post.id,
@@ -367,7 +381,7 @@ export async function reconcileVerifiedBlogPostPublication(
         publication.sequence,
         verifiedAt,
         siteId,
-        JSON.stringify(definition.blog.posts.map(({ id }) => id)),
+        JSON.stringify(blogPosts.map(({ id }) => id)),
       ),
   ]);
   const verification = await database

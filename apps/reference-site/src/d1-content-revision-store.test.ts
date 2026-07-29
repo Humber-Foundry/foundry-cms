@@ -862,6 +862,51 @@ describe("D1 content revision store", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("skips blog reconciliation for a verified legacy revision without blog data", async () => {
+    const legacyDefinition = structuredClone(referenceSiteDefinition) as any;
+    legacyDefinition.definitionVersion = "1.2.0";
+    legacyDefinition.schemaVersion = "1.2.0";
+    delete legacyDefinition.blog;
+
+    await expect(
+      reconcileVerifiedBlogPostPublication(
+        database,
+        referenceSiteDefinition.site.id,
+        legacyDefinition,
+        { id: "publication-legacy-without-blog", sequence: 1 },
+        "2026-07-27T14:15:00.000Z",
+      ),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM blog_posts
+           WHERE last_verified_publication_id = ?1`,
+        )
+        .bind("publication-legacy-without-blog")
+        .first<{ count: number }>(),
+    ).resolves.toEqual({ count: 0 });
+  });
+
+  it("fails closed when a current verified revision has no blog data", async () => {
+    const invalidDefinition = structuredClone(
+      referenceSiteDefinition,
+    ) as any;
+    delete invalidDefinition.blog;
+
+    await expect(
+      reconcileVerifiedBlogPostPublication(
+        database,
+        referenceSiteDefinition.site.id,
+        invalidDefinition,
+        { id: "publication-current-without-blog", sequence: 1 },
+        "2026-07-27T14:16:00.000Z",
+      ),
+    ).rejects.toBeInstanceOf(ContentRevisionConfigurationError);
+  });
+
   it("does not let delayed publication resurrect a newer absence", async () => {
     const postId = createBlogPostId(
       "00000000-0000-4000-8000-0000000000dd",
