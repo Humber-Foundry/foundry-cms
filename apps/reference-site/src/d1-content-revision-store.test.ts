@@ -647,9 +647,67 @@ describe("D1 content revision store", () => {
       live_revision: null,
       last_verified_visibility: "absent",
     });
+    const restoredAfterAbsence = await hydrateManagedBlogPosts(
+      database,
+      referenceSiteDefinition,
+    );
+    expect(restoredAfterAbsence).toMatchObject({
+      blog: {
+        posts: [
+          expect.objectContaining({
+            id: postId,
+            revision: 7,
+            targetVisibility: "unpublished",
+          }),
+        ],
+      },
+    });
+    const absentRecoveryWorkspaceId = createContentWorkspaceId(
+      "workspace_absent_blog_recovery",
+    );
+    const absentRecoveryApplication = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      initialDefinition: restoredAfterAbsence,
+      store: createD1ContentRevisionStore(
+        database,
+        referenceSiteDefinition.site.id,
+        absentRecoveryWorkspaceId,
+      ),
+      workspaceId: absentRecoveryWorkspaceId,
+      actorId: editorActorId,
+      rendererVersion: "renderer-test-commit",
+      productionBase: "published:site_foundry_reference@1.3.0",
+      now: () => "2026-07-27T13:40:00.000Z",
+    });
+    await absentRecoveryApplication.commands.create({
+      actorId: editorActorId,
+      workspaceId: absentRecoveryWorkspaceId,
+      idempotencyKey: "d1-create-absent-recovery-workspace",
+    });
     await expect(
-      hydrateManagedBlogPosts(database, referenceSiteDefinition),
-    ).resolves.toMatchObject({ blog: { posts: [] } });
+      absentRecoveryApplication.commands.republishBlogPost({
+        actorId: editorActorId,
+        workspaceId: absentRecoveryWorkspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        postId,
+        idempotencyKey: "d1-republish-restored-absent-post",
+      }),
+    ).resolves.toMatchObject({
+      revision: 1,
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              revision: 8,
+              targetVisibility: "public",
+            }),
+          ],
+        },
+      },
+    });
     expect(
       await database
         .prepare(

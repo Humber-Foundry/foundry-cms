@@ -147,7 +147,7 @@ export async function hydrateManagedBlogPosts(
 ): Promise<SiteDefinition> {
   const rows = await database
     .prepare(
-      `SELECT revision.snapshot_json
+      `SELECT revision.snapshot_json, post.last_verified_visibility
        FROM blog_posts AS post
        JOIN blog_post_revisions AS revision
          ON revision.site_id = post.site_id
@@ -155,14 +155,32 @@ export async function hydrateManagedBlogPosts(
         AND revision.revision = post.current_revision
        WHERE post.site_id = ?1
          AND post.live_revision IS NULL
-         AND post.last_verified_visibility = 'unpublished'
-         AND post.last_verified_revision = post.current_revision
+         AND (
+           (
+             post.last_verified_visibility = 'unpublished'
+             AND post.last_verified_revision = post.current_revision
+           )
+           OR post.last_verified_visibility = 'absent'
+         )
        ORDER BY post.post_id`,
     )
     .bind(definition.site.id)
-    .all<{ snapshot_json: string }>();
-  const managed = rows.results.map(({ snapshot_json }) =>
-    JSON.parse(snapshot_json) as BlogPost
+    .all<{
+      snapshot_json: string;
+      last_verified_visibility: "unpublished" | "absent";
+    }>();
+  const managed = rows.results.map(
+    ({ snapshot_json, last_verified_visibility }) => {
+      const post = JSON.parse(snapshot_json) as BlogPost;
+      return last_verified_visibility === "absent" &&
+        post.targetVisibility === "public"
+        ? {
+            ...post,
+            revision: post.revision + 1,
+            targetVisibility: "unpublished" as const,
+          }
+        : post;
+    },
   );
   const publishedIds = new Set(definition.blog.posts.map(({ id }) => id));
   const hydrated = {
@@ -549,7 +567,14 @@ export function createD1ContentRevisionStore(
                ?3
              FROM json_each(?2) AS entry
              WHERE 1 = 1
-             ON CONFLICT (site_id, post_id) DO NOTHING`,
+             ON CONFLICT (site_id, post_id) DO UPDATE SET
+               current_revision = excluded.current_revision,
+               version = blog_posts.version + 1,
+               updated_at = excluded.updated_at
+             WHERE blog_posts.live_revision IS NULL
+               AND blog_posts.last_verified_visibility = 'absent'
+               AND blog_posts.current_revision + 1 =
+                   excluded.current_revision`,
           )
           .bind(
             siteId,

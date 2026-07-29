@@ -105,10 +105,12 @@ the collection grows. Both present state and absence tombstones advance by
 durable publication sequence, so a delayed older publication cannot resurrect
 a route removed by a newer verified release.
 Only after verified removal may the latest immutable snapshot be hydrated into
-a fresh management workspace. Republishing creates another attributed
-successor revision and runs through the same preview, approval, commit,
-deployment, and verification path. Never-published drafts and in-flight
-withdrawals are not hydrated across workspaces.
+a fresh management workspace. A post made absent by a verified historical
+restore is recovered as a new unpublished management revision, so it cannot
+reappear merely by approving the restored workspace. Republishing creates
+another attributed successor revision and runs through the same preview,
+approval, commit, deployment, and verification path. Never-published drafts
+and in-flight withdrawals are not hydrated across workspaces.
 
 Accepted and rejected blog commands are recorded in an append-only D1
 transition audit with the authenticated actor, workspace, post target, request
