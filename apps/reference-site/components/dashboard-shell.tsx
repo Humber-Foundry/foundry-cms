@@ -23,6 +23,14 @@ export function contentWorkspaceRequiresSchemaRecovery(
   return revision.inputs.schemaVersion !== definition.schemaVersion;
 }
 
+export function verifiedPublicBlogPostIds(
+  definition: SiteDefinition,
+) {
+  return definition.blog.posts
+    .filter(({ targetVisibility }) => targetVisibility === "public")
+    .map(({ id }) => id);
+}
+
 export function DashboardShell({
   definition,
   currentMembership,
@@ -140,8 +148,8 @@ export function DashboardShell({
                 mediaAssets={mediaAssets}
                 mediaOccurrences={mediaOccurrences}
                 mediaWorkspaceId={mediaWorkspaceId}
-                verifiedPublicPostIds={definition.blog.posts.map(
-                  ({ id }) => id,
+                verifiedPublicPostIds={verifiedPublicBlogPostIds(
+                  definition,
                 )}
               />
             </>

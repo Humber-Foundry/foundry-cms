@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { ContentRevision } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
+  referenceSiteDefinition,
+} from "@foundry/site-definition";
 
-import { contentWorkspaceRequiresSchemaRecovery } from "./dashboard-shell";
+import {
+  contentWorkspaceRequiresSchemaRecovery,
+  verifiedPublicBlogPostIds,
+} from "./dashboard-shell";
 
 describe("dashboard content-workspace compatibility", () => {
   const revision = {
@@ -29,5 +36,47 @@ describe("dashboard content-workspace compatibility", () => {
         revision,
       ),
     ).toBe(false);
+  });
+
+  it("passes only verified-public posts to lifecycle controls", () => {
+    const publicId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000011",
+    );
+    const unpublishedId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000012",
+    );
+    const post = {
+      revision: 1,
+      collectionState: "active" as const,
+      slug: "verified-state",
+      title: "Verified state",
+      excerpt: "Verified lifecycle wiring.",
+      seo: {
+        title: "Verified state | Foundry",
+        description: "Verified lifecycle wiring.",
+      },
+      body: createRichTextDocumentFromPlainText("Verified state."),
+    };
+    const definition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            ...post,
+            id: publicId,
+            targetVisibility: "public" as const,
+          },
+          {
+            ...post,
+            id: unpublishedId,
+            slug: "verified-unpublished",
+            targetVisibility: "unpublished" as const,
+          },
+        ],
+      },
+    };
+
+    expect(verifiedPublicBlogPostIds(definition)).toEqual([publicId]);
   });
 });
