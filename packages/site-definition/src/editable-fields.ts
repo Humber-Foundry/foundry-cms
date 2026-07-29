@@ -60,6 +60,7 @@ type MutableSiteDefinition = DeepMutable<SiteDefinition>;
 
 type EditableFieldBinding = Readonly<{
   field: EditableSiteField;
+  blogPostId?: BlogPostId;
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
@@ -79,6 +80,7 @@ type EditableFieldBindingInput = Readonly<{
   group: EditableSiteField["group"];
   multiline?: boolean;
   values?: ReadonlyArray<string>;
+  blogPostId?: BlogPostId;
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
@@ -98,6 +100,7 @@ function fieldBinding({
   multiline = false,
   format = "plainText",
   values,
+  blogPostId,
   write,
 }: EditableFieldBindingInput &
   Readonly<{
@@ -114,6 +117,7 @@ function fieldBinding({
       format,
       ...(values === undefined ? {} : { values }),
     } as EditableSiteField,
+    ...(blogPostId === undefined ? {} : { blogPostId }),
     write,
   };
 }
@@ -451,6 +455,7 @@ function editableFieldBindings(
       fields.push(
         fieldBinding({
           path: `${post.id}.${property}`,
+          blogPostId: post.id,
           label,
           group: "Blog",
           value: post[property],
@@ -468,6 +473,7 @@ function editableFieldBindings(
       fields.push(
         fieldBinding({
           path: `${post.id}.seo.${property}`,
+          blogPostId: post.id,
           label: `Post SEO ${property}`,
           group: "Blog",
           value: post.seo[property],
@@ -481,6 +487,7 @@ function editableFieldBindings(
     fields.push(
       fieldBinding({
         path: `${post.id}.body`,
+        blogPostId: post.id,
         label: "Post body",
         group: "Blog",
         value: serializeRichTextDocument(post.body),
@@ -522,25 +529,48 @@ export function serializeSiteDefinitionRichTextForPublication(
 ): ReadonlyArray<PublishedRichTextArtifact> {
   const publicPostIds = new Set(
     definition.blog.posts
-      .filter(({ visibility }) => visibility === "public")
+      .filter(({ targetVisibility }) => targetVisibility === "public")
       .map(({ id }) => id),
   );
-  return listEditableSiteFields(definition)
+  return editableFieldBindings(definition)
     .filter(
       (
-        field,
-      ): field is Extract<EditableSiteField, { format: "richText" }> =>
-        field.format === "richText" &&
-        (field.group !== "Blog" ||
-          publicPostIds.has(field.path.split(".", 1)[0] as BlogPostId)),
+        binding,
+      ): binding is EditableFieldBinding & {
+        field: Extract<EditableSiteField, { format: "richText" }>;
+      } =>
+        binding.field.format === "richText" &&
+        (binding.field.group !== "Blog" ||
+          (binding.blogPostId !== undefined &&
+            publicPostIds.has(binding.blogPostId))),
     )
-    .map((field) => ({
+    .map(({ field }) => ({
       fieldPath: field.path,
       filePath: `content/rich-text/${field.path.replaceAll(".", "/")}.md`,
       markdown: serializeRichTextToMarkdown(
         parseSerializedRichTextDocument(field.value),
       ),
     }));
+}
+
+export function blogPostIdsForSiteDefinitionEdits(
+  definition: SiteDefinition,
+  edits: ReadonlyArray<SiteDefinitionEdit>,
+): ReadonlyArray<BlogPostId> {
+  const bindings = new Map(
+    editableFieldBindings(definition).map((binding) => [
+      binding.field.path,
+      binding,
+    ]),
+  );
+  return [
+    ...new Set(
+      edits.flatMap(({ path }) => {
+        const postId = bindings.get(path)?.blogPostId;
+        return postId === undefined ? [] : [postId];
+      }),
+    ),
+  ];
 }
 
 export function updateEditableSiteField(
@@ -633,12 +663,10 @@ export function applySiteDefinitionEdits(
   ) as unknown as MutableSiteDefinition;
   const editedPostIds = new Set<string>();
   for (const edit of edits) {
-    bindings.get(edit.path)!.write(draft, edit.value);
-    const post = definition.blog.posts.find(({ id }) =>
-      edit.path.startsWith(`${id}.`)
-    );
-    if (post !== undefined) {
-      editedPostIds.add(post.id);
+    const binding = bindings.get(edit.path)!;
+    binding.write(draft, edit.value);
+    if (binding.blogPostId !== undefined) {
+      editedPostIds.add(binding.blogPostId);
     }
   }
   for (const postId of editedPostIds) {

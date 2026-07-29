@@ -11,6 +11,10 @@ import {
   type ContentRevision,
   type ContentWorkspaceId,
 } from "./content-revisions";
+import {
+  createBlogPostArtifactFingerprints,
+  type BlogPostArtifactFingerprint,
+} from "./blog-artifacts";
 import { canonicalJson } from "./deterministic-hash";
 import type { HumanMembershipId } from "./human-access";
 
@@ -68,6 +72,7 @@ export type ContentApprovalFingerprint = Readonly<{
   productionBase: string;
   artifactHash: string;
   serializationVersion: ContentSerializationVersion;
+  postArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
 }>;
 
 export type ContentPublicationArtifact = Readonly<{
@@ -460,7 +465,7 @@ function publicSiteDefinition(definition: SiteDefinition): SiteDefinition {
     blog: {
       ...definition.blog,
       posts: definition.blog.posts.filter(
-        ({ visibility }) => visibility === "public",
+        ({ targetVisibility }) => targetVisibility === "public",
       ),
     },
   };
@@ -584,6 +589,13 @@ export async function createContentApprovalFingerprint(
   const publishedContentHash = await hashPublishedSiteDefinition(
     publicSiteDefinition(revision.definition),
   );
+  const postArtifacts = await createBlogPostArtifactFingerprints({
+    definition: revision.definition,
+    inputs: {
+      schemaVersion: revision.definition.schemaVersion,
+      rendererVersion: revision.inputs.rendererVersion,
+    },
+  });
   const binding = {
     channel,
     channelConfigurationHash,
@@ -595,6 +607,7 @@ export async function createContentApprovalFingerprint(
     productionBase: revision.inputs.productionBase,
     artifactHash,
     serializationVersion: contentSerializationVersion,
+    postArtifacts,
   } as const;
   return {
     ...binding,

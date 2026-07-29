@@ -239,6 +239,7 @@ describe("content publication application", () => {
           artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           serializationVersion:
             "foundry.site-publication-artifacts.v2",
+          postArtifacts: [],
         },
       }),
     );
@@ -287,6 +288,18 @@ describe("content publication application", () => {
       approvedBy: membershipId,
       previewConfirmed: true,
     });
+    expect(approval.fingerprint.postArtifacts).toEqual([
+      expect.objectContaining({
+        postId,
+        postRevisionId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+        ),
+        revision: 1,
+        contentHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        renderedBytesHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        value: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      }),
+    ]);
     const publication = await app.commands.publish({
       workspaceId,
       approvalId: approval.id,

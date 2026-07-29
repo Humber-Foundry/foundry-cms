@@ -65,6 +65,16 @@ that saved revision, and approval, Git compare-and-swap, Cloudflare deployment,
 and two-read live-marker verification use the existing publication
 transaction described here.
 
+Each post revision also has its own deterministic, site-scoped UUIDv5 identity
+and `foundry.post-artifact.v1` fingerprint. The fingerprint length-delimits and
+hashes the post ID, post-revision ID, canonical post-content hash, schema
+version, renderer version, serialization version, and the exact rendered-route
+bytes hash (or route-absence artifact for unpublish). D1 persists that evidence
+with the immutable `blog_post_revisions` row, and the site approval stores the
+ordered post-artifact evidence inside its own fingerprint. Preview, approval,
+Git publication, and verified-live reconciliation therefore identify both the
+complete site artifact and every exact post revision within it.
+
 Post identity and revision concurrency are site-global even though editing
 occurs in workspaces. D1 stores one `blog_posts` aggregate head per site/post,
 plus immutable UUID-keyed `blog_post_revisions`. Every create or successor

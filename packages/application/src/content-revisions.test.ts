@@ -108,7 +108,7 @@ describe("content revision application", () => {
     expect(created.definition.blog.posts[0]).toMatchObject({
       id: postId,
       revision: 1,
-      visibility: "public",
+      targetVisibility: "public",
       title: "First post",
     });
 
@@ -182,7 +182,7 @@ describe("content revision application", () => {
             id: postId,
             revision: 1,
             collectionState: "active" as const,
-            visibility: "public" as const,
+            targetVisibility: "public" as const,
             slug: "live-post",
             title: "Live post",
             excerpt: "This post is currently live.",
@@ -214,7 +214,7 @@ describe("content revision application", () => {
     expect(unpublished.definition.blog.posts[0]).toMatchObject({
       id: postId,
       revision: 2,
-      visibility: "unpublished",
+      targetVisibility: "unpublished",
     });
     expect(
       (await application.queries.getRevision(0))?.definition.blog.posts[0],
@@ -281,7 +281,7 @@ describe("content revision application", () => {
       id: postId,
       revision: 3,
       collectionState: "active",
-      visibility: "public",
+      targetVisibility: "public",
     });
   });
 

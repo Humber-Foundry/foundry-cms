@@ -9,6 +9,7 @@ import {
   ContentRevisionBookmarkError,
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
+  createBlogPostArtifactFingerprint,
   createContentWorkspaceId,
   restoreContentActorId,
   assertContentRevisionBase,
@@ -150,9 +151,9 @@ export async function reconcileVerifiedBlogPostPublication(
              )`,
         )
         .bind(
-          post.visibility === "public" ? post.revision : null,
+          post.targetVisibility === "public" ? post.revision : null,
           post.revision,
-          post.visibility,
+          post.targetVisibility,
           publication.id,
           publication.sequence,
           verifiedAt,
@@ -348,10 +349,18 @@ export function createD1ContentRevisionStore(
 
   return {
     async initialize(initialRevision, ownerActorId) {
-      const initialBlogStatements = initialRevision.definition.blog.posts
-        .flatMap((post) => [
-          database
-            .prepare(
+      const initialBlogStatements = (
+        await Promise.all(
+          initialRevision.definition.blog.posts.map(async (post) => {
+            const artifact = await createBlogPostArtifactFingerprint({
+              siteId,
+              post,
+              schemaVersion: initialRevision.definition.schemaVersion,
+              rendererVersion: initialRevision.inputs.rendererVersion,
+            });
+            return [
+              database
+                .prepare(
               `INSERT INTO blog_posts (
                  site_id, post_id, collection_state, current_revision,
                  live_revision, last_verified_revision,
@@ -383,35 +392,52 @@ export function createD1ContentRevisionStore(
                  ?3, ?6
                )
                ON CONFLICT (site_id, post_id) DO NOTHING`,
-            )
-            .bind(
-              siteId,
-              post.id,
-              post.revision,
-              post.visibility === "public" ? post.revision : null,
-              post.visibility,
-              initialRevision.createdAt,
-            ),
-          database
-            .prepare(
+                )
+                .bind(
+                  siteId,
+                  post.id,
+                  post.revision,
+                  post.targetVisibility === "public"
+                    ? post.revision
+                    : null,
+                  post.targetVisibility,
+                  initialRevision.createdAt,
+                ),
+              database
+                .prepare(
               `INSERT INTO blog_post_revisions (
                  revision_id, site_id, post_id, revision, workspace_id,
-                 content_revision, snapshot_json, created_at, created_by
-               ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 content_revision, snapshot_json, created_at, created_by,
+                 content_hash, schema_version, renderer_version,
+                 serialization_version, rendered_bytes_hash,
+                 artifact_fingerprint
+               ) VALUES (
+                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                 ?10, ?11, ?12, ?13, ?14, ?15
+               )
                ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
-            )
-            .bind(
-              crypto.randomUUID(),
-              siteId,
-              post.id,
-              post.revision,
-              workspaceId,
-              initialRevision.revision,
-              JSON.stringify(post),
-              initialRevision.createdAt,
-              initialRevision.createdBy,
-            ),
-        ]);
+                )
+                .bind(
+                  artifact.postRevisionId,
+                  siteId,
+                  post.id,
+                  post.revision,
+                  workspaceId,
+                  initialRevision.revision,
+                  JSON.stringify(post),
+                  initialRevision.createdAt,
+                  initialRevision.createdBy,
+                  artifact.contentHash,
+                  artifact.schemaVersion,
+                  artifact.rendererVersion,
+                  artifact.serializationVersion,
+                  artifact.renderedBytesHash,
+                  artifact.value,
+                ),
+            ];
+          }),
+        )
+      ).flat();
       await database.batch([
         database
           .prepare(
@@ -559,7 +585,7 @@ export function createD1ContentRevisionStore(
           live_revision: number | null;
           last_verified_revision: number | null;
           last_verified_visibility:
-            | BlogPost["visibility"]
+            | BlogPost["targetVisibility"]
             | "absent"
             | null;
           version: number;
@@ -822,15 +848,20 @@ export function createD1ContentRevisionStore(
             .prepare(
               `INSERT INTO blog_post_revisions (
                  revision_id, site_id, post_id, revision, workspace_id,
-                 content_revision, snapshot_json, created_at, created_by
+                 content_revision, snapshot_json, created_at, created_by,
+                 content_hash, schema_version, renderer_version,
+                 serialization_version, rendered_bytes_hash,
+                 artifact_fingerprint
                )
-               SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+               SELECT
+                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                 ?10, ?11, ?12, ?13, ?14, ?15
                WHERE EXISTS (
                  SELECT 1 FROM content_revision_receipts
-                 WHERE idempotency_key = ?10
+                 WHERE idempotency_key = ?16
                    AND workspace_id = ?5
                    AND revision = ?6
-                   AND request_hash = ?11
+                   AND request_hash = ?17
                )
                ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
             )
@@ -844,6 +875,12 @@ export function createD1ContentRevisionStore(
               JSON.stringify(post),
               command.revision.createdAt,
               command.revision.createdBy,
+              transition.artifact.contentHash,
+              transition.artifact.schemaVersion,
+              transition.artifact.rendererVersion,
+              transition.artifact.serializationVersion,
+              transition.artifact.renderedBytesHash,
+              transition.artifact.value,
               command.idempotencyKey,
               command.requestHash,
             );

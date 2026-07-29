@@ -132,7 +132,7 @@ export function BlogPostControls({
             <div>
               <strong>{post.title}</strong>
               <span>
-                Revision {post.revision} · {post.visibility} · /blog/{post.slug}
+                Revision {post.revision} · {post.targetVisibility} · /blog/{post.slug}
               </span>
             </div>
             <button
@@ -143,7 +143,7 @@ export function BlogPostControls({
               }
               onClick={() => {
                 const operation =
-                  post.visibility === "public"
+                  post.targetVisibility === "public"
                     ? "unpublish_blog_post"
                     : "republish_blog_post";
                 void send(
@@ -158,7 +158,7 @@ export function BlogPostControls({
                 );
               }}
             >
-              {post.visibility === "public"
+              {post.targetVisibility === "public"
                 ? "Prepare unpublish"
                 : "Prepare republish"}
             </button>

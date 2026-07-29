@@ -41,7 +41,7 @@ export function createBlogPostDefinition(
   siteId: SiteId,
   post: Omit<
     BlogPost,
-    "revision" | "collectionState" | "visibility"
+    "revision" | "collectionState" | "targetVisibility"
   >,
 ): SiteDefinition {
   requireSite(definition, siteId);
@@ -61,7 +61,7 @@ export function createBlogPostDefinition(
           ...post,
           revision: 1,
           collectionState: "active",
-          visibility: "public",
+          targetVisibility: "public",
         },
       ],
     },
@@ -74,7 +74,7 @@ export function editBlogPostDefinition(
   postId: BlogPostId,
   replacement: Omit<
     BlogPost,
-    "id" | "revision" | "collectionState" | "visibility"
+    "id" | "revision" | "collectionState" | "targetVisibility"
   >,
 ): SiteDefinition {
   requireSite(definition, siteId);
@@ -95,7 +95,7 @@ export function editBlogPostDefinition(
     id: current.id,
     revision: current.revision + 1,
     collectionState: current.collectionState,
-    visibility: current.visibility,
+    targetVisibility: current.targetVisibility,
     slug: replacement.slug,
     title: replacement.title,
     excerpt: replacement.excerpt,
@@ -118,7 +118,7 @@ export function unpublishBlogPostDefinition(
     throw new BlogPostSchemaError("post_not_found");
   }
   const current = definition.blog.posts.find(({ id }) => id === postId)!;
-  if (current.visibility === "unpublished") {
+  if (current.targetVisibility === "unpublished") {
     throw new BlogPostSchemaError("post_not_live");
   }
   return requireValid({
@@ -130,7 +130,7 @@ export function unpublishBlogPostDefinition(
           ? {
               ...post,
               revision: post.revision + 1,
-              visibility: "unpublished" as const,
+              targetVisibility: "unpublished" as const,
             }
           : post,
       ),
@@ -148,7 +148,7 @@ export function republishBlogPostDefinition(
   if (current === undefined) {
     throw new BlogPostSchemaError("post_not_found");
   }
-  if (current.visibility === "public") {
+  if (current.targetVisibility === "public") {
     throw new BlogPostSchemaError("post_already_live");
   }
   return requireValid({
@@ -160,7 +160,7 @@ export function republishBlogPostDefinition(
           ? {
               ...post,
               revision: post.revision + 1,
-              visibility: "public" as const,
+              targetVisibility: "public" as const,
             }
           : post,
       ),

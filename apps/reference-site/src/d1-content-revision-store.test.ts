@@ -50,6 +50,7 @@ describe("D1 content revision store", () => {
       "0008_media_assets.sql",
       "0011_blog_post_transition_audit.sql",
       "0013_blog_post_verified_state.sql",
+      "0014_blog_post_artifact_fingerprints.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -278,14 +279,14 @@ describe("D1 content revision store", () => {
       post_id: postId,
       before_state_json: JSON.stringify({
         revision: 2,
-        visibility: "public",
+        targetVisibility: "public",
         aggregateRevision: 2,
         liveRevision: null,
         aggregateVersion: 2,
       }),
       after_state_json: JSON.stringify({
         revision: 2,
-        visibility: "public",
+        targetVisibility: "public",
         aggregateRevision: 2,
         liveRevision: null,
         aggregateVersion: 2,
@@ -320,7 +321,7 @@ describe("D1 content revision store", () => {
       before_state_json: null,
       after_state_json: JSON.stringify({
         revision: 1,
-        visibility: "public",
+        targetVisibility: "public",
       }),
       revision: 1,
     });
@@ -340,11 +341,11 @@ describe("D1 content revision store", () => {
       post_id: postId,
       before_state_json: JSON.stringify({
         revision: 1,
-        visibility: "public",
+        targetVisibility: "public",
       }),
       after_state_json: JSON.stringify({
         revision: 2,
-        visibility: "public",
+        targetVisibility: "public",
       }),
       revision: 2,
     });
@@ -466,7 +467,7 @@ describe("D1 content revision store", () => {
             expect.objectContaining({
               id: postId,
               revision: 4,
-              visibility: "unpublished",
+              targetVisibility: "unpublished",
             }),
           ],
         },
@@ -479,7 +480,7 @@ describe("D1 content revision store", () => {
             expect.objectContaining({
               id: postId,
               revision: 3,
-              visibility: "public",
+              targetVisibility: "public",
             }),
           ],
         },
@@ -525,11 +526,11 @@ describe("D1 content revision store", () => {
       post_id: postId,
       before_state_json: JSON.stringify({
         revision: 3,
-        visibility: "public",
+        targetVisibility: "public",
       }),
       after_state_json: JSON.stringify({
         revision: 4,
-        visibility: "unpublished",
+        targetVisibility: "unpublished",
       }),
       revision: 4,
     });
@@ -542,7 +543,7 @@ describe("D1 content revision store", () => {
       expect.objectContaining({
         id: postId,
         revision: 4,
-        visibility: "unpublished",
+        targetVisibility: "unpublished",
       }),
     ]);
     const republishWorkspaceId = createContentWorkspaceId(
@@ -588,7 +589,7 @@ describe("D1 content revision store", () => {
           posts: [
             expect.objectContaining({
               revision: 5,
-              visibility: "unpublished",
+              targetVisibility: "unpublished",
             }),
           ],
         },
@@ -612,7 +613,7 @@ describe("D1 content revision store", () => {
             expect.objectContaining({
               id: postId,
               revision: 6,
-              visibility: "public",
+              targetVisibility: "public",
             }),
           ],
         },
@@ -651,14 +652,34 @@ describe("D1 content revision store", () => {
     expect(
       await database
         .prepare(
-          `SELECT snapshot_json
+          `SELECT snapshot_json, revision_id AS post_revision_id, content_hash,
+                  schema_version, renderer_version, serialization_version,
+                  rendered_bytes_hash, artifact_fingerprint
            FROM blog_post_revisions
            WHERE site_id = ?1 AND post_id = ?2 AND revision = 6`,
         )
         .bind(referenceSiteDefinition.site.id, postId)
-        .first<{ snapshot_json: string }>(),
+        .first<{
+          snapshot_json: string;
+          post_revision_id: string;
+          content_hash: string;
+          schema_version: string;
+          renderer_version: string;
+          serialization_version: string;
+          rendered_bytes_hash: string;
+          artifact_fingerprint: string;
+        }>(),
     ).toMatchObject({
-      snapshot_json: expect.stringContaining('"visibility":"public"'),
+      snapshot_json: expect.stringContaining('"targetVisibility":"public"'),
+      post_revision_id: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      ),
+      content_hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      schema_version: referenceSiteDefinition.schemaVersion,
+      renderer_version: "renderer-test-commit",
+      serialization_version: "foundry.post-artifact.v1",
+      rendered_bytes_hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      artifact_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
     });
     },
   );
@@ -676,7 +697,7 @@ describe("D1 content revision store", () => {
             id: postId,
             revision: 1,
             collectionState: "active" as const,
-            visibility: "public" as const,
+            targetVisibility: "public" as const,
             slug: "shared-post",
             title: "Shared post",
             excerpt: "One aggregate shared across workspaces.",
@@ -753,14 +774,14 @@ describe("D1 content revision store", () => {
       outcome: "rejected",
       before_state_json: JSON.stringify({
         revision: 1,
-        visibility: "public",
+        targetVisibility: "public",
         aggregateRevision: 2,
         liveRevision: 1,
         aggregateVersion: 2,
       }),
       after_state_json: JSON.stringify({
         revision: 1,
-        visibility: "public",
+        targetVisibility: "public",
         aggregateRevision: 2,
         liveRevision: 1,
         aggregateVersion: 2,
@@ -800,7 +821,7 @@ describe("D1 content revision store", () => {
             ),
             revision: 1,
             collectionState: "active" as const,
-            visibility: "public" as const,
+            targetVisibility: "public" as const,
             slug: "missing-aggregate",
             title: "Missing aggregate",
             excerpt: "The callback must not silently succeed.",

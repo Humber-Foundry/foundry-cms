@@ -21,6 +21,7 @@ import {
   createContentPublicationId,
   createContentWorkspaceId,
   createHumanMembershipId,
+  isBlogPostArtifactFingerprint,
   serializeContentPublicationCommandIdentity,
   serializeContentRestoreIdentity,
 } from "@foundry/application";
@@ -36,6 +37,7 @@ type ApprovalRow = {
   channel_configuration_hash: string;
   content_hash: string;
   revision_content_hash: string | null;
+  blog_post_artifacts_json: string | null;
   design_hash: string;
   schema_version: ContentApprovalFingerprint["schemaVersion"];
   renderer_version: string;
@@ -91,6 +93,7 @@ const approvalProjection = `
     approval.channel_configuration_hash,
     approval.content_hash,
     approval.revision_content_hash,
+    approval.blog_post_artifacts_json,
     approval.design_hash,
     approval.schema_version,
     approval.renderer_version,
@@ -131,6 +134,16 @@ const publicationProjection = `
 `;
 
 function toApproval(row: ApprovalRow): ContentApproval {
+  const postArtifacts: unknown =
+    row.blog_post_artifacts_json === null
+      ? []
+      : JSON.parse(row.blog_post_artifacts_json);
+  if (
+    !Array.isArray(postArtifacts) ||
+    !postArtifacts.every(isBlogPostArtifactFingerprint)
+  ) {
+    throw new Error("content_approval_blog_post_artifacts_invalid");
+  }
   const fingerprint: ContentApprovalFingerprint = {
     value: row.fingerprint,
     channel: row.channel,
@@ -144,6 +157,7 @@ function toApproval(row: ApprovalRow): ContentApproval {
     productionBase: row.production_base,
     artifactHash: row.artifact_hash,
     serializationVersion: row.serialization_version,
+    postArtifacts,
   };
   return {
     id: createContentApprovalId(row.id),
@@ -419,12 +433,13 @@ export function createD1ContentPublicationStore(
                id, workspace_id, revision, fingerprint, channel,
                channel_configuration_hash, content_hash, design_hash,
                revision_content_hash,
+               blog_post_artifacts_json,
                schema_version, renderer_version, production_base,
                artifact_hash, serialization_version, approved_by, approved_at
              )
              SELECT
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-               ?14, ?15, ?16
+               ?14, ?15, ?16, ?17
              WHERE EXISTS (
                SELECT 1
                FROM content_workspaces
@@ -443,6 +458,7 @@ export function createD1ContentPublicationStore(
             approval.fingerprint.designHash,
             approval.fingerprint.revisionContentHash ??
               approval.fingerprint.contentHash,
+            JSON.stringify(approval.fingerprint.postArtifacts),
             approval.fingerprint.schemaVersion,
             approval.fingerprint.rendererVersion,
             approval.fingerprint.productionBase,

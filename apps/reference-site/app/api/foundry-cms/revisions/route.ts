@@ -66,7 +66,7 @@ type BlogMutationBody =
       baseRevision: number;
       post: Omit<
         SiteDefinition["blog"]["posts"][number],
-        "revision" | "collectionState" | "visibility"
+        "revision" | "collectionState" | "targetVisibility"
       >;
     }>
   | Readonly<{
@@ -77,7 +77,7 @@ type BlogMutationBody =
       postId: SiteDefinition["blog"]["posts"][number]["id"];
       post: Omit<
         SiteDefinition["blog"]["posts"][number],
-        "id" | "revision" | "collectionState" | "visibility"
+        "id" | "revision" | "collectionState" | "targetVisibility"
       >;
     }>
   | Readonly<{
@@ -95,17 +95,38 @@ type BlogMutationBody =
       postId: SiteDefinition["blog"]["posts"][number]["id"];
     }>;
 
+type BlogMutationOperation = BlogMutationBody["operation"];
+
+const blogMutationCommandTypes: Readonly<
+  Record<
+    BlogMutationOperation,
+    | "blog.post.create"
+    | "blog.post.edit"
+    | "blog.post.unpublish"
+    | "blog.post.republish"
+  >
+> = {
+  create_blog_post: "blog.post.create",
+  edit_blog_post: "blog.post.edit",
+  unpublish_blog_post: "blog.post.unpublish",
+  republish_blog_post: "blog.post.republish",
+};
+
+function isBlogMutationOperation(
+  value: unknown,
+): value is BlogMutationOperation {
+  return (
+    typeof value === "string" &&
+    Object.hasOwn(blogMutationCommandTypes, value)
+  );
+}
+
 function parseBlogMutation(value: unknown): BlogMutationBody | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
   const candidate = value as Record<string, unknown>;
-  if (
-    candidate.operation !== "create_blog_post" &&
-    candidate.operation !== "edit_blog_post" &&
-    candidate.operation !== "unpublish_blog_post" &&
-    candidate.operation !== "republish_blog_post"
-  ) {
+  if (!isBlogMutationOperation(candidate.operation)) {
     return null;
   }
   if (
@@ -183,6 +204,53 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
   };
 }
 
+async function saveBlogMutation(
+  application: Awaited<ReturnType<typeof loadContentRevisionApplication>>,
+  mutation: BlogMutationBody,
+  command: {
+    actorId: ReturnType<typeof createContentActorId>;
+    workspaceId: BlogMutationBody["workspaceId"];
+    siteId: SiteDefinition["site"]["id"];
+    schemaVersion: SiteDefinition["schemaVersion"];
+    baseRevision: number;
+    idempotencyKey: string;
+  },
+) {
+  switch (mutation.operation) {
+    case "create_blog_post":
+      return application.commands.createBlogPost({
+        ...command,
+        post: mutation.post,
+      });
+    case "edit_blog_post":
+      return application.commands.editBlogPost({
+        ...command,
+        postId: mutation.postId,
+        post: mutation.post,
+      });
+    case "unpublish_blog_post":
+      return application.commands.unpublishBlogPost({
+        ...command,
+        postId: mutation.postId,
+      });
+    case "republish_blog_post":
+      return application.commands.republishBlogPost({
+        ...command,
+        postId: mutation.postId,
+      });
+  }
+}
+
+function selectedBlogPostId(
+  mutation: BlogMutationBody,
+): SiteDefinition["blog"]["posts"][number]["id"] | null {
+  return mutation.operation === "unpublish_blog_post"
+    ? null
+    : mutation.operation === "create_blog_post"
+      ? mutation.post.id
+      : mutation.postId;
+}
+
 export async function GET(request: Request) {
   try {
     const authenticated = await loadHumanIdentityRequestContext(
@@ -235,8 +303,8 @@ export async function GET(request: Request) {
     if (
       postParameter !== null &&
       !revision.definition.blog.posts.some(
-        ({ slug, visibility }) =>
-          slug === postParameter && visibility === "public",
+        ({ slug, targetVisibility }) =>
+          slug === postParameter && targetVisibility === "public",
       )
     ) {
       return Response.json({ error: "preview_unavailable" }, { status: 409 });
@@ -432,10 +500,7 @@ export async function POST(request: Request) {
         typeof submitted === "object" &&
         submitted !== null &&
         "operation" in submitted &&
-        (submitted.operation === "create_blog_post" ||
-          submitted.operation === "edit_blog_post" ||
-          submitted.operation === "unpublish_blog_post" ||
-          submitted.operation === "republish_blog_post")
+        isBlogMutationOperation(submitted.operation)
       ) {
         const candidate = submitted as Record<string, unknown>;
         const rawPostId =
@@ -480,13 +545,9 @@ export async function POST(request: Request) {
           actorId,
           postId,
           commandType:
-            candidate.operation === "create_blog_post"
-                ? "blog.post.create"
-                : candidate.operation === "edit_blog_post"
-                  ? "blog.post.edit"
-                  : candidate.operation === "unpublish_blog_post"
-                    ? "blog.post.unpublish"
-                    : "blog.post.republish",
+            blogMutationCommandTypes[
+              candidate.operation as BlogMutationOperation
+            ],
           reasonCode: "blog_command_invalid",
           requestId: idempotencyKey,
         });
@@ -507,37 +568,15 @@ export async function POST(request: Request) {
         baseRevision: blogMutation.baseRevision,
         idempotencyKey,
       };
-      const saved =
-        blogMutation.operation === "create_blog_post"
-          ? await application.commands.createBlogPost({
-              ...command,
-              post: blogMutation.post,
-            })
-          : blogMutation.operation === "edit_blog_post"
-            ? await application.commands.editBlogPost({
-                ...command,
-                postId: blogMutation.postId,
-                post: blogMutation.post,
-              })
-            : blogMutation.operation === "unpublish_blog_post"
-              ? await application.commands.unpublishBlogPost({
-                  ...command,
-                  postId: blogMutation.postId,
-                })
-              : await application.commands.republishBlogPost({
-                  ...command,
-                  postId: blogMutation.postId,
-                });
-      const selectedPost =
-        blogMutation.operation === "unpublish_blog_post"
-          ? undefined
-          : saved.definition.blog.posts.find(
-              ({ id }) =>
-                id ===
-                (blogMutation.operation === "create_blog_post"
-                  ? blogMutation.post.id
-                  : blogMutation.postId),
-            );
+      const saved = await saveBlogMutation(
+        application,
+        blogMutation,
+        command,
+      );
+      const selectedId = selectedBlogPostId(blogMutation);
+      const selectedPost = saved.definition.blog.posts.find(
+        ({ id }) => id === selectedId,
+      );
       const previewQuery =
         selectedPost === undefined
           ? ""

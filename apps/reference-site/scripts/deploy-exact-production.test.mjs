@@ -1265,7 +1265,7 @@ describe("guarded exact production deployment", () => {
     }
   });
 
-  it("does not retry a lost rollback response after a newer deployment wins during delayed history visibility", async () => {
+  it("does not retry a lost rollback response after a newer deployment wins during delayed history targetVisibility", async () => {
     const deployments = [
       { id: "deployment-before", versionId: previousVersionId },
     ];

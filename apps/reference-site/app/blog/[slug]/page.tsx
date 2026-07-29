@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { BlogPostRenderer } from "@/components/blog-post-renderer";
+import {
+  blogPostMetadata,
+  findPublicBlogPost,
+} from "@/src/blog-post-page";
 import { referenceSiteApplication } from "@/src/reference-installation";
 
 import "../../public.css";
@@ -14,11 +18,8 @@ async function loadPost(props: BlogPostPageProps) {
   const definition =
     await referenceSiteApplication.queries.getPublishedSite();
   const { slug } = await props.params;
-  const post = definition.blog.posts.find(
-    (candidate) =>
-      candidate.slug === slug && candidate.visibility === "public",
-  );
-  if (post === undefined) {
+  const post = findPublicBlogPost(definition, slug);
+  if (post === null) {
     notFound();
   }
   return { definition, post };
@@ -28,10 +29,7 @@ export async function generateMetadata(
   props: BlogPostPageProps,
 ): Promise<Metadata> {
   const { post } = await loadPost(props);
-  return {
-    title: post.seo.title,
-    description: post.seo.description,
-  };
+  return blogPostMetadata(post);
 }
 
 export default async function BlogPostPage(props: BlogPostPageProps) {

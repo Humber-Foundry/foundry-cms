@@ -21,7 +21,7 @@ describe("SiteRenderer controlled design projection", () => {
       ),
       revision: 1,
       collectionState: "active" as const,
-      visibility: "public" as const,
+      targetVisibility: "public" as const,
       slug: "renderer-post",
       title: "Renderer post",
       excerpt: "A public post.",
@@ -56,7 +56,7 @@ describe("SiteRenderer controlled design projection", () => {
           ...definition,
           blog: {
             ...definition.blog,
-            posts: [{ ...postDefinition, visibility: "unpublished" }],
+            posts: [{ ...postDefinition, targetVisibility: "unpublished" }],
           },
         }}
       />,

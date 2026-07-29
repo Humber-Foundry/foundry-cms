@@ -2,12 +2,12 @@ import {
   applyPageComposition,
   applySiteDefinitionEdits,
   bindSiteMediaOccurrence,
+  blogPostIdsForSiteDefinitionEdits,
   createBlogPostDefinition,
   editBlogPostDefinition,
   republishBlogPostDefinition,
   unpublishBlogPostDefinition,
   BlogPostSchemaError,
-  createBlogPostId,
   type BlogPost,
   type BlogPostId,
   type PageComposition,
@@ -17,6 +17,10 @@ import {
   type SiteMediaOccurrence,
 } from "@foundry/site-definition";
 import { sha256CanonicalJson } from "./deterministic-hash";
+import {
+  createBlogPostArtifactFingerprint,
+  type BlogPostArtifactFingerprint,
+} from "./blog-artifacts";
 
 export type ContentRevisionInputs = Readonly<{
   contentHash: string;
@@ -93,7 +97,7 @@ export type CreateBlogPostCommand = BlogPostMutationCommand &
   Readonly<{
     post: Omit<
       BlogPost,
-      "revision" | "collectionState" | "visibility"
+      "revision" | "collectionState" | "targetVisibility"
     >;
   }>;
 
@@ -102,7 +106,7 @@ export type EditBlogPostCommand = BlogPostMutationCommand &
     postId: BlogPostId;
     post: Omit<
       BlogPost,
-      "id" | "revision" | "collectionState" | "visibility"
+      "id" | "revision" | "collectionState" | "targetVisibility"
     >;
   }>;
 
@@ -113,7 +117,7 @@ export type RepublishBlogPostCommand = BlogPostMutationCommand &
 
 type BlogPostAuditState = Readonly<{
   revision: number;
-  visibility: BlogPost["visibility"];
+  targetVisibility: BlogPost["targetVisibility"];
   aggregateRevision?: number;
   liveRevision?: number | null;
   aggregateVersion?: number;
@@ -137,7 +141,7 @@ type BlogPostAggregateState = Readonly<{
   currentRevision: number;
   liveRevision: number | null;
   lastVerifiedRevision: number | null;
-  lastVerifiedVisibility: BlogPost["visibility"] | "absent" | null;
+  lastVerifiedVisibility: BlogPost["targetVisibility"] | "absent" | null;
   version: number;
 }>;
 
@@ -221,7 +225,11 @@ type PersistContentRevisionCommand = Readonly<{
   }>;
   blogTransitions?: ReadonlyArray<
     Omit<BlogPostTransitionAudit, "reasonCode" | "postId"> &
-      Readonly<{ postId: BlogPostId; revisionId: string }>
+      Readonly<{
+        postId: BlogPostId;
+        revisionId: string;
+        artifact: BlogPostArtifactFingerprint;
+      }>
   >;
 }>;
 
@@ -425,9 +433,9 @@ export function createInMemoryContentRevisionStore({
           blogPosts.set(post.id, {
             currentRevision: post.revision,
             liveRevision:
-              post.visibility === "public" ? post.revision : null,
+              post.targetVisibility === "public" ? post.revision : null,
             lastVerifiedRevision: post.revision,
-            lastVerifiedVisibility: post.visibility,
+            lastVerifiedVisibility: post.targetVisibility,
             version: post.revision,
           });
         }
@@ -685,26 +693,46 @@ export function createContentRevisionApplication({
       createdAt: now(),
       createdBy: input.command.actorId,
     };
+    const blogTransitions =
+      input.blogTransitions === undefined
+        ? undefined
+        : await Promise.all(
+            input.blogTransitions.map(async (transition) => {
+              const post = definition.blog.posts.find(
+                ({ id }) => id === transition.postId,
+              );
+              if (post === undefined) {
+                throw new ContentRevisionConfigurationError();
+              }
+              const artifact = await createBlogPostArtifactFingerprint({
+                siteId: definition.site.id,
+                post,
+                schemaVersion: definition.schemaVersion,
+                rendererVersion,
+              });
+              return {
+                ...transition,
+                revisionId: artifact.postRevisionId,
+                artifact,
+                requestId: input.command.idempotencyKey,
+                beforeState: blogPostAuditState(
+                  base.definition,
+                  transition.postId,
+                ),
+                afterState: blogPostAuditState(
+                  definition,
+                  transition.postId,
+                ),
+                occurredAt: nextRevision.createdAt,
+              };
+            }),
+          );
     return store.persist({
       baseRevision: input.command.baseRevision,
       idempotencyKey: input.command.idempotencyKey,
       requestHash,
       revision: nextRevision,
-      ...(input.blogTransitions === undefined
-        ? {}
-        : {
-            blogTransitions: input.blogTransitions.map((transition) => ({
-              ...transition,
-              revisionId: crypto.randomUUID(),
-              requestId: input.command.idempotencyKey,
-              beforeState: blogPostAuditState(
-                base.definition,
-                transition.postId,
-              ),
-              afterState: blogPostAuditState(definition, transition.postId),
-              occurredAt: nextRevision.createdAt,
-            })),
-          }),
+      ...(blogTransitions === undefined ? {} : { blogTransitions }),
     });
   }
 
@@ -715,7 +743,7 @@ export function createContentRevisionApplication({
     const post = definition.blog.posts.find(({ id }) => id === postId);
     return post === undefined
       ? null
-      : { revision: post.revision, visibility: post.visibility };
+      : { revision: post.revision, targetVisibility: post.targetVisibility };
   }
 
   function blogAuditRequestId(value: string): string {
@@ -860,18 +888,22 @@ export function createContentRevisionApplication({
         return store.getCurrent();
       },
       async save(command: SaveContentRevisionCommand) {
-        const blogPostIds = [
-          ...new Set(
-            command.edits.flatMap(({ path }) => {
-              const candidate = path.split(".", 1)[0] ?? "";
-              try {
-                return [createBlogPostId(candidate)];
-              } catch {
-                return [];
-              }
-            }),
-          ),
-        ];
+        if (command.actorId !== actorId) {
+          throw new ContentWorkspaceAccessError();
+        }
+        if (command.workspaceId !== workspaceId) {
+          throw new ContentRevisionValidationError({
+            workspaceId: "This workspace is not available.",
+          });
+        }
+        await store.requireAccess(actorId);
+        const requestedBase = await store.getRevision(command.baseRevision);
+        const fieldDefinition =
+          requestedBase?.definition ?? (await store.getCurrent()).definition;
+        const blogPostIds = blogPostIdsForSiteDefinitionEdits(
+          fieldDefinition,
+          command.edits,
+        );
         const operation = () => persistDefinitionMutation({
           command,
           requestIdentity: {

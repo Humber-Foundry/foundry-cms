@@ -61,7 +61,7 @@ export type BlogPost = Readonly<{
   id: BlogPostId;
   revision: number;
   collectionState: "active";
-  visibility: "public" | "unpublished";
+  targetVisibility: "public" | "unpublished";
   slug: string;
   title: string;
   excerpt: string;
@@ -408,7 +408,7 @@ export const siteDefinitionSchema = {
         "id",
         "revision",
         "collectionState",
-        "visibility",
+        "targetVisibility",
         "slug",
         "title",
         "excerpt",
@@ -423,7 +423,7 @@ export const siteDefinitionSchema = {
         },
         revision: { type: "integer", minimum: 1 },
         collectionState: { const: "active" },
-        visibility: { enum: ["public", "unpublished"] },
+        targetVisibility: { enum: ["public", "unpublished"] },
         slug: {
           type: "string",
           pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",

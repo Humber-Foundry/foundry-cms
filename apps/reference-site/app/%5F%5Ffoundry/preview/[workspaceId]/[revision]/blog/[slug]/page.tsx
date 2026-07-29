@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { BlogPostRenderer } from "@/components/blog-post-renderer";
+import {
+  blogPostMetadata,
+  findPublicBlogPost,
+} from "@/src/blog-post-page";
 import { loadRevisionPreview } from "@/src/revision-preview-page";
 
 import "../../../../../../public.css";
@@ -28,11 +32,8 @@ async function loadPostPreview(props: BlogPostPreviewProps) {
     params: Promise.resolve(params),
     searchParams: props.searchParams,
   });
-  const post = revision.definition.blog.posts.find(
-    (candidate) =>
-      candidate.slug === params.slug && candidate.visibility === "public",
-  );
-  if (post === undefined) {
+  const post = findPublicBlogPost(revision.definition, params.slug);
+  if (post === null) {
     notFound();
   }
   return { revision, post };
@@ -44,8 +45,7 @@ export async function generateMetadata(
   const { post } = await loadPostPreview(props);
   return {
     robots: { index: false, follow: false },
-    title: post.seo.title,
-    description: post.seo.description,
+    ...blogPostMetadata(post),
   };
 }
 

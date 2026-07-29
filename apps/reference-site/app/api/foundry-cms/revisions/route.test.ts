@@ -199,7 +199,7 @@ describe("content revision endpoint", () => {
               id: routePostId,
               revision: 1,
               collectionState: "active",
-              visibility: "public",
+              targetVisibility: "public",
               slug: "route-post",
               title: "Route post",
               excerpt: "Created through the route.",

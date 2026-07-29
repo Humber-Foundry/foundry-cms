@@ -173,7 +173,7 @@ export function SiteRenderer({
   blogPostHref?: (slug: string) => string;
 }) {
   const publicPosts = definition.blog.posts.filter(
-    ({ visibility }) => visibility === "public",
+    ({ targetVisibility }) => targetVisibility === "public",
   );
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
