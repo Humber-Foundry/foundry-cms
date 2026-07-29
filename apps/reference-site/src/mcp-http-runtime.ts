@@ -12,13 +12,14 @@ import type { SiteId } from "@foundry/site-definition";
 
 import {
   base64UrlEncode,
+  createRequestExecutionContext,
   escapeHtml,
   hasExactKeys,
   isRecord,
   jsonResponse,
   readBoundedText,
   sha256,
-  withTimeout,
+  type RequestExecutionContext,
 } from "./mcp-http-support";
 import {
   createMcpProtocolRuntime,
@@ -132,6 +133,7 @@ export function createMcpHttpRuntime({
   createRefreshToken = () =>
     base64UrlEncode(crypto.getRandomValues(new Uint8Array(32))),
   createRefreshFamilyId = () => crypto.randomUUID(),
+  requestTimeoutMs = rpcTimeoutMs,
   now = () => new Date(),
 }: {
   resourceUri: string;
@@ -161,6 +163,7 @@ export function createMcpHttpRuntime({
   createTokenId?: () => string;
   createRefreshToken?: () => string;
   createRefreshFamilyId?: () => string;
+  requestTimeoutMs?: number;
   now?: () => Date;
 }) {
   const resource = new URL(resourceUri);
@@ -199,6 +202,7 @@ export function createMcpHttpRuntime({
 
   async function authenticateMcpRequest(
     request: Request,
+    context: RequestExecutionContext,
   ): Promise<McpConnectionPrincipal | Response> {
     const authorization = request.headers.get("authorization");
     if (
@@ -239,10 +243,12 @@ export function createMcpHttpRuntime({
         siteId,
         scopes: [mcpInitialScope],
       };
-      const current = await store.findCurrentConnection({
-        connectionId: principal.connectionId,
-        siteId,
-      });
+      const current = await context.waitFor(
+        store.findCurrentConnection({
+          connectionId: principal.connectionId,
+          siteId,
+        }),
+      );
       if (
         current === null ||
         current.status !== "active" ||
@@ -694,19 +700,15 @@ export function createMcpHttpRuntime({
       ) {
         return jsonResponse({ error: "not_found" }, 404);
       }
-      const principal = await authenticateMcpRequest(request);
-      if (principal instanceof Response) return principal;
+      const execution = createRequestExecutionContext(requestTimeoutMs);
       try {
-        return await withTimeout(
-          protocol.handle(request, principal),
-          rpcTimeoutMs,
+        return await protocol.handle(
+          request,
+          () => authenticateMcpRequest(request, execution.context),
+          execution.context,
         );
-      } catch {
-        return jsonResponse(
-          { error: "temporarily_unavailable" },
-          503,
-          { "retry-after": "1" },
-        );
+      } finally {
+        execution.dispose();
       }
     },
   };

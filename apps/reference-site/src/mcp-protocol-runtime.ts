@@ -5,11 +5,14 @@ import {
   mcpProtocolVersion,
   type McpConnectionPrincipal,
   type McpCursorCodec,
+  type McpExecutionContext,
 } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
 
 import {
   RequestBodyLimitError,
+  RequestDeadlineExceededError,
+  type RequestExecutionContext,
   hasExactKeys,
   isRecord,
   isRequestId,
@@ -124,12 +127,14 @@ export function createMcpProtocolRuntime({
     query,
     values,
     pageSize,
+    context,
   }: {
     principal: McpConnectionPrincipal;
     params: unknown;
     query: string;
     values: ReadonlyArray<Value>;
     pageSize: number;
+    context: McpExecutionContext;
   }): Promise<{
     values: ReadonlyArray<Value>;
     nextCursor: string | null;
@@ -139,7 +144,7 @@ export function createMcpProtocolRuntime({
     let offset = 0;
     if (cursor !== null) {
       try {
-        const binding = await cursors.decode(cursor);
+        const binding = await context.waitFor(cursors.decode(cursor));
         if (
           binding.siteId !== siteId ||
           binding.actorId !== principal.actorId ||
@@ -150,7 +155,8 @@ export function createMcpProtocolRuntime({
           return null;
         }
         offset = binding.offset;
-      } catch {
+      } catch (error) {
+        if (error instanceof RequestDeadlineExceededError) throw error;
         return null;
       }
     }
@@ -160,12 +166,14 @@ export function createMcpProtocolRuntime({
       values: page,
       nextCursor:
         nextOffset < values.length
-          ? await cursors.encode({
-              siteId,
-              actorId: principal.actorId,
-              query: `discovery:${query}`,
-              offset: nextOffset,
-            })
+          ? await context.waitFor(
+              cursors.encode({
+                siteId,
+                actorId: principal.actorId,
+                query: `discovery:${query}`,
+                offset: nextOffset,
+              }),
+            )
           : null,
     };
   }
@@ -173,12 +181,13 @@ export function createMcpProtocolRuntime({
   async function readResource(
     principal: McpConnectionPrincipal,
     uri: string,
+    context: McpExecutionContext,
   ) {
     if (uri === "foundry://site") {
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify(await readApplication.getSite(principal)),
+        text: JSON.stringify(await readApplication.getSite(principal, context)),
       };
     }
     if (uri === "foundry://schemas/content") {
@@ -186,7 +195,7 @@ export function createMcpProtocolRuntime({
         uri,
         mimeType: "application/schema+json",
         text: JSON.stringify(
-          await readApplication.getContentSchema(principal),
+          await readApplication.getContentSchema(principal, context),
         ),
       };
     }
@@ -195,20 +204,33 @@ export function createMcpProtocolRuntime({
         uri,
         mimeType: "application/schema+json",
         text: JSON.stringify(
-          await readApplication.getDesignSchema(principal),
+          await readApplication.getDesignSchema(principal, context),
         ),
       };
     }
     const match = /^foundry:\/\/content\/(page|post)\/([^/]+)$/u.exec(uri);
     if (match !== null) {
+      let contentId: string;
+      try {
+        contentId = decodeURIComponent(match[2]!);
+      } catch {
+        throw new McpReadError(
+          "VALIDATION_FAILED",
+          "The resource URI is invalid.",
+        );
+      }
       return {
         uri,
         mimeType: "application/json",
         text: JSON.stringify(
-          await readApplication.getContent(principal, {
-            kind: match[1] as "page" | "post",
-            contentId: decodeURIComponent(match[2]!),
-          }),
+          await readApplication.getContent(
+            principal,
+            {
+              kind: match[1] as "page" | "post",
+              contentId,
+            },
+            context,
+          ),
         ),
       };
     }
@@ -222,12 +244,13 @@ export function createMcpProtocolRuntime({
     principal: McpConnectionPrincipal,
     name: string,
     argumentsValue: unknown,
+    context: McpExecutionContext,
   ) {
     const tool = tools.get(name);
     if (tool === null) return null;
     try {
       return toolResult(
-        await tool.execute(principal, argumentsValue),
+        await tool.execute(principal, argumentsValue, context),
         false,
       );
     } catch (error) {
@@ -256,24 +279,27 @@ export function createMcpProtocolRuntime({
 
   async function applyIngressRateLimits(
     principal: McpConnectionPrincipal,
+    context: McpExecutionContext,
   ) {
     const windowStartedAt = new Date(
       Math.floor(now().getTime() / 60_000) * 60_000,
     ).toISOString();
-    const [siteBudget, connectionBudget] = await Promise.all([
-      store.consumeRateLimit({
-        siteId,
-        bucketKey: "site",
-        windowStartedAt,
-        limit: 600,
-      }),
-      store.consumeRateLimit({
-        siteId,
-        bucketKey: principal.connectionId,
-        windowStartedAt,
-        limit: 300,
-      }),
-    ]);
+    const [siteBudget, connectionBudget] = await context.waitFor(
+      Promise.all([
+        store.consumeRateLimit({
+          siteId,
+          bucketKey: "site",
+          windowStartedAt,
+          limit: 600,
+        }),
+        store.consumeRateLimit({
+          siteId,
+          bucketKey: principal.connectionId,
+          windowStartedAt,
+          limit: 300,
+        }),
+      ]),
+    );
     return siteBudget && connectionBudget
       ? null
       : rateLimitedResponse();
@@ -291,6 +317,7 @@ export function createMcpProtocolRuntime({
   async function applyOperationRateLimit(
     principal: McpConnectionPrincipal,
     rpc: RpcRequest,
+    context: McpExecutionContext,
   ) {
     const windowStartedAt = new Date(
       Math.floor(now().getTime() / 60_000) * 60_000,
@@ -309,12 +336,14 @@ export function createMcpProtocolRuntime({
           tools.get(rpc.params.name) !== null))
         ? requestedOperation
         : "unknown";
-    return (await store.consumeRateLimit({
-      siteId,
-      bucketKey: `${principal.connectionId}:${operation}`,
-      windowStartedAt,
-      limit: 120,
-    }))
+    return (await context.waitFor(
+      store.consumeRateLimit({
+        siteId,
+        bucketKey: `${principal.connectionId}:${operation}`,
+        windowStartedAt,
+        limit: 120,
+      }),
+    ))
       ? null
       : rateLimitedResponse();
   }
@@ -322,8 +351,9 @@ export function createMcpProtocolRuntime({
   async function dispatch(
     principal: McpConnectionPrincipal,
     rpc: RpcRequest,
+    context: McpExecutionContext,
   ): Promise<Response> {
-    const rateLimited = await applyOperationRateLimit(principal, rpc);
+    const rateLimited = await applyOperationRateLimit(principal, rpc, context);
     if (rateLimited !== null) return rateLimited;
     if (rpc.method === "ping") {
       return rpc.params === undefined ||
@@ -375,6 +405,7 @@ export function createMcpProtocolRuntime({
         query: "tools",
         values: tools.list(),
         pageSize: 2,
+        context,
       });
       return page === null
         ? rpcError(rpc.id, -32602, "Invalid pagination cursor")
@@ -396,6 +427,7 @@ export function createMcpProtocolRuntime({
         principal,
         rpc.params.name,
         rpc.params.arguments ?? {},
+        context,
       );
       return result === null
         ? rpcError(rpc.id, -32602, "Invalid tool arguments")
@@ -406,12 +438,16 @@ export function createMcpProtocolRuntime({
       if (cursor === undefined) {
         return rpcError(rpc.id, -32602, "Invalid pagination cursor");
       }
-      const site = await readApplication.getSite(principal);
-      const content = await readApplication.listContent(principal, {
-        kind: null,
-        limit: cursor === null ? 47 : 50,
-        cursor,
-      });
+      const site = await readApplication.getSite(principal, context);
+      const content = await readApplication.listContent(
+        principal,
+        {
+          kind: null,
+          limit: cursor === null ? 47 : 50,
+          cursor,
+        },
+        context,
+      );
       return rpcResult(rpc.id, {
         resources: [
           ...(cursor === null
@@ -458,7 +494,7 @@ export function createMcpProtocolRuntime({
       });
     }
     if (rpc.method === "resources/templates/list") {
-      const site = await readApplication.getSite(principal);
+      const site = await readApplication.getSite(principal, context);
       const page = await paginateDiscovery({
         principal,
         params: rpc.params,
@@ -474,6 +510,7 @@ export function createMcpProtocolRuntime({
           },
         ],
         pageSize: 50,
+        context,
       });
       return page === null
         ? rpcError(rpc.id, -32602, "Invalid pagination cursor")
@@ -493,10 +530,13 @@ export function createMcpProtocolRuntime({
       }
       try {
         return rpcResult(rpc.id, {
-          contents: [await readResource(principal, rpc.params.uri)],
+          contents: [await readResource(principal, rpc.params.uri, context)],
         });
       } catch (error) {
         if (error instanceof McpReadError) {
+          if (error.code === "VALIDATION_FAILED") {
+            return rpcError(rpc.id, -32602, "Invalid resource request");
+          }
           return rpcError(rpc.id, -32002, safeErrorMessage(error.code), {
             code: error.code,
           });
@@ -511,6 +551,7 @@ export function createMcpProtocolRuntime({
         query: "prompts",
         values: [],
         pageSize: 50,
+        context,
       });
       return page === null
         ? rpcError(rpc.id, -32602, "Invalid pagination cursor")
@@ -525,7 +566,8 @@ export function createMcpProtocolRuntime({
   return {
     async handle(
       request: Request,
-      principal: McpConnectionPrincipal,
+      authenticate: () => Promise<McpConnectionPrincipal | Response>,
+      context: RequestExecutionContext,
     ): Promise<Response> {
       if (request.method !== "POST") {
         return jsonResponse({ error: "method_not_allowed" }, 405, {
@@ -547,20 +589,6 @@ export function createMcpProtocolRuntime({
       ) {
         return jsonResponse({ error: "unsupported_media_type" }, 415);
       }
-      const ingressLimited = await applyIngressRateLimits(principal);
-      if (ingressLimited !== null) return ingressLimited;
-      let value: unknown;
-      try {
-        value = JSON.parse(await readBoundedText(request, rpcBodyLimitBytes));
-      } catch (error) {
-        if (error instanceof RequestBodyLimitError) {
-          return jsonResponse({ error: "request_too_large" }, 413);
-        }
-        return rpcError(null, -32700, "Parse error");
-      }
-      if (!isRecord(value) || value.jsonrpc !== "2.0") {
-        return rpcError(null, -32600, "Invalid Request");
-      }
       const requestedVersion =
         request.headers.get("mcp-protocol-version");
       if (
@@ -568,12 +596,61 @@ export function createMcpProtocolRuntime({
         requestedVersion !== mcpProtocolVersion
       ) {
         return rpcError(
-          isRequestId(value.id) ? value.id : null,
+          null,
           -32600,
           "Unsupported MCP protocol version",
           undefined,
           400,
         );
+      }
+      let principal: McpConnectionPrincipal | Response;
+      try {
+        principal = await context.waitFor(authenticate());
+      } catch (error) {
+        return error instanceof RequestDeadlineExceededError
+          ? jsonResponse(
+              { error: "temporarily_unavailable" },
+              503,
+              { "retry-after": "1" },
+            )
+          : jsonResponse({ error: "temporarily_unavailable" }, 503);
+      }
+      if (principal instanceof Response) return principal;
+      let ingressLimited: Response | null;
+      try {
+        ingressLimited = await applyIngressRateLimits(principal, context);
+      } catch (error) {
+        return error instanceof RequestDeadlineExceededError
+          ? jsonResponse(
+              { error: "temporarily_unavailable" },
+              503,
+              { "retry-after": "1" },
+            )
+          : jsonResponse({ error: "temporarily_unavailable" }, 503);
+      }
+      if (ingressLimited !== null) return ingressLimited;
+      let value: unknown;
+      try {
+        value = JSON.parse(
+          await context.waitFor(
+            readBoundedText(request, rpcBodyLimitBytes, context.signal),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof RequestBodyLimitError) {
+          return jsonResponse({ error: "request_too_large" }, 413);
+        }
+        if (error instanceof RequestDeadlineExceededError) {
+          return jsonResponse(
+            { error: "temporarily_unavailable" },
+            503,
+            { "retry-after": "1" },
+          );
+        }
+        return rpcError(null, -32700, "Parse error");
+      }
+      if (!isRecord(value) || value.jsonrpc !== "2.0") {
+        return rpcError(null, -32600, "Invalid Request");
       }
       if (valueDepth(value, rpcMaximumDepth) > rpcMaximumDepth) {
         return rpcError(
@@ -632,7 +709,19 @@ export function createMcpProtocolRuntime({
           400,
         );
       }
-      return dispatch(principal, value as RpcRequest);
+      try {
+        return await dispatch(principal, value as RpcRequest, context);
+      } catch (error) {
+        return error instanceof RequestDeadlineExceededError
+          ? rpcError(
+              value.id,
+              -32001,
+              "Request deadline exceeded",
+              { code: "TEMPORARILY_UNAVAILABLE" },
+              503,
+            )
+          : rpcError(value.id, -32603, "Internal error", undefined, 500);
+      }
     },
   };
 }

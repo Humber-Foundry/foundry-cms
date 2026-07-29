@@ -49,7 +49,15 @@ async function digest(value: string) {
   return encodeBase64Url(new Uint8Array(bytes));
 }
 
-function createStore(allowRateLimit = true) {
+function createStore({
+  allowRateLimit = true,
+  beforeFindCurrentConnection,
+  beforeConsumeRateLimit,
+}: {
+  allowRateLimit?: boolean;
+  beforeFindCurrentConnection?: (call: number) => Promise<void>;
+  beforeConsumeRateLimit?: (call: number) => Promise<void>;
+} = {}) {
   const connections = new Map<string, McpConnectionGrant>();
   const codes = new Map<
     string,
@@ -60,6 +68,12 @@ function createStore(allowRateLimit = true) {
     bucketKey: string;
     limit: number;
   }> = [];
+  const connectionLookupInputs: Array<{
+    connectionId: string;
+    siteId: string;
+  }> = [];
+  let connectionLookupCount = 0;
+  let rateLimitCount = 0;
   const refreshTokens = new Map<
     string,
     {
@@ -108,6 +122,9 @@ function createStore(allowRateLimit = true) {
       };
     },
     async findCurrentConnection(input) {
+      connectionLookupCount += 1;
+      connectionLookupInputs.push(input);
+      await beforeFindCurrentConnection?.(connectionLookupCount);
       const connection = connections.get(input.connectionId);
       return connection?.siteId === input.siteId ? connection : null;
     },
@@ -151,6 +168,8 @@ function createStore(allowRateLimit = true) {
       };
     },
     async consumeRateLimit(input) {
+      rateLimitCount += 1;
+      await beforeConsumeRateLimit?.(rateLimitCount);
       rateLimitInputs.push(input);
       return allowRateLimit;
     },
@@ -158,13 +177,25 @@ function createStore(allowRateLimit = true) {
       audit.push(event);
     },
   };
-  return { store, connections, audit, rateLimitInputs };
+  return {
+    store,
+    connections,
+    audit,
+    rateLimitInputs,
+    connectionLookupInputs,
+  };
 }
 
 function fixture(
-  options: { allowRateLimit?: boolean; contentCount?: number } = {},
+  options: {
+    allowRateLimit?: boolean;
+    contentCount?: number;
+    requestTimeoutMs?: number;
+    beforeFindCurrentConnection?: (call: number) => Promise<void>;
+    beforeConsumeRateLimit?: (call: number) => Promise<void>;
+  } = {},
 ) {
-  const state = createStore(options.allowRateLimit ?? true);
+  const state = createStore(options);
   const contentCount = options.contentCount ?? 0;
   const definition = {
     ...referenceSiteDefinition,
@@ -249,6 +280,7 @@ function fixture(
       return () => `refresh-token-${++refresh}-${"r".repeat(43)}`;
     })(),
     createRefreshFamilyId: () => "44444444-4444-4444-8444-444444444444",
+    requestTimeoutMs: options.requestTimeoutMs,
     now: () => now,
   });
   return { runtime, ...state };
@@ -1148,6 +1180,147 @@ describe("production MCP HTTP runtime", () => {
     );
     expect(rateLimited.status).toBe(429);
     expect(Number(rateLimited.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it.each([
+    [
+      "foreign Origin",
+      {
+        origin: "https://attacker.example",
+        accept: "application/json, text/event-stream",
+        contentType: "application/json",
+        protocolVersion: "2025-11-25",
+      },
+    ],
+    [
+      "unsupported media",
+      {
+        origin: canonicalOrigin,
+        accept: "application/json",
+        contentType: "text/plain",
+        protocolVersion: "2025-11-25",
+      },
+    ],
+    [
+      "unsupported protocol",
+      {
+        origin: canonicalOrigin,
+        accept: "application/json, text/event-stream",
+        contentType: "application/json",
+        protocolVersion: "2099-01-01",
+      },
+    ],
+  ])(
+    "rejects %s before authentication or ingress accounting",
+    async (_label, headers) => {
+      const state = fixture();
+      const { accessToken } = await authorizeAndExchange(state.runtime);
+      const lookupsBeforeRequest = state.connectionLookupInputs.length;
+      const response = await state.runtime.fetch(
+        new Request(resourceUri, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            origin: headers.origin,
+            accept: headers.accept,
+            "content-type": headers.contentType,
+            "mcp-protocol-version": headers.protocolVersion,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "guard-order",
+            method: "tools/list",
+            params: {},
+          }),
+        }),
+      );
+
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(state.connectionLookupInputs).toHaveLength(lookupsBeforeRequest);
+      expect(state.rateLimitInputs).toEqual([]);
+    },
+  );
+
+  it("keeps timeout correlation and prevents downstream audit after expiry", async () => {
+    let releaseApplicationLookup: (() => void) | undefined;
+    const stalled = new Promise<void>((resolve) => {
+      releaseApplicationLookup = resolve;
+    });
+    const state = fixture({
+      requestTimeoutMs: 10,
+      beforeFindCurrentConnection: async (call) => {
+        if (call === 2) await stalled;
+      },
+    });
+    const { accessToken } = await authorizeAndExchange(state.runtime);
+    const response = await state.runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "deadline-1",
+        method: "resources/read",
+        params: { uri: "foundry://site" },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "deadline-1",
+      error: {
+        code: -32001,
+        message: "Request deadline exceeded",
+        data: { code: "TEMPORARILY_UNAVAILABLE" },
+      },
+    });
+
+    releaseApplicationLookup?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.audit).toEqual([]);
+  });
+
+  it("correlates malformed resource URIs and unexpected post-parse failures", async () => {
+    const malformed = fixture();
+    const { accessToken } = await authorizeAndExchange(malformed.runtime);
+    const malformedResponse = await malformed.runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "malformed-uri",
+        method: "resources/read",
+        params: { uri: "foundry://content/post/%" },
+      }),
+    );
+    await expect(malformedResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "malformed-uri",
+      error: {
+        code: -32602,
+        message: "Invalid resource request",
+      },
+    });
+
+    const unexpected = fixture({
+      beforeConsumeRateLimit: async (call) => {
+        if (call === 3) throw new Error("dependency exploded");
+      },
+    });
+    const unexpectedToken = await authorizeAndExchange(unexpected.runtime);
+    const unexpectedResponse = await unexpected.runtime.fetch(
+      rpcRequest(unexpectedToken.accessToken, {
+        jsonrpc: "2.0",
+        id: 202,
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(unexpectedResponse.status).toBe(500);
+    await expect(unexpectedResponse.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: 202,
+      error: {
+        code: -32603,
+        message: "Internal error",
+      },
+    });
   });
 
   it("normalizes adversarial method names into bounded durable rate keys", async () => {

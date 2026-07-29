@@ -69,6 +69,11 @@ export type McpCursorCodec = Readonly<{
   decode(cursor: string): Promise<McpCursorBinding>;
 }>;
 
+export type McpExecutionContext = Readonly<{
+  throwIfExpired(): void;
+  waitFor<Result>(operation: Promise<Result>): Promise<Result>;
+}>;
+
 export type McpReadErrorCode =
   | "AUTHENTICATION_REQUIRED"
   | "INSUFFICIENT_SCOPE"
@@ -251,11 +256,21 @@ export function createMcpReadApplication({
   createInvocationId?: () => string;
   now?: () => string;
 }) {
-  async function loadConnection(principal: McpConnectionPrincipal) {
-    return connections.findCurrentConnection({
-      connectionId: principal.connectionId,
-      siteId: principal.siteId,
-    });
+  const uninterruptedContext: McpExecutionContext = {
+    throwIfExpired() {},
+    waitFor: (operation) => operation,
+  };
+
+  async function loadConnection(
+    principal: McpConnectionPrincipal,
+    context: McpExecutionContext = uninterruptedContext,
+  ) {
+    return context.waitFor(
+      connections.findCurrentConnection({
+        connectionId: principal.connectionId,
+        siteId: principal.siteId,
+      }),
+    );
   }
 
   async function execute<Result>({
@@ -263,17 +278,19 @@ export function createMcpReadApplication({
     operation,
     auditInput,
     run,
+    context,
   }: {
     principal: McpConnectionPrincipal;
     operation: string;
     auditInput: unknown;
-    run(): Promise<Result>;
+    run(context: McpExecutionContext): Promise<Result>;
+    context: McpExecutionContext;
   }): Promise<McpSuccess<Result>> {
     const invocationId = createInvocationId();
     const observedAt = now();
-    const inputHash = await sha256CanonicalJson(auditInput);
+    const inputHash = await context.waitFor(sha256CanonicalJson(auditInput));
     try {
-      const current = await loadConnection(principal);
+      const current = await loadConnection(principal, context);
       if (current === null || !isAuthenticConnection(current, principal)) {
         throw new McpReadError(
           "AUTHENTICATION_REQUIRED",
@@ -295,21 +312,24 @@ export function createMcpReadApplication({
           "The current connection does not grant site.read.",
         );
       }
-      const result = await run();
-      await connections.recordInvocation({
-        invocationId,
-        connectionId: principal.connectionId,
-        actorId: principal.actorId,
-        siteId: principal.siteId,
-        operation,
-        inputHash,
-        protocolVersion: mcpProtocolVersion,
-        scopesEvaluated: [mcpInitialScope],
-        outcome: "allowed",
-        reason: null,
-        occurredAt: observedAt,
-        contractVersion: mcpContractVersion,
-      });
+      const result = await run(context);
+      context.throwIfExpired();
+      await context.waitFor(
+        connections.recordInvocation({
+          invocationId,
+          connectionId: principal.connectionId,
+          actorId: principal.actorId,
+          siteId: principal.siteId,
+          operation,
+          inputHash,
+          protocolVersion: mcpProtocolVersion,
+          scopesEvaluated: [mcpInitialScope],
+          outcome: "allowed",
+          reason: null,
+          occurredAt: observedAt,
+          contractVersion: mcpContractVersion,
+        }),
+      );
       return {
         contractVersion: mcpContractVersion,
         invocationId,
@@ -320,6 +340,7 @@ export function createMcpReadApplication({
         },
       };
     } catch (error) {
+      context.throwIfExpired();
       const safeError =
         error instanceof McpReadError
           ? error
@@ -337,20 +358,22 @@ export function createMcpReadApplication({
         safeError.message,
         { invocationId, observedAt },
       );
-      await connections.recordInvocation({
-        invocationId,
-        connectionId: principal.connectionId,
-        actorId: principal.actorId,
-        siteId: principal.siteId,
-        operation,
-        inputHash,
-        protocolVersion: mcpProtocolVersion,
-        scopesEvaluated: [mcpInitialScope],
-        outcome: "denied",
-        reason: safeError.code,
-        occurredAt: observedAt,
-        contractVersion: mcpContractVersion,
-      });
+      await context.waitFor(
+        connections.recordInvocation({
+          invocationId,
+          connectionId: principal.connectionId,
+          actorId: principal.actorId,
+          siteId: principal.siteId,
+          operation,
+          inputHash,
+          protocolVersion: mcpProtocolVersion,
+          scopesEvaluated: [mcpInitialScope],
+          outcome: "denied",
+          reason: safeError.code,
+          occurredAt: observedAt,
+          contractVersion: mcpContractVersion,
+        }),
+      );
       throw contextualError;
     }
   }
@@ -361,11 +384,13 @@ export function createMcpReadApplication({
       principal: McpConnectionPrincipal,
       operation: string,
       input: unknown,
+      context: McpExecutionContext = uninterruptedContext,
     ): Promise<unknown> {
       return execute({
         principal,
         operation,
         auditInput: input,
+        context,
         async run(): Promise<never> {
           throw new McpReadError(
             "VALIDATION_FAILED",
@@ -374,14 +399,22 @@ export function createMcpReadApplication({
         },
       });
     },
-    getSite(principal: McpConnectionPrincipal) {
+    getSite(
+      principal: McpConnectionPrincipal,
+      context: McpExecutionContext = uninterruptedContext,
+    ) {
       return execute({
         principal,
         operation: "foundry.site.get",
         auditInput: {},
-        async run() {
-          const definition = await site.queries.getPublishedSite();
-          const liveRelease = await siteMetadata.getLiveRelease();
+        context,
+        async run(execution) {
+          const definition = await execution.waitFor(
+            site.queries.getPublishedSite(),
+          );
+          const liveRelease = await execution.waitFor(
+            siteMetadata.getLiveRelease(),
+          );
           return {
             siteId: site.siteId,
             displayName: definition.site.name,
@@ -394,31 +427,49 @@ export function createMcpReadApplication({
         },
       });
     },
-    getContentSchema(principal: McpConnectionPrincipal) {
+    getContentSchema(
+      principal: McpConnectionPrincipal,
+      context: McpExecutionContext = uninterruptedContext,
+    ) {
       return execute({
         principal,
         operation: "foundry.schema.content.get",
         auditInput: {},
-        async run() {
-          const definition = await site.queries.getPublishedSite();
-          const liveRelease = await siteMetadata.getLiveRelease();
+        context,
+        async run(execution) {
+          const definition = await execution.waitFor(
+            site.queries.getPublishedSite(),
+          );
+          const liveRelease = await execution.waitFor(
+            siteMetadata.getLiveRelease(),
+          );
           return {
             schemaVersion: definition.schemaVersion,
             schema: siteDefinitionSchema,
-            contentHash: await sha256CanonicalJson(siteDefinitionSchema),
+            contentHash: await execution.waitFor(
+              sha256CanonicalJson(siteDefinitionSchema),
+            ),
             lastModified: liveRelease?.observedAt ?? null,
           };
         },
       });
     },
-    getDesignSchema(principal: McpConnectionPrincipal) {
+    getDesignSchema(
+      principal: McpConnectionPrincipal,
+      context: McpExecutionContext = uninterruptedContext,
+    ) {
       return execute({
         principal,
         operation: "foundry.schema.design.get",
         auditInput: {},
-        async run() {
-          const definition = await site.queries.getPublishedSite();
-          const liveRelease = await siteMetadata.getLiveRelease();
+        context,
+        async run(execution) {
+          const definition = await execution.waitFor(
+            site.queries.getPublishedSite(),
+          );
+          const liveRelease = await execution.waitFor(
+            siteMetadata.getLiveRelease(),
+          );
           const schema = {
             schemaVersion: definition.schemaVersion,
             design: siteDefinitionSchema.properties.design,
@@ -426,7 +477,7 @@ export function createMcpReadApplication({
           };
           return {
             ...schema,
-            contentHash: await sha256CanonicalJson(schema),
+            contentHash: await execution.waitFor(sha256CanonicalJson(schema)),
             lastModified: liveRelease?.observedAt ?? null,
           };
         },
@@ -439,12 +490,14 @@ export function createMcpReadApplication({
         limit: number;
         cursor: string | null;
       }>,
+      context: McpExecutionContext = uninterruptedContext,
     ) {
       return execute({
         principal,
         operation: "foundry.content.list",
         auditInput: input,
-        async run() {
+        context,
+        async run(execution) {
           if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
             throw new McpReadError(
               "VALIDATION_FAILED",
@@ -456,7 +509,7 @@ export function createMcpReadApplication({
           if (input.cursor !== null) {
             let binding: McpCursorBinding;
             try {
-              binding = await cursors.decode(input.cursor);
+              binding = await execution.waitFor(cursors.decode(input.cursor));
             } catch {
               throw new McpReadError(
                 "VALIDATION_FAILED",
@@ -477,25 +530,31 @@ export function createMcpReadApplication({
             }
             offset = binding.offset;
           }
-          const definition = await site.queries.getPublishedSite();
-          const liveRelease = await siteMetadata.getLiveRelease();
+          const definition = await execution.waitFor(
+            site.queries.getPublishedSite(),
+          );
+          const liveRelease = await execution.waitFor(
+            siteMetadata.getLiveRelease(),
+          );
           const allItemsWithDocuments = contentSummaries(
             definition,
             liveRelease,
           );
-          const allItems = await Promise.all(
-            allItemsWithDocuments.map(async (item) => {
-              const document =
-                item.kind === "page"
-                  ? definition.home
-                  : definition.blog.posts.find(
-                      (post) => post.id === item.contentId,
-                    );
-              return {
-                ...item,
-                contentHash: await sha256CanonicalJson(document),
-              };
-            }),
+          const allItems = await execution.waitFor(
+            Promise.all(
+              allItemsWithDocuments.map(async (item) => {
+                const document =
+                  item.kind === "page"
+                    ? definition.home
+                    : definition.blog.posts.find(
+                        (post) => post.id === item.contentId,
+                      );
+                return {
+                  ...item,
+                  contentHash: await sha256CanonicalJson(document),
+                };
+              }),
+            ),
           );
           const filteredItems = allItems.filter(
             (item) => input.kind === null || item.kind === input.kind,
@@ -506,12 +565,14 @@ export function createMcpReadApplication({
             items,
             nextCursor:
               nextOffset < filteredItems.length
-                ? await cursors.encode({
-                    siteId: principal.siteId,
-                    actorId: principal.actorId,
-                    query,
-                    offset: nextOffset,
-                  })
+                ? await execution.waitFor(
+                    cursors.encode({
+                      siteId: principal.siteId,
+                      actorId: principal.actorId,
+                      query,
+                      offset: nextOffset,
+                    }),
+                  )
                 : null,
           };
         },
@@ -523,14 +584,20 @@ export function createMcpReadApplication({
         kind: PublishedContentKind;
         contentId: string;
       }>,
+      context: McpExecutionContext = uninterruptedContext,
     ) {
       return execute({
         principal,
         operation: "foundry.content.get",
         auditInput: input,
-        async run() {
-          const definition = await site.queries.getPublishedSite();
-          const liveRelease = await siteMetadata.getLiveRelease();
+        context,
+        async run(execution) {
+          const definition = await execution.waitFor(
+            site.queries.getPublishedSite(),
+          );
+          const liveRelease = await execution.waitFor(
+            siteMetadata.getLiveRelease(),
+          );
           const document = contentDocument(
             definition,
             input.kind,
@@ -545,7 +612,9 @@ export function createMcpReadApplication({
           }
           return {
             ...document,
-            contentHash: await sha256CanonicalJson(document.document),
+            contentHash: await execution.waitFor(
+              sha256CanonicalJson(document.document),
+            ),
           };
         },
       });

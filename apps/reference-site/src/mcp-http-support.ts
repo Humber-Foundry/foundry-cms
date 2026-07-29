@@ -50,9 +50,71 @@ export function escapeHtml(value: string) {
 
 export class RequestBodyLimitError extends Error {}
 
+export class RequestDeadlineExceededError extends Error {
+  constructor() {
+    super("mcp_request_timeout");
+    this.name = "RequestDeadlineExceededError";
+  }
+}
+
+export type RequestExecutionContext = Readonly<{
+  signal: AbortSignal;
+  throwIfExpired(): void;
+  waitFor<Result>(operation: Promise<Result>): Promise<Result>;
+}>;
+
+export function createRequestExecutionContext(milliseconds: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), milliseconds);
+  const throwIfExpired = () => {
+    if (controller.signal.aborted) {
+      throw new RequestDeadlineExceededError();
+    }
+  };
+  const context: RequestExecutionContext = {
+    signal: controller.signal,
+    throwIfExpired,
+    waitFor<Result>(operation: Promise<Result>) {
+      throwIfExpired();
+      return new Promise<Result>((resolve, reject) => {
+        const expired = () => {
+          cleanup();
+          reject(new RequestDeadlineExceededError());
+        };
+        const cleanup = () => {
+          controller.signal.removeEventListener("abort", expired);
+        };
+        controller.signal.addEventListener("abort", expired, { once: true });
+        operation.then(
+          (result) => {
+            cleanup();
+            try {
+              throwIfExpired();
+              resolve(result);
+            } catch (error) {
+              reject(error);
+            }
+          },
+          (error: unknown) => {
+            cleanup();
+            reject(error);
+          },
+        );
+      });
+    },
+  };
+  return {
+    context,
+    dispose() {
+      clearTimeout(timeout);
+    },
+  };
+}
+
 export async function readBoundedText(
   request: Request,
   maximumBytes: number,
+  signal?: AbortSignal,
 ) {
   const declaredLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
@@ -60,17 +122,29 @@ export async function readBoundedText(
   }
   if (request.body === null) return "";
   const reader = request.body.getReader();
+  const cancelReader = () => {
+    void reader.cancel();
+  };
+  signal?.addEventListener("abort", cancelReader, { once: true });
   const chunks: Uint8Array[] = [];
   let length = 0;
-  while (true) {
-    const next = await reader.read();
-    if (next.done) break;
-    length += next.value.byteLength;
-    if (length > maximumBytes) {
-      await reader.cancel();
-      throw new RequestBodyLimitError();
+  try {
+    while (true) {
+      if (signal?.aborted === true) {
+        await reader.cancel();
+        throw new RequestDeadlineExceededError();
+      }
+      const next = await reader.read();
+      if (next.done) break;
+      length += next.value.byteLength;
+      if (length > maximumBytes) {
+        await reader.cancel();
+        throw new RequestBodyLimitError();
+      }
+      chunks.push(next.value);
     }
-    chunks.push(next.value);
+  } finally {
+    signal?.removeEventListener("abort", cancelReader);
   }
   const joined = new Uint8Array(length);
   let offset = 0;
@@ -103,26 +177,6 @@ export function valueDepth(
     }
   }
   return deepest;
-}
-
-export async function withTimeout<Result>(
-  operation: Promise<Result>,
-  milliseconds: number,
-): Promise<Result> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<Result>((_resolve, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error("mcp_request_timeout")),
-          milliseconds,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
 }
 
 export function base64UrlEncode(bytes: Uint8Array): string {

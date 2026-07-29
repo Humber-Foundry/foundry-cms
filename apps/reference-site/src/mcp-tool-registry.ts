@@ -1,6 +1,7 @@
 import {
   mcpContractVersion,
   type McpConnectionPrincipal,
+  type McpExecutionContext,
   type createMcpReadApplication,
 } from "@foundry/application";
 import { siteDefinitionSchema } from "@foundry/site-definition";
@@ -269,19 +270,22 @@ export function createMcpToolRegistry(application: McpReadApplication) {
     "foundry.site.get": async (
       principal: McpConnectionPrincipal,
       input: unknown,
+      context: McpExecutionContext,
     ) => {
       if (!isRecord(input) || !hasExactKeys(input, [])) {
         return application.rejectInvalidInput(
           principal,
           "foundry.site.get",
           input,
+          context,
         );
       }
-      return application.getSite(principal);
+      return application.getSite(principal, context);
     },
     "foundry.content.list": async (
       principal: McpConnectionPrincipal,
       input: unknown,
+      context: McpExecutionContext,
     ) => {
       if (
         !isRecord(input) ||
@@ -296,17 +300,19 @@ export function createMcpToolRegistry(application: McpReadApplication) {
           principal,
           "foundry.content.list",
           input,
+          context,
         );
       }
       return application.listContent(principal, {
         kind: input.kind,
         limit: input.limit,
         cursor: input.cursor,
-      });
+      }, context);
     },
     "foundry.content.get": async (
       principal: McpConnectionPrincipal,
       input: unknown,
+      context: McpExecutionContext,
     ) => {
       if (
         !isRecord(input) ||
@@ -320,16 +326,21 @@ export function createMcpToolRegistry(application: McpReadApplication) {
           principal,
           "foundry.content.get",
           input,
+          context,
         );
       }
       return application.getContent(principal, {
         kind: input.kind,
         contentId: input.contentId,
-      });
+      }, context);
     },
   } satisfies Record<
     keyof typeof descriptors,
-    (principal: McpConnectionPrincipal, input: unknown) => Promise<unknown>
+    (
+      principal: McpConnectionPrincipal,
+      input: unknown,
+      context: McpExecutionContext,
+    ) => Promise<unknown>
   >;
 
   return {
