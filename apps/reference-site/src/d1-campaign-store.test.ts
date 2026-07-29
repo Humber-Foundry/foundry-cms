@@ -169,8 +169,8 @@ describe("D1 campaign store", () => {
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
            failure_code, evidence_json, created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'ambiguous',
-           1, NULL, '17', NULL, NULL, ?7, ?7)`,
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'attempting',
+           1, '9999-12-31T23:59:59.999Z', '17', NULL, NULL, ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000051",
@@ -181,6 +181,40 @@ describe("D1 campaign store", () => {
         created.revision.id,
         "2026-07-29T19:05:00.000Z",
       )
+      .run();
+    await expect(
+      application.commands.edit({
+        actor,
+        requestId: "campaign-edit-during-test-send-1",
+        campaignId: created.campaign.id,
+        expectedVersion: 1,
+        input: {
+          ...created.revision,
+          subject: "Must wait for provider write",
+        },
+      }),
+    ).rejects.toBeInstanceOf(CampaignConflictError);
+    await expect(
+      database
+        .prepare(
+          `SELECT
+             (SELECT version FROM campaigns WHERE id = ?1) AS version,
+             (SELECT state FROM campaign_test_deliveries
+              WHERE execution_id = ?2) AS delivery_state`,
+        )
+        .bind(
+          created.campaign.id,
+          "40000000-0000-4000-8000-000000000051",
+        )
+        .first(),
+    ).resolves.toEqual({ version: 1, delivery_state: "attempting" });
+    await database
+      .prepare(
+        `UPDATE campaign_test_deliveries
+         SET attempt_lease_until = '2000-01-01T00:00:00.000Z'
+         WHERE execution_id = ?1`,
+      )
+      .bind("40000000-0000-4000-8000-000000000051")
       .run();
     const edited = await application.commands.edit({
       actor,
@@ -262,9 +296,10 @@ describe("D1 campaign store", () => {
            execution_id, site_id, actor_id, request_id, campaign_id,
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
-           failure_code, evidence_json, created_at, updated_at
+           foundry_send_proof, failure_code, evidence_json,
+           created_at, updated_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
-           1, NULL, '18', NULL, '{}', ?7, ?7)`,
+           1, NULL, '18', '${"a".repeat(64)}', NULL, '{}', ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000001",
@@ -411,9 +446,10 @@ describe("D1 campaign store", () => {
            execution_id, site_id, actor_id, request_id, campaign_id,
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
-           failure_code, evidence_json, created_at, updated_at
+           foundry_send_proof, failure_code, evidence_json,
+           created_at, updated_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
-           1, NULL, '19', NULL, '{}', ?7, ?7)`,
+           1, NULL, '19', '${"b".repeat(64)}', NULL, '{}', ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000002",
@@ -480,7 +516,7 @@ describe("D1 campaign store", () => {
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_audit_events")
         .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 8 });
+    ).resolves.toEqual({ count: 9 });
     await expect(
       database
         .prepare(
@@ -492,7 +528,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { outcome: "accepted", count: 4 },
-        { outcome: "rejected", count: 4 },
+        { outcome: "rejected", count: 5 },
       ],
     });
     await expect(
@@ -506,7 +542,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { outcome: "accepted", count: 4 },
-        { outcome: "rejected", count: 3 },
+        { outcome: "rejected", count: 4 },
       ],
     });
     await expect(
@@ -532,9 +568,10 @@ describe("D1 campaign store", () => {
            execution_id, site_id, actor_id, request_id, campaign_id,
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
-           failure_code, evidence_json, created_at, updated_at
+           foundry_send_proof, failure_code, evidence_json,
+           created_at, updated_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
-           1, NULL, '20', NULL, '{}', ?7, ?7)`,
+           1, NULL, '20', '${"c".repeat(64)}', NULL, '{}', ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000003",

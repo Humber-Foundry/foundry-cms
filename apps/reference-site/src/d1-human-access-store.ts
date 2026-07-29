@@ -474,7 +474,18 @@ export function createD1HumanAccessStore(
                SET status = ?1, updated_at = ?2
                WHERE site_id = ?3
                  AND id = ?4
-                 AND NOT (status = 'revoked' AND ?1 <> 'revoked')`,
+                 AND NOT (status = 'revoked' AND ?1 <> 'revoked')
+                 AND (
+                   ?1 = 'active' OR NOT EXISTS (
+                     SELECT 1
+                     FROM campaign_test_deliveries AS delivery,
+                       json_each(delivery.recipient_ids_json) AS recipient
+                     WHERE delivery.site_id = ?3
+                       AND delivery.state = 'attempting'
+                       AND delivery.attempt_lease_until > ?2
+                       AND recipient.value = ?4
+                   )
+                 )`,
             )
             .bind(status, now, siteId, membershipId),
           database
@@ -517,6 +528,25 @@ export function createD1HumanAccessStore(
         const result = results[0]!;
 
         if ((result.meta.changes ?? 0) < 1) {
+          const activeSend = await database
+            .prepare(
+              `SELECT delivery.execution_id
+               FROM campaign_test_deliveries AS delivery,
+                 json_each(delivery.recipient_ids_json) AS recipient
+               WHERE delivery.site_id = ?1
+                 AND delivery.state = 'attempting'
+                 AND delivery.attempt_lease_until > ?2
+                 AND recipient.value = ?3
+               LIMIT 1`,
+            )
+            .bind(siteId, now, membershipId)
+            .first();
+          if (status !== "active" && activeSend !== null) {
+            return {
+              changed: false,
+              reason: "campaign_test_send_in_progress",
+            };
+          }
           return { changed: false, reason: "membership_not_found" };
         }
 

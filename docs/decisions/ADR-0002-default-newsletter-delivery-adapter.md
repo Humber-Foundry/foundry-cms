@@ -75,10 +75,22 @@ evidence.
   the exact approved artifacts and fingerprints.
 - Brevo templates may provide an optional delivery wrapper but never become the
   canonical campaign editor.
-- Before scheduling, the adapter verifies that the approved Foundry artifact
-  matches the Brevo draft fingerprint. Drift blocks the send.
-- A dedicated API test-send to explicit recipients, without making the campaign
-  live, is mandatory for the default adapter.
+- Before scheduling a bulk campaign, the adapter verifies that the approved
+  Foundry artifact matches the Brevo draft fingerprint. Drift blocks the send.
+- Test delivery uses Brevo's transactional-email endpoint with inline Foundry
+  HTML, the verified sender ID, the exact subject and explicit recipients in
+  one provider request. It does not read and then send a mutable provider
+  draft.
+- Foundry persists an installation-keyed proof of the exact test binding before
+  the provider request. It accepts the result only when that request returns a
+  Brevo message ID; an uncertain response remains ambiguous.
+- Ambiguous transactional writes reconcile through Brevo's
+  [tag-filtered event report](https://developers.brevo.com/reference/get-email-event-report),
+  [message lookup](https://developers.brevo.com/reference/get-transac-emails-list)
+  and
+  [sent-content lookup](https://developers.brevo.com/reference/get-transac-email-content).
+  Acceptance requires exact sender, recipient-set, subject and actual HTML
+  agreement with the durable Foundry proof.
 - Scheduling, cancellation, and rescheduling use stored UTC intent, provider
   identifiers, and idempotency records. An accepted API response alone does not
   prove that a campaign was sent.

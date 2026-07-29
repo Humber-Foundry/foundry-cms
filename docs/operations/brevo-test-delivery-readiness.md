@@ -69,29 +69,32 @@ provisioned scope.
    Owner's receipt confirmation. This result is test-delivery evidence, not a
    production-readiness declaration.
 
-Every logical test creates a fresh Brevo draft tagged with its stable execution
-identity. Foundry reconciles Brevo's `testSent` state and the exact draft
-content before persisting a canonical Foundry send-intent proof and making the
-test-send call. Only a successful response to that exact Foundry call creates
-accepted evidence. Brevo's generic `testSent` flag cannot turn an ambiguous
-response into accepted evidence because it does not identify the invoker or
-recipient set. A timeout or lost response therefore remains ambiguous, even if
-the matching draft later reports `testSent`. Deletion of a known provider
-campaign also remains ambiguous because its missing draft does not prove its
-test was not delivered. Only a create attempt with no known provider campaign
-ID and a complete search proving no matching draft may create another draft.
-An expired in-flight writer
-remains reconciliation-only so a slow first call cannot race a replacement
-call. Automatic retry is possible only after the adapter has returned an
-ambiguous result and a later reconciliation definitively proves the known
-draft was not sent before any send-intent proof was persisted. A crashed call
-enters a one-minute reconciliation
-quarantine after the provider request's 30-second deadline; Foundry blocks a
-second execution for that revision while recovery remains unresolved.
-Editing a campaign revision cancels every open test for the replaced revision
-inside the same durable edit transaction. A request that was still preparing
-its provider call rechecks the revision before the write; an already in-flight
-provider result cannot restore acceptance or evidence after cancellation.
+Every logical test prepares a stable provider correlation ID and canonical
+Foundry send proof without creating a mutable Brevo draft. Foundry persists
+that proof, acquires a durable send lease, and makes one transactional-email
+request containing the exact rendered HTML, subject, verified sender ID and
+explicit recipient addresses. The request also carries the execution ID as a
+Brevo tag, uses it as the provider idempotency key, and carries the
+execution/proof values as a custom header. A Brevo 201 response must contain a
+message ID before Foundry stores accepted evidence.
+
+A timeout, lost response, malformed success response, rate limit or server
+error remains ambiguous. Foundry does not issue another provider write for that
+logical operation. Reconciliation queries Brevo's tagged transactional events,
+then the message record and each per-recipient sent-content record. It accepts
+only when the verified sender, exact recipient set, subject and actual sent HTML
+all match the durable Foundry binding. Provider drift is rejected. Missing,
+partial or unavailable evidence remains ambiguous. If the tagged transactional
+evidence never converges, the operation remains unresolved; there is no
+automatic abandon-and-restart path that could create a duplicate.
+
+The send lease serializes the provider request against campaign edits and
+membership deauthorization. While the lease is active, a campaign edit and
+suspension or revocation of a recipient Owner are rejected. A mutation that
+wins before lease acquisition is caught by the final revision and active-Owner
+checks. After the provider response is durably classified, edits may proceed;
+they make prior accepted evidence stale, and they cancel open ambiguous work
+for the replaced revision.
 
 The shared application boundary accepts no more than five configured
 recipient identities and permits five new logical tests per site and campaign
@@ -102,9 +105,10 @@ test-recipient emails per Brevo account scope and UTC day. A Brevo 429 remains
 an ambiguous delivery outcome for reconciliation while retaining the visible
 `provider_rate_limited` status.
 
-The adapter reports Brevo's campaign API plain-text artifact capability as
-`unsupported`. Brevo receives the exact authored subject, preview text and
-rendered HTML; Foundry retains and binds the deterministic plain-text artifact
+The adapter reports Brevo's transactional API plain-text artifact capability as
+`unsupported`. Brevo receives the exact authored subject and rendered HTML;
+Foundry retains and binds the preview text and deterministic
+plain-text artifact
 for portability without claiming that Brevo transmitted a separately supplied
 plain-text body.
 

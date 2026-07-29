@@ -9,6 +9,8 @@ import {
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 
 const configurationFingerprint = "a".repeat(64);
+const correlationId =
+  "brevo-transactional-40000000-0000-4000-8000-000000000001";
 const request: NewsletterTestRequest = {
   executionId: "40000000-0000-4000-8000-000000000001",
   providerCampaignId: null,
@@ -80,116 +82,83 @@ async function prepareRequest(
   };
 }
 
-describe("Brevo newsletter delivery adapter", () => {
-  it("durably prepares one fresh draft before sending to explicit recipients", async () => {
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(response(201, { id: 17 }))
-      .mockResolvedValueOnce(
-        response(200, {
-          id: 17,
-          name: "foundry-test-40000000-0000-4000-8000-000000000001",
-          tag: "f-test-8000000000000001",
-          sender: { id: 42 },
-          subject: request.subject,
-          previewText: request.previewText,
-          htmlContent: "<html><body>Exact body</body></html>",
-          testSent: false,
-        }),
-      )
-      .mockResolvedValueOnce(response(204));
-    const adapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher,
-    });
+function adapter(fetcher = vi.fn()) {
+  return createBrevoNewsletterDeliveryAdapter({
+    apiKey: "test-key-not-a-real-secret",
+    configurationFingerprint,
+    accountScopeFingerprint: "8".repeat(64),
+    installationProofKey: "p".repeat(64),
+    senderIds: { sender_primary: 42 },
+    fetcher,
+  });
+}
 
-    const prepared = await prepareRequest(adapter);
-    await expect(adapter.sendTest(prepared)).resolves.toEqual({
+describe("Brevo newsletter delivery adapter", () => {
+  it("sends the exact content, sender, subject, and recipients in one provider write", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      response(201, { messageId: "<message-17@brevo.test>" }),
+    );
+    const delivery = adapter(fetcher);
+    const prepared = await prepareRequest(delivery);
+
+    await expect(delivery.sendTest(prepared)).resolves.toEqual({
       outcome: "accepted",
-      providerCampaignId: "17",
+      providerCampaignId: correlationId,
       foundrySendProof: prepared.foundrySendProof,
-      providerReceipt: expect.stringMatching(/^brevo:test:/u),
+      providerReceipt: expect.stringMatching(
+        /^brevo:transactional-test:v1:/u,
+      ),
     });
-    expect(fetcher).toHaveBeenNthCalledWith(
-      1,
-      "https://api.brevo.com/v3/emailCampaigns",
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://api.brevo.com/v3/smtp/email",
       expect.objectContaining({
         method: "POST",
         signal: expect.any(AbortSignal),
-      }),
-    );
-    expect(fetcher).toHaveBeenNthCalledWith(
-      3,
-      "https://api.brevo.com/v3/emailCampaigns/17/sendTest",
-      expect.objectContaining({
-        method: "POST",
         body: JSON.stringify({
-          emailTo: ["owner-primary@example.test"],
+          sender: { id: 42 },
+          to: [{ email: "owner-primary@example.test" }],
+          subject: request.subject,
+          htmlContent: request.renderedCampaign.html.bytes,
+          tags: [request.executionId],
+          headers: {
+            idempotencyKey: request.executionId,
+            "X-Mailin-custom":
+              `foundry_execution:${request.executionId}` +
+              `|foundry_proof:${prepared.foundrySendProof}`,
+          },
         }),
       }),
     );
   });
 
-  it("keeps canonical send proof stable across Brevo credential rotation", async () => {
-    const existingCampaign = {
-      id: 17,
-      name: "foundry-test-40000000-0000-4000-8000-000000000001",
-      tag: "f-test-8000000000000001",
-      sender: { id: 42 },
-      subject: request.subject,
-      previewText: request.previewText,
-      htmlContent: "<html><body>Exact body</body></html>",
-      testSent: false,
-    };
-    const createAdapter = (apiKey: string) =>
-      createBrevoNewsletterDeliveryAdapter({
-        apiKey,
-        configurationFingerprint,
-        accountScopeFingerprint: "8".repeat(64),
-        installationProofKey: "p".repeat(64),
-        senderIds: { sender_primary: 42 },
-        fetcher: vi.fn().mockResolvedValue(response(200, existingCampaign)),
-      });
-    const knownCampaignRequest = {
-      ...request,
-      providerCampaignId: "17",
-    };
-
-    const beforeRotation =
-      await createAdapter("first-test-key").prepareTest(
-        knownCampaignRequest,
-      );
-    const afterRotation =
-      await createAdapter("rotated-test-key").prepareTest(
-        knownCampaignRequest,
-      );
-
-    expect(beforeRotation).toMatchObject({
-      outcome: "prepared",
-      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
-    });
-    expect(afterRotation).toEqual(beforeRotation);
-  });
-
-  it("refuses the provider test write without the persisted exact proof", async () => {
-    const fetcher = vi.fn();
-    const adapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
+  it("prepares deterministic proof without a mutable provider draft", async () => {
+    const before = adapter();
+    const after = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "rotated-test-key",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
       installationProofKey: "p".repeat(64),
       senderIds: { sender_primary: 42 },
-      fetcher,
+      fetcher: vi.fn(),
     });
 
+    const beforeRotation = await before.prepareTest(request);
+    const afterRotation = await after.prepareTest(request);
+    expect(beforeRotation).toEqual(afterRotation);
+    expect(beforeRotation).toEqual({
+      outcome: "prepared",
+      providerCampaignId: correlationId,
+      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+  });
+
+  it("refuses the provider write without the persisted exact proof", async () => {
+    const fetcher = vi.fn();
     await expect(
-      adapter.sendTest({
+      adapter(fetcher).sendTest({
         ...request,
-        providerCampaignId: "17",
+        providerCampaignId: correlationId,
         foundrySendProof: null,
       }),
     ).resolves.toEqual({
@@ -199,254 +168,169 @@ describe("Brevo newsletter delivery adapter", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("does not accept a matching provider draft sent outside Foundry", async () => {
-    const fetcher = vi.fn().mockResolvedValue(
-      response(200, {
-        count: 1,
-        campaigns: [
-          {
-            id: 18,
-            name: "foundry-test-40000000-0000-4000-8000-000000000001",
-            tag: "f-test-8000000000000001",
-            sender: { id: 42 },
-            subject: request.subject,
-            previewText: request.previewText,
-            htmlContent: "<html><body>Exact body</body></html>",
-            testSent: true,
-          },
-        ],
-      }),
-    );
-    const adapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher,
-    });
-
-    await expect(
-      adapter.reconcileTest({
-        request,
-        providerCampaignId: null,
-      }),
-    ).resolves.toEqual({
-      outcome: "ambiguous",
-      providerCampaignId: "18",
-    });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+  it("keeps lost, malformed, rate-limited, and server responses ambiguous", async () => {
+    for (const result of [
+      () => Promise.reject(new Error("response_lost_after_send")),
+      () => Promise.resolve(response(201, {})),
+      () => Promise.resolve(response(429)),
+      () => Promise.resolve(response(503)),
+    ]) {
+      const delivery = adapter(vi.fn().mockImplementation(result));
+      const prepared = await prepareRequest(delivery);
+      await expect(delivery.sendTest(prepared)).resolves.toMatchObject({
+        outcome: "ambiguous",
+        providerCampaignId: correlationId,
+        foundrySendProof: prepared.foundrySendProof,
+      });
+    }
   });
 
-  it("keeps transient and deleted known-campaign reads ambiguous", async () => {
-    const transientRead = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher: vi.fn().mockResolvedValue(response(429)),
-    });
+  it("does not infer acceptance while reconciling an uncertain transactional write", async () => {
+    const delivery = adapter();
+    const prepared = await prepareRequest(delivery);
     await expect(
-      transientRead.reconcileTest({
-        request,
-        providerCampaignId: "17",
+      delivery.reconcileTest({
+        request: prepared,
+        providerCampaignId: correlationId,
       }),
     ).resolves.toEqual({
       outcome: "ambiguous",
-      providerCampaignId: "17",
-      code: "provider_rate_limited",
-    });
-
-    const transientSearch = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher: vi.fn().mockResolvedValue(response(503)),
-    });
-    await expect(
-      transientSearch.reconcileTest({
-        request,
-        providerCampaignId: null,
-      }),
-    ).resolves.toEqual({ outcome: "ambiguous" });
-
-    const absent = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher: vi.fn().mockResolvedValue(response(404)),
-    });
-    await expect(
-      absent.reconcileTest({
-        request,
-        providerCampaignId: "17",
-      }),
-    ).resolves.toEqual({
-      outcome: "ambiguous",
-      providerCampaignId: "17",
+      providerCampaignId: correlationId,
+      foundrySendProof: prepared.foundrySendProof,
     });
   });
 
-  it("keeps a lost Foundry send response ambiguous after its provider draft is deleted", async () => {
+  it("reconciles an uncertain write only from exact tagged transactional evidence", async () => {
+    const messageId = "<message-17@brevo.test>";
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(response(201, { id: 17 }))
       .mockResolvedValueOnce(
         response(200, {
-          id: 17,
-          name: "foundry-test-40000000-0000-4000-8000-000000000001",
-          tag: "f-test-8000000000000001",
-          sender: { id: 42 },
-          subject: request.subject,
-          previewText: request.previewText,
-          htmlContent: "<html><body>Exact body</body></html>",
-          testSent: false,
+          events: [
+            {
+              email: "owner-primary@example.test",
+              event: "delivered",
+              messageId,
+              from: "sender@example.test",
+              tag: request.executionId,
+            },
+          ],
         }),
       )
-      .mockRejectedValueOnce(new Error("response_lost_after_send"))
-      .mockResolvedValueOnce(response(404))
       .mockResolvedValueOnce(
         response(200, {
-          id: 17,
-          name: "foundry-test-40000000-0000-4000-8000-000000000001",
-          tag: "f-test-8000000000000001",
-          sender: { id: 42 },
+          senders: [
+            {
+              id: 42,
+              active: true,
+              email: "sender@example.test",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, {
+          count: 1,
+          transactionalEmails: [
+            {
+              email: "owner-primary@example.test",
+              messageId,
+              subject: request.subject,
+              uuid: "transactional-email-uuid-17",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, {
+          email: "owner-primary@example.test",
           subject: request.subject,
-          previewText: request.previewText,
-          htmlContent: "<html><body>Exact body</body></html>",
-          testSent: true,
+          body: request.renderedCampaign.html.bytes,
+          events: [{ name: "delivered" }],
         }),
       );
-    const adapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher,
-    });
+    const delivery = adapter(fetcher);
+    const prepared = await prepareRequest(delivery);
 
-    const prepared = await prepareRequest(adapter);
-    const ambiguous = await adapter.sendTest(prepared);
-    expect(ambiguous).toMatchObject({
-      outcome: "ambiguous",
-      providerCampaignId: "17",
-      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
-    });
-    const reconciliationRequest = prepared;
     await expect(
-      adapter.reconcileTest({
-        request: reconciliationRequest,
-        providerCampaignId: "17",
+      delivery.reconcileTest({
+        request: prepared,
+        providerCampaignId: correlationId,
       }),
     ).resolves.toEqual({
-      outcome: "ambiguous",
-      providerCampaignId: "17",
-      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      outcome: "accepted",
+      providerCampaignId: correlationId,
+      foundrySendProof: prepared.foundrySendProof,
+      providerReceipt: expect.stringMatching(
+        /^brevo:transactional-test:v1:/u,
+      ),
     });
-    await expect(
-      adapter.reconcileTest({
-        request: reconciliationRequest,
-        providerCampaignId: "17",
-      }),
-    ).resolves.toEqual({
-      outcome: "ambiguous",
-      providerCampaignId: "17",
-      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
-    });
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenNthCalledWith(
+      3,
+      "https://api.brevo.com/v3/smtp/emails?messageId=" +
+        encodeURIComponent(messageId),
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      4,
+      "https://api.brevo.com/v3/smtp/emails/transactional-email-uuid-17",
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
-  it("keeps server errors ambiguous because either provider write may have applied", async () => {
-    const createAmbiguous = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher: vi.fn().mockResolvedValue(response(503)),
-    });
-    await expect(createAmbiguous.prepareTest(request)).resolves.toEqual({
-      outcome: "ambiguous",
-    });
+  it("rejects tagged transactional evidence whose actual body differs", async () => {
+    const messageId = "<message-18@brevo.test>";
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response(200, {
+          events: [
+            {
+              email: "owner-primary@example.test",
+              messageId,
+              from: "sender@example.test",
+              tag: request.executionId,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, {
+          senders: [
+            { id: 42, active: true, email: "sender@example.test" },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, {
+          transactionalEmails: [
+            {
+              email: "owner-primary@example.test",
+              messageId,
+              subject: request.subject,
+              uuid: "transactional-email-uuid-18",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, {
+          email: "owner-primary@example.test",
+          subject: request.subject,
+          body: "<html>provider-side mutation</html>",
+        }),
+      );
+    const delivery = adapter(fetcher);
+    const prepared = await prepareRequest(delivery);
 
-    const createRateLimited = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher: vi.fn().mockResolvedValue(response(429)),
-    });
-    await expect(createRateLimited.prepareTest(request)).resolves.toEqual({
-      outcome: "ambiguous",
-      code: "provider_rate_limited",
-    });
-
-    const sendAmbiguous = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher: vi
-        .fn()
-        .mockResolvedValueOnce(response(201, { id: 19 }))
-        .mockResolvedValueOnce(
-          response(200, {
-            id: 19,
-            name: "foundry-test-40000000-0000-4000-8000-000000000001",
-            tag: "f-test-8000000000000001",
-            sender: { id: 42 },
-            subject: request.subject,
-            previewText: request.previewText,
-            htmlContent: "<html><body>Exact body</body></html>",
-          }),
-        )
-        .mockResolvedValueOnce(response(503)),
-    });
     await expect(
-      sendAmbiguous.sendTest(await prepareRequest(sendAmbiguous)),
+      delivery.reconcileTest({
+        request: prepared,
+        providerCampaignId: correlationId,
+      }),
     ).resolves.toEqual({
-      outcome: "ambiguous",
-      providerCampaignId: "19",
-      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
-    });
-
-    const sendRateLimited = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      accountScopeFingerprint: "8".repeat(64),
-      installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
-      fetcher: vi
-        .fn()
-        .mockResolvedValueOnce(response(201, { id: 20 }))
-        .mockResolvedValueOnce(
-          response(200, {
-            id: 20,
-            name: "foundry-test-40000000-0000-4000-8000-000000000001",
-            tag: "f-test-8000000000000001",
-            sender: { id: 42 },
-            subject: request.subject,
-            previewText: request.previewText,
-            htmlContent: "<html><body>Exact body</body></html>",
-          }),
-        )
-        .mockResolvedValueOnce(response(429)),
-    });
-    await expect(
-      sendRateLimited.sendTest(await prepareRequest(sendRateLimited)),
-    ).resolves.toEqual({
-      outcome: "ambiguous",
-      providerCampaignId: "20",
-      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      code: "provider_rate_limited",
+      outcome: "rejected",
+      code: "provider_campaign_fingerprint_mismatch",
     });
   });
 
@@ -467,7 +351,7 @@ describe("Brevo newsletter delivery adapter", () => {
           senders: [{ id: 42, active: true, email: "secret@example.test" }],
         }),
       );
-    const adapter = createBrevoNewsletterDeliveryAdapter({
+    const delivery = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint,
@@ -476,14 +360,14 @@ describe("Brevo newsletter delivery adapter", () => {
       fetcher,
     });
 
-    await expect(adapter.capabilities()).resolves.toMatchObject({
+    await expect(delivery.capabilities()).resolves.toMatchObject({
       provider: "brevo",
       apiTestDelivery: "supported",
       explicitRecipients: "supported",
       ambiguousOutcomeReconciliation: "supported",
       plainTextArtifact: "unsupported",
     });
-    const health = await adapter.health();
+    const health = await delivery.health();
     expect(health).toEqual({
       state: "healthy",
       credential: "verified",
@@ -493,7 +377,7 @@ describe("Brevo newsletter delivery adapter", () => {
   });
 
   it("fails health when the credential belongs to a different provisioned account", async () => {
-    const adapter = createBrevoNewsletterDeliveryAdapter({
+    const delivery = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
@@ -509,7 +393,7 @@ describe("Brevo newsletter delivery adapter", () => {
         ),
     });
 
-    await expect(adapter.health()).resolves.toEqual({
+    await expect(delivery.health()).resolves.toEqual({
       state: "degraded",
       credential: "invalid",
       senderIdentity: "unknown",

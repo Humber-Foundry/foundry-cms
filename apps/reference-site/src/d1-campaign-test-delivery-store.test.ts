@@ -188,6 +188,7 @@ describe("D1 campaign test delivery store", () => {
         state: "accepted",
         attemptLeaseUntil: null,
         providerCampaignId: "stale-17",
+        foundrySendProof: "7".repeat(64),
         evidence: {
           ...pending.binding,
           executionId: pending.executionId,
@@ -213,6 +214,24 @@ describe("D1 campaign test delivery store", () => {
       updatedAt: "2026-07-29T19:06:00.000Z",
     };
 
+    await expect(
+      store.record({
+        ...accepted,
+        foundrySendProof: null,
+      }),
+    ).rejects.toThrow(/campaign_test_delivery_evidence_invalid/u);
+    await expect(
+      database
+        .prepare(
+          `UPDATE campaign_test_deliveries
+           SET state = 'accepted', attempt_lease_until = NULL,
+             provider_campaign_id = '17', foundry_send_proof = NULL,
+             evidence_json = '{}'
+           WHERE execution_id = ?1`,
+        )
+        .bind(pending.executionId)
+        .run(),
+    ).rejects.toThrow(/CHECK constraint failed/u);
     await expect(store.record(accepted)).resolves.toEqual(accepted);
     for (let attemptNumber = 1; attemptNumber <= 10; attemptNumber += 1) {
       await expect(

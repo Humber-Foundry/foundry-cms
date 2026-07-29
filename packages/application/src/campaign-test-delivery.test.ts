@@ -698,7 +698,7 @@ describe("campaign test delivery", () => {
     await first;
   });
 
-  it("cancels an attempting test after a send-affecting edit before recovery", async () => {
+  it("blocks a send-affecting edit until the provider write completes", async () => {
     let now = new Date("2026-07-29T19:05:00.000Z");
     let completeSend!: (
       outcome: Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>,
@@ -726,27 +726,21 @@ describe("campaign test delivery", () => {
 
     const first = application.commands.requestTest(request);
     await vi.waitFor(() => expect(sendTest).toHaveBeenCalledTimes(1));
-    await campaignApplication.commands.edit({
-      actor,
-      requestId: "campaign-edit-during-attempting-test-1",
-      campaignId: created.campaign.id,
-      expectedVersion: 1,
-      input: { ...input, subject: "Edited during provider test" },
-    });
+    await expect(
+      campaignApplication.commands.edit({
+        actor,
+        requestId: "campaign-edit-during-attempting-test-1",
+        campaignId: created.campaign.id,
+        expectedVersion: 1,
+        input: { ...input, subject: "Edited during provider test" },
+      }),
+    ).rejects.toMatchObject({ message: "campaign_revision_conflict" });
     expect(deliveryStore.list()).toEqual([
       expect.objectContaining({
-        state: "cancelled",
-        failureCode: "campaign_revision_changed",
+        state: "attempting",
+        failureCode: null,
       }),
     ]);
-    now = new Date("2026-07-29T19:06:01.000Z");
-
-    await expect(
-      application.commands.requestTest(request),
-    ).resolves.toMatchObject({
-      state: "cancelled",
-      failureCode: "campaign_revision_changed",
-    });
     expect(adapter.reconcileTest).not.toHaveBeenCalled();
     expect(sendTest).toHaveBeenCalledTimes(1);
     completeSend({
@@ -756,9 +750,20 @@ describe("campaign test delivery", () => {
       providerReceipt: "brevo-test-cancelled-1",
     });
     await expect(first).resolves.toMatchObject({
-      state: "cancelled",
-      evidence: null,
-      failureCode: "campaign_revision_changed",
+      state: "accepted",
+      failureCode: null,
+    });
+    now = new Date("2026-07-29T19:06:01.000Z");
+    await expect(
+      campaignApplication.commands.edit({
+        actor,
+        requestId: "campaign-edit-after-attempting-test-1",
+        campaignId: created.campaign.id,
+        expectedVersion: 1,
+        input: { ...input, subject: "Edited after provider test" },
+      }),
+    ).resolves.toMatchObject({
+      campaign: { version: 2 },
     });
   });
 

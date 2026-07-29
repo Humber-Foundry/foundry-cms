@@ -110,6 +110,7 @@ export type MembershipStatusChange =
       reason:
         | "membership_not_found"
         | "last_owner"
+        | "campaign_test_send_in_progress"
         | "membership_transition_not_allowed";
     }>;
 
@@ -209,6 +210,7 @@ export class AccessDeniedError extends Error {
     | "capability_not_authorized"
     | "invitation_not_claimable"
     | "membership_email_ambiguous"
+    | "campaign_test_send_in_progress"
     | "membership_transition_not_allowed";
 
   constructor(code: AccessDeniedError["code"]) {
@@ -463,6 +465,9 @@ export function createHumanAccessApplication({
       }
       if (result.reason === "membership_transition_not_allowed") {
         throw new AccessDeniedError("membership_transition_not_allowed");
+      }
+      if (result.reason === "campaign_test_send_in_progress") {
+        throw new AccessDeniedError("campaign_test_send_in_progress");
       }
       throw new AccessDeniedError("membership_not_found");
     }

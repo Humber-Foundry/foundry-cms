@@ -15,7 +15,7 @@ export function createInMemoryCampaignStore(
       campaignId: Campaign["id"];
       retainedRevisionId: CampaignRevision["id"];
       cancelledAt: string;
-    }) => Promise<void>;
+    }) => Promise<boolean>;
     persistTestReceiptConfirmation?: (
       confirmation: Parameters<
         CampaignStore["acceptTestReceiptConfirmation"]
@@ -141,12 +141,19 @@ export function createInMemoryCampaignStore(
         audits.push(rejectedAudit);
         return Object.freeze({ receipt, replayed: false });
       }
-      await options.cancelOpenTestDeliveries?.({
-        siteId: campaign.siteId,
-        campaignId: campaign.id,
-        retainedRevisionId: revision.id,
-        cancelledAt: revision.createdAt,
-      });
+      if (
+        await options.cancelOpenTestDeliveries?.({
+          siteId: campaign.siteId,
+          campaignId: campaign.id,
+          retainedRevisionId: revision.id,
+          cancelledAt: revision.createdAt,
+        }) === false
+      ) {
+        const receipt = rejectedReceipt(command, rejectedAudit);
+        receipts.set(commandKey(command), receipt);
+        audits.push(rejectedAudit);
+        return Object.freeze({ receipt, replayed: false });
+      }
       campaigns.set(key, campaign);
       revisions.set(revisionKey(revision), revision);
       audits.push(acceptedAudit);

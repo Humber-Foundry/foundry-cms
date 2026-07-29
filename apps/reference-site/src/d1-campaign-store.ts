@@ -439,6 +439,12 @@ export function createD1CampaignStore(
                  SELECT 1 FROM campaigns
                  WHERE site_id = ?1 AND id = ?7 AND version = ?11
                )
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_deliveries
+                 WHERE site_id = ?1 AND campaign_id = ?7
+                   AND state = 'attempting'
+                   AND attempt_lease_until > ?10
+               )
              ON CONFLICT DO NOTHING`,
           )
           .bind(
@@ -461,6 +467,12 @@ export function createD1CampaignStore(
                version = ?8, updated_at = ?9
              WHERE site_id = ?1 AND id = ?10 AND version = ?11
                AND ${pending}
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_deliveries
+                 WHERE site_id = ?1 AND campaign_id = ?10
+                   AND state = 'attempting'
+                   AND attempt_lease_until > ?9
+               )
                AND EXISTS (
                  SELECT 1 FROM campaign_revisions
                  WHERE id = ?7 AND site_id = ?1
@@ -486,7 +498,12 @@ export function createD1CampaignStore(
                failure_code = 'campaign_revision_changed', updated_at = ?6
              WHERE site_id = ?1 AND campaign_id = ?7
                AND campaign_revision_id != ?8
-               AND state IN ('pending', 'attempting', 'ambiguous')
+               AND (
+                 state IN ('pending', 'ambiguous') OR
+                 (state = 'attempting' AND (
+                   attempt_lease_until IS NULL OR attempt_lease_until <= ?6
+                 ))
+               )
                AND EXISTS (
                  SELECT 1 FROM campaigns
                  WHERE site_id = ?1 AND id = ?7
@@ -672,6 +689,8 @@ export function createD1CampaignStore(
                    AND campaign_id = ?11
                    AND campaign_revision_id = ?12
                    AND state = 'accepted' AND evidence_json IS NOT NULL
+                   AND provider_campaign_id IS NOT NULL
+                   AND foundry_send_proof IS NOT NULL
                )
                AND EXISTS (
                  SELECT 1 FROM campaigns

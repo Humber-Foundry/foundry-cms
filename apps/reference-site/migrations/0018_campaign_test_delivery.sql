@@ -30,7 +30,8 @@ CREATE TABLE campaign_test_deliveries (
   FOREIGN KEY (campaign_revision_id) REFERENCES campaign_revisions(id),
   CHECK (
     (state = 'accepted' AND evidence_json IS NOT NULL
-      AND provider_campaign_id IS NOT NULL AND failure_code IS NULL) OR
+      AND provider_campaign_id IS NOT NULL
+      AND foundry_send_proof IS NOT NULL AND failure_code IS NULL) OR
     (state = 'failed' AND evidence_json IS NULL
       AND failure_code IN (
         'foundry_send_proof_invalid',

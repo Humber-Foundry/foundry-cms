@@ -218,7 +218,7 @@ export interface CampaignTestDeliveryStore {
     campaignId: CampaignId;
     retainedRevisionId: CampaignRevisionId;
     cancelledAt: string;
-  }): Promise<void>;
+  }): Promise<boolean>;
 }
 
 export const maximumCampaignTestRecipients = 5;
@@ -1244,7 +1244,14 @@ export function createCampaignTestDeliveryApplication({
       siteId,
       campaignId,
     });
-    if (operation?.evidence === null || operation === null) return null;
+    if (
+      operation === null ||
+      operation.evidence === null ||
+      operation.providerCampaignId === null ||
+      operation.foundrySendProof === null
+    ) {
+      return null;
+    }
     const capabilities = await adapter.capabilities();
     assertCapabilities(capabilities);
     const { revision } = await currentCampaignRevision(campaignId);
@@ -1323,7 +1330,12 @@ export function createCampaignTestDeliveryApplication({
         return confirmation;
       }
       const operation = await store.findByExecution({ siteId, executionId });
-      if (operation?.state !== "accepted" || operation.evidence === null) {
+      if (
+        operation?.state !== "accepted" ||
+        operation.evidence === null ||
+        operation.providerCampaignId === null ||
+        operation.foundrySendProof === null
+      ) {
         throw new CampaignValidationError("test_delivery_not_accepted");
       }
       if (!operation.recipientIds.includes(owner.id)) {
@@ -1578,6 +1590,16 @@ export function createInMemoryCampaignTestDeliveryStore():
       return attempting;
     },
     async record(operation) {
+      if (
+        operation.state === "accepted" &&
+        (operation.evidence === null ||
+          operation.providerCampaignId === null ||
+          operation.foundrySendProof === null)
+      ) {
+        throw new CampaignValidationError(
+          "campaign_test_delivery_evidence_invalid",
+        );
+      }
       const key = requestKey(operation);
       const current = operations.get(key);
       if (
@@ -1600,7 +1622,10 @@ export function createInMemoryCampaignTestDeliveryStore():
             (operation) =>
               operation.siteId === requestedSiteId &&
               operation.campaignId === campaignId &&
-              operation.state === "accepted",
+              operation.state === "accepted" &&
+              operation.evidence !== null &&
+              operation.providerCampaignId !== null &&
+              operation.foundrySendProof !== null,
           )
           .sort((left, right) =>
             right.updatedAt.localeCompare(left.updatedAt),
@@ -1638,7 +1663,12 @@ export function createInMemoryCampaignTestDeliveryStore():
           candidate.siteId === confirmation.siteId &&
           candidate.executionId === confirmation.executionId,
       );
-      if (operation?.state !== "accepted") {
+      if (
+        operation?.state !== "accepted" ||
+        operation.evidence === null ||
+        operation.providerCampaignId === null ||
+        operation.foundrySendProof === null
+      ) {
         throw new CampaignValidationError("test_delivery_not_accepted");
       }
       confirmations.set(key, confirmation);
@@ -1674,6 +1704,18 @@ export function createInMemoryCampaignTestDeliveryStore():
       retainedRevisionId,
       cancelledAt,
     }) {
+      if (
+        [...operations.values()].some(
+          (operation) =>
+            operation.siteId === requestedSiteId &&
+            operation.campaignId === campaignId &&
+            operation.state === "attempting" &&
+            operation.attemptLeaseUntil !== null &&
+            operation.attemptLeaseUntil > cancelledAt,
+        )
+      ) {
+        return false;
+      }
       for (const [key, operation] of operations) {
         if (
           operation.siteId === requestedSiteId &&
@@ -1695,6 +1737,7 @@ export function createInMemoryCampaignTestDeliveryStore():
           );
         }
       }
+      return true;
     },
     list() {
       return [...operations.values()];

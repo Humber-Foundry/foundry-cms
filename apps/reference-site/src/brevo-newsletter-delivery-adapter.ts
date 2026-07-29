@@ -3,7 +3,6 @@ import {
   sha256Text,
   type NewsletterDeliveryAdapter,
   type NewsletterDeliveryCapabilities,
-  type NewsletterTestAmbiguityCode,
   type NewsletterTestOutcome,
   type NewsletterTestRequest,
 } from "@foundry/application";
@@ -15,33 +14,6 @@ type Fetcher = (
   input: string | URL | Request,
   init?: RequestInit,
 ) => Promise<Response>;
-
-type BrevoCampaign = Readonly<{
-  id?: unknown;
-  name?: unknown;
-  tag?: unknown;
-  sender?: Readonly<{ id?: unknown }>;
-  subject?: unknown;
-  previewText?: unknown;
-  htmlContent?: unknown;
-  testSent?: unknown;
-}>;
-
-type CampaignRead =
-  | Readonly<{ outcome: "found"; campaign: BrevoCampaign }>
-  | Readonly<{ outcome: "not_found" }>
-  | Readonly<{
-      outcome: "ambiguous";
-      code?: NewsletterTestAmbiguityCode;
-    }>;
-
-function campaignName(executionId: string) {
-  return `foundry-test-${executionId}`;
-}
-
-function campaignTag(executionId: string) {
-  return `f-test-${executionId.replaceAll("-", "").slice(-16)}`;
-}
 
 function headers(apiKey: string) {
   return {
@@ -59,14 +31,6 @@ async function json(response: Response): Promise<unknown> {
   }
 }
 
-function providerId(value: unknown): string | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    ? String(value)
-    : typeof value === "string" && /^[1-9][0-9]*$/u.test(value)
-      ? value
-      : null;
-}
-
 function outcomeCouldBeAmbiguous(status: number) {
   return status === 408 || status === 429 || status >= 500;
 }
@@ -79,42 +43,22 @@ function expectedSenderId(
   return Number.isSafeInteger(id) && (id ?? 0) > 0 ? id! : null;
 }
 
-function matchesCampaign(
-  campaign: BrevoCampaign,
-  request: NewsletterTestRequest,
-  senderId: number,
-) {
-  return (
-    campaign.name === campaignName(request.executionId) &&
-    campaign.tag === campaignTag(request.executionId) &&
-    campaign.sender?.id === senderId &&
-    campaign.subject === request.subject &&
-    campaign.previewText === request.previewText &&
-    campaign.htmlContent === request.renderedCampaign.html.bytes
-  );
+function providerCorrelationId(executionId: string) {
+  return `brevo-transactional-${executionId}`;
 }
 
-function accepted(
-  request: NewsletterTestRequest,
-  campaign: BrevoCampaign,
-  foundrySendProof: string,
-): NewsletterTestOutcome {
-  const id = providerId(campaign.id);
-  if (id === null) return { outcome: "ambiguous" };
-  return {
-    outcome: "accepted",
-    providerCampaignId: id,
-    foundrySendProof,
-    providerReceipt: [
-      "brevo:test:v1",
-      request.executionId,
-      id,
-      request.binding.campaignFingerprint,
-      request.binding.providerConfigurationFingerprint,
-      request.binding.recipientSetFingerprint,
-      foundrySendProof,
-    ].join(":"),
-  };
+function providerMessageId(value: unknown): string | null {
+  return typeof value === "string" &&
+      value.length > 0 &&
+      value.length <= 512
+    ? value
+    : null;
+}
+
+function recipientAddress(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized.includes("@") ? normalized : null;
 }
 
 export function createBrevoNewsletterDeliveryAdapter({
@@ -159,126 +103,34 @@ export function createBrevoNewsletterDeliveryAdapter({
     providerCampaignId: string,
   ) {
     return sha256CanonicalJson({
-      version: "foundry.brevo-test-send-proof.v1",
+      version: "foundry.brevo-transactional-test-send-proof.v1",
       installationProofKey,
       executionId: request.executionId,
       providerCampaignId,
-      providerConfigurationFingerprint:
+      subject: request.subject,
+      senderIdentityId: request.senderIdentityId,
+      binding: request.binding,
+    });
+  }
+
+  function accepted(
+    request: NewsletterTestRequest,
+    messageId: string,
+  ): NewsletterTestOutcome {
+    return {
+      outcome: "accepted",
+      providerCampaignId: providerCorrelationId(request.executionId),
+      foundrySendProof: request.foundrySendProof!,
+      providerReceipt: [
+        "brevo:transactional-test:v1",
+        request.executionId,
+        messageId,
+        request.binding.campaignFingerprint,
         request.binding.providerConfigurationFingerprint,
-      recipientSetFingerprint: request.binding.recipientSetFingerprint,
-    });
-  }
-
-  async function readCampaign(
-    id: string,
-    signal?: AbortSignal,
-  ): Promise<CampaignRead> {
-    const response = await fetcher(`${endpoint}/emailCampaigns/${id}`, {
-      method: "GET",
-      headers: headers(apiKey),
-      ...(signal === undefined ? {} : { signal }),
-    });
-    if (response.status === 404) return { outcome: "not_found" } as const;
-    if (!response.ok) {
-      return {
-        outcome: "ambiguous",
-        ...(response.status === 429
-          ? { code: "provider_rate_limited" }
-          : {}),
-      } as const;
-    }
-    return {
-      outcome: "found",
-      campaign: (await json(response)) as BrevoCampaign,
-    } as const;
-  }
-
-  async function findCampaign(
-    request: NewsletterTestRequest,
-  ): Promise<CampaignRead> {
-    const response = await fetcher(
-      `${endpoint}/emailCampaigns?type=classic&status=draft&limit=50&sort=desc`,
-      { method: "GET", headers: headers(apiKey) },
-    );
-    if (!response.ok) {
-      return {
-        outcome: "ambiguous",
-        ...(response.status === 429
-          ? { code: "provider_rate_limited" }
-          : {}),
-      };
-    }
-    const body = await json(response) as {
-      campaigns?: ReadonlyArray<BrevoCampaign>;
-      count?: unknown;
-    } | null;
-    const matches = (body?.campaigns ?? []).filter(
-      (campaign) =>
-        campaign.name === campaignName(request.executionId) &&
-        campaign.tag === campaignTag(request.executionId),
-    );
-    if (matches.length === 1) {
-      return { outcome: "found", campaign: matches[0]! };
-    }
-    if (matches.length > 1) return { outcome: "ambiguous" };
-    const returned = body?.campaigns?.length ?? 0;
-    return typeof body?.count === "number" && body.count <= returned
-      ? { outcome: "not_found" }
-      : { outcome: "ambiguous" };
-  }
-
-  async function reconcile(
-    request: NewsletterTestRequest,
-    campaignId: string | null,
-    foundrySendProof: string | null = request.foundrySendProof,
-  ) {
-    const senderId = expectedSenderId(request, senderIds);
-    if (senderId === null) {
-      return { outcome: "rejected", code: "provider_sender_unmapped" } as const;
-    }
-    const read =
-      campaignId === null
-        ? await findCampaign(request)
-        : await readCampaign(campaignId);
-    if (read.outcome === "ambiguous") {
-      return {
-        outcome: "ambiguous",
-        ...(campaignId === null ? {} : { providerCampaignId: campaignId }),
-        ...(foundrySendProof === null ? {} : { foundrySendProof }),
-        ...(read.code === undefined ? {} : { code: read.code }),
-      } as const;
-    }
-    if (read.outcome === "not_found") {
-      return campaignId === null
-        ? read
-        : {
-            outcome: "ambiguous",
-            providerCampaignId: campaignId,
-            ...(foundrySendProof === null ? {} : { foundrySendProof }),
-          } as const;
-    }
-    const campaign = read.campaign;
-    if (!matchesCampaign(campaign, request, senderId)) {
-      return {
-        outcome: "rejected",
-        code: "provider_campaign_fingerprint_mismatch",
-      } as const;
-    }
-    const id = providerId(campaign.id);
-    if (campaign.testSent === false && id !== null) {
-      return foundrySendProof === null
-        ? { outcome: "not_sent", providerCampaignId: id } as const
-        : {
-            outcome: "ambiguous",
-            providerCampaignId: id,
-            foundrySendProof,
-          } as const;
-    }
-    return {
-      outcome: "ambiguous",
-      ...(id === null ? {} : { providerCampaignId: id }),
-      ...(foundrySendProof === null ? {} : { foundrySendProof }),
-    } as const;
+        request.binding.recipientSetFingerprint,
+        request.foundrySendProof,
+      ].join(":"),
+    };
   }
 
   const adapter: NewsletterDeliveryAdapter = {
@@ -349,138 +201,68 @@ export function createBrevoNewsletterDeliveryAdapter({
       }
     },
     async prepareTest(request) {
-      const senderId = expectedSenderId(request, senderIds);
-      if (senderId === null) {
+      if (expectedSenderId(request, senderIds) === null) {
         return { outcome: "rejected", code: "provider_sender_unmapped" };
       }
-      let campaignId: string | null = request.providerCampaignId;
-      const signal = AbortSignal.timeout(30_000);
-      try {
-        if (campaignId === null) {
-          const created = await fetcher(`${endpoint}/emailCampaigns`, {
-            method: "POST",
-            headers: headers(apiKey),
-            signal,
-            body: JSON.stringify({
-              name: campaignName(request.executionId),
-              tag: campaignTag(request.executionId),
-              sender: { id: senderId },
-              subject: request.subject,
-              previewText: request.previewText,
-              htmlContent: request.renderedCampaign.html.bytes,
-            }),
-          });
-          if (!created.ok) {
-            if (outcomeCouldBeAmbiguous(created.status)) {
-              return {
-                outcome: "ambiguous",
-                ...(created.status === 429
-                  ? { code: "provider_rate_limited" }
-                  : {}),
-              } as const;
-            }
-            return {
-              outcome: "rejected",
-              code: "provider_campaign_create_rejected",
-            } as const;
-          }
-          const createdBody = await json(created) as { id?: unknown } | null;
-          campaignId = providerId(createdBody?.id);
-          if (campaignId === null) return { outcome: "ambiguous" };
-        } else {
-          const existing = await readCampaign(campaignId, signal);
-          if (existing.outcome === "ambiguous") {
-            return {
-              outcome: "ambiguous",
-              providerCampaignId: campaignId,
-              ...(existing.code === undefined
-                ? {}
-                : { code: existing.code }),
-            } as const;
-          }
-          if (
-            existing.outcome !== "found" ||
-            !matchesCampaign(existing.campaign, request, senderId)
-          ) {
-            return {
-              outcome: "rejected",
-              code:
-                existing.outcome === "not_found"
-                  ? "provider_campaign_not_found"
-                  : "provider_campaign_fingerprint_mismatch",
-            } as const;
-          }
-        }
+      const correlationId = providerCorrelationId(request.executionId);
+      if (
+        request.providerCampaignId !== null &&
+        request.providerCampaignId !== correlationId
+      ) {
         return {
-          outcome: "prepared",
-          providerCampaignId: campaignId,
-          foundrySendProof: await foundrySendProof(request, campaignId),
-        } as const;
-      } catch {
-        return {
-          outcome: "ambiguous",
-          ...(campaignId === null ? {} : { providerCampaignId: campaignId }),
-        } as const;
+          outcome: "rejected",
+          code: "provider_campaign_fingerprint_mismatch",
+        };
       }
+      return {
+        outcome: "prepared",
+        providerCampaignId: correlationId,
+        foundrySendProof: await foundrySendProof(request, correlationId),
+      };
     },
     async sendTest(request) {
       const senderId = expectedSenderId(request, senderIds);
-      const campaignId = request.providerCampaignId;
+      const correlationId = providerCorrelationId(request.executionId);
       const sendProof = request.foundrySendProof;
       if (senderId === null) {
         return { outcome: "rejected", code: "provider_sender_unmapped" };
       }
       if (
-        campaignId === null ||
+        request.providerCampaignId !== correlationId ||
         sendProof === null ||
-        sendProof !== await foundrySendProof(request, campaignId)
+        sendProof !== await foundrySendProof(request, correlationId)
       ) {
         return {
           outcome: "rejected",
           code: "foundry_send_proof_invalid",
-        } as const;
+        };
       }
-      const signal = AbortSignal.timeout(30_000);
       try {
-        const existing = await readCampaign(campaignId, signal);
-        if (existing.outcome === "ambiguous") {
-          return {
-            outcome: "ambiguous",
-            providerCampaignId: campaignId,
-            foundrySendProof: sendProof,
-            ...(existing.code === undefined ? {} : { code: existing.code }),
-          } as const;
-        }
-        if (
-          existing.outcome !== "found" ||
-          !matchesCampaign(existing.campaign, request, senderId)
-        ) {
-          return {
-            outcome: "rejected",
-            code:
-              existing.outcome === "not_found"
-                ? "provider_campaign_not_found"
-                : "provider_campaign_fingerprint_mismatch",
-          } as const;
-        }
-        const sent = await fetcher(
-          `${endpoint}/emailCampaigns/${campaignId}/sendTest`,
-          {
-            method: "POST",
-            headers: headers(apiKey),
-            signal,
-            body: JSON.stringify({
-              emailTo: request.recipients.map(
-                (recipient) => recipient.address,
-              ),
-            }),
-          },
-        );
+        const sent = await fetcher(`${endpoint}/smtp/email`, {
+          method: "POST",
+          headers: headers(apiKey),
+          signal: AbortSignal.timeout(30_000),
+          body: JSON.stringify({
+            sender: { id: senderId },
+            to: request.recipients.map((recipient) => ({
+              email: recipient.address,
+            })),
+            subject: request.subject,
+            htmlContent: request.renderedCampaign.html.bytes,
+            tags: [request.executionId],
+            headers: {
+              idempotencyKey: request.executionId,
+              "X-Mailin-custom":
+                `foundry_execution:${request.executionId}` +
+                `|foundry_proof:${sendProof}`,
+            },
+          }),
+        });
         if (!sent.ok) {
           if (outcomeCouldBeAmbiguous(sent.status)) {
             return {
               outcome: "ambiguous",
-              providerCampaignId: campaignId,
+              providerCampaignId: correlationId,
               foundrySendProof: sendProof,
               ...(sent.status === 429
                 ? { code: "provider_rate_limited" }
@@ -492,28 +274,248 @@ export function createBrevoNewsletterDeliveryAdapter({
             code: "provider_test_rejected",
           } as const;
         }
-        return accepted(
-          request,
-          { id: campaignId },
-          sendProof,
-        );
+        const body = await json(sent) as { messageId?: unknown } | null;
+        const messageId = providerMessageId(body?.messageId);
+        if (messageId === null) {
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: sendProof,
+          } as const;
+        }
+        return accepted(request, messageId);
       } catch {
         return {
           outcome: "ambiguous",
-          providerCampaignId: campaignId,
+          providerCampaignId: correlationId,
           foundrySendProof: sendProof,
         };
       }
     },
     async reconcileTest({ request, providerCampaignId }) {
+      const correlationId = providerCorrelationId(request.executionId);
+      if (
+        providerCampaignId !== null &&
+        providerCampaignId !== correlationId
+      ) {
+        return {
+          outcome: "rejected",
+          code: "provider_campaign_fingerprint_mismatch",
+        };
+      }
+      const senderId = expectedSenderId(request, senderIds);
+      if (senderId === null) {
+        return { outcome: "rejected", code: "provider_sender_unmapped" };
+      }
+      if (
+        request.foundrySendProof === null ||
+        request.foundrySendProof !==
+          await foundrySendProof(request, correlationId)
+      ) {
+        return {
+          outcome: "ambiguous",
+          ...(providerCampaignId === null ? {} : { providerCampaignId }),
+        };
+      }
       try {
-        return await reconcile(request, providerCampaignId);
+        const [eventsResponse, sendersResponse] = await Promise.all([
+          fetcher(
+            `${endpoint}/smtp/statistics/events?` +
+              `tags=${encodeURIComponent(JSON.stringify([
+                request.executionId,
+              ]))}&limit=5000&sort=desc`,
+            {
+              method: "GET",
+              headers: headers(apiKey),
+              signal: AbortSignal.timeout(30_000),
+            },
+          ),
+          fetcher(`${endpoint}/senders`, {
+            method: "GET",
+            headers: headers(apiKey),
+            signal: AbortSignal.timeout(30_000),
+          }),
+        ]);
+        if (!eventsResponse.ok || !sendersResponse.ok) {
+          const status = !eventsResponse.ok
+            ? eventsResponse.status
+            : sendersResponse.status;
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
+            ...(status === 429 ? { code: "provider_rate_limited" } : {}),
+          } as const;
+        }
+        const eventsBody = await json(eventsResponse) as {
+          events?: ReadonlyArray<{
+            email?: unknown;
+            messageId?: unknown;
+            from?: unknown;
+            tag?: unknown;
+          }>;
+        } | null;
+        const senderBody = await json(sendersResponse) as {
+          senders?: ReadonlyArray<{
+            id?: unknown;
+            email?: unknown;
+            active?: unknown;
+          }>;
+        } | null;
+        const sender = (senderBody?.senders ?? []).find(
+          (candidate) =>
+            candidate.id === senderId && candidate.active === true,
+        );
+        const senderEmail = recipientAddress(sender?.email);
+        const events = (eventsBody?.events ?? []).filter(
+          (event) => event.tag === request.executionId,
+        );
+        if (events.length === 0) {
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
+          };
+        }
+        const expectedRecipients = new Set(
+          request.recipients.map((recipient) =>
+            recipient.address.trim().toLowerCase()
+          ),
+        );
+        const eventRecipients = new Set(
+          events.map((event) => recipientAddress(event.email)),
+        );
+        const messageIds = new Set(
+          events.map((event) => providerMessageId(event.messageId)),
+        );
+        const eventSenders = new Set(
+          events.map((event) => recipientAddress(event.from)),
+        );
+        if (
+          senderEmail === null ||
+          eventRecipients.has(null) ||
+          messageIds.has(null) ||
+          eventSenders.has(null) ||
+          eventRecipients.size !== expectedRecipients.size ||
+          [...eventRecipients].some(
+            (address) =>
+              address === null || !expectedRecipients.has(address),
+          ) ||
+          messageIds.size !== 1 ||
+          eventSenders.size !== 1 ||
+          !eventSenders.has(senderEmail)
+        ) {
+          return {
+            outcome: "rejected",
+            code: "provider_campaign_fingerprint_mismatch",
+          };
+        }
+        const messageId = [...messageIds][0]!;
+        const emailListResponse = await fetcher(
+          `${endpoint}/smtp/emails?messageId=${encodeURIComponent(messageId!)}`,
+          {
+            method: "GET",
+            headers: headers(apiKey),
+            signal: AbortSignal.timeout(30_000),
+          },
+        );
+        if (!emailListResponse.ok) {
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
+            ...(emailListResponse.status === 429
+              ? { code: "provider_rate_limited" }
+              : {}),
+          } as const;
+        }
+        const emailList = await json(emailListResponse) as {
+          transactionalEmails?: ReadonlyArray<{
+            email?: unknown;
+            messageId?: unknown;
+            subject?: unknown;
+            uuid?: unknown;
+          }>;
+        } | null;
+        const rows = emailList?.transactionalEmails ?? [];
+        const listedRecipients = new Set(
+          rows.map((row) => recipientAddress(row.email)),
+        );
+        if (
+          rows.length !== expectedRecipients.size ||
+          listedRecipients.has(null) ||
+          listedRecipients.size !== expectedRecipients.size ||
+          [...listedRecipients].some(
+            (address) =>
+              address === null || !expectedRecipients.has(address),
+          ) ||
+          rows.some(
+            (row) =>
+              row.messageId !== messageId ||
+              row.subject !== request.subject ||
+              typeof row.uuid !== "string" ||
+              row.uuid.length === 0,
+          )
+        ) {
+          return {
+            outcome: "rejected",
+            code: "provider_campaign_fingerprint_mismatch",
+          };
+        }
+        const contentResponses = await Promise.all(
+          rows.map((row) =>
+            fetcher(
+              `${endpoint}/smtp/emails/${encodeURIComponent(
+                row.uuid as string,
+              )}`,
+              {
+                method: "GET",
+                headers: headers(apiKey),
+                signal: AbortSignal.timeout(30_000),
+              },
+            )
+          ),
+        );
+        if (contentResponses.some((response) => !response.ok)) {
+          const rateLimited = contentResponses.some(
+            (response) => response.status === 429,
+          );
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
+            ...(rateLimited ? { code: "provider_rate_limited" } : {}),
+          };
+        }
+        const contents = await Promise.all(
+          contentResponses.map((response) => json(response)),
+        ) as ReadonlyArray<{
+          email?: unknown;
+          subject?: unknown;
+          body?: unknown;
+        } | null>;
+        if (
+          contents.some(
+            (content) =>
+              content === null ||
+              !expectedRecipients.has(
+                recipientAddress(content.email) ?? "",
+              ) ||
+              content.subject !== request.subject ||
+              content.body !== request.renderedCampaign.html.bytes,
+          )
+        ) {
+          return {
+            outcome: "rejected",
+            code: "provider_campaign_fingerprint_mismatch",
+          };
+        }
+        return accepted(request, messageId!);
       } catch {
         return {
           outcome: "ambiguous",
-          ...(providerCampaignId === null
-            ? {}
-            : { providerCampaignId }),
+          providerCampaignId: correlationId,
+          foundrySendProof: request.foundrySendProof,
         };
       }
     },

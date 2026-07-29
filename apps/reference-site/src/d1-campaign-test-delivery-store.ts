@@ -59,6 +59,14 @@ function deepFreeze<T>(value: T): T {
 }
 
 function toOperation(row: TestDeliveryRow): CampaignTestDeliveryOperation {
+  if (
+    row.state === "accepted" &&
+    (row.foundry_send_proof === null ||
+      row.provider_campaign_id === null ||
+      row.evidence_json === null)
+  ) {
+    throw new Error("campaign_test_delivery_evidence_invalid");
+  }
   return Object.freeze({
     executionId: row.execution_id,
     siteId: row.site_id as SiteId,
@@ -232,6 +240,14 @@ export function createD1CampaignTestDeliveryStore(
       return byRequest(database, operation);
     },
     async record(operation) {
+      if (
+        operation.state === "accepted" &&
+        (operation.foundrySendProof === null ||
+          operation.providerCampaignId === null ||
+          operation.evidence === null)
+      ) {
+        throw new Error("campaign_test_delivery_evidence_invalid");
+      }
       const result = await database
         .prepare(
           `UPDATE campaign_test_deliveries
@@ -269,6 +285,9 @@ export function createD1CampaignTestDeliveryStore(
         .prepare(
           `${projection}
            WHERE site_id = ?1 AND campaign_id = ?2 AND state = 'accepted'
+             AND provider_campaign_id IS NOT NULL
+             AND foundry_send_proof IS NOT NULL
+             AND evidence_json IS NOT NULL
            ORDER BY updated_at DESC, execution_id DESC LIMIT 1`,
         )
         .bind(siteId, campaignId)
@@ -338,6 +357,18 @@ export function createD1CampaignTestDeliveryStore(
       return reservation?.recipient_count === input.recipientCount;
     },
     async cancelForCampaignEdit(input) {
+      const activeAttempt = await database
+        .prepare(
+          `SELECT execution_id
+           FROM campaign_test_deliveries
+           WHERE site_id = ?1 AND campaign_id = ?2
+             AND state = 'attempting'
+             AND attempt_lease_until > ?3
+           LIMIT 1`,
+        )
+        .bind(input.siteId, input.campaignId, input.cancelledAt)
+        .first();
+      if (activeAttempt !== null) return false;
       await database
         .prepare(
           `UPDATE campaign_test_deliveries
@@ -345,7 +376,12 @@ export function createD1CampaignTestDeliveryStore(
              failure_code = 'campaign_revision_changed', updated_at = ?1
            WHERE site_id = ?2 AND campaign_id = ?3
              AND campaign_revision_id != ?4
-             AND state IN ('pending', 'attempting', 'ambiguous')`,
+             AND (
+               state IN ('pending', 'ambiguous') OR
+               (state = 'attempting' AND (
+                 attempt_lease_until IS NULL OR attempt_lease_until <= ?1
+               ))
+             )`,
         )
         .bind(
           input.cancelledAt,
@@ -354,6 +390,7 @@ export function createD1CampaignTestDeliveryStore(
           input.retainedRevisionId,
         )
         .run();
+      return true;
     },
   };
   return Object.freeze(store);
