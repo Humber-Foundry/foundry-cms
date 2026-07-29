@@ -1,4 +1,5 @@
 import type {
+  BlogPostArtifactFingerprint,
   ContentActorId,
   ContentRevision,
   ContentRevisionStore,
@@ -24,7 +25,72 @@ import {
   type StoredSiteDefinitionSchemaVersion,
 } from "@foundry/site-definition";
 
-import type { D1DatabaseBinding } from "./d1-human-access-store";
+import type {
+  D1DatabaseBinding,
+  D1DatabaseSessionBinding,
+} from "./d1-human-access-store";
+
+type D1StatementPreparer = Pick<
+  D1DatabaseBinding | D1DatabaseSessionBinding,
+  "prepare"
+>;
+
+function prepareBlogRenderArtifactInsert(
+  target: D1StatementPreparer,
+  input: Readonly<{
+    workspaceId: ContentWorkspaceId;
+    contentRevision: number;
+    artifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
+    createdAt: string;
+    receipt?: Readonly<{ idempotencyKey: string; requestHash: string }>;
+  }>,
+) {
+  const receiptGuard =
+    input.receipt === undefined
+      ? ""
+      : `AND EXISTS (
+           SELECT 1 FROM content_revision_receipts
+           WHERE idempotency_key = ?5
+             AND workspace_id = ?1
+             AND revision = ?2
+             AND request_hash = ?6
+         )`;
+  return target
+    .prepare(
+      `INSERT INTO blog_post_render_artifacts (
+         workspace_id, content_revision, post_id, post_revision_id,
+         post_revision, content_hash, schema_version, renderer_version,
+         serialization_version, rendered_bytes_hash,
+         artifact_fingerprint, created_at
+       )
+       SELECT
+         ?1, ?2,
+         json_extract(artifact.value, '$.postId'),
+         json_extract(artifact.value, '$.postRevisionId'),
+         json_extract(artifact.value, '$.revision'),
+         json_extract(artifact.value, '$.contentHash'),
+         json_extract(artifact.value, '$.schemaVersion'),
+         json_extract(artifact.value, '$.rendererVersion'),
+         json_extract(artifact.value, '$.serializationVersion'),
+         json_extract(artifact.value, '$.renderedBytesHash'),
+         json_extract(artifact.value, '$.value'),
+         ?4
+       FROM json_each(?3) AS artifact
+       WHERE 1 = 1
+       ${receiptGuard}
+       ON CONFLICT (workspace_id, content_revision, post_id)
+       DO NOTHING`,
+    )
+    .bind(
+      input.workspaceId,
+      input.contentRevision,
+      JSON.stringify(input.artifacts),
+      input.createdAt,
+      ...(input.receipt === undefined
+        ? []
+        : [input.receipt.idempotencyKey, input.receipt.requestHash]),
+    );
+}
 
 export async function findLatestContentWorkspaceIdForActor(
   database: D1DatabaseBinding,
@@ -122,40 +188,64 @@ export async function reconcileVerifiedBlogPostPublication(
   publication: Readonly<{ id: string; sequence: number }>,
   verifiedAt: string,
 ): Promise<void> {
-  const presentPostIds = definition.blog.posts.map(({ id }) => id);
-  const results = await database.batch([
-    ...definition.blog.posts.map((post) =>
-      database
-        .prepare(
-          `UPDATE blog_posts
-           SET live_revision = ?1,
-               last_verified_revision = ?2,
-               last_verified_visibility = ?3,
-               last_verified_publication_id = ?4,
-               last_verified_publication_sequence = ?5,
-               updated_at = ?6
-           WHERE site_id = ?7
-             AND post_id = ?8
-             AND (
-               last_verified_publication_sequence IS NULL
-               OR last_verified_publication_sequence < ?5
-               OR (
-                 last_verified_publication_sequence = ?5
-                 AND last_verified_publication_id = ?4
-               )
-             )`,
-        )
-        .bind(
-          post.targetVisibility === "public" ? post.revision : null,
-          post.revision,
-          post.targetVisibility,
-          publication.id,
-          publication.sequence,
-          verifiedAt,
-          siteId,
-          post.id,
-        ),
-    ),
+  const serializedPosts = JSON.stringify(
+    definition.blog.posts.map(({ id, revision, targetVisibility }) => ({
+      id,
+      revision,
+      targetVisibility,
+    })),
+  );
+  await database.batch([
+    database
+      .prepare(
+        `WITH incoming_posts AS (
+           SELECT
+             json_extract(value, '$.id') AS post_id,
+             json_extract(value, '$.revision') AS revision,
+             json_extract(value, '$.targetVisibility') AS target_visibility
+           FROM json_each(?1)
+         )
+         UPDATE blog_posts
+         SET live_revision = (
+               SELECT CASE
+                 WHEN incoming.target_visibility = 'public'
+                   THEN incoming.revision
+                 ELSE NULL
+               END
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             last_verified_revision = (
+               SELECT incoming.revision
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             last_verified_visibility = (
+               SELECT incoming.target_visibility
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             last_verified_publication_id = ?2,
+             last_verified_publication_sequence = ?3,
+             updated_at = ?4
+         WHERE site_id = ?5
+           AND post_id IN (SELECT post_id FROM incoming_posts)
+           AND (
+             last_verified_publication_sequence IS NULL
+             OR last_verified_publication_sequence < ?3
+             OR (
+               last_verified_publication_sequence = ?3
+               AND last_verified_publication_id = ?2
+             )
+           )`,
+      )
+      .bind(
+        serializedPosts,
+        publication.id,
+        publication.sequence,
+        verifiedAt,
+        siteId,
+      ),
     database
       .prepare(
         `UPDATE blog_posts
@@ -165,7 +255,7 @@ export async function reconcileVerifiedBlogPostPublication(
              last_verified_publication_sequence = ?2,
              updated_at = ?3
          WHERE site_id = ?4
-           AND live_revision IS NOT NULL
+           AND last_verified_publication_sequence IS NOT NULL
            AND (
              last_verified_publication_sequence IS NULL
              OR last_verified_publication_sequence < ?2
@@ -185,38 +275,33 @@ export async function reconcileVerifiedBlogPostPublication(
         publication.sequence,
         verifiedAt,
         siteId,
-        JSON.stringify(presentPostIds),
+        JSON.stringify(definition.blog.posts.map(({ id }) => id)),
       ),
   ]);
-  for (const [index, result] of results
-    .slice(0, definition.blog.posts.length)
-    .entries()) {
-    if ((result.meta.changes ?? 0) > 0) {
-      continue;
-    }
-    const post = definition.blog.posts[index]!;
-    const aggregate = await database
-      .prepare(
-        `SELECT last_verified_revision,
-                last_verified_publication_id,
-                last_verified_publication_sequence
-         FROM blog_posts
-         WHERE site_id = ?1 AND post_id = ?2`,
-      )
-      .bind(siteId, post.id)
-      .first<{
-        last_verified_revision: number | null;
-        last_verified_publication_id: string | null;
-        last_verified_publication_sequence: number | null;
-      }>();
-    if (
-      aggregate === null ||
-      aggregate.last_verified_revision === null ||
-      aggregate.last_verified_publication_sequence === null ||
-      aggregate.last_verified_publication_sequence <= publication.sequence
-    ) {
-      throw new ContentRevisionConfigurationError();
-    }
+  const verification = await database
+    .prepare(
+      `WITH incoming_posts AS (
+         SELECT json_extract(value, '$.id') AS post_id
+         FROM json_each(?1)
+       )
+       SELECT COUNT(*) AS invalid_count
+       FROM incoming_posts AS incoming
+       LEFT JOIN blog_posts AS aggregate
+         ON aggregate.site_id = ?2
+        AND aggregate.post_id = incoming.post_id
+       WHERE aggregate.post_id IS NULL
+          OR aggregate.last_verified_revision IS NULL
+          OR aggregate.last_verified_publication_sequence IS NULL
+          OR aggregate.last_verified_publication_sequence < ?3
+          OR (
+            aggregate.last_verified_publication_sequence = ?3
+            AND aggregate.last_verified_publication_id <> ?4
+          )`,
+    )
+    .bind(serializedPosts, siteId, publication.sequence, publication.id)
+    .first<{ invalid_count: number }>();
+  if (verification === null || verification.invalid_count > 0) {
+    throw new ContentRevisionConfigurationError();
   }
 }
 
@@ -348,122 +433,22 @@ export function createD1ContentRevisionStore(
 
   return {
     async initialize(initialRevision, ownerActorId) {
-      const initialBlogStatements = (
-        await Promise.all(
-          initialRevision.definition.blog.posts.map(async (post) => {
-            const artifact = await createBlogPostArtifactFingerprint({
-              definition: initialRevision.definition,
-              post,
-              schemaVersion: initialRevision.definition.schemaVersion,
-              rendererVersion: initialRevision.inputs.rendererVersion,
-            });
-            return [
-              database
-                .prepare(
-              `INSERT INTO blog_posts (
-                 site_id, post_id, collection_state, current_revision,
-                 live_revision, last_verified_revision,
-                 last_verified_visibility, last_verified_publication_id,
-                 last_verified_publication_sequence,
-                 version, updated_at
-               ) VALUES (
-                 ?1, ?2, 'active', ?3, ?4, ?3, ?5,
-                 (
-                   SELECT publication_order.publication_id
-                   FROM blog_publication_reconciliation_order
-                     AS publication_order
-                   JOIN content_publications AS publication
-                     ON publication.id = publication_order.publication_id
-                   WHERE publication.status = 'verified-live'
-                   ORDER BY publication_order.sequence DESC
-                   LIMIT 1
-                 ),
-                 (
-                   SELECT publication_order.sequence
-                   FROM blog_publication_reconciliation_order
-                     AS publication_order
-                   JOIN content_publications AS publication
-                     ON publication.id = publication_order.publication_id
-                   WHERE publication.status = 'verified-live'
-                   ORDER BY publication_order.sequence DESC
-                   LIMIT 1
-                 ),
-                 ?3, ?6
-               )
-               ON CONFLICT (site_id, post_id) DO NOTHING`,
-                )
-                .bind(
-                  siteId,
-                  post.id,
-                  post.revision,
-                  post.targetVisibility === "public"
-                    ? post.revision
-                    : null,
-                  post.targetVisibility,
-                  initialRevision.createdAt,
-                ),
-              database
-                .prepare(
-              `INSERT INTO blog_post_revisions (
-                 revision_id, site_id, post_id, revision, workspace_id,
-                 content_revision, snapshot_json, created_at, created_by,
-                 content_hash, schema_version, renderer_version,
-                 serialization_version, rendered_bytes_hash,
-                 artifact_fingerprint
-               ) VALUES (
-                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                 ?10, ?11, ?12, ?13, ?14, ?15
-               )
-               ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
-                )
-                .bind(
-                  artifact.postRevisionId,
-                  siteId,
-                  post.id,
-                  post.revision,
-                  workspaceId,
-                  initialRevision.revision,
-                  JSON.stringify(post),
-                  initialRevision.createdAt,
-                  initialRevision.createdBy,
-                  artifact.contentHash,
-                  artifact.schemaVersion,
-                  artifact.rendererVersion,
-                  artifact.serializationVersion,
-                  artifact.renderedBytesHash,
-                  artifact.value,
-                ),
-              database
-                .prepare(
-              `INSERT INTO blog_post_render_artifacts (
-                 workspace_id, content_revision, post_id, post_revision_id,
-                 post_revision, content_hash, schema_version, renderer_version,
-                 serialization_version, rendered_bytes_hash,
-                 artifact_fingerprint, created_at
-               ) VALUES (
-                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
-               )
-               ON CONFLICT (workspace_id, content_revision, post_id)
-               DO NOTHING`,
-                )
-                .bind(
-                  workspaceId,
-                  initialRevision.revision,
-                  artifact.postId,
-                  artifact.postRevisionId,
-                  artifact.revision,
-                  artifact.contentHash,
-                  artifact.schemaVersion,
-                  artifact.rendererVersion,
-                  artifact.serializationVersion,
-                  artifact.renderedBytesHash,
-                  artifact.value,
-                  initialRevision.createdAt,
-                ),
-            ];
+      const initialArtifacts = await Promise.all(
+        initialRevision.definition.blog.posts.map((post) =>
+          createBlogPostArtifactFingerprint({
+            definition: initialRevision.definition,
+            post,
+            schemaVersion: initialRevision.definition.schemaVersion,
+            rendererVersion: initialRevision.inputs.rendererVersion,
           }),
-        )
-      ).flat();
+        ),
+      );
+      const initialPosts = initialRevision.definition.blog.posts.map(
+        (post, index) => ({
+          post,
+          artifact: initialArtifacts[index]!,
+        }),
+      );
       await database.batch([
         database
           .prepare(
@@ -513,7 +498,102 @@ export function createD1ContentRevisionStore(
             initialRevision.createdAt,
             initialRevision.createdBy,
           ),
-        ...initialBlogStatements,
+        database
+          .prepare(
+            `INSERT INTO blog_posts (
+               site_id, post_id, collection_state, current_revision,
+               live_revision, last_verified_revision,
+               last_verified_visibility, last_verified_publication_id,
+               last_verified_publication_sequence,
+               version, updated_at
+             )
+             SELECT
+               ?1,
+               json_extract(entry.value, '$.post.id'),
+               'active',
+               json_extract(entry.value, '$.post.revision'),
+               CASE
+                 WHEN json_extract(
+                   entry.value,
+                   '$.post.targetVisibility'
+                 ) = 'public'
+                   THEN json_extract(entry.value, '$.post.revision')
+                 ELSE NULL
+               END,
+               json_extract(entry.value, '$.post.revision'),
+               json_extract(entry.value, '$.post.targetVisibility'),
+               (
+                 SELECT publication_order.publication_id
+                 FROM blog_publication_reconciliation_order
+                   AS publication_order
+                 JOIN content_publications AS publication
+                   ON publication.id = publication_order.publication_id
+                 WHERE publication.status = 'verified-live'
+                 ORDER BY publication_order.sequence DESC
+                 LIMIT 1
+               ),
+               (
+                 SELECT publication_order.sequence
+                 FROM blog_publication_reconciliation_order
+                   AS publication_order
+                 JOIN content_publications AS publication
+                   ON publication.id = publication_order.publication_id
+                 WHERE publication.status = 'verified-live'
+                 ORDER BY publication_order.sequence DESC
+                 LIMIT 1
+               ),
+               json_extract(entry.value, '$.post.revision'),
+               ?3
+             FROM json_each(?2) AS entry
+             WHERE 1 = 1
+             ON CONFLICT (site_id, post_id) DO NOTHING`,
+          )
+          .bind(
+            siteId,
+            JSON.stringify(initialPosts),
+            initialRevision.createdAt,
+          ),
+        database
+          .prepare(
+            `INSERT INTO blog_post_revisions (
+               revision_id, site_id, post_id, revision, workspace_id,
+               content_revision, snapshot_json, created_at, created_by,
+               content_hash, schema_version, renderer_version,
+               serialization_version, rendered_bytes_hash,
+               artifact_fingerprint
+             )
+             SELECT
+               json_extract(entry.value, '$.artifact.postRevisionId'),
+               ?1,
+               json_extract(entry.value, '$.post.id'),
+               json_extract(entry.value, '$.post.revision'),
+               ?2, ?3,
+               json_extract(entry.value, '$.post'),
+               ?4, ?5,
+               json_extract(entry.value, '$.artifact.contentHash'),
+               json_extract(entry.value, '$.artifact.schemaVersion'),
+               json_extract(entry.value, '$.artifact.rendererVersion'),
+               json_extract(entry.value, '$.artifact.serializationVersion'),
+               json_extract(entry.value, '$.artifact.renderedBytesHash'),
+               json_extract(entry.value, '$.artifact.value')
+             FROM json_each(?6) AS entry
+             WHERE 1 = 1
+             ON CONFLICT (site_id, post_id, revision) DO NOTHING`,
+          )
+          .bind(
+            siteId,
+            workspaceId,
+            initialRevision.revision,
+            initialRevision.createdAt,
+            initialRevision.createdBy,
+            JSON.stringify(initialPosts),
+          ),
+        prepareBlogRenderArtifactInsert(database, {
+          workspaceId,
+          contentRevision: initialRevision.revision,
+          artifacts: initialArtifacts,
+          createdAt: initialRevision.createdAt,
+        }),
       ]);
     },
     async requireAccess(actorId) {
@@ -912,43 +992,16 @@ export function createD1ContentRevisionStore(
             );
         },
       );
-      const blogArtifactStatements = command.blogArtifacts.map((artifact) =>
-        session
-          .prepare(
-            `INSERT INTO blog_post_render_artifacts (
-               workspace_id, content_revision, post_id, post_revision_id,
-               post_revision, content_hash, schema_version, renderer_version,
-               serialization_version, rendered_bytes_hash,
-               artifact_fingerprint, created_at
-             )
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
-             WHERE EXISTS (
-               SELECT 1 FROM content_revision_receipts
-               WHERE idempotency_key = ?13
-                 AND workspace_id = ?1
-                 AND revision = ?2
-                 AND request_hash = ?14
-             )
-             ON CONFLICT (workspace_id, content_revision, post_id)
-             DO NOTHING`,
-          )
-          .bind(
-            workspaceId,
-            command.revision.revision,
-            artifact.postId,
-            artifact.postRevisionId,
-            artifact.revision,
-            artifact.contentHash,
-            artifact.schemaVersion,
-            artifact.rendererVersion,
-            artifact.serializationVersion,
-            artifact.renderedBytesHash,
-            artifact.value,
-            command.revision.createdAt,
-            command.idempotencyKey,
-            command.requestHash,
-          ),
-      );
+      const blogArtifactStatement = prepareBlogRenderArtifactInsert(session, {
+        workspaceId,
+        contentRevision: command.revision.revision,
+        artifacts: command.blogArtifacts,
+        createdAt: command.revision.createdAt,
+        receipt: {
+          idempotencyKey: command.idempotencyKey,
+          requestHash: command.requestHash,
+        },
+      });
       const results = await session.batch([
         session
           .prepare(
@@ -1098,7 +1151,7 @@ export function createD1ContentRevisionStore(
           ),
         ...blogAggregateStatements,
         ...blogRevisionStatements,
-        ...blogArtifactStatements,
+        blogArtifactStatement,
         ...blogTransitionStatements,
       ]);
 

@@ -703,35 +703,120 @@ describe("D1 content revision store", () => {
         body: createRichTextDocumentFromPlainText(`Body ${index + 1}.`),
       };
     });
-    await database.batch(
-      posts.map((post) =>
-        database
-          .prepare(
-            `INSERT INTO blog_posts (
-               site_id, post_id, collection_state, current_revision,
-               live_revision, last_verified_revision, version, updated_at
-             ) VALUES (?1, ?2, 'active', 1, 1, 1, 1, ?3)`,
-          )
-          .bind(
-            referenceSiteDefinition.site.id,
-            post.id,
-            "2026-07-27T14:00:00.000Z",
-          ),
-      ),
+    const definition = {
+      ...referenceSiteDefinition,
+      blog: { ...referenceSiteDefinition.blog, posts },
+    };
+    const manyPostsWorkspaceId = createContentWorkspaceId(
+      "workspace_many_blog_posts",
     );
+    const application = createApplication(
+      editorActorId,
+      manyPostsWorkspaceId,
+      "2026-07-27T14:00:00.000Z",
+      definition,
+    );
+    await application.commands.create({
+      actorId: editorActorId,
+      workspaceId: manyPostsWorkspaceId,
+      idempotencyKey: "d1-create-many-blog-posts",
+    });
+    await application.commands.save({
+      actorId: editorActorId,
+      workspaceId: manyPostsWorkspaceId,
+      schemaVersion: definition.schemaVersion,
+      baseRevision: 0,
+      edits: [{ path: "design.colour.accent", value: "clay" }],
+      idempotencyKey: "d1-save-many-blog-artifacts",
+    });
 
     await expect(
       reconcileVerifiedBlogPostPublication(
         database,
         referenceSiteDefinition.site.id,
-        {
-          ...referenceSiteDefinition,
-          blog: { ...referenceSiteDefinition.blog, posts },
-        },
+        definition,
         { id: "publication-many-blog-posts", sequence: 1 },
         "2026-07-27T14:10:00.000Z",
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it("does not let delayed publication resurrect a newer absence", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000dd",
+    );
+    const post = {
+      id: postId,
+      revision: 1,
+      collectionState: "active" as const,
+      targetVisibility: "public" as const,
+      slug: "ordered-absence",
+      title: "Ordered absence",
+      excerpt: "Newer verified absence must win.",
+      seo: {
+        title: "Ordered absence | Foundry",
+        description: "Newer verified absence must win.",
+      },
+      body: createRichTextDocumentFromPlainText("Publication ordering."),
+    };
+    await database
+      .prepare(
+        `INSERT INTO blog_posts (
+           site_id, post_id, collection_state, current_revision,
+           live_revision, last_verified_revision, last_verified_visibility,
+           last_verified_publication_id, last_verified_publication_sequence,
+           version, updated_at
+         ) VALUES (?1, ?2, 'active', 1, 1, 1, 'public', ?3, 1, 1, ?4)`,
+      )
+      .bind(
+        referenceSiteDefinition.site.id,
+        postId,
+        "publication-ordered-1",
+        "2026-07-27T14:20:00.000Z",
+      )
+      .run();
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      referenceSiteDefinition,
+      { id: "publication-ordered-2", sequence: 2 },
+      "2026-07-27T14:21:00.000Z",
+    );
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      referenceSiteDefinition,
+      { id: "publication-ordered-4", sequence: 4 },
+      "2026-07-27T14:23:00.000Z",
+    );
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      {
+        ...referenceSiteDefinition,
+        blog: { ...referenceSiteDefinition.blog, posts: [post] },
+      },
+      { id: "publication-ordered-3", sequence: 3 },
+      "2026-07-27T14:22:00.000Z",
+    );
+
+    await expect(
+      database
+        .prepare(
+          `SELECT live_revision, last_verified_visibility,
+                  last_verified_publication_id,
+                  last_verified_publication_sequence
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first(),
+    ).resolves.toEqual({
+      live_revision: null,
+      last_verified_visibility: "absent",
+      last_verified_publication_id: "publication-ordered-4",
+      last_verified_publication_sequence: 4,
+    });
   });
 
   it("preserves a render artifact for each site revision", async () => {

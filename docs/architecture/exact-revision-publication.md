@@ -100,6 +100,10 @@ from both canonical JSON and managed Markdown, so the approved successor
 removes the route and public payload. The aggregate live pointer is changed
 only by a callback after the exact publication reaches `verified-live`; a
 failed callback is retried when the durable verified publication is refreshed.
+Reconciliation uses set-based JSON queries so its query count stays bounded as
+the collection grows. Both present state and absence tombstones advance by
+durable publication sequence, so a delayed older publication cannot resurrect
+a route removed by a newer verified release.
 Only after verified removal may the latest immutable snapshot be hydrated into
 a fresh management workspace. Republishing creates another attributed
 successor revision and runs through the same preview, approval, commit,
