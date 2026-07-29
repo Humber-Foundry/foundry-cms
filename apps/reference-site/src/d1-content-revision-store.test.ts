@@ -862,7 +862,26 @@ describe("D1 content revision store", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("skips blog reconciliation for a verified legacy revision without blog data", async () => {
+  it("reconciles a verified legacy revision without blog data as an empty blog", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000ac",
+    );
+    await database
+      .prepare(
+        `INSERT INTO blog_posts (
+           site_id, post_id, collection_state, current_revision,
+           live_revision, last_verified_revision, last_verified_visibility,
+           last_verified_publication_id, last_verified_publication_sequence,
+           version, updated_at
+         ) VALUES (?1, ?2, 'active', 1, 1, 1, 'public', ?3, 1, 1, ?4)`,
+      )
+      .bind(
+        referenceSiteDefinition.site.id,
+        postId,
+        "publication-modern-with-blog",
+        "2026-07-27T14:14:00.000Z",
+      )
+      .run();
     const legacyDefinition = structuredClone(referenceSiteDefinition) as any;
     legacyDefinition.definitionVersion = "1.2.0";
     legacyDefinition.schemaVersion = "1.2.0";
@@ -873,7 +892,7 @@ describe("D1 content revision store", () => {
         database,
         referenceSiteDefinition.site.id,
         legacyDefinition,
-        { id: "publication-legacy-without-blog", sequence: 1 },
+        { id: "publication-legacy-without-blog", sequence: 2 },
         "2026-07-27T14:15:00.000Z",
       ),
     ).resolves.toBeUndefined();
@@ -881,13 +900,20 @@ describe("D1 content revision store", () => {
     await expect(
       database
         .prepare(
-          `SELECT COUNT(*) AS count
+          `SELECT live_revision, last_verified_visibility,
+                  last_verified_publication_id,
+                  last_verified_publication_sequence
            FROM blog_posts
-           WHERE last_verified_publication_id = ?1`,
+           WHERE site_id = ?1 AND post_id = ?2`,
         )
-        .bind("publication-legacy-without-blog")
-        .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 0 });
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first(),
+    ).resolves.toEqual({
+      live_revision: null,
+      last_verified_visibility: "absent",
+      last_verified_publication_id: "publication-legacy-without-blog",
+      last_verified_publication_sequence: 2,
+    });
   });
 
   it("fails closed when a current verified revision has no blog data", async () => {

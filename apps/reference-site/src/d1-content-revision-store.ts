@@ -216,15 +216,17 @@ export async function reconcileVerifiedBlogPostPublication(
       readonly blog?: SiteDefinition["blog"];
     }
   ).blog;
+  let blogPosts: SiteDefinition["blog"]["posts"];
   if (blog === undefined) {
     if (
       !["1.0.0", "1.1.0", "1.2.0"].includes(definition.schemaVersion)
     ) {
       throw new ContentRevisionConfigurationError();
     }
-    return;
+    blogPosts = [];
+  } else {
+    blogPosts = blog.posts;
   }
-  const blogPosts = blog.posts;
   const serializedPosts = JSON.stringify(
     await Promise.all(
       blogPosts.map(async (post) => {
