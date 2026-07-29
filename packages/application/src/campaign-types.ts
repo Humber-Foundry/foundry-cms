@@ -362,7 +362,7 @@ export type NewsletterUnsubscribeResolution = Readonly<{
   providerEventId: string;
 }>;
 
-export interface NewsletterDeliveryAdapter {
+export interface NewsletterUnsubscribeAdapter {
   readonly unsubscribePlaceholder: string;
   createUnsubscribeUrl(input: {
     identityKey: string;

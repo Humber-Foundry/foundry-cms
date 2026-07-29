@@ -26,6 +26,11 @@ type CampaignCommand =
       campaignId: string;
       expectedVersion: number;
       input: CampaignEditableInput;
+    }>
+  | Readonly<{
+      action: "request_test";
+      campaignId: string;
+      testRecipientIds: ReadonlyArray<string>;
     }>;
 
 const maximumCampaignCommandBytes = 256 * 1024;
@@ -86,6 +91,21 @@ function command(value: unknown): CampaignCommand | null {
         }
       : null;
   }
+  if (value.action === "request_test") {
+    return "campaignId" in value &&
+      typeof value.campaignId === "string" &&
+      "testRecipientIds" in value &&
+      Array.isArray(value.testRecipientIds) &&
+      value.testRecipientIds.every(
+        (recipientId) => typeof recipientId === "string",
+      )
+      ? {
+          action: value.action,
+          campaignId: value.campaignId,
+          testRecipientIds: value.testRecipientIds,
+        }
+      : null;
+  }
   if (
     (value.action !== "create_standalone" && value.action !== "edit") ||
     !("input" in value) ||
@@ -136,7 +156,12 @@ export async function GET(request: Request) {
       actor: context.identity,
       campaignId,
     });
-    return Response.json({ rendered }, {
+    const testEvidence =
+      await context.testDelivery.queries.currentEvidence({
+        actor: context.identity,
+        campaignId,
+      });
+    return Response.json({ rendered, testEvidence }, {
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
@@ -210,18 +235,24 @@ export async function POST(request: Request) {
       );
     }
     let editedCampaignId;
-    if (parsed.action === "edit") {
+    if (parsed.action === "edit" || parsed.action === "request_test") {
       try {
         editedCampaignId = createCampaignId(parsed.campaignId);
       } catch {
         await context.application.commands.recordRejectedCommand({
           actor: context.identity,
           requestId,
-          action: "campaign.edit",
+          action:
+            parsed.action === "edit"
+              ? "campaign.edit"
+              : "campaign.create",
           targetId: parsed.campaignId,
           reason: "campaign_id_invalid",
           command: rawCommand,
-          commandName: "campaign.edit",
+          commandName:
+            parsed.action === "edit"
+              ? "campaign.edit"
+              : "campaign.create_standalone",
         });
         return Response.json(
           { error: "campaign_command_invalid" },
@@ -229,7 +260,14 @@ export async function POST(request: Request) {
         );
       }
     }
-    const result = parsed.action === "create_standalone"
+    const result = parsed.action === "request_test"
+      ? await context.testDelivery.commands.requestTest({
+          actor: context.identity,
+          requestId,
+          campaignId: editedCampaignId!,
+          testRecipientIds: parsed.testRecipientIds,
+        })
+      : parsed.action === "create_standalone"
       ? await context.application.commands.createStandalone({
           actor: context.identity,
           requestId,
@@ -249,7 +287,12 @@ export async function POST(request: Request) {
             input: parsed.input,
           });
     return Response.json(result, {
-      status: parsed.action === "edit" || result.replayed ? 200 : 201,
+      status:
+        parsed.action === "edit" ||
+        parsed.action === "request_test" ||
+        ("replayed" in result && result.replayed)
+          ? 200
+          : 201,
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {

@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   loadContext: vi.fn(),
   listCampaigns: vi.fn(),
   render: vi.fn(),
+  currentEvidence: vi.fn(),
+  requestTest: vi.fn(),
   createStandalone: vi.fn(),
   createFromPost: vi.fn(),
   edit: vi.fn(),
@@ -32,6 +34,10 @@ const application = {
     recordRejectedCommand: mocks.recordRejectedCommand,
   },
 };
+const testDelivery = {
+  queries: { currentEvidence: mocks.currentEvidence },
+  commands: { requestTest: mocks.requestTest },
+};
 
 vi.mock("../../../../src/campaign-runtime", () => ({
   loadCampaignRequestContext: mocks.loadContext,
@@ -50,9 +56,18 @@ import { GET, POST } from "./route";
 describe("campaign endpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.loadContext.mockResolvedValue({ identity, application });
+    mocks.loadContext.mockResolvedValue({
+      identity,
+      application,
+      testDelivery,
+    });
     mocks.createStandalone.mockResolvedValue({
       campaign: { id: "20000000-0000-4000-8000-000000000001" },
+    });
+    mocks.currentEvidence.mockResolvedValue(null);
+    mocks.requestTest.mockResolvedValue({
+      executionId: "40000000-0000-4000-8000-000000000001",
+      state: "pending",
     });
   });
 
@@ -149,6 +164,35 @@ describe("campaign endpoint", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ replayed: true });
+  });
+
+  it("requests a provider test only for configured recipient identities", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-1",
+        },
+        body: JSON.stringify({
+          action: "request_test",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          testRecipientIds: ["owner-primary"],
+          emailTo: ["attacker@example.test"],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requestTest).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-test-1",
+      campaignId: "20000000-0000-4000-8000-000000000001",
+      testRecipientIds: ["owner-primary"],
+    });
+    expect(JSON.stringify(mocks.requestTest.mock.calls)).not.toContain(
+      "attacker@example.test",
+    );
   });
 
   it("reports a missing shared request key as an invalid command", async () => {

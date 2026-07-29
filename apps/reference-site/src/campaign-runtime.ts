@@ -5,13 +5,19 @@ import {
   canonicalJson,
   createBlogPostRevisionId,
   createCampaignApplication,
+  createCampaignTestDeliveryApplication,
+  createInMemoryCampaignTestDeliveryStore,
   createInMemoryCampaignStore,
   createInMemorySubscriberLedgerStore,
   createSubscriberLedgerAudienceResolver,
   sha256Text,
+  sha256CanonicalJson,
   type CampaignApplication,
+  type CampaignTestDeliveryApplication,
+  type CampaignTestDeliveryStore,
   type CampaignChannelConfiguration,
   type CampaignStore,
+  type NewsletterDeliveryAdapter,
 } from "@foundry/application";
 import {
   upgradeSiteDefinition,
@@ -20,6 +26,7 @@ import {
 } from "@foundry/site-definition";
 
 import { createD1CampaignStore } from "./d1-campaign-store";
+import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
 import {
@@ -35,8 +42,13 @@ import { referenceSiteApplication } from "./reference-installation";
 import {
   createSignedNewsletterDeliveryAdapter,
 } from "./newsletter-unsubscribe-token";
+import {
+  createBrevoNewsletterDeliveryAdapter,
+} from "./brevo-newsletter-delivery-adapter";
 
 const localCampaignStore = createInMemoryCampaignStore();
+const localCampaignTestDeliveryStore =
+  createInMemoryCampaignTestDeliveryStore();
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
 const developmentChannelConfiguration: CampaignChannelConfiguration = Object.freeze({
@@ -112,6 +124,7 @@ export async function loadCampaignRequestContext(
     ReturnType<typeof loadHumanAccessRequestContext>
   >["identity"];
   application: CampaignApplication;
+  testDelivery: CampaignTestDeliveryApplication;
 }>> {
   const human = await loadHumanAccessRequestContext(requestHeaders);
   if (human.state !== "authorized") {
@@ -125,6 +138,33 @@ export async function loadCampaignRequestContext(
   let findPostRevision = localPostRevision;
   let rendererCommit = developmentRendererCommit;
   let channelConfiguration = developmentChannelConfiguration;
+  let testDeliveryStore: CampaignTestDeliveryStore =
+    localCampaignTestDeliveryStore;
+  let testRecipients: Readonly<Record<string, string>> = {};
+  let testAdapter: NewsletterDeliveryAdapter = {
+    async capabilities() {
+      return {
+        provider: "brevo",
+        configurationFingerprint: "0".repeat(64),
+        apiTestDelivery: "supported" as const,
+        explicitRecipients: "supported" as const,
+        ambiguousOutcomeReconciliation: "supported" as const,
+      };
+    },
+    async health() {
+      return {
+        state: "unavailable" as const,
+        credential: "unknown" as const,
+        senderIdentity: "unknown" as const,
+      };
+    },
+    async sendTest() {
+      return { outcome: "rejected" as const, code: "provider_unavailable" };
+    },
+    async reconcileTest() {
+      return { outcome: "not_found" as const };
+    },
+  };
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
     if (environment.FOUNDRY_DB === undefined) {
@@ -141,18 +181,65 @@ export async function loadCampaignRequestContext(
       deliveryAdapter.unsubscribePlaceholder,
     );
     store = createD1CampaignStore(environment.FOUNDRY_DB);
+    testDeliveryStore = createD1CampaignTestDeliveryStore(
+      environment.FOUNDRY_DB,
+    );
     resolveAudience = createSubscriberLedgerAudienceResolver({
       siteId: referenceSiteApplication.siteId,
       store: createD1SubscriberLedgerStore(environment.FOUNDRY_DB),
     });
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
+    const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
+    const accountScopeFingerprint =
+      environment.FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT?.trim() ?? "";
+    if (!/^[a-f0-9]{64}$/u.test(accountScopeFingerprint)) {
+      throw new Error("brevo_account_scope_fingerprint_invalid");
+    }
+    const senderIds = JSON.parse(
+      environment.FOUNDRY_BREVO_SENDER_IDS_JSON ?? "{}",
+    ) as Record<string, number>;
+    testRecipients = JSON.parse(
+      environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
+    ) as Record<string, string>;
+    const configurationFingerprint = await sha256CanonicalJson({
+      version: "foundry.brevo-test-configuration.v1",
+      accountScopeFingerprint,
+      senderIds,
+      adapterVersion: "brevo-test-v1",
+    });
+    testAdapter = createBrevoNewsletterDeliveryAdapter({
+      apiKey,
+      configurationFingerprint,
+      senderIds,
+    });
   }
+  const application = createCampaignApplication({
+    siteId: referenceSiteApplication.siteId,
+    store,
+    authorize: (actor, capability) =>
+      human.application.queries.requireCapability({
+        actor,
+        capability:
+          capability === "campaign.author"
+            ? "content.write"
+            : capability,
+      }),
+    identifyActor: () => human.membership.id,
+    findPostRevision,
+    resolveAudience,
+    channelConfiguration,
+    rendererVersion: rendererCommit,
+    schemaVersion: "1.3.0",
+  });
   return {
     identity: human.identity,
-    application: createCampaignApplication({
+    application,
+    testDelivery: createCampaignTestDeliveryApplication({
       siteId: referenceSiteApplication.siteId,
-      store,
+      campaignStore: store,
+      store: testDeliveryStore,
+      adapter: testAdapter,
       authorize: (actor, capability) =>
         human.application.queries.requireCapability({
           actor,
@@ -162,11 +249,15 @@ export async function loadCampaignRequestContext(
               : capability,
         }),
       identifyActor: () => human.membership.id,
-      findPostRevision,
       resolveAudience,
-      channelConfiguration,
-      rendererVersion: rendererCommit,
-      schemaVersion: "1.3.0",
+      resolveTestRecipients: async (recipientIds) =>
+        recipientIds.map((id) => {
+          const address = testRecipients[id];
+          if (address === undefined) {
+            throw new Error("test_recipient_forbidden");
+          }
+          return { id, address };
+        }),
     }),
   };
 }
