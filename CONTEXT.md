@@ -127,6 +127,55 @@ originate human authorization.
 **System scheduler** — A non-human executor that may claim due work only when a
 still-valid human approval and active schedule already exist.
 
+## Installation and provisioning
+
+**Installation** — One deployed Foundry CMS site in accounts the client owns.
+Its `installationId` names the logical site for the site's whole life and never
+changes, including across reprovisioning.
+
+**Deployment** — One account-bound set of Cloudflare resources for an
+installation. Its `deploymentId` changes only when a separate set is
+intentionally created, such as a cutover from temporary hosting. Every provider
+resource name is derived from the deployment, so two installations, or two
+deployments of one installation, can never collide on a name.
+
+**Resource stem** — The deterministic `<slug>-<suffix>` prefix every derived
+provider resource name uses, where the suffix is hashed from the deployment ID.
+
+**Configuration fingerprint** — A deterministic digest of one resource's
+declared, non-secret configuration. It states what the operator intends and what
+the provider was observed to be; it never carries a credential.
+
+**Account-scope fingerprint** — A one-way digest binding an operation to one
+provider account. A fresh operator recomputes it; the raw account ID is never
+committed.
+
+**Provisioning step** — One unit of provisioning work with `inspect`, `plan`,
+`apply` and `verify` behaviour. A step is `verified` only after the client
+account was read back and its health check passed; `applying` is never evidence
+that a write landed.
+
+**Resource classification** — The result of inspecting the client account for
+one resource: `absent`, `exact`, `repairable_drift`, `incompatible_drift`,
+`ambiguous` or `foreign`. A matching name alone is never `exact`.
+
+**Create intent** — A durable pre-create record naming the provider, exact
+resource name, account scope, desired fingerprint and one-use nonce. It is
+committed before any create the provider cannot make idempotent, so an ambiguous
+response can be resolved later against evidence rather than correlation.
+
+**Provisioning journal** — The installation's durable step, resource and
+credential-slot state. Before D1 exists it is the signed receipt chain on the
+client repository's provisioning-state branch.
+
+**Provisioning receipt** — One append-only, hash-linked, client-signed entry in
+that chain. A resumed operation verifies the whole chain from its root; a broken
+link, deleted entry or unexpected signer blocks the chain.
+
+**Credential slot** — The durable record that one credential exists, who owns
+it, its least authority, how it is rotated and whether its health check passed.
+The value is never part of the record.
+
 ## Linked domain documents
 
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
