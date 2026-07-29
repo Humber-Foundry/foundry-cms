@@ -21,6 +21,7 @@ export * from "./public-form-notification";
 export * from "./public-form-privacy";
 export * from "./media-assets";
 export * from "./in-memory-media-assets";
+export * from "./mcp-read";
 
 export interface PublishedSiteRepository {
   findBySiteId(siteId: SiteId): Promise<PublishedSiteBundle | null>;

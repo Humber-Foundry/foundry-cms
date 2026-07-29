@@ -12,6 +12,7 @@ import type {
   SiteDesign,
 } from "./design-tokens";
 import { designContract } from "./design-tokens";
+export { designContract } from "./design-tokens";
 import publishedSite from "./published-site.json";
 import {
   projectPublishedSiteDefinition,
