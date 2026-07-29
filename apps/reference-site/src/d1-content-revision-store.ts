@@ -1050,6 +1050,9 @@ export function createD1ContentRevisionStore(
               command.requestHash,
             ),
       );
+      // Successor drafts branch independently by workspace and immutable,
+      // content-addressed revision ID. Only creation claims the site-global
+      // identity here; verified-live reconciliation advances the aggregate.
       const blogAggregateStatements = (command.blogTransitions ?? [])
         .filter((transition) => transition.beforeState === null)
         .map((transition) =>
