@@ -18,6 +18,7 @@ import {
   isRequestId,
   jsonResponse,
   readBoundedText,
+  readsJsonMediaType,
   rpcError,
   rpcResult,
   type RpcRequest,
@@ -89,16 +90,6 @@ function readListCursor(params: unknown): string | null | undefined {
     return undefined;
   }
   return params.cursor ?? null;
-}
-
-function readsJsonMediaType(request: Request) {
-  return (
-    request.headers
-      .get("content-type")
-      ?.split(";", 1)[0]
-      ?.trim()
-      .toLowerCase() === "application/json"
-  );
 }
 
 export function createMcpProtocolRuntime({

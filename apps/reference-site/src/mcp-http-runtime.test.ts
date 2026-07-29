@@ -471,6 +471,58 @@ describe("production MCP HTTP runtime", () => {
     expect(connections.size).toBe(0);
   });
 
+  it("rejects JSON lookalike media types on authorization and revocation", async () => {
+    const { runtime, connections } = fixture();
+    const verifier = "v".repeat(64);
+    const authorization = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/jsonp",
+          "x-foundry-csrf": "verified-by-owner-boundary",
+        },
+        body: JSON.stringify({
+          response_type: "code",
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          resource: resourceUri,
+          scope: "site.read",
+          state: "client-state",
+          code_challenge: await digest(verifier),
+          code_challenge_method: "S256",
+        }),
+      }),
+    );
+    expect(authorization.status).toBe(400);
+    expect(connections.size).toBe(0);
+
+    const connected = fixture();
+    await authorizeAndExchange(connected.runtime);
+    const [connection] = [...connected.connections.values()];
+    const revocation = await connected.runtime.fetch(
+      new Request(
+        `${canonicalOrigin}/api/foundry-cms/mcp-connections/revoke`,
+        {
+          method: "POST",
+          headers: {
+            origin: canonicalOrigin,
+            "content-type": "application/jsonp",
+            "x-foundry-csrf": "verified-by-owner-boundary",
+          },
+          body: JSON.stringify({
+            connectionId: connection!.connectionId,
+            reason: "This request must not be accepted.",
+          }),
+        },
+      ),
+    );
+    expect(revocation.status).toBe(400);
+    expect(connected.connections.get(connection!.connectionId)?.status).toBe(
+      "active",
+    );
+  });
+
   it("completes authorization code + PKCE and exposes typed read-only catalogs", async () => {
     const { runtime } = fixture();
     const { accessToken: token } = await authorizeAndExchange(runtime);

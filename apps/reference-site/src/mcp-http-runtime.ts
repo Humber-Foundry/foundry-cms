@@ -18,6 +18,7 @@ import {
   isRecord,
   jsonResponse,
   readBoundedText,
+  readsJsonMediaType,
   RequestDeadlineExceededError,
   sha256,
   type RequestExecutionContext,
@@ -322,7 +323,7 @@ export function createMcpHttpRuntime({
 
   async function readAuthorizationBody(request: Request) {
     const contentType = request.headers.get("content-type")?.toLowerCase();
-    if (contentType?.startsWith("application/json") === true) {
+    if (readsJsonMediaType(request)) {
       return {
         body: JSON.parse(
           await readBoundedText(request, oauthBodyLimitBytes),
@@ -593,10 +594,7 @@ export function createMcpHttpRuntime({
     if (
       request.method !== "POST" ||
       request.headers.get("origin") !== canonicalOrigin ||
-      request.headers
-        .get("content-type")
-        ?.toLowerCase()
-        .startsWith("application/json") !== true
+      !readsJsonMediaType(request)
     ) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }

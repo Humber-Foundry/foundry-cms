@@ -26,6 +26,16 @@ export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function readsJsonMediaType(request: Request) {
+  return (
+    request.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase() === "application/json"
+  );
+}
+
 export function hasExactKeys(
   value: JsonRecord,
   required: ReadonlyArray<string>,
