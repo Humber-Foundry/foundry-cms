@@ -21,7 +21,7 @@ import {
   createCampaignApplication,
   createCampaignId,
   createCampaignRevisionId,
-  type CampaignAuthoringInput,
+  type CampaignEditableInput,
 } from "./campaign";
 import { createInMemoryCampaignStore } from "./in-memory-campaign-store";
 import {
@@ -78,7 +78,7 @@ const sourcePost: BlogPost = {
   },
   body: createRichTextDocumentFromPlainText("The copied post body."),
 };
-const standaloneInput: CampaignAuthoringInput = {
+const standaloneInput: CampaignEditableInput = {
   subject: "A standalone campaign",
   previewText: "An introduction with <unsafe> punctuation & symbols.",
   callToAction: {
@@ -86,6 +86,8 @@ const standaloneInput: CampaignAuthoringInput = {
     href: "https://example.com/update?from=email&kind=campaign",
   },
   emailContent: createRichTextDocumentFromPlainText("Standalone email body."),
+};
+const channelConfiguration = {
   senderIdentityId: "sender_primary",
   complianceFooter: {
     version: "footer-v1",
@@ -94,7 +96,7 @@ const standaloneInput: CampaignAuthoringInput = {
   audienceDefinition: {
     id: "canonical-consent-and-suppression",
     version: 1,
-  },
+  } as const,
 };
 
 function createFixture() {
@@ -120,6 +122,7 @@ function createFixture() {
         ? sourcePost
         : null,
     resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
+    channelConfiguration,
     rendererVersion: "1111111111111111111111111111111111111111",
     schemaVersion: "1.3.0",
     clock: () => new Date("2026-07-29T07:00:00.000Z"),
@@ -169,9 +172,6 @@ describe("campaign authoring and rendering", () => {
     const created = await application.commands.createFromPost({
       actor: editor,
       sourcePostRevisionId,
-      senderIdentityId: "sender_primary",
-      complianceFooter: standaloneInput.complianceFooter,
-      audienceDefinition: standaloneInput.audienceDefinition,
     });
     const edited = await application.commands.edit({
       actor: editor,
@@ -252,6 +252,7 @@ describe("campaign authoring and rendering", () => {
       authorize: async () => ({ ...editorMembership, siteId: otherSiteId }),
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 0 }),
+      channelConfiguration,
       rendererVersion: "1111111111111111111111111111111111111111",
       schemaVersion: "1.3.0",
     });
@@ -259,9 +260,6 @@ describe("campaign authoring and rendering", () => {
       otherSiteApplication.commands.createFromPost({
         actor: editor,
         sourcePostRevisionId,
-        senderIdentityId: "sender_primary",
-        complianceFooter: standaloneInput.complianceFooter,
-        audienceDefinition: standaloneInput.audienceDefinition,
       }),
     ).rejects.toBeInstanceOf(CampaignNotFoundError);
   });
@@ -371,18 +369,10 @@ describe("campaign authoring and rendering", () => {
     ).resolves.toEqual({ eligibleSubscriberCount: 1 });
   });
 
-  it("supports a site-scoped MCP authorizer and audits accepted and rejected commands", async () => {
+  it("links accepted revisions and rejected commands in the audit history", async () => {
     const { application, store } = createFixture();
-    await application.commands.createStandalone({
+    const created = await application.commands.createStandalone({
       actor: editor,
-      input: standaloneInput,
-    });
-    await application.commands.createStandalone({
-      actor: {
-        type: "mcp",
-        connectionId: "connection-1",
-        siteId,
-      },
       input: standaloneInput,
     });
     await expect(
@@ -397,16 +387,13 @@ describe("campaign authoring and rendering", () => {
         action: "campaign.create",
         outcome: "accepted",
         actorId: "human:https://access.example:editor",
-      },
-      {
-        action: "campaign.create",
-        outcome: "accepted",
-        actorId: "mcp:connection-1",
+        revisionId: created.revision.id,
       },
       {
         action: "campaign.create",
         outcome: "rejected",
         actorId: "human:https://access.example:editor",
+        revisionId: null,
         reason: "campaign_schema_invalid",
       },
     ]);

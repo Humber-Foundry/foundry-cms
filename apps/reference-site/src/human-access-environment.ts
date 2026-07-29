@@ -17,6 +17,13 @@ export async function loadHumanAccessEnvironment(): Promise<HumanAccessEnvironme
       FOUNDRY_SUBSCRIBER_IDENTITY_SECRET:
         "local-development-subscriber-identity-secret",
       FOUNDRY_ACCESS_AUDIENCE: "local-development-audience",
+      FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID: "sender_primary",
+      FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION: "local-footer-v1",
+      FOUNDRY_CAMPAIGN_LEGAL_NAME: "Foundry local development",
+      FOUNDRY_CAMPAIGN_POSTAL_ADDRESS: "Local development only",
+      FOUNDRY_CAMPAIGN_CONTACT_URL: "https://example.test/contact",
+      FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL:
+        "https://example.test/newsletter/unsubscribe",
     };
   }
   const { env } = await getCloudflareContext({ async: true });

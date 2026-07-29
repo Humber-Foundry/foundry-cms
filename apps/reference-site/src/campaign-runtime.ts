@@ -10,6 +10,7 @@ import {
   createSubscriberLedgerAudienceResolver,
   sha256Text,
   type CampaignApplication,
+  type CampaignChannelConfiguration,
   type CampaignStore,
 } from "@foundry/application";
 import {
@@ -25,11 +26,27 @@ import {
   loadHumanAccessRequestContext,
 } from "./human-access-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
+import { readCampaignChannelConfiguration } from "./human-access-configuration";
+import { resolveContentReleaseInputs } from "./content-revision-runtime";
 import { referenceSiteApplication } from "./reference-installation";
 
 const localCampaignStore = createInMemoryCampaignStore();
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
+const developmentChannelConfiguration: CampaignChannelConfiguration = Object.freeze({
+  senderIdentityId: "sender_primary",
+  complianceFooter: Object.freeze({
+    version: "local-footer-v1",
+    content:
+      "Foundry local development · Local development only · " +
+      "Contact: https://example.test/contact · " +
+      "Unsubscribe: https://example.test/newsletter/unsubscribe",
+  }),
+  audienceDefinition: Object.freeze({
+    id: "canonical-consent-and-suppression" as const,
+    version: 1 as const,
+  }),
+});
 
 async function localPostRevision(
   siteId: SiteId,
@@ -99,18 +116,15 @@ export async function loadCampaignRequestContext(
   });
   let findPostRevision = localPostRevision;
   let rendererCommit = developmentRendererCommit;
+  let channelConfiguration = developmentChannelConfiguration;
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
     if (environment.FOUNDRY_DB === undefined) {
       throw new Error("campaign_database_unavailable");
     }
-    if (
-      environment.FOUNDRY_RENDERER_COMMIT === undefined ||
-      !/^[a-f0-9]{40}$/u.test(environment.FOUNDRY_RENDERER_COMMIT)
-    ) {
-      throw new Error("campaign_renderer_commit_unavailable");
-    }
-    rendererCommit = environment.FOUNDRY_RENDERER_COMMIT;
+    rendererCommit = resolveContentReleaseInputs(environment)
+      .productionBaseCommit;
+    channelConfiguration = readCampaignChannelConfiguration(environment);
     store = createD1CampaignStore(environment.FOUNDRY_DB);
     resolveAudience = createSubscriberLedgerAudienceResolver({
       siteId: referenceSiteApplication.siteId,
@@ -138,6 +152,7 @@ export async function loadCampaignRequestContext(
             ),
       findPostRevision,
       resolveAudience,
+      channelConfiguration,
       rendererVersion: rendererCommit,
       schemaVersion: "1.3.0",
     }),

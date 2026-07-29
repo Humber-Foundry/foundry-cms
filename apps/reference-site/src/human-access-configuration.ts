@@ -15,8 +15,13 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_CSRF_SECRET?: string;
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET?: string;
   FOUNDRY_RENDERER_VERSION?: string;
-  FOUNDRY_RENDERER_COMMIT?: string;
   FOUNDRY_PRODUCTION_BASE?: string;
+  FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID?: string;
+  FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION?: string;
+  FOUNDRY_CAMPAIGN_LEGAL_NAME?: string;
+  FOUNDRY_CAMPAIGN_POSTAL_ADDRESS?: string;
+  FOUNDRY_CAMPAIGN_CONTACT_URL?: string;
+  FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL?: string;
   CF_VERSION_METADATA?: Readonly<{ id: string }>;
   FOUNDRY_DB?: D1DatabaseBinding;
   FOUNDRY_GITHUB_APP_ID?: string;
@@ -107,5 +112,51 @@ export function readSubscriberIdentityKeySecret(
     throw new HumanAccessConfigurationError();
   }
   return secret;
+}
+
+function requireAbsoluteHttpsUrl(value: string | undefined): string {
+  const normalized = requireSetting(value);
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new HumanAccessConfigurationError();
+  }
+  if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "") {
+    throw new HumanAccessConfigurationError();
+  }
+  return parsed.toString();
+}
+
+export function readCampaignChannelConfiguration(
+  environment: HumanAccessEnvironment,
+) {
+  const legalName = requireSetting(environment.FOUNDRY_CAMPAIGN_LEGAL_NAME);
+  const postalAddress = requireSetting(
+    environment.FOUNDRY_CAMPAIGN_POSTAL_ADDRESS,
+  );
+  const contactUrl = requireAbsoluteHttpsUrl(
+    environment.FOUNDRY_CAMPAIGN_CONTACT_URL,
+  );
+  const unsubscribeUrl = requireAbsoluteHttpsUrl(
+    environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL,
+  );
+  return Object.freeze({
+    senderIdentityId: requireSetting(
+      environment.FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID,
+    ),
+    complianceFooter: Object.freeze({
+      version: requireSetting(
+        environment.FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION,
+      ),
+      content:
+        `${legalName} · ${postalAddress} · Contact: ${contactUrl} · ` +
+        `Unsubscribe: ${unsubscribeUrl}`,
+    }),
+    audienceDefinition: Object.freeze({
+      id: "canonical-consent-and-suppression" as const,
+      version: 1 as const,
+    }),
+  });
 }
 import type { HumanAccessEligibilitySynchronizer } from "@foundry/application";

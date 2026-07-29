@@ -1,6 +1,8 @@
 import type {
   ContentRevision,
   BlogPostArtifactFingerprint,
+  Campaign,
+  CampaignRevision,
   FailedPublicFormDelivery,
   HumanMembership,
   MediaAsset,
@@ -51,6 +53,7 @@ export function DashboardShell({
   mediaOccurrences,
   mediaWorkspaceId,
   campaignPostArtifacts,
+  campaigns,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -72,6 +75,9 @@ export function DashboardShell({
   mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
   mediaWorkspaceId: string;
   campaignPostArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
+  campaigns: ReadonlyArray<
+    Readonly<{ campaign: Campaign; revision: CampaignRevision }>
+  >;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined
@@ -160,6 +166,7 @@ export function DashboardShell({
           )}
           <CampaignControls
             csrfToken={mutationToken}
+            initialCampaigns={campaigns}
             postSources={campaignPostArtifacts.flatMap((artifact) => {
               const post = definition.blog.posts.find(
                 ({ id }) => id === artifact.postId,

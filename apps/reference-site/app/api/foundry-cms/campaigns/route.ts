@@ -4,7 +4,7 @@ import {
   CampaignNotFoundError,
   CampaignValidationError,
   createCampaignId,
-  type CampaignAuthoringInput,
+  type CampaignEditableInput,
 } from "@foundry/application";
 
 import { loadCampaignRequestContext } from "../../../../src/campaign-runtime";
@@ -16,35 +16,60 @@ import {
 type CampaignCommand =
   | Readonly<{
       action: "create_standalone";
-      input: Omit<CampaignAuthoringInput, "complianceFooter">;
+      input: CampaignEditableInput;
     }>
   | Readonly<{
       action: "create_from_post";
       sourcePostRevisionId: string;
-      senderIdentityId: string;
-      audienceDefinition: CampaignAuthoringInput["audienceDefinition"];
     }>
   | Readonly<{
       action: "edit";
       campaignId: string;
       expectedVersion: number;
-      input: Omit<CampaignAuthoringInput, "complianceFooter">;
+      input: CampaignEditableInput;
     }>;
-
-const canonicalComplianceFooter = Object.freeze({
-  version: "reference-footer-v1",
-  content:
-    "Humber Foundry · 123 Harbour Street, Victoria, BC · Contact: mailto:hello@humberfoundry.ca · Unsubscribe: https://foundry.tinyskiff.xyz/newsletter/unsubscribe",
-});
 
 function command(value: unknown): CampaignCommand | null {
   if (typeof value !== "object" || value === null || !("action" in value)) {
     return null;
   }
-  return value.action === "create_standalone" ||
-    value.action === "create_from_post" ||
-    value.action === "edit"
-    ? (value as CampaignCommand)
+  if (value.action === "create_from_post") {
+    return "sourcePostRevisionId" in value &&
+      typeof value.sourcePostRevisionId === "string"
+      ? {
+          action: value.action,
+          sourcePostRevisionId: value.sourcePostRevisionId,
+        }
+      : null;
+  }
+  if (
+    (value.action !== "create_standalone" && value.action !== "edit") ||
+    !("input" in value) ||
+    typeof value.input !== "object" ||
+    value.input === null
+  ) {
+    return null;
+  }
+  const editable = value.input as Record<string, unknown>;
+  const input = {
+    subject: editable.subject,
+    previewText: editable.previewText,
+    callToAction: editable.callToAction,
+    emailContent: editable.emailContent,
+  } as CampaignEditableInput;
+  if (value.action === "create_standalone") {
+    return { action: value.action, input };
+  }
+  return "campaignId" in value &&
+    typeof value.campaignId === "string" &&
+    "expectedVersion" in value &&
+    typeof value.expectedVersion === "number"
+    ? {
+        action: value.action,
+        campaignId: value.campaignId,
+        expectedVersion: value.expectedVersion,
+        input,
+      }
     : null;
 }
 
@@ -99,6 +124,23 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    let editedCampaignId;
+    if (parsed.action === "edit") {
+      try {
+        editedCampaignId = createCampaignId(parsed.campaignId);
+      } catch {
+        await context.application.commands.recordRejectedCommand({
+          actor: context.identity,
+          action: "campaign.edit",
+          targetId: parsed.campaignId,
+          reason: "campaign_id_invalid",
+        });
+        return Response.json(
+          { error: "campaign_command_invalid" },
+          { status: 400 },
+        );
+      }
+    }
     return executeIdempotentHumanMutation({
       request,
       identity: context.identity,
@@ -107,27 +149,18 @@ export async function POST(request: Request) {
         const result = parsed.action === "create_standalone"
           ? await context.application.commands.createStandalone({
               actor: context.identity,
-              input: {
-                ...parsed.input,
-                complianceFooter: canonicalComplianceFooter,
-              },
+              input: parsed.input,
             })
           : parsed.action === "create_from_post"
             ? await context.application.commands.createFromPost({
                 actor: context.identity,
                 sourcePostRevisionId: parsed.sourcePostRevisionId,
-                senderIdentityId: parsed.senderIdentityId,
-                complianceFooter: canonicalComplianceFooter,
-                audienceDefinition: parsed.audienceDefinition,
               })
             : await context.application.commands.edit({
                 actor: context.identity,
-                campaignId: createCampaignId(parsed.campaignId),
+                campaignId: editedCampaignId!,
                 expectedVersion: parsed.expectedVersion,
-                input: {
-                  ...parsed.input,
-                  complianceFooter: canonicalComplianceFooter,
-                },
+                input: parsed.input,
               });
         return Response.json(result, {
           status: parsed.action === "edit" ? 200 : 201,

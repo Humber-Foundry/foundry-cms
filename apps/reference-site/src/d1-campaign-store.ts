@@ -2,7 +2,6 @@ import {
   createCampaignId,
   createCampaignRevisionId,
   type Campaign,
-  type CampaignArtifact,
   type CampaignLifecycleState,
   type CampaignRevision,
   type CampaignStore,
@@ -19,7 +18,6 @@ type CampaignRow = {
   test_delivery_id: string | null;
   bulk_authorization_id: string | null;
   active_schedule_id: string | null;
-  provider_cancellation_required: number;
   version: number;
   created_at: string;
   updated_at: string;
@@ -27,15 +25,6 @@ type CampaignRow = {
 
 type RevisionRow = {
   revision_json: string;
-};
-
-type ArtifactRow = {
-  channel: CampaignArtifact["channel"];
-  bytes: string;
-  fingerprint: string;
-  campaign_fingerprint: string;
-  schema_version: "1.3.0";
-  renderer_version: string;
 };
 
 function toCampaign(row: CampaignRow): Campaign {
@@ -47,8 +36,6 @@ function toCampaign(row: CampaignRow): Campaign {
     testDeliveryId: row.test_delivery_id,
     bulkAuthorizationId: row.bulk_authorization_id,
     activeScheduleId: row.active_schedule_id,
-    providerCancellationRequired:
-      row.provider_cancellation_required === 1,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -58,7 +45,7 @@ function toCampaign(row: CampaignRow): Campaign {
 const campaignProjection = `
   SELECT id, site_id, lifecycle_state, current_revision_id,
     test_delivery_id, bulk_authorization_id, active_schedule_id,
-    provider_cancellation_required, version, created_at, updated_at
+    version, created_at, updated_at
   FROM campaigns
 `;
 
@@ -85,19 +72,14 @@ function revisionInsert(
 function auditInsert(
   database: D1DatabaseBinding,
   event: import("@foundry/application").CampaignAuditEvent,
-  campaignRevisionId?: string,
 ) {
   return database
     .prepare(
       `INSERT INTO campaign_audit_events (
          id, site_id, actor_id, target_id, request_id, action, outcome,
-         reason, before_state, after_state, occurred_at
+         campaign_revision_id, reason, before_state, after_state, occurred_at
        )
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
-       WHERE ?12 IS NULL OR EXISTS (
-         SELECT 1 FROM campaign_revisions
-         WHERE id = ?12 AND site_id = ?2
-       )`,
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
     )
     .bind(
       event.id,
@@ -107,11 +89,11 @@ function auditInsert(
       event.requestId,
       event.action,
       event.outcome,
+      event.revisionId,
       event.reason,
       event.beforeState,
       event.afterState,
       event.occurredAt,
-      campaignRevisionId ?? null,
     );
 }
 
@@ -126,8 +108,8 @@ export function createD1CampaignStore(
             `INSERT INTO campaigns (
                id, site_id, lifecycle_state, current_revision_id,
                test_delivery_id, bulk_authorization_id, active_schedule_id,
-               provider_cancellation_required, version, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+               version, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
           )
           .bind(
             campaign.id,
@@ -137,13 +119,12 @@ export function createD1CampaignStore(
             campaign.testDeliveryId,
             campaign.bulkAuthorizationId,
             campaign.activeScheduleId,
-            campaign.providerCancellationRequired ? 1 : 0,
             campaign.version,
             campaign.createdAt,
             campaign.updatedAt,
           ),
         revisionInsert(database, revision),
-        auditInsert(database, audit, revision.id),
+        auditInsert(database, audit),
       ]);
       return (results[0]?.meta.changes ?? 0) === 1 &&
         (results[1]?.meta.changes ?? 0) === 1 &&
@@ -205,32 +186,12 @@ export function createD1CampaignStore(
           ),
         database
           .prepare(
-            `INSERT INTO campaign_provider_cancellation_outbox (
-               campaign_id, superseded_revision_id,
-               replacement_revision_id, created_at
-             )
-             SELECT id, current_revision_id, ?1, ?2
-             FROM campaigns
-             WHERE site_id = ?3 AND id = ?4 AND version = ?5 AND ?6 = 1
-             ON CONFLICT DO NOTHING`,
-          )
-          .bind(
-            revision.id,
-            revision.createdAt,
-            campaign.siteId,
-            campaign.id,
-            expectedVersion,
-            campaign.providerCancellationRequired ? 1 : 0,
-          ),
-        database
-          .prepare(
             `UPDATE campaigns
              SET lifecycle_state = ?1, current_revision_id = ?2,
                test_delivery_id = ?3, bulk_authorization_id = ?4,
                active_schedule_id = ?5,
-               provider_cancellation_required = ?6,
-               version = ?7, updated_at = ?8
-             WHERE site_id = ?9 AND id = ?10 AND version = ?11
+               version = ?6, updated_at = ?7
+             WHERE site_id = ?8 AND id = ?9 AND version = ?10
                AND EXISTS (
                  SELECT 1 FROM campaign_revisions WHERE id = ?2
                )`,
@@ -241,77 +202,25 @@ export function createD1CampaignStore(
             campaign.testDeliveryId,
             campaign.bulkAuthorizationId,
             campaign.activeScheduleId,
-            campaign.providerCancellationRequired ? 1 : 0,
             campaign.version,
             campaign.updatedAt,
             campaign.siteId,
             campaign.id,
             expectedVersion,
           ),
-        auditInsert(database, audit, revision.id),
+        auditInsert(database, audit),
       ]);
-      const expectedCancellationChanges =
-        campaign.providerCancellationRequired ? 1 : 0;
       return (results[0]?.meta.changes ?? 0) === 1 &&
-        (results[1]?.meta.changes ?? 0) === expectedCancellationChanges &&
-        (results[2]?.meta.changes ?? 0) === 1 &&
-        (results[3]?.meta.changes ?? 0) === 1;
-    },
-    async saveRenderedArtifacts(input) {
-      const statements = [input.html, input.text].map((artifact) =>
-        database
-          .prepare(
-            `INSERT INTO campaign_rendered_artifacts (
-               campaign_revision_id, channel, bytes, fingerprint,
-               campaign_fingerprint, schema_version, renderer_version
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT DO NOTHING`,
-          )
-          .bind(
-            input.campaignRevisionId,
-            artifact.channel,
-            artifact.bytes,
-            artifact.fingerprint,
-            input.campaignFingerprint,
-            artifact.schemaVersion,
-            artifact.rendererVersion,
-          ),
-      );
-      await database.batch(statements);
-      const stored = await database
-        .prepare(
-          `SELECT channel, bytes, fingerprint, campaign_fingerprint,
-             schema_version, renderer_version
-           FROM campaign_rendered_artifacts
-           WHERE campaign_revision_id = ?1 ORDER BY channel`,
-        )
-        .bind(input.campaignRevisionId)
-        .all<ArtifactRow>();
-      const expected = [input.html, input.text].sort((left, right) =>
-        left.channel.localeCompare(right.channel),
-      );
-      if (
-        stored.results.length !== 2 ||
-        stored.results.some((row, index) => {
-          const artifact = expected[index]!;
-          return row.channel !== artifact.channel ||
-            row.bytes !== artifact.bytes ||
-            row.fingerprint !== artifact.fingerprint ||
-            row.campaign_fingerprint !== input.campaignFingerprint ||
-            row.schema_version !== artifact.schemaVersion ||
-            row.renderer_version !== artifact.rendererVersion;
-        })
-      ) {
-        throw new Error("campaign_artifact_immutable");
-      }
+        (results[1]?.meta.changes ?? 0) === 1 &&
+        (results[2]?.meta.changes ?? 0) === 1;
     },
     async recordAudit(event) {
       await database
         .prepare(
           `INSERT INTO campaign_audit_events (
              id, site_id, actor_id, target_id, request_id, action, outcome,
-             reason, before_state, after_state, occurred_at
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
+             campaign_revision_id, reason, before_state, after_state, occurred_at
+           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
         )
         .bind(
           event.id,
@@ -321,6 +230,7 @@ export function createD1CampaignStore(
           event.requestId,
           event.action,
           event.outcome,
+          event.revisionId,
           event.reason,
           event.beforeState,
           event.afterState,

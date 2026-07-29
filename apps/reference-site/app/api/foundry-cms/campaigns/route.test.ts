@@ -62,7 +62,7 @@ describe("campaign endpoint", () => {
     expect(mocks.listCampaigns).toHaveBeenCalledWith({ actor: identity });
   });
 
-  it("injects canonical sender, contact, and unsubscribe compliance material", async () => {
+  it("does not accept sender or compliance configuration from the caller", async () => {
     const response = await POST(
       new Request("https://foundry.example/api/foundry-cms/campaigns", {
         method: "POST",
@@ -77,10 +77,10 @@ describe("campaign endpoint", () => {
             previewText: "Preview",
             callToAction: { label: "Read", href: "https://example.com" },
             emailContent: { version: "1.0.0", type: "document", children: [] },
-            senderIdentityId: "sender_primary",
-            audienceDefinition: {
-              id: "canonical-consent-and-suppression",
-              version: 1,
+            senderIdentityId: "attacker-controlled-sender",
+            complianceFooter: {
+              version: "attacker",
+              content: "No unsubscribe",
             },
           },
         }),
@@ -89,14 +89,12 @@ describe("campaign endpoint", () => {
     expect(response.status).toBe(201);
     expect(mocks.createStandalone).toHaveBeenCalledWith({
       actor: identity,
-      input: expect.objectContaining({
-        complianceFooter: {
-          version: "reference-footer-v1",
-          content: expect.stringMatching(
-            /Humber Foundry.*Contact:.*Unsubscribe:/u,
-          ),
-        },
-      }),
+      input: {
+        subject: "Campaign",
+        previewText: "Preview",
+        callToAction: { label: "Read", href: "https://example.com" },
+        emailContent: { version: "1.0.0", type: "document", children: [] },
+      },
     });
   });
 
@@ -113,5 +111,28 @@ describe("campaign endpoint", () => {
       actor: identity,
       reason: "campaign_command_invalid",
     });
+  });
+
+  it("audits malformed campaign identifiers before returning a rejection", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "edit",
+          campaignId: "not-a-campaign-id",
+          expectedVersion: 1,
+          input: {},
+        }),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
+      actor: identity,
+      action: "campaign.edit",
+      targetId: "not-a-campaign-id",
+      reason: "campaign_id_invalid",
+    });
+    expect(mocks.edit).not.toHaveBeenCalled();
   });
 });

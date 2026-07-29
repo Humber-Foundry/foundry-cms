@@ -81,6 +81,17 @@ async function loadDependencies(): Promise<{
   };
 }
 
+export async function loadSubscriberLedgerIntegrationApplication() {
+  const dependencies = await loadDependencies();
+  return createSubscriberLedgerApplication({
+    siteId: referenceSiteApplication.siteId,
+    ...dependencies,
+    authorize: async () => {
+      throw new AccessDeniedError("capability_not_authorized");
+    },
+  });
+}
+
 export async function authorizeSubscriberLedgerIdentity(
   identityContext: AuthenticatedHumanIdentityContext,
 ) {

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
-  campaignAudienceDefinition,
+  renderRichTextPlain,
   type BlogPostArtifactFingerprint,
   type Campaign,
   type CampaignRevision,
@@ -17,6 +17,7 @@ import {
 export function CampaignControls({
   csrfToken,
   postSources,
+  initialCampaigns,
 }: {
   csrfToken: string;
   postSources: ReadonlyArray<
@@ -25,15 +26,18 @@ export function CampaignControls({
       artifact: BlogPostArtifactFingerprint;
     }>
   >;
+  initialCampaigns: ReadonlyArray<
+    Readonly<{ campaign: Campaign; revision: CampaignRevision }>
+  >;
 }) {
   const [message, setMessage] = useState("");
   const [campaigns, setCampaigns] = useState<
     ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>
-  >([]);
+  >(initialCampaigns);
   const [selected, setSelected] = useState<CampaignRevision | null>(null);
   const [rendered, setRendered] = useState<RenderedCampaign | null>(null);
 
-  async function loadCampaigns() {
+  async function loadCampaigns(selectedCampaignId?: string) {
     const response = await fetch("/api/foundry-cms/campaigns", {
       cache: "no-store",
     });
@@ -44,11 +48,15 @@ export function CampaignControls({
       >;
     };
     setCampaigns(body.campaigns);
+    if (selectedCampaignId !== undefined) {
+      setSelected(
+        body.campaigns.find(
+          ({ campaign }) => campaign.id === selectedCampaignId,
+        )?.revision ?? null,
+      );
+    }
+    return body.campaigns;
   }
-
-  useEffect(() => {
-    void loadCampaigns();
-  }, []);
 
   async function submit(command: unknown) {
     const response = await fetch("/api/foundry-cms/campaigns", {
@@ -65,7 +73,13 @@ export function CampaignControls({
         ? "Campaign revision saved."
         : "The campaign was rejected. Check the fields and retry.",
     );
-    if (response.ok) await loadCampaigns();
+    if (response.ok) {
+      const body = (await response.json()) as {
+        campaign: Campaign;
+        revision: CampaignRevision;
+      };
+      await loadCampaigns(body.campaign.id);
+    }
   }
 
   return (
@@ -103,8 +117,6 @@ export function CampaignControls({
                 href: callToActionHref,
               },
               emailContent: createRichTextDocumentFromPlainText(emailContent),
-              senderIdentityId: "sender_primary",
-              audienceDefinition: campaignAudienceDefinition,
             },
           });
         }}
@@ -143,8 +155,6 @@ export function CampaignControls({
             void submit({
               action: "create_from_post",
               sourcePostRevisionId,
-              senderIdentityId: "sender_primary",
-              audienceDefinition: campaignAudienceDefinition,
             });
           }}
         >
@@ -217,8 +227,6 @@ export function CampaignControls({
                 emailContent: createRichTextDocumentFromPlainText(
                   String(data.get("emailContent") ?? ""),
                 ),
-                senderIdentityId: selected.senderIdentityId,
-                audienceDefinition: selected.audienceDefinition,
               },
             });
           }}
@@ -254,7 +262,11 @@ export function CampaignControls({
           </label>
           <label>
             Email content
-            <textarea name="emailContent" required />
+            <textarea
+              name="emailContent"
+              defaultValue={renderRichTextPlain(selected.emailContent)}
+              required
+            />
           </label>
           <button type="submit">Save independent revision</button>
         </form>

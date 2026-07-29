@@ -10,7 +10,6 @@ export function createInMemoryCampaignStore(): CampaignStore & {
 } {
   const campaigns = new Map<string, Campaign>();
   const revisions = new Map<string, CampaignRevision>();
-  const artifacts = new Map<string, string>();
   const audits: CampaignAuditEvent[] = [];
   const revisionKey = (
     revision: Pick<
@@ -58,19 +57,6 @@ export function createInMemoryCampaignStore(): CampaignStore & {
       revisions.set(revisionKey(revision), revision);
       audits.push(audit);
       return true;
-    },
-    async saveRenderedArtifacts(input) {
-      const key = `${input.siteId}:${input.campaignRevisionId}`;
-      const serialized = JSON.stringify({
-        html: input.html,
-        text: input.text,
-        campaignFingerprint: input.campaignFingerprint,
-      });
-      const existing = artifacts.get(key);
-      if (existing !== undefined && existing !== serialized) {
-        throw new Error("campaign_artifact_immutable");
-      }
-      artifacts.set(key, serialized);
     },
     async recordAudit(event) {
       audits.push(Object.freeze({ ...event }));

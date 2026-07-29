@@ -69,7 +69,7 @@ beforeEach(async () => {
 afterEach(async () => runtime.dispose());
 
 describe("D1 campaign store", () => {
-  it("atomically persists immutable revisions, audit, and rendered artifacts", async () => {
+  it("atomically persists immutable revisions with linked audit evidence", async () => {
     let id = 0;
     const application = createCampaignApplication({
       siteId,
@@ -87,6 +87,14 @@ describe("D1 campaign store", () => {
       }),
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 7 }),
+      channelConfiguration: {
+        senderIdentityId: "sender_primary",
+        complianceFooter: {
+          version: "footer-v1",
+          content: "Durable compliance material.",
+        },
+        audienceDefinition: campaignAudienceDefinition,
+      },
       rendererVersion: "1111111111111111111111111111111111111111",
       schemaVersion: "1.3.0",
       createId: (kind) =>
@@ -104,26 +112,12 @@ describe("D1 campaign store", () => {
           href: "https://example.com",
         },
         emailContent: createRichTextDocumentFromPlainText("Durable body."),
-        senderIdentityId: "sender_primary",
-        complianceFooter: {
-          version: "footer-v1",
-          content: "Durable compliance material.",
-        },
-        audienceDefinition: campaignAudienceDefinition,
       },
     });
     await application.queries.render({
       actor,
       campaignId: created.campaign.id,
     });
-    await database
-      .prepare(
-        `UPDATE campaigns
-         SET lifecycle_state = 'tested', test_delivery_id = 'test-1'
-         WHERE site_id = ?1 AND id = ?2`,
-      )
-      .bind(siteId, created.campaign.id)
-      .run();
     await application.commands.edit({
       actor,
       campaignId: created.campaign.id,
@@ -148,16 +142,19 @@ describe("D1 campaign store", () => {
     ).resolves.toEqual({ count: 2 });
     await expect(
       database
-        .prepare("SELECT COUNT(*) AS count FROM campaign_rendered_artifacts")
-        .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 2 });
-    await expect(
-      database
         .prepare(
-          "SELECT COUNT(*) AS count FROM campaign_provider_cancellation_outbox",
+          `SELECT campaign_revision_id
+           FROM campaign_audit_events
+           WHERE outcome = 'accepted'
+           ORDER BY occurred_at, id`,
         )
-        .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 1 });
+        .all<{ campaign_revision_id: string }>(),
+    ).resolves.toMatchObject({
+      results: [
+        { campaign_revision_id: created.revision.id },
+        { campaign_revision_id: expect.any(String) },
+      ],
+    });
     await expect(
       database
         .prepare(

@@ -225,6 +225,28 @@ describe("subscriber consent and suppression ledger", () => {
     ).toEqual(["consent_recorded", "complained", "unsubscribed"]);
   });
 
+  it("records a public unsubscribe by opaque canonical identity key", async () => {
+    const { application } = createFixture();
+    const subscriber = await application.commands.recordConsent({
+      actor: owner,
+      email: "person@example.com",
+      evidence: consent,
+    });
+
+    await expect(
+      application.provider.ingestSuppressionByIdentityKey({
+        provider: "foundry_unsubscribe",
+        providerEventId: "unsubscribe-token-1",
+        identityKey: subscriber.identityKey,
+        reason: "unsubscribed",
+        occurredAt: "2026-07-27T18:01:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      id: subscriber.id,
+      state: "unsubscribed",
+    });
+  });
+
   it("deduplicates a retried provider event in the development store", async () => {
     const { application } = createFixture();
     await application.commands.recordConsent({

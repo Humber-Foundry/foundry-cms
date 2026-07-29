@@ -185,6 +185,13 @@ export type SubscriberLedgerApplication = Readonly<{
       reason: Exclude<SuppressionReason, "erased">;
       occurredAt: string;
     }): Promise<Subscriber>;
+    ingestSuppressionByIdentityKey(input: {
+      provider: string;
+      providerEventId: string;
+      identityKey: string;
+      reason: Exclude<SuppressionReason, "erased">;
+      occurredAt: string;
+    }): Promise<Subscriber>;
     synchronizeProfile(input: {
       email: unknown;
     }): Promise<Subscriber>;
@@ -545,6 +552,29 @@ export function createSubscriberLedgerApplication({
         }
         return appendSuppression({
           subscriber: located.subscriber,
+          reason,
+          occurredAt,
+          actor: { type: "provider", provider, providerEventId },
+        });
+      },
+      async ingestSuppressionByIdentityKey({
+        provider,
+        providerEventId,
+        identityKey,
+        reason,
+        occurredAt,
+      }) {
+        validateEventTimestamp(occurredAt);
+        if (!/^[a-f0-9]{64}$/u.test(identityKey)) {
+          throw new SubscriberNotFoundError();
+        }
+        const subscriber = await store.findByIdentityKey({
+          siteId,
+          identityKey,
+        });
+        if (subscriber === null) throw new SubscriberNotFoundError();
+        return appendSuppression({
+          subscriber,
           reason,
           occurredAt,
           actor: { type: "provider", provider, providerEventId },
