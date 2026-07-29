@@ -659,7 +659,11 @@ export function createMcpProtocolRuntime({
         return rpcError(null, -32700, "Parse error");
       }
       if (!isRecord(value) || value.jsonrpc !== "2.0") {
-        return rpcError(null, -32600, "Invalid Request");
+        return rpcError(
+          isRecord(value) && isRequestId(value.id) ? value.id : null,
+          -32600,
+          "Invalid Request",
+        );
       }
       if (valueDepth(value, rpcMaximumDepth) > rpcMaximumDepth) {
         return rpcError(
@@ -683,13 +687,21 @@ export function createMcpProtocolRuntime({
         return (isResultResponse || isErrorResponse) &&
           requestedVersion === mcpProtocolVersion
           ? new Response(null, { status: 202 })
-          : rpcError(null, -32600, "Invalid Request");
+          : rpcError(
+              isRequestId(value.id) ? value.id : null,
+              -32600,
+              "Invalid Request",
+            );
       }
       if (
         !hasExactKeys(value, ["jsonrpc", "method"], ["id", "params"]) ||
         (value.params !== undefined && !isRecord(value.params))
       ) {
-        return rpcError(null, -32600, "Invalid Request");
+        return rpcError(
+          isRequestId(value.id) ? value.id : null,
+          -32600,
+          "Invalid Request",
+        );
       }
       if (value.id === undefined) {
         return value.method === "initialize" ||

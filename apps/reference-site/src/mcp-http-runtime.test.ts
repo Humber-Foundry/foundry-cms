@@ -779,6 +779,34 @@ describe("production MCP HTTP runtime", () => {
     unsupported.headers.set("mcp-protocol-version", "2099-01-01");
     const unsupportedResponse = await runtime.fetch(unsupported);
     expect(unsupportedResponse.status).toBe(400);
+
+    const parseTemplate = rpcRequest(accessToken, {});
+    const parseError = await runtime.fetch(
+      new Request(resourceUri, {
+        method: "POST",
+        headers: parseTemplate.headers,
+        body: "{",
+      }),
+    );
+    await expect(parseError.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32700, message: "Parse error" },
+    });
+
+    const malformed = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "malformed-request-id",
+        method: "ping",
+        unexpected: true,
+      }),
+    );
+    await expect(malformed.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "malformed-request-id",
+      error: { code: -32600, message: "Invalid Request" },
+    });
   });
 
   it("returns schema-conforming tool errors for invalid tool arguments", async () => {

@@ -311,7 +311,7 @@ export function rpcError(
   return jsonResponse(
     {
       jsonrpc: "2.0",
-      ...(id === null ? {} : { id }),
+      id,
       error: {
         code,
         message,
