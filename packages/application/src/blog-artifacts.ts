@@ -8,6 +8,7 @@ import {
 
 import {
   canonicalJson,
+  lengthDelimitedText,
   sha256Text,
   sha256TextBytes,
 } from "./deterministic-hash";
@@ -64,13 +65,6 @@ export function isBlogPostArtifactFingerprint(
   );
 }
 
-function lengthDelimited(parts: ReadonlyArray<string>): string {
-  const encoder = new TextEncoder();
-  return parts
-    .map((part) => `${encoder.encode(part).byteLength}:${part}`)
-    .join("");
-}
-
 export async function createBlogPostRevisionId(
   siteId: SiteId,
   postId: BlogPostId,
@@ -84,7 +78,7 @@ export async function createBlogPostRevisionId(
     throw new TypeError("blog_post_content_hash_invalid");
   }
   const bytes = await sha256TextBytes(
-    lengthDelimited([
+    lengthDelimitedText([
       "foundry.post-revision-id.v1",
       siteId,
       postId,
@@ -124,7 +118,7 @@ export async function createBlogPostArtifactFingerprint(input: {
     canonicalJson(createBlogPostRenderModel(input.definition, input.post)),
   );
   const value = await sha256Text(
-    lengthDelimited([
+    lengthDelimitedText([
       blogPostArtifactSerializationVersion,
       input.post.id,
       postRevisionId,

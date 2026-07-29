@@ -29,3 +29,10 @@ export async function sha256Text(value: string): Promise<string> {
     byte.toString(16).padStart(2, "0"),
   ).join("");
 }
+
+export function lengthDelimitedText(parts: ReadonlyArray<string>): string {
+  const encoder = new TextEncoder();
+  return parts
+    .map((part) => `${encoder.encode(part).byteLength}:${part}`)
+    .join("");
+}

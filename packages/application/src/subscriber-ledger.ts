@@ -10,6 +10,7 @@ import {
   InvalidEmailAddressError,
   normalizeEmailAddress,
 } from "./email-address";
+import type { CampaignAudienceDefinition } from "./campaign";
 
 declare const subscriberIdBrand: unique symbol;
 declare const subscriberEventIdBrand: unique symbol;
@@ -114,6 +115,31 @@ export interface SubscriberLedgerStore {
     }>
   >;
   recordSensitiveAccess(event: SensitiveSubscriberAccessEvent): Promise<void>;
+}
+
+export function createSubscriberLedgerAudienceResolver({
+  siteId,
+  store,
+}: {
+  siteId: SiteId;
+  store: SubscriberLedgerStore;
+}) {
+  return async (
+    definition: CampaignAudienceDefinition,
+  ): Promise<Readonly<{ eligibleSubscriberCount: number }>> => {
+    if (
+      definition.id !== "canonical-consent-and-suppression" ||
+      definition.version !== 1
+    ) {
+      throw new TypeError("campaign_audience_definition_invalid");
+    }
+    const subscribers = await store.listSubscribers(siteId);
+    return Object.freeze({
+      eligibleSubscriberCount: subscribers.filter(
+        (subscriber) => subscriber.state === "active",
+      ).length,
+    });
+  };
 }
 
 export type SubscriberLedgerExport = Readonly<{
