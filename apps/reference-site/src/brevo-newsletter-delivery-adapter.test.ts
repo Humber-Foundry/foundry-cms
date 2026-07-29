@@ -9,6 +9,13 @@ import {
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 
 const configurationFingerprint = "a".repeat(64);
+const senderConfiguration = {
+  sender_primary: {
+    id: 42,
+    email: "sender@example.test",
+    name: "Foundry Sender",
+  },
+} as const;
 const correlationId =
   "brevo-transactional-40000000-0000-4000-8000-000000000001";
 const request: NewsletterTestRequest = {
@@ -88,7 +95,7 @@ function adapter(fetcher = vi.fn()) {
     configurationFingerprint,
     accountScopeFingerprint: "8".repeat(64),
     installationProofKey: "p".repeat(64),
-    senderIds: { sender_primary: 42 },
+    senders: senderConfiguration,
     fetcher,
   });
 }
@@ -116,7 +123,10 @@ describe("Brevo newsletter delivery adapter", () => {
         method: "POST",
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
-          sender: { id: 42 },
+          sender: {
+            email: "sender@example.test",
+            name: "Foundry Sender",
+          },
           to: [{ email: "owner-primary@example.test" }],
           subject: request.subject,
           htmlContent: request.renderedCampaign.html.bytes,
@@ -139,7 +149,7 @@ describe("Brevo newsletter delivery adapter", () => {
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
       installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
+      senders: senderConfiguration,
       fetcher: vi.fn(),
     });
 
@@ -185,6 +195,20 @@ describe("Brevo newsletter delivery adapter", () => {
     }
   });
 
+  it("does not accept an undocumented successful status", async () => {
+    const delivery = adapter(
+      vi.fn().mockResolvedValue(
+        response(200, { messageId: "<message-200@brevo.test>" }),
+      ),
+    );
+    const prepared = await prepareRequest(delivery);
+    await expect(delivery.sendTest(prepared)).resolves.toMatchObject({
+      outcome: "ambiguous",
+      providerCampaignId: correlationId,
+      foundrySendProof: prepared.foundrySendProof,
+    });
+  });
+
   it("does not infer acceptance while reconciling an uncertain transactional write", async () => {
     const delivery = adapter();
     const prepared = await prepareRequest(delivery);
@@ -213,17 +237,6 @@ describe("Brevo newsletter delivery adapter", () => {
               messageId,
               from: "sender@example.test",
               tag: request.executionId,
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        response(200, {
-          senders: [
-            {
-              id: 42,
-              active: true,
-              email: "sender@example.test",
             },
           ],
         }),
@@ -266,13 +279,13 @@ describe("Brevo newsletter delivery adapter", () => {
       ),
     });
     expect(fetcher).toHaveBeenNthCalledWith(
-      3,
+      2,
       "https://api.brevo.com/v3/smtp/emails?messageId=" +
         encodeURIComponent(messageId),
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetcher).toHaveBeenNthCalledWith(
-      4,
+      3,
       "https://api.brevo.com/v3/smtp/emails/transactional-email-uuid-17",
       expect.objectContaining({ method: "GET" }),
     );
@@ -291,13 +304,6 @@ describe("Brevo newsletter delivery adapter", () => {
               from: "sender@example.test",
               tag: request.executionId,
             },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        response(200, {
-          senders: [
-            { id: 42, active: true, email: "sender@example.test" },
           ],
         }),
       )
@@ -334,6 +340,110 @@ describe("Brevo newsletter delivery adapter", () => {
     });
   });
 
+  it("keeps exact but incomplete transactional evidence ambiguous", async () => {
+    const delivery = adapter(
+      vi.fn().mockResolvedValue(
+        response(200, {
+          events: [{
+            email: "owner-primary@example.test",
+            from: "sender@example.test",
+            tag: request.executionId,
+          }],
+        }),
+      ),
+    );
+    const prepared = await prepareRequest(delivery);
+    await expect(
+      delivery.reconcileTest({
+        request: prepared,
+        providerCampaignId: correlationId,
+      }),
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: correlationId,
+      foundrySendProof: prepared.foundrySendProof,
+    });
+  });
+
+  it("keeps an exact recipient subset ambiguous", async () => {
+    const requestWithTwoRecipients: NewsletterTestRequest = {
+      ...request,
+      recipients: [
+        ...request.recipients,
+        {
+          id: "owner-secondary",
+          address: "owner-secondary@example.test",
+        },
+      ],
+      binding: {
+        ...request.binding,
+        recipientSetFingerprint: "3".repeat(64),
+      },
+    };
+    const preparation = await adapter().prepareTest(
+      requestWithTwoRecipients,
+    );
+    if (preparation.outcome !== "prepared") {
+      throw new Error("two-recipient preparation failed");
+    }
+    const prepared = {
+      ...requestWithTwoRecipients,
+      providerCampaignId: preparation.providerCampaignId,
+      foundrySendProof: preparation.foundrySendProof,
+    };
+    const delivery = adapter(
+      vi.fn().mockResolvedValue(
+        response(200, {
+          events: [{
+            email: "owner-primary@example.test",
+            event: "delivered",
+            messageId: "<message-subset@brevo.test>",
+            from: "sender@example.test",
+            tag: request.executionId,
+          }],
+        }),
+      ),
+    );
+
+    await expect(
+      delivery.reconcileTest({
+        request: prepared,
+        providerCampaignId: correlationId,
+      }),
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: correlationId,
+      foundrySendProof: prepared.foundrySendProof,
+    });
+  });
+
+  it("closes an ambiguous operation only when every exact recipient has terminal non-delivery evidence", async () => {
+    const delivery = adapter(
+      vi.fn().mockResolvedValue(
+        response(200, {
+          events: [{
+            email: "owner-primary@example.test",
+            event: "hardBounces",
+            messageId: "<message-hard-bounce@brevo.test>",
+            from: "sender@example.test",
+            tag: request.executionId,
+          }],
+        }),
+      ),
+    );
+    const prepared = await prepareRequest(delivery);
+
+    await expect(
+      delivery.reconcileTest({
+        request: prepared,
+        providerCampaignId: correlationId,
+      }),
+    ).resolves.toEqual({
+      outcome: "rejected",
+      code: "provider_test_definitively_not_delivered",
+    });
+  });
+
   it("reports explicit capabilities and checks account plus sender health without returning account identity", async () => {
     const accountScopeFingerprint = await sha256Text(
       "foundry.brevo-account-scope.v1:owner@example.test",
@@ -348,7 +458,12 @@ describe("Brevo newsletter delivery adapter", () => {
       )
       .mockResolvedValueOnce(
         response(200, {
-          senders: [{ id: 42, active: true, email: "secret@example.test" }],
+          senders: [{
+            id: 42,
+            active: true,
+            email: "sender@example.test",
+            name: "Foundry Sender",
+          }],
         }),
       );
     const delivery = createBrevoNewsletterDeliveryAdapter({
@@ -356,7 +471,7 @@ describe("Brevo newsletter delivery adapter", () => {
       configurationFingerprint,
       accountScopeFingerprint,
       installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
+      senders: senderConfiguration,
       fetcher,
     });
 
@@ -382,7 +497,7 @@ describe("Brevo newsletter delivery adapter", () => {
       configurationFingerprint,
       accountScopeFingerprint: "8".repeat(64),
       installationProofKey: "p".repeat(64),
-      senderIds: { sender_primary: 42 },
+      senders: senderConfiguration,
       fetcher: vi
         .fn()
         .mockResolvedValueOnce(
@@ -397,6 +512,40 @@ describe("Brevo newsletter delivery adapter", () => {
       state: "degraded",
       credential: "invalid",
       senderIdentity: "unknown",
+    });
+  });
+
+  it("fails health when a Brevo sender changes under its numeric ID", async () => {
+    const accountScopeFingerprint = await sha256Text(
+      "foundry.brevo-account-scope.v1:owner@example.test",
+    );
+    const delivery = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      accountScopeFingerprint,
+      installationProofKey: "p".repeat(64),
+      senders: senderConfiguration,
+      fetcher: vi
+        .fn()
+        .mockResolvedValueOnce(
+          response(200, { email: "owner@example.test" }),
+        )
+        .mockResolvedValueOnce(
+          response(200, {
+            senders: [{
+              id: 42,
+              active: true,
+              email: "changed@example.test",
+              name: "Foundry Sender",
+            }],
+          }),
+        ),
+    });
+
+    await expect(delivery.health()).resolves.toEqual({
+      state: "degraded",
+      credential: "verified",
+      senderIdentity: "invalid",
     });
   });
 });

@@ -207,6 +207,7 @@ export async function loadCampaignRequestContext(
       return {
         provider: "brevo",
         configurationFingerprint: "0".repeat(64),
+        senderConfigurationFingerprints: {},
         apiTestDelivery: "supported" as const,
         explicitRecipients: "supported" as const,
         ambiguousOutcomeReconciliation: "supported" as const,
@@ -268,26 +269,26 @@ export async function loadCampaignRequestContext(
       environment.FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON,
       accountScopeFingerprint,
     );
-    const senderIds = JSON.parse(
-      environment.FOUNDRY_BREVO_SENDER_IDS_JSON ?? "{}",
-    ) as Record<string, number>;
+    const senders = JSON.parse(
+      environment.FOUNDRY_BREVO_SENDERS_JSON ?? "{}",
+    ) as Record<string, { id: number; email: string; name?: string }>;
     testRecipients = JSON.parse(
       environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
     ) as Record<string, string>;
     const configurationFingerprint = await sha256CanonicalJson({
-      version: "foundry.brevo-test-configuration.v1",
+      version: "foundry.brevo-test-configuration.v2",
       accountScopeFingerprint,
-      senderIds,
+      senders,
       installationProofKeyFingerprint:
         await sha256Text(installationProofKey),
-      adapterVersion: "brevo-test-v1",
+      adapterVersion: "brevo-transactional-test-v2",
     });
     testAdapter = createBrevoNewsletterDeliveryAdapter({
       apiKey,
       configurationFingerprint,
       accountScopeFingerprint,
       installationProofKey,
-      senderIds,
+      senders,
     });
   }
   const application = createCampaignApplication({
@@ -326,6 +327,7 @@ export async function loadCampaignRequestContext(
         }),
       identifyActor: () => human.membership.id,
       resolveAudience,
+      activeRendererVersion: () => rendererCommit,
       resolveTestRecipients: async (recipientIds) => {
         const activeOwnerIds = new Set<string>(
           (

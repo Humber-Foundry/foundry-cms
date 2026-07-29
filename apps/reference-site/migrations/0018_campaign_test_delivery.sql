@@ -39,6 +39,7 @@ CREATE TABLE campaign_test_deliveries (
         'provider_campaign_fingerprint_mismatch',
         'provider_campaign_not_found',
         'provider_sender_unmapped',
+        'provider_test_definitively_not_delivered',
         'provider_test_daily_recipient_limit',
         'provider_test_rejected',
         'provider_unavailable',

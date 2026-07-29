@@ -225,7 +225,11 @@ export function createD1CampaignTestDeliveryStore(
                state = 'pending' OR
                (state = 'ambiguous' AND (
                  attempt_lease_until IS NULL OR attempt_lease_until <= ?2
-               ))
+               )) OR
+               (state = 'attempting'
+                 AND attempt_lease_until <= ?2
+                 AND provider_campaign_id IS NULL
+                 AND foundry_send_proof IS NULL)
              )`,
         )
         .bind(
@@ -233,6 +237,28 @@ export function createD1CampaignTestDeliveryStore(
           now,
           operation.executionId,
           operation.siteId,
+          operation.updatedAt,
+        )
+        .run();
+      if ((result.meta.changes ?? 0) !== 1) return null;
+      return byRequest(database, operation);
+    },
+    async renewAttemptLease({ operation, now, leaseUntil }) {
+      const result = await database
+        .prepare(
+          `UPDATE campaign_test_deliveries
+           SET attempt_lease_until = ?1, updated_at = ?2
+           WHERE execution_id = ?3 AND site_id = ?4
+             AND attempt_number = ?5 AND updated_at = ?6
+             AND state = 'attempting'
+             AND attempt_lease_until > ?2`,
+        )
+        .bind(
+          leaseUntil,
+          now,
+          operation.executionId,
+          operation.siteId,
+          operation.attemptNumber,
           operation.updatedAt,
         )
         .run();

@@ -79,6 +79,7 @@ function createFixture(
     })),
   failConfirmationReceipt = false,
   authorizedMembership: HumanMembership = membership,
+  activeRendererVersion = () => "1".repeat(40),
 ) {
   let sequence = 0;
   let campaignSequence = 0;
@@ -117,6 +118,7 @@ function createFixture(
     resolveAudience: async () => ({ eligibleSubscriberCount: 3 }),
     resolveTestRecipients,
     providerOwnershipEvidence,
+    activeRendererVersion,
     replayTestCommand: (command) =>
       campaignApplication.commands.replayTestCommand(command),
     recordAcceptedTestCommand: (command) =>
@@ -159,6 +161,9 @@ function capableAdapter(
     capabilities: vi.fn().mockResolvedValue({
       provider: "brevo",
       configurationFingerprint: "a".repeat(64),
+      senderConfigurationFingerprints: {
+        sender_primary: "b".repeat(64),
+      },
       apiTestDelivery: "supported",
       explicitRecipients: "supported",
       ambiguousOutcomeReconciliation: "supported",
@@ -402,6 +407,65 @@ describe("campaign test delivery", () => {
     expect(adapter.reconcileTest).toHaveBeenCalledTimes(1);
   });
 
+  it("permits a new logical request after exact reconciliation proves terminal non-delivery", async () => {
+    const sendTest = vi
+      .fn()
+      .mockResolvedValueOnce({
+        outcome: "ambiguous",
+        providerCampaignId: "brevo-campaign-17",
+        foundrySendProof: "9".repeat(64),
+      })
+      .mockResolvedValueOnce({
+        outcome: "accepted",
+        providerCampaignId: "brevo-campaign-17",
+        foundrySendProof: "9".repeat(64),
+        providerReceipt: "brevo-test-restarted-17",
+      });
+    const adapter = capableAdapter({
+      sendTest,
+      reconcileTest: vi.fn().mockResolvedValue({
+        outcome: "rejected",
+        code: "provider_test_definitively_not_delivered",
+      }),
+    });
+    let executionSequence = 0;
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      undefined,
+      () =>
+        `40000000-0000-4000-8000-${String(
+          ++executionSequence,
+        ).padStart(12, "0")}`,
+    );
+    const created = await createCampaign(campaignApplication);
+    const originalRequest = {
+      actor,
+      requestId: "campaign-test-terminal-nondelivery-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    await expect(
+      application.commands.requestTest(originalRequest),
+    ).resolves.toMatchObject({ state: "ambiguous" });
+    await expect(
+      application.commands.requestTest(originalRequest),
+    ).resolves.toMatchObject({
+      state: "failed",
+      failureCode: "provider_test_definitively_not_delivered",
+    });
+    await expect(
+      application.commands.requestTest({
+        ...originalRequest,
+        requestId: "campaign-test-terminal-nondelivery-2",
+      }),
+    ).resolves.toMatchObject({
+      state: "accepted",
+      executionId: "40000000-0000-4000-8000-000000000002",
+    });
+    expect(sendTest).toHaveBeenCalledTimes(2);
+  });
+
   it("retries with the stable execution identity only after reconciliation proves no delivery", async () => {
     const prepareTest = vi
       .fn()
@@ -565,6 +629,65 @@ describe("campaign test delivery", () => {
       providerReceipt: "brevo-test-accepted-21",
     });
     await expect(first).resolves.toMatchObject({ state: "accepted" });
+  });
+
+  it("safely restarts an expired attempt that crashed before proof persistence", async () => {
+    let now = new Date("2026-07-29T19:05:00.000Z");
+    let finishFirstPreparation!: (
+      preparation: Awaited<
+        ReturnType<NewsletterDeliveryAdapter["prepareTest"]>
+      >,
+    ) => void;
+    const prepareTest = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirstPreparation = resolve;
+          }),
+      )
+      .mockResolvedValue({
+        outcome: "prepared",
+        providerCampaignId: "brevo-campaign-17",
+        foundrySendProof: "9".repeat(64),
+      });
+    const adapter = capableAdapter({ prepareTest });
+    const { application, campaignApplication, deliveryStore } = createFixture(
+      adapter,
+      () => now,
+    );
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-pre-proof-crash-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    const crashed = application.commands.requestTest(request);
+    await vi.waitFor(() => expect(prepareTest).toHaveBeenCalledTimes(1));
+    expect(deliveryStore.list()[0]).toMatchObject({
+      state: "attempting",
+      providerCampaignId: null,
+      foundrySendProof: null,
+    });
+
+    now = new Date("2026-07-29T19:06:01.000Z");
+    await expect(
+      application.commands.requestTest(request),
+    ).resolves.toMatchObject({
+      state: "accepted",
+      attemptNumber: 2,
+    });
+    expect(adapter.reconcileTest).not.toHaveBeenCalled();
+    expect(adapter.sendTest).toHaveBeenCalledTimes(1);
+
+    finishFirstPreparation({
+      outcome: "prepared",
+      providerCampaignId: "brevo-campaign-17",
+      foundrySendProof: "9".repeat(64),
+    });
+    await expect(crashed).resolves.toMatchObject({ state: "accepted" });
   });
 
   it("keeps an expired in-flight writer reconciliation-only until that writer completes", async () => {
@@ -765,6 +888,73 @@ describe("campaign test delivery", () => {
     ).resolves.toMatchObject({
       campaign: { version: 2 },
     });
+  });
+
+  it("renews the durable fence immediately before a delayed provider write", async () => {
+    let now = new Date("2026-07-29T19:05:00.000Z");
+    let recipientResolution = 0;
+    const resolveTestRecipients = vi.fn(
+      async (recipientIds: ReadonlyArray<string>) => {
+        recipientResolution += 1;
+        if (recipientResolution === 2) {
+          now = new Date("2026-07-29T19:05:50.000Z");
+        }
+        return recipientIds.map((id) => ({
+          id,
+          address: `${id}@example.test`,
+        }));
+      },
+    );
+    let completeSend!: (
+      outcome: Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>,
+    ) => void;
+    const sendTest = vi.fn(
+      () =>
+        new Promise<
+          Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>
+        >((resolve) => {
+          completeSend = resolve;
+        }),
+    );
+    const adapter = capableAdapter({ sendTest });
+    const { application, campaignApplication, deliveryStore } = createFixture(
+      adapter,
+      () => now,
+      undefined,
+      undefined,
+      resolveTestRecipients,
+    );
+    const created = await createCampaign(campaignApplication);
+    const requested = application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-renewed-fence-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+    await vi.waitFor(() => expect(sendTest).toHaveBeenCalledTimes(1));
+    expect(deliveryStore.list()[0]).toMatchObject({
+      state: "attempting",
+      attemptLeaseUntil: "2026-07-29T19:06:50.000Z",
+    });
+
+    now = new Date("2026-07-29T19:06:01.000Z");
+    await expect(
+      campaignApplication.commands.edit({
+        actor,
+        requestId: "campaign-edit-during-renewed-fence-1",
+        campaignId: created.campaign.id,
+        expectedVersion: 1,
+        input: { ...input, subject: "Blocked by renewed fence" },
+      }),
+    ).rejects.toMatchObject({ message: "campaign_revision_conflict" });
+
+    completeSend({
+      outcome: "accepted",
+      providerCampaignId: "brevo-campaign-17",
+      foundrySendProof: "9".repeat(64),
+      providerReceipt: "brevo-test-renewed-fence-1",
+    });
+    await expect(requested).resolves.toMatchObject({ state: "accepted" });
   });
 
   it("cancels an ambiguous test after an edit without reconciling or retrying", async () => {
@@ -1032,11 +1222,54 @@ describe("campaign test delivery", () => {
     ).resolves.toBeNull();
   });
 
+  it("makes prior evidence stale when the selected sender configuration changes", async () => {
+    let senderConfigurationFingerprint = "b".repeat(64);
+    const adapter = capableAdapter({
+      capabilities: vi.fn(async () => ({
+        provider: "brevo",
+        configurationFingerprint: "a".repeat(64),
+        senderConfigurationFingerprints: {
+          sender_primary: senderConfigurationFingerprint,
+        },
+        apiTestDelivery: "supported" as const,
+        explicitRecipients: "supported" as const,
+        ambiguousOutcomeReconciliation: "supported" as const,
+        plainTextArtifact: "unsupported" as const,
+      })),
+    });
+    const { application, campaignApplication } = createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    await application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-before-sender-change-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+    await expect(
+      application.queries.currentEvidence({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.not.toBeNull();
+
+    senderConfigurationFingerprint = "c".repeat(64);
+
+    await expect(
+      application.queries.currentEvidence({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("fails closed when the configured provider lacks a required test capability", async () => {
     const adapter = capableAdapter({
       capabilities: vi.fn().mockResolvedValue({
         provider: "replacement",
         configurationFingerprint: "b".repeat(64),
+        senderConfigurationFingerprints: {
+          sender_primary: "c".repeat(64),
+        },
         apiTestDelivery: "unsupported",
         explicitRecipients: "supported",
         ambiguousOutcomeReconciliation: "supported",
@@ -1075,6 +1308,45 @@ describe("campaign test delivery", () => {
         }),
       },
     ]);
+  });
+
+  it("rejects tests and current evidence rendered by another release", async () => {
+    let activeRendererVersion = "1".repeat(40);
+    const adapter = capableAdapter();
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      membership,
+      () => activeRendererVersion,
+    );
+    const created = await createCampaign(campaignApplication);
+    await application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-renderer-original-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+    activeRendererVersion = "2".repeat(40);
+
+    await expect(
+      application.commands.requestTest({
+        actor,
+        requestId: "campaign-test-renderer-drift-1",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary"],
+      }),
+    ).rejects.toMatchObject({ message: "campaign_renderer_mismatch" });
+    await expect(
+      application.queries.currentEvidence({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).rejects.toMatchObject({ message: "campaign_renderer_mismatch" });
+    expect(adapter.sendTest).toHaveBeenCalledTimes(1);
   });
 
   it("replays a durable pre-operation rejection without later sending", async () => {

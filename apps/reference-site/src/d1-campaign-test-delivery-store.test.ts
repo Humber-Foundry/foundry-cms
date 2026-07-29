@@ -150,6 +150,17 @@ describe("D1 campaign test delivery store", () => {
       state: "attempting",
       attemptLeaseUntil: "2026-07-29T19:06:01.000Z",
     });
+    const renewed = await store.renewAttemptLease({
+      operation: attempting!,
+      now: "2026-07-29T19:05:30.000Z",
+      leaseUntil: "2026-07-29T19:06:30.000Z",
+    });
+    expect(renewed).toMatchObject({
+      state: "attempting",
+      attemptNumber: 1,
+      attemptLeaseUntil: "2026-07-29T19:06:30.000Z",
+      updatedAt: "2026-07-29T19:05:30.000Z",
+    });
     await expect(
       store.claim({
         ...pending,
@@ -159,23 +170,23 @@ describe("D1 campaign test delivery store", () => {
     ).rejects.toThrow(/test_delivery_in_progress/u);
     await expect(
       store.beginAttempt({
-        operation: attempting!,
-        now: "2026-07-29T19:06:02.000Z",
+        operation: renewed!,
+        now: "2026-07-29T19:05:59.000Z",
         leaseUntil: "2026-07-29T19:07:02.000Z",
       }),
     ).resolves.toBeNull();
     const ambiguous = await store.record({
-      ...attempting!,
+      ...renewed!,
       state: "ambiguous",
       attemptLeaseUntil: null,
       providerCampaignId: "17",
       foundrySendProof: "7".repeat(64),
-      updatedAt: "2026-07-29T19:05:03.000Z",
+      updatedAt: "2026-07-29T19:06:31.000Z",
     });
     expect(ambiguous.foundrySendProof).toBe("7".repeat(64));
     const takeover = await store.beginAttempt({
       operation: ambiguous,
-      now: "2026-07-29T19:06:02.000Z",
+      now: "2026-07-29T19:06:32.000Z",
       leaseUntil: "2026-07-29T19:07:02.000Z",
     });
     expect(takeover).toMatchObject({

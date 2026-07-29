@@ -26,6 +26,7 @@ const uuidPattern =
 export type NewsletterDeliveryCapabilities = Readonly<{
   provider: string;
   configurationFingerprint: string;
+  senderConfigurationFingerprints: Readonly<Record<string, string>>;
   apiTestDelivery: "supported" | "unsupported";
   explicitRecipients: "supported" | "unsupported";
   ambiguousOutcomeReconciliation: "supported" | "unsupported";
@@ -76,6 +77,7 @@ export type NewsletterTestRejectionCode =
   | "provider_campaign_fingerprint_mismatch"
   | "provider_campaign_not_found"
   | "provider_sender_unmapped"
+  | "provider_test_definitively_not_delivered"
   | "provider_test_rejected"
   | "provider_unavailable";
 
@@ -191,6 +193,11 @@ export interface CampaignTestDeliveryStore {
   claim(operation: CampaignTestDeliveryOperation):
     Promise<CampaignTestDeliveryOperation>;
   beginAttempt(input: {
+    operation: CampaignTestDeliveryOperation;
+    now: string;
+    leaseUntil: string;
+  }): Promise<CampaignTestDeliveryOperation | null>;
+  renewAttemptLease(input: {
     operation: CampaignTestDeliveryOperation;
     now: string;
     leaseUntil: string;
@@ -321,11 +328,13 @@ async function bindingFor({
   revision,
   rendered,
   providerConfigurationFingerprint,
+  senderConfigurationFingerprint,
   recipients,
 }: {
   revision: CampaignRevision;
   rendered: RenderedCampaign;
   providerConfigurationFingerprint: string;
+  senderConfigurationFingerprint: string;
   recipients: ReadonlyArray<NewsletterTestRecipient>;
 }): Promise<CampaignTestDeliveryBinding> {
   const [
@@ -335,8 +344,9 @@ async function bindingFor({
     recipientSetFingerprint,
   ] = await Promise.all([
     sha256CanonicalJson({
-      version: "foundry.campaign-test-sender.v1",
+      version: "foundry.campaign-test-sender.v2",
       senderIdentityId: revision.senderIdentityId,
+      senderConfigurationFingerprint,
     }),
     sha256CanonicalJson({
       version: "foundry.campaign-test-audience.v1",
@@ -523,6 +533,7 @@ export function createCampaignTestDeliveryApplication({
   resolveAudience,
   resolveTestRecipients,
   providerOwnershipEvidence,
+  activeRendererVersion,
   replayTestCommand,
   recordAcceptedTestCommand,
   recordAcceptedTestReceiptConfirmation,
@@ -546,6 +557,7 @@ export function createCampaignTestDeliveryApplication({
     recipientIds: ReadonlyArray<string>,
   ): Promise<ReadonlyArray<NewsletterTestRecipient>>;
   providerOwnershipEvidence: NewsletterProviderOwnershipEvidence;
+  activeRendererVersion(): string;
   replayTestCommand?(input: {
     actor: CampaignActor;
     requestId: string;
@@ -615,6 +627,13 @@ export function createCampaignTestDeliveryApplication({
       revisionNumber: campaign.version,
     });
     if (revision === null) throw new CampaignNotFoundError();
+    const rendererVersion = activeRendererVersion();
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(rendererVersion)) {
+      throw new CampaignValidationError("campaign_renderer_commit_invalid");
+    }
+    if (revision.rendererVersion !== rendererVersion) {
+      throw new CampaignValidationError("campaign_renderer_mismatch");
+    }
     return { campaign, revision };
   }
 
@@ -712,8 +731,21 @@ export function createCampaignTestDeliveryApplication({
         }),
       );
     }
+    const { campaign, revision } = current;
     const capabilities = await adapter.capabilities();
     assertCapabilities(capabilities);
+    const senderConfigurationFingerprint =
+      capabilities.senderConfigurationFingerprints[
+        revision.senderIdentityId
+      ];
+    if (
+      senderConfigurationFingerprint === undefined ||
+      !fingerprintPattern.test(senderConfigurationFingerprint)
+    ) {
+      throw new CampaignValidationError(
+        "provider_sender_configuration_invalid",
+      );
+    }
     const health = await adapter.health();
     if (
       health.state !== "healthy" ||
@@ -722,7 +754,6 @@ export function createCampaignTestDeliveryApplication({
     ) {
       throw new CampaignValidationError("provider_unhealthy");
     }
-    const { campaign, revision } = current;
     const audience = await resolveAudience(revision.audienceDefinition);
     const rendered = await renderCampaignRevision(
       revision,
@@ -736,6 +767,7 @@ export function createCampaignTestDeliveryApplication({
       rendered,
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
+      senderConfigurationFingerprint,
       recipients: configuredRecipients,
     });
     let operation: CampaignTestDeliveryOperation;
@@ -816,9 +848,14 @@ export function createCampaignTestDeliveryApplication({
       operation.state === "attempting" &&
       operation.attemptLeaseUntil !== null &&
       operation.attemptLeaseUntil <= now;
+    const safelyRestartablePreWriteAttempt =
+      attemptExpired &&
+      operation.providerCampaignId === null &&
+      operation.foundrySendProof === null;
     if (
       !newlyClaimed &&
-      (operation.state === "ambiguous" || attemptExpired)
+      (operation.state === "ambiguous" ||
+        (attemptExpired && !safelyRestartablePreWriteAttempt))
     ) {
       const reconciled = await adapter.reconcileTest({
         request: {
@@ -1126,6 +1163,7 @@ export function createCampaignTestDeliveryApplication({
       rendered,
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
+      senderConfigurationFingerprint,
       recipients: preWriteRecipients,
     });
     if (!sameBinding(operation.binding, preWriteBinding)) {
@@ -1140,6 +1178,20 @@ export function createCampaignTestDeliveryApplication({
       );
     }
     configuredRecipients = preWriteRecipients;
+    const renewedAt = clock();
+    const renewed = await store.renewAttemptLease({
+      operation,
+      now: renewedAt.toISOString(),
+      leaseUntil: new Date(
+        renewedAt.getTime() + 60_000,
+      ).toISOString(),
+    });
+    if (renewed === null) {
+      return (
+        await store.findByRequest({ siteId, actorId, requestId })
+      ) ?? operation;
+    }
+    operation = renewed;
     let outcome: NewsletterTestOutcome;
     try {
       outcome = await adapter.sendTest({
@@ -1274,11 +1326,22 @@ export function createCampaignTestDeliveryApplication({
       }
       throw error;
     }
+    const senderConfigurationFingerprint =
+      capabilities.senderConfigurationFingerprints[
+        revision.senderIdentityId
+      ];
+    if (
+      senderConfigurationFingerprint === undefined ||
+      !fingerprintPattern.test(senderConfigurationFingerprint)
+    ) {
+      return null;
+    }
     const currentBinding = await bindingFor({
       revision,
       rendered,
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
+      senderConfigurationFingerprint,
       recipients: configuredRecipients,
     });
     return sameBinding(operation.binding, currentBinding)
@@ -1573,7 +1636,12 @@ export function createInMemoryCampaignTestDeliveryStore():
           current.state === "pending" ||
           (current.state === "ambiguous" &&
             (current.attemptLeaseUntil === null ||
-              current.attemptLeaseUntil <= now))
+              current.attemptLeaseUntil <= now)) ||
+          (current.state === "attempting" &&
+            current.attemptLeaseUntil !== null &&
+            current.attemptLeaseUntil <= now &&
+            current.providerCampaignId === null &&
+            current.foundrySendProof === null)
         )
       ) {
         return null;
@@ -1588,6 +1656,28 @@ export function createInMemoryCampaignTestDeliveryStore():
       });
       operations.set(key, attempting);
       return attempting;
+    },
+    async renewAttemptLease({ operation, now, leaseUntil }) {
+      const key = requestKey(operation);
+      const current = operations.get(key);
+      if (
+        current === undefined ||
+        current.executionId !== operation.executionId ||
+        current.attemptNumber !== operation.attemptNumber ||
+        current.updatedAt !== operation.updatedAt ||
+        current.state !== "attempting" ||
+        current.attemptLeaseUntil === null ||
+        current.attemptLeaseUntil <= now
+      ) {
+        return null;
+      }
+      const renewed = Object.freeze({
+        ...current,
+        attemptLeaseUntil: leaseUntil,
+        updatedAt: now,
+      });
+      operations.set(key, renewed);
+      return renewed;
     },
     async record(operation) {
       if (

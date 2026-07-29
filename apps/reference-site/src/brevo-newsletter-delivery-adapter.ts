@@ -15,6 +15,12 @@ type Fetcher = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+type BrevoSenderIdentity = Readonly<{
+  id: number;
+  email: string;
+  name?: string;
+}>;
+
 function headers(apiKey: string) {
   return {
     accept: "application/json",
@@ -35,12 +41,40 @@ function outcomeCouldBeAmbiguous(status: number) {
   return status === 408 || status === 429 || status >= 500;
 }
 
-function expectedSenderId(
+function normalizedSender(sender: unknown) {
+  if (typeof sender !== "object" || sender === null) {
+    return null;
+  }
+  const candidate = sender as {
+    id?: unknown;
+    email?: unknown;
+    name?: unknown;
+  };
+  const email = recipientAddress(candidate.email);
+  const name =
+    typeof candidate.name === "string" ? candidate.name.trim() : undefined;
+  if (
+    typeof candidate.id !== "number" ||
+    !Number.isSafeInteger(candidate.id) ||
+    candidate.id <= 0 ||
+    email === null ||
+    (candidate.name !== undefined && name === undefined) ||
+    (name !== undefined && (name.length === 0 || name.length > 200))
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    id: candidate.id,
+    email,
+    ...(name === undefined ? {} : { name }),
+  });
+}
+
+function expectedSender(
   request: NewsletterTestRequest,
-  senderIds: Readonly<Record<string, number>>,
+  senders: Readonly<Record<string, BrevoSenderIdentity>>,
 ) {
-  const id = senderIds[request.senderIdentityId];
-  return Number.isSafeInteger(id) && (id ?? 0) > 0 ? id! : null;
+  return normalizedSender(senders[request.senderIdentityId]);
 }
 
 function providerCorrelationId(executionId: string) {
@@ -66,7 +100,7 @@ export function createBrevoNewsletterDeliveryAdapter({
   configurationFingerprint,
   accountScopeFingerprint,
   installationProofKey,
-  senderIds,
+  senders,
   fetcher = fetch,
   baseUrl = defaultBaseUrl,
 }: {
@@ -74,7 +108,7 @@ export function createBrevoNewsletterDeliveryAdapter({
   configurationFingerprint: string;
   accountScopeFingerprint: string;
   installationProofKey: string;
-  senderIds: Readonly<Record<string, number>>;
+  senders: Readonly<Record<string, BrevoSenderIdentity>>;
   fetcher?: Fetcher;
   baseUrl?: string;
 }): NewsletterDeliveryAdapter {
@@ -89,14 +123,34 @@ export function createBrevoNewsletterDeliveryAdapter({
     throw new Error("brevo_installation_proof_key_invalid");
   }
   const endpoint = baseUrl.replace(/\/+$/u, "");
-  const capabilities: NewsletterDeliveryCapabilities = Object.freeze({
-    provider: "brevo",
-    configurationFingerprint,
-    apiTestDelivery: "supported",
-    explicitRecipients: "supported",
-    ambiguousOutcomeReconciliation: "supported",
-    plainTextArtifact: "unsupported",
-  });
+  const capabilities = Promise.all(
+    Object.entries(senders).map(async ([logicalId, sender]) => {
+      const normalized = normalizedSender(sender);
+      return [
+        logicalId,
+        await sha256CanonicalJson({
+          version: "foundry.brevo-sender-configuration.v1",
+          logicalId,
+          id: normalized?.id ?? null,
+          email: normalized?.email ?? null,
+          name: normalized?.name ?? null,
+        }),
+      ] as const;
+    }),
+  ).then(
+    (senderConfigurationFingerprints) =>
+      Object.freeze({
+        provider: "brevo",
+        configurationFingerprint,
+        senderConfigurationFingerprints: Object.freeze(
+          Object.fromEntries(senderConfigurationFingerprints),
+        ),
+        apiTestDelivery: "supported",
+        explicitRecipients: "supported",
+        ambiguousOutcomeReconciliation: "supported",
+        plainTextArtifact: "unsupported",
+      }) satisfies NewsletterDeliveryCapabilities,
+  );
 
   function foundrySendProof(
     request: NewsletterTestRequest,
@@ -139,7 +193,7 @@ export function createBrevoNewsletterDeliveryAdapter({
     },
     async health() {
       try {
-        const [account, senders] = await Promise.all([
+        const [account, senderResponse] = await Promise.all([
           fetcher(`${endpoint}/account`, {
             method: "GET",
             headers: headers(apiKey),
@@ -149,7 +203,7 @@ export function createBrevoNewsletterDeliveryAdapter({
             headers: headers(apiKey),
           }),
         ]);
-        if (!account.ok || !senders.ok) {
+        if (!account.ok || !senderResponse.ok) {
           return {
             state: "unavailable",
             credential: account.status === 401 ? "invalid" : "unknown",
@@ -176,16 +230,29 @@ export function createBrevoNewsletterDeliveryAdapter({
             senderIdentity: "unknown",
           } as const;
         }
-        const senderBody = await json(senders) as {
-          senders?: ReadonlyArray<{ id?: unknown; active?: unknown }>;
+        const senderBody = await json(senderResponse) as {
+          senders?: ReadonlyArray<{
+            id?: unknown;
+            email?: unknown;
+            name?: unknown;
+            active?: unknown;
+          }>;
         } | null;
-        const configuredIds = new Set(Object.values(senderIds));
+        const configuredSenders =
+          Object.values(senders).map(normalizedSender);
         const allVerified =
-          configuredIds.size > 0 &&
-          [...configuredIds].every((id) =>
-            (senderBody?.senders ?? []).some(
-              (sender) => sender.id === id && sender.active === true,
-            ),
+          configuredSenders.length > 0 &&
+          configuredSenders.every(
+            (expected) =>
+              expected !== null &&
+              (senderBody?.senders ?? []).some(
+                (sender) =>
+                  sender.id === expected.id &&
+                  sender.active === true &&
+                  recipientAddress(sender.email) === expected.email &&
+                  (expected.name === undefined ||
+                    sender.name === expected.name),
+              ),
           );
         return {
           state: allVerified ? "healthy" : "degraded",
@@ -201,7 +268,7 @@ export function createBrevoNewsletterDeliveryAdapter({
       }
     },
     async prepareTest(request) {
-      if (expectedSenderId(request, senderIds) === null) {
+      if (expectedSender(request, senders) === null) {
         return { outcome: "rejected", code: "provider_sender_unmapped" };
       }
       const correlationId = providerCorrelationId(request.executionId);
@@ -221,10 +288,10 @@ export function createBrevoNewsletterDeliveryAdapter({
       };
     },
     async sendTest(request) {
-      const senderId = expectedSenderId(request, senderIds);
+      const sender = expectedSender(request, senders);
       const correlationId = providerCorrelationId(request.executionId);
       const sendProof = request.foundrySendProof;
-      if (senderId === null) {
+      if (sender === null) {
         return { outcome: "rejected", code: "provider_sender_unmapped" };
       }
       if (
@@ -243,7 +310,10 @@ export function createBrevoNewsletterDeliveryAdapter({
           headers: headers(apiKey),
           signal: AbortSignal.timeout(30_000),
           body: JSON.stringify({
-            sender: { id: senderId },
+            sender: {
+              email: sender.email,
+              ...(sender.name === undefined ? {} : { name: sender.name }),
+            },
             to: request.recipients.map((recipient) => ({
               email: recipient.address,
             })),
@@ -258,8 +328,8 @@ export function createBrevoNewsletterDeliveryAdapter({
             },
           }),
         });
-        if (!sent.ok) {
-          if (outcomeCouldBeAmbiguous(sent.status)) {
+        if (sent.status !== 201) {
+          if (sent.ok || outcomeCouldBeAmbiguous(sent.status)) {
             return {
               outcome: "ambiguous",
               providerCampaignId: correlationId,
@@ -303,8 +373,8 @@ export function createBrevoNewsletterDeliveryAdapter({
           code: "provider_campaign_fingerprint_mismatch",
         };
       }
-      const senderId = expectedSenderId(request, senderIds);
-      if (senderId === null) {
+      const sender = expectedSender(request, senders);
+      if (sender === null) {
         return { outcome: "rejected", code: "provider_sender_unmapped" };
       }
       if (
@@ -318,55 +388,37 @@ export function createBrevoNewsletterDeliveryAdapter({
         };
       }
       try {
-        const [eventsResponse, sendersResponse] = await Promise.all([
-          fetcher(
-            `${endpoint}/smtp/statistics/events?` +
-              `tags=${encodeURIComponent(JSON.stringify([
-                request.executionId,
-              ]))}&limit=5000&sort=desc`,
-            {
-              method: "GET",
-              headers: headers(apiKey),
-              signal: AbortSignal.timeout(30_000),
-            },
-          ),
-          fetcher(`${endpoint}/senders`, {
+        const eventsResponse = await fetcher(
+          `${endpoint}/smtp/statistics/events?` +
+            `tags=${encodeURIComponent(JSON.stringify([
+              request.executionId,
+            ]))}&limit=5000&sort=desc`,
+          {
             method: "GET",
             headers: headers(apiKey),
             signal: AbortSignal.timeout(30_000),
-          }),
-        ]);
-        if (!eventsResponse.ok || !sendersResponse.ok) {
-          const status = !eventsResponse.ok
-            ? eventsResponse.status
-            : sendersResponse.status;
+          },
+        );
+        if (!eventsResponse.ok) {
           return {
             outcome: "ambiguous",
             providerCampaignId: correlationId,
             foundrySendProof: request.foundrySendProof,
-            ...(status === 429 ? { code: "provider_rate_limited" } : {}),
+            ...(eventsResponse.status === 429
+              ? { code: "provider_rate_limited" }
+              : {}),
           } as const;
         }
         const eventsBody = await json(eventsResponse) as {
           events?: ReadonlyArray<{
             email?: unknown;
+            event?: unknown;
             messageId?: unknown;
             from?: unknown;
             tag?: unknown;
           }>;
         } | null;
-        const senderBody = await json(sendersResponse) as {
-          senders?: ReadonlyArray<{
-            id?: unknown;
-            email?: unknown;
-            active?: unknown;
-          }>;
-        } | null;
-        const sender = (senderBody?.senders ?? []).find(
-          (candidate) =>
-            candidate.id === senderId && candidate.active === true,
-        );
-        const senderEmail = recipientAddress(sender?.email);
+        const senderEmail = recipientAddress(sender.email);
         const events = (eventsBody?.events ?? []).filter(
           (event) => event.tag === request.executionId,
         );
@@ -391,23 +443,65 @@ export function createBrevoNewsletterDeliveryAdapter({
         const eventSenders = new Set(
           events.map((event) => recipientAddress(event.from)),
         );
+        const conflictingEvents =
+          [...eventRecipients].some(
+            (address) =>
+              address !== null && !expectedRecipients.has(address),
+          ) ||
+          messageIds.size > 1 ||
+          [...eventSenders].some(
+            (address) => address !== null && address !== senderEmail,
+          );
+        if (conflictingEvents) {
+          return {
+            outcome: "rejected",
+            code: "provider_campaign_fingerprint_mismatch",
+          };
+        }
         if (
           senderEmail === null ||
           eventRecipients.has(null) ||
           messageIds.has(null) ||
           eventSenders.has(null) ||
           eventRecipients.size !== expectedRecipients.size ||
-          [...eventRecipients].some(
-            (address) =>
-              address === null || !expectedRecipients.has(address),
-          ) ||
           messageIds.size !== 1 ||
-          eventSenders.size !== 1 ||
-          !eventSenders.has(senderEmail)
+          eventSenders.size !== 1
+        ) {
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
+          };
+        }
+        const terminalNonDeliveryEvents = new Set([
+          "blocked",
+          "error",
+          "hardBounces",
+          "invalid",
+        ]);
+        const everyRecipientDefinitelyNotDelivered =
+          [...expectedRecipients].every((address) =>
+            events.some(
+              (event) =>
+                recipientAddress(event.email) === address &&
+                typeof event.event === "string" &&
+                terminalNonDeliveryEvents.has(event.event),
+            )
+          );
+        const anyRecipientDelivered = events.some(
+          (event) =>
+            event.event === "delivered" ||
+            event.event === "opened" ||
+            event.event === "unique_opened" ||
+            event.event === "clicks",
+        );
+        if (
+          everyRecipientDefinitelyNotDelivered &&
+          !anyRecipientDelivered
         ) {
           return {
             outcome: "rejected",
-            code: "provider_campaign_fingerprint_mismatch",
+            code: "provider_test_definitively_not_delivered",
           };
         }
         const messageId = [...messageIds][0]!;
@@ -441,14 +535,28 @@ export function createBrevoNewsletterDeliveryAdapter({
         const listedRecipients = new Set(
           rows.map((row) => recipientAddress(row.email)),
         );
+        const conflictingRows =
+          [...listedRecipients].some(
+            (address) =>
+              address !== null && !expectedRecipients.has(address),
+          ) ||
+          rows.some(
+            (row) =>
+              (row.messageId !== undefined &&
+                row.messageId !== messageId) ||
+              (row.subject !== undefined &&
+                row.subject !== request.subject),
+          );
+        if (conflictingRows) {
+          return {
+            outcome: "rejected",
+            code: "provider_campaign_fingerprint_mismatch",
+          };
+        }
         if (
           rows.length !== expectedRecipients.size ||
           listedRecipients.has(null) ||
           listedRecipients.size !== expectedRecipients.size ||
-          [...listedRecipients].some(
-            (address) =>
-              address === null || !expectedRecipients.has(address),
-          ) ||
           rows.some(
             (row) =>
               row.messageId !== messageId ||
@@ -458,8 +566,9 @@ export function createBrevoNewsletterDeliveryAdapter({
           )
         ) {
           return {
-            outcome: "rejected",
-            code: "provider_campaign_fingerprint_mismatch",
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
           };
         }
         const contentResponses = await Promise.all(

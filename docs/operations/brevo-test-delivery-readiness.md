@@ -25,31 +25,35 @@ Install these values in the client-owned Worker configuration:
   containing the ownership classification, a stable evidence ID, the exact
   account-scope fingerprint, and its verification timestamp. If it is absent,
   the runtime classifies the account as `evaluation` and cannot report ready.
-- `FOUNDRY_BREVO_SENDER_IDS_JSON` — a protected mapping from Foundry logical
-  sender identity to verified Brevo numeric sender ID.
+- `FOUNDRY_BREVO_SENDERS_JSON` — a protected mapping from each Foundry logical
+  sender identity to its verified Brevo numeric ID and exact expected email
+  address, plus its expected display name when configured.
 - `FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON` — a protected mapping from configured
   active Owner membership ID to verified delivery address. Runtime resolution
   rejects inactive, non-Owner, or unknown membership IDs.
 
 The runtime derives the provider-configuration fingerprint from the account
-scope, sender mapping, pinned adapter version, and a one-way fingerprint of
-the installation proof key. Rotating the Brevo API credential alone preserves
+scope, exact sender ID/address/name mapping, pinned adapter version, and a
+one-way fingerprint of the installation proof key. Rotating the Brevo API
+credential alone preserves
 the send-intent binding. Rotating the installation proof key intentionally
 changes the provider-configuration fingerprint, invalidates prior accepted
 test evidence, and requires a new exact test and Owner confirmation. Recipient
 addresses pass
 directly to Brevo for the explicit test request and are absent from operation
 rows, evidence, API results, logs, and source control.
-Provider health independently reads the credential's Brevo account, derives
+Each delivery binding also includes the fingerprint of the selected sender's
+exact expected ID, address and display name. Provider health independently
+reads the credential's Brevo account, derives
 the same one-way account scope, and fails closed if it differs from the
-provisioned scope.
+provisioned scope or if a sender changes under its numeric ID.
 
 ## Owner-assisted ceremony
 
 1. Install the provisioning evidence produced by the account-ownership
    workflow. Application callers cannot assert account ownership.
-2. Install the API key through the client-owned secret surface and install the
-   three protected, non-secret configuration values.
+2. Install the API key and campaign-test proof key through the client-owned
+   secret surface, then install the four protected configuration values.
 3. Run the adapter health check. It verifies API access and every configured
    sender through Brevo account and sender reads.
 4. Create or select the exact campaign revision in Foundry and request a test
@@ -72,11 +76,12 @@ provisioned scope.
 Every logical test prepares a stable provider correlation ID and canonical
 Foundry send proof without creating a mutable Brevo draft. Foundry persists
 that proof, acquires a durable send lease, and makes one transactional-email
-request containing the exact rendered HTML, subject, verified sender ID and
-explicit recipient addresses. The request also carries the execution ID as a
-Brevo tag, uses it as the provider idempotency key, and carries the
-execution/proof values as a custom header. A Brevo 201 response must contain a
-message ID before Foundry stores accepted evidence.
+request containing the exact rendered HTML, subject, verified sender address
+and display name, and explicit recipient addresses. The request also carries
+the execution ID as a Brevo tag, uses it as the provider idempotency key, and
+carries the execution/proof values as a custom header. A Brevo 201 response
+must contain a message ID before Foundry stores accepted evidence. Other
+successful-looking HTTP statuses remain ambiguous.
 
 A timeout, lost response, malformed success response, rate limit or server
 error remains ambiguous. Foundry does not issue another provider write for that
@@ -84,17 +89,30 @@ logical operation. Reconciliation queries Brevo's tagged transactional events,
 then the message record and each per-recipient sent-content record. It accepts
 only when the verified sender, exact recipient set, subject and actual sent HTML
 all match the durable Foundry binding. Provider drift is rejected. Missing,
-partial or unavailable evidence remains ambiguous. If the tagged transactional
-evidence never converges, the operation remains unresolved; there is no
-automatic abandon-and-restart path that could create a duplicate.
+partial or unavailable evidence remains ambiguous.
+
+To restart an unresolved test safely, replay the same request so Foundry
+reconciles it first. A restart is available only when tagged evidence proves
+terminal non-delivery for every exact recipient and shows no delivery event.
+Foundry then records the original operation as failed; the operator can issue a
+new logical request with a new request ID. An empty result, a recipient subset,
+or conflicting delivery evidence leaves the original operation unresolved and
+continues to block another provider write.
 
 The send lease serializes the provider request against campaign edits and
 membership deauthorization. While the lease is active, a campaign edit and
 suspension or revocation of a recipient Owner are rejected. A mutation that
 wins before lease acquisition is caught by the final revision and active-Owner
-checks. After the provider response is durably classified, edits may proceed;
+checks. The lease is atomically renewed after final binding checks and
+immediately before the bounded provider request. After the provider response is
+durably classified, edits may proceed;
 they make prior accepted evidence stale, and they cancel open ambiguous work
 for the replaced revision.
+
+The active release renderer must match the renderer recorded on the immutable
+campaign revision before a test can start or prior evidence can be treated as
+current. A deployment renderer change therefore requires a newly rendered
+revision and test.
 
 The shared application boundary accepts no more than five configured
 recipient identities and permits five new logical tests per site and campaign
