@@ -22,6 +22,11 @@ import {
   runPublicFormRetentionMaintenanceIfDue,
   type PublicFormPrivacyEnvironment,
 } from "./src/public-form-privacy-runtime";
+import {
+  createProductionMcpRuntime,
+  isMcpProductionRequest,
+  type McpProductionEnvironment,
+} from "./src/mcp-production-runtime";
 
 type ExecutionContext = Readonly<{
   waitUntil(promise: Promise<unknown>): void;
@@ -69,13 +74,38 @@ async function runScheduledWork(
   ]);
 }
 
-const fetch = createDashboardIdentityBoundary<
+const dashboardFetch = createDashboardIdentityBoundary<
   HumanAccessEnvironment,
   ExecutionContext
 >({
   next: (request, environment, context) =>
     openNextWorker.fetch(request, environment, context),
 });
+
+async function fetch(
+  request: Request,
+  environment: HumanAccessEnvironment & McpProductionEnvironment,
+  context: ExecutionContext,
+) {
+  if (isMcpProductionRequest(request)) {
+    try {
+      return await createProductionMcpRuntime(environment).fetch(request);
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "mcp_service_unavailable" }),
+        {
+          status: 503,
+          headers: {
+            "cache-control": "no-store",
+            "content-type": "application/json; charset=utf-8",
+            "retry-after": "30",
+          },
+        },
+      );
+    }
+  }
+  return dashboardFetch(request, environment, context);
+}
 
 export default {
   fetch,

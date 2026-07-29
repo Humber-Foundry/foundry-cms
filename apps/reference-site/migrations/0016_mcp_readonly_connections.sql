@@ -1,0 +1,44 @@
+CREATE TABLE mcp_connections (
+  id TEXT PRIMARY KEY,
+  actor_id TEXT NOT NULL UNIQUE CHECK (actor_id GLOB 'mcp-*'),
+  site_id TEXT NOT NULL,
+  oauth_client_id TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  scopes_json TEXT NOT NULL CHECK (scopes_json = '["site.read"]'),
+  status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
+  created_by_membership_id TEXT NOT NULL REFERENCES human_memberships(id),
+  created_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+
+CREATE INDEX mcp_connections_site_status
+  ON mcp_connections (site_id, status);
+
+CREATE TABLE mcp_authorization_codes (
+  code_hash TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL REFERENCES mcp_connections(id),
+  code_challenge TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  consumed_at TEXT
+);
+
+CREATE TABLE mcp_audit_events (
+  invocation_id TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL REFERENCES mcp_connections(id),
+  actor_id TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  scopes_json TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('allowed', 'denied')),
+  reason TEXT,
+  occurred_at TEXT NOT NULL,
+  contract_version TEXT NOT NULL
+);
+
+CREATE TRIGGER mcp_connections_preserve_identity
+BEFORE UPDATE OF actor_id, site_id, oauth_client_id, redirect_uri,
+  created_by_membership_id, created_at ON mcp_connections
+BEGIN
+  SELECT RAISE(ABORT, 'mcp_connection_identity_is_immutable');
+END;

@@ -17,6 +17,46 @@ Start with the smallest useful permission. For example, grant **Read site** and
 only if you want the agent to start publication after you have reviewed and
 approved the exact preview.
 
+## Installation configuration for read-only connections
+
+The shipped Worker serves the site-bound resource at
+`/api/foundry-mcp`. Its OAuth protected-resource metadata is at
+`/.well-known/oauth-protected-resource/api/foundry-mcp`, while the
+authorization-server metadata is at
+`/.well-known/oauth-authorization-server`.
+
+Before enabling connections, the installation operator must:
+
+- apply D1 migration `0016_mcp_readonly_connections.sql`;
+- set `FOUNDRY_MCP_OAUTH_SIGNING_KEY` as a Worker secret with at least 32
+  random characters;
+- set `FOUNDRY_MCP_CLIENTS` to a non-secret JSON object whose keys are
+  pre-registered client IDs and whose values contain a display `name` and
+  exact `redirectUris`; and
+- keep `/api/foundry-cms/*` behind the installation's existing Cloudflare
+  Access application, because Owner consent and revocation use that protected
+  namespace.
+
+Example client registry:
+
+```json
+{
+  "https://client.example/metadata.json": {
+    "name": "Owner-approved desktop client",
+    "redirectUris": [
+      "https://client.example/oauth/callback",
+      "http://127.0.0.1:43119/callback"
+    ]
+  }
+}
+```
+
+Remote redirects must use HTTPS. Exact loopback redirects are supported for
+installed clients. Wildcards, fragments, an empty registry, missing D1, and a
+missing or short signing secret fail closed with no MCP command execution.
+Neither setting contains an access token; the signing key must still remain a
+Worker secret.
+
 ## Connect
 
 1. In Foundry, open **Settings → Agent connections → Add connection**.
