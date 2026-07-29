@@ -26,6 +26,9 @@
       "@foundry/application": [
         "./packages/application/src/index.ts"
       ],
+      "@foundry/operator": [
+        "./packages/operator/src/index.ts"
+      ],
       "@foundry/site-definition": [
         "./packages/site-definition/src/index.ts"
       ]
