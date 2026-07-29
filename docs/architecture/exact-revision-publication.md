@@ -73,11 +73,14 @@ model bytes hash (or route-absence artifact for unpublish). The canonical model
 is also consumed by the React renderer and covers every variable route input:
 design attributes, site chrome, metadata, post copy, rich text, and definition
 version; the renderer version binds the static markup and renderer code. D1
-persists that evidence
-with the immutable `blog_post_revisions` row, and the site approval stores the
-ordered post-artifact evidence inside its own fingerprint. Preview, approval,
-Git publication, and verified-live reconciliation therefore identify both the
-complete site artifact and every exact post revision within it.
+persists the immutable post snapshot in `blog_post_revisions` and persists the
+rendered evidence for every post in every site revision in
+`blog_post_render_artifacts`. This keeps a post's stable revision identity while
+recording a successor artifact whenever shared design or site chrome changes.
+The site approval stores the ordered post-artifact evidence inside its own
+fingerprint. Preview, approval, Git publication, and verified-live
+reconciliation therefore identify both the complete site artifact and every
+exact post rendering within it.
 
 Post identity and revision concurrency are site-global even though editing
 occurs in workspaces. D1 stores one `blog_posts` aggregate head per site/post,

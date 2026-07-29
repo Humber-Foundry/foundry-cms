@@ -19,6 +19,7 @@ import {
 import { sha256CanonicalJson } from "./deterministic-hash";
 import {
   createBlogPostArtifactFingerprint,
+  createBlogPostArtifactFingerprints,
   type BlogPostArtifactFingerprint,
 } from "./blog-artifacts";
 
@@ -231,6 +232,7 @@ type PersistContentRevisionCommand = Readonly<{
         artifact: BlogPostArtifactFingerprint;
       }>
   >;
+  blogArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
 }>;
 
 export type ContentRevisionStore = Readonly<{
@@ -727,11 +729,19 @@ export function createContentRevisionApplication({
               };
             }),
           );
+    const blogArtifacts = await createBlogPostArtifactFingerprints({
+      definition,
+      inputs: {
+        schemaVersion: definition.schemaVersion,
+        rendererVersion,
+      },
+    });
     return store.persist({
       baseRevision: input.command.baseRevision,
       idempotencyKey: input.command.idempotencyKey,
       requestHash,
       revision: nextRevision,
+      blogArtifacts,
       ...(blogTransitions === undefined ? {} : { blogTransitions }),
     });
   }
@@ -1163,11 +1173,19 @@ export function createContentRevisionApplication({
           createdAt: now(),
           createdBy: command.actorId,
         };
+        const blogArtifacts = await createBlogPostArtifactFingerprints({
+          definition,
+          inputs: {
+            schemaVersion: definition.schemaVersion,
+            rendererVersion,
+          },
+        });
         return store.persist({
           baseRevision: command.baseRevision,
           idempotencyKey: command.idempotencyKey,
           requestHash,
           revision: nextRevision,
+          blogArtifacts,
           mediaOccurrence: {
             occurrenceId: command.occurrence.occurrenceId,
             revision: command.occurrence.revision,

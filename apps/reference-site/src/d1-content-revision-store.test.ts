@@ -51,6 +51,7 @@ describe("D1 content revision store", () => {
       "0011_blog_post_transition_audit.sql",
       "0013_blog_post_verified_state.sql",
       "0014_blog_post_artifact_fingerprints.sql",
+      "0015_blog_post_render_artifacts.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -684,6 +685,136 @@ describe("D1 content revision store", () => {
     },
   );
 
+  it("reconciles more posts than D1's bound-parameter limit", async () => {
+    const posts = Array.from({ length: 101 }, (_, index) => {
+      const suffix = (index + 1).toString(16).padStart(12, "0");
+      return {
+        id: createBlogPostId(`00000000-0000-4000-8000-${suffix}`),
+        revision: 1,
+        collectionState: "active" as const,
+        targetVisibility: "public" as const,
+        slug: `post-${index + 1}`,
+        title: `Post ${index + 1}`,
+        excerpt: `Excerpt ${index + 1}`,
+        seo: {
+          title: `Post ${index + 1} | Foundry`,
+          description: `Excerpt ${index + 1}`,
+        },
+        body: createRichTextDocumentFromPlainText(`Body ${index + 1}.`),
+      };
+    });
+    await database.batch(
+      posts.map((post) =>
+        database
+          .prepare(
+            `INSERT INTO blog_posts (
+               site_id, post_id, collection_state, current_revision,
+               live_revision, last_verified_revision, version, updated_at
+             ) VALUES (?1, ?2, 'active', 1, 1, 1, 1, ?3)`,
+          )
+          .bind(
+            referenceSiteDefinition.site.id,
+            post.id,
+            "2026-07-27T14:00:00.000Z",
+          ),
+      ),
+    );
+
+    await expect(
+      reconcileVerifiedBlogPostPublication(
+        database,
+        referenceSiteDefinition.site.id,
+        {
+          ...referenceSiteDefinition,
+          blog: { ...referenceSiteDefinition.blog, posts },
+        },
+        { id: "publication-many-blog-posts", sequence: 1 },
+        "2026-07-27T14:10:00.000Z",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("preserves a render artifact for each site revision", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000cc",
+    );
+    const post = {
+      id: postId,
+      revision: 1,
+      collectionState: "active" as const,
+      targetVisibility: "public" as const,
+      slug: "shared-render-inputs",
+      title: "Shared render inputs",
+      excerpt: "The post content remains unchanged.",
+      seo: {
+        title: "Shared render inputs | Foundry",
+        description: "The post content remains unchanged.",
+      },
+      body: createRichTextDocumentFromPlainText("Unchanged post body."),
+    };
+    const definition = {
+      ...referenceSiteDefinition,
+      blog: { ...referenceSiteDefinition.blog, posts: [post] },
+    };
+    const artifactWorkspaceId = createContentWorkspaceId(
+      "workspace_blog_render_artifacts",
+    );
+    const application = createApplication(
+      editorActorId,
+      artifactWorkspaceId,
+      "2026-07-27T15:00:00.000Z",
+      definition,
+    );
+    await application.commands.create({
+      actorId: editorActorId,
+      workspaceId: artifactWorkspaceId,
+      idempotencyKey: "d1-create-blog-render-artifacts",
+    });
+    await application.commands.save({
+      actorId: editorActorId,
+      workspaceId: artifactWorkspaceId,
+      schemaVersion: definition.schemaVersion,
+      baseRevision: 0,
+      edits: [{ path: "design.colour.accent", value: "clay" }],
+      idempotencyKey: "d1-change-shared-blog-render-input",
+    });
+
+    const artifacts = await database
+      .prepare(
+        `SELECT content_revision, post_revision, content_hash,
+                rendered_bytes_hash, artifact_fingerprint
+         FROM blog_post_render_artifacts
+         WHERE workspace_id = ?1 AND post_id = ?2
+         ORDER BY content_revision`,
+      )
+      .bind(artifactWorkspaceId, postId)
+      .all<{
+        content_revision: number;
+        post_revision: number;
+        content_hash: string;
+        rendered_bytes_hash: string;
+        artifact_fingerprint: string;
+      }>();
+    expect(artifacts.results).toHaveLength(2);
+    expect(
+      artifacts.results.map(
+        ({ content_revision }: { content_revision: number }) =>
+          content_revision,
+      ),
+    ).toEqual([0, 1]);
+    expect(artifacts.results[0]!.post_revision).toBe(1);
+    expect(artifacts.results[1]!.post_revision).toBe(1);
+    expect(artifacts.results[1]!.content_hash).toBe(
+      artifacts.results[0]!.content_hash,
+    );
+    expect(artifacts.results[1]!.rendered_bytes_hash).not.toBe(
+      artifacts.results[0]!.rendered_bytes_hash,
+    );
+    expect(artifacts.results[1]!.artifact_fingerprint).not.toBe(
+      artifacts.results[0]!.artifact_fingerprint,
+    );
+  });
+
   it("allows only one workspace to advance a shared post revision", async () => {
     const postId = createBlogPostId(
       "00000000-0000-4000-8000-00000000000b",
@@ -1316,6 +1447,7 @@ describe("D1 content revision store", () => {
         createdAt: "2026-07-27T12:01:00.000Z",
         createdBy: editorActorId,
       },
+      blogArtifacts: [],
     };
 
     function storeWithFirstReceiptMiss(onMiss: () => Promise<void>) {

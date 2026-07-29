@@ -123,11 +123,6 @@ export async function reconcileVerifiedBlogPostPublication(
   verifiedAt: string,
 ): Promise<void> {
   const presentPostIds = definition.blog.posts.map(({ id }) => id);
-  const absentBindings = presentPostIds.map((_, index) => `?${index + 5}`);
-  const absentPostGuard =
-    absentBindings.length === 0
-      ? ""
-      : `AND post_id NOT IN (${absentBindings.join(", ")})`;
   const results = await database.batch([
     ...definition.blog.posts.map((post) =>
       database
@@ -179,14 +174,18 @@ export async function reconcileVerifiedBlogPostPublication(
                AND last_verified_publication_id = ?1
              )
            )
-           ${absentPostGuard}`,
+           AND NOT EXISTS (
+             SELECT 1
+             FROM json_each(?5) AS present_post
+             WHERE present_post.value = blog_posts.post_id
+           )`,
       )
       .bind(
         publication.id,
         publication.sequence,
         verifiedAt,
         siteId,
-        ...presentPostIds,
+        JSON.stringify(presentPostIds),
       ),
   ]);
   for (const [index, result] of results
@@ -433,6 +432,33 @@ export function createD1ContentRevisionStore(
                   artifact.serializationVersion,
                   artifact.renderedBytesHash,
                   artifact.value,
+                ),
+              database
+                .prepare(
+              `INSERT INTO blog_post_render_artifacts (
+                 workspace_id, content_revision, post_id, post_revision_id,
+                 post_revision, content_hash, schema_version, renderer_version,
+                 serialization_version, rendered_bytes_hash,
+                 artifact_fingerprint, created_at
+               ) VALUES (
+                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+               )
+               ON CONFLICT (workspace_id, content_revision, post_id)
+               DO NOTHING`,
+                )
+                .bind(
+                  workspaceId,
+                  initialRevision.revision,
+                  artifact.postId,
+                  artifact.postRevisionId,
+                  artifact.revision,
+                  artifact.contentHash,
+                  artifact.schemaVersion,
+                  artifact.rendererVersion,
+                  artifact.serializationVersion,
+                  artifact.renderedBytesHash,
+                  artifact.value,
+                  initialRevision.createdAt,
                 ),
             ];
           }),
@@ -886,6 +912,43 @@ export function createD1ContentRevisionStore(
             );
         },
       );
+      const blogArtifactStatements = command.blogArtifacts.map((artifact) =>
+        session
+          .prepare(
+            `INSERT INTO blog_post_render_artifacts (
+               workspace_id, content_revision, post_id, post_revision_id,
+               post_revision, content_hash, schema_version, renderer_version,
+               serialization_version, rendered_bytes_hash,
+               artifact_fingerprint, created_at
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+             WHERE EXISTS (
+               SELECT 1 FROM content_revision_receipts
+               WHERE idempotency_key = ?13
+                 AND workspace_id = ?1
+                 AND revision = ?2
+                 AND request_hash = ?14
+             )
+             ON CONFLICT (workspace_id, content_revision, post_id)
+             DO NOTHING`,
+          )
+          .bind(
+            workspaceId,
+            command.revision.revision,
+            artifact.postId,
+            artifact.postRevisionId,
+            artifact.revision,
+            artifact.contentHash,
+            artifact.schemaVersion,
+            artifact.rendererVersion,
+            artifact.serializationVersion,
+            artifact.renderedBytesHash,
+            artifact.value,
+            command.revision.createdAt,
+            command.idempotencyKey,
+            command.requestHash,
+          ),
+      );
       const results = await session.batch([
         session
           .prepare(
@@ -1035,6 +1098,7 @@ export function createD1ContentRevisionStore(
           ),
         ...blogAggregateStatements,
         ...blogRevisionStatements,
+        ...blogArtifactStatements,
         ...blogTransitionStatements,
       ]);
 

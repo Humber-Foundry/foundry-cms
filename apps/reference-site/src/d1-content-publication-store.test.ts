@@ -50,6 +50,7 @@ describe("D1 content publication store", () => {
       "0012_content_approval_revision_hash.sql",
       "0013_blog_post_verified_state.sql",
       "0014_blog_post_artifact_fingerprints.sql",
+      "0015_blog_post_render_artifacts.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
