@@ -16,6 +16,13 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET?: string;
   FOUNDRY_RENDERER_VERSION?: string;
   FOUNDRY_PRODUCTION_BASE?: string;
+  FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID?: string;
+  FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION?: string;
+  FOUNDRY_CAMPAIGN_LEGAL_NAME?: string;
+  FOUNDRY_CAMPAIGN_POSTAL_ADDRESS?: string;
+  FOUNDRY_CAMPAIGN_CONTACT_URL?: string;
+  FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL?: string;
+  FOUNDRY_NEWSLETTER_DELIVERY_SECRET?: string;
   CF_VERSION_METADATA?: Readonly<{ id: string }>;
   FOUNDRY_DB?: D1DatabaseBinding;
   FOUNDRY_GITHUB_APP_ID?: string;
@@ -107,4 +114,17 @@ export function readSubscriberIdentityKeySecret(
   }
   return secret;
 }
+
+export function readNewsletterDeliverySecret(
+  environment: HumanAccessEnvironment,
+) {
+  const secret = requireSetting(
+    environment.FOUNDRY_NEWSLETTER_DELIVERY_SECRET,
+  );
+  if (secret.length < 32) {
+    throw new HumanAccessConfigurationError();
+  }
+  return secret;
+}
+
 import type { HumanAccessEligibilitySynchronizer } from "@foundry/application";

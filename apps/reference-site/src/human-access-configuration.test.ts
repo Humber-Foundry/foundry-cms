@@ -34,4 +34,5 @@ describe("human access synchronization configuration", () => {
       }),
     ).toBe("production-subscriber-identity-secret");
   });
+
 });

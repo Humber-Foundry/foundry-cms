@@ -8,6 +8,7 @@ import {
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   createContentActorId,
+  createBlogPostArtifactFingerprints,
   createContentWorkspaceId,
 } from "@foundry/application";
 
@@ -31,6 +32,7 @@ import { referenceSiteApplication } from "@/src/reference-installation";
 import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
 import { durableSchemaRecoveryEdits } from "@/src/content-schema-recovery";
 import type { StaleRecoveryEdit } from "@/src/content-editor-recovery";
+import { loadCampaignRequestContext } from "@/src/campaign-runtime";
 
 import "./dashboard.css";
 import "../public.css";
@@ -48,8 +50,9 @@ export default async function DashboardPage({
   }>;
 }) {
   let access;
+  const requestHeaders = await headers();
   try {
-    access = await loadHumanAccessRequestContext(await headers());
+    access = await loadHumanAccessRequestContext(requestHeaders);
   } catch (error) {
     if (
       error instanceof AccessIdentityError ||
@@ -117,6 +120,9 @@ export default async function DashboardPage({
         })
       : [];
   const mutationToken = await createHumanMutationToken(access.identity);
+  const campaigns = await (
+    await loadCampaignRequestContext(requestHeaders)
+  ).application.queries.listCampaigns({ actor: access.identity });
   const formOperations = await loadPublicFormOperationsDashboard(access);
   let workspaceId;
   const requestedWorkspace =
@@ -200,6 +206,18 @@ export default async function DashboardPage({
       mediaAssets={mediaAssets}
       mediaOccurrences={mediaOccurrences}
       mediaWorkspaceId={workspaceId}
+      campaignPostArtifacts={
+        contentRevision === undefined
+          ? []
+          : await createBlogPostArtifactFingerprints({
+              definition: contentRevision.definition,
+              inputs: {
+                ...contentRevision.inputs,
+                schemaVersion: contentRevision.definition.schemaVersion,
+              },
+            })
+      }
+      campaigns={campaigns}
     />
   );
 }

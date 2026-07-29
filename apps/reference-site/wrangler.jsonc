@@ -55,7 +55,13 @@
     "FOUNDRY_FORM_RETENTION_SPAM_DAYS": "30",
     "FOUNDRY_FORM_RETENTION_ACCEPTED_DAYS": "180",
     "FOUNDRY_FORM_RETENTION_AUDIT_DAYS": "365",
-    "FOUNDRY_FORM_RETENTION_BACKUP_DAYS": "30"
+    "FOUNDRY_FORM_RETENTION_BACKUP_DAYS": "30",
+    "FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID": "sender_primary",
+    "FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION": "reference-footer-v1",
+    "FOUNDRY_CAMPAIGN_LEGAL_NAME": "Humber Foundry",
+    "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS": "123 Harbour Street, Victoria, BC",
+    "FOUNDRY_CAMPAIGN_CONTACT_URL": "https://foundry.tinyskiff.xyz/contact",
+    "FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL": "https://foundry.tinyskiff.xyz/newsletter/unsubscribe"
   },
   "observability": {
     "enabled": true

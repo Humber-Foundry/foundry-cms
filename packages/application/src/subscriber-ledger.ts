@@ -10,6 +10,7 @@ import {
   InvalidEmailAddressError,
   normalizeEmailAddress,
 } from "./email-address";
+import type { CampaignAudienceDefinition } from "./campaign";
 
 declare const subscriberIdBrand: unique symbol;
 declare const subscriberEventIdBrand: unique symbol;
@@ -116,6 +117,31 @@ export interface SubscriberLedgerStore {
   recordSensitiveAccess(event: SensitiveSubscriberAccessEvent): Promise<void>;
 }
 
+export function createSubscriberLedgerAudienceResolver({
+  siteId,
+  store,
+}: {
+  siteId: SiteId;
+  store: SubscriberLedgerStore;
+}) {
+  return async (
+    definition: CampaignAudienceDefinition,
+  ): Promise<Readonly<{ eligibleSubscriberCount: number }>> => {
+    if (
+      definition.id !== "canonical-consent-and-suppression" ||
+      definition.version !== 1
+    ) {
+      throw new TypeError("campaign_audience_definition_invalid");
+    }
+    const subscribers = await store.listSubscribers(siteId);
+    return Object.freeze({
+      eligibleSubscriberCount: subscribers.filter(
+        (subscriber) => subscriber.state === "active",
+      ).length,
+    });
+  };
+}
+
 export type SubscriberLedgerExport = Readonly<{
   schemaVersion: 1;
   siteId: SiteId;
@@ -156,6 +182,13 @@ export type SubscriberLedgerApplication = Readonly<{
       provider: string;
       providerEventId: string;
       email: unknown;
+      reason: Exclude<SuppressionReason, "erased">;
+      occurredAt: string;
+    }): Promise<Subscriber>;
+    ingestSuppressionByIdentityKey(input: {
+      provider: string;
+      providerEventId: string;
+      identityKey: string;
       reason: Exclude<SuppressionReason, "erased">;
       occurredAt: string;
     }): Promise<Subscriber>;
@@ -519,6 +552,29 @@ export function createSubscriberLedgerApplication({
         }
         return appendSuppression({
           subscriber: located.subscriber,
+          reason,
+          occurredAt,
+          actor: { type: "provider", provider, providerEventId },
+        });
+      },
+      async ingestSuppressionByIdentityKey({
+        provider,
+        providerEventId,
+        identityKey,
+        reason,
+        occurredAt,
+      }) {
+        validateEventTimestamp(occurredAt);
+        if (!/^[a-f0-9]{64}$/u.test(identityKey)) {
+          throw new SubscriberNotFoundError();
+        }
+        const subscriber = await store.findByIdentityKey({
+          siteId,
+          identityKey,
+        });
+        if (subscriber === null) throw new SubscriberNotFoundError();
+        return appendSuppression({
+          subscriber,
           reason,
           occurredAt,
           actor: { type: "provider", provider, providerEventId },
