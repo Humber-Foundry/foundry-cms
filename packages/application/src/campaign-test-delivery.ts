@@ -1102,6 +1102,11 @@ export function createCampaignTestDeliveryApplication({
       if (operation?.state !== "accepted" || operation.evidence === null) {
         throw new CampaignValidationError("test_delivery_not_accepted");
       }
+      if (!operation.recipientIds.includes(owner.id)) {
+        throw new CampaignValidationError(
+          "test_confirmation_owner_not_recipient",
+        );
+      }
       const current = await currentCampaignRevision(operation.campaignId);
       if (current.revision.id !== operation.campaignRevisionId) {
         throw new CampaignValidationError("test_delivery_not_current");

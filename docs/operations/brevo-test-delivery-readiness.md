@@ -24,7 +24,8 @@ Install these values in the client-owned Worker configuration:
 - `FOUNDRY_BREVO_SENDER_IDS_JSON` — a protected mapping from Foundry logical
   sender identity to verified Brevo numeric sender ID.
 - `FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON` — a protected mapping from configured
-  Owner recipient identity to verified delivery address.
+  active Owner membership ID to verified delivery address. Runtime resolution
+  rejects inactive, non-Owner, or unknown membership IDs.
 
 The runtime derives the provider-configuration fingerprint from the account
 scope, sender mapping, and pinned adapter version. Recipient addresses pass
@@ -50,7 +51,8 @@ provisioned scope.
    execution ID; the immutable confirmation and its accepted command receipt
    are persisted atomically in one D1 batch. Reusing its request key with
    another execution is rejected and confirmation audits contain no recipient
-   address.
+   address. The confirming Owner must be one of the membership IDs that
+   received that exact test.
 6. Evaluate test-delivery readiness with the successful current test evidence.
    `ready`
    requires healthy credentials and sender identity, `client_owned`

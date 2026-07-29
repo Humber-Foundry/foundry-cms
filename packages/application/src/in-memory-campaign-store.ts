@@ -175,11 +175,25 @@ export function createInMemoryCampaignStore(
       campaign,
       revision,
       audit,
+      conflictAudit,
       confirmation,
     }) {
       const existing = existingResult(command);
       if (existing !== null) return existing;
-      await options.persistTestReceiptConfirmation?.(confirmation);
+      try {
+        await options.persistTestReceiptConfirmation?.(confirmation);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "test_receipt_already_confirmed"
+        ) {
+          const receipt = rejectedReceipt(command, conflictAudit);
+          receipts.set(commandKey(command), receipt);
+          audits.push(conflictAudit);
+          return Object.freeze({ receipt, replayed: false });
+        }
+        throw error;
+      }
       const receipt = acceptedReceipt(command, campaign, revision);
       receipts.set(commandKey(command), receipt);
       audits.push(audit);

@@ -379,6 +379,7 @@ export async function POST(request: Request) {
         error.message === "provider_unhealthy" ||
         error.message === "test_recipient_forbidden" ||
         error.message.startsWith("test_delivery_") ||
+        error.message.startsWith("test_confirmation_") ||
         error.message.startsWith("test_receipt_") ||
         error.message.startsWith("test_execution_") ||
         error.message.startsWith("provider_test_") ||

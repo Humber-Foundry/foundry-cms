@@ -283,6 +283,32 @@ describe("campaign endpoint", () => {
     });
   });
 
+  it("returns the stable Owner-recipient confirmation reason", async () => {
+    mocks.confirmReceipt.mockRejectedValueOnce(
+      new CampaignValidationError(
+        "test_confirmation_owner_not_recipient",
+      ),
+    );
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-confirm-owner-mismatch-1",
+        },
+        body: JSON.stringify({
+          action: "confirm_test_receipt",
+          executionId: "40000000-0000-4000-8000-000000000001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "test_confirmation_owner_not_recipient",
+    });
+  });
+
   it("rejects forbidden recipient fields instead of silently ignoring them", async () => {
     const response = await POST(
       new Request("https://foundry.example/api/foundry-cms/campaigns", {

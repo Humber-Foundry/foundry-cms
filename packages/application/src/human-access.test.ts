@@ -367,6 +367,12 @@ describe("human access application", () => {
         identityBinding: editorIdentity.binding,
         role: "editor",
       }),
+      activeMembership({
+        id: createHumanMembershipId("membership-owner-suspended"),
+        userId: createHumanUserId("user-owner-suspended"),
+        email: "owner-suspended@example.test",
+        status: "suspended",
+      }),
     ]);
 
     await expect(
@@ -513,6 +519,17 @@ describe("human access application", () => {
         capability: "campaign.test.confirm",
       }),
     ).resolves.toMatchObject({ role: "owner", status: "active" });
+    await expect(
+      application.queries.listActiveOwnersForTestDelivery({
+        actor: editorIdentity,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: createHumanMembershipId("membership-owner"),
+        role: "owner",
+        status: "active",
+      }),
+    ]);
   });
 
   it("does not authorize an email match with a different issuer and subject", async () => {

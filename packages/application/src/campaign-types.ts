@@ -250,6 +250,7 @@ export interface CampaignStore {
     campaign: Campaign;
     revision: CampaignRevision;
     audit: CampaignAuditEvent;
+    conflictAudit: CampaignAuditEvent;
     confirmation: CampaignTestReceiptConfirmationRecord;
   }): Promise<CampaignCommandStoreResult>;
   recordAudit(event: CampaignAuditEvent): Promise<void>;

@@ -318,14 +318,29 @@ export async function loadCampaignRequestContext(
         }),
       identifyActor: () => human.membership.id,
       resolveAudience,
-      resolveTestRecipients: async (recipientIds) =>
-        recipientIds.map((id) => {
-          const address = testRecipients[id];
-          if (address === undefined) {
+      resolveTestRecipients: async (recipientIds) => {
+        const activeOwnerIds = new Set<string>(
+          (
+            await human.application.queries
+              .listActiveOwnersForTestDelivery({
+                actor: human.identity,
+              })
+          ).map((membership) => membership.id),
+        );
+        return recipientIds.map((id) => {
+          if (!activeOwnerIds.has(id)) {
             throw new CampaignValidationError("test_recipient_forbidden");
           }
-          return { id, address };
-        }),
+          const address = testRecipients[id];
+          if (
+            typeof address !== "string" ||
+            address.trim() === ""
+          ) {
+            throw new CampaignValidationError("test_recipient_forbidden");
+          }
+          return { id, address: address.trim() };
+        });
+      },
       providerOwnershipEvidence,
       replayTestCommand: ({
         actor,

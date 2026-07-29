@@ -651,6 +651,7 @@ export function createD1CampaignStore(
       campaign,
       revision,
       audit,
+      conflictAudit,
       confirmation,
     }) {
       const resultJson = JSON.stringify({ campaign, revision });
@@ -723,6 +724,44 @@ export function createD1CampaignStore(
             command.inputHash,
             resultJson,
             audit.occurredAt,
+            confirmation.executionId,
+          ),
+        commandAuditInsert(
+          database,
+          conflictAudit,
+          command,
+          `AND EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+              AND (owner_actor_id != ?21 OR request_id != ?22)
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            confirmation.requestId,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'rejected', reason = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+                   AND (owner_actor_id != ?2 OR request_id != ?4)
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            conflictAudit.reason,
+            conflictAudit.occurredAt,
             confirmation.executionId,
           ),
       ]);

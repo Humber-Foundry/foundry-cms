@@ -28,12 +28,12 @@ const actor: ExternalHumanIdentity = {
   nonce: "editor-nonce",
 };
 const membership: HumanMembership = {
-  id: createHumanMembershipId("membership-editor"),
+  id: createHumanMembershipId("owner-primary"),
   siteId,
   userId: createHumanUserId("user-editor"),
   email: actor.email,
   identityBinding: actor.binding,
-  role: "editor",
+  role: "owner",
   status: "active",
 };
 const input: CampaignEditableInput = {
@@ -77,6 +77,7 @@ function createFixture(
       address: `${id}@example.test`,
     })),
   failConfirmationReceipt = false,
+  authorizedMembership: HumanMembership = membership,
 ) {
   let sequence = 0;
   let campaignSequence = 0;
@@ -92,8 +93,8 @@ function createFixture(
   const campaignApplication = createCampaignApplication({
     siteId,
     store: campaignStore,
-    authorize: async () => membership,
-    identifyActor: () => membership.id,
+    authorize: async () => authorizedMembership,
+    identifyActor: () => authorizedMembership.id,
     findPostRevision: async () => null,
     resolveAudience: async () => ({ eligibleSubscriberCount: 3 }),
     channelConfiguration,
@@ -110,8 +111,8 @@ function createFixture(
     campaignStore,
     store: deliveryStore,
     adapter,
-    authorize: async () => membership,
-    identifyActor: () => membership.id,
+    authorize: async () => authorizedMembership,
+    identifyActor: () => authorizedMembership.id,
     resolveAudience: async () => ({ eligibleSubscriberCount: 3 }),
     resolveTestRecipients,
     providerOwnershipEvidence,
@@ -1152,6 +1153,48 @@ describe("campaign test delivery", () => {
     ).rejects.toMatchObject({
       message: "campaign_idempotency_key_reused",
     });
+  });
+
+  it("requires the confirming Owner to be one of the delivered recipient identities", async () => {
+    const otherOwner: HumanMembership = {
+      ...membership,
+      id: createHumanMembershipId("owner-secondary"),
+      userId: createHumanUserId("user-owner-secondary"),
+      email: "owner-secondary@example.test",
+    };
+    const { application, campaignApplication, rejectedCommands } =
+      createFixture(
+        capableAdapter(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        otherOwner,
+      );
+    const created = await createCampaign(campaignApplication);
+    const operation = await application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-owner-match-source-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+
+    await expect(
+      application.commands.confirmReceipt({
+        actor,
+        requestId: "campaign-test-owner-match-confirm-1",
+        executionId: operation.executionId,
+      }),
+    ).rejects.toMatchObject({
+      message: "test_confirmation_owner_not_recipient",
+    });
+    expect(rejectedCommands).toEqual([
+      expect.objectContaining({
+        reason: "test_confirmation_owner_not_recipient",
+        commandName: "campaign.confirm_test_receipt",
+      }),
+    ]);
   });
 
   it("audits rejected receipt confirmation without recipient addresses", async () => {

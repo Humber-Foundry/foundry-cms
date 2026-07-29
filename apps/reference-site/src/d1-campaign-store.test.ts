@@ -327,6 +327,69 @@ describe("D1 campaign store", () => {
         .bind(acceptedConfirmation.confirmation.executionId)
         .run(),
     ).rejects.toThrow(/campaign_test_receipt_confirmation_is_immutable/u);
+    const secondOwnerCommand = {
+      siteId,
+      actorId: "membership-owner-secondary",
+      commandName: "campaign.confirm_test_receipt" as const,
+      requestId: "campaign-test-confirm-owner-secondary-1",
+      inputHash: "7".repeat(64),
+    };
+    const secondOwnerResult =
+      await store.acceptTestReceiptConfirmation({
+        command: secondOwnerCommand,
+        campaign: created.campaign,
+        revision: created.revision,
+        confirmation: {
+          executionId: acceptedConfirmation.confirmation.executionId,
+          siteId,
+          ownerActorId: secondOwnerCommand.actorId,
+          requestId: secondOwnerCommand.requestId,
+          confirmedAt: "2026-07-29T19:07:01.000Z",
+        },
+        audit: {
+          id: "50000000-0000-4000-8000-000000000071" as never,
+          siteId,
+          actorId: secondOwnerCommand.actorId,
+          targetId: acceptedConfirmation.confirmation.executionId,
+          revisionId: created.revision.id,
+          requestId: secondOwnerCommand.requestId,
+          inputHash: secondOwnerCommand.inputHash,
+          action: "campaign.test",
+          outcome: "accepted",
+          reason: null,
+          beforeState: "{}",
+          afterState: "{}",
+          occurredAt: "2026-07-29T19:07:01.000Z",
+        },
+        conflictAudit: {
+          id: "50000000-0000-4000-8000-000000000072" as never,
+          siteId,
+          actorId: secondOwnerCommand.actorId,
+          targetId: acceptedConfirmation.confirmation.executionId,
+          revisionId: created.revision.id,
+          requestId: secondOwnerCommand.requestId,
+          inputHash: secondOwnerCommand.inputHash,
+          action: "campaign.test",
+          outcome: "rejected",
+          reason: "test_receipt_already_confirmed",
+          beforeState: "{}",
+          afterState: null,
+          occurredAt: "2026-07-29T19:07:01.000Z",
+        },
+      });
+    expect(secondOwnerResult.receipt).toMatchObject({
+      outcome: "rejected",
+      reason: "test_receipt_already_confirmed",
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM campaign_command_receipts
+           WHERE command_name = 'campaign.confirm_test_receipt'
+             AND outcome = 'pending'`,
+        )
+        .first(),
+    ).resolves.toEqual({ count: 0 });
     await database
       .prepare(
         `INSERT INTO campaign_test_deliveries (
@@ -402,7 +465,7 @@ describe("D1 campaign store", () => {
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_audit_events")
         .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 7 });
+    ).resolves.toEqual({ count: 8 });
     await expect(
       database
         .prepare(
@@ -414,7 +477,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { outcome: "accepted", count: 4 },
-        { outcome: "rejected", count: 3 },
+        { outcome: "rejected", count: 4 },
       ],
     });
     await expect(
@@ -428,7 +491,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { outcome: "accepted", count: 4 },
-        { outcome: "rejected", count: 2 },
+        { outcome: "rejected", count: 3 },
       ],
     });
     await expect(
