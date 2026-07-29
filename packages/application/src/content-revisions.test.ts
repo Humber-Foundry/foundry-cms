@@ -78,9 +78,10 @@ async function legacyRequestHash(value: unknown): Promise<string> {
 
 describe("content revision application", () => {
   it("creates and edits a first-class post through immutable site revisions", async () => {
+    const store = createInMemoryContentRevisionStore();
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
-      store: createInMemoryContentRevisionStore(),
+      store,
       ...applicationInputs,
     });
     await createWorkspace(application, "create-blog-workspace-0001");
@@ -167,6 +168,13 @@ describe("content revision application", () => {
     expect(
       (await application.queries.getRevision(2))?.definition.blog.posts[0],
     ).toMatchObject({ revision: 2, title: "First post via editor" });
+    await expect(store.getBlogPostAggregate(postId)).resolves.toEqual({
+      currentRevision: 1,
+      liveRevision: null,
+      lastVerifiedRevision: null,
+      lastVerifiedVisibility: null,
+      version: 1,
+    });
   });
 
   it("unpublishes only a post present in the immutable published base", async () => {

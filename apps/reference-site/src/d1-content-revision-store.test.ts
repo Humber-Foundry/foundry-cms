@@ -794,7 +794,7 @@ describe("D1 content revision store", () => {
     ).toMatchObject({
       snapshot_json: expect.stringContaining('"targetVisibility":"public"'),
       post_revision_id: expect.stringMatching(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
       ),
       content_hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
       schema_version: referenceSiteDefinition.schemaVersion,
@@ -880,22 +880,31 @@ describe("D1 content revision store", () => {
       },
       body: createRichTextDocumentFromPlainText("Publication ordering."),
     };
-    await database
-      .prepare(
-        `INSERT INTO blog_posts (
-           site_id, post_id, collection_state, current_revision,
-           live_revision, last_verified_revision, last_verified_visibility,
-           last_verified_publication_id, last_verified_publication_sequence,
-           version, updated_at
-         ) VALUES (?1, ?2, 'active', 1, 1, 1, 'public', ?3, 1, 1, ?4)`,
-      )
-      .bind(
-        referenceSiteDefinition.site.id,
-        postId,
-        "publication-ordered-1",
-        "2026-07-27T14:20:00.000Z",
-      )
-      .run();
+    const publishedDefinition = {
+      ...referenceSiteDefinition,
+      blog: { ...referenceSiteDefinition.blog, posts: [post] },
+    };
+    const orderedWorkspaceId = createContentWorkspaceId(
+      "workspace_ordered_absence",
+    );
+    const application = createApplication(
+      editorActorId,
+      orderedWorkspaceId,
+      "2026-07-27T14:20:00.000Z",
+      publishedDefinition,
+    );
+    await application.commands.create({
+      actorId: editorActorId,
+      workspaceId: orderedWorkspaceId,
+      idempotencyKey: "d1-create-ordered-absence",
+    });
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      publishedDefinition,
+      { id: "publication-ordered-1", sequence: 1 },
+      "2026-07-27T14:20:00.000Z",
+    );
     await reconcileVerifiedBlogPostPublication(
       database,
       referenceSiteDefinition.site.id,
@@ -913,10 +922,7 @@ describe("D1 content revision store", () => {
     await reconcileVerifiedBlogPostPublication(
       database,
       referenceSiteDefinition.site.id,
-      {
-        ...referenceSiteDefinition,
-        blog: { ...referenceSiteDefinition.blog, posts: [post] },
-      },
+      publishedDefinition,
       { id: "publication-ordered-3", sequence: 3 },
       "2026-07-27T14:22:00.000Z",
     );
@@ -1221,6 +1227,77 @@ describe("D1 content revision store", () => {
         "2026-07-27T15:00:00.000Z",
       ),
     ).rejects.toBeInstanceOf(ContentRevisionConfigurationError);
+  });
+
+  it("fails verified-live reconciliation before mutating an aggregate whose immutable revision is missing", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-00000000000e",
+    );
+    const missingRevisionDefinition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: postId,
+            revision: 1,
+            collectionState: "active" as const,
+            targetVisibility: "public" as const,
+            slug: "missing-revision",
+            title: "Missing revision",
+            excerpt: "The callback must require immutable evidence.",
+            seo: {
+              title: "Missing revision | Foundry",
+              description: "The callback must require immutable evidence.",
+            },
+            body: createRichTextDocumentFromPlainText("Missing evidence."),
+          },
+        ],
+      },
+    };
+    const danglingRevisionId =
+      "00000000-0000-8000-8000-00000000000e";
+    await database
+      .prepare(
+        `INSERT INTO blog_posts (
+           site_id, post_id, collection_state, current_revision,
+           current_revision_id, live_revision, last_verified_revision,
+           last_verified_visibility, last_verified_publication_id,
+           last_verified_publication_sequence, version, updated_at
+         ) VALUES (?1, ?2, 'active', 1, ?3, NULL, NULL, NULL, NULL, NULL, 1, ?4)`,
+      )
+      .bind(
+        referenceSiteDefinition.site.id,
+        postId,
+        danglingRevisionId,
+        "2026-07-27T15:05:00.000Z",
+      )
+      .run();
+
+    await expect(
+      reconcileVerifiedBlogPostPublication(
+        database,
+        referenceSiteDefinition.site.id,
+        missingRevisionDefinition,
+        { id: "publication-missing-revision", sequence: 1 },
+        "2026-07-27T15:10:00.000Z",
+      ),
+    ).rejects.toBeInstanceOf(ContentRevisionConfigurationError);
+    await expect(
+      database
+        .prepare(
+          `SELECT current_revision_id, live_revision,
+                  last_verified_publication_id
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first(),
+    ).resolves.toEqual({
+      current_revision_id: danglingRevisionId,
+      live_revision: null,
+      last_verified_publication_id: null,
+    });
   });
 
   it("preserves immutable stored 1.0 revisions without rewriting their fingerprinted definition", async () => {

@@ -65,8 +65,11 @@ that saved revision, and approval, Git compare-and-swap, Cloudflare deployment,
 and two-read live-marker verification use the existing publication
 transaction described here.
 
-Each post revision also has its own deterministic, site-scoped UUIDv5 identity
-and `foundry.post-artifact.v1` fingerprint. The fingerprint length-delimits and
+Each post revision also has its own deterministic, site-scoped UUIDv8
+content identity and `foundry.post-artifact.v1` fingerprint. The custom UUIDv8
+payload is the leading 128 bits of a SHA-256 digest over length-delimited site
+ID, post ID, logical revision, and canonical content hash. The fingerprint
+length-delimits and
 hashes the post ID, post-revision ID, canonical post-content hash, schema
 version, renderer version, serialization version, and the exact rendered-route
 model bytes hash (or route-absence artifact for unpublish). The canonical model

@@ -503,7 +503,7 @@ export function createInMemoryContentRevisionStore({
           if (
             (transition.beforeState === null && aggregate !== undefined) ||
             (transition.beforeState !== null &&
-              aggregate?.currentRevision !== transition.beforeState.revision)
+              aggregate === undefined)
           ) {
             throw new ContentRevisionConflictError(currentRevision);
           }
@@ -522,16 +522,15 @@ export function createInMemoryContentRevisionStore({
           revision: saved,
         });
         for (const transition of command.blogTransitions ?? []) {
-          blogPosts.set(transition.postId, {
-            currentRevision: transition.afterState!.revision,
-            liveRevision:
-              blogPosts.get(transition.postId)?.liveRevision ?? null,
-            lastVerifiedRevision:
-              blogPosts.get(transition.postId)?.lastVerifiedRevision ?? null,
-            lastVerifiedVisibility:
-              blogPosts.get(transition.postId)?.lastVerifiedVisibility ?? null,
-            version: (blogPosts.get(transition.postId)?.version ?? 0) + 1,
-          });
+          if (transition.beforeState === null) {
+            blogPosts.set(transition.postId, {
+              currentRevision: transition.afterState!.revision,
+              liveRevision: null,
+              lastVerifiedRevision: null,
+              lastVerifiedVisibility: null,
+              version: 1,
+            });
+          }
         }
         return saved;
       };

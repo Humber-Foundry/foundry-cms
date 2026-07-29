@@ -45,7 +45,7 @@ export function isBlogPostArtifactFingerprint(
       candidate.postId,
     ) &&
     typeof candidate.postRevisionId === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
       candidate.postRevisionId,
     ) &&
     Number.isSafeInteger(candidate.revision) &&
@@ -93,7 +93,7 @@ export async function createBlogPostRevisionId(
     ]),
   );
   const uuid = bytes.slice(0, 16);
-  uuid[6] = (uuid[6]! & 0x0f) | 0x50;
+  uuid[6] = (uuid[6]! & 0x0f) | 0x80;
   uuid[8] = (uuid[8]! & 0x3f) | 0x80;
   const hex = [...uuid]
     .map((byte) => byte.toString(16).padStart(2, "0"))

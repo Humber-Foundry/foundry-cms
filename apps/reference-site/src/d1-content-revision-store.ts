@@ -224,11 +224,44 @@ export async function reconcileVerifiedBlogPostPublication(
             post.revision,
             contentHash,
           ),
+          contentHash,
           targetVisibility: post.targetVisibility,
         };
       }),
     ),
   );
+  const immutableRevisionVerification = await database
+    .prepare(
+      `WITH incoming_posts AS (
+         SELECT
+           json_extract(value, '$.id') AS post_id,
+           json_extract(value, '$.revision') AS revision,
+           json_extract(value, '$.revisionId') AS revision_id,
+           json_extract(value, '$.contentHash') AS content_hash
+         FROM json_each(?1)
+       )
+       SELECT COUNT(*) AS invalid_count
+       FROM incoming_posts AS incoming
+       LEFT JOIN blog_posts AS aggregate
+         ON aggregate.site_id = ?2
+        AND aggregate.post_id = incoming.post_id
+       LEFT JOIN blog_post_revisions AS revision
+         ON revision.revision_id = incoming.revision_id
+        AND revision.site_id = ?2
+        AND revision.post_id = incoming.post_id
+        AND revision.revision = incoming.revision
+        AND revision.content_hash = incoming.content_hash
+       WHERE aggregate.post_id IS NULL
+          OR revision.revision_id IS NULL`,
+    )
+    .bind(serializedPosts, siteId)
+    .first<{ invalid_count: number }>();
+  if (
+    immutableRevisionVerification === null ||
+    immutableRevisionVerification.invalid_count > 0
+  ) {
+    throw new ContentRevisionConfigurationError();
+  }
   await database.batch([
     database
       .prepare(
@@ -237,6 +270,7 @@ export async function reconcileVerifiedBlogPostPublication(
              json_extract(value, '$.id') AS post_id,
              json_extract(value, '$.revision') AS revision,
              json_extract(value, '$.revisionId') AS revision_id,
+             json_extract(value, '$.contentHash') AS content_hash,
              json_extract(value, '$.targetVisibility') AS target_visibility
            FROM json_each(?1)
          )
@@ -274,7 +308,17 @@ export async function reconcileVerifiedBlogPostPublication(
              last_verified_publication_sequence = ?3,
              updated_at = ?4
          WHERE site_id = ?5
-           AND post_id IN (SELECT post_id FROM incoming_posts)
+           AND EXISTS (
+             SELECT 1
+             FROM incoming_posts AS incoming
+             JOIN blog_post_revisions AS revision
+               ON revision.revision_id = incoming.revision_id
+              AND revision.site_id = ?5
+              AND revision.post_id = incoming.post_id
+              AND revision.revision = incoming.revision
+              AND revision.content_hash = incoming.content_hash
+             WHERE incoming.post_id = blog_posts.post_id
+           )
            AND (
              last_verified_publication_sequence IS NULL
              OR last_verified_publication_sequence < ?3
@@ -329,7 +373,12 @@ export async function reconcileVerifiedBlogPostPublication(
   const verification = await database
     .prepare(
       `WITH incoming_posts AS (
-         SELECT json_extract(value, '$.id') AS post_id
+         SELECT
+           json_extract(value, '$.id') AS post_id,
+           json_extract(value, '$.revision') AS revision,
+           json_extract(value, '$.revisionId') AS revision_id,
+           json_extract(value, '$.contentHash') AS content_hash,
+           json_extract(value, '$.targetVisibility') AS target_visibility
          FROM json_each(?1)
        )
        SELECT COUNT(*) AS invalid_count
@@ -337,13 +386,32 @@ export async function reconcileVerifiedBlogPostPublication(
        LEFT JOIN blog_posts AS aggregate
          ON aggregate.site_id = ?2
         AND aggregate.post_id = incoming.post_id
+       LEFT JOIN blog_post_revisions AS revision
+         ON revision.revision_id = incoming.revision_id
+        AND revision.site_id = ?2
+        AND revision.post_id = incoming.post_id
+        AND revision.revision = incoming.revision
+        AND revision.content_hash = incoming.content_hash
        WHERE aggregate.post_id IS NULL
+          OR revision.revision_id IS NULL
           OR aggregate.last_verified_revision IS NULL
           OR aggregate.last_verified_publication_sequence IS NULL
           OR aggregate.last_verified_publication_sequence < ?3
           OR (
             aggregate.last_verified_publication_sequence = ?3
-            AND aggregate.last_verified_publication_id <> ?4
+            AND (
+              aggregate.last_verified_publication_id <> ?4
+              OR aggregate.current_revision <> incoming.revision
+              OR aggregate.current_revision_id <> incoming.revision_id
+              OR aggregate.last_verified_revision <> incoming.revision
+              OR aggregate.last_verified_visibility <>
+                incoming.target_visibility
+              OR aggregate.live_revision IS NOT CASE
+                WHEN incoming.target_visibility = 'public'
+                  THEN incoming.revision
+                ELSE NULL
+              END
+            )
           )`,
     )
     .bind(serializedPosts, siteId, publication.sequence, publication.id)
