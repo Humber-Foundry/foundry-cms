@@ -515,6 +515,9 @@ export function createCampaignTestDeliveryApplication({
         capabilities.configurationFingerprint,
       recipientIds: testRecipientIds,
     });
+    const configuredRecipients =
+      await resolveTestRecipients(testRecipientIds);
+    assertResolvedRecipients(testRecipientIds, configuredRecipients);
     let operation: CampaignTestDeliveryOperation;
     let newlyClaimed = false;
     if (existing === null) {
@@ -592,8 +595,6 @@ export function createCampaignTestDeliveryApplication({
       !newlyClaimed &&
       (operation.state === "ambiguous" || attemptExpired)
     ) {
-      const recipients = await resolveTestRecipients(operation.recipientIds);
-      assertResolvedRecipients(operation.recipientIds, recipients);
       const reconciled = await adapter.reconcileTest({
         request: {
           executionId: operation.executionId,
@@ -602,7 +603,7 @@ export function createCampaignTestDeliveryApplication({
           subject: revision.subject,
           previewText: revision.previewText,
           senderIdentityId: revision.senderIdentityId,
-          recipients,
+          recipients: configuredRecipients,
           binding: operation.binding,
         },
         providerCampaignId: operation.providerCampaignId,
@@ -703,8 +704,6 @@ export function createCampaignTestDeliveryApplication({
       )!;
     }
     operation = attempt;
-    const recipients = await resolveTestRecipients(operation.recipientIds);
-    assertResolvedRecipients(operation.recipientIds, recipients);
     let outcome: NewsletterTestOutcome;
     try {
       outcome = await adapter.sendTest({
@@ -714,7 +713,7 @@ export function createCampaignTestDeliveryApplication({
         subject: revision.subject,
         previewText: revision.previewText,
         senderIdentityId: revision.senderIdentityId,
-        recipients,
+        recipients: configuredRecipients,
         binding: operation.binding,
       });
     } catch {
