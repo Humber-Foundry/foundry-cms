@@ -26,7 +26,7 @@ authorization-server metadata is at
 
 Before enabling connections, the installation operator must:
 
-- apply D1 migration `0016_mcp_readonly_connections.sql`;
+- apply D1 migration `0017_mcp_readonly_connections.sql`;
 - set `FOUNDRY_MCP_OAUTH_SIGNING_KEY` as a Worker secret with at least 32
   random characters;
 - set `FOUNDRY_MCP_CLIENTS` to a non-secret JSON object whose keys are

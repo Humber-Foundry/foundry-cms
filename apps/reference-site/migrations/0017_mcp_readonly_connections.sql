@@ -1,3 +1,4 @@
+-- Read-only, site-scoped MCP authorization and audit state.
 CREATE TABLE mcp_connections (
   id TEXT PRIMARY KEY,
   actor_id TEXT NOT NULL UNIQUE,

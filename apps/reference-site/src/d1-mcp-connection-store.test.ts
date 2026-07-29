@@ -27,7 +27,7 @@ describe("D1 MCP connection store", () => {
       "0001_human_access.sql",
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
-      "0016_mcp_readonly_connections.sql",
+      "0017_mcp_readonly_connections.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
