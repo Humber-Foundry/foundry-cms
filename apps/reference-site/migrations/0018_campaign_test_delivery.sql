@@ -15,6 +15,12 @@ CREATE TABLE campaign_test_deliveries (
   attempt_number INTEGER NOT NULL CHECK (attempt_number >= 0),
   attempt_lease_until TEXT,
   provider_campaign_id TEXT,
+  foundry_send_proof TEXT CHECK (
+    foundry_send_proof IS NULL OR (
+      length(foundry_send_proof) = 64
+      AND foundry_send_proof NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
   failure_code TEXT,
   evidence_json TEXT,
   created_at TEXT NOT NULL,

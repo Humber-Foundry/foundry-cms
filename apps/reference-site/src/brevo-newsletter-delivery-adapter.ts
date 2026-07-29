@@ -199,6 +199,7 @@ export function createBrevoNewsletterDeliveryAdapter({
   async function reconcile(
     request: NewsletterTestRequest,
     campaignId: string | null,
+    foundrySendProof: string | null = request.foundrySendProof,
   ) {
     const senderId = expectedSenderId(request, senderIds);
     if (senderId === null) {
@@ -212,10 +213,19 @@ export function createBrevoNewsletterDeliveryAdapter({
       return {
         outcome: "ambiguous",
         ...(campaignId === null ? {} : { providerCampaignId: campaignId }),
+        ...(foundrySendProof === null ? {} : { foundrySendProof }),
         ...(read.code === undefined ? {} : { code: read.code }),
       } as const;
     }
-    if (read.outcome === "not_found") return read;
+    if (read.outcome === "not_found") {
+      return campaignId === null
+        ? read
+        : {
+            outcome: "ambiguous",
+            providerCampaignId: campaignId,
+            ...(foundrySendProof === null ? {} : { foundrySendProof }),
+          } as const;
+    }
     const campaign = read.campaign;
     if (!matchesCampaign(campaign, request, senderId)) {
       return {
@@ -225,9 +235,35 @@ export function createBrevoNewsletterDeliveryAdapter({
     }
     const id = providerId(campaign.id);
     if (campaign.testSent === false && id !== null) {
-      return { outcome: "not_sent", providerCampaignId: id } as const;
+      return foundrySendProof === null
+        ? { outcome: "not_sent", providerCampaignId: id } as const
+        : {
+            outcome: "ambiguous",
+            providerCampaignId: id,
+            foundrySendProof,
+          } as const;
     }
     if (campaign.testSent !== true) {
+      return {
+        outcome: "ambiguous",
+        ...(id === null ? {} : { providerCampaignId: id }),
+        ...(foundrySendProof === null ? {} : { foundrySendProof }),
+      } as const;
+    }
+    if (
+      id === null ||
+      foundrySendProof !==
+        await sha256Text(
+          [
+            "foundry.brevo-test-send.v1",
+            apiKey,
+            request.executionId,
+            id,
+            request.binding.providerConfigurationFingerprint,
+            request.binding.recipientSetFingerprint,
+          ].join(":"),
+        )
+    ) {
       return {
         outcome: "ambiguous",
         ...(id === null ? {} : { providerCampaignId: id }),
@@ -309,6 +345,7 @@ export function createBrevoNewsletterDeliveryAdapter({
         return { outcome: "rejected", code: "provider_sender_unmapped" };
       }
       let campaignId: string | null = request.providerCampaignId;
+      let foundrySendProof: string | null = request.foundrySendProof;
       const signal = AbortSignal.timeout(30_000);
       try {
         if (campaignId === null) {
@@ -369,6 +406,16 @@ export function createBrevoNewsletterDeliveryAdapter({
             } as const;
           }
         }
+        foundrySendProof = await sha256Text(
+          [
+            "foundry.brevo-test-send.v1",
+            apiKey,
+            request.executionId,
+            campaignId,
+            request.binding.providerConfigurationFingerprint,
+            request.binding.recipientSetFingerprint,
+          ].join(":"),
+        );
         const sent = await fetcher(
           `${endpoint}/emailCampaigns/${campaignId}/sendTest`,
           {
@@ -387,6 +434,7 @@ export function createBrevoNewsletterDeliveryAdapter({
             return {
               outcome: "ambiguous",
               providerCampaignId: campaignId,
+              foundrySendProof,
               ...(sent.status === 429
                 ? { code: "provider_rate_limited" }
                 : {}),
@@ -400,15 +448,24 @@ export function createBrevoNewsletterDeliveryAdapter({
                 : "provider_test_rejected",
           } as const;
         }
-        const reconciled = await reconcile(request, campaignId);
+        const reconciled = await reconcile(
+          request,
+          campaignId,
+          foundrySendProof,
+        );
         return reconciled.outcome === "not_found" ||
           reconciled.outcome === "not_sent"
-          ? { outcome: "ambiguous", providerCampaignId: campaignId }
+          ? {
+              outcome: "ambiguous",
+              providerCampaignId: campaignId,
+              foundrySendProof,
+            }
           : reconciled;
       } catch {
         return {
           outcome: "ambiguous",
           ...(campaignId === null ? {} : { providerCampaignId: campaignId }),
+          ...(foundrySendProof === null ? {} : { foundrySendProof }),
         };
       }
     },

@@ -124,6 +124,7 @@ describe("D1 campaign test delivery store", () => {
       attemptNumber: 0,
       attemptLeaseUntil: null,
       providerCampaignId: null,
+      foundrySendProof: null,
       failureCode: null,
       evidence: null,
       createdAt: "2026-07-29T19:05:00.000Z",
@@ -158,8 +159,10 @@ describe("D1 campaign test delivery store", () => {
       state: "ambiguous",
       attemptLeaseUntil: null,
       providerCampaignId: "17",
+      foundrySendProof: "7".repeat(64),
       updatedAt: "2026-07-29T19:05:03.000Z",
     });
+    expect(ambiguous.foundrySendProof).toBe("7".repeat(64));
     const takeover = await store.beginAttempt({
       operation: ambiguous,
       now: "2026-07-29T19:06:02.000Z",

@@ -8,6 +8,7 @@ const configurationFingerprint = "a".repeat(64);
 const request: NewsletterTestRequest = {
   executionId: "40000000-0000-4000-8000-000000000001",
   providerCampaignId: null,
+  foundrySendProof: null,
   renderedCampaign: {
     campaignId: "20000000-0000-4000-8000-000000000001" as never,
     campaignRevisionId:
@@ -112,7 +113,7 @@ describe("Brevo newsletter delivery adapter", () => {
     );
   });
 
-  it("finds the fresh execution draft and reconciles before any retry after a lost create response", async () => {
+  it("does not accept a matching provider draft sent outside Foundry", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       response(200, {
         count: 1,
@@ -144,14 +145,13 @@ describe("Brevo newsletter delivery adapter", () => {
         providerCampaignId: null,
       }),
     ).resolves.toEqual({
-      outcome: "accepted",
+      outcome: "ambiguous",
       providerCampaignId: "18",
-      providerReceipt: expect.stringMatching(/^brevo:test:/u),
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps transient reconciliation reads ambiguous and treats only a definitive 404 as absent", async () => {
+  it("keeps transient and deleted known-campaign reads ambiguous", async () => {
     const transientRead = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
@@ -196,7 +196,72 @@ describe("Brevo newsletter delivery adapter", () => {
         request,
         providerCampaignId: "17",
       }),
-    ).resolves.toEqual({ outcome: "not_found" });
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: "17",
+    });
+  });
+
+  it("keeps a lost Foundry send response ambiguous after its provider draft is deleted", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response(201, { id: 17 }))
+      .mockRejectedValueOnce(new Error("response_lost_after_send"))
+      .mockResolvedValueOnce(response(404))
+      .mockResolvedValueOnce(
+        response(200, {
+          id: 17,
+          name: "foundry-test-40000000-0000-4000-8000-000000000001",
+          tag: "f-test-8000000000000001",
+          sender: { id: 42 },
+          subject: request.subject,
+          previewText: request.previewText,
+          htmlContent: "<html><body>Exact body</body></html>",
+          testSent: false,
+        }),
+      );
+    const adapter = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
+      senderIds: { sender_primary: 42 },
+      fetcher,
+    });
+
+    const ambiguous = await adapter.sendTest(request);
+    expect(ambiguous).toMatchObject({
+      outcome: "ambiguous",
+      providerCampaignId: "17",
+      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    const reconciliationRequest = {
+      ...request,
+      foundrySendProof:
+        ambiguous.outcome === "ambiguous"
+          ? (ambiguous.foundrySendProof ?? null)
+          : null,
+    };
+    await expect(
+      adapter.reconcileTest({
+        request: reconciliationRequest,
+        providerCampaignId: "17",
+      }),
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: "17",
+      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    await expect(
+      adapter.reconcileTest({
+        request: reconciliationRequest,
+        providerCampaignId: "17",
+      }),
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: "17",
+      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
   it("keeps server errors ambiguous because either provider write may have applied", async () => {
@@ -236,6 +301,7 @@ describe("Brevo newsletter delivery adapter", () => {
     await expect(sendAmbiguous.sendTest(request)).resolves.toEqual({
       outcome: "ambiguous",
       providerCampaignId: "19",
+      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
     });
 
     const sendRateLimited = createBrevoNewsletterDeliveryAdapter({
@@ -251,6 +317,7 @@ describe("Brevo newsletter delivery adapter", () => {
     await expect(sendRateLimited.sendTest(request)).resolves.toEqual({
       outcome: "ambiguous",
       providerCampaignId: "20",
+      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
       code: "provider_rate_limited",
     });
   });

@@ -26,6 +26,7 @@ type TestDeliveryRow = Readonly<{
   attempt_number: number;
   attempt_lease_until: string | null;
   provider_campaign_id: string | null;
+  foundry_send_proof: string | null;
   failure_code: string | null;
   evidence_json: string | null;
   created_at: string;
@@ -44,7 +45,8 @@ const projection = `
   SELECT execution_id, site_id, actor_id, request_id, campaign_id,
     campaign_revision_id, binding_json, recipient_ids_json, state,
     attempt_number, attempt_lease_until,
-    provider_campaign_id, failure_code, evidence_json, created_at, updated_at
+    provider_campaign_id, foundry_send_proof, failure_code, evidence_json,
+    created_at, updated_at
   FROM campaign_test_deliveries
 `;
 
@@ -74,6 +76,7 @@ function toOperation(row: TestDeliveryRow): CampaignTestDeliveryOperation {
     attemptNumber: row.attempt_number,
     attemptLeaseUntil: row.attempt_lease_until,
     providerCampaignId: row.provider_campaign_id,
+    foundrySendProof: row.foundry_send_proof,
     failureCode: row.failure_code,
     evidence:
       row.evidence_json === null
@@ -138,11 +141,12 @@ export function createD1CampaignTestDeliveryStore(
              execution_id, site_id, actor_id, request_id, campaign_id,
              campaign_revision_id, binding_json, recipient_ids_json, state,
              attempt_number, attempt_lease_until,
-             provider_campaign_id, failure_code, evidence_json,
+             provider_campaign_id, foundry_send_proof, failure_code,
+             evidence_json,
              created_at, updated_at
            ) SELECT
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-             ?12, ?13, ?14, ?15, ?16
+             ?12, ?13, ?14, ?15, ?16, ?17
            WHERE NOT EXISTS (
              SELECT 1 FROM campaign_test_deliveries
              WHERE site_id = ?2 AND campaign_revision_id = ?6
@@ -151,7 +155,7 @@ export function createD1CampaignTestDeliveryStore(
              AND (
                SELECT COUNT(*) FROM campaign_test_deliveries
                WHERE site_id = ?2 AND campaign_revision_id = ?6
-                 AND created_at >= ?17
+                 AND created_at >= ?18
              ) < ${maximumCampaignTestsPerRevisionWindow}
            ON CONFLICT (site_id, actor_id, request_id) DO NOTHING`,
         )
@@ -168,6 +172,7 @@ export function createD1CampaignTestDeliveryStore(
           operation.attemptNumber,
           operation.attemptLeaseUntil,
           operation.providerCampaignId,
+          operation.foundrySendProof,
           operation.failureCode,
           operation.evidence === null
             ? null
@@ -231,16 +236,17 @@ export function createD1CampaignTestDeliveryStore(
         .prepare(
           `UPDATE campaign_test_deliveries
            SET state = ?1, attempt_lease_until = ?2,
-             provider_campaign_id = ?3, failure_code = ?4,
-             evidence_json = ?5, updated_at = ?6
-           WHERE execution_id = ?7 AND site_id = ?8
-             AND attempt_number = ?9
+             provider_campaign_id = ?3, foundry_send_proof = ?4,
+             failure_code = ?5, evidence_json = ?6, updated_at = ?7
+           WHERE execution_id = ?8 AND site_id = ?9
+             AND attempt_number = ?10
              AND state IN ('pending', 'attempting', 'ambiguous')`,
         )
         .bind(
           operation.state,
           operation.attemptLeaseUntil,
           operation.providerCampaignId,
+          operation.foundrySendProof,
           operation.failureCode,
           operation.evidence === null
             ? null

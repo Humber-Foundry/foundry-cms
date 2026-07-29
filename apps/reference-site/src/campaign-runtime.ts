@@ -322,10 +322,10 @@ export async function loadCampaignRequestContext(
         const activeOwnerIds = new Set<string>(
           (
             await human.application.queries
-              .listActiveOwnersForTestDelivery({
+              .listActiveOwnerIdsForTestDelivery({
                 actor: human.identity,
               })
-          ).map((membership) => membership.id),
+          ),
         );
         return recipientIds.map((id) => {
           if (!activeOwnerIds.has(id)) {

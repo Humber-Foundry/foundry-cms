@@ -274,7 +274,6 @@ describe("campaign test delivery", () => {
       .fn()
       .mockResolvedValueOnce({
         outcome: "ambiguous",
-        providerCampaignId: "brevo-campaign-19",
       })
       .mockResolvedValueOnce({
         outcome: "accepted",
@@ -305,6 +304,37 @@ describe("campaign test delivery", () => {
         providerCampaignId: null,
       }),
     );
+  });
+
+  it("does not retry a known provider campaign when reconciliation reports it missing", async () => {
+    const sendTest = vi.fn().mockResolvedValue({
+      outcome: "ambiguous",
+      providerCampaignId: "brevo-campaign-deleted-after-send-1",
+      foundrySendProof: "9".repeat(64),
+    });
+    const adapter = capableAdapter({
+      sendTest,
+      reconcileTest: vi.fn().mockResolvedValue({ outcome: "not_found" }),
+    });
+    const { application, campaignApplication } = createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-deleted-after-send-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    const first = await application.commands.requestTest(request);
+    const second = await application.commands.requestTest(request);
+
+    expect(second).toMatchObject({
+      executionId: first.executionId,
+      state: "ambiguous",
+      providerCampaignId: "brevo-campaign-deleted-after-send-1",
+      foundrySendProof: "9".repeat(64),
+    });
+    expect(sendTest).toHaveBeenCalledTimes(1);
   });
 
   it("continues an existing provider draft when reconciliation proves the test was not sent", async () => {

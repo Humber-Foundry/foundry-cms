@@ -62,12 +62,18 @@ provisioned scope.
 
 Every logical test creates a fresh Brevo draft tagged with its stable execution
 identity. Foundry reconciles Brevo's `testSent` state and the exact draft
-content before accepting evidence. A timeout or lost response enters
-reconciliation before another provider write. An expired in-flight writer
+content before accepting evidence. A matching draft with `testSent` is
+accepted only when the operation also retains the exact Foundry-owned proof
+that the API test-send call was invoked for that provider campaign and
+recipient-set fingerprint. A timeout or lost response enters reconciliation
+before another provider write. Deletion of a known provider campaign remains
+ambiguous because its missing draft does not prove its test was not delivered.
+Only a create attempt with no known provider campaign ID and a complete search
+proving no matching draft may create another draft. An expired in-flight writer
 remains reconciliation-only so a slow first call cannot race a replacement
 call. Automatic retry is possible only after the adapter has returned an
-ambiguous result and a later reconciliation definitively proves the prior
-draft or test is absent. A crashed call enters a one-minute reconciliation
+ambiguous result and a later reconciliation definitively proves the known
+draft was not sent. A crashed call enters a one-minute reconciliation
 quarantine after the provider request's 30-second deadline; Foundry blocks a
 second execution for that revision while recovery remains unresolved.
 Editing a campaign revision cancels every open test for the replaced revision

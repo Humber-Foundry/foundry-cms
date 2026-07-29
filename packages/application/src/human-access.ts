@@ -175,9 +175,9 @@ export type HumanAccessApplication = Readonly<{
     listMembers(input: {
       actor: ExternalHumanIdentity;
     }): Promise<ReadonlyArray<HumanMembership>>;
-    listActiveOwnersForTestDelivery(input: {
+    listActiveOwnerIdsForTestDelivery(input: {
       actor: ExternalHumanIdentity;
-    }): Promise<ReadonlyArray<HumanMembership>>;
+    }): Promise<ReadonlyArray<HumanMembershipId>>;
     canActivateInvitation(input: {
       actor: ExternalHumanIdentity;
     }): Promise<boolean>;
@@ -476,12 +476,14 @@ export function createHumanAccessApplication({
       await requireCapability({ actor, capability: "access.manage" });
       return store.listMemberships(siteId);
     },
-    async listActiveOwnersForTestDelivery({ actor }) {
+    async listActiveOwnerIdsForTestDelivery({ actor }) {
       await requireCapability({ actor, capability: "content.write" });
-      return (await store.listMemberships(siteId)).filter(
-        (membership) =>
-          membership.role === "owner" && membership.status === "active",
-      );
+      return (await store.listMemberships(siteId))
+        .filter(
+          (membership) =>
+            membership.role === "owner" && membership.status === "active",
+        )
+        .map((membership) => membership.id);
     },
     async canActivateInvitation({ actor }) {
       return (

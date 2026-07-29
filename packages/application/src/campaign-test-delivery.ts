@@ -59,6 +59,7 @@ export type CampaignTestDeliveryBinding = Readonly<{
 export type NewsletterTestRequest = Readonly<{
   executionId: string;
   providerCampaignId: string | null;
+  foundrySendProof: string | null;
   renderedCampaign: RenderedCampaign;
   subject: string;
   previewText: string;
@@ -76,6 +77,7 @@ export type NewsletterTestOutcome =
   | Readonly<{
       outcome: "ambiguous";
       providerCampaignId?: string;
+      foundrySendProof?: string;
       code?: string;
     }>
   | Readonly<{ outcome: "rejected"; code: string }>;
@@ -133,6 +135,7 @@ export type CampaignTestDeliveryOperation = Readonly<{
   attemptNumber: number;
   attemptLeaseUntil: string | null;
   providerCampaignId: string | null;
+  foundrySendProof: string | null;
   failureCode: string | null;
   evidence: CampaignTestDeliveryEvidence | null;
   createdAt: string;
@@ -410,6 +413,13 @@ function validateProviderText(value: string, code: string): string {
     throw new CampaignValidationError(code);
   }
   return normalized;
+}
+
+function validateFingerprint(value: string, code: string): string {
+  if (!fingerprintPattern.test(value)) {
+    throw new CampaignValidationError(code);
+  }
+  return value;
 }
 
 async function acceptedOperation(
@@ -690,6 +700,7 @@ export function createCampaignTestDeliveryApplication({
           attemptNumber: 0,
           attemptLeaseUntil: null,
           providerCampaignId: null,
+          foundrySendProof: null,
           failureCode: null,
           evidence: null,
           createdAt: timestamp,
@@ -753,6 +764,7 @@ export function createCampaignTestDeliveryApplication({
         request: {
           executionId: operation.executionId,
           providerCampaignId: operation.providerCampaignId,
+          foundrySendProof: operation.foundrySendProof,
           renderedCampaign: rendered,
           subject: revision.subject,
           previewText: revision.previewText,
@@ -796,7 +808,7 @@ export function createCampaignTestDeliveryApplication({
             ).toISOString(),
             providerCampaignId:
               reconciled.outcome === "not_found"
-                ? null
+                ? operation.providerCampaignId
                 : reconciled.outcome === "not_sent"
                   ? reconciled.providerCampaignId
                   : reconciled.outcome === "ambiguous" &&
@@ -852,16 +864,7 @@ export function createCampaignTestDeliveryApplication({
         reconciled.outcome === "not_found" &&
         operation.providerCampaignId !== null
       ) {
-        operation = await recordOperation(
-          Object.freeze({
-            ...operation,
-            state: "ambiguous" as const,
-            providerCampaignId: null,
-            attemptLeaseUntil: null,
-            failureCode: null,
-            updatedAt: clock().toISOString(),
-          }),
-        );
+        return operation;
       }
       if (reconciled.outcome === "rejected") {
         return recordOperation(
@@ -929,6 +932,7 @@ export function createCampaignTestDeliveryApplication({
       outcome = await adapter.sendTest({
         executionId: operation.executionId,
         providerCampaignId: operation.providerCampaignId,
+        foundrySendProof: operation.foundrySendProof,
         renderedCampaign: rendered,
         subject: revision.subject,
         previewText: revision.previewText,
@@ -975,6 +979,13 @@ export function createCampaignTestDeliveryApplication({
             : validateProviderText(
                 outcome.providerCampaignId,
                 "provider_campaign_id_invalid",
+              ),
+        foundrySendProof:
+          outcome.foundrySendProof === undefined
+            ? operation.foundrySendProof
+            : validateFingerprint(
+                outcome.foundrySendProof,
+                "foundry_send_proof_invalid",
               ),
         failureCode: outcome.code ?? null,
         updatedAt: timestamp,

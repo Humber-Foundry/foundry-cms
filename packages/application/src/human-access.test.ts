@@ -520,15 +520,11 @@ describe("human access application", () => {
       }),
     ).resolves.toMatchObject({ role: "owner", status: "active" });
     await expect(
-      application.queries.listActiveOwnersForTestDelivery({
+      application.queries.listActiveOwnerIdsForTestDelivery({
         actor: editorIdentity,
       }),
     ).resolves.toEqual([
-      expect.objectContaining({
-        id: createHumanMembershipId("membership-owner"),
-        role: "owner",
-        status: "active",
-      }),
+      createHumanMembershipId("membership-owner"),
     ]);
   });
 
