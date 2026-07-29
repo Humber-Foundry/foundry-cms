@@ -8,6 +8,7 @@ import {
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   createContentActorId,
+  createBlogPostArtifactFingerprints,
   createContentWorkspaceId,
 } from "@foundry/application";
 
@@ -200,6 +201,17 @@ export default async function DashboardPage({
       mediaAssets={mediaAssets}
       mediaOccurrences={mediaOccurrences}
       mediaWorkspaceId={workspaceId}
+      campaignPostArtifacts={
+        contentRevision === undefined
+          ? []
+          : await createBlogPostArtifactFingerprints({
+              definition: contentRevision.definition,
+              inputs: {
+                ...contentRevision.inputs,
+                schemaVersion: contentRevision.definition.schemaVersion,
+              },
+            })
+      }
     />
   );
 }

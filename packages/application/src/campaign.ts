@@ -18,9 +18,6 @@ import {
 } from "./deterministic-hash";
 import type {
   ExternalHumanIdentity,
-  HumanCapability,
-  HumanMembership,
-  HumanMembershipId,
 } from "./human-access";
 
 declare const campaignIdBrand: unique symbol;
@@ -72,11 +69,11 @@ export type CampaignCallToAction = Readonly<{
 
 export type CampaignAuthoringInput = Readonly<{
   subject: string;
-  introduction: string;
+  previewText: string;
   callToAction: CampaignCallToAction;
   emailContent: RichTextDocument;
   senderIdentityId: string;
-  complianceFooterVersion: string;
+  complianceFooter: Readonly<{ version: string; content: string }>;
   audienceDefinition: CampaignAudienceDefinition;
 }>;
 
@@ -100,6 +97,10 @@ export type Campaign = Readonly<{
   siteId: SiteId;
   lifecycleState: CampaignLifecycleState;
   currentRevisionId: CampaignRevisionId;
+  testDeliveryId: string | null;
+  bulkAuthorizationId: string | null;
+  activeScheduleId: string | null;
+  providerCancellationRequired: boolean;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -124,14 +125,24 @@ export type CampaignRevision = Readonly<
     schemaVersion: SiteDefinition["schemaVersion"];
     rendererVersion: string;
     createdAt: string;
-    createdByMembershipId: HumanMembershipId;
+    createdByActorId: string;
   }
 >;
+
+export type CampaignMcpActor = Readonly<{
+  type: "mcp";
+  connectionId: string;
+  siteId: SiteId;
+}>;
+export type CampaignActor = ExternalHumanIdentity | CampaignMcpActor;
+export type CampaignAuthor = Readonly<{ id: string }>;
 
 export type CampaignArtifact = Readonly<{
   channel: "html" | "text";
   bytes: string;
   fingerprint: string;
+  schemaVersion: SiteDefinition["schemaVersion"];
+  rendererVersion: string;
 }>;
 
 export type RenderedCampaign = Readonly<{
@@ -144,10 +155,21 @@ export type RenderedCampaign = Readonly<{
   eligibleSubscriberCount: number;
 }>;
 
+export type CampaignAuditEvent = Readonly<{
+  id: string;
+  siteId: SiteId;
+  actorId: string;
+  action: "campaign.create" | "campaign.edit";
+  outcome: "accepted" | "rejected";
+  reason: string | null;
+  occurredAt: string;
+}>;
+
 export interface CampaignStore {
   create(input: {
     campaign: Campaign;
     revision: CampaignRevision;
+    audit: CampaignAuditEvent;
   }): Promise<boolean>;
   findCampaign(input: {
     siteId: SiteId;
@@ -162,24 +184,33 @@ export interface CampaignStore {
     expectedVersion: number;
     campaign: Campaign;
     revision: CampaignRevision;
+    audit: CampaignAuditEvent;
   }): Promise<boolean>;
+  saveRenderedArtifacts(input: {
+    siteId: SiteId;
+    campaignRevisionId: CampaignRevisionId;
+    html: CampaignArtifact;
+    text: CampaignArtifact;
+    campaignFingerprint: string;
+  }): Promise<void>;
+  recordAudit(event: CampaignAuditEvent): Promise<void>;
 }
 
 export type CampaignApplication = Readonly<{
   commands: Readonly<{
     createStandalone(input: {
-      actor: ExternalHumanIdentity;
+      actor: CampaignActor;
       input: CampaignAuthoringInput;
     }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
     createFromPost(input: {
-      actor: ExternalHumanIdentity;
+      actor: CampaignActor;
       sourcePostRevisionId: string;
       senderIdentityId: string;
-      complianceFooterVersion: string;
+      complianceFooter: CampaignAuthoringInput["complianceFooter"];
       audienceDefinition: CampaignAudienceDefinition;
     }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
     edit(input: {
-      actor: ExternalHumanIdentity;
+      actor: CampaignActor;
       campaignId: CampaignId;
       expectedVersion: number;
       input: CampaignAuthoringInput;
@@ -187,16 +218,16 @@ export type CampaignApplication = Readonly<{
   }>;
   queries: Readonly<{
     getCampaign(input: {
-      actor: ExternalHumanIdentity;
+      actor: CampaignActor;
       campaignId: CampaignId;
     }): Promise<Campaign>;
     getRevision(input: {
-      actor: ExternalHumanIdentity;
+      actor: CampaignActor;
       campaignId: CampaignId;
       revisionNumber: number;
     }): Promise<CampaignRevision>;
     render(input: {
-      actor: ExternalHumanIdentity;
+      actor: CampaignActor;
       campaignId: CampaignId;
       revisionNumber?: number;
     }): Promise<RenderedCampaign>;
@@ -236,7 +267,7 @@ const safeLink = new RegExp(SAFE_RICH_TEXT_LINK_PATTERN, "u");
 
 function validateInput(input: CampaignAuthoringInput): CampaignAuthoringInput {
   const subject = requireText(input.subject, 200);
-  const introduction = requireText(input.introduction, 1_000);
+  const previewText = requireText(input.previewText, 1_000);
   const callToAction = Object.freeze({
     label: requireText(input.callToAction.label, 200),
     href: input.callToAction.href.trim(),
@@ -248,10 +279,10 @@ function validateInput(input: CampaignAuthoringInput): CampaignAuthoringInput {
     validateRichTextDocument(structuredClone(input.emailContent)),
   );
   const senderIdentityId = requireText(input.senderIdentityId, 200);
-  const complianceFooterVersion = requireText(
-    input.complianceFooterVersion,
-    200,
-  );
+  const complianceFooter = Object.freeze({
+    version: requireText(input.complianceFooter.version, 200),
+    content: requireText(input.complianceFooter.content, 2_000),
+  });
   if (
     input.audienceDefinition.id !== campaignAudienceDefinition.id ||
     input.audienceDefinition.version !== campaignAudienceDefinition.version
@@ -260,11 +291,11 @@ function validateInput(input: CampaignAuthoringInput): CampaignAuthoringInput {
   }
   return Object.freeze({
     subject,
-    introduction,
+    previewText,
     callToAction,
     emailContent,
     senderIdentityId,
-    complianceFooterVersion,
+    complianceFooter,
     audienceDefinition: campaignAudienceDefinition,
   });
 }
@@ -307,6 +338,9 @@ function renderTextNode(node: RichTextText): string {
 
 const renderInline = (children: RichTextParagraph["children"]) =>
   children.map(renderTextNode).join("");
+const renderListItemInline = (
+  item: Readonly<{ children: ReadonlyArray<RichTextParagraph> }>,
+) => renderInline(item.children[0]!.children);
 
 function renderRichTextHtml(document: RichTextDocument): string {
   return document.children
@@ -325,14 +359,14 @@ function renderRichTextHtml(document: RichTextDocument): string {
           `<ul>${list.children
             .map(
               (item) =>
-                `<li>${renderInline(item.children[0]!.children)}</li>`,
+                `<li>${renderListItemInline(item)}</li>`,
             )
             .join("")}</ul>`,
         orderedList: (list) =>
           `<ol>${list.children
             .map(
               (item) =>
-                `<li>${renderInline(item.children[0]!.children)}</li>`,
+                `<li>${renderListItemInline(item)}</li>`,
             )
             .join("")}</ol>`,
       }),
@@ -386,25 +420,25 @@ function renderCampaignBytes(revision: CampaignRevision) {
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
     `<title>${escapeHtml(revision.subject)}</title></head><body>`,
-    `<p>${escapeHtml(revision.introduction)}</p>`,
+    `<p>${escapeHtml(revision.previewText)}</p>`,
     renderRichTextHtml(revision.emailContent),
     `<p><a href="${escapeHtml(revision.callToAction.href)}">${escapeHtml(
       revision.callToAction.label,
     )}</a></p>`,
-    `<footer>${escapeHtml(revision.complianceFooterVersion)}</footer>`,
+    `<footer>${escapeHtml(revision.complianceFooter.content)}</footer>`,
     "</body></html>",
   ].join("");
   const plainContent = renderRichTextPlain(revision.emailContent);
   const text = [
     revision.subject,
     "",
-    revision.introduction,
+    revision.previewText,
     "",
     plainContent,
     "",
     `${revision.callToAction.label}: ${revision.callToAction.href}`,
     "",
-    revision.complianceFooterVersion,
+    revision.complianceFooter.content,
     "",
   ].join("\n");
   return { html, text };
@@ -435,11 +469,11 @@ async function renderCampaign(
       revision.campaignId,
       revision.id,
       revision.subject,
-      revision.introduction,
+      revision.previewText,
       htmlFingerprint,
       textFingerprint,
       revision.senderIdentityId,
-      revision.complianceFooterVersion,
+      revision.complianceFooter.version,
       revision.audienceDefinition.id,
       String(revision.audienceDefinition.version),
       revision.schemaVersion,
@@ -454,11 +488,15 @@ async function renderCampaign(
       channel: "html",
       bytes: bytes.html,
       fingerprint: htmlFingerprint,
+      schemaVersion: revision.schemaVersion,
+      rendererVersion: revision.rendererVersion,
     }),
     text: Object.freeze({
       channel: "text",
       bytes: bytes.text,
       fingerprint: textFingerprint,
+      schemaVersion: revision.schemaVersion,
+      rendererVersion: revision.rendererVersion,
     }),
     campaignFingerprint,
     eligibleSubscriberCount,
@@ -479,9 +517,9 @@ export function createCampaignApplication({
   siteId: SiteId;
   store: CampaignStore;
   authorize(
-    actor: ExternalHumanIdentity,
-    capability: HumanCapability,
-  ): Promise<HumanMembership>;
+    actor: CampaignActor,
+    capability: "campaign.author",
+  ): Promise<CampaignAuthor>;
   findPostRevision(
     siteId: SiteId,
     revisionId: string,
@@ -492,10 +530,35 @@ export function createCampaignApplication({
   rendererVersion: string;
   schemaVersion: SiteDefinition["schemaVersion"];
   clock?: () => Date;
-  createId?: (kind: "campaign" | "campaign_revision") => string;
+  createId?: (kind: "campaign" | "campaign_revision" | "audit") => string;
 }): CampaignApplication {
-  async function requireAuthor(actor: ExternalHumanIdentity) {
-    return authorize(actor, "content.write");
+  async function requireAuthor(actor: CampaignActor) {
+    return authorize(actor, "campaign.author");
+  }
+  const normalizedRendererVersion = requireText(rendererVersion, 200);
+
+  async function audited<T>(
+    actor: CampaignActor,
+    action: CampaignAuditEvent["action"],
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const actorId =
+      "binding" in actor ? actor.binding.subject : actor.connectionId;
+    try {
+      return await operation();
+    } catch (error) {
+      await store.recordAudit({
+        id: createId("audit"),
+        siteId,
+        actorId,
+        action,
+        outcome: "rejected",
+        reason:
+          error instanceof Error ? error.message : "campaign_command_rejected",
+        occurredAt: clock().toISOString(),
+      });
+      throw error;
+    }
   }
 
   async function getCampaign(campaignId: CampaignId) {
@@ -522,11 +585,11 @@ export function createCampaignApplication({
   }
 
   async function createFirstRevision({
-    membership,
+    author,
     input,
     provenance,
   }: {
-    membership: HumanMembership;
+    author: CampaignAuthor;
     input: CampaignAuthoringInput;
     provenance: CampaignProvenance;
   }) {
@@ -542,20 +605,33 @@ export function createCampaignApplication({
       provenance,
       ...authored,
       schemaVersion,
-      rendererVersion,
+      rendererVersion: normalizedRendererVersion,
       createdAt: timestamp,
-      createdByMembershipId: membership.id,
+      createdByActorId: author.id,
     });
     const campaign: Campaign = Object.freeze({
       id: campaignId,
       siteId,
       lifecycleState: "draft",
       currentRevisionId: revisionId,
+      testDeliveryId: null,
+      bulkAuthorizationId: null,
+      activeScheduleId: null,
+      providerCancellationRequired: false,
       version: 1,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
-    if (!(await store.create({ campaign, revision }))) {
+    const audit: CampaignAuditEvent = Object.freeze({
+      id: createId("audit"),
+      siteId,
+      actorId: author.id,
+      action: "campaign.create",
+      outcome: "accepted",
+      reason: null,
+      occurredAt: timestamp,
+    });
+    if (!(await store.create({ campaign, revision, audit }))) {
       throw new CampaignConflictError();
     }
     return Object.freeze({ campaign, revision });
@@ -563,56 +639,63 @@ export function createCampaignApplication({
 
   const commands: CampaignApplication["commands"] = Object.freeze({
       async createStandalone({ actor, input }) {
-        const membership = await requireAuthor(actor);
-        return createFirstRevision({
-          membership,
-          input,
-          provenance: Object.freeze({ kind: "standalone" }),
+        return audited(actor, "campaign.create", async () => {
+          const author = await requireAuthor(actor);
+          return createFirstRevision({
+            author,
+            input,
+            provenance: Object.freeze({ kind: "standalone" }),
+          });
         });
       },
       async createFromPost({
         actor,
         sourcePostRevisionId,
         senderIdentityId,
-        complianceFooterVersion,
+        complianceFooter,
         audienceDefinition,
       }) {
-        const membership = await requireAuthor(actor);
-        const postRevisionId = createSourcePostRevisionId(
-          sourcePostRevisionId,
-        );
-        const post = await findPostRevision(siteId, postRevisionId);
-        if (post === null) {
-          throw new CampaignNotFoundError();
-        }
-        return createFirstRevision({
-          membership,
-          input: {
+        return audited(actor, "campaign.create", async () => {
+          const author = await requireAuthor(actor);
+          const postRevisionId = createSourcePostRevisionId(
+            sourcePostRevisionId,
+          );
+          const post = await findPostRevision(siteId, postRevisionId);
+          if (post === null) {
+            throw new CampaignNotFoundError();
+          }
+          return createFirstRevision({
+            author,
+            input: {
             subject: post.title,
-            introduction: post.excerpt,
+            previewText: post.excerpt,
             callToAction: {
               label: "Read more",
               href: `/blog/${post.slug}`,
             },
             emailContent: post.body,
             senderIdentityId,
-            complianceFooterVersion,
+            complianceFooter,
             audienceDefinition,
-          },
-          provenance: Object.freeze({
+            },
+            provenance: Object.freeze({
             kind: "post_revision",
             postId: post.id,
             postRevisionId,
             postRevisionNumber: post.revision,
-          }),
+            }),
+          });
         });
       },
       async edit({ actor, campaignId, expectedVersion, input }) {
-        const membership = await requireAuthor(actor);
-        const current = await getCampaign(campaignId);
+        return audited(actor, "campaign.edit", async () => {
+          const author = await requireAuthor(actor);
+          const current = await getCampaign(campaignId);
         if (
           current.version !== expectedVersion ||
-          current.lifecycleState !== "draft"
+          ["preparing_send", "provider_queued", "sending", "sent"].includes(
+            current.lifecycleState,
+          )
         ) {
           throw new CampaignConflictError();
         }
@@ -633,13 +716,22 @@ export function createCampaignApplication({
           provenance: currentRevision.provenance,
           ...authored,
           schemaVersion,
-          rendererVersion,
+          rendererVersion: normalizedRendererVersion,
           createdAt: timestamp,
-          createdByMembershipId: membership.id,
+          createdByActorId: author.id,
         });
         const campaign: Campaign = Object.freeze({
           ...current,
+          lifecycleState: "draft",
           currentRevisionId: revisionId,
+          testDeliveryId: null,
+          bulkAuthorizationId: null,
+          activeScheduleId: null,
+          providerCancellationRequired:
+            current.testDeliveryId !== null ||
+            current.bulkAuthorizationId !== null ||
+            current.activeScheduleId !== null ||
+            current.lifecycleState !== "draft",
           version: current.version + 1,
           updatedAt: timestamp,
         });
@@ -648,11 +740,21 @@ export function createCampaignApplication({
             expectedVersion,
             campaign,
             revision,
+            audit: Object.freeze({
+              id: createId("audit"),
+              siteId,
+              actorId: author.id,
+              action: "campaign.edit",
+              outcome: "accepted",
+              reason: null,
+              occurredAt: timestamp,
+            }),
           }))
         ) {
           throw new CampaignConflictError();
         }
-        return Object.freeze({ campaign, revision });
+          return Object.freeze({ campaign, revision });
+        });
       },
     });
   const queries: CampaignApplication["queries"] = Object.freeze({
@@ -672,7 +774,18 @@ export function createCampaignApplication({
           revisionNumber ?? campaign.version,
         );
         const audience = await resolveAudience(revision.audienceDefinition);
-        return renderCampaign(revision, audience.eligibleSubscriberCount);
+        const rendered = await renderCampaign(
+          revision,
+          audience.eligibleSubscriberCount,
+        );
+        await store.saveRenderedArtifacts({
+          siteId,
+          campaignRevisionId: revision.id,
+          html: rendered.html,
+          text: rendered.text,
+          campaignFingerprint: rendered.campaignFingerprint,
+        });
+        return rendered;
       },
     });
   return Object.freeze({

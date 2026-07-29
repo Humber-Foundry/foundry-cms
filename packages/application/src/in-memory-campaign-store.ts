@@ -1,8 +1,17 @@
-import type { Campaign, CampaignRevision, CampaignStore } from "./campaign";
+import type {
+  Campaign,
+  CampaignAuditEvent,
+  CampaignRevision,
+  CampaignStore,
+} from "./campaign";
 
-export function createInMemoryCampaignStore(): CampaignStore {
+export function createInMemoryCampaignStore(): CampaignStore & {
+  listAuditEvents(): ReadonlyArray<CampaignAuditEvent>;
+} {
   const campaigns = new Map<string, Campaign>();
   const revisions = new Map<string, CampaignRevision>();
+  const artifacts = new Map<string, string>();
+  const audits: CampaignAuditEvent[] = [];
   const revisionKey = (
     revision: Pick<
       CampaignRevision,
@@ -10,13 +19,16 @@ export function createInMemoryCampaignStore(): CampaignStore {
     >,
   ) => `${revision.siteId}:${revision.campaignId}:${revision.revisionNumber}`;
 
-  const store: CampaignStore = {
-    async create({ campaign, revision }) {
+  const store: CampaignStore & {
+    listAuditEvents(): ReadonlyArray<CampaignAuditEvent>;
+  } = {
+    async create({ campaign, revision, audit }) {
       if (campaigns.has(`${campaign.siteId}:${campaign.id}`)) {
         return false;
       }
       campaigns.set(`${campaign.siteId}:${campaign.id}`, campaign);
       revisions.set(revisionKey(revision), revision);
+      audits.push(audit);
       return true;
     },
     async findCampaign({ siteId, campaignId }) {
@@ -27,7 +39,7 @@ export function createInMemoryCampaignStore(): CampaignStore {
         revisions.get(`${siteId}:${campaignId}:${revisionNumber}`) ?? null
       );
     },
-    async appendRevision({ expectedVersion, campaign, revision }) {
+    async appendRevision({ expectedVersion, campaign, revision, audit }) {
       const key = `${campaign.siteId}:${campaign.id}`;
       const current = campaigns.get(key);
       if (
@@ -39,7 +51,27 @@ export function createInMemoryCampaignStore(): CampaignStore {
       }
       campaigns.set(key, campaign);
       revisions.set(revisionKey(revision), revision);
+      audits.push(audit);
       return true;
+    },
+    async saveRenderedArtifacts(input) {
+      const key = `${input.siteId}:${input.campaignRevisionId}`;
+      const serialized = JSON.stringify({
+        html: input.html,
+        text: input.text,
+        campaignFingerprint: input.campaignFingerprint,
+      });
+      const existing = artifacts.get(key);
+      if (existing !== undefined && existing !== serialized) {
+        throw new Error("campaign_artifact_immutable");
+      }
+      artifacts.set(key, serialized);
+    },
+    async recordAudit(event) {
+      audits.push(Object.freeze({ ...event }));
+    },
+    listAuditEvents() {
+      return [...audits];
     },
   };
   return Object.freeze(store);

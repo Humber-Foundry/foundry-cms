@@ -80,14 +80,17 @@ const sourcePost: BlogPost = {
 };
 const standaloneInput: CampaignAuthoringInput = {
   subject: "A standalone campaign",
-  introduction: "An introduction with <unsafe> punctuation & symbols.",
+  previewText: "An introduction with <unsafe> punctuation & symbols.",
   callToAction: {
     label: "Read the update",
     href: "https://example.com/update?from=email&kind=campaign",
   },
   emailContent: createRichTextDocumentFromPlainText("Standalone email body."),
   senderIdentityId: "sender_primary",
-  complianceFooterVersion: "footer-v1",
+  complianceFooter: {
+    version: "footer-v1",
+    content: "You are receiving this update from Foundry.",
+  },
   audienceDefinition: {
     id: "canonical-consent-and-suppression",
     version: 1,
@@ -96,13 +99,17 @@ const standaloneInput: CampaignAuthoringInput = {
 
 function createFixture() {
   let id = 0;
+  let campaignId = 0;
   const store = createInMemoryCampaignStore();
-  const requestedCapabilities: HumanCapability[] = [];
+  const requestedCapabilities: string[] = [];
   const application = createCampaignApplication({
     siteId,
     store,
     authorize: async (actor, capability) => {
       requestedCapabilities.push(capability);
+      if ("type" in actor) {
+        return { id: actor.connectionId };
+      }
       if (actor.binding.subject !== editor.binding.subject) {
         throw new AccessDeniedError("capability_not_authorized");
       }
@@ -118,7 +125,10 @@ function createFixture() {
     clock: () => new Date("2026-07-29T07:00:00.000Z"),
     createId: (kind) =>
       kind === "campaign"
-        ? "20000000-0000-4000-8000-000000000001"
+        ? `20000000-0000-4000-8000-${String(++campaignId).padStart(
+            12,
+            "0",
+          )}`
         : `30000000-0000-4000-8000-${String(++id).padStart(12, "0")}`,
   });
   return { application, requestedCapabilities, store };
@@ -150,7 +160,7 @@ describe("campaign authoring and rendering", () => {
     });
     expect(Object.isFrozen(created.campaign)).toBe(true);
     expect(Object.isFrozen(created.revision)).toBe(true);
-    expect(requestedCapabilities).toEqual(["content.write"]);
+    expect(requestedCapabilities).toEqual(["campaign.author"]);
   });
 
   it("copies an exact post revision once and preserves provenance after later edits", async () => {
@@ -160,7 +170,7 @@ describe("campaign authoring and rendering", () => {
       actor: editor,
       sourcePostRevisionId,
       senderIdentityId: "sender_primary",
-      complianceFooterVersion: "footer-v1",
+      complianceFooter: standaloneInput.complianceFooter,
       audienceDefinition: standaloneInput.audienceDefinition,
     });
     const edited = await application.commands.edit({
@@ -170,7 +180,7 @@ describe("campaign authoring and rendering", () => {
       input: {
         ...standaloneInput,
         subject: "Independent subject after derivation",
-        introduction: "Independent introduction after derivation",
+        previewText: "Independent introduction after derivation",
         callToAction: {
           label: "Independent CTA",
           href: "https://example.com/independent",
@@ -184,7 +194,7 @@ describe("campaign authoring and rendering", () => {
 
     expect(created.revision).toMatchObject({
       subject: sourcePost.title,
-      introduction: sourcePost.excerpt,
+      previewText: sourcePost.excerpt,
       callToAction: {
         label: "Read more",
         href: "/blog/independent-campaigns",
@@ -201,7 +211,7 @@ describe("campaign authoring and rendering", () => {
       revisionNumber: 2,
       provenance: created.revision.provenance,
       subject: "Independent subject after derivation",
-      introduction: "Independent introduction after derivation",
+      previewText: "Independent introduction after derivation",
     });
     expect(
       await application.queries.getRevision({
@@ -250,7 +260,7 @@ describe("campaign authoring and rendering", () => {
         actor: editor,
         sourcePostRevisionId,
         senderIdentityId: "sender_primary",
-        complianceFooterVersion: "footer-v1",
+        complianceFooter: standaloneInput.complianceFooter,
         audienceDefinition: standaloneInput.audienceDefinition,
       }),
     ).rejects.toBeInstanceOf(CampaignNotFoundError);
@@ -289,7 +299,7 @@ describe("campaign authoring and rendering", () => {
         "",
         "Read the update: https://example.com/update?from=email&kind=campaign",
         "",
-        "footer-v1",
+        "You are receiving this update from Foundry.",
         "",
       ].join("\n"),
     );
@@ -359,5 +369,46 @@ describe("campaign authoring and rendering", () => {
         version: 1,
       }),
     ).resolves.toEqual({ eligibleSubscriberCount: 1 });
+  });
+
+  it("supports a site-scoped MCP authorizer and audits accepted and rejected commands", async () => {
+    const { application, store } = createFixture();
+    await application.commands.createStandalone({
+      actor: editor,
+      input: standaloneInput,
+    });
+    await application.commands.createStandalone({
+      actor: {
+        type: "mcp",
+        connectionId: "connection-1",
+        siteId,
+      },
+      input: standaloneInput,
+    });
+    await expect(
+      application.commands.createStandalone({
+        actor: editor,
+        input: { ...standaloneInput, subject: "" },
+      }),
+    ).rejects.toMatchObject({ message: "campaign_schema_invalid" });
+
+    expect(store.listAuditEvents()).toMatchObject([
+      {
+        action: "campaign.create",
+        outcome: "accepted",
+        actorId: editorMembership.id,
+      },
+      {
+        action: "campaign.create",
+        outcome: "accepted",
+        actorId: "connection-1",
+      },
+      {
+        action: "campaign.create",
+        outcome: "rejected",
+        actorId: editorMembership.id.replace("membership-", ""),
+        reason: "campaign_schema_invalid",
+      },
+    ]);
   });
 });

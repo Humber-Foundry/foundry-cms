@@ -1,5 +1,6 @@
 import type {
   ContentRevision,
+  BlogPostArtifactFingerprint,
   FailedPublicFormDelivery,
   HumanMembership,
   MediaAsset,
@@ -15,6 +16,7 @@ import { MemberAccessControls } from "./member-access-controls";
 import { FormOperationsControls } from "./form-operations-controls";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { WorkspaceEditors } from "./workspace-editors";
+import { CampaignControls } from "./campaign-controls";
 
 export function contentWorkspaceRequiresSchemaRecovery(
   definition: SiteDefinition,
@@ -48,6 +50,7 @@ export function DashboardShell({
   mediaAssets,
   mediaOccurrences,
   mediaWorkspaceId,
+  campaignPostArtifacts,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -68,6 +71,7 @@ export function DashboardShell({
   mediaAssets: ReadonlyArray<MediaAsset>;
   mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
   mediaWorkspaceId: string;
+  campaignPostArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined
@@ -154,6 +158,15 @@ export function DashboardShell({
               />
             </>
           )}
+          <CampaignControls
+            csrfToken={mutationToken}
+            postSources={campaignPostArtifacts.flatMap((artifact) => {
+              const post = definition.blog.posts.find(
+                ({ id }) => id === artifact.postId,
+              );
+              return post === undefined ? [] : [{ post, artifact }];
+            })}
+          />
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">
               <div>
