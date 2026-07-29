@@ -1,9 +1,11 @@
 import {
   parseSerializedRichTextDocument,
   richTextDocumentHasVisibleText,
+  isSiteDefinition,
   serializeRichTextDocument,
   serializeRichTextToMarkdown,
   type ProofSection,
+  type BlogPostId,
   type SerializedRichTextDocument,
   type ServicesSection,
   type SiteDefinition,
@@ -25,7 +27,7 @@ export type SiteDefinitionEdit =
 type EditableSiteFieldBase = Readonly<{
   path: string;
   label: string;
-  group: "Page" | "Navigation" | "Footer" | "SEO" | "Design";
+  group: "Page" | "Navigation" | "Footer" | "SEO" | "Design" | "Blog";
   multiline: boolean;
   values?: ReadonlyArray<string>;
 }>;
@@ -58,6 +60,7 @@ type MutableSiteDefinition = DeepMutable<SiteDefinition>;
 
 type EditableFieldBinding = Readonly<{
   field: EditableSiteField;
+  blogPostId?: BlogPostId;
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
@@ -77,6 +80,7 @@ type EditableFieldBindingInput = Readonly<{
   group: EditableSiteField["group"];
   multiline?: boolean;
   values?: ReadonlyArray<string>;
+  blogPostId?: BlogPostId;
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
@@ -96,6 +100,7 @@ function fieldBinding({
   multiline = false,
   format = "plainText",
   values,
+  blogPostId,
   write,
 }: EditableFieldBindingInput &
   Readonly<{
@@ -112,6 +117,7 @@ function fieldBinding({
       format,
       ...(values === undefined ? {} : { values }),
     } as EditableSiteField,
+    ...(blogPostId === undefined ? {} : { blogPostId }),
     write,
   };
 }
@@ -440,6 +446,62 @@ function editableFieldBindings(
     }
   });
 
+  definition.blog.posts.forEach((post, postIndex) => {
+    const bindPostField = (
+      property: "slug" | "title" | "excerpt",
+      label: string,
+      multiline = false,
+    ) => {
+      fields.push(
+        fieldBinding({
+          path: `${post.id}.${property}`,
+          blogPostId: post.id,
+          label,
+          group: "Blog",
+          value: post[property],
+          multiline,
+          write: (draft, value) => {
+            draft.blog.posts[postIndex]![property] = value;
+          },
+        }),
+      );
+    };
+    bindPostField("slug", "Post slug");
+    bindPostField("title", "Post title");
+    bindPostField("excerpt", "Post excerpt", true);
+    for (const property of ["title", "description"] as const) {
+      fields.push(
+        fieldBinding({
+          path: `${post.id}.seo.${property}`,
+          blogPostId: post.id,
+          label: `Post SEO ${property}`,
+          group: "Blog",
+          value: post.seo[property],
+          multiline: property === "description",
+          write: (draft, value) => {
+            draft.blog.posts[postIndex]!.seo[property] = value;
+          },
+        }),
+      );
+    }
+    fields.push(
+      fieldBinding({
+        path: `${post.id}.body`,
+        blogPostId: post.id,
+        label: "Post body",
+        group: "Blog",
+        value: serializeRichTextDocument(post.body),
+        multiline: true,
+        format: "richText",
+        write: (draft, value) => {
+          (
+            draft.blog.posts[postIndex] as unknown as Record<string, unknown>
+          ).body = parseSerializedRichTextDocument(value);
+        },
+      }),
+    );
+  });
+
   const paths = new Set<string>();
   for (const binding of fields) {
     if (paths.has(binding.field.path)) {
@@ -465,20 +527,50 @@ export type PublishedRichTextArtifact = Readonly<{
 export function serializeSiteDefinitionRichTextForPublication(
   definition: SiteDefinition,
 ): ReadonlyArray<PublishedRichTextArtifact> {
-  return listEditableSiteFields(definition)
+  const publicPostIds = new Set(
+    definition.blog.posts
+      .filter(({ targetVisibility }) => targetVisibility === "public")
+      .map(({ id }) => id),
+  );
+  return editableFieldBindings(definition)
     .filter(
       (
-        field,
-      ): field is Extract<EditableSiteField, { format: "richText" }> =>
-        field.format === "richText",
+        binding,
+      ): binding is EditableFieldBinding & {
+        field: Extract<EditableSiteField, { format: "richText" }>;
+      } =>
+        binding.field.format === "richText" &&
+        (binding.field.group !== "Blog" ||
+          (binding.blogPostId !== undefined &&
+            publicPostIds.has(binding.blogPostId))),
     )
-    .map((field) => ({
+    .map(({ field }) => ({
       fieldPath: field.path,
       filePath: `content/rich-text/${field.path.replaceAll(".", "/")}.md`,
       markdown: serializeRichTextToMarkdown(
         parseSerializedRichTextDocument(field.value),
       ),
     }));
+}
+
+export function blogPostIdsForSiteDefinitionEdits(
+  definition: SiteDefinition,
+  edits: ReadonlyArray<SiteDefinitionEdit>,
+): ReadonlyArray<BlogPostId> {
+  const bindings = new Map(
+    editableFieldBindings(definition).map((binding) => [
+      binding.field.path,
+      binding,
+    ]),
+  );
+  return [
+    ...new Set(
+      edits.flatMap(({ path }) => {
+        const postId = bindings.get(path)?.blogPostId;
+        return postId === undefined ? [] : [postId];
+      }),
+    ),
+  ];
 }
 
 export function updateEditableSiteField(
@@ -521,6 +613,9 @@ export function applySiteDefinitionEdits(
   );
   const errors = Object.create(null) as Record<string, string>;
   for (const edit of edits) {
+    const editedPostSlug = definition.blog.posts.some(
+      ({ id }) => edit.path === `${id}.slug`,
+    );
     if (!bindings.has(edit.path)) {
       errors[edit.path] =
         `This field is not in Site Definition ${definition.definitionVersion}.`;
@@ -533,6 +628,13 @@ export function applySiteDefinitionEdits(
       edit.value.trim() === ""
     ) {
       errors[edit.path] = "Enter at least one visible character.";
+    } else if (
+      editedPostSlug &&
+      (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(edit.value) ||
+        edit.value.length > 120)
+    ) {
+      errors[edit.path] =
+        "Use at most 120 lowercase letters, numbers, and single hyphens.";
     } else if (bindings.get(edit.path)!.field.format === "richText") {
       try {
         const document = parseSerializedRichTextDocument(edit.value);
@@ -559,8 +661,44 @@ export function applySiteDefinitionEdits(
   const draft = structuredClone(
     definition,
   ) as unknown as MutableSiteDefinition;
+  const editedPostIds = new Set<string>();
   for (const edit of edits) {
-    bindings.get(edit.path)!.write(draft, edit.value);
+    const binding = bindings.get(edit.path)!;
+    binding.write(draft, edit.value);
+    if (binding.blogPostId !== undefined) {
+      editedPostIds.add(binding.blogPostId);
+    }
+  }
+  for (const postId of editedPostIds) {
+    const post = draft.blog.posts.find(({ id }) => id === postId);
+    if (post !== undefined) {
+      post.revision += 1;
+    }
+  }
+  const postsBySlug = new Map<string, string[]>();
+  for (const post of draft.blog.posts) {
+    const postIds = postsBySlug.get(post.slug) ?? [];
+    postIds.push(post.id);
+    postsBySlug.set(post.slug, postIds);
+  }
+  const duplicateSlugErrors = Object.create(null) as Record<string, string>;
+  for (const postIds of postsBySlug.values()) {
+    if (postIds.length < 2) {
+      continue;
+    }
+    for (const postId of postIds) {
+      duplicateSlugErrors[`${postId}.slug`] =
+        "Choose a URL slug that is unique within this site.";
+    }
+  }
+  if (Object.keys(duplicateSlugErrors).length > 0) {
+    return { ok: false, errors: duplicateSlugErrors };
+  }
+  if (!isSiteDefinition(draft)) {
+    return {
+      ok: false,
+      errors: { blog: "The blog post does not match the current schema." },
+    };
   }
   return {
     ok: true,

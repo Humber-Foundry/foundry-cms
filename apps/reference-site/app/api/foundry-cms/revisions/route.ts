@@ -14,6 +14,10 @@ import {
 } from "@foundry/application";
 import {
   createSerializedRichTextDocument,
+  createBlogPostId,
+  parseSerializedRichTextDocument,
+  referenceSiteDefinition,
+  RichTextValidationError,
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -55,6 +59,199 @@ type SaveBody = {
   composition?: PageComposition;
 };
 
+type BlogMutationBody =
+  | Readonly<{
+      operation: "create_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      post: Omit<
+        SiteDefinition["blog"]["posts"][number],
+        "revision" | "collectionState" | "targetVisibility"
+      >;
+    }>
+  | Readonly<{
+      operation: "edit_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      postId: SiteDefinition["blog"]["posts"][number]["id"];
+      post: Omit<
+        SiteDefinition["blog"]["posts"][number],
+        "id" | "revision" | "collectionState" | "targetVisibility"
+      >;
+    }>
+  | Readonly<{
+      operation: "unpublish_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      postId: SiteDefinition["blog"]["posts"][number]["id"];
+    }>
+  | Readonly<{
+      operation: "republish_blog_post";
+      workspaceId: ReturnType<typeof createContentWorkspaceId>;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      postId: SiteDefinition["blog"]["posts"][number]["id"];
+    }>;
+
+type BlogMutationOperation = BlogMutationBody["operation"];
+
+const blogMutationCommandTypes: Readonly<
+  Record<
+    BlogMutationOperation,
+    | "blog.post.create"
+    | "blog.post.edit"
+    | "blog.post.unpublish"
+    | "blog.post.republish"
+  >
+> = {
+  create_blog_post: "blog.post.create",
+  edit_blog_post: "blog.post.edit",
+  unpublish_blog_post: "blog.post.unpublish",
+  republish_blog_post: "blog.post.republish",
+};
+
+function isBlogMutationOperation(
+  value: unknown,
+): value is BlogMutationOperation {
+  return (
+    typeof value === "string" &&
+    Object.hasOwn(blogMutationCommandTypes, value)
+  );
+}
+
+function parseBlogMutation(value: unknown): BlogMutationBody | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!isBlogMutationOperation(candidate.operation)) {
+    return null;
+  }
+  if (
+    typeof candidate.workspaceId !== "string" ||
+    candidate.schemaVersion !== referenceSiteDefinition.schemaVersion ||
+    !Number.isSafeInteger(candidate.baseRevision) ||
+    (candidate.baseRevision as number) < 0
+  ) {
+    throw new TypeError("blog_command_invalid");
+  }
+  const common = {
+    workspaceId: createContentWorkspaceId(candidate.workspaceId),
+    schemaVersion: candidate.schemaVersion,
+    baseRevision: candidate.baseRevision as number,
+  };
+  if (
+    candidate.operation === "unpublish_blog_post" ||
+    candidate.operation === "republish_blog_post"
+  ) {
+    if (typeof candidate.postId !== "string") {
+      throw new TypeError("blog_command_invalid");
+    }
+    return {
+      operation: candidate.operation,
+      ...common,
+      postId: createBlogPostId(candidate.postId),
+    };
+  }
+  if (typeof candidate.post !== "object" || candidate.post === null) {
+    throw new TypeError("blog_command_invalid");
+  }
+  const post = candidate.post as Record<string, unknown>;
+  if (
+    typeof post.slug !== "string" ||
+    typeof post.title !== "string" ||
+    typeof post.excerpt !== "string" ||
+    typeof post.seo !== "object" ||
+    post.seo === null ||
+    typeof (post.seo as Record<string, unknown>).title !== "string" ||
+    typeof (post.seo as Record<string, unknown>).description !== "string" ||
+    typeof post.body !== "string"
+  ) {
+    throw new TypeError("blog_command_invalid");
+  }
+  const content = {
+    slug: post.slug,
+    title: post.title,
+    excerpt: post.excerpt,
+    seo: {
+      title: (post.seo as Record<string, string>).title!,
+      description: (post.seo as Record<string, string>).description!,
+    },
+    body: parseSerializedRichTextDocument(
+      createSerializedRichTextDocument(post.body),
+    ),
+  };
+  if (candidate.operation === "create_blog_post") {
+    if (typeof post.id !== "string") {
+      throw new TypeError("blog_command_invalid");
+    }
+    return {
+      operation: candidate.operation,
+      ...common,
+      post: { id: createBlogPostId(post.id), ...content },
+    };
+  }
+  if (typeof candidate.postId !== "string") {
+    throw new TypeError("blog_command_invalid");
+  }
+  return {
+    operation: candidate.operation,
+    ...common,
+    postId: createBlogPostId(candidate.postId),
+    post: content,
+  };
+}
+
+async function saveBlogMutation(
+  application: Awaited<ReturnType<typeof loadContentRevisionApplication>>,
+  mutation: BlogMutationBody,
+  command: {
+    actorId: ReturnType<typeof createContentActorId>;
+    workspaceId: BlogMutationBody["workspaceId"];
+    siteId: SiteDefinition["site"]["id"];
+    schemaVersion: SiteDefinition["schemaVersion"];
+    baseRevision: number;
+    idempotencyKey: string;
+  },
+) {
+  switch (mutation.operation) {
+    case "create_blog_post":
+      return application.commands.createBlogPost({
+        ...command,
+        post: mutation.post,
+      });
+    case "edit_blog_post":
+      return application.commands.editBlogPost({
+        ...command,
+        postId: mutation.postId,
+        post: mutation.post,
+      });
+    case "unpublish_blog_post":
+      return application.commands.unpublishBlogPost({
+        ...command,
+        postId: mutation.postId,
+      });
+    case "republish_blog_post":
+      return application.commands.republishBlogPost({
+        ...command,
+        postId: mutation.postId,
+      });
+  }
+}
+
+function selectedBlogPostId(
+  mutation: BlogMutationBody,
+): SiteDefinition["blog"]["posts"][number]["id"] | null {
+  return mutation.operation === "unpublish_blog_post"
+    ? null
+    : mutation.operation === "create_blog_post"
+      ? mutation.post.id
+      : mutation.postId;
+}
+
 export async function GET(request: Request) {
   try {
     const authenticated = await loadHumanIdentityRequestContext(
@@ -67,6 +264,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceParameter = url.searchParams.get("workspaceId");
     const revisionParameter = url.searchParams.get("revision");
+    const postParameter = url.searchParams.get("post");
     const mediaAccessToken = url.searchParams.get("accessToken");
     if (workspaceParameter === null && revisionParameter === null) {
       return Response.json(
@@ -103,6 +301,15 @@ export async function GET(request: Request) {
     ) {
       return Response.json({ error: "preview_unavailable" }, { status: 409 });
     }
+    if (
+      postParameter !== null &&
+      !revision.definition.blog.posts.some(
+        ({ slug, targetVisibility }) =>
+          slug === postParameter && targetVisibility === "public",
+      )
+    ) {
+      return Response.json({ error: "preview_unavailable" }, { status: 409 });
+    }
     const capability = await createRevisionPreviewCapability({
       identity: access.identity,
       workspaceId,
@@ -132,7 +339,11 @@ export async function GET(request: Request) {
         : { accessToken: mediaAccessToken }),
     });
     const previewUrl =
-      `/__foundry/preview/${workspaceId}/${revisionNumber}?${previewQuery.toString()}`;
+      `/__foundry/preview/${workspaceId}/${revisionNumber}` +
+      (postParameter === null
+        ? ""
+        : `/blog/${encodeURIComponent(postParameter)}`) +
+      `?${previewQuery.toString()}`;
     return Response.redirect(new URL(previewUrl, request.url), 307);
   } catch (error) {
     if (
@@ -281,6 +492,107 @@ export async function POST(request: Request) {
     const submitted: unknown = await request.json();
     const actorId = createContentActorId(access.membership.id);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";
+    let blogMutation: BlogMutationBody | null;
+    try {
+      blogMutation = parseBlogMutation(submitted);
+    } catch (error) {
+      if (
+        (error instanceof TypeError ||
+          error instanceof RichTextValidationError) &&
+        typeof submitted === "object" &&
+        submitted !== null &&
+        "operation" in submitted &&
+        isBlogMutationOperation(submitted.operation)
+      ) {
+        const candidate = submitted as Record<string, unknown>;
+        const rawPostId =
+          candidate.operation === "create_blog_post" &&
+          typeof candidate.post === "object" &&
+          candidate.post !== null
+            ? (candidate.post as Record<string, unknown>).id
+            : candidate.postId;
+        let postId = null;
+        if (typeof rawPostId === "string") {
+          try {
+            postId = createBlogPostId(rawPostId);
+          } catch {
+            // A malformed target is represented by the null audit target.
+          }
+        }
+        let workspaceId = await contentWorkspaceIdForActor(actorId);
+        if (typeof candidate.workspaceId === "string") {
+          try {
+            const requestedWorkspaceId = createContentWorkspaceId(
+              candidate.workspaceId,
+            );
+            await requireExistingContentWorkspaceAccess(
+              requestedWorkspaceId,
+              actorId,
+            );
+            workspaceId = requestedWorkspaceId;
+          } catch (workspaceError) {
+            if (
+              !(workspaceError instanceof TypeError) &&
+              !(workspaceError instanceof ContentWorkspaceAccessError)
+            ) {
+              throw workspaceError;
+            }
+          }
+        }
+        const application = await loadContentRevisionApplication(
+          workspaceId,
+          actorId,
+        );
+        await application.commands.recordRejectedBlogPostCommand({
+          actorId,
+          postId,
+          commandType:
+            blogMutationCommandTypes[
+              candidate.operation as BlogMutationOperation
+            ],
+          reasonCode: "blog_command_invalid",
+          requestId: idempotencyKey,
+        });
+        return Response.json({ error: "invalid_command" }, { status: 400 });
+      }
+      throw error;
+    }
+    if (blogMutation !== null) {
+      const application = await loadContentRevisionApplication(
+        blogMutation.workspaceId,
+        actorId,
+      );
+      const command = {
+        actorId,
+        workspaceId: blogMutation.workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: blogMutation.schemaVersion,
+        baseRevision: blogMutation.baseRevision,
+        idempotencyKey,
+      };
+      const saved = await saveBlogMutation(
+        application,
+        blogMutation,
+        command,
+      );
+      const selectedId = selectedBlogPostId(blogMutation);
+      const selectedPost = saved.definition.blog.posts.find(
+        ({ id }) => id === selectedId,
+      );
+      const previewQuery =
+        selectedPost === undefined
+          ? ""
+          : `&post=${encodeURIComponent(selectedPost.slug)}`;
+      return Response.json(
+        {
+          ...saved,
+          previewUrl:
+            `${revisionPreviewGatewayUrl(saved.workspaceId, saved.revision)}` +
+            previewQuery,
+        },
+        { status: 201 },
+      );
+    }
     const operation =
       typeof submitted === "object" &&
       submitted !== null &&
@@ -484,7 +796,7 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
-    if (error instanceof SyntaxError) {
+    if (error instanceof SyntaxError || error instanceof TypeError) {
       return Response.json({ error: "invalid_command" }, { status: 400 });
     }
     throw error;

@@ -11,7 +11,11 @@ import {
   type ContentRevision,
   type ContentWorkspaceId,
 } from "./content-revisions";
-import { canonicalJson } from "./deterministic-hash";
+import {
+  createBlogPostArtifactFingerprints,
+  type BlogPostArtifactFingerprint,
+} from "./blog-artifacts";
+import { canonicalJson, sha256Text } from "./deterministic-hash";
 import type { HumanMembershipId } from "./human-access";
 
 export const publishedSiteDefinitionPath =
@@ -24,6 +28,7 @@ export type ContentSerializationVersion =
 export type ContentPublicationSchemaVersion =
   | "1.0.0"
   | "1.1.0"
+  | "1.2.0"
   | SiteDefinitionSchemaVersion;
 const publicationLeaseDurationMs = 5 * 60 * 1_000;
 
@@ -60,12 +65,14 @@ export type ContentApprovalFingerprint = Readonly<{
   channel: ContentPublicationChannel;
   channelConfigurationHash: string;
   contentHash: string;
+  revisionContentHash?: string;
   designHash: string;
   schemaVersion: ContentPublicationSchemaVersion;
   rendererVersion: string;
   productionBase: string;
   artifactHash: string;
   serializationVersion: ContentSerializationVersion;
+  postArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
 }>;
 
 export type ContentPublicationArtifact = Readonly<{
@@ -436,31 +443,58 @@ export class ContentPublicationValidationError extends Error {
   }
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 export function serializePublishedSiteDefinition(
   definition: SiteDefinition,
 ): string {
   return `${canonicalJson(definition)}\n`;
 }
 
+function publicSiteDefinition(definition: SiteDefinition): SiteDefinition {
+  const blog = (
+    definition as SiteDefinition & {
+      readonly blog?: SiteDefinition["blog"];
+    }
+  ).blog;
+  if (blog === undefined) {
+    if (
+      !["1.0.0", "1.1.0", "1.2.0"].includes(definition.schemaVersion)
+    ) {
+      throw new TypeError("site_definition_blog_missing");
+    }
+    return definition;
+  }
+  return {
+    ...definition,
+    blog: {
+      ...blog,
+      posts: blog.posts.filter(
+        ({ targetVisibility }) => targetVisibility === "public",
+      ),
+    },
+  };
+}
+
 export function serializeContentPublicationArtifacts(
   definition: SiteDefinition,
 ): ReadonlyArray<ContentPublicationArtifact> {
+  const publicDefinition = publicSiteDefinition(definition);
+  const richTextDefinition =
+    (
+      publicDefinition as SiteDefinition & {
+        readonly blog?: SiteDefinition["blog"];
+      }
+    ).blog === undefined
+      ? {
+          ...publicDefinition,
+          blog: { id: "blog" as const, posts: [] },
+        }
+      : publicDefinition;
   return [
     {
       path: publishedSiteDefinitionPath,
-      bytes: serializePublishedSiteDefinition(definition),
+      bytes: serializePublishedSiteDefinition(publicDefinition),
     },
-    ...serializeSiteDefinitionRichTextForPublication(definition).map(
+    ...serializeSiteDefinitionRichTextForPublication(richTextDefinition).map(
       ({ filePath, markdown }) => ({
         path: filePath,
         bytes: markdown,
@@ -510,16 +544,16 @@ export async function hashContentPublicationArtifacts(
     sorted.map(async ({ path, bytes }) => ({
       path,
       byteLength: new TextEncoder().encode(bytes).byteLength,
-      sha256: await sha256(bytes),
+      sha256: await sha256Text(bytes),
     })),
   );
-  return sha256(canonicalJson(manifest));
+  return sha256Text(canonicalJson(manifest));
 }
 
 export function hashPublishedSiteDefinition(
   definition: SiteDefinition,
 ): Promise<string> {
-  return sha256(canonicalJson(definition));
+  return sha256Text(canonicalJson(definition));
 }
 
 function designProjection(definition: SiteDefinition) {
@@ -554,7 +588,7 @@ export async function createContentApprovalFingerprint(
   const artifactHash = await hashContentPublicationArtifacts(
     serializeContentPublicationArtifacts(revision.definition),
   );
-  const canonicalDefinitionHash = await sha256(
+  const canonicalDefinitionHash = await sha256Text(
     canonicalJson(revision.definition),
   );
   if (
@@ -563,23 +597,35 @@ export async function createContentApprovalFingerprint(
   ) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
-  const designHash = await sha256(canonicalJson(designProjection(
+  const designHash = await sha256Text(canonicalJson(designProjection(
     revision.definition,
   )));
+  const publishedContentHash = await hashPublishedSiteDefinition(
+    publicSiteDefinition(revision.definition),
+  );
+  const postArtifacts = await createBlogPostArtifactFingerprints({
+    definition: revision.definition,
+    inputs: {
+      schemaVersion: revision.definition.schemaVersion,
+      rendererVersion: revision.inputs.rendererVersion,
+    },
+  });
   const binding = {
     channel,
     channelConfigurationHash,
-    contentHash: revision.inputs.contentHash,
+    contentHash: publishedContentHash,
+    revisionContentHash: revision.inputs.contentHash,
     designHash,
     schemaVersion: revision.inputs.schemaVersion,
     rendererVersion: revision.inputs.rendererVersion,
     productionBase: revision.inputs.productionBase,
     artifactHash,
     serializationVersion: contentSerializationVersion,
+    postArtifacts,
   } as const;
   return {
     ...binding,
-    value: await sha256(canonicalJson(binding)),
+    value: await sha256Text(canonicalJson(binding)),
   };
 }
 
@@ -935,6 +981,7 @@ export function createContentPublicationApplication({
   publishedRevisions,
   draftRestorer,
   restoreSourcePublication,
+  onVerifiedLive,
   now = () => new Date().toISOString(),
 }: {
   store: ContentPublicationStore;
@@ -943,8 +990,46 @@ export function createContentPublicationApplication({
   publishedRevisions?: ContentPublishedRevisionReader;
   draftRestorer?: ContentPublicationDraftRestorer;
   restoreSourcePublication?: ContentPublication;
+  onVerifiedLive?: (
+    publication: ContentPublication,
+    revision: ContentRevision,
+  ) => Promise<void>;
   now?: () => string;
 }) {
+  async function reconcileVerifiedPublication(
+    publication: ContentPublication,
+  ) {
+    if (
+      onVerifiedLive === undefined ||
+      publication.status !== "verified-live"
+    ) {
+      return;
+    }
+    const revision = await revisions.getRevision(
+      publication.workspaceId,
+      publication.revision,
+    );
+    if (revision === null) {
+      throw new Error("verified_publication_revision_missing");
+    }
+    await onVerifiedLive(publication, revision);
+  }
+
+  if (onVerifiedLive !== undefined) {
+    const durableStore = store;
+    store = {
+      ...durableStore,
+      async updatePublication(publication, options) {
+        const updated = await durableStore.updatePublication(
+          publication,
+          options,
+        );
+        await reconcileVerifiedPublication(updated);
+        return updated;
+      },
+    };
+  }
+
   async function requireBoundRevision(
     workspaceId: ContentWorkspaceId,
     revisionNumber: number,
@@ -1039,7 +1124,7 @@ export function createContentPublicationApplication({
         approval.fingerprint.contentHash !==
           (await hashPublishedSiteDefinition(revision.definition)) ||
         approval.fingerprint.artifactHash !==
-          (await sha256(serializedDefinition)) ||
+          (await sha256Text(serializedDefinition)) ||
         approval.fingerprint.schemaVersion !==
           revision.definition.schemaVersion ||
         approval.fingerprint.rendererVersion !==
@@ -1222,7 +1307,12 @@ export function createContentPublicationApplication({
       return null;
     }
     if (
-      publication.status === "verified-live" ||
+      publication.status === "verified-live"
+    ) {
+      await reconcileVerifiedPublication(publication);
+      return publication;
+    }
+    if (
       publication.status === "failed" ||
       publication.status === "blocked"
     ) {
@@ -2496,7 +2586,7 @@ export function createContentPublicationApplication({
           approval.fingerprint.serializationVersion ===
           "foundry.site-definition.canonical-json.v1"
         ) {
-          artifactHash = await sha256(bytes);
+          artifactHash = await sha256Text(bytes);
         } else {
           let artifacts: ReadonlyArray<ContentPublicationArtifact>;
           try {

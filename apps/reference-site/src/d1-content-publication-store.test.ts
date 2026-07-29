@@ -46,6 +46,11 @@ describe("D1 content publication store", () => {
       "0008_media_assets.sql",
       "0009_content_publication_history_evidence.sql",
       "0010_content_publication_restore_identity.sql",
+      "0011_blog_post_transition_audit.sql",
+      "0012_content_approval_revision_hash.sql",
+      "0013_blog_post_verified_state.sql",
+      "0014_blog_post_artifact_fingerprints.sql",
+      "0015_blog_post_render_artifacts.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -140,6 +145,20 @@ describe("D1 content publication store", () => {
       }),
     );
     await expect(store.findApproval(next.id)).resolves.toEqual(next);
+    await expect(
+      database
+        .prepare(
+          `SELECT blog_post_artifacts_json
+           FROM content_approvals
+           WHERE id = ?1`,
+        )
+        .bind(next.id)
+        .first<{ blog_post_artifacts_json: string }>(),
+    ).resolves.toEqual({
+      blog_post_artifacts_json: JSON.stringify(
+        next.fingerprint.postArtifacts,
+      ),
+    });
     await expect(
       database
         .prepare(

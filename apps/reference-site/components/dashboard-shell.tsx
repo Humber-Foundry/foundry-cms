@@ -23,6 +23,14 @@ export function contentWorkspaceRequiresSchemaRecovery(
   return revision.inputs.schemaVersion !== definition.schemaVersion;
 }
 
+export function verifiedPublicBlogPostIds(
+  definition: SiteDefinition,
+) {
+  return definition.blog.posts
+    .filter(({ targetVisibility }) => targetVisibility === "public")
+    .map(({ id }) => id);
+}
+
 export function DashboardShell({
   definition,
   currentMembership,
@@ -129,17 +137,22 @@ export function DashboardShell({
               staleRecovery={staleRecovery}
             />
           ) : (
-            <WorkspaceEditors
-              csrfToken={contentMutationToken}
-              contentRevision={contentRevision}
-              initialPreviewUrl={initialPreviewUrl}
-              initialContentStale={initialContentStale}
-              activeWorkspaceUrl={activeWorkspaceUrl}
-              staleRecovery={staleRecovery}
-              mediaAssets={mediaAssets}
-              mediaOccurrences={mediaOccurrences}
-              mediaWorkspaceId={mediaWorkspaceId}
-            />
+            <>
+              <WorkspaceEditors
+                csrfToken={contentMutationToken}
+                contentRevision={contentRevision}
+                initialPreviewUrl={initialPreviewUrl}
+                initialContentStale={initialContentStale}
+                activeWorkspaceUrl={activeWorkspaceUrl}
+                staleRecovery={staleRecovery}
+                mediaAssets={mediaAssets}
+                mediaOccurrences={mediaOccurrences}
+                mediaWorkspaceId={mediaWorkspaceId}
+                verifiedPublicPostIds={verifiedPublicBlogPostIds(
+                  definition,
+                )}
+              />
+            </>
           )}
           <section aria-labelledby="foundation-status">
             <div className="dashboard-section-heading">

@@ -2,6 +2,14 @@ import {
   applyPageComposition,
   applySiteDefinitionEdits,
   bindSiteMediaOccurrence,
+  blogPostIdsForSiteDefinitionEdits,
+  createBlogPostDefinition,
+  editBlogPostDefinition,
+  republishBlogPostDefinition,
+  unpublishBlogPostDefinition,
+  BlogPostSchemaError,
+  type BlogPost,
+  type BlogPostId,
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -9,6 +17,11 @@ import {
   type SiteMediaOccurrence,
 } from "@foundry/site-definition";
 import { sha256CanonicalJson } from "./deterministic-hash";
+import {
+  createBlogPostArtifactFingerprint,
+  createBlogPostArtifactFingerprints,
+  type BlogPostArtifactFingerprint,
+} from "./blog-artifacts";
 
 export type ContentRevisionInputs = Readonly<{
   contentHash: string;
@@ -70,6 +83,67 @@ export type SaveContentRevisionCommand = Readonly<{
   edits: ReadonlyArray<SiteDefinitionEdit>;
   composition?: PageComposition;
   idempotencyKey: string;
+}>;
+
+type BlogPostMutationCommand = Readonly<{
+  actorId: ContentActorId;
+  workspaceId: ContentWorkspaceId;
+  siteId: SiteDefinition["site"]["id"];
+  schemaVersion: SiteDefinition["schemaVersion"];
+  baseRevision: number;
+  idempotencyKey: string;
+}>;
+
+export type CreateBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{
+    post: Omit<
+      BlogPost,
+      "revision" | "collectionState" | "targetVisibility"
+    >;
+  }>;
+
+export type EditBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{
+    postId: BlogPostId;
+    post: Omit<
+      BlogPost,
+      "id" | "revision" | "collectionState" | "targetVisibility"
+    >;
+  }>;
+
+export type UnpublishBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{ postId: BlogPostId }>;
+export type RepublishBlogPostCommand = BlogPostMutationCommand &
+  Readonly<{ postId: BlogPostId }>;
+
+type BlogPostAuditState = Readonly<{
+  revision: number;
+  targetVisibility: BlogPost["targetVisibility"];
+  aggregateRevision?: number;
+  liveRevision?: number | null;
+  aggregateVersion?: number;
+}> | null;
+
+type BlogPostTransitionAudit = Readonly<{
+  postId: BlogPostId | null;
+  commandType:
+    | "blog.post.create"
+    | "blog.post.edit"
+    | "blog.post.unpublish"
+    | "blog.post.republish";
+  requestId: string;
+  reasonCode: string;
+  beforeState: BlogPostAuditState;
+  afterState: BlogPostAuditState;
+  occurredAt: string;
+}>;
+
+type BlogPostAggregateState = Readonly<{
+  currentRevision: number;
+  liveRevision: number | null;
+  lastVerifiedRevision: number | null;
+  lastVerifiedVisibility: BlogPost["targetVisibility"] | "absent" | null;
+  version: number;
 }>;
 
 function compositionWithAuthoritativeVariants(
@@ -150,6 +224,16 @@ type PersistContentRevisionCommand = Readonly<{
     assetId: string;
     crop: SiteMediaOccurrence["crop"];
   }>;
+  blogTransitions?: ReadonlyArray<
+    Omit<BlogPostTransitionAudit, "reasonCode" | "postId"> &
+      Readonly<{
+        postId: BlogPostId;
+        revisionId: string;
+        artifact: BlogPostArtifactFingerprint;
+        observedAggregate: BlogPostAggregateState | null;
+      }>
+  >;
+  blogArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
 }>;
 
 export type ContentRevisionStore = Readonly<{
@@ -174,9 +258,16 @@ export type ContentRevisionStore = Readonly<{
   getRevisionWithBookmark(
     revision: number,
   ): Promise<SavedContentRevision | null>;
+  getBlogPostAggregate(
+    postId: BlogPostId,
+  ): Promise<BlogPostAggregateState | null>;
   persist(
     command: PersistContentRevisionCommand,
   ): Promise<SavedContentRevision>;
+  recordRejectedBlogTransition(input: {
+    workspaceId: ContentWorkspaceId;
+    actorId: ContentActorId;
+  } & BlogPostTransitionAudit): Promise<void>;
 }>;
 
 export class ContentRevisionConflictError extends Error {
@@ -332,6 +423,7 @@ export function createInMemoryContentRevisionStore({
   let currentRevision = 0;
   let ownerActorId: ContentActorId | undefined;
   const collaborators = new Set<ContentActorId>();
+  const blogPosts = new Map<BlogPostId, BlogPostAggregateState>();
 
   return {
     async initialize(initialRevision, initialOwnerActorId) {
@@ -340,6 +432,16 @@ export function createInMemoryContentRevisionStore({
         revisions.set(immutable.revision, immutable);
         currentRevision = immutable.revision;
         ownerActorId = initialOwnerActorId;
+        for (const post of initialRevision.definition.blog.posts) {
+          blogPosts.set(post.id, {
+            currentRevision: post.revision,
+            liveRevision:
+              post.targetVisibility === "public" ? post.revision : null,
+            lastVerifiedRevision: post.revision,
+            lastVerifiedVisibility: post.targetVisibility,
+            version: post.revision,
+          });
+        }
       }
     },
     async requireAccess(actorId) {
@@ -368,6 +470,10 @@ export function createInMemoryContentRevisionStore({
             `local:${revision.workspaceId}:${revision.revision}`,
           );
     },
+    async getBlogPostAggregate(postId) {
+      return blogPosts.get(postId) ?? null;
+    },
+    async recordRejectedBlogTransition() {},
     async replay(idempotencyKey, requestHash) {
       const receipt = receipts.get(idempotencyKey);
       if (receipt === undefined) {
@@ -393,6 +499,28 @@ export function createInMemoryContentRevisionStore({
         ) {
           throw new ContentRevisionConflictError(currentRevision);
         }
+        for (const transition of command.blogTransitions ?? []) {
+          const aggregate = blogPosts.get(transition.postId);
+          if (
+            (transition.beforeState === null &&
+              (transition.observedAggregate !== null ||
+                aggregate !== undefined)) ||
+            (transition.beforeState !== null &&
+              (transition.observedAggregate === null ||
+                aggregate === undefined ||
+                aggregate.currentRevision !==
+                  transition.observedAggregate.currentRevision ||
+                aggregate.liveRevision !==
+                  transition.observedAggregate.liveRevision ||
+                aggregate.lastVerifiedRevision !==
+                  transition.observedAggregate.lastVerifiedRevision ||
+                aggregate.lastVerifiedVisibility !==
+                  transition.observedAggregate.lastVerifiedVisibility ||
+                aggregate.version !== transition.observedAggregate.version))
+          ) {
+            throw new ContentRevisionConflictError(currentRevision);
+          }
+        }
         const revision = immutableRevision(command.revision);
         const saved = deepFreeze(
           withContentRevisionBookmark(
@@ -406,6 +534,17 @@ export function createInMemoryContentRevisionStore({
           requestHash: command.requestHash,
           revision: saved,
         });
+        for (const transition of command.blogTransitions ?? []) {
+          if (transition.beforeState === null) {
+            blogPosts.set(transition.postId, {
+              currentRevision: transition.afterState!.revision,
+              liveRevision: null,
+              lastVerifiedRevision: null,
+              lastVerifiedVisibility: null,
+              version: 1,
+            });
+          }
+        }
         return saved;
       };
       return mediaContentCoordinator !== undefined
@@ -471,6 +610,259 @@ export function createContentRevisionApplication({
     return initialization;
   };
 
+  function assertMutationCommand(command: {
+    actorId: ContentActorId;
+    workspaceId: ContentWorkspaceId;
+    idempotencyKey: string;
+  }) {
+    if (command.actorId !== actorId) {
+      throw new ContentWorkspaceAccessError();
+    }
+    if (!isValidContentMutationIdempotencyKey(command.idempotencyKey)) {
+      throw new ContentRevisionValidationError({
+        idempotencyKey: "Use a 16–128 character idempotency key.",
+      });
+    }
+    if (command.workspaceId !== workspaceId) {
+      throw new ContentRevisionValidationError({
+        workspaceId: "This workspace is not available.",
+      });
+    }
+  }
+
+  async function persistDefinitionMutation(input: {
+    command: {
+      actorId: ContentActorId;
+      schemaVersion: SiteDefinition["schemaVersion"];
+      baseRevision: number;
+      idempotencyKey: string;
+    };
+    requestIdentity: unknown;
+    mutate(
+      base: SiteDefinition,
+      observedBlogAggregates: ReadonlyMap<
+        BlogPostId,
+        BlogPostAggregateState | null
+      >,
+    ): SiteDefinition | Promise<SiteDefinition>;
+    blogTransitions?: ReadonlyArray<Readonly<{
+      postId: BlogPostId;
+      commandType: BlogPostTransitionAudit["commandType"];
+    }>>;
+  }) {
+    await store.requireAccess(actorId);
+    const currentProductionBase = await resolveProductionBase();
+    const requestHash = await sha256CanonicalJson(input.requestIdentity);
+    const replay = await store.replay(
+      input.command.idempotencyKey,
+      requestHash,
+    );
+    if (replay !== null) {
+      if (
+        !isContentRevisionRenderableBy(replay, {
+          schemaVersion: siteDefinition.schemaVersion,
+          rendererVersion,
+          productionBase: currentProductionBase,
+        })
+      ) {
+        throw new ContentRevisionStaleError(replay.revision);
+      }
+      return replay;
+    }
+    if (input.command.schemaVersion !== siteDefinition.schemaVersion) {
+      throw new ContentRevisionValidationError({
+        schemaVersion:
+          `Use Site Definition schema ${siteDefinition.schemaVersion}.`,
+      });
+    }
+    const base = await store.getRevision(input.command.baseRevision);
+    if (base === null) {
+      const current = await store.getCurrent();
+      throw new ContentRevisionConflictError(current.revision);
+    }
+    if (
+      !isContentRevisionRenderableBy(base, {
+        schemaVersion: siteDefinition.schemaVersion,
+        rendererVersion,
+        productionBase: currentProductionBase,
+      })
+    ) {
+      throw new ContentRevisionStaleError();
+    }
+    const observedBlogAggregates = new Map<
+      BlogPostId,
+      BlogPostAggregateState | null
+    >(
+      await Promise.all(
+        (input.blogTransitions ?? []).map(async ({ postId }) => [
+          postId,
+          await store.getBlogPostAggregate(postId),
+        ] as const),
+      ),
+    );
+    let definition: SiteDefinition;
+    try {
+      definition = await input.mutate(
+        base.definition,
+        observedBlogAggregates,
+      );
+    } catch (error) {
+      if (error instanceof BlogPostSchemaError) {
+        throw new ContentRevisionValidationError({
+          blog: error.code,
+        });
+      }
+      throw error;
+    }
+    const nextRevision: ContentRevision = {
+      workspaceId,
+      revision: input.command.baseRevision + 1,
+      definition,
+      inputs: {
+        contentHash: await sha256CanonicalJson(definition),
+        schemaVersion: definition.schemaVersion,
+        rendererVersion,
+        productionBase: base.inputs.productionBase,
+      },
+      createdAt: now(),
+      createdBy: input.command.actorId,
+    };
+    const blogTransitions =
+      input.blogTransitions === undefined
+        ? undefined
+        : await Promise.all(
+            input.blogTransitions.map(async (transition) => {
+              const post = definition.blog.posts.find(
+                ({ id }) => id === transition.postId,
+              );
+              if (post === undefined) {
+                throw new ContentRevisionConfigurationError();
+              }
+              const artifact = await createBlogPostArtifactFingerprint({
+                definition,
+                post,
+                schemaVersion: definition.schemaVersion,
+                rendererVersion,
+              });
+              return {
+                ...transition,
+                revisionId: artifact.postRevisionId,
+                artifact,
+                observedAggregate:
+                  observedBlogAggregates.get(transition.postId) ?? null,
+                requestId: input.command.idempotencyKey,
+                beforeState: blogPostAuditState(
+                  base.definition,
+                  transition.postId,
+                ),
+                afterState: blogPostAuditState(
+                  definition,
+                  transition.postId,
+                ),
+                occurredAt: nextRevision.createdAt,
+              };
+            }),
+          );
+    const blogArtifacts = await createBlogPostArtifactFingerprints({
+      definition,
+      inputs: {
+        schemaVersion: definition.schemaVersion,
+        rendererVersion,
+      },
+    });
+    return store.persist({
+      baseRevision: input.command.baseRevision,
+      idempotencyKey: input.command.idempotencyKey,
+      requestHash,
+      revision: nextRevision,
+      blogArtifacts,
+      ...(blogTransitions === undefined ? {} : { blogTransitions }),
+    });
+  }
+
+  function blogPostAuditState(
+    definition: SiteDefinition,
+    postId: BlogPostId,
+  ): BlogPostAuditState {
+    const post = definition.blog.posts.find(({ id }) => id === postId);
+    return post === undefined
+      ? null
+      : { revision: post.revision, targetVisibility: post.targetVisibility };
+  }
+
+  function blogAuditRequestId(value: string): string {
+    return isValidContentMutationIdempotencyKey(value)
+      ? value
+      : `invalid:${crypto.randomUUID()}`;
+  }
+
+  async function executeBlogMutation<Result>(
+    commandType: BlogPostTransitionAudit["commandType"],
+    command: Pick<
+      BlogPostMutationCommand,
+      | "actorId"
+      | "workspaceId"
+      | "schemaVersion"
+      | "baseRevision"
+      | "idempotencyKey"
+    >,
+    postIds: ReadonlyArray<BlogPostId>,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    if (
+      command.actorId !== actorId ||
+      command.workspaceId !== workspaceId
+    ) {
+      throw new ContentWorkspaceAccessError();
+    }
+    await store.requireAccess(actorId);
+    try {
+      assertMutationCommand(command);
+      return await operation();
+    } catch (error) {
+      let currentDefinition: SiteDefinition | null = null;
+      try {
+        currentDefinition = (await store.getCurrent()).definition;
+      } catch {
+        // Rejection audit remains valid when no workspace revision exists.
+      }
+      for (const postId of postIds) {
+        const aggregate = await store.getBlogPostAggregate(postId);
+        const snapshot =
+          currentDefinition === null
+            ? null
+            : blogPostAuditState(currentDefinition, postId);
+        const beforeState =
+          snapshot === null || aggregate === null
+            ? snapshot
+            : {
+                ...snapshot,
+                aggregateRevision: aggregate.currentRevision,
+                liveRevision: aggregate.liveRevision,
+                aggregateVersion: aggregate.version,
+              };
+        await store.recordRejectedBlogTransition({
+          workspaceId,
+          actorId,
+          postId,
+          commandType,
+          reasonCode:
+            error instanceof ContentRevisionValidationError &&
+            typeof error.fields.blog === "string"
+              ? error.fields.blog
+              : error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)
+                ? error.message
+                : "blog_post_command_rejected",
+          requestId: blogAuditRequestId(command.idempotencyKey),
+          beforeState,
+          afterState: beforeState,
+          occurredAt: now(),
+        });
+      }
+      throw error;
+    }
+  }
+
   return Object.freeze({
     workspaceId,
     rendererVersion,
@@ -497,6 +889,29 @@ export function createContentRevisionApplication({
       },
     }),
     commands: Object.freeze({
+      async recordRejectedBlogPostCommand(command: {
+        actorId: ContentActorId;
+        postId: BlogPostId | null;
+        commandType: BlogPostTransitionAudit["commandType"];
+        reasonCode: string;
+        requestId: string;
+      }) {
+        if (command.actorId !== actorId) {
+          throw new ContentWorkspaceAccessError();
+        }
+        await store.requireAccess(actorId);
+        await store.recordRejectedBlogTransition({
+          workspaceId,
+          actorId,
+          postId: command.postId,
+          commandType: command.commandType,
+          reasonCode: command.reasonCode,
+          requestId: blogAuditRequestId(command.requestId),
+          beforeState: null,
+          afterState: null,
+          occurredAt: now(),
+        });
+      },
       async create(command: CreateContentWorkspaceCommand) {
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
@@ -520,106 +935,201 @@ export function createContentRevisionApplication({
         if (command.actorId !== actorId) {
           throw new ContentWorkspaceAccessError();
         }
-        if (
-          !isValidContentMutationIdempotencyKey(command.idempotencyKey)
-        ) {
-          throw new ContentRevisionValidationError({
-            idempotencyKey: "Use a 16–128 character idempotency key.",
-          });
-        }
         if (command.workspaceId !== workspaceId) {
           throw new ContentRevisionValidationError({
             workspaceId: "This workspace is not available.",
           });
         }
         await store.requireAccess(actorId);
-        const currentProductionBase = await resolveProductionBase();
-        const requestHash = await sha256CanonicalJson({
-          actorId: command.actorId,
-          workspaceId: command.workspaceId,
-          schemaVersion: command.schemaVersion,
-          baseRevision: command.baseRevision,
-          edits: command.edits,
-          ...(command.composition === undefined
-            ? {}
-            : { composition: command.composition }),
-        });
-        const replay = await store.replay(
-          command.idempotencyKey,
-          requestHash,
-        );
-        if (replay !== null) {
-          if (
-            !isContentRevisionRenderableBy(replay, {
-              schemaVersion: siteDefinition.schemaVersion,
-              rendererVersion,
-              productionBase: currentProductionBase,
-            })
-          ) {
-            throw new ContentRevisionStaleError(replay.revision);
-          }
-          return replay;
-        }
-        if (command.schemaVersion !== siteDefinition.schemaVersion) {
-          throw new ContentRevisionValidationError({
-            schemaVersion:
-              `Use Site Definition schema ${siteDefinition.schemaVersion}.`,
-          });
-        }
-        const base = await store.getRevision(command.baseRevision);
-        if (base === null) {
-          const current = await store.getCurrent();
-          throw new ContentRevisionConflictError(current.revision);
-        }
-        if (
-          !isContentRevisionRenderableBy(base, {
-            schemaVersion: siteDefinition.schemaVersion,
-            rendererVersion,
-            productionBase: currentProductionBase,
-          })
-        ) {
-          throw new ContentRevisionStaleError();
-        }
-        const composed =
-          command.composition === undefined
-            ? { ok: true as const, definition: base.definition }
-            : applyPageComposition(
-                base.definition,
-                compositionWithAuthoritativeVariants(
-                  base.definition,
-                  command.composition,
-                  command.edits,
-                ),
-              );
-        if (!composed.ok) {
-          throw new ContentRevisionValidationError(composed.errors);
-        }
-        const edited = applySiteDefinitionEdits(
-          composed.definition,
+        const requestedBase = await store.getRevision(command.baseRevision);
+        const fieldDefinition =
+          requestedBase?.definition ?? (await store.getCurrent()).definition;
+        const blogPostIds = blogPostIdsForSiteDefinitionEdits(
+          fieldDefinition,
           command.edits,
         );
-        if (!edited.ok) {
-          throw new ContentRevisionValidationError(edited.errors);
-        }
-        const nextRevision: ContentRevision = {
-          workspaceId,
-          revision: command.baseRevision + 1,
-          definition: edited.definition,
-          inputs: {
-            contentHash: await sha256CanonicalJson(edited.definition),
-            schemaVersion: edited.definition.schemaVersion,
-            rendererVersion,
-            productionBase: base.inputs.productionBase,
+        const operation = () => persistDefinitionMutation({
+          command,
+          requestIdentity: {
+            actorId: command.actorId,
+            workspaceId: command.workspaceId,
+            schemaVersion: command.schemaVersion,
+            baseRevision: command.baseRevision,
+            edits: command.edits,
+            ...(command.composition === undefined
+              ? {}
+              : { composition: command.composition }),
           },
-          createdAt: now(),
-          createdBy: command.actorId,
-        };
-        return store.persist({
-          baseRevision: command.baseRevision,
-          idempotencyKey: command.idempotencyKey,
-          requestHash,
-          revision: nextRevision,
+          mutate(baseDefinition) {
+            const composed =
+              command.composition === undefined
+                ? { ok: true as const, definition: baseDefinition }
+                : applyPageComposition(
+                  baseDefinition,
+                  compositionWithAuthoritativeVariants(
+                    baseDefinition,
+                    command.composition,
+                    command.edits,
+                  ),
+                );
+            if (!composed.ok) {
+              throw new ContentRevisionValidationError(composed.errors);
+            }
+            const edited = applySiteDefinitionEdits(
+              composed.definition,
+              command.edits,
+            );
+            if (!edited.ok) {
+              throw new ContentRevisionValidationError(edited.errors);
+            }
+            return edited.definition;
+          },
+          ...(blogPostIds.length === 0
+            ? {}
+            : {
+                blogTransitions: blogPostIds.map((postId) => ({
+                  commandType: "blog.post.edit" as const,
+                  postId,
+                })),
+              }),
         });
+        if (blogPostIds.length === 0) {
+          assertMutationCommand(command);
+          return operation();
+        }
+        return executeBlogMutation(
+          "blog.post.edit",
+          command,
+          blogPostIds,
+          operation,
+        );
+      },
+      async createBlogPost(command: CreateBlogPostCommand) {
+        return executeBlogMutation(
+          "blog.post.create",
+          command,
+          [command.post.id],
+          () =>
+          persistDefinitionMutation({
+            command,
+            requestIdentity: { operation: "create_blog_post", ...command },
+            mutate: (definition) =>
+              createBlogPostDefinition(
+                definition,
+                command.siteId,
+                command.post,
+              ),
+            blogTransitions: [
+              {
+                commandType: "blog.post.create",
+                postId: command.post.id,
+              },
+            ],
+          }),
+        );
+      },
+      async editBlogPost(command: EditBlogPostCommand) {
+        return executeBlogMutation(
+          "blog.post.edit",
+          command,
+          [command.postId],
+          () =>
+          persistDefinitionMutation({
+            command,
+            requestIdentity: { operation: "edit_blog_post", ...command },
+            mutate: (definition) =>
+              editBlogPostDefinition(
+                definition,
+                command.siteId,
+                command.postId,
+                command.post,
+              ),
+            blogTransitions: [
+              {
+                commandType: "blog.post.edit",
+                postId: command.postId,
+              },
+            ],
+          }),
+        );
+      },
+      async unpublishBlogPost(command: UnpublishBlogPostCommand) {
+        return executeBlogMutation(
+          "blog.post.unpublish",
+          command,
+          [command.postId],
+          () =>
+            persistDefinitionMutation({
+              command,
+              requestIdentity: {
+                operation: "unpublish_blog_post",
+                ...command,
+              },
+              mutate: async (definition, observedBlogAggregates) => {
+                const aggregate =
+                  observedBlogAggregates.get(command.postId) ?? null;
+                if (
+                  aggregate?.liveRevision === null ||
+                  aggregate === null
+                ) {
+                  throw new BlogPostSchemaError("post_not_live");
+                }
+                return unpublishBlogPostDefinition(
+                  definition,
+                  command.siteId,
+                  command.postId,
+                );
+              },
+              blogTransitions: [
+                {
+                  commandType: "blog.post.unpublish",
+                  postId: command.postId,
+                },
+              ],
+            }),
+        );
+      },
+      async republishBlogPost(command: RepublishBlogPostCommand) {
+        return executeBlogMutation(
+          "blog.post.republish",
+          command,
+          [command.postId],
+          () =>
+            persistDefinitionMutation({
+              command,
+              requestIdentity: {
+                operation: "republish_blog_post",
+                ...command,
+              },
+              mutate: async (definition, observedBlogAggregates) => {
+                const aggregate =
+                  observedBlogAggregates.get(command.postId) ?? null;
+                if (
+                  aggregate === null ||
+                  aggregate.liveRevision !== null ||
+                  (
+                    aggregate.lastVerifiedVisibility !== "unpublished" &&
+                    aggregate.lastVerifiedVisibility !== "absent"
+                  )
+                ) {
+                  throw new ContentRevisionValidationError({
+                    blog: "post_not_unpublished",
+                  });
+                }
+                return republishBlogPostDefinition(
+                  definition,
+                  command.siteId,
+                  command.postId,
+                );
+              },
+              blogTransitions: [
+                {
+                  commandType: "blog.post.republish",
+                  postId: command.postId,
+                },
+              ],
+            }),
+        );
       },
       async saveMediaOccurrence(command: SaveContentMediaOccurrenceCommand) {
         if (command.actorId !== actorId) {
@@ -691,11 +1201,19 @@ export function createContentRevisionApplication({
           createdAt: now(),
           createdBy: command.actorId,
         };
+        const blogArtifacts = await createBlogPostArtifactFingerprints({
+          definition,
+          inputs: {
+            schemaVersion: definition.schemaVersion,
+            rendererVersion,
+          },
+        });
         return store.persist({
           baseRevision: command.baseRevision,
           idempotencyKey: command.idempotencyKey,
           requestHash,
           revision: nextRevision,
+          blogArtifacts,
           mediaOccurrence: {
             occurrenceId: command.occurrence.occurrenceId,
             revision: command.occurrence.revision,

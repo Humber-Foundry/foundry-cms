@@ -1,5 +1,5 @@
 export const projectedRichTextVersion = "1.0.0";
-export const projectedSiteDefinitionVersion = "1.2.0";
+export const projectedSiteDefinitionVersion = "1.3.0";
 
 const projectedDefaultSiteDesign = Object.freeze({
   typography: Object.freeze({ heading: "editorial" }),
@@ -50,7 +50,8 @@ export function projectSiteDefinitionSchema(value) {
   if (
     value.definitionVersion !== value.schemaVersion ||
     (value.schemaVersion !== "1.0.0" &&
-      value.schemaVersion !== "1.1.0")
+      value.schemaVersion !== "1.1.0" &&
+      value.schemaVersion !== "1.2.0")
   ) {
     throw new TypeError("site_definition_version_unsupported");
   }
@@ -58,6 +59,7 @@ export function projectSiteDefinitionSchema(value) {
   const needsDesignProjection = projected.schemaVersion === "1.0.0";
   projected.definitionVersion = projectedSiteDefinitionVersion;
   projected.schemaVersion = projectedSiteDefinitionVersion;
+  projected.blog ??= { id: "blog", posts: [] };
   if (needsDesignProjection) {
     projected.design ??= projectedDefaultSiteDesign;
   }

@@ -13,9 +13,7 @@ const liveCommit = "a".repeat(40);
 const failedCommit = "b".repeat(40);
 const expectedCommit = "c".repeat(40);
 const publicationId = `publish_${"d".repeat(32)}`;
-const bytes =
-  '{"definitionVersion":"1.2.0","schemaVersion":"1.2.0",' +
-  '"site":{"name":"New"},"home":{"media":[],"sections":[]}}\n';
+const bytes = `${canonicalJson(referenceSiteDefinition)}\n`;
 const currentDefinitionWithoutMedia = structuredClone(
   referenceSiteDefinition,
 );
@@ -64,6 +62,13 @@ const fixedBaseRuntimeContentHash = canonicalHash({
     ...trackedPublishedDefinition.home,
     media: trackedPublishedDefinition.home.media ?? [],
   },
+});
+const { blog: _currentBlog, ...currentDefinitionWithoutBlog } =
+  referenceSiteDefinition;
+const previousProjectedContentHash = canonicalHash({
+  ...currentDefinitionWithoutBlog,
+  definitionVersion: "1.2.0",
+  schemaVersion: "1.2.0",
 });
 const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
 
@@ -266,6 +271,26 @@ describe("exact production content authorization", () => {
       readLiveMarker: vi.fn().mockResolvedValue({
         commitSha: liveCommit,
         contentHash: fixedBaseRuntimeContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes a code-only 1.3 reader upgrade against the prior 1.2 projection hash", async () => {
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: previousProjectedContentHash,
       }),
       readChangedPaths: vi
         .fn()

@@ -12,13 +12,19 @@ import {
   type ContentPublisher,
   type ContentWorkspaceId,
 } from "@foundry/application";
+import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
   loadContentRevisionApplication,
   loadRestoredContentRevisionApplication,
 } from "./content-revision-runtime";
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
-import { listContentRevisionContributors } from "./d1-content-revision-store";
+import {
+  findContentRevision,
+  findVerifiedPublicationOrder,
+  listContentRevisionContributors,
+  reconcileVerifiedBlogPostPublication,
+} from "./d1-content-revision-store";
 import {
   createGitHubContentPublisher,
   readGitHubContentPublisherConfiguration,
@@ -96,8 +102,16 @@ export async function loadContentPublicationApplication(
     return createContentPublicationApplication({
       store: localRuntime.__foundryContentPublicationStore!,
       revisions: {
-        getRevision: (_workspaceId, revision) =>
-          revisionApplication.queries.getRevision(revision),
+        async getRevision(targetWorkspaceId, revision) {
+          const targetApplication =
+            targetWorkspaceId === workspaceId
+              ? revisionApplication
+              : await loadContentRevisionApplication(
+                  targetWorkspaceId,
+                  actorId,
+                );
+          return targetApplication.queries.getRevision(revision);
+        },
         getCurrent: () => revisionApplication.queries.getCurrent(),
         isCurrent: (revision) =>
           revisionApplication.queries.isRevisionCurrent(revision),
@@ -125,8 +139,12 @@ export async function loadContentPublicationApplication(
   return createContentPublicationApplication({
     store,
     revisions: {
-      getRevision: (_workspaceId, revision) =>
-        revisionApplication.queries.getRevision(revision),
+      getRevision: (targetWorkspaceId, revision) =>
+        findContentRevision(
+          environment.FOUNDRY_DB!,
+          targetWorkspaceId,
+          revision,
+        ),
       getCurrent: () => revisionApplication.queries.getCurrent(),
       isCurrent: (revision) =>
         revisionApplication.queries.isRevisionCurrent(revision),
@@ -138,6 +156,17 @@ export async function loadContentPublicationApplication(
         ),
     },
     publisher,
+    onVerifiedLive: async (publication, revision) =>
+      reconcileVerifiedBlogPostPublication(
+        environment.FOUNDRY_DB!,
+        referenceSiteDefinition.site.id,
+        revision.definition,
+        await findVerifiedPublicationOrder(
+          environment.FOUNDRY_DB!,
+          publication.id,
+        ),
+        publication.requestedAt,
+      ),
     publishedRevisions: publisher,
     restoreSourcePublication,
     draftRestorer: {

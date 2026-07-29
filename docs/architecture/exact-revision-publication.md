@@ -19,6 +19,7 @@ The dashboard enables approval only after the human opens the canonical
 preview for the current saved revision. The approval fingerprint binds:
 
 - the complete Site Definition content hash;
+- the filtered public Site Definition hash used by the release marker;
 - a structural design projection;
 - schema and renderer versions;
 - the exact production Git base and published-content hash;
@@ -51,6 +52,81 @@ managed-Markdown deletion, and the signed message. Creation of the one-parent
 commit and advancement of the configured production branch are therefore one
 optimistic compare-and-swap. A moved ref is blocked and is never silently
 rebased.
+
+Site Definition 1.3 makes blog posts part of that same artifact set rather than
+introducing a parallel publishing path. Each post has a site-scoped stable ID,
+an immutable UUID identity, an incrementing post revision, active
+collection state, target visibility, slug, title, excerpt, SEO metadata, and
+canonical rich-text body. Its body is serialized to
+`content/rich-text/<post-id>/body.md`; all other post fields remain in the
+canonical Site Definition JSON. Creating or editing a post therefore creates
+an ordinary immutable content-workspace revision. The exact post preview uses
+that saved revision, and approval, Git compare-and-swap, Cloudflare deployment,
+and two-read live-marker verification use the existing publication
+transaction described here.
+
+Each post revision also has its own deterministic, site-scoped UUIDv8
+content identity and `foundry.post-artifact.v1` fingerprint. The custom UUIDv8
+payload is the leading 128 bits of a SHA-256 digest over length-delimited site
+ID, post ID, logical revision, and canonical content hash. The fingerprint
+length-delimits and
+hashes the post ID, post-revision ID, canonical post-content hash, schema
+version, renderer version, serialization version, and the exact rendered-route
+model bytes hash (or route-absence artifact for unpublish). The canonical model
+is also consumed by the React renderer and covers every variable route input:
+design attributes, site chrome, metadata, post copy, rich text, and definition
+version; the renderer version binds the static markup and renderer code. D1
+persists the immutable post snapshot in `blog_post_revisions` and persists the
+rendered evidence for every post in every site revision in
+`blog_post_render_artifacts`. This keeps a post's stable revision identity while
+recording a successor artifact whenever shared design or site chrome changes.
+The site approval stores the ordered post-artifact evidence inside its own
+fingerprint. Preview, approval, Git publication, and verified-live
+reconciliation therefore identify both the complete site artifact and every
+exact post rendering within it.
+
+Post identity is site-global, while draft concurrency remains workspace-local.
+D1 stores one `blog_posts` verified-publication aggregate per site/post plus
+immutable UUID-keyed `blog_post_revisions`. Revision IDs bind the site, stable
+post ID, logical revision number, and canonical content hash, so two workspaces
+may independently create different successors from the same verified revision
+without colliding or changing production state. Each workspace still advances
+through the content-revision compare-and-swap and receipt transaction. The
+site-global aggregate advances only when an exact publication is verified live
+or when a verified-absent post is claimed for recovery. Publication base
+checks and approval invalidation make a branch stale after another workspace
+changes production.
+
+Unpublishing is a guarded successor publication, not deletion of history. The
+command is accepted only when the aggregate has a verified live revision and
+no global publication operation is active. It
+creates a new immutable post revision whose target visibility is
+`unpublished`, retaining the stable identity and editable content in D1 and
+the workspace history. Public artifact serialization omits non-public records
+from both canonical JSON and managed Markdown, so the approved successor
+removes the route and public payload. The aggregate live pointer is changed
+only by a callback after the exact publication reaches `verified-live`; a
+failed callback is retried when the durable verified publication is refreshed.
+Reconciliation uses set-based JSON queries so its query count stays bounded as
+the collection grows. Both present state and absence tombstones advance by
+durable publication sequence, so a delayed older publication cannot resurrect
+a route removed by a newer verified release.
+Only after verified removal may the latest immutable snapshot be hydrated into
+a fresh management workspace. A post made absent by a verified historical
+restore is recovered as a new unpublished management revision, so it cannot
+reappear merely by approving the restored workspace. Recovery is claimed only
+while the aggregate still points at the last verified revision; once that
+successor exists, its later draft edits remain isolated to its workspace.
+Republishing creates another attributed successor revision and runs through
+the same preview, approval, commit, deployment, and verification path.
+Never-published drafts and in-flight withdrawals are not hydrated across
+workspaces.
+
+Accepted and rejected blog commands are recorded in an append-only D1
+transition audit with the authenticated actor, workspace, post target, request
+identity, command type, stable reason, and non-secret before/after state.
+Accepted audit insertion is in the same D1 batch as its immutable revision and
+idempotency receipt.
 
 Schema reader upgrades are staged separately from published-content migration.
 A code release may add an in-memory projection for an older stored Site

@@ -1,4 +1,5 @@
 import type {
+  BlogPostArtifactFingerprint,
   ContentActorId,
   ContentRevision,
   ContentRevisionStore,
@@ -9,19 +10,89 @@ import {
   ContentRevisionBookmarkError,
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
+  createBlogPostArtifactFingerprint,
+  createBlogPostRevisionId,
   createContentWorkspaceId,
   restoreContentActorId,
+  sha256CanonicalJson,
   assertContentRevisionBase,
   assertContentRevisionIdempotency,
   withContentRevisionBookmark,
 } from "@foundry/application";
 import {
+  isSiteDefinition,
+  type BlogPost,
   type SiteDefinition,
   type SiteId,
   type StoredSiteDefinitionSchemaVersion,
 } from "@foundry/site-definition";
 
-import type { D1DatabaseBinding } from "./d1-human-access-store";
+import type {
+  D1DatabaseBinding,
+  D1DatabaseSessionBinding,
+} from "./d1-human-access-store";
+
+type D1StatementPreparer = Pick<
+  D1DatabaseBinding | D1DatabaseSessionBinding,
+  "prepare"
+>;
+
+function prepareBlogRenderArtifactInsert(
+  target: D1StatementPreparer,
+  input: Readonly<{
+    workspaceId: ContentWorkspaceId;
+    contentRevision: number;
+    artifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
+    createdAt: string;
+    receipt?: Readonly<{ idempotencyKey: string; requestHash: string }>;
+  }>,
+) {
+  const receiptGuard =
+    input.receipt === undefined
+      ? ""
+      : `AND EXISTS (
+           SELECT 1 FROM content_revision_receipts
+           WHERE idempotency_key = ?5
+             AND workspace_id = ?1
+             AND revision = ?2
+             AND request_hash = ?6
+         )`;
+  return target
+    .prepare(
+      `INSERT INTO blog_post_render_artifacts (
+         workspace_id, content_revision, post_id, post_revision_id,
+         post_revision, content_hash, schema_version, renderer_version,
+         serialization_version, rendered_bytes_hash,
+         artifact_fingerprint, created_at
+       )
+       SELECT
+         ?1, ?2,
+         json_extract(artifact.value, '$.postId'),
+         json_extract(artifact.value, '$.postRevisionId'),
+         json_extract(artifact.value, '$.revision'),
+         json_extract(artifact.value, '$.contentHash'),
+         json_extract(artifact.value, '$.schemaVersion'),
+         json_extract(artifact.value, '$.rendererVersion'),
+         json_extract(artifact.value, '$.serializationVersion'),
+         json_extract(artifact.value, '$.renderedBytesHash'),
+         json_extract(artifact.value, '$.value'),
+         ?4
+       FROM json_each(?3) AS artifact
+       WHERE 1 = 1
+       ${receiptGuard}
+       ON CONFLICT (workspace_id, content_revision, post_id)
+       DO NOTHING`,
+    )
+    .bind(
+      input.workspaceId,
+      input.contentRevision,
+      JSON.stringify(input.artifacts),
+      input.createdAt,
+      ...(input.receipt === undefined
+        ? []
+        : [input.receipt.idempotencyKey, input.receipt.requestHash]),
+    );
+}
 
 export async function findLatestContentWorkspaceIdForActor(
   database: D1DatabaseBinding,
@@ -72,6 +143,318 @@ export async function listContentRevisionContributors(
   return rows.results.map((row) => restoreContentActorId(row.created_by));
 }
 
+export async function hydrateManagedBlogPosts(
+  database: D1DatabaseBinding,
+  definition: SiteDefinition,
+): Promise<SiteDefinition> {
+  const rows = await database
+    .prepare(
+      `SELECT revision.snapshot_json, post.last_verified_visibility
+       FROM blog_posts AS post
+       JOIN blog_post_revisions AS revision
+         ON revision.site_id = post.site_id
+        AND revision.post_id = post.post_id
+        AND revision.revision_id = post.current_revision_id
+       WHERE post.site_id = ?1
+         AND post.live_revision IS NULL
+         AND (
+           (
+             post.last_verified_visibility = 'unpublished'
+             AND post.last_verified_revision = post.current_revision
+           )
+           OR (
+             post.last_verified_visibility = 'absent'
+             AND post.last_verified_revision = post.current_revision
+           )
+         )
+       ORDER BY post.post_id`,
+    )
+    .bind(definition.site.id)
+    .all<{
+      snapshot_json: string;
+      last_verified_visibility: "unpublished" | "absent";
+    }>();
+  const managed = rows.results.map(
+    ({ snapshot_json, last_verified_visibility }) => {
+      const post = JSON.parse(snapshot_json) as BlogPost;
+      return last_verified_visibility === "absent" &&
+        post.targetVisibility === "public"
+        ? {
+            ...post,
+            revision: post.revision + 1,
+            targetVisibility: "unpublished" as const,
+          }
+        : post;
+    },
+  );
+  const publishedIds = new Set(definition.blog.posts.map(({ id }) => id));
+  const hydrated = {
+    ...definition,
+    blog: {
+      ...definition.blog,
+      posts: [
+        ...definition.blog.posts,
+        ...managed.filter(({ id }) => !publishedIds.has(id)),
+      ],
+    },
+  };
+  if (!isSiteDefinition(hydrated)) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return hydrated;
+}
+
+export async function reconcileVerifiedBlogPostPublication(
+  database: D1DatabaseBinding,
+  siteId: SiteId,
+  definition: SiteDefinition,
+  publication: Readonly<{ id: string; sequence: number }>,
+  verifiedAt: string,
+): Promise<void> {
+  const blog = (
+    definition as SiteDefinition & {
+      readonly blog?: SiteDefinition["blog"];
+    }
+  ).blog;
+  let blogPosts: SiteDefinition["blog"]["posts"];
+  if (blog === undefined) {
+    if (
+      !["1.0.0", "1.1.0", "1.2.0"].includes(definition.schemaVersion)
+    ) {
+      throw new ContentRevisionConfigurationError();
+    }
+    blogPosts = [];
+  } else {
+    blogPosts = blog.posts;
+  }
+  const serializedPosts = JSON.stringify(
+    await Promise.all(
+      blogPosts.map(async (post) => {
+        const contentHash = await sha256CanonicalJson(post);
+        return {
+          id: post.id,
+          revision: post.revision,
+          revisionId: await createBlogPostRevisionId(
+            definition.site.id,
+            post.id,
+            post.revision,
+            contentHash,
+          ),
+          contentHash,
+          targetVisibility: post.targetVisibility,
+        };
+      }),
+    ),
+  );
+  const immutableRevisionVerification = await database
+    .prepare(
+      `WITH incoming_posts AS (
+         SELECT
+           json_extract(value, '$.id') AS post_id,
+           json_extract(value, '$.revision') AS revision,
+           json_extract(value, '$.revisionId') AS revision_id,
+           json_extract(value, '$.contentHash') AS content_hash
+         FROM json_each(?1)
+       )
+       SELECT COUNT(*) AS invalid_count
+       FROM incoming_posts AS incoming
+       LEFT JOIN blog_posts AS aggregate
+         ON aggregate.site_id = ?2
+        AND aggregate.post_id = incoming.post_id
+       LEFT JOIN blog_post_revisions AS revision
+         ON revision.revision_id = incoming.revision_id
+        AND revision.site_id = ?2
+        AND revision.post_id = incoming.post_id
+        AND revision.revision = incoming.revision
+        AND revision.content_hash = incoming.content_hash
+       WHERE aggregate.post_id IS NULL
+          OR revision.revision_id IS NULL`,
+    )
+    .bind(serializedPosts, siteId)
+    .first<{ invalid_count: number }>();
+  if (
+    immutableRevisionVerification === null ||
+    immutableRevisionVerification.invalid_count > 0
+  ) {
+    throw new ContentRevisionConfigurationError();
+  }
+  await database.batch([
+    database
+      .prepare(
+        `WITH incoming_posts AS (
+           SELECT
+             json_extract(value, '$.id') AS post_id,
+             json_extract(value, '$.revision') AS revision,
+             json_extract(value, '$.revisionId') AS revision_id,
+             json_extract(value, '$.contentHash') AS content_hash,
+             json_extract(value, '$.targetVisibility') AS target_visibility
+           FROM json_each(?1)
+         )
+         UPDATE blog_posts
+         SET live_revision = (
+               SELECT CASE
+                 WHEN incoming.target_visibility = 'public'
+                   THEN incoming.revision
+                 ELSE NULL
+               END
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             current_revision = (
+               SELECT incoming.revision
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             current_revision_id = (
+               SELECT incoming.revision_id
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             last_verified_revision = (
+               SELECT incoming.revision
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             last_verified_visibility = (
+               SELECT incoming.target_visibility
+               FROM incoming_posts AS incoming
+               WHERE incoming.post_id = blog_posts.post_id
+             ),
+             last_verified_publication_id = ?2,
+             last_verified_publication_sequence = ?3,
+             updated_at = ?4
+         WHERE site_id = ?5
+           AND EXISTS (
+             SELECT 1
+             FROM incoming_posts AS incoming
+             JOIN blog_post_revisions AS revision
+               ON revision.revision_id = incoming.revision_id
+              AND revision.site_id = ?5
+              AND revision.post_id = incoming.post_id
+              AND revision.revision = incoming.revision
+              AND revision.content_hash = incoming.content_hash
+             WHERE incoming.post_id = blog_posts.post_id
+           )
+           AND (
+             last_verified_publication_sequence IS NULL
+             OR last_verified_publication_sequence < ?3
+             OR (
+               last_verified_publication_sequence = ?3
+               AND last_verified_publication_id = ?2
+             )
+           )`,
+      )
+      .bind(
+        serializedPosts,
+        publication.id,
+        publication.sequence,
+        verifiedAt,
+        siteId,
+      ),
+    database
+      .prepare(
+        `UPDATE blog_posts
+         SET live_revision = NULL,
+             last_verified_visibility = 'absent',
+             last_verified_publication_id = ?1,
+             last_verified_publication_sequence = ?2,
+             updated_at = ?3
+         WHERE site_id = ?4
+           AND (
+             live_revision IS NOT NULL
+             OR last_verified_publication_sequence IS NOT NULL
+           )
+           AND (
+             last_verified_publication_sequence IS NULL
+             OR last_verified_publication_sequence < ?2
+             OR (
+               last_verified_publication_sequence = ?2
+               AND last_verified_publication_id = ?1
+             )
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM json_each(?5) AS present_post
+             WHERE present_post.value = blog_posts.post_id
+           )`,
+      )
+      .bind(
+        publication.id,
+        publication.sequence,
+        verifiedAt,
+        siteId,
+        JSON.stringify(blogPosts.map(({ id }) => id)),
+      ),
+  ]);
+  const verification = await database
+    .prepare(
+      `WITH incoming_posts AS (
+         SELECT
+           json_extract(value, '$.id') AS post_id,
+           json_extract(value, '$.revision') AS revision,
+           json_extract(value, '$.revisionId') AS revision_id,
+           json_extract(value, '$.contentHash') AS content_hash,
+           json_extract(value, '$.targetVisibility') AS target_visibility
+         FROM json_each(?1)
+       )
+       SELECT COUNT(*) AS invalid_count
+       FROM incoming_posts AS incoming
+       LEFT JOIN blog_posts AS aggregate
+         ON aggregate.site_id = ?2
+        AND aggregate.post_id = incoming.post_id
+       LEFT JOIN blog_post_revisions AS revision
+         ON revision.revision_id = incoming.revision_id
+        AND revision.site_id = ?2
+        AND revision.post_id = incoming.post_id
+        AND revision.revision = incoming.revision
+        AND revision.content_hash = incoming.content_hash
+       WHERE aggregate.post_id IS NULL
+          OR revision.revision_id IS NULL
+          OR aggregate.last_verified_revision IS NULL
+          OR aggregate.last_verified_publication_sequence IS NULL
+          OR aggregate.last_verified_publication_sequence < ?3
+          OR (
+            aggregate.last_verified_publication_sequence = ?3
+            AND (
+              aggregate.last_verified_publication_id <> ?4
+              OR aggregate.current_revision <> incoming.revision
+              OR aggregate.current_revision_id <> incoming.revision_id
+              OR aggregate.last_verified_revision <> incoming.revision
+              OR aggregate.last_verified_visibility <>
+                incoming.target_visibility
+              OR aggregate.live_revision IS NOT CASE
+                WHEN incoming.target_visibility = 'public'
+                  THEN incoming.revision
+                ELSE NULL
+              END
+            )
+          )`,
+    )
+    .bind(serializedPosts, siteId, publication.sequence, publication.id)
+    .first<{ invalid_count: number }>();
+  if (verification === null || verification.invalid_count > 0) {
+    throw new ContentRevisionConfigurationError();
+  }
+}
+
+export async function findVerifiedPublicationOrder(
+  database: D1DatabaseBinding,
+  publicationId: string,
+): Promise<Readonly<{ id: string; sequence: number }>> {
+  const row = await database
+    .prepare(
+      `SELECT sequence
+       FROM blog_publication_reconciliation_order
+       WHERE publication_id = ?1`,
+    )
+    .bind(publicationId)
+    .first<{ sequence: number }>();
+  if (row === null || !Number.isSafeInteger(row.sequence) || row.sequence < 1) {
+    throw new ContentRevisionConfigurationError();
+  }
+  return { id: publicationId, sequence: row.sequence };
+}
+
 type RevisionRow = {
   workspace_id: ContentWorkspaceId;
   revision: number;
@@ -119,6 +502,29 @@ const revisionProjection = `
   FROM content_revisions
 `;
 
+async function findContentRevisionFrom(
+  connection: Pick<D1DatabaseBinding, "prepare">,
+  workspaceId: ContentWorkspaceId,
+  revision: number,
+): Promise<ContentRevision | null> {
+  const row = await connection
+    .prepare(
+      `${revisionProjection}
+       WHERE workspace_id = ?1 AND revision = ?2`,
+    )
+    .bind(workspaceId, revision)
+    .first<RevisionRow>();
+  return row === null ? null : toRevision(row);
+}
+
+export function findContentRevision(
+  database: D1DatabaseBinding,
+  workspaceId: ContentWorkspaceId,
+  revision: number,
+): Promise<ContentRevision | null> {
+  return findContentRevisionFrom(database, workspaceId, revision);
+}
+
 function requireBookmark(bookmark: string | null): string {
   if (bookmark === null) {
     throw new ContentRevisionConfigurationError();
@@ -149,14 +555,7 @@ export function createD1ContentRevisionStore(
     connection: Pick<D1DatabaseBinding, "prepare">,
     revision: number,
   ) {
-    const row = await connection
-      .prepare(
-        `${revisionProjection}
-         WHERE workspace_id = ?1 AND revision = ?2`,
-      )
-      .bind(workspaceId, revision)
-      .first<RevisionRow>();
-    return row === null ? null : toRevision(row);
+    return findContentRevisionFrom(connection, workspaceId, revision);
   }
 
   async function getCurrentFrom(
@@ -182,6 +581,22 @@ export function createD1ContentRevisionStore(
 
   return {
     async initialize(initialRevision, ownerActorId) {
+      const initialArtifacts = await Promise.all(
+        initialRevision.definition.blog.posts.map((post) =>
+          createBlogPostArtifactFingerprint({
+            definition: initialRevision.definition,
+            post,
+            schemaVersion: initialRevision.definition.schemaVersion,
+            rendererVersion: initialRevision.inputs.rendererVersion,
+          }),
+        ),
+      );
+      const initialPosts = initialRevision.definition.blog.posts.map(
+        (post, index) => ({
+          post,
+          artifact: initialArtifacts[index]!,
+        }),
+      );
       await database.batch([
         database
           .prepare(
@@ -231,6 +646,112 @@ export function createD1ContentRevisionStore(
             initialRevision.createdAt,
             initialRevision.createdBy,
           ),
+        database
+          .prepare(
+            `INSERT INTO blog_posts (
+               site_id, post_id, collection_state, current_revision,
+               current_revision_id,
+               live_revision, last_verified_revision,
+               last_verified_visibility, last_verified_publication_id,
+               last_verified_publication_sequence,
+               version, updated_at
+             )
+             SELECT
+               ?1,
+               json_extract(entry.value, '$.post.id'),
+               'active',
+               json_extract(entry.value, '$.post.revision'),
+               json_extract(entry.value, '$.artifact.postRevisionId'),
+               CASE
+                 WHEN json_extract(
+                   entry.value,
+                   '$.post.targetVisibility'
+                 ) = 'public'
+                   THEN json_extract(entry.value, '$.post.revision')
+                 ELSE NULL
+               END,
+               json_extract(entry.value, '$.post.revision'),
+               json_extract(entry.value, '$.post.targetVisibility'),
+               (
+                 SELECT publication_order.publication_id
+                 FROM blog_publication_reconciliation_order
+                   AS publication_order
+                 JOIN content_publications AS publication
+                   ON publication.id = publication_order.publication_id
+                 WHERE publication.status = 'verified-live'
+                 ORDER BY publication_order.sequence DESC
+                 LIMIT 1
+               ),
+               (
+                 SELECT publication_order.sequence
+                 FROM blog_publication_reconciliation_order
+                   AS publication_order
+                 JOIN content_publications AS publication
+                   ON publication.id = publication_order.publication_id
+                 WHERE publication.status = 'verified-live'
+                 ORDER BY publication_order.sequence DESC
+                 LIMIT 1
+               ),
+               json_extract(entry.value, '$.post.revision'),
+               ?3
+             FROM json_each(?2) AS entry
+             WHERE 1 = 1
+             ON CONFLICT (site_id, post_id) DO UPDATE SET
+               current_revision = excluded.current_revision,
+               current_revision_id = excluded.current_revision_id,
+               version = blog_posts.version + 1,
+               updated_at = excluded.updated_at
+             WHERE blog_posts.live_revision IS NULL
+               AND blog_posts.last_verified_visibility = 'absent'
+               AND blog_posts.current_revision + 1 =
+                   excluded.current_revision`,
+          )
+          .bind(
+            siteId,
+            JSON.stringify(initialPosts),
+            initialRevision.createdAt,
+          ),
+        database
+          .prepare(
+            `INSERT INTO blog_post_revisions (
+               revision_id, site_id, post_id, revision, workspace_id,
+               content_revision, snapshot_json, created_at, created_by,
+               content_hash, schema_version, renderer_version,
+               serialization_version, rendered_bytes_hash,
+               artifact_fingerprint
+             )
+             SELECT
+               json_extract(entry.value, '$.artifact.postRevisionId'),
+               ?1,
+               json_extract(entry.value, '$.post.id'),
+               json_extract(entry.value, '$.post.revision'),
+               ?2, ?3,
+               json_extract(entry.value, '$.post'),
+               ?4, ?5,
+               json_extract(entry.value, '$.artifact.contentHash'),
+               json_extract(entry.value, '$.artifact.schemaVersion'),
+               json_extract(entry.value, '$.artifact.rendererVersion'),
+               json_extract(entry.value, '$.artifact.serializationVersion'),
+               json_extract(entry.value, '$.artifact.renderedBytesHash'),
+               json_extract(entry.value, '$.artifact.value')
+             FROM json_each(?6) AS entry
+             WHERE 1 = 1
+             ON CONFLICT (revision_id) DO NOTHING`,
+          )
+          .bind(
+            siteId,
+            workspaceId,
+            initialRevision.revision,
+            initialRevision.createdAt,
+            initialRevision.createdBy,
+            JSON.stringify(initialPosts),
+          ),
+        prepareBlogRenderArtifactInsert(database, {
+          workspaceId,
+          contentRevision: initialRevision.revision,
+          artifacts: initialArtifacts,
+          createdAt: initialRevision.createdAt,
+        }),
       ]);
     },
     async requireAccess(actorId) {
@@ -314,6 +835,35 @@ export function createD1ContentRevisionStore(
             requireBookmark(session.getBookmark()),
           );
     },
+    async getBlogPostAggregate(postId) {
+      const row = await database
+        .prepare(
+          `SELECT current_revision, live_revision,
+                  last_verified_revision, last_verified_visibility, version
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(siteId, postId)
+        .first<{
+          current_revision: number;
+          live_revision: number | null;
+          last_verified_revision: number | null;
+          last_verified_visibility:
+            | BlogPost["targetVisibility"]
+            | "absent"
+            | null;
+          version: number;
+        }>();
+      return row === null
+        ? null
+        : {
+            currentRevision: row.current_revision,
+            liveRevision: row.live_revision,
+            lastVerifiedRevision: row.last_verified_revision,
+            lastVerifiedVisibility: row.last_verified_visibility,
+            version: row.version,
+          };
+    },
     async replay(idempotencyKey, requestHash) {
       if (database.withSession === undefined) {
         throw new Error("content_revision_sessions_unavailable");
@@ -332,6 +882,34 @@ export function createD1ContentRevisionStore(
         revision,
         requireBookmark(session.getBookmark()),
       );
+    },
+    async recordRejectedBlogTransition(input) {
+      await database
+        .prepare(
+          `INSERT INTO blog_post_transition_audit_events (
+             workspace_id, actor_id, post_id, command_type, outcome,
+             reason_code, request_id, before_state_json, after_state_json,
+             revision, occurred_at
+           ) VALUES (?1, ?2, ?3, ?4, 'rejected', ?5, ?6, ?7, ?8, NULL, ?9)
+           ON CONFLICT (workspace_id, request_id, outcome, post_id)
+           DO NOTHING`,
+        )
+        .bind(
+          input.workspaceId,
+          input.actorId,
+          input.postId ?? "unknown",
+          input.commandType,
+          input.reasonCode,
+          input.requestId,
+          input.beforeState === null
+            ? null
+            : JSON.stringify(input.beforeState),
+          input.afterState === null
+            ? null
+            : JSON.stringify(input.afterState),
+          input.occurredAt,
+        )
+        .run();
     },
     async persist(command) {
       if (database.withSession === undefined) {
@@ -384,7 +962,210 @@ export function createD1ContentRevisionStore(
         mediaOccurrence?.crop === null || mediaOccurrence === undefined
           ? null
           : JSON.stringify(mediaOccurrence.crop);
+      const blogGuardBindings: Array<string | number | null> = [];
+      let blogGuardParameter = 18;
+      const blogTransitionGuards = (command.blogTransitions ?? [])
+        .map((transition) => {
+          const bindGuardValue = (value: string | number | null) => {
+            const parameter = blogGuardParameter;
+            blogGuardParameter += 1;
+            blogGuardBindings.push(value);
+            return `?${parameter}`;
+          };
+          if (transition.beforeState === null) {
+            if (transition.observedAggregate !== null) {
+              return "AND 0 = 1";
+            }
+            const postParameter = bindGuardValue(transition.postId);
+            return `AND NOT EXISTS (
+              SELECT 1 FROM blog_posts
+              WHERE site_id = ?14 AND post_id = ${postParameter}
+            )`;
+          }
+          const observedAggregate = transition.observedAggregate;
+          if (observedAggregate === null) {
+            return "AND 0 = 1";
+          }
+          const postParameter = bindGuardValue(transition.postId);
+          const currentRevisionParameter = bindGuardValue(
+            observedAggregate.currentRevision,
+          );
+          const liveRevisionParameter = bindGuardValue(
+            observedAggregate.liveRevision,
+          );
+          const lastVerifiedRevisionParameter = bindGuardValue(
+            observedAggregate.lastVerifiedRevision,
+          );
+          const lastVerifiedVisibilityParameter = bindGuardValue(
+            observedAggregate.lastVerifiedVisibility,
+          );
+          const versionParameter = bindGuardValue(
+            observedAggregate.version,
+          );
+          return `AND EXISTS (
+            SELECT 1 FROM blog_posts
+            WHERE site_id = ?14
+              AND post_id = ${postParameter}
+              AND collection_state = 'active'
+              AND current_revision = ${currentRevisionParameter}
+              AND live_revision IS ${liveRevisionParameter}
+              AND last_verified_revision IS ${lastVerifiedRevisionParameter}
+              AND last_verified_visibility IS ${lastVerifiedVisibilityParameter}
+              AND version = ${versionParameter}
+          )`;
+        })
+        .join("\n");
+      const blogPublicationGuard =
+        !command.blogTransitions?.some(
+          ({ commandType }) => commandType === "blog.post.unpublish",
+        )
+          ? ""
+          : `AND NOT EXISTS (
+              SELECT 1 FROM content_publications
+              WHERE status IN (
+                'requested', 'committed', 'building',
+                'deployed', 'unknown'
+              )
+            )`;
 
+      const blogTransitionStatements = (command.blogTransitions ?? []).map(
+        (transition) =>
+          session
+            .prepare(
+              `INSERT INTO blog_post_transition_audit_events (
+                 workspace_id, actor_id, post_id, command_type, outcome,
+                 reason_code, request_id, before_state_json, after_state_json,
+                 revision, occurred_at
+               )
+               SELECT ?1, ?2, ?3, ?4, 'accepted', 'accepted', ?5,
+                      ?6, ?7, ?8, ?9
+               WHERE EXISTS (
+                 SELECT 1 FROM content_revision_receipts
+                 WHERE idempotency_key = ?5
+                   AND workspace_id = ?1
+                   AND revision = ?8
+                   AND request_hash = ?10
+               )
+               ON CONFLICT (workspace_id, request_id, outcome, post_id)
+               DO NOTHING`,
+            )
+            .bind(
+              workspaceId,
+              command.revision.createdBy,
+              transition.postId,
+              transition.commandType,
+              command.idempotencyKey,
+              transition.beforeState === null
+                ? null
+                : JSON.stringify(transition.beforeState),
+              transition.afterState === null
+                ? null
+                : JSON.stringify(transition.afterState),
+              command.revision.revision,
+              command.revision.createdAt,
+              command.requestHash,
+            ),
+      );
+      // Successor drafts branch independently by workspace and immutable,
+      // content-addressed revision ID. Only creation claims the site-global
+      // identity here; verified-live reconciliation advances the aggregate.
+      const blogAggregateStatements = (command.blogTransitions ?? [])
+        .filter((transition) => transition.beforeState === null)
+        .map((transition) =>
+          session
+            .prepare(
+                  `INSERT INTO blog_posts (
+                     site_id, post_id, collection_state, current_revision,
+                     current_revision_id,
+                     live_revision, last_verified_revision,
+                     last_verified_visibility, last_verified_publication_id,
+                     last_verified_publication_sequence,
+                     version, updated_at
+                   )
+                   SELECT
+                     ?1, ?2, 'active', ?3, ?4,
+                     NULL, NULL, NULL, NULL, NULL, 1, ?5
+                   WHERE EXISTS (
+                     SELECT 1 FROM content_revision_receipts
+                     WHERE idempotency_key = ?6
+                       AND workspace_id = ?7
+                       AND revision = ?8
+                       AND request_hash = ?9
+                   )
+                   ON CONFLICT (site_id, post_id) DO NOTHING`,
+              )
+              .bind(
+                siteId,
+                transition.postId,
+                transition.afterState!.revision,
+                transition.revisionId,
+                command.revision.createdAt,
+                command.idempotencyKey,
+                workspaceId,
+                command.revision.revision,
+                command.requestHash,
+              ),
+        );
+      const blogRevisionStatements = (command.blogTransitions ?? []).map(
+        (transition) => {
+          const post = command.revision.definition.blog.posts.find(
+            ({ id }) => id === transition.postId,
+          );
+          if (post === undefined) {
+            throw new ContentRevisionConfigurationError();
+          }
+          return session
+            .prepare(
+              `INSERT INTO blog_post_revisions (
+                 revision_id, site_id, post_id, revision, workspace_id,
+                 content_revision, snapshot_json, created_at, created_by,
+                 content_hash, schema_version, renderer_version,
+                 serialization_version, rendered_bytes_hash,
+                 artifact_fingerprint
+               )
+               SELECT
+                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                 ?10, ?11, ?12, ?13, ?14, ?15
+               WHERE EXISTS (
+                 SELECT 1 FROM content_revision_receipts
+                 WHERE idempotency_key = ?16
+                   AND workspace_id = ?5
+                   AND revision = ?6
+                   AND request_hash = ?17
+               )
+               ON CONFLICT (revision_id) DO NOTHING`,
+            )
+            .bind(
+              transition.revisionId,
+              siteId,
+              transition.postId,
+              transition.afterState!.revision,
+              workspaceId,
+              command.revision.revision,
+              JSON.stringify(post),
+              command.revision.createdAt,
+              command.revision.createdBy,
+              transition.artifact.contentHash,
+              transition.artifact.schemaVersion,
+              transition.artifact.rendererVersion,
+              transition.artifact.serializationVersion,
+              transition.artifact.renderedBytesHash,
+              transition.artifact.value,
+              command.idempotencyKey,
+              command.requestHash,
+            );
+        },
+      );
+      const blogArtifactStatement = prepareBlogRenderArtifactInsert(session, {
+        workspaceId,
+        contentRevision: command.revision.revision,
+        artifacts: command.blogArtifacts,
+        createdAt: command.revision.createdAt,
+        receipt: {
+          idempotencyKey: command.idempotencyKey,
+          requestHash: command.requestHash,
+        },
+      });
       const results = await session.batch([
         session
           .prepare(
@@ -418,7 +1199,9 @@ export function createD1ContentRevisionStore(
                    AND media_revision.asset_id = ?16
                    AND media_revision.crop_json IS ?17
                )
-             )`,
+             )
+             ${blogTransitionGuards}
+             ${blogPublicationGuard}`,
           )
           .bind(
             workspaceId,
@@ -438,6 +1221,7 @@ export function createD1ContentRevisionStore(
             mediaOccurrence?.revision ?? null,
             mediaOccurrence?.assetId ?? null,
             mediaCrop,
+            ...blogGuardBindings,
           ),
         session
           .prepare(
@@ -529,6 +1313,10 @@ export function createD1ContentRevisionStore(
             command.revision.createdAt,
             command.idempotencyKey,
           ),
+        ...blogAggregateStatements,
+        ...blogRevisionStatements,
+        blogArtifactStatement,
+        ...blogTransitionStatements,
       ]);
 
       if ((results[2]?.meta.changes ?? 0) > 0) {

@@ -1,0 +1,210 @@
+"use client";
+
+import { useState } from "react";
+
+import type { ContentRevision } from "@foundry/application";
+import {
+  createRichTextDocumentFromPlainText,
+  serializeRichTextDocument,
+  type BlogPost,
+  type BlogPostId,
+} from "@foundry/site-definition";
+
+import {
+  sendContentRevisionAttempt,
+  type ContentRevisionAttempt,
+} from "../src/content-revision-client";
+
+function mutationKey(operation: string) {
+  return `${operation}:${crypto.randomUUID()}`;
+}
+
+export function blogPostLifecycleAction(
+  post: Pick<BlogPost, "id" | "targetVisibility">,
+  verifiedPublicPostIds: ReadonlySet<BlogPostId>,
+): "unpublish_blog_post" | "republish_blog_post" | null {
+  if (
+    post.targetVisibility === "public" &&
+    verifiedPublicPostIds.has(post.id)
+  ) {
+    return "unpublish_blog_post";
+  }
+  if (
+    post.targetVisibility === "unpublished" &&
+    !verifiedPublicPostIds.has(post.id)
+  ) {
+    return "republish_blog_post";
+  }
+  return null;
+}
+
+export function BlogPostControls({
+  revision,
+  csrfToken,
+  verifiedPublicPostIds,
+}: {
+  revision: ContentRevision;
+  csrfToken: string;
+  verifiedPublicPostIds: ReadonlyArray<BlogPostId>;
+}) {
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pendingAttempt, setPendingAttempt] =
+    useState<ContentRevisionAttempt | null>(null);
+  const verifiedPublicPosts = new Set(verifiedPublicPostIds);
+
+  async function send(body: unknown, operation: string) {
+    const attempt =
+      pendingAttempt ?? {
+        body: JSON.stringify(body),
+        idempotencyKey: mutationKey(operation),
+      };
+    setPendingAttempt(attempt);
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await sendContentRevisionAttempt({
+        attempt,
+        mutationToken: csrfToken,
+      });
+      setPendingAttempt(null);
+      if (!result.response.ok) {
+        setMessage("The post change was rejected. Refresh and try again.");
+        return;
+      }
+      window.location.assign(
+        `/dash?workspace=${encodeURIComponent(revision.workspaceId)}`,
+      );
+    } catch {
+      setMessage(
+        "The result is not yet known. Retry the exact post change safely.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section aria-labelledby="blog-posts-heading">
+      <div className="dashboard-section-heading">
+        <div>
+          <h2 id="blog-posts-heading">Blog posts</h2>
+          <p>
+            Posts share this workspace’s immutable preview, approval, and
+            publication path.
+          </p>
+        </div>
+      </div>
+      <form
+        className="blog-post-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          const title = String(data.get("title") ?? "").trim();
+          const slug = String(data.get("slug") ?? "").trim();
+          const excerpt = String(data.get("excerpt") ?? "").trim();
+          const body = String(data.get("body") ?? "").trim();
+          void send(
+            {
+              operation: "create_blog_post",
+              workspaceId: revision.workspaceId,
+              schemaVersion: revision.definition.schemaVersion,
+              baseRevision: revision.revision,
+              post: {
+                id: crypto.randomUUID(),
+                slug,
+                title,
+                excerpt,
+                seo: { title, description: excerpt },
+                body: serializeRichTextDocument(
+                  createRichTextDocumentFromPlainText(body),
+                ),
+              },
+            },
+            "create-blog-post",
+          );
+        }}
+      >
+        <label>
+          Title
+          <input name="title" required maxLength={160} />
+        </label>
+        <label>
+          URL slug
+          <input
+            name="slug"
+            required
+            pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+            maxLength={120}
+          />
+        </label>
+        <label>
+          Excerpt
+          <textarea name="excerpt" required maxLength={320} />
+        </label>
+        <label>
+          Body
+          <textarea name="body" required />
+        </label>
+        <button type="submit" disabled={busy || pendingAttempt !== null}>
+          Create post revision
+        </button>
+      </form>
+      <ul className="blog-post-operations">
+        {revision.definition.blog.posts.map((post) => {
+          const operation = blogPostLifecycleAction(
+            post,
+            verifiedPublicPosts,
+          );
+          return (
+            <li key={post.id}>
+              <div>
+                <strong>{post.title}</strong>
+                <span>
+                  Revision {post.revision} · {post.targetVisibility} ·
+                  /blog/{post.slug}
+                </span>
+              </div>
+              {operation === null ? (
+                <span>Awaiting verified publication state</span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy || pendingAttempt !== null}
+                  onClick={() => {
+                    void send(
+                      {
+                        operation,
+                        workspaceId: revision.workspaceId,
+                        schemaVersion: revision.definition.schemaVersion,
+                        baseRevision: revision.revision,
+                        postId: post.id,
+                      },
+                      operation,
+                    );
+                  }}
+                >
+                  {operation === "unpublish_blog_post"
+                    ? "Prepare unpublish"
+                    : "Prepare republish"}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {pendingAttempt === null ? null : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            void send(JSON.parse(pendingAttempt.body), "retry-blog-post");
+          }}
+        >
+          Retry pending post change
+        </button>
+      )}
+      {message === "" ? null : <p role="alert">{message}</p>}
+    </section>
+  );
+}

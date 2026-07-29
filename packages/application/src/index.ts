@@ -13,6 +13,7 @@ export * from "./in-memory-subscriber-ledger-store";
 export * from "./public-form";
 export * from "./content-revisions";
 export * from "./deterministic-hash";
+export * from "./blog-artifacts";
 export * from "./content-publication";
 export * from "./public-form-notification";
 export * from "./public-form-privacy";

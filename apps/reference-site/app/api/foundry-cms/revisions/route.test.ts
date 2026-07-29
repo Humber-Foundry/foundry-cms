@@ -20,6 +20,11 @@ const mocks = vi.hoisted(() => ({
   loadIdentity: vi.fn(),
   create: vi.fn(),
   save: vi.fn(),
+  createBlogPost: vi.fn(),
+  editBlogPost: vi.fn(),
+  unpublishBlogPost: vi.fn(),
+  republishBlogPost: vi.fn(),
+  recordRejectedBlogPostCommand: vi.fn(),
   loadApplication: vi.fn(),
   requireExistingAccess: vi.fn(),
   createMutationToken: vi.fn(),
@@ -57,6 +62,8 @@ vi.mock("../../../../src/preview-capability-runtime", () => ({
 
 import { GET, POST } from "./route";
 
+const routePostId = "00000000-0000-4000-8000-00000000000a";
+
 describe("content revision endpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -87,7 +94,16 @@ describe("content revision endpoint", () => {
     mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.requireExistingAccess.mockResolvedValue(undefined);
     mocks.loadApplication.mockResolvedValue({
-      commands: { create: mocks.create, save: mocks.save },
+      commands: {
+        create: mocks.create,
+        save: mocks.save,
+        createBlogPost: mocks.createBlogPost,
+        editBlogPost: mocks.editBlogPost,
+        unpublishBlogPost: mocks.unpublishBlogPost,
+        republishBlogPost: mocks.republishBlogPost,
+        recordRejectedBlogPostCommand:
+          mocks.recordRejectedBlogPostCommand,
+      },
       queries: {
         getRevisionWithBookmark: mocks.getRevisionWithBookmark,
         isRevisionCurrent: mocks.isRevisionCurrent,
@@ -160,6 +176,193 @@ describe("content revision endpoint", () => {
           "/api/foundry-cms/revisions?workspaceId=workspace_home&revision=3",
       }),
     );
+  });
+
+  it("creates a schema-valid post through the authenticated revision boundary", async () => {
+    const callToAction = referenceSiteDefinition.home.sections.find(
+      ({ type }) => type === "callToAction",
+    );
+    if (callToAction?.type !== "callToAction") {
+      throw new Error("call_to_action_fixture_missing");
+    }
+    const body = callToAction.body;
+    mocks.createBlogPost.mockResolvedValue({
+      workspaceId: "workspace_home",
+      revision: 1,
+      bookmark: "d1-bookmark",
+      definition: {
+        ...referenceSiteDefinition,
+        blog: {
+          id: "blog",
+          posts: [
+            {
+              id: routePostId,
+              revision: 1,
+              collectionState: "active",
+              targetVisibility: "public",
+              slug: "route-post",
+              title: "Route post",
+              excerpt: "Created through the route.",
+              seo: {
+                title: "Route post | Foundry",
+                description: "Created through the authenticated route.",
+              },
+              body,
+            },
+          ],
+        },
+      },
+      inputs: {
+        contentHash: "abc",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        rendererVersion: "renderer-a",
+        productionBase: "published-a",
+      },
+    });
+    const response = await POST(
+      request({
+        operation: "create_blog_post",
+        workspaceId: "workspace_home",
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        post: {
+          id: routePostId,
+          slug: "route-post",
+          title: "Route post",
+          excerpt: "Created through the route.",
+          seo: {
+            title: "Route post | Foundry",
+            description: "Created through the authenticated route.",
+          },
+          body: serializeRichTextDocument(body),
+        },
+      }, "create-blog-route-0001"),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.createBlogPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "membership-editor",
+        workspaceId: "workspace_home",
+        siteId: referenceSiteDefinition.site.id,
+        baseRevision: 0,
+        idempotencyKey: "create-blog-route-0001",
+        post: expect.objectContaining({
+          id: routePostId,
+          slug: "route-post",
+          body,
+        }),
+      }),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      revision: 1,
+      previewUrl:
+        "/api/foundry-cms/revisions?workspaceId=workspace_home&revision=1&post=route-post",
+    });
+  });
+
+  it("audits a malformed recognized blog command at the authenticated boundary", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "create_blog_post",
+          workspaceId: "not a workspace",
+          schemaVersion: referenceSiteDefinition.schemaVersion,
+          baseRevision: 0,
+          post: {
+            id: "not-a-post-id",
+            slug: "bad slug",
+          },
+        },
+        "malformed-blog-route-0001",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_default",
+      "membership-editor",
+    );
+    expect(mocks.recordRejectedBlogPostCommand).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      postId: null,
+      commandType: "blog.post.create",
+      reasonCode: "blog_command_invalid",
+      requestId: "malformed-blog-route-0001",
+    });
+    expect(mocks.createBlogPost).not.toHaveBeenCalled();
+  });
+
+  it("attributes malformed blog commands to an accessible submitted workspace", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "edit_blog_post",
+          workspaceId: "workspace_collaborator",
+          schemaVersion: referenceSiteDefinition.schemaVersion,
+          baseRevision: 1,
+          postId: routePostId,
+          post: { slug: "bad slug" },
+        },
+        "malformed-blog-route-0002",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireExistingAccess).toHaveBeenCalledWith(
+      "workspace_collaborator",
+      "membership-editor",
+    );
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_collaborator",
+      "membership-editor",
+    );
+    expect(mocks.recordRejectedBlogPostCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postId: routePostId,
+        commandType: "blog.post.edit",
+        requestId: "malformed-blog-route-0002",
+      }),
+    );
+  });
+
+  it("audits malformed post rich text as an invalid blog command", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "create_blog_post",
+          workspaceId: "workspace_home",
+          schemaVersion: referenceSiteDefinition.schemaVersion,
+          baseRevision: 0,
+          post: {
+            id: routePostId,
+            slug: "invalid-rich-text",
+            title: "Invalid rich text",
+            excerpt: "The body is not canonical rich text.",
+            seo: {
+              title: "Invalid rich text | Foundry",
+              description: "The body is not canonical rich text.",
+            },
+            body: "{",
+          },
+        },
+        "malformed-blog-rich-text-0001",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_home",
+      "membership-editor",
+    );
+    expect(mocks.recordRejectedBlogPostCommand).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      postId: routePostId,
+      commandType: "blog.post.create",
+      reasonCode: "blog_command_invalid",
+      requestId: "malformed-blog-rich-text-0001",
+    });
+    expect(mocks.createBlogPost).not.toHaveBeenCalled();
   });
 
   it("preserves a canonical rich-text edit at the API boundary", async () => {

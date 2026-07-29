@@ -4,7 +4,9 @@ import Ajv2020 from "ajv/dist/2020.js";
 import { siteDefinitionValidationKeywords } from "../scripts/site-definition-validation-keywords.mjs";
 import {
   applySiteDefinitionEdits,
+  createBlogPostId,
   createReferenceSiteDefinition,
+  createRichTextDocumentFromPlainText,
   DuplicateEditableSiteFieldPathError,
   createSiteId,
   isSiteDefinition,
@@ -29,13 +31,13 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.2.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.2.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.3.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.3.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.2.0",
+      "https://foundrycms.dev/schemas/site-definition/1.3.0",
     );
     expect(
       siteDefinitionSchema.$defs.richTextDocument.$comment,
@@ -126,8 +128,8 @@ describe("reference Site Definition", () => {
     )!;
 
     expect(upgraded).not.toBe(legacy);
-    expect(upgraded.definitionVersion).toBe("1.2.0");
-    expect(upgraded.schemaVersion).toBe("1.2.0");
+    expect(upgraded.definitionVersion).toBe("1.3.0");
+    expect(upgraded.schemaVersion).toBe("1.3.0");
     expect(callToAction).toEqual(
       expect.objectContaining({
         body: {
@@ -465,6 +467,70 @@ describe("reference Site Definition", () => {
     );
   });
 
+  it("rejects a duplicate post slug through the generic field editor", () => {
+    const firstPostId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000005",
+    );
+    const secondPostId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000006",
+    );
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: firstPostId,
+            revision: 1,
+            collectionState: "active",
+            targetVisibility: "public",
+            slug: "first",
+            title: "First",
+            excerpt: "First excerpt",
+            seo: { title: "First", description: "First excerpt" },
+            body: createRichTextDocumentFromPlainText("First body"),
+          },
+          {
+            id: secondPostId,
+            revision: 1,
+            collectionState: "active",
+            targetVisibility: "public",
+            slug: "second",
+            title: "Second",
+            excerpt: "Second excerpt",
+            seo: { title: "Second", description: "Second excerpt" },
+            body: createRichTextDocumentFromPlainText("Second body"),
+          },
+        ],
+      },
+    };
+
+    expect(
+      applySiteDefinitionEdits(definition, [
+        { path: `${secondPostId}.slug`, value: "first" },
+      ]),
+    ).toEqual({
+      ok: false,
+      errors: {
+        [`${firstPostId}.slug`]:
+          "Choose a URL slug that is unique within this site.",
+        [`${secondPostId}.slug`]:
+          "Choose a URL slug that is unique within this site.",
+      },
+    });
+    expect(
+      applySiteDefinitionEdits(definition, [
+        { path: `${secondPostId}.slug`, value: "Not Valid" },
+      ]),
+    ).toEqual({
+      ok: false,
+      errors: {
+        [`${secondPostId}.slug`]:
+          "Use at most 120 lowercase letters, numbers, and single hyphens.",
+      },
+    });
+  });
+
   it("stores rich-text edits as the canonical versioned AST", () => {
     const body = {
       version: "1.0.0",
@@ -652,9 +718,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.2.0.",
+        "section_missing.title": "This field is not in Site Definition 1.3.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.2.0.",
+        "section_hero.href": "This field is not in Site Definition 1.3.0.",
       },
     });
   });
@@ -668,7 +734,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.2.0.",
+        "This field is not in Site Definition 1.3.0.",
       );
     }
   });

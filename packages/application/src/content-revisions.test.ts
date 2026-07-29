@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDefaultPageSection,
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
+  createSiteId,
   referenceSiteDefinition,
   toPageComposition,
   type PageSection,
@@ -36,7 +39,7 @@ const applicationInputs = {
 
 const commandInputs = {
   workspaceId: applicationInputs.workspaceId,
-  schemaVersion: "1.2.0",
+  schemaVersion: "1.3.0",
 } as const;
 
 async function createWorkspace(
@@ -74,6 +77,415 @@ async function legacyRequestHash(value: unknown): Promise<string> {
 }
 
 describe("content revision application", () => {
+  it("preserves aggregate create and successor invariants in memory", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000cd",
+    );
+    const post = {
+      id: postId,
+      revision: 1,
+      collectionState: "active" as const,
+      targetVisibility: "public" as const,
+      slug: "memory-aggregate-invariant",
+      title: "Memory aggregate invariant",
+      excerpt: "The adapter must preserve command shape.",
+      seo: {
+        title: "Memory aggregate invariant | Foundry",
+        description: "The adapter must preserve command shape.",
+      },
+      body: createRichTextDocumentFromPlainText("Invariant body."),
+    };
+    const definitionWithPost = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [post],
+      },
+    };
+    const revision = (
+      definition: typeof referenceSiteDefinition,
+      revisionNumber: number,
+    ) => ({
+      workspaceId: applicationInputs.workspaceId,
+      revision: revisionNumber,
+      definition,
+      inputs: {
+        contentHash: `content-${revisionNumber}`,
+        schemaVersion: definition.schemaVersion,
+        rendererVersion: applicationInputs.rendererVersion,
+        productionBase: applicationInputs.productionBase,
+      },
+      createdAt: `2026-07-27T10:0${revisionNumber}:00.000Z`,
+      createdBy: editorActorId,
+    });
+    const transition = {
+      postId,
+      commandType: "blog.post.edit" as const,
+      requestId: "memory-aggregate-transition",
+      occurredAt: "2026-07-27T10:01:00.000Z",
+      revisionId: "00000000-0000-8000-8000-0000000000cd",
+      artifact: {} as any,
+    };
+
+    const existingStore = createInMemoryContentRevisionStore();
+    await existingStore.initialize(
+      revision(definitionWithPost, 0),
+      editorActorId,
+    );
+    const existingAggregate =
+      await existingStore.getBlogPostAggregate(postId);
+    await expect(
+      existingStore.persist({
+        baseRevision: 0,
+        idempotencyKey: "memory-create-existing-aggregate",
+        requestHash: "create-existing",
+        revision: revision(definitionWithPost, 1),
+        blogArtifacts: [],
+        blogTransitions: [
+          {
+            ...transition,
+            commandType: "blog.post.create",
+            beforeState: null,
+            afterState: {
+              revision: 1,
+              targetVisibility: "public",
+            },
+            observedAggregate: existingAggregate,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+
+    const missingStore = createInMemoryContentRevisionStore();
+    await missingStore.initialize(
+      revision(referenceSiteDefinition, 0),
+      editorActorId,
+    );
+    await expect(
+      missingStore.persist({
+        baseRevision: 0,
+        idempotencyKey: "memory-successor-missing-aggregate",
+        requestHash: "successor-missing",
+        revision: revision(definitionWithPost, 1),
+        blogArtifacts: [],
+        blogTransitions: [
+          {
+            ...transition,
+            beforeState: {
+              revision: 1,
+              targetVisibility: "public",
+            },
+            afterState: {
+              revision: 2,
+              targetVisibility: "public",
+            },
+            observedAggregate: null,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+  });
+
+  it("creates and edits a first-class post through immutable site revisions", async () => {
+    const store = createInMemoryContentRevisionStore();
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store,
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-blog-workspace-0001");
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    const created = await application.commands.createBlogPost({
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: referenceSiteDefinition.site.id,
+      baseRevision: 0,
+      post: {
+        id: postId,
+        slug: "first-post",
+        title: "First post",
+        excerpt: "The first post excerpt.",
+        seo: {
+          title: "First post | Foundry",
+          description: "The first post from Foundry.",
+        },
+        body: createRichTextDocumentFromPlainText("Original body."),
+      },
+      idempotencyKey: "create-blog-post-0001",
+    });
+    expect(created.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 1,
+      targetVisibility: "public",
+      title: "First post",
+    });
+
+    const fieldEdited = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 1,
+      edits: [{ path: `${postId}.title`, value: "First post via editor" }],
+      idempotencyKey: "edit-blog-post-fields-0001",
+    });
+    expect(fieldEdited.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 2,
+      title: "First post via editor",
+    });
+
+    const edited = await application.commands.editBlogPost({
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: referenceSiteDefinition.site.id,
+      baseRevision: 2,
+      postId,
+      post: {
+        slug: "first-post",
+        title: "First post, revised",
+        excerpt: "The revised excerpt.",
+        seo: {
+          title: "First post, revised | Foundry",
+          description: "The revised first post from Foundry.",
+        },
+        body: createRichTextDocumentFromPlainText("Revised body."),
+      },
+      idempotencyKey: "edit-blog-post-0001",
+    });
+    expect(edited.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 3,
+      title: "First post, revised",
+    });
+    expect(
+      (await application.queries.getRevision(1))?.definition.blog.posts[0],
+    ).toMatchObject({ revision: 1, title: "First post" });
+
+    await expect(
+      application.commands.unpublishBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: referenceSiteDefinition.site.id,
+        baseRevision: 3,
+        postId,
+        idempotencyKey: "unpublish-blog-post-0001",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_not_live" },
+    });
+    expect(
+      (await application.queries.getRevision(2))?.definition.blog.posts[0],
+    ).toMatchObject({ revision: 2, title: "First post via editor" });
+    await expect(store.getBlogPostAggregate(postId)).resolves.toEqual({
+      currentRevision: 1,
+      liveRevision: null,
+      lastVerifiedRevision: null,
+      lastVerifiedVisibility: null,
+      version: 1,
+    });
+  });
+
+  it("unpublishes only a post present in the immutable published base", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000002",
+    );
+    const liveDefinition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: postId,
+            revision: 1,
+            collectionState: "active" as const,
+            targetVisibility: "public" as const,
+            slug: "live-post",
+            title: "Live post",
+            excerpt: "This post is currently live.",
+            seo: {
+              title: "Live post | Foundry",
+              description: "A live post ready to be unpublished.",
+            },
+            body: createRichTextDocumentFromPlainText("Live body."),
+          },
+        ],
+      },
+    };
+    const application = createContentRevisionApplication({
+      siteDefinition: liveDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-live-blog-workspace-0001");
+
+    const unpublished = await application.commands.unpublishBlogPost({
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: liveDefinition.site.id,
+      baseRevision: 0,
+      postId,
+      idempotencyKey: "unpublish-live-blog-post-0001",
+    });
+
+    expect(unpublished.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 2,
+      targetVisibility: "unpublished",
+    });
+    expect(
+      (await application.queries.getRevision(0))?.definition.blog.posts[0],
+    ).toMatchObject({ id: postId, revision: 1, title: "Live post" });
+    await expect(
+      application.commands.createBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: liveDefinition.site.id,
+        baseRevision: 1,
+        post: {
+          id: postId,
+          slug: "recreated-post",
+          title: "Recreated post",
+          excerpt: "Identity reuse must fail.",
+          seo: {
+            title: "Recreated post | Foundry",
+            description: "Identity reuse must fail.",
+          },
+          body: createRichTextDocumentFromPlainText("Recreated body."),
+        },
+        idempotencyKey: "recreate-unpublished-blog-post",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_already_exists" },
+    });
+    await expect(
+      application.commands.republishBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: liveDefinition.site.id,
+        baseRevision: 1,
+        postId,
+        idempotencyKey: "republish-before-unpublish-verification",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_not_unpublished" },
+    });
+
+    const publishedWithoutPost = {
+      ...liveDefinition,
+      blog: { ...liveDefinition.blog, posts: [] },
+    };
+    const freshApplication = createContentRevisionApplication({
+      siteDefinition: publishedWithoutPost,
+      initialDefinition: unpublished.definition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(
+      freshApplication,
+      "create-hydrated-unpublished-workspace",
+    );
+    const republished =
+      await freshApplication.commands.republishBlogPost({
+        actorId: editorActorId,
+        ...commandInputs,
+        siteId: liveDefinition.site.id,
+        baseRevision: 0,
+        postId,
+        idempotencyKey: "republish-unpublished-blog-post",
+      });
+    expect(republished.definition.blog.posts[0]).toMatchObject({
+      id: postId,
+      revision: 3,
+      collectionState: "active",
+      targetVisibility: "public",
+    });
+  });
+
+  it("replays blog commands and fails closed for concurrency, invalid schemas, and cross-site IDs", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-blog-workspace-0002");
+    const command = {
+      actorId: editorActorId,
+      ...commandInputs,
+      siteId: referenceSiteDefinition.site.id,
+      baseRevision: 0,
+      post: {
+        id: createBlogPostId(
+          "00000000-0000-4000-8000-000000000003",
+        ),
+        slug: "concurrent-post",
+        title: "Concurrent post",
+        excerpt: "A concurrency test.",
+        seo: {
+          title: "Concurrent post | Foundry",
+          description: "A concurrency test post.",
+        },
+        body: createRichTextDocumentFromPlainText("Body."),
+      },
+      idempotencyKey: "create-blog-post-0002",
+    } as const;
+    const created = await application.commands.createBlogPost(command);
+    await expect(application.commands.createBlogPost(command)).resolves.toEqual(
+      created,
+    );
+    await expect(
+      application.commands.createBlogPost({
+        ...command,
+        baseRevision: 1,
+        idempotencyKey: "create-blog-post-0003",
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "post_already_exists" },
+    });
+    await expect(
+      application.commands.createBlogPost({
+        ...command,
+        siteId: createSiteId("site_other"),
+        baseRevision: 1,
+        idempotencyKey: "create-blog-post-0004",
+        post: {
+          ...command.post,
+          id: createBlogPostId(
+            "00000000-0000-4000-8000-000000000004",
+          ),
+        },
+      }),
+    ).rejects.toMatchObject({
+      fields: { blog: "cross_site_identifier" },
+    });
+    const results = await Promise.allSettled([
+      application.commands.editBlogPost({
+        ...command,
+        baseRevision: 1,
+        postId: command.post.id,
+        post: { ...command.post, title: "Winner A" },
+        idempotencyKey: "edit-blog-concurrent-a",
+      }),
+      application.commands.editBlogPost({
+        ...command,
+        baseRevision: 1,
+        postId: command.post.id,
+        post: { ...command.post, title: "Winner B" },
+        idempotencyKey: "edit-blog-concurrent-b",
+      }),
+    ]);
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1,
+    );
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(
+      1,
+    );
+    expect(
+      (results.find(({ status }) => status === "rejected") as PromiseRejectedResult)
+        .reason,
+    ).toBeInstanceOf(ContentRevisionConflictError);
+  });
+
   it("keeps reads side-effect free until an explicit create command", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -175,21 +587,21 @@ describe("content revision application", () => {
     );
     expect(saved.inputs).toEqual({
       contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      schemaVersion: "1.2.0",
+      schemaVersion: "1.3.0",
       rendererVersion: "renderer-commit-a",
       productionBase: "published:site_foundry_reference@1.1.0",
     });
     expect(Object.isFrozen(saved)).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.2.0",
+        schemaVersion: "1.3.0",
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.2.0",
+        schemaVersion: "1.3.0",
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
       }),
@@ -201,7 +613,7 @@ describe("content revision application", () => {
           inputs: { ...saved.inputs, schemaVersion: "1.0.0" },
         },
         {
-          schemaVersion: "1.2.0",
+          schemaVersion: "1.3.0",
           rendererVersion: "renderer-commit-a",
           productionBase: applicationInputs.productionBase,
         },
@@ -927,7 +1339,7 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: createContentWorkspaceId("workspace_other"),
-        schemaVersion: "1.2.0",
+        schemaVersion: "1.3.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong workspace" }],
         idempotencyKey: "save-section-hero-0007",
@@ -941,14 +1353,14 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: applicationInputs.workspaceId,
-        schemaVersion: "2.0.0" as "1.2.0",
+        schemaVersion: "2.0.0" as "1.3.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong schema" }],
         idempotencyKey: "save-section-hero-0008",
       }),
     ).rejects.toEqual(
       new ContentRevisionValidationError({
-        schemaVersion: "Use Site Definition schema 1.2.0.",
+        schemaVersion: "Use Site Definition schema 1.3.0.",
       }),
     );
   });

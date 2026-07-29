@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
 } from "@foundry/site-definition";
@@ -188,11 +190,16 @@ describe("content publication application", () => {
     ).resolves.toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  function application() {
+  function application(
+    onVerifiedLive?: Parameters<
+      typeof createContentPublicationApplication
+    >[0]["onVerifiedLive"],
+  ) {
     return createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),
       revisions: repository,
       publisher,
+      onVerifiedLive,
       now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
     });
   }
@@ -223,6 +230,8 @@ describe("content publication application", () => {
           channel: "site",
           channelConfigurationHash: "channel-a",
           contentHash: revisionApplication.saved.inputs.contentHash,
+          revisionContentHash:
+            revisionApplication.saved.inputs.contentHash,
           designHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           schemaVersion: referenceSiteDefinition.schemaVersion,
           rendererVersion: "renderer-v1",
@@ -230,8 +239,241 @@ describe("content publication application", () => {
           artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           serializationVersion:
             "foundry.site-publication-artifacts.v2",
+          postArtifacts: [],
         },
       }),
+    );
+  });
+
+  it("publishes a post through the exact site fingerprint and verified-live pipeline", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-000000000009",
+    );
+    createCommit
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "c".repeat(40),
+      })
+      .mockResolvedValueOnce({
+        state: "committed",
+        commitSha: "d".repeat(40),
+      });
+    const savedPost = await revisionApplication.application.commands
+      .createBlogPost({
+        actorId: editorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 1,
+        post: {
+          id: postId,
+          slug: "exact-pipeline",
+          title: "Exact pipeline",
+          excerpt: "Published through the site pipeline.",
+          seo: {
+            title: "Exact pipeline | Foundry",
+            description: "A post using the exact site publication pipeline.",
+          },
+          body: createRichTextDocumentFromPlainText("Exact post body."),
+        },
+        idempotencyKey: "create-exact-pipeline-post",
+      });
+    getDeploymentStatus.mockResolvedValue("deployed");
+    isReleaseLive.mockResolvedValue(true);
+    const onVerifiedLive = vi.fn();
+    const app = application(onVerifiedLive);
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: savedPost.revision,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    expect(approval.fingerprint.postArtifacts).toEqual([
+      expect.objectContaining({
+        postId,
+        postRevisionId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+        ),
+        revision: 1,
+        contentHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        renderedBytesHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        value: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      }),
+    ]);
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-exact-pipeline-post",
+    });
+    expect(onVerifiedLive).not.toHaveBeenCalled();
+    expect(publication).toMatchObject({
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+    });
+    expect(createCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentHash: approval.fingerprint.contentHash,
+        artifactHash: approval.fingerprint.artifactHash,
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: `content/rich-text/${postId}/body.md`,
+            bytes: "Exact post body\\.\n",
+          }),
+        ]),
+      }),
+    );
+    await app.commands.refresh(publication.id);
+    await expect(app.queries.get(publication.id)).resolves.toMatchObject({
+      status: "verified-live",
+      commitSha: "c".repeat(40),
+      fingerprint: approval.fingerprint.value,
+    });
+    expect(onVerifiedLive).toHaveBeenCalledTimes(1);
+    expect(onVerifiedLive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: publication.id,
+        status: "verified-live",
+        revision: savedPost.revision,
+      }),
+      expect.objectContaining({
+        revision: savedPost.revision,
+        definition: savedPost.definition,
+      }),
+    );
+
+    const removalWorkspaceId = createContentWorkspaceId(
+      "workspace_unpublish_post",
+    );
+    const removalStore = createInMemoryContentRevisionStore();
+    const removalRevisions = createContentRevisionApplication({
+      siteDefinition: savedPost.definition,
+      initialDefinition: savedPost.definition,
+      store: removalStore,
+      workspaceId: removalWorkspaceId,
+      actorId: editorId,
+      rendererVersion: "renderer-v1",
+      productionBase:
+        `git:${"c".repeat(40)}@content:${approval.fingerprint.contentHash}`,
+      now: () => "2026-07-27T10:06:00.000Z",
+    });
+    await removalRevisions.commands.create({
+      actorId: editorId,
+      workspaceId: removalWorkspaceId,
+      idempotencyKey: "create-unpublish-workspace",
+    });
+    const removalRevision =
+      await removalRevisions.commands.unpublishBlogPost({
+        actorId: editorId,
+        workspaceId: removalWorkspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        postId,
+        idempotencyKey: "create-unpublish-revision",
+      });
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    const removalApplication = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: {
+        getRevision: async (_workspace, revision) =>
+          removalRevisions.queries.getRevision(revision),
+        getCurrent: async () => removalRevisions.queries.getCurrent(),
+        isCurrent: async (revision) =>
+          removalRevisions.queries.isRevisionCurrent(revision),
+        listContributors: async () => [editorId],
+      },
+      publisher,
+      now: () => "2026-07-27T10:07:00.000Z",
+    });
+    const removalApproval = await removalApplication.commands.approve({
+      workspaceId: removalWorkspaceId,
+      revision: removalRevision.revision,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const removalPublicDefinition = {
+      ...removalRevision.definition,
+      blog: { ...removalRevision.definition.blog, posts: [] },
+    };
+    expect(removalApproval.fingerprint).toMatchObject({
+      contentHash: await hashPublishedSiteDefinition(
+        removalPublicDefinition,
+      ),
+      revisionContentHash: removalRevision.inputs.contentHash,
+    });
+    expect(removalApproval.fingerprint.contentHash).not.toBe(
+      removalApproval.fingerprint.revisionContentHash,
+    );
+    const removalPublication = await removalApplication.commands.publish({
+      workspaceId: removalWorkspaceId,
+      approvalId: removalApproval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-unpublish-revision",
+    });
+
+    expect(removalPublication).toMatchObject({
+      approvalId: removalApproval.id,
+      requestedBy: membershipId,
+      fingerprint: removalApproval.fingerprint.value,
+    });
+    const removalCommit = createCommit.mock.calls[1]?.[0];
+    const removalJson = removalCommit?.artifacts.find(
+      ({ path }) =>
+        path === "packages/site-definition/src/published-site.json",
+    );
+    expect(JSON.parse(removalJson?.bytes ?? "{}")).toMatchObject({
+      blog: { posts: [] },
+    });
+    expect(removalCommit?.artifacts).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: `content/rich-text/${postId}/body.md`,
+        }),
+      ]),
+    );
+    await expect(removalRevisions.queries.getRevision(0)).resolves.toMatchObject({
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              revision: 1,
+            }),
+          ],
+        },
+      },
+    });
+  });
+
+  it("retries verified-live reconciliation after the durable callback fails", async () => {
+    getDeploymentStatus.mockResolvedValue("deployed");
+    const onVerifiedLive = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("aggregate_write_unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const { app, approval } = await approve(application(onVerifiedLive));
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-with-reconciliation-retry",
+    });
+
+    await expect(app.commands.refresh(publication.id)).rejects.toThrow(
+      "aggregate_write_unavailable",
+    );
+    await expect(app.queries.get(publication.id)).resolves.toMatchObject({
+      status: "verified-live",
+    });
+
+    await expect(app.commands.refresh(publication.id)).resolves.toMatchObject({
+      status: "verified-live",
+    });
+    expect(onVerifiedLive).toHaveBeenCalledTimes(2);
+    expect(onVerifiedLive).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "verified-live" }),
+      expect.objectContaining({ revision: 1 }),
     );
   });
 
@@ -1124,6 +1366,52 @@ describe("content publication application", () => {
         workspaceId: restoredWorkspaceId,
       }),
     );
+  });
+
+  it("preserves the legacy v2 artifact contract when the historical definition has no blog", async () => {
+    const legacyDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    legacyDefinition.definitionVersion = "1.2.0";
+    legacyDefinition.schemaVersion = "1.2.0";
+    delete legacyDefinition.blog;
+    const legacyRichTextDefinition = {
+      ...legacyDefinition,
+      blog: { id: "blog", posts: [] },
+    };
+
+    await expect(
+      hashContentPublicationArtifacts(
+        serializeContentPublicationArtifacts(legacyDefinition),
+      ),
+    ).resolves.toBe(
+      await hashContentPublicationArtifacts([
+        {
+          path: "packages/site-definition/src/published-site.json",
+          bytes: serializePublishedSiteDefinition(legacyDefinition),
+        },
+        ...serializeSiteDefinitionRichTextForPublication(
+          legacyRichTextDefinition,
+        ).map(({ filePath, markdown }) => ({
+          path: filePath,
+          bytes: markdown,
+        })),
+      ]),
+    );
+    expect(
+      serializeContentPublicationArtifacts(legacyDefinition)[0]!.bytes,
+    ).toBe(serializePublishedSiteDefinition(legacyDefinition));
+  });
+
+  it("rejects a current publication definition whose blog data is missing", () => {
+    const invalidDefinition = structuredClone(
+      revisionApplication.saved.definition,
+    ) as any;
+    delete invalidDefinition.blog;
+
+    expect(() =>
+      serializeContentPublicationArtifacts(invalidDefinition),
+    ).toThrow("site_definition_blog_missing");
   });
 
   it("reconciles and explicitly retries an ambiguous legacy v1 publication after rollout", async () => {
