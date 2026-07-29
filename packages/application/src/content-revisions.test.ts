@@ -77,6 +77,115 @@ async function legacyRequestHash(value: unknown): Promise<string> {
 }
 
 describe("content revision application", () => {
+  it("preserves aggregate create and successor invariants in memory", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000cd",
+    );
+    const post = {
+      id: postId,
+      revision: 1,
+      collectionState: "active" as const,
+      targetVisibility: "public" as const,
+      slug: "memory-aggregate-invariant",
+      title: "Memory aggregate invariant",
+      excerpt: "The adapter must preserve command shape.",
+      seo: {
+        title: "Memory aggregate invariant | Foundry",
+        description: "The adapter must preserve command shape.",
+      },
+      body: createRichTextDocumentFromPlainText("Invariant body."),
+    };
+    const definitionWithPost = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [post],
+      },
+    };
+    const revision = (
+      definition: typeof referenceSiteDefinition,
+      revisionNumber: number,
+    ) => ({
+      workspaceId: applicationInputs.workspaceId,
+      revision: revisionNumber,
+      definition,
+      inputs: {
+        contentHash: `content-${revisionNumber}`,
+        schemaVersion: definition.schemaVersion,
+        rendererVersion: applicationInputs.rendererVersion,
+        productionBase: applicationInputs.productionBase,
+      },
+      createdAt: `2026-07-27T10:0${revisionNumber}:00.000Z`,
+      createdBy: editorActorId,
+    });
+    const transition = {
+      postId,
+      commandType: "blog.post.edit" as const,
+      requestId: "memory-aggregate-transition",
+      occurredAt: "2026-07-27T10:01:00.000Z",
+      revisionId: "00000000-0000-8000-8000-0000000000cd",
+      artifact: {} as any,
+    };
+
+    const existingStore = createInMemoryContentRevisionStore();
+    await existingStore.initialize(
+      revision(definitionWithPost, 0),
+      editorActorId,
+    );
+    const existingAggregate =
+      await existingStore.getBlogPostAggregate(postId);
+    await expect(
+      existingStore.persist({
+        baseRevision: 0,
+        idempotencyKey: "memory-create-existing-aggregate",
+        requestHash: "create-existing",
+        revision: revision(definitionWithPost, 1),
+        blogArtifacts: [],
+        blogTransitions: [
+          {
+            ...transition,
+            commandType: "blog.post.create",
+            beforeState: null,
+            afterState: {
+              revision: 1,
+              targetVisibility: "public",
+            },
+            observedAggregate: existingAggregate,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+
+    const missingStore = createInMemoryContentRevisionStore();
+    await missingStore.initialize(
+      revision(referenceSiteDefinition, 0),
+      editorActorId,
+    );
+    await expect(
+      missingStore.persist({
+        baseRevision: 0,
+        idempotencyKey: "memory-successor-missing-aggregate",
+        requestHash: "successor-missing",
+        revision: revision(definitionWithPost, 1),
+        blogArtifacts: [],
+        blogTransitions: [
+          {
+            ...transition,
+            beforeState: {
+              revision: 1,
+              targetVisibility: "public",
+            },
+            afterState: {
+              revision: 2,
+              targetVisibility: "public",
+            },
+            observedAggregate: null,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+  });
+
   it("creates and edits a first-class post through immutable site revisions", async () => {
     const store = createInMemoryContentRevisionStore();
     const application = createContentRevisionApplication({

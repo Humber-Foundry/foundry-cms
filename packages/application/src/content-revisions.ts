@@ -502,10 +502,12 @@ export function createInMemoryContentRevisionStore({
         for (const transition of command.blogTransitions ?? []) {
           const aggregate = blogPosts.get(transition.postId);
           if (
-            (transition.observedAggregate === null &&
-              aggregate !== undefined) ||
-            (transition.observedAggregate !== null &&
-              (aggregate === undefined ||
+            (transition.beforeState === null &&
+              (transition.observedAggregate !== null ||
+                aggregate !== undefined)) ||
+            (transition.beforeState !== null &&
+              (transition.observedAggregate === null ||
+                aggregate === undefined ||
                 aggregate.currentRevision !==
                   transition.observedAggregate.currentRevision ||
                 aggregate.liveRevision !==

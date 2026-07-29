@@ -266,6 +266,147 @@ describe("D1 content revision store", () => {
     });
   });
 
+  it("preserves create and successor aggregate invariants at persistence", async () => {
+    const existingPostId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000cb",
+    );
+    const createApplicationWithoutPost = createApplication();
+    await createWorkspace(
+      createApplicationWithoutPost,
+      "d1-global-id-create-workspace",
+    );
+    await database
+      .prepare(
+        `INSERT INTO blog_posts (
+           site_id, post_id, collection_state, current_revision,
+           live_revision, last_verified_revision, last_verified_visibility,
+           last_verified_publication_id, last_verified_publication_sequence,
+           version, updated_at
+         ) VALUES (?1, ?2, 'active', 1, NULL, NULL, NULL, NULL, NULL, 1, ?3)`,
+      )
+      .bind(
+        referenceSiteDefinition.site.id,
+        existingPostId,
+        "2026-07-27T12:05:00.000Z",
+      )
+      .run();
+
+    await expect(
+      createApplicationWithoutPost.commands.createBlogPost({
+        actorId: editorActorId,
+        workspaceId,
+        siteId: referenceSiteDefinition.site.id,
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        baseRevision: 0,
+        post: {
+          id: existingPostId,
+          slug: "global-id-collision",
+          title: "Global ID collision",
+          excerpt: "The stable identity already exists outside this draft.",
+          seo: {
+            title: "Global ID collision | Foundry",
+            description:
+              "The stable identity already exists outside this draft.",
+          },
+          body: createRichTextDocumentFromPlainText("Must conflict."),
+        },
+        idempotencyKey: "d1-global-id-create-command",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+
+    const missingPostId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000cc",
+    );
+    const missingWorkspaceId = createContentWorkspaceId(
+      "workspace_missing_successor",
+    );
+    const definitionWithPost = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: missingPostId,
+            revision: 1,
+            collectionState: "active" as const,
+            targetVisibility: "public" as const,
+            slug: "missing-successor",
+            title: "Missing successor",
+            excerpt: "The draft post has lost its aggregate.",
+            seo: {
+              title: "Missing successor | Foundry",
+              description: "The draft post has lost its aggregate.",
+            },
+            body: createRichTextDocumentFromPlainText("Original body."),
+          },
+        ],
+      },
+    };
+    const successorApplication = createApplication(
+      editorActorId,
+      missingWorkspaceId,
+      "2026-07-27T12:06:00.000Z",
+      definitionWithPost,
+    );
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO content_workspaces (
+             workspace_id, site_id, owner_actor_id, production_base,
+             schema_version, renderer_version, current_revision,
+             current_content_hash, lifecycle, created_at, updated_at
+           ) VALUES (
+             ?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, 'open', ?8, ?8
+           )`,
+        )
+        .bind(
+          missingWorkspaceId,
+          definitionWithPost.site.id,
+          editorActorId,
+          "published:site_foundry_reference@1.1.0",
+          definitionWithPost.schemaVersion,
+          "renderer-test-commit",
+          "missing-aggregate-content-hash",
+          "2026-07-27T12:06:00.000Z",
+        ),
+      database
+        .prepare(
+          `INSERT INTO content_revisions (
+             workspace_id, revision, definition_json, content_hash,
+             schema_version, renderer_version, production_base, request_hash,
+             created_at, created_by
+           ) VALUES (?1, 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+        )
+        .bind(
+          missingWorkspaceId,
+          JSON.stringify(definitionWithPost),
+          "missing-aggregate-content-hash",
+          definitionWithPost.schemaVersion,
+          "renderer-test-commit",
+          "published:site_foundry_reference@1.1.0",
+          "missing-aggregate-request-hash",
+          "2026-07-27T12:06:00.000Z",
+          editorActorId,
+        ),
+    ]);
+
+    await expect(
+      successorApplication.commands.save({
+        actorId: editorActorId,
+        workspaceId: missingWorkspaceId,
+        schemaVersion: definitionWithPost.schemaVersion,
+        baseRevision: 0,
+        edits: [
+          {
+            path: `${missingPostId}.title`,
+            value: "Missing successor, edited",
+          },
+        ],
+        idempotencyKey: "d1-missing-successor-command",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+  });
+
   it(
     "persists blog revisions, transition audit, and live unpublish history in D1",
     { timeout: 60_000 },

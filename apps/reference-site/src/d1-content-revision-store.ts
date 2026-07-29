@@ -956,27 +956,35 @@ export function createD1ContentRevisionStore(
             blogGuardBindings.push(value);
             return `?${parameter}`;
           };
-          const postParameter = bindGuardValue(transition.postId);
-          if (transition.observedAggregate === null) {
+          if (transition.beforeState === null) {
+            if (transition.observedAggregate !== null) {
+              return "AND 0 = 1";
+            }
+            const postParameter = bindGuardValue(transition.postId);
             return `AND NOT EXISTS (
               SELECT 1 FROM blog_posts
               WHERE site_id = ?14 AND post_id = ${postParameter}
             )`;
           }
+          const observedAggregate = transition.observedAggregate;
+          if (observedAggregate === null) {
+            return "AND 0 = 1";
+          }
+          const postParameter = bindGuardValue(transition.postId);
           const currentRevisionParameter = bindGuardValue(
-            transition.observedAggregate.currentRevision,
+            observedAggregate.currentRevision,
           );
           const liveRevisionParameter = bindGuardValue(
-            transition.observedAggregate.liveRevision,
+            observedAggregate.liveRevision,
           );
           const lastVerifiedRevisionParameter = bindGuardValue(
-            transition.observedAggregate.lastVerifiedRevision,
+            observedAggregate.lastVerifiedRevision,
           );
           const lastVerifiedVisibilityParameter = bindGuardValue(
-            transition.observedAggregate.lastVerifiedVisibility,
+            observedAggregate.lastVerifiedVisibility,
           );
           const versionParameter = bindGuardValue(
-            transition.observedAggregate.version,
+            observedAggregate.version,
           );
           return `AND EXISTS (
             SELECT 1 FROM blog_posts
