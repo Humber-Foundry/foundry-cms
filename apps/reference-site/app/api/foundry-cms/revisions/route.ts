@@ -17,6 +17,7 @@ import {
   createBlogPostId,
   parseSerializedRichTextDocument,
   referenceSiteDefinition,
+  RichTextValidationError,
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
@@ -496,7 +497,8 @@ export async function POST(request: Request) {
       blogMutation = parseBlogMutation(submitted);
     } catch (error) {
       if (
-        error instanceof TypeError &&
+        (error instanceof TypeError ||
+          error instanceof RichTextValidationError) &&
         typeof submitted === "object" &&
         submitted !== null &&
         "operation" in submitted &&

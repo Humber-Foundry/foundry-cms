@@ -326,6 +326,45 @@ describe("content revision endpoint", () => {
     );
   });
 
+  it("audits malformed post rich text as an invalid blog command", async () => {
+    const response = await POST(
+      request(
+        {
+          operation: "create_blog_post",
+          workspaceId: "workspace_home",
+          schemaVersion: referenceSiteDefinition.schemaVersion,
+          baseRevision: 0,
+          post: {
+            id: routePostId,
+            slug: "invalid-rich-text",
+            title: "Invalid rich text",
+            excerpt: "The body is not canonical rich text.",
+            seo: {
+              title: "Invalid rich text | Foundry",
+              description: "The body is not canonical rich text.",
+            },
+            body: "{",
+          },
+        },
+        "malformed-blog-rich-text-0001",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.loadApplication).toHaveBeenCalledWith(
+      "workspace_home",
+      "membership-editor",
+    );
+    expect(mocks.recordRejectedBlogPostCommand).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      postId: routePostId,
+      commandType: "blog.post.create",
+      reasonCode: "blog_command_invalid",
+      requestId: "malformed-blog-rich-text-0001",
+    });
+    expect(mocks.createBlogPost).not.toHaveBeenCalled();
+  });
+
   it("preserves a canonical rich-text edit at the API boundary", async () => {
     mocks.save.mockResolvedValue({
       workspaceId: "workspace_home",
