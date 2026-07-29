@@ -299,10 +299,24 @@ export async function POST(request: Request) {
     if (error instanceof AccessDeniedError) {
       return Response.json({ error: "not_authorized" }, { status: 403 });
     }
-    if (
-      error instanceof CampaignValidationError ||
-      error instanceof TypeError
-    ) {
+    if (error instanceof CampaignValidationError) {
+      const isTestDeliveryReason =
+        error.message === "provider_unhealthy" ||
+        error.message === "test_recipient_forbidden" ||
+        error.message.startsWith("provider_test_") ||
+        error.message.startsWith("provider_configuration_");
+      return Response.json(
+        {
+          error: isTestDeliveryReason
+            ? error.message
+            : "campaign_command_invalid",
+        },
+        {
+          status: error.message === "provider_unhealthy" ? 503 : 400,
+        },
+      );
+    }
+    if (error instanceof TypeError) {
       return Response.json({ error: "campaign_command_invalid" }, { status: 400 });
     }
     if (error instanceof CampaignConflictError) {

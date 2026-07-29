@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  assessBrevoClientAccountReadiness,
+  assessBrevoTestDeliveryReadiness,
   createBrevoNewsletterDeliveryAdapter,
 } from "./brevo-newsletter-delivery-adapter";
 import type {
@@ -78,8 +78,8 @@ describe("Brevo newsletter delivery adapter", () => {
           name: "foundry-test-40000000-0000-4000-8000-000000000001",
           tag: "f-test-8000000000000001",
           sender: { id: 42 },
-          subject: "Foundry campaign test bbbbbbbbbbbb",
-          previewText: "Foundry exact test delivery",
+          subject: request.subject,
+          previewText: request.previewText,
           htmlContent: "<html><body>Exact body</body></html>",
           testSent: true,
         }),
@@ -117,8 +117,8 @@ describe("Brevo newsletter delivery adapter", () => {
             name: "foundry-test-40000000-0000-4000-8000-000000000001",
             tag: "f-test-8000000000000001",
             sender: { id: 42 },
-            subject: "Foundry campaign test bbbbbbbbbbbb",
-            previewText: "Foundry exact test delivery",
+            subject: request.subject,
+            previewText: request.previewText,
             htmlContent: "<html><body>Exact body</body></html>",
             testSent: true,
           },
@@ -145,6 +145,32 @@ describe("Brevo newsletter delivery adapter", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps server errors ambiguous because either provider write may have applied", async () => {
+    const createAmbiguous = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi.fn().mockResolvedValue(response(503)),
+    });
+    await expect(createAmbiguous.sendTest(request)).resolves.toEqual({
+      outcome: "ambiguous",
+    });
+
+    const sendAmbiguous = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi
+        .fn()
+        .mockResolvedValueOnce(response(201, { id: 19 }))
+        .mockResolvedValueOnce(response(503)),
+    });
+    await expect(sendAmbiguous.sendTest(request)).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: "19",
+    });
+  });
+
   it("reports explicit capabilities and checks account plus sender health without returning account identity", async () => {
     const fetcher = vi
       .fn()
@@ -166,6 +192,7 @@ describe("Brevo newsletter delivery adapter", () => {
       apiTestDelivery: "supported",
       explicitRecipients: "supported",
       ambiguousOutcomeReconciliation: "supported",
+      plainTextArtifact: "unsupported",
     });
     const health = await adapter.health();
     expect(health).toEqual({
@@ -197,7 +224,7 @@ describe("Brevo newsletter delivery adapter", () => {
     });
 
     await expect(
-      assessBrevoClientAccountReadiness({
+      assessBrevoTestDeliveryReadiness({
         adapter,
         ownership: "evaluation",
         liveTestEvidence: evidence,
@@ -205,7 +232,7 @@ describe("Brevo newsletter delivery adapter", () => {
       }),
     ).resolves.toMatchObject({
       state: "evaluation_only",
-      productionReady: false,
+      testDeliveryReady: false,
     });
   });
 
@@ -230,7 +257,7 @@ describe("Brevo newsletter delivery adapter", () => {
     });
 
     await expect(
-      assessBrevoClientAccountReadiness({
+      assessBrevoTestDeliveryReadiness({
         adapter,
         ownership: "client_owned",
         liveTestEvidence: evidence,
@@ -238,7 +265,7 @@ describe("Brevo newsletter delivery adapter", () => {
       }),
     ).resolves.toEqual({
       state: "ready",
-      productionReady: true,
+      testDeliveryReady: true,
       provider: "brevo",
       configurationFingerprint,
       acceptedAt: evidence.acceptedAt,

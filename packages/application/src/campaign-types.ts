@@ -139,7 +139,7 @@ export type CampaignAuditEvent = Readonly<{
   revisionId: CampaignRevisionId | null;
   requestId: string;
   inputHash: string;
-  action: "campaign.create" | "campaign.edit";
+  action: "campaign.create" | "campaign.edit" | "campaign.test";
   outcome: "accepted" | "rejected";
   reason: string | null;
   beforeState: string | null;
@@ -150,7 +150,8 @@ export type CampaignAuditEvent = Readonly<{
 export type CampaignCommandName =
   | "campaign.create_standalone"
   | "campaign.create_from_post"
-  | "campaign.edit";
+  | "campaign.edit"
+  | "campaign.request_test";
 
 export function isCampaignRequestId(value: string): boolean {
   return (

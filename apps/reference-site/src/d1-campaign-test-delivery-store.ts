@@ -18,6 +18,7 @@ type TestDeliveryRow = Readonly<{
   binding_json: string;
   recipient_ids_json: string;
   state: CampaignTestDeliveryOperation["state"];
+  attempt_lease_until: string | null;
   provider_campaign_id: string | null;
   failure_code: string | null;
   evidence_json: string | null;
@@ -28,6 +29,7 @@ type TestDeliveryRow = Readonly<{
 const projection = `
   SELECT execution_id, site_id, actor_id, request_id, campaign_id,
     campaign_revision_id, binding_json, recipient_ids_json, state,
+    attempt_lease_until,
     provider_campaign_id, failure_code, evidence_json, created_at, updated_at
   FROM campaign_test_deliveries
 `;
@@ -55,6 +57,7 @@ function toOperation(row: TestDeliveryRow): CampaignTestDeliveryOperation {
       JSON.parse(row.recipient_ids_json) as ReadonlyArray<string>,
     ),
     state: row.state,
+    attemptLeaseUntil: row.attempt_lease_until,
     providerCampaignId: row.provider_campaign_id,
     failureCode: row.failure_code,
     evidence:
@@ -97,11 +100,12 @@ export function createD1CampaignTestDeliveryStore(
           `INSERT INTO campaign_test_deliveries (
              execution_id, site_id, actor_id, request_id, campaign_id,
              campaign_revision_id, binding_json, recipient_ids_json, state,
+             attempt_lease_until,
              provider_campaign_id, failure_code, evidence_json,
              created_at, updated_at
            ) VALUES (
-             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-             ?10, ?11, ?12, ?13, ?14
+             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+             ?11, ?12, ?13, ?14, ?15
            )
            ON CONFLICT (site_id, actor_id, request_id) DO NOTHING`,
         )
@@ -115,6 +119,7 @@ export function createD1CampaignTestDeliveryStore(
           JSON.stringify(operation.binding),
           JSON.stringify(operation.recipientIds),
           operation.state,
+          operation.attemptLeaseUntil,
           operation.providerCampaignId,
           operation.failureCode,
           operation.evidence === null
@@ -128,17 +133,42 @@ export function createD1CampaignTestDeliveryStore(
       if (claimed === null) throw new Error("campaign_test_delivery_missing");
       return claimed;
     },
+    async beginAttempt({ operation, now, leaseUntil }) {
+      const result = await database
+        .prepare(
+          `UPDATE campaign_test_deliveries
+           SET state = 'attempting', attempt_lease_until = ?1,
+             updated_at = ?2
+           WHERE execution_id = ?3 AND site_id = ?4 AND updated_at = ?5
+             AND (
+               state IN ('pending', 'ambiguous') OR
+               (state = 'attempting' AND attempt_lease_until <= ?2)
+             )`,
+        )
+        .bind(
+          leaseUntil,
+          now,
+          operation.executionId,
+          operation.siteId,
+          operation.updatedAt,
+        )
+        .run();
+      if ((result.meta.changes ?? 0) !== 1) return null;
+      return byRequest(database, operation);
+    },
     async record(operation) {
       const result = await database
         .prepare(
           `UPDATE campaign_test_deliveries
-           SET state = ?1, provider_campaign_id = ?2, failure_code = ?3,
-             evidence_json = ?4, updated_at = ?5
-           WHERE execution_id = ?6 AND site_id = ?7
-             AND state IN ('pending', 'ambiguous')`,
+           SET state = ?1, attempt_lease_until = ?2,
+             provider_campaign_id = ?3, failure_code = ?4,
+             evidence_json = ?5, updated_at = ?6
+           WHERE execution_id = ?7 AND site_id = ?8
+             AND state IN ('pending', 'attempting', 'ambiguous')`,
         )
         .bind(
           operation.state,
+          operation.attemptLeaseUntil,
           operation.providerCampaignId,
           operation.failureCode,
           operation.evidence === null

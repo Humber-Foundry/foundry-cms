@@ -63,6 +63,7 @@ function createFixture(adapter: NewsletterDeliveryAdapter) {
   let sequence = 0;
   const campaignStore = createInMemoryCampaignStore();
   const deliveryStore = createInMemoryCampaignTestDeliveryStore();
+  const rejectedCommands: unknown[] = [];
   const campaignApplication = createCampaignApplication({
     siteId,
     store: campaignStore,
@@ -95,8 +96,16 @@ function createFixture(adapter: NewsletterDeliveryAdapter) {
     clock: () => new Date("2026-07-29T19:05:00.000Z"),
     createExecutionId: () =>
       "40000000-0000-4000-8000-000000000001",
+    recordRejectedCommand: async (command) => {
+      rejectedCommands.push(command);
+    },
   });
-  return { application, campaignApplication, deliveryStore };
+  return {
+    application,
+    campaignApplication,
+    deliveryStore,
+    rejectedCommands,
+  };
 }
 
 function capableAdapter(
@@ -109,6 +118,7 @@ function capableAdapter(
       apiTestDelivery: "supported",
       explicitRecipients: "supported",
       ambiguousOutcomeReconciliation: "supported",
+      plainTextArtifact: "unsupported",
     }),
     health: vi.fn().mockResolvedValue({
       state: "healthy",
@@ -288,6 +298,42 @@ describe("campaign test delivery", () => {
     );
   });
 
+  it("lets only one concurrent caller cross the provider-write fence", async () => {
+    let completeSend!: (
+      outcome: Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>,
+    ) => void;
+    const sendTest = vi.fn(
+      () =>
+        new Promise<
+          Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>
+        >((resolve) => {
+          completeSend = resolve;
+        }),
+    );
+    const adapter = capableAdapter({ sendTest });
+    const { application, campaignApplication } = createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-concurrent-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    const first = application.commands.requestTest(request);
+    await vi.waitFor(() => expect(sendTest).toHaveBeenCalledTimes(1));
+    const concurrent = await application.commands.requestTest(request);
+
+    expect(concurrent.state).toBe("attempting");
+    expect(sendTest).toHaveBeenCalledTimes(1);
+    completeSend({
+      outcome: "accepted",
+      providerCampaignId: "brevo-campaign-21",
+      providerReceipt: "brevo-test-accepted-21",
+    });
+    await expect(first).resolves.toMatchObject({ state: "accepted" });
+  });
+
   it("makes prior evidence stale after any send-affecting campaign edit", async () => {
     const { application, campaignApplication } =
       createFixture(capableAdapter());
@@ -329,9 +375,11 @@ describe("campaign test delivery", () => {
         apiTestDelivery: "unsupported",
         explicitRecipients: "supported",
         ambiguousOutcomeReconciliation: "supported",
+        plainTextArtifact: "unsupported",
       }),
     });
-    const { application, campaignApplication } = createFixture(adapter);
+    const { application, campaignApplication, rejectedCommands } =
+      createFixture(adapter);
     const created = await createCampaign(campaignApplication);
 
     await expect(
@@ -343,5 +391,15 @@ describe("campaign test delivery", () => {
       }),
     ).rejects.toMatchObject({ message: "provider_test_delivery_unsupported" });
     expect(adapter.sendTest).not.toHaveBeenCalled();
+    expect(rejectedCommands).toMatchObject([
+      {
+        requestId: "campaign-test-unsupported-1",
+        reason: "provider_test_delivery_unsupported",
+        command: {
+          action: "request_test",
+          testRecipientIds: ["owner-primary"],
+        },
+      },
+    ]);
   });
 });

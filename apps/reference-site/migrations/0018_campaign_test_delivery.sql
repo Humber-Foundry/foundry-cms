@@ -8,8 +8,9 @@ CREATE TABLE campaign_test_deliveries (
   binding_json TEXT NOT NULL,
   recipient_ids_json TEXT NOT NULL,
   state TEXT NOT NULL CHECK (
-    state IN ('pending', 'ambiguous', 'accepted', 'failed')
+    state IN ('pending', 'attempting', 'ambiguous', 'accepted', 'failed')
   ),
+  attempt_lease_until TEXT,
   provider_campaign_id TEXT,
   failure_code TEXT,
   evidence_json TEXT,
@@ -23,7 +24,7 @@ CREATE TABLE campaign_test_deliveries (
       AND provider_campaign_id IS NOT NULL AND failure_code IS NULL) OR
     (state = 'failed' AND evidence_json IS NULL
       AND failure_code IS NOT NULL) OR
-    (state IN ('pending', 'ambiguous') AND evidence_json IS NULL
+    (state IN ('pending', 'attempting', 'ambiguous') AND evidence_json IS NULL
       AND failure_code IS NULL)
   )
 );

@@ -33,10 +33,6 @@ function campaignTag(executionId: string) {
   return `f-test-${executionId.replaceAll("-", "").slice(-16)}`;
 }
 
-function campaignSubject(request: NewsletterTestRequest) {
-  return `Foundry campaign test ${request.binding.campaignFingerprint.slice(0, 12)}`;
-}
-
 function headers(apiKey: string) {
   return {
     accept: "application/json",
@@ -61,6 +57,10 @@ function providerId(value: unknown): string | null {
       : null;
 }
 
+function outcomeCouldBeAmbiguous(status: number) {
+  return status === 408 || status >= 500;
+}
+
 function expectedSenderId(
   request: NewsletterTestRequest,
   senderIds: Readonly<Record<string, number>>,
@@ -78,8 +78,8 @@ function matchesCampaign(
     campaign.name === campaignName(request.executionId) &&
     campaign.tag === campaignTag(request.executionId) &&
     campaign.sender?.id === senderId &&
-    campaign.subject === campaignSubject(request) &&
-    campaign.previewText === "Foundry exact test delivery" &&
+    campaign.subject === request.subject &&
+    campaign.previewText === request.previewText &&
     campaign.htmlContent === request.renderedCampaign.html.bytes
   );
 }
@@ -99,6 +99,7 @@ function accepted(
       id,
       request.binding.campaignFingerprint,
       request.binding.providerConfigurationFingerprint,
+      request.binding.recipientSetFingerprint,
     ].join(":"),
   };
 }
@@ -127,6 +128,7 @@ export function createBrevoNewsletterDeliveryAdapter({
     apiTestDelivery: "supported",
     explicitRecipients: "supported",
     ambiguousOutcomeReconciliation: "supported",
+    plainTextArtifact: "unsupported",
   });
 
   async function readCampaign(id: string) {
@@ -248,12 +250,15 @@ export function createBrevoNewsletterDeliveryAdapter({
               name: campaignName(request.executionId),
               tag: campaignTag(request.executionId),
               sender: { id: senderId },
-              subject: campaignSubject(request),
-              previewText: "Foundry exact test delivery",
+              subject: request.subject,
+              previewText: request.previewText,
               htmlContent: request.renderedCampaign.html.bytes,
             }),
           });
           if (!created.ok) {
+            if (outcomeCouldBeAmbiguous(created.status)) {
+              return { outcome: "ambiguous" } as const;
+            }
             return {
               outcome: "rejected",
               code:
@@ -290,6 +295,12 @@ export function createBrevoNewsletterDeliveryAdapter({
           },
         );
         if (!sent.ok) {
+          if (outcomeCouldBeAmbiguous(sent.status)) {
+            return {
+              outcome: "ambiguous",
+              providerCampaignId: campaignId,
+            } as const;
+          }
           return {
             outcome: "rejected",
             code:
@@ -326,7 +337,7 @@ export function createBrevoNewsletterDeliveryAdapter({
   return Object.freeze(adapter);
 }
 
-export async function assessBrevoClientAccountReadiness({
+export async function assessBrevoTestDeliveryReadiness({
   adapter,
   ownership,
   liveTestEvidence,
@@ -348,7 +359,7 @@ export async function assessBrevoClientAccountReadiness({
   if (ownership !== "client_owned") {
     return Object.freeze({
       state: "evaluation_only" as const,
-      productionReady: false,
+      testDeliveryReady: false,
       provider: capabilities.provider,
       configurationFingerprint: capabilities.configurationFingerprint,
     });
@@ -360,7 +371,7 @@ export async function assessBrevoClientAccountReadiness({
   ) {
     return Object.freeze({
       state: "provider_unhealthy" as const,
-      productionReady: false,
+      testDeliveryReady: false,
       provider: capabilities.provider,
       configurationFingerprint: capabilities.configurationFingerprint,
     });
@@ -368,7 +379,7 @@ export async function assessBrevoClientAccountReadiness({
   if (!currentEvidence) {
     return Object.freeze({
       state: "live_test_required" as const,
-      productionReady: false,
+      testDeliveryReady: false,
       provider: capabilities.provider,
       configurationFingerprint: capabilities.configurationFingerprint,
     });
@@ -376,14 +387,14 @@ export async function assessBrevoClientAccountReadiness({
   if (!ownerConfirmedReceipt) {
     return Object.freeze({
       state: "owner_confirmation_required" as const,
-      productionReady: false,
+      testDeliveryReady: false,
       provider: capabilities.provider,
       configurationFingerprint: capabilities.configurationFingerprint,
     });
   }
   return Object.freeze({
     state: "ready" as const,
-    productionReady: true,
+    testDeliveryReady: true,
     provider: capabilities.provider,
     configurationFingerprint: capabilities.configurationFingerprint,
     acceptedAt: liveTestEvidence.acceptedAt,

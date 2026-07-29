@@ -121,6 +121,7 @@ describe("D1 campaign test delivery store", () => {
       },
       recipientIds: ["owner-primary"],
       state: "pending",
+      attemptLeaseUntil: null,
       providerCampaignId: null,
       failureCode: null,
       evidence: null,
@@ -128,9 +129,26 @@ describe("D1 campaign test delivery store", () => {
       updatedAt: "2026-07-29T19:05:00.000Z",
     };
     await store.claim(pending);
+    const attempting = await store.beginAttempt({
+      operation: pending,
+      now: "2026-07-29T19:05:01.000Z",
+      leaseUntil: "2026-07-29T19:06:01.000Z",
+    });
+    expect(attempting).toMatchObject({
+      state: "attempting",
+      attemptLeaseUntil: "2026-07-29T19:06:01.000Z",
+    });
+    await expect(
+      store.beginAttempt({
+        operation: pending,
+        now: "2026-07-29T19:05:02.000Z",
+        leaseUntil: "2026-07-29T19:06:02.000Z",
+      }),
+    ).resolves.toBeNull();
     const accepted: CampaignTestDeliveryOperation = {
-      ...pending,
+      ...attempting!,
       state: "accepted",
+      attemptLeaseUntil: null,
       providerCampaignId: "17",
       evidence: {
         ...pending.binding,

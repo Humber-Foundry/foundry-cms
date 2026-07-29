@@ -26,6 +26,7 @@ export type NewsletterDeliveryCapabilities = Readonly<{
   apiTestDelivery: "supported" | "unsupported";
   explicitRecipients: "supported" | "unsupported";
   ambiguousOutcomeReconciliation: "supported" | "unsupported";
+  plainTextArtifact: "supported" | "unsupported";
 }>;
 
 export type NewsletterDeliveryHealth = Readonly<{
@@ -108,7 +109,8 @@ export type CampaignTestDeliveryOperation = Readonly<{
   campaignRevisionId: CampaignRevisionId;
   binding: CampaignTestDeliveryBinding;
   recipientIds: ReadonlyArray<string>;
-  state: "pending" | "ambiguous" | "accepted" | "failed";
+  state: "pending" | "attempting" | "ambiguous" | "accepted" | "failed";
+  attemptLeaseUntil: string | null;
   providerCampaignId: string | null;
   failureCode: string | null;
   evidence: CampaignTestDeliveryEvidence | null;
@@ -124,6 +126,11 @@ export interface CampaignTestDeliveryStore {
   }): Promise<CampaignTestDeliveryOperation | null>;
   claim(operation: CampaignTestDeliveryOperation):
     Promise<CampaignTestDeliveryOperation>;
+  beginAttempt(input: {
+    operation: CampaignTestDeliveryOperation;
+    now: string;
+    leaseUntil: string;
+  }): Promise<CampaignTestDeliveryOperation | null>;
   record(operation: CampaignTestDeliveryOperation):
     Promise<CampaignTestDeliveryOperation>;
   findLatestAccepted(input: {
@@ -294,6 +301,7 @@ async function acceptedOperation(
   return Object.freeze({
     ...operation,
     state: "accepted" as const,
+    attemptLeaseUntil: null,
     providerCampaignId,
     failureCode: null,
     evidence,
@@ -310,6 +318,7 @@ export function createCampaignTestDeliveryApplication({
   identifyActor,
   resolveAudience,
   resolveTestRecipients,
+  recordRejectedCommand,
   clock = () => new Date(),
   createExecutionId = () => crypto.randomUUID(),
 }: {
@@ -328,6 +337,12 @@ export function createCampaignTestDeliveryApplication({
   resolveTestRecipients(
     recipientIds: ReadonlyArray<string>,
   ): Promise<ReadonlyArray<NewsletterTestRecipient>>;
+  recordRejectedCommand?(input: {
+    actor: CampaignActor;
+    requestId: string;
+    reason: string;
+    command: unknown;
+  }): Promise<void>;
   clock?: () => Date;
   createExecutionId?: () => string;
 }): CampaignTestDeliveryApplication {
@@ -343,7 +358,7 @@ export function createCampaignTestDeliveryApplication({
     return { campaign, revision };
   }
 
-  async function requestTest({
+  async function executeRequestTest({
     actor,
     requestId,
     campaignId,
@@ -407,6 +422,7 @@ export function createCampaignTestDeliveryApplication({
           binding,
           recipientIds: Object.freeze([...testRecipientIds]),
           state: "pending" as const,
+          attemptLeaseUntil: null,
           providerCampaignId: null,
           failureCode: null,
           evidence: null,
@@ -429,7 +445,15 @@ export function createCampaignTestDeliveryApplication({
     if (operation.state === "accepted" || operation.state === "failed") {
       return operation;
     }
-    if (!newlyClaimed && operation.state === "ambiguous") {
+    const now = clock().toISOString();
+    const attemptExpired =
+      operation.state === "attempting" &&
+      operation.attemptLeaseUntil !== null &&
+      operation.attemptLeaseUntil <= now;
+    if (
+      !newlyClaimed &&
+      (operation.state === "ambiguous" || attemptExpired)
+    ) {
       const recipients = await resolveTestRecipients(operation.recipientIds);
       assertResolvedRecipients(operation.recipientIds, recipients);
       const reconciled = await adapter.reconcileTest({
@@ -459,7 +483,9 @@ export function createCampaignTestDeliveryApplication({
         operation = await store.record(
           Object.freeze({
             ...operation,
+            state: "ambiguous" as const,
             providerCampaignId: reconciled.providerCampaignId,
+            attemptLeaseUntil: null,
             updatedAt: clock().toISOString(),
           }),
         );
@@ -469,21 +495,30 @@ export function createCampaignTestDeliveryApplication({
           Object.freeze({
             ...operation,
             state: "failed" as const,
+            attemptLeaseUntil: null,
             failureCode: reconciled.code,
             updatedAt: clock().toISOString(),
           }),
         );
       }
     }
-    if (operation.state === "pending") {
-      operation = await store.record(
-        Object.freeze({
-          ...operation,
-          state: "ambiguous" as const,
-          updatedAt: clock().toISOString(),
-        }),
-      );
+    if (operation.state === "attempting" && !attemptExpired) {
+      return operation;
     }
+    const attemptStartedAt = clock();
+    const attempt = await store.beginAttempt({
+      operation,
+      now: attemptStartedAt.toISOString(),
+      leaseUntil: new Date(
+        attemptStartedAt.getTime() + 60_000,
+      ).toISOString(),
+    });
+    if (attempt === null) {
+      return (
+        await store.findByRequest({ siteId, actorId, requestId })
+      )!;
+    }
+    operation = attempt;
     const recipients = await resolveTestRecipients(operation.recipientIds);
     assertResolvedRecipients(operation.recipientIds, recipients);
     let outcome: NewsletterTestOutcome;
@@ -512,6 +547,7 @@ export function createCampaignTestDeliveryApplication({
         Object.freeze({
           ...operation,
           state: "failed" as const,
+          attemptLeaseUntil: null,
           failureCode: outcome.code,
           updatedAt: timestamp,
         }),
@@ -521,6 +557,7 @@ export function createCampaignTestDeliveryApplication({
       Object.freeze({
         ...operation,
         state: "ambiguous" as const,
+        attemptLeaseUntil: null,
         providerCampaignId:
           outcome.providerCampaignId === undefined
             ? operation.providerCampaignId
@@ -531,6 +568,34 @@ export function createCampaignTestDeliveryApplication({
         updatedAt: timestamp,
       }),
     );
+  }
+
+  async function requestTest(
+    input: Parameters<typeof executeRequestTest>[0],
+  ) {
+    try {
+      return await executeRequestTest(input);
+    } catch (error) {
+      if (
+        recordRejectedCommand !== undefined &&
+        isCampaignRequestId(input.requestId) &&
+        (error instanceof CampaignValidationError ||
+          error instanceof CampaignIdempotencyError ||
+          error instanceof CampaignNotFoundError)
+      ) {
+        await recordRejectedCommand({
+          actor: input.actor,
+          requestId: input.requestId,
+          reason: error.message,
+          command: {
+            action: "request_test",
+            campaignId: input.campaignId,
+            testRecipientIds: input.testRecipientIds,
+          },
+        });
+      }
+      throw error;
+    }
   }
 
   return Object.freeze({
@@ -594,6 +659,32 @@ export function createInMemoryCampaignTestDeliveryStore():
       if (existing !== undefined) return existing;
       operations.set(key, operation);
       return operation;
+    },
+    async beginAttempt({ operation, now, leaseUntil }) {
+      const key = requestKey(operation);
+      const current = operations.get(key);
+      if (
+        current === undefined ||
+        current.executionId !== operation.executionId ||
+        current.updatedAt !== operation.updatedAt ||
+        !(
+          current.state === "pending" ||
+          current.state === "ambiguous" ||
+          (current.state === "attempting" &&
+            current.attemptLeaseUntil !== null &&
+            current.attemptLeaseUntil <= now)
+        )
+      ) {
+        return null;
+      }
+      const attempting = Object.freeze({
+        ...current,
+        state: "attempting" as const,
+        attemptLeaseUntil: leaseUntil,
+        updatedAt: now,
+      });
+      operations.set(key, attempting);
+      return attempting;
     },
     async record(operation) {
       const key = requestKey(operation);

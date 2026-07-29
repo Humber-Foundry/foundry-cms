@@ -7,6 +7,7 @@ import {
   createCampaignApplication,
   createCampaignTestDeliveryApplication,
   createInMemoryCampaignTestDeliveryStore,
+  CampaignValidationError,
   createInMemoryCampaignStore,
   createInMemorySubscriberLedgerStore,
   createSubscriberLedgerAudienceResolver,
@@ -149,6 +150,7 @@ export async function loadCampaignRequestContext(
         apiTestDelivery: "supported" as const,
         explicitRecipients: "supported" as const,
         ambiguousOutcomeReconciliation: "supported" as const,
+        plainTextArtifact: "unsupported" as const,
       };
     },
     async health() {
@@ -254,9 +256,18 @@ export async function loadCampaignRequestContext(
         recipientIds.map((id) => {
           const address = testRecipients[id];
           if (address === undefined) {
-            throw new Error("test_recipient_forbidden");
+            throw new CampaignValidationError("test_recipient_forbidden");
           }
           return { id, address };
+        }),
+      recordRejectedCommand: ({ actor, requestId, reason, command }) =>
+        application.commands.recordRejectedCommand({
+          actor,
+          requestId,
+          reason,
+          command,
+          action: "campaign.test",
+          commandName: "campaign.request_test",
         }),
     }),
   };

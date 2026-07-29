@@ -38,15 +38,23 @@ rows, evidence, API results, logs, and source control.
    keys, not email addresses.
 5. Confirm the delivered message in the Owner's mailbox. Record confirmation
    against the returned stable test execution.
-6. Evaluate readiness with the successful current test evidence. `ready`
+6. Evaluate test-delivery readiness with the successful current test evidence.
+   `ready`
    requires healthy credentials and sender identity, `client_owned`
    classification, an exact provider-configuration fingerprint match, and the
-   Owner's receipt confirmation.
+   Owner's receipt confirmation. This result is test-delivery evidence, not a
+   production-readiness declaration.
 
 Every logical test creates a fresh Brevo draft tagged with its stable execution
 identity. Foundry reconciles Brevo's `testSent` state and the exact draft
 content before accepting evidence. A timeout or lost response enters
 reconciliation before another provider write.
+
+The adapter reports Brevo's campaign API plain-text artifact capability as
+`unsupported`. Brevo receives the exact authored subject, preview text and
+rendered HTML; Foundry retains and binds the deterministic plain-text artifact
+for portability without claiming that Brevo transmitted a separately supplied
+plain-text body.
 
 The full ADR-0002 provider acceptance suite remains a pre-production handoff
 gate for the first client account. It covers subscriber and suppression
