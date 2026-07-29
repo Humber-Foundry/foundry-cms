@@ -11,27 +11,69 @@ export type McpReadApplication = ReturnType<
   typeof createMcpReadApplication
 >;
 
-export class McpToolArgumentsError extends Error {}
-
-function successOutputSchema(result: unknown) {
-  return {
+function toolOutputSchema(result: unknown) {
+  const meta = {
     type: "object",
     additionalProperties: false,
     properties: {
-      contractVersion: { const: mcpContractVersion },
-      invocationId: { type: "string", minLength: 1 },
-      result,
-      meta: {
+      replayed: { const: false },
+      observedAt: { type: "string", format: "date-time" },
+    },
+    required: ["replayed", "observedAt"],
+  };
+  return {
+    type: "object",
+    oneOf: [
+      {
         type: "object",
         additionalProperties: false,
         properties: {
-          replayed: { const: false },
-          observedAt: { type: "string", format: "date-time" },
+          contractVersion: { const: mcpContractVersion },
+          invocationId: { type: "string", minLength: 1 },
+          result,
+          meta,
         },
-        required: ["replayed", "observedAt"],
+        required: ["contractVersion", "invocationId", "result", "meta"],
       },
-    },
-    required: ["contractVersion", "invocationId", "result", "meta"],
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          contractVersion: { const: mcpContractVersion },
+          invocationId: { type: "string", minLength: 1 },
+          error: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              code: {
+                enum: [
+                  "AUTHENTICATION_REQUIRED",
+                  "INSUFFICIENT_SCOPE",
+                  "CONNECTION_REVOKED",
+                  "OBJECT_NOT_FOUND",
+                  "VALIDATION_FAILED",
+                  "TEMPORARILY_UNAVAILABLE",
+                ],
+              },
+              message: { type: "string" },
+              retryable: { type: "boolean" },
+              requiredScopes: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+            required: [
+              "code",
+              "message",
+              "retryable",
+              "requiredScopes",
+            ],
+          },
+          meta,
+        },
+        required: ["contractVersion", "invocationId", "error", "meta"],
+      },
+    ],
     $defs: siteDefinitionSchema.$defs,
   };
 }
@@ -54,7 +96,7 @@ const descriptors = {
       additionalProperties: false,
       properties: {},
     },
-    outputSchema: successOutputSchema({
+    outputSchema: toolOutputSchema({
       type: "object",
       additionalProperties: false,
       properties: {
@@ -107,7 +149,7 @@ const descriptors = {
       },
       required: ["kind", "limit", "cursor"],
     },
-    outputSchema: successOutputSchema({
+    outputSchema: toolOutputSchema({
       type: "object",
       additionalProperties: false,
       properties: {
@@ -175,7 +217,7 @@ const descriptors = {
       },
       required: ["kind", "contentId"],
     },
-    outputSchema: successOutputSchema({
+    outputSchema: toolOutputSchema({
       type: "object",
       additionalProperties: false,
       properties: {
@@ -229,7 +271,11 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       input: unknown,
     ) => {
       if (!isRecord(input) || !hasExactKeys(input, [])) {
-        throw new McpToolArgumentsError();
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.site.get",
+          input,
+        );
       }
       return application.getSite(principal);
     },
@@ -246,7 +292,11 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         typeof input.limit !== "number" ||
         (input.cursor !== null && typeof input.cursor !== "string")
       ) {
-        throw new McpToolArgumentsError();
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.content.list",
+          input,
+        );
       }
       return application.listContent(principal, {
         kind: input.kind,
@@ -266,7 +316,11 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         input.contentId.length < 1 ||
         input.contentId.length > 200
       ) {
-        throw new McpToolArgumentsError();
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.content.get",
+          input,
+        );
       }
       return application.getContent(principal, {
         kind: input.kind,

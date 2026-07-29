@@ -22,7 +22,7 @@ type AuthorizationCodeRow = Readonly<{
   code_challenge: string;
 }>;
 
-export type ConsumedMcpAuthorizationCode = McpConnectionGrant &
+export type ExchangedMcpAuthorizationCode = McpConnectionGrant &
   Readonly<{
     codeChallenge: string;
   }>;
@@ -73,13 +73,16 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       now: string;
       inputHash: string;
     }): Promise<void>;
-    consumeAuthorizationCode(input: {
+    exchangeAuthorizationCode(input: {
       codeHash: string;
       codeChallenge: string;
       clientId: string;
       redirectUri: string;
+      refreshTokenHash: string;
+      refreshFamilyId: string;
+      refreshExpiresAt: string;
       now: string;
-    }): Promise<ConsumedMcpAuthorizationCode | null>;
+    }): Promise<ExchangedMcpAuthorizationCode | null>;
     revokeConnection(input: {
       siteId: SiteId;
       connectionId: string;
@@ -88,14 +91,6 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       reason: string;
       inputHash: string;
     }): Promise<boolean>;
-    saveRefreshToken(input: {
-      tokenHash: string;
-      familyId: string;
-      connectionId: string;
-      clientId: string;
-      expiresAt: string;
-      now: string;
-    }): Promise<void>;
     rotateRefreshToken(input: {
       tokenHash: string;
       nextTokenHash: string;
@@ -197,33 +192,79 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         throw new TypeError("mcp_authorization_grant_not_created");
       }
     },
-    async consumeAuthorizationCode(input) {
-      const consumed = await database
-        .prepare(
+    async exchangeAuthorizationCode(input) {
+      const results = await database.batch([
+        database.prepare(
           `UPDATE mcp_authorization_codes
-           SET consumed_at = ?1
+           SET consumed_at = ?1,
+               refresh_token_hash = ?6,
+               refresh_family_id = ?7,
+               refresh_expires_at = ?8
            WHERE code_hash = ?2
-             AND code_challenge = ?5
+             AND code_challenge = ?3
              AND consumed_at IS NULL
              AND expires_at > ?1
              AND EXISTS (
                SELECT 1 FROM mcp_connections AS connection
                WHERE connection.id = mcp_authorization_codes.connection_id
-                 AND connection.oauth_client_id = ?3
-                 AND connection.redirect_uri = ?4
+                 AND connection.oauth_client_id = ?4
+                 AND connection.redirect_uri = ?5
                  AND connection.status = 'active'
              )
            RETURNING connection_id, code_challenge`,
-        )
-        .bind(
+        ).bind(
           input.now,
           input.codeHash,
+          input.codeChallenge,
           input.clientId,
           input.redirectUri,
+          input.refreshTokenHash,
+          input.refreshFamilyId,
+          input.refreshExpiresAt,
+        ),
+        database.prepare(
+          `INSERT INTO mcp_refresh_tokens (
+             token_hash, family_id, connection_id, oauth_client_id,
+             expires_at, issued_at
+           )
+           SELECT
+             code.refresh_token_hash,
+             code.refresh_family_id,
+             code.connection_id,
+             connection.oauth_client_id,
+             code.refresh_expires_at,
+             code.consumed_at
+           FROM mcp_authorization_codes AS code
+           JOIN mcp_connections AS connection
+             ON connection.id = code.connection_id
+           WHERE code.code_hash = ?5
+             AND code.code_challenge = ?6
+             AND code.consumed_at = ?4
+             AND code.refresh_token_hash = ?1
+             AND code.refresh_family_id = ?2
+             AND code.refresh_expires_at = ?3
+             AND connection.oauth_client_id = ?7
+             AND connection.redirect_uri = ?8
+             AND connection.status = 'active'`,
+        ).bind(
+          input.refreshTokenHash,
+          input.refreshFamilyId,
+          input.refreshExpiresAt,
+          input.now,
+          input.codeHash,
           input.codeChallenge,
-        )
-        .first<AuthorizationCodeRow>();
-      if (consumed === null) {
+          input.clientId,
+          input.redirectUri,
+        ),
+      ]);
+      const consumed = results[0]?.results?.[0] as
+        | AuthorizationCodeRow
+        | undefined;
+      if (
+        consumed === undefined ||
+        (results[0]?.meta.changes ?? 0) !== 1 ||
+        (results[1]?.meta.changes ?? 0) !== 1
+      ) {
         return null;
       }
       const row = await database
@@ -327,41 +368,14 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         )
         .run();
     },
-    async saveRefreshToken(input) {
-      const result = await database
-        .prepare(
-          `INSERT INTO mcp_refresh_tokens (
-             token_hash, family_id, connection_id, oauth_client_id,
-             expires_at, issued_at
-           )
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6
-           WHERE EXISTS (
-             SELECT 1 FROM mcp_connections
-             WHERE id = ?3
-               AND oauth_client_id = ?4
-               AND status = 'active'
-           )`,
-        )
-        .bind(
-          input.tokenHash,
-          input.familyId,
-          input.connectionId,
-          input.clientId,
-          input.expiresAt,
-          input.now,
-        )
-        .run();
-      if ((result.meta.changes ?? 0) !== 1) {
-        throw new TypeError("mcp_refresh_token_not_created");
-      }
-    },
     async rotateRefreshToken(input) {
       const existing = await database
         .prepare(
           `SELECT
              token.family_id, token.connection_id, token.expires_at,
              token.consumed_at, token.revoked_at,
-             connection.actor_id, connection.site_id, connection.scopes_json
+             connection.actor_id, connection.site_id, connection.scopes_json,
+             connection.status AS connection_status
            FROM mcp_refresh_tokens AS token
            JOIN mcp_connections AS connection
              ON connection.id = token.connection_id
@@ -377,9 +391,11 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           actor_id: string;
           site_id: string;
           scopes_json: string;
+          connection_status: "active" | "revoked";
         }>();
       if (
         existing === null ||
+        existing.connection_status !== "active" ||
         existing.revoked_at !== null ||
         existing.expires_at <= input.now
       ) {
@@ -478,6 +494,27 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         : { state: "rotated", connection };
     },
     async consumeRateLimit(input) {
+      if (
+        input.bucketKey.length < 1 ||
+        input.bucketKey.length > 128 ||
+        !Number.isInteger(input.limit) ||
+        input.limit < 1 ||
+        !Number.isFinite(Date.parse(input.windowStartedAt))
+      ) {
+        throw new TypeError("mcp_rate_limit_key_invalid");
+      }
+      if (input.bucketKey === "site") {
+        const retentionThreshold = new Date(
+          Date.parse(input.windowStartedAt) - 2 * 60 * 60 * 1_000,
+        ).toISOString();
+        await database
+          .prepare(
+            `DELETE FROM mcp_rate_limit_buckets
+             WHERE site_id = ?1 AND window_started_at < ?2`,
+          )
+          .bind(input.siteId, retentionThreshold)
+          .run();
+      }
       const row = await database
         .prepare(
           `INSERT INTO mcp_rate_limit_buckets (
@@ -534,18 +571,18 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
     async findLiveRelease(siteId) {
       const row = await database
         .prepare(
-          `SELECT commit_sha, deployment_id, updated_at
-           FROM content_publications
-           WHERE status = 'verified-live'
-             AND commit_sha IS NOT NULL
-             AND deployment_id IS NOT NULL
-             AND EXISTS (
-               SELECT 1 FROM content_revisions AS revision
-               WHERE revision.workspace_id = content_publications.workspace_id
-                 AND revision.revision = content_publications.revision
-                 AND revision.site_id = ?1
-             )
-           ORDER BY updated_at DESC, id DESC
+          `SELECT
+             publication.commit_sha,
+             publication.deployment_id,
+             publication.updated_at
+           FROM content_publications AS publication
+           JOIN content_workspaces AS workspace
+             ON workspace.workspace_id = publication.workspace_id
+           WHERE publication.status = 'verified-live'
+             AND publication.commit_sha IS NOT NULL
+             AND publication.deployment_id IS NOT NULL
+             AND workspace.site_id = ?1
+           ORDER BY publication.updated_at DESC, publication.id DESC
            LIMIT 1`,
         )
         .bind(siteId)

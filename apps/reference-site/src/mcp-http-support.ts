@@ -10,10 +10,17 @@ export type JsonRecord = Record<string, unknown>;
 
 export type RpcRequest = Readonly<{
   jsonrpc: "2.0";
-  id?: string | number | null;
+  id: string | number;
   method: string;
   params?: unknown;
 }>;
+
+export function isRequestId(value: unknown): value is string | number {
+  return (
+    typeof value === "string" ||
+    (typeof value === "number" && Number.isSafeInteger(value))
+  );
+}
 
 export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -236,22 +243,26 @@ export function jsonResponse(
 }
 
 export function rpcResult(id: RpcRequest["id"], result: unknown) {
-  return jsonResponse({ jsonrpc: "2.0", id: id ?? null, result });
+  return jsonResponse({ jsonrpc: "2.0", id, result });
 }
 
 export function rpcError(
-  id: RpcRequest["id"],
+  id: RpcRequest["id"] | null,
   code: number,
   message: string,
   data?: unknown,
+  status = 200,
 ) {
-  return jsonResponse({
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: {
-      code,
-      message,
-      ...(data === undefined ? {} : { data }),
+  return jsonResponse(
+    {
+      jsonrpc: "2.0",
+      ...(id === null ? {} : { id }),
+      error: {
+        code,
+        message,
+        ...(data === undefined ? {} : { data }),
+      },
     },
-  });
+    status,
+  );
 }

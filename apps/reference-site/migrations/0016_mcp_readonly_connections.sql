@@ -20,7 +20,10 @@ CREATE TABLE mcp_authorization_codes (
   code_challenge TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  consumed_at TEXT
+  consumed_at TEXT,
+  refresh_token_hash TEXT,
+  refresh_family_id TEXT,
+  refresh_expires_at TEXT
 );
 
 CREATE TABLE mcp_refresh_tokens (
@@ -40,11 +43,14 @@ CREATE INDEX mcp_refresh_tokens_family
 
 CREATE TABLE mcp_rate_limit_buckets (
   site_id TEXT NOT NULL,
-  bucket_key TEXT NOT NULL,
+  bucket_key TEXT NOT NULL CHECK (length(bucket_key) BETWEEN 1 AND 128),
   window_started_at TEXT NOT NULL,
   request_count INTEGER NOT NULL CHECK (request_count > 0),
   PRIMARY KEY (site_id, bucket_key, window_started_at)
 );
+
+CREATE INDEX mcp_rate_limit_buckets_retention
+  ON mcp_rate_limit_buckets (site_id, window_started_at);
 
 CREATE TABLE mcp_audit_events (
   invocation_id TEXT PRIMARY KEY,
@@ -62,6 +68,18 @@ CREATE TABLE mcp_audit_events (
   occurred_at TEXT NOT NULL,
   contract_version TEXT NOT NULL
 );
+
+CREATE TRIGGER mcp_audit_events_prevent_update
+BEFORE UPDATE ON mcp_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'mcp_audit_events_are_immutable');
+END;
+
+CREATE TRIGGER mcp_audit_events_prevent_delete
+BEFORE DELETE ON mcp_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'mcp_audit_events_are_immutable');
+END;
 
 CREATE TRIGGER mcp_connections_preserve_identity
 BEFORE UPDATE OF actor_id, site_id, oauth_client_id, redirect_uri,

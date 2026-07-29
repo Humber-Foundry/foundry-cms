@@ -51,11 +51,14 @@ export type McpAuthorizationGrantInput = Readonly<{
 export type McpAuthorizationRuntimeStore = McpConnectionStore &
   Readonly<{
     createAuthorizationGrant(input: McpAuthorizationGrantInput): Promise<void>;
-    consumeAuthorizationCode(input: {
+    exchangeAuthorizationCode(input: {
       codeHash: string;
       codeChallenge: string;
       clientId: string;
       redirectUri: string;
+      refreshTokenHash: string;
+      refreshFamilyId: string;
+      refreshExpiresAt: string;
       now: string;
     }): Promise<
       (McpConnectionGrant & Readonly<{ codeChallenge: string }>) | null
@@ -68,14 +71,6 @@ export type McpAuthorizationRuntimeStore = McpConnectionStore &
       reason: string;
       inputHash: string;
     }): Promise<boolean>;
-    saveRefreshToken(input: {
-      tokenHash: string;
-      familyId: string;
-      connectionId: string;
-      clientId: string;
-      expiresAt: string;
-      now: string;
-    }): Promise<void>;
     rotateRefreshToken(input: {
       tokenHash: string;
       nextTokenHash: string;
@@ -174,6 +169,7 @@ export function createMcpHttpRuntime({
     resource.protocol !== "https:" ||
     resource.origin !== canonicalOrigin ||
     issuer.protocol !== "https:" ||
+    issuer.origin !== canonicalOrigin ||
     signingSecret.length < 32
   ) {
     throw new TypeError("mcp_production_origin_invalid");
@@ -528,15 +524,22 @@ export function createMcpHttpRuntime({
         return jsonResponse({ error: "invalid_grant" }, 400);
       }
       const codeChallenge = await sha256(verifier);
-      const exchanged = await store.consumeAuthorizationCode({
+      refreshToken = createRefreshToken();
+      const exchanged = await store.exchangeAuthorizationCode({
         codeHash: await sha256(code),
         codeChallenge,
         clientId,
         redirectUri,
+        refreshTokenHash: await sha256(refreshToken),
+        refreshFamilyId: createRefreshFamilyId(),
+        refreshExpiresAt: new Date(
+          observedAt.getTime() + refreshTokenLifetimeSeconds * 1_000,
+        ).toISOString(),
         now: observedAt.toISOString(),
       });
       if (
         exchanged === null ||
+        exchanged.status !== "active" ||
         exchanged.siteId !== siteId ||
         exchanged.scopes.length !== 1 ||
         exchanged.scopes[0] !== mcpInitialScope ||
@@ -545,17 +548,6 @@ export function createMcpHttpRuntime({
         return jsonResponse({ error: "invalid_grant" }, 400);
       }
       connection = exchanged;
-      refreshToken = createRefreshToken();
-      await store.saveRefreshToken({
-        tokenHash: await sha256(refreshToken),
-        familyId: createRefreshFamilyId(),
-        connectionId: connection.connectionId,
-        clientId,
-        expiresAt: new Date(
-          observedAt.getTime() + refreshTokenLifetimeSeconds * 1_000,
-        ).toISOString(),
-        now: observedAt.toISOString(),
-      });
     } else if (form.get("grant_type") === "refresh_token") {
       const presented = form.get("refresh_token");
       if (presented === null) {

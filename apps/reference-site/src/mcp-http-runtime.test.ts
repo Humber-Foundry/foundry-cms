@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SignJWT } from "jose";
+import Ajv2020 from "ajv/dist/2020.js";
 
 import {
   createInMemoryPublishedSiteRepository,
@@ -55,6 +56,10 @@ function createStore(allowRateLimit = true) {
     McpAuthorizationGrantInput & { consumed: boolean }
   >();
   const audit: McpReadAuditEvent[] = [];
+  const rateLimitInputs: Array<{
+    bucketKey: string;
+    limit: number;
+  }> = [];
   const refreshTokens = new Map<
     string,
     {
@@ -77,7 +82,7 @@ function createStore(allowRateLimit = true) {
       });
       codes.set(input.codeHash, { ...input, consumed: false });
     },
-    async consumeAuthorizationCode(input) {
+    async exchangeAuthorizationCode(input) {
       const code = codes.get(input.codeHash);
       if (
         code === undefined ||
@@ -90,6 +95,13 @@ function createStore(allowRateLimit = true) {
         return null;
       }
       code.consumed = true;
+      refreshTokens.set(input.refreshTokenHash, {
+        familyId: input.refreshFamilyId,
+        connectionId: code.connectionId,
+        clientId: input.clientId,
+        consumed: false,
+        revoked: false,
+      });
       return {
         ...connections.get(code.connectionId)!,
         codeChallenge: code.codeChallenge,
@@ -107,15 +119,6 @@ function createStore(allowRateLimit = true) {
         status: "revoked",
       });
       return true;
-    },
-    async saveRefreshToken(input) {
-      refreshTokens.set(input.tokenHash, {
-        familyId: input.familyId,
-        connectionId: input.connectionId,
-        clientId: input.clientId,
-        consumed: false,
-        revoked: false,
-      });
     },
     async rotateRefreshToken(input) {
       const existing = refreshTokens.get(input.tokenHash);
@@ -147,14 +150,15 @@ function createStore(allowRateLimit = true) {
         connection: connections.get(existing.connectionId)!,
       };
     },
-    async consumeRateLimit() {
+    async consumeRateLimit(input) {
+      rateLimitInputs.push(input);
       return allowRateLimit;
     },
     async recordInvocation(event) {
       audit.push(event);
     },
   };
-  return { store, connections, audit };
+  return { store, connections, audit, rateLimitInputs };
 }
 
 function fixture(
@@ -489,7 +493,6 @@ describe("production MCP HTTP runtime", () => {
     };
     expect(remainingToolsBody.result).toEqual({
       tools: [expect.objectContaining({ name: "foundry.content.get" })],
-      nextCursor: null,
     });
     expect(JSON.stringify(toolsBody)).not.toMatch(
       /subscriber|recipient|bulk.send|human.role/iu,
@@ -643,7 +646,276 @@ describe("production MCP HTTP runtime", () => {
     expect(secondBody.result.resources.map(({ uri }) => uri)).not.toContain(
       "foundry://site",
     );
-    expect(secondBody.result.nextCursor).toBeNull();
+    expect(secondBody.result).not.toHaveProperty("nextCursor");
+  });
+
+  it("conforms to MCP request, notification, ping, metadata, and protocol-version semantics", async () => {
+    const { runtime } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+
+    const notification = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        method: "notifications/unknown-client-event",
+        params: { _meta: { "com.example/trace": "notification" } },
+      }),
+    );
+    expect(notification.status).toBe(202);
+    expect(await notification.text()).toBe("");
+
+    const responseMessage = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "server-request-1",
+        result: {},
+      }),
+    );
+    expect(responseMessage.status).toBe(202);
+    expect(await responseMessage.text()).toBe("");
+
+    const ping = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "ping-1",
+        method: "ping",
+        params: { _meta: { "com.example/trace": "ping" } },
+      }),
+    );
+    await expect(ping.json()).resolves.toEqual({
+      jsonrpc: "2.0",
+      id: "ping-1",
+      result: {},
+    });
+
+    const tools = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "tools-with-meta",
+        method: "tools/list",
+        params: { _meta: { "com.example/trace": "tools" } },
+      }),
+    );
+    expect(tools.status).toBe(200);
+
+    const noArguments = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "site-without-arguments",
+        method: "tools/call",
+        params: {
+          name: "foundry.site.get",
+          _meta: { "com.example/trace": "call" },
+        },
+      }),
+    );
+    await expect(noArguments.json()).resolves.toEqual(
+      expect.objectContaining({
+        result: expect.objectContaining({ isError: false }),
+      }),
+    );
+
+    const missingId = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(missingId.status).toBe(202);
+
+    const nullId = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: null,
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    await expect(nullId.json()).resolves.toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({ code: -32600 }),
+      }),
+    );
+
+    const unsupported = rpcRequest(accessToken, {
+      jsonrpc: "2.0",
+      id: "unsupported-version",
+      method: "ping",
+    });
+    unsupported.headers.set("mcp-protocol-version", "2099-01-01");
+    const unsupportedResponse = await runtime.fetch(unsupported);
+    expect(unsupportedResponse.status).toBe(400);
+  });
+
+  it("returns schema-conforming tool errors for invalid tool arguments", async () => {
+    const { runtime, audit } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+
+    const invalid = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "invalid-tool-input",
+        method: "tools/call",
+        params: {
+          name: "foundry.content.get",
+          arguments: { kind: "page" },
+        },
+      }),
+    );
+    await expect(invalid.json()).resolves.toEqual(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          isError: true,
+          structuredContent: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "VALIDATION_FAILED",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(audit).toContainEqual(
+      expect.objectContaining({
+        operation: "foundry.content.get",
+        outcome: "denied",
+        reason: "VALIDATION_FAILED",
+      }),
+    );
+  });
+
+  it("validates advertised success and error structuredContent with an independent JSON Schema validator", async () => {
+    const { runtime } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+    const listed = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "schema-list",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    const listedBody = (await listed.json()) as {
+      result: {
+        tools: Array<{
+          name: string;
+          inputSchema: object;
+          outputSchema: object;
+        }>;
+        nextCursor: string;
+      };
+    };
+    const remaining = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "schema-list-remaining",
+        method: "tools/list",
+        params: { cursor: listedBody.result.nextCursor },
+      }),
+    );
+    const remainingBody = (await remaining.json()) as {
+      result: {
+        tools: Array<{
+          name: string;
+          inputSchema: object;
+          outputSchema: object;
+        }>;
+      };
+    };
+    const descriptors = [
+      ...listedBody.result.tools,
+      ...remainingBody.result.tools,
+    ];
+    const ajv = new Ajv2020({
+      strict: false,
+      formats: {
+        "date-time": true,
+        uri: true,
+      },
+    });
+    const validInputs = {
+      "foundry.site.get": {},
+      "foundry.content.list": { kind: null, limit: 10, cursor: null },
+      "foundry.content.get": {
+        kind: "page",
+        contentId: referenceSiteDefinition.home.id,
+      },
+    } as const;
+    for (const descriptor of descriptors) {
+      const input =
+        validInputs[descriptor.name as keyof typeof validInputs];
+      const validateInput = ajv.compile(descriptor.inputSchema);
+      expect(validateInput(input), descriptor.name).toBe(true);
+      expect(validateInput({ ...input, unexpected: true }), descriptor.name)
+        .toBe(false);
+
+      const response = await runtime.fetch(
+        rpcRequest(accessToken, {
+          jsonrpc: "2.0",
+          id: `schema-success:${descriptor.name}`,
+          method: "tools/call",
+          params: { name: descriptor.name, arguments: input },
+        }),
+      );
+      const body = (await response.json()) as {
+        result: { structuredContent: unknown };
+      };
+      const validateOutput = ajv.compile(descriptor.outputSchema);
+      const validOutput = validateOutput(body.result.structuredContent);
+      expect(
+        validOutput,
+        `${descriptor.name}: ${JSON.stringify(validateOutput.errors)}`,
+      ).toBe(true);
+    }
+
+    const siteDescriptor = descriptors.find(
+      ({ name }) => name === "foundry.site.get",
+    )!;
+    const invalidResponse = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "schema-error",
+        method: "tools/call",
+        params: {
+          name: siteDescriptor.name,
+          arguments: { unexpected: true },
+        },
+      }),
+    );
+    const invalidBody = (await invalidResponse.json()) as {
+      result: { structuredContent: unknown };
+    };
+    expect(
+      ajv.compile(siteDescriptor.outputSchema)(
+        invalidBody.result.structuredContent,
+      ),
+    ).toBe(true);
+  });
+
+  it("publishes honest lastModified annotations on every discovered resource", async () => {
+    const { runtime } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+    const response = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "resource-metadata",
+        method: "resources/list",
+        params: {},
+      }),
+    );
+    const body = (await response.json()) as {
+      result: {
+        resources: Array<{
+          annotations?: { audience?: string[]; lastModified?: string };
+        }>;
+      };
+    };
+    expect(body.result.resources.length).toBeGreaterThan(0);
+    for (const resource of body.result.resources) {
+      expect(resource.annotations).toEqual({
+        audience: ["user", "assistant"],
+        lastModified: "2026-07-29T17:59:00.000Z",
+      });
+    }
   });
 
   it("rechecks D1 connection state so an unexpired token fails on the first post-revocation call", async () => {
@@ -841,6 +1113,10 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(oversized.status).toBe(413);
+    expect(ordinary.rateLimitInputs.map(({ bucketKey }) => bucketKey)).toEqual([
+      "site",
+      "11111111-1111-4111-8111-111111111111",
+    ]);
 
     let nested: unknown = "leaf";
     for (let index = 0; index < 40; index += 1) {
@@ -872,5 +1148,25 @@ describe("production MCP HTTP runtime", () => {
     );
     expect(rateLimited.status).toBe(429);
     expect(Number(rateLimited.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("normalizes adversarial method names into bounded durable rate keys", async () => {
+    const state = fixture();
+    const { accessToken } = await authorizeAndExchange(state.runtime);
+    await state.runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "unknown-method",
+        method: `unknown/${"x".repeat(200_000)}`,
+        params: {},
+      }),
+    );
+    expect(state.rateLimitInputs.length).toBeGreaterThan(0);
+    expect(
+      Math.max(...state.rateLimitInputs.map(({ bucketKey }) => bucketKey.length)),
+    ).toBeLessThanOrEqual(128);
+    expect(state.rateLimitInputs.some(({ bucketKey }) =>
+      bucketKey.endsWith(":unknown"),
+    )).toBe(true);
   });
 });

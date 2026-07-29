@@ -77,7 +77,12 @@ per-tool minute buckets return HTTP `429` with `Retry-After` when exhausted.
 The address is not a secret, and it does not contain a token. Do not paste access
 tokens into prompts or settings fields. Authentication happens in the browser.
 
-## Safe publishing
+## Future capability: safe publishing
+
+The workflow in this section is part of the approved MCP contract design, but
+it is not exposed by the current read-only server. A `site.read` connection
+cannot create drafts, prepare previews, approve, schedule, publish or send
+campaign tests.
 
 An agent can draft and prepare a canonical preview. It cannot approve that
 preview for itself.
@@ -121,7 +126,10 @@ drafts remain available for a human to review, reassign or archive.
 Revoke immediately if the client device is lost, the client behaves
 unexpectedly, or a permission was granted by mistake.
 
-## Worked agent example
+## Future capability: drafting and publishing example
+
+The following example documents a later scoped release. Its tools are not
+advertised by the current three-tool read-only catalog.
 
 Owner request:
 
@@ -168,10 +176,7 @@ connection "Claude — blog drafting"
 
 | Message | What it means | What to do |
 |---|---|---|
-| Permission required | The connection lacks a separate scope | Review the new permission in Foundry; decline if unexpected |
-| Revision changed | A human or agent saved newer work | Ask the agent to read and reconcile the latest revision |
-| Human approval required | The exact canonical preview is not approved | Open the Foundry review link |
-| Approval is stale | Content, renderer or live base changed | Review a newly prepared preview |
-| Publication busy | Another approved publication is finishing | Wait and retry with the same request |
+| Permission required | The connection does not have `site.read` | Revoke it and complete a new Owner approval only if access is still wanted |
 | Connection revoked | An Owner disabled this connection | Create a new connection only if still wanted |
-| Verifying deployment | Git/build may be done but the public site is not yet proven | Wait; do not announce the page as live |
+| Rate limited | A per-site, connection or tool minute budget was exhausted | Respect `Retry-After` before trying again |
+| Temporarily unavailable | The read could not complete safely within its time or dependency bounds | Retry after the indicated backoff; inspect installation health if it persists |

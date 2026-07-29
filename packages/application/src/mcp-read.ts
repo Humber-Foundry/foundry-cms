@@ -10,6 +10,7 @@ import { sha256CanonicalJson } from "./deterministic-hash";
 
 export const mcpContractVersion = "foundry.mcp.v1" as const;
 export const mcpInitialScope = "site.read" as const;
+export const mcpProtocolVersion = "2025-11-25" as const;
 
 export type McpConnectionStatus = "active" | "revoked";
 
@@ -40,7 +41,7 @@ export type McpReadAuditEvent = Readonly<{
   siteId: SiteId;
   operation: string;
   inputHash: string;
-  protocolVersion: "2025-11-25";
+  protocolVersion: typeof mcpProtocolVersion;
   scopesEvaluated: ReadonlyArray<string>;
   outcome: "allowed" | "denied";
   reason: McpReadErrorCode | null;
@@ -302,7 +303,7 @@ export function createMcpReadApplication({
         siteId: principal.siteId,
         operation,
         inputHash,
-        protocolVersion: "2025-11-25",
+        protocolVersion: mcpProtocolVersion,
         scopesEvaluated: [mcpInitialScope],
         outcome: "allowed",
         reason: null,
@@ -343,7 +344,7 @@ export function createMcpReadApplication({
         siteId: principal.siteId,
         operation,
         inputHash,
-        protocolVersion: "2025-11-25",
+        protocolVersion: mcpProtocolVersion,
         scopesEvaluated: [mcpInitialScope],
         outcome: "denied",
         reason: safeError.code,
@@ -356,6 +357,23 @@ export function createMcpReadApplication({
 
   return {
     loadConnection,
+    rejectInvalidInput(
+      principal: McpConnectionPrincipal,
+      operation: string,
+      input: unknown,
+    ): Promise<unknown> {
+      return execute({
+        principal,
+        operation,
+        auditInput: input,
+        async run(): Promise<never> {
+          throw new McpReadError(
+            "VALIDATION_FAILED",
+            "The tool arguments are invalid.",
+          );
+        },
+      });
+    },
     getSite(principal: McpConnectionPrincipal) {
       return execute({
         principal,

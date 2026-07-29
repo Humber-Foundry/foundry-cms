@@ -2,6 +2,7 @@ import {
   McpReadError,
   mcpContractVersion,
   mcpInitialScope,
+  mcpProtocolVersion,
   type McpConnectionPrincipal,
   type McpCursorCodec,
 } from "@foundry/application";
@@ -11,6 +12,7 @@ import {
   RequestBodyLimitError,
   hasExactKeys,
   isRecord,
+  isRequestId,
   jsonResponse,
   readBoundedText,
   rpcError,
@@ -19,15 +21,24 @@ import {
   valueDepth,
 } from "./mcp-http-support";
 import {
-  McpToolArgumentsError,
   createMcpToolRegistry,
   type McpReadApplication,
 } from "./mcp-tool-registry";
 
-export const mcpProtocolVersion = "2025-11-25";
+export { mcpProtocolVersion } from "@foundry/application";
 
 const rpcBodyLimitBytes = 256 * 1024;
 const rpcMaximumDepth = 32;
+const knownMethods = new Set([
+  "initialize",
+  "ping",
+  "tools/list",
+  "tools/call",
+  "resources/list",
+  "resources/templates/list",
+  "resources/read",
+  "prompts/list",
+]);
 
 type McpProtocolRateStore = Readonly<{
   consumeRateLimit(input: {
@@ -67,9 +78,9 @@ function readListCursor(params: unknown): string | null | undefined {
   if (params === undefined) return null;
   if (
     !isRecord(params) ||
-    !hasExactKeys(params, [], ["cursor"]) ||
+    !hasExactKeys(params, [], ["cursor", "_meta"]) ||
+    (params._meta !== undefined && !isRecord(params._meta)) ||
     (params.cursor !== undefined &&
-      params.cursor !== null &&
       typeof params.cursor !== "string")
   ) {
     return undefined;
@@ -95,6 +106,17 @@ export function createMcpProtocolRuntime({
   now?: () => Date;
 }) {
   const tools = createMcpToolRegistry(readApplication);
+
+  function paginationCursor(nextCursor: string | null) {
+    return nextCursor === null ? {} : { nextCursor };
+  }
+
+  function resourceAnnotations(lastModified: string | null) {
+    return {
+      audience: ["user", "assistant"],
+      ...(lastModified === null ? {} : { lastModified }),
+    };
+  }
 
   async function paginateDiscovery<Value>({
     principal,
@@ -209,7 +231,6 @@ export function createMcpProtocolRuntime({
         false,
       );
     } catch (error) {
-      if (error instanceof McpToolArgumentsError) return null;
       if (!(error instanceof McpReadError)) throw error;
       const observedAt = error.observedAt ?? now().toISOString();
       return toolResult(
@@ -233,20 +254,13 @@ export function createMcpProtocolRuntime({
     }
   }
 
-  async function applyRateLimits(
+  async function applyIngressRateLimits(
     principal: McpConnectionPrincipal,
-    rpc: RpcRequest,
   ) {
     const windowStartedAt = new Date(
       Math.floor(now().getTime() / 60_000) * 60_000,
     ).toISOString();
-    const operation =
-      rpc.method === "tools/call" &&
-      isRecord(rpc.params) &&
-      typeof rpc.params.name === "string"
-        ? `${rpc.method}:${rpc.params.name}`
-        : rpc.method;
-    const [siteBudget, connectionBudget, toolBudget] = await Promise.all([
+    const [siteBudget, connectionBudget] = await Promise.all([
       store.consumeRateLimit({
         siteId,
         bucketKey: "site",
@@ -259,14 +273,13 @@ export function createMcpProtocolRuntime({
         windowStartedAt,
         limit: 300,
       }),
-      store.consumeRateLimit({
-        siteId,
-        bucketKey: `${principal.connectionId}:${operation}`,
-        windowStartedAt,
-        limit: 120,
-      }),
     ]);
-    if (siteBudget && connectionBudget && toolBudget) return null;
+    return siteBudget && connectionBudget
+      ? null
+      : rateLimitedResponse();
+  }
+
+  function rateLimitedResponse() {
     const retryAfter = Math.max(1, 60 - now().getUTCSeconds());
     return jsonResponse(
       { error: "rate_limited", retryAfterMs: retryAfter * 1_000 },
@@ -275,26 +288,65 @@ export function createMcpProtocolRuntime({
     );
   }
 
+  async function applyOperationRateLimit(
+    principal: McpConnectionPrincipal,
+    rpc: RpcRequest,
+  ) {
+    const windowStartedAt = new Date(
+      Math.floor(now().getTime() / 60_000) * 60_000,
+    ).toISOString();
+    const requestedOperation =
+      rpc.method === "tools/call" &&
+      isRecord(rpc.params) &&
+      typeof rpc.params.name === "string"
+        ? `${rpc.method}:${rpc.params.name}`
+        : rpc.method;
+    const operation =
+      knownMethods.has(rpc.method) &&
+      (rpc.method !== "tools/call" ||
+        (isRecord(rpc.params) &&
+          typeof rpc.params.name === "string" &&
+          tools.get(rpc.params.name) !== null))
+        ? requestedOperation
+        : "unknown";
+    return (await store.consumeRateLimit({
+      siteId,
+      bucketKey: `${principal.connectionId}:${operation}`,
+      windowStartedAt,
+      limit: 120,
+    }))
+      ? null
+      : rateLimitedResponse();
+  }
+
   async function dispatch(
-    request: Request,
     principal: McpConnectionPrincipal,
     rpc: RpcRequest,
   ): Promise<Response> {
-    const rateLimited = await applyRateLimits(principal, rpc);
+    const rateLimited = await applyOperationRateLimit(principal, rpc);
     if (rateLimited !== null) return rateLimited;
-    if (
-      rpc.method !== "initialize" &&
-      request.headers.get("mcp-protocol-version") !== mcpProtocolVersion
-    ) {
-      return rpcError(rpc.id, -32600, "Unsupported MCP protocol version");
-    }
-    if (rpc.method === "notifications/initialized") {
-      return new Response(null, { status: 202 });
+    if (rpc.method === "ping") {
+      return rpc.params === undefined ||
+        (isRecord(rpc.params) &&
+          hasExactKeys(rpc.params, [], ["_meta"]) &&
+          (rpc.params._meta === undefined || isRecord(rpc.params._meta)))
+        ? rpcResult(rpc.id, {})
+        : rpcError(rpc.id, -32602, "Invalid ping parameters");
     }
     if (rpc.method === "initialize") {
       if (
         !isRecord(rpc.params) ||
-        rpc.params.protocolVersion !== mcpProtocolVersion
+        !hasExactKeys(
+          rpc.params,
+          ["protocolVersion", "capabilities", "clientInfo"],
+          ["_meta"],
+        ) ||
+        rpc.params.protocolVersion !== mcpProtocolVersion ||
+        !isRecord(rpc.params.capabilities) ||
+        !isRecord(rpc.params.clientInfo) ||
+        typeof rpc.params.clientInfo.name !== "string" ||
+        typeof rpc.params.clientInfo.version !== "string" ||
+        (rpc.params._meta !== undefined && !isRecord(rpc.params._meta))
       ) {
         return rpcError(
           rpc.id,
@@ -328,13 +380,14 @@ export function createMcpProtocolRuntime({
         ? rpcError(rpc.id, -32602, "Invalid pagination cursor")
         : rpcResult(rpc.id, {
             tools: page.values,
-            nextCursor: page.nextCursor,
+            ...paginationCursor(page.nextCursor),
           });
     }
     if (rpc.method === "tools/call") {
       if (
         !isRecord(rpc.params) ||
-        !hasExactKeys(rpc.params, ["name", "arguments"]) ||
+        !hasExactKeys(rpc.params, ["name"], ["arguments", "_meta"]) ||
+        (rpc.params._meta !== undefined && !isRecord(rpc.params._meta)) ||
         typeof rpc.params.name !== "string"
       ) {
         return rpcError(rpc.id, -32602, "Invalid tool arguments");
@@ -342,7 +395,7 @@ export function createMcpProtocolRuntime({
       const result = await callTool(
         principal,
         rpc.params.name,
-        rpc.params.arguments,
+        rpc.params.arguments ?? {},
       );
       return result === null
         ? rpcError(rpc.id, -32602, "Invalid tool arguments")
@@ -367,19 +420,25 @@ export function createMcpProtocolRuntime({
                   uri: "foundry://site",
                   name: site.result.displayName,
                   mimeType: "application/json",
-                  annotations: { audience: ["user", "assistant"] },
+                  annotations: resourceAnnotations(
+                    site.result.liveRelease?.observedAt ?? null,
+                  ),
                 },
                 {
                   uri: "foundry://schemas/content",
                   name: "Content schema",
                   mimeType: "application/schema+json",
-                  annotations: { audience: ["user", "assistant"] },
+                  annotations: resourceAnnotations(
+                    site.result.liveRelease?.observedAt ?? null,
+                  ),
                 },
                 {
                   uri: "foundry://schemas/design",
                   name: "Design schema",
                   mimeType: "application/schema+json",
-                  annotations: { audience: ["user", "assistant"] },
+                  annotations: resourceAnnotations(
+                    site.result.liveRelease?.observedAt ?? null,
+                  ),
                 },
               ]
             : []),
@@ -387,7 +446,7 @@ export function createMcpProtocolRuntime({
             uri: `foundry://content/${item.kind}/${encodeURIComponent(item.contentId)}`,
             name: item.title,
             mimeType: "application/json",
-            annotations: { audience: ["user", "assistant"] },
+            annotations: resourceAnnotations(item.lastModified),
             _meta: {
               contentHash: item.contentHash,
               liveGitSha: item.liveGitSha,
@@ -395,10 +454,11 @@ export function createMcpProtocolRuntime({
             },
           })),
         ],
-        nextCursor: content.result.nextCursor,
+        ...paginationCursor(content.result.nextCursor),
       });
     }
     if (rpc.method === "resources/templates/list") {
+      const site = await readApplication.getSite(principal);
       const page = await paginateDiscovery({
         principal,
         params: rpc.params,
@@ -408,7 +468,9 @@ export function createMcpProtocolRuntime({
             uriTemplate: "foundry://content/{kind}/{contentId}",
             name: "Published content",
             mimeType: "application/json",
-            annotations: { audience: ["user", "assistant"] },
+            annotations: resourceAnnotations(
+              site.result.liveRelease?.observedAt ?? null,
+            ),
           },
         ],
         pageSize: 50,
@@ -417,13 +479,14 @@ export function createMcpProtocolRuntime({
         ? rpcError(rpc.id, -32602, "Invalid pagination cursor")
         : rpcResult(rpc.id, {
             resourceTemplates: page.values,
-            nextCursor: page.nextCursor,
+            ...paginationCursor(page.nextCursor),
           });
     }
     if (rpc.method === "resources/read") {
       if (
         !isRecord(rpc.params) ||
-        !hasExactKeys(rpc.params, ["uri"]) ||
+        !hasExactKeys(rpc.params, ["uri"], ["_meta"]) ||
+        (rpc.params._meta !== undefined && !isRecord(rpc.params._meta)) ||
         typeof rpc.params.uri !== "string"
       ) {
         return rpcError(rpc.id, -32602, "Invalid resource request");
@@ -453,7 +516,7 @@ export function createMcpProtocolRuntime({
         ? rpcError(rpc.id, -32602, "Invalid pagination cursor")
         : rpcResult(rpc.id, {
             prompts: page.values,
-            nextCursor: page.nextCursor,
+            ...paginationCursor(page.nextCursor),
           });
     }
     return rpcError(rpc.id, -32601, "Method not found");
@@ -484,6 +547,8 @@ export function createMcpProtocolRuntime({
       ) {
         return jsonResponse({ error: "unsupported_media_type" }, 415);
       }
+      const ingressLimited = await applyIngressRateLimits(principal);
+      if (ingressLimited !== null) return ingressLimited;
       let value: unknown;
       try {
         value = JSON.parse(await readBoundedText(request, rpcBodyLimitBytes));
@@ -493,26 +558,81 @@ export function createMcpProtocolRuntime({
         }
         return rpcError(null, -32700, "Parse error");
       }
-      if (
-        !isRecord(value) ||
-        value.jsonrpc !== "2.0" ||
-        typeof value.method !== "string" ||
-        !hasExactKeys(value, ["jsonrpc", "method"], ["id", "params"])
-      ) {
+      if (!isRecord(value) || value.jsonrpc !== "2.0") {
         return rpcError(null, -32600, "Invalid Request");
+      }
+      const requestedVersion =
+        request.headers.get("mcp-protocol-version");
+      if (
+        requestedVersion !== null &&
+        requestedVersion !== mcpProtocolVersion
+      ) {
+        return rpcError(
+          isRequestId(value.id) ? value.id : null,
+          -32600,
+          "Unsupported MCP protocol version",
+          undefined,
+          400,
+        );
       }
       if (valueDepth(value, rpcMaximumDepth) > rpcMaximumDepth) {
         return rpcError(
-          typeof value.id === "string" ||
-            typeof value.id === "number" ||
-            value.id === null
-            ? value.id
-            : null,
+          isRequestId(value.id) ? value.id : null,
           -32602,
           "Request nesting limit exceeded",
         );
       }
-      return dispatch(request, principal, value as RpcRequest);
+      if (typeof value.method !== "string") {
+        const isResultResponse =
+          isRequestId(value.id) &&
+          hasExactKeys(value, ["jsonrpc", "id", "result"]) &&
+          isRecord(value.result);
+        const isErrorResponse =
+          isRequestId(value.id) &&
+          hasExactKeys(value, ["jsonrpc", "id", "error"]) &&
+          isRecord(value.error) &&
+          typeof value.error.code === "number" &&
+          Number.isInteger(value.error.code) &&
+          typeof value.error.message === "string";
+        return (isResultResponse || isErrorResponse) &&
+          requestedVersion === mcpProtocolVersion
+          ? new Response(null, { status: 202 })
+          : rpcError(null, -32600, "Invalid Request");
+      }
+      if (
+        !hasExactKeys(value, ["jsonrpc", "method"], ["id", "params"]) ||
+        (value.params !== undefined && !isRecord(value.params))
+      ) {
+        return rpcError(null, -32600, "Invalid Request");
+      }
+      if (value.id === undefined) {
+        return value.method === "initialize" ||
+          requestedVersion === mcpProtocolVersion
+          ? new Response(null, { status: 202 })
+          : rpcError(
+              null,
+              -32600,
+              "MCP-Protocol-Version header required",
+              undefined,
+              400,
+            );
+      }
+      if (!isRequestId(value.id)) {
+        return rpcError(null, -32600, "Invalid Request");
+      }
+      if (
+        value.method !== "initialize" &&
+        requestedVersion !== mcpProtocolVersion
+      ) {
+        return rpcError(
+          value.id,
+          -32600,
+          "MCP-Protocol-Version header required",
+          undefined,
+          400,
+        );
+      }
+      return dispatch(principal, value as RpcRequest);
     },
   };
 }
