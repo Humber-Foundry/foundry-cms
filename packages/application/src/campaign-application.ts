@@ -13,6 +13,7 @@ import {
   createCampaignId,
   createCampaignRevisionId,
   createSourcePostRevisionId,
+  isCampaignRequestId,
   type Campaign,
   type CampaignActor,
   type CampaignApplication,
@@ -133,10 +134,7 @@ export function createCampaignApplication({
     input: unknown;
   }): Promise<CampaignCommandKey> {
     const inputHash = await sha256CanonicalJson(input);
-    if (
-      requestId.length > 200 ||
-      !/^[A-Za-z0-9][A-Za-z0-9:._-]*$/u.test(requestId)
-    ) {
+    if (!isCampaignRequestId(requestId)) {
       const action =
         commandName === "campaign.edit"
           ? "campaign.edit"

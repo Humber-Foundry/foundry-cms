@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  CampaignIdempotencyError,
   CampaignValidationError,
 } from "@foundry/application";
 
@@ -153,11 +152,9 @@ describe("campaign endpoint", () => {
   });
 
   it("reports a missing shared request key as an invalid command", async () => {
-    mocks.createStandalone.mockRejectedValueOnce(
-      new CampaignIdempotencyError("campaign_idempotency_key_invalid"),
-    );
-    const response = await POST(
-      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+    const request = new Request(
+      "https://foundry.example/api/foundry-cms/campaigns",
+      {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -173,12 +170,45 @@ describe("campaign endpoint", () => {
             },
           },
         }),
-      }),
+      },
     );
+    const response = await POST(request);
 
     expect(response.status).toBe(400);
+    expect(request.bodyUsed).toBe(false);
+    expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "",
+      reason: "campaign_idempotency_key_invalid",
+      command: { kind: "campaign_request_envelope" },
+    });
     await expect(response.json()).resolves.toEqual({
       error: "campaign_idempotency_key_invalid",
+    });
+  });
+
+  it("rejects a declared oversized command before consuming its body", async () => {
+    const request = new Request(
+      "https://foundry.example/api/foundry-cms/campaigns",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(256 * 1024 + 1),
+          "idempotency-key": "campaign-too-large-1",
+        },
+        body: "{}",
+      },
+    );
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    expect(request.bodyUsed).toBe(false);
+    expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-too-large-1",
+      reason: "campaign_command_too_large",
+      command: { kind: "campaign_command_too_large" },
     });
   });
 

@@ -5,6 +5,7 @@ import {
   CampaignNotFoundError,
   CampaignValidationError,
   createCampaignId,
+  isCampaignRequestId,
   type CampaignEditableInput,
 } from "@foundry/application";
 
@@ -26,6 +27,51 @@ type CampaignCommand =
       expectedVersion: number;
       input: CampaignEditableInput;
     }>;
+
+const maximumCampaignCommandBytes = 256 * 1024;
+
+class CampaignCommandBodyError extends Error {
+  constructor(readonly code: "campaign_command_invalid" | "campaign_command_too_large") {
+    super(code);
+    this.name = "CampaignCommandBodyError";
+  }
+}
+
+async function readCampaignCommandBody(request: Request) {
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > maximumCampaignCommandBytes
+  ) {
+    throw new CampaignCommandBodyError("campaign_command_too_large");
+  }
+  if (request.body === null) {
+    return Object.freeze({ value: null, receiptInput: "" });
+  }
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  while (true) {
+    const result = await reader.read();
+    if (result.done) break;
+    bytes += result.value.byteLength;
+    if (bytes > maximumCampaignCommandBytes) {
+      await reader.cancel();
+      throw new CampaignCommandBodyError("campaign_command_too_large");
+    }
+    text += decoder.decode(result.value, { stream: true });
+  }
+  text += decoder.decode();
+  try {
+    return Object.freeze({
+      value: JSON.parse(text) as unknown,
+      receiptInput: text,
+    });
+  } catch {
+    return Object.freeze({ value: null, receiptInput: text });
+  }
+}
 
 function command(value: unknown): CampaignCommand | null {
   if (typeof value !== "object" || value === null || !("action" in value)) {
@@ -117,15 +163,46 @@ export async function POST(request: Request) {
   try {
     const context = await loadCampaignRequestContext(request.headers);
     await verifyHumanMutation(request, context.identity);
-    const rawCommand = await request.json().catch(() => null);
-    const parsed = command(rawCommand);
     const requestId = request.headers.get("idempotency-key") ?? "";
+    if (!isCampaignRequestId(requestId)) {
+      await context.application.commands.recordRejectedCommand({
+        actor: context.identity,
+        requestId,
+        reason: "campaign_idempotency_key_invalid",
+        command: { kind: "campaign_request_envelope" },
+      });
+      return Response.json(
+        { error: "campaign_idempotency_key_invalid" },
+        { status: 400 },
+      );
+    }
+    let body;
+    try {
+      body = await readCampaignCommandBody(request);
+    } catch (error) {
+      if (!(error instanceof CampaignCommandBodyError)) throw error;
+      await context.application.commands.recordRejectedCommand({
+        actor: context.identity,
+        requestId,
+        reason: error.code,
+        command: { kind: error.code },
+      });
+      return Response.json(
+        { error: error.code },
+        {
+          status:
+            error.code === "campaign_command_too_large" ? 413 : 400,
+        },
+      );
+    }
+    const rawCommand = body.value;
+    const parsed = command(rawCommand);
     if (parsed === null) {
       await context.application.commands.recordRejectedCommand({
         actor: context.identity,
         requestId,
         reason: "campaign_command_invalid",
-        command: rawCommand,
+        command: rawCommand ?? { invalidJson: body.receiptInput },
       });
       return Response.json(
         { error: "campaign_command_invalid" },

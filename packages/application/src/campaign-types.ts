@@ -152,6 +152,13 @@ export type CampaignCommandName =
   | "campaign.create_from_post"
   | "campaign.edit";
 
+export function isCampaignRequestId(value: string): boolean {
+  return (
+    value.length <= 200 &&
+    /^[A-Za-z0-9][A-Za-z0-9:._-]*$/u.test(value)
+  );
+}
+
 export type CampaignCommandReceipt =
   | Readonly<{
       siteId: SiteId;
