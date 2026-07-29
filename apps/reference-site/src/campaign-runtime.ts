@@ -260,12 +260,19 @@ export async function loadCampaignRequestContext(
           }
           return { id, address };
         }),
-      recordRejectedCommand: ({ actor, requestId, reason, command }) =>
+      recordRejectedCommand: ({
+        actor,
+        requestId,
+        reason,
+        command,
+        targetId,
+      }) =>
         application.commands.recordRejectedCommand({
           actor,
           requestId,
           reason,
           command,
+          targetId,
           action: "campaign.test",
           commandName: "campaign.request_test",
         }),

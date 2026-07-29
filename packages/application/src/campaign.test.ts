@@ -275,6 +275,40 @@ describe("campaign authoring and rendering", () => {
     ]);
   });
 
+  it("attributes a rejected test command authorization to the requested campaign", async () => {
+    const { application, store } = createFixture();
+    const campaignId = createCampaignId(
+      "20000000-0000-4000-8000-000000000001",
+    );
+
+    await expect(
+      application.commands.recordRejectedCommand({
+        actor: owner,
+        requestId: "campaign-test-denied-1",
+        reason: "capability_not_authorized",
+        command: {
+          action: "request_test",
+          campaignId,
+          testRecipientIds: ["owner-primary"],
+        },
+        targetId: campaignId,
+        action: "campaign.test",
+        commandName: "campaign.request_test",
+      }),
+    ).rejects.toBeInstanceOf(AccessDeniedError);
+
+    expect(store.listAuditEvents()).toMatchObject([
+      {
+        actorId: ownerMembership.id,
+        targetId: campaignId,
+        requestId: "campaign-test-denied-1",
+        action: "campaign.test",
+        outcome: "rejected",
+        reason: "capability_not_authorized",
+      },
+    ]);
+  });
+
   it("replays terminal stale-write rejections without contradictory accepted audit", async () => {
     const { application, store } = createFixture();
     const created = await application.commands.createStandalone({

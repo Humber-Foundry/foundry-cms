@@ -309,4 +309,39 @@ describe("campaign endpoint", () => {
     });
     expect(mocks.edit).not.toHaveBeenCalled();
   });
+
+  it("classifies a malformed test campaign identifier as a test rejection", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-invalid-id-1",
+        },
+        body: JSON.stringify({
+          action: "request_test",
+          campaignId: "not-a-campaign-id",
+          testRecipientIds: ["owner-primary"],
+        }),
+      }),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "campaign_id_invalid",
+    });
+    expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-test-invalid-id-1",
+      action: "campaign.test",
+      targetId: "not-a-campaign-id",
+      reason: "campaign_id_invalid",
+      command: {
+        action: "request_test",
+        campaignId: "not-a-campaign-id",
+        testRecipientIds: ["owner-primary"],
+      },
+      commandName: "campaign.request_test",
+    });
+    expect(mocks.requestTest).not.toHaveBeenCalled();
+  });
 });

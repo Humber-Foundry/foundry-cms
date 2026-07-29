@@ -399,6 +399,7 @@ describe("campaign test delivery", () => {
           action: "request_test",
           testRecipientIds: ["owner-primary"],
         },
+        targetId: created.campaign.id,
       },
     ]);
   });

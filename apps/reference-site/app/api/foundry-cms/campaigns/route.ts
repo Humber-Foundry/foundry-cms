@@ -245,17 +245,17 @@ export async function POST(request: Request) {
           action:
             parsed.action === "edit"
               ? "campaign.edit"
-              : "campaign.create",
+              : "campaign.test",
           targetId: parsed.campaignId,
           reason: "campaign_id_invalid",
           command: rawCommand,
           commandName:
             parsed.action === "edit"
               ? "campaign.edit"
-              : "campaign.create_standalone",
+              : "campaign.request_test",
         });
         return Response.json(
-          { error: "campaign_command_invalid" },
+          { error: "campaign_id_invalid" },
           { status: 400 },
         );
       }

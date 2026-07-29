@@ -10,6 +10,7 @@ CREATE TABLE campaign_test_deliveries (
   state TEXT NOT NULL CHECK (
     state IN ('pending', 'attempting', 'ambiguous', 'accepted', 'failed')
   ),
+  attempt_number INTEGER NOT NULL CHECK (attempt_number >= 0),
   attempt_lease_until TEXT,
   provider_campaign_id TEXT,
   failure_code TEXT,

@@ -1,6 +1,7 @@
 import type { SiteId } from "@foundry/site-definition";
 
 import { sha256CanonicalJson, sha256Text } from "./deterministic-hash";
+import { AccessDeniedError } from "./human-access";
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
   CampaignIdempotencyError,
@@ -110,6 +111,7 @@ export type CampaignTestDeliveryOperation = Readonly<{
   binding: CampaignTestDeliveryBinding;
   recipientIds: ReadonlyArray<string>;
   state: "pending" | "attempting" | "ambiguous" | "accepted" | "failed";
+  attemptNumber: number;
   attemptLeaseUntil: string | null;
   providerCampaignId: string | null;
   failureCode: string | null;
@@ -342,6 +344,7 @@ export function createCampaignTestDeliveryApplication({
     requestId: string;
     reason: string;
     command: unknown;
+    targetId: string;
   }): Promise<void>;
   clock?: () => Date;
   createExecutionId?: () => string;
@@ -422,6 +425,7 @@ export function createCampaignTestDeliveryApplication({
           binding,
           recipientIds: Object.freeze([...testRecipientIds]),
           state: "pending" as const,
+          attemptNumber: 0,
           attemptLeaseUntil: null,
           providerCampaignId: null,
           failureCode: null,
@@ -581,7 +585,8 @@ export function createCampaignTestDeliveryApplication({
         isCampaignRequestId(input.requestId) &&
         (error instanceof CampaignValidationError ||
           error instanceof CampaignIdempotencyError ||
-          error instanceof CampaignNotFoundError)
+          error instanceof CampaignNotFoundError ||
+          error instanceof AccessDeniedError)
       ) {
         await recordRejectedCommand({
           actor: input.actor,
@@ -592,6 +597,7 @@ export function createCampaignTestDeliveryApplication({
             campaignId: input.campaignId,
             testRecipientIds: input.testRecipientIds,
           },
+          targetId: input.campaignId,
         });
       }
       throw error;
@@ -680,6 +686,7 @@ export function createInMemoryCampaignTestDeliveryStore():
       const attempting = Object.freeze({
         ...current,
         state: "attempting" as const,
+        attemptNumber: current.attemptNumber + 1,
         attemptLeaseUntil: leaseUntil,
         updatedAt: now,
       });
@@ -692,6 +699,7 @@ export function createInMemoryCampaignTestDeliveryStore():
       if (
         current === undefined ||
         current.executionId !== operation.executionId ||
+        current.attemptNumber !== operation.attemptNumber ||
         current.state === "accepted" ||
         current.state === "failed"
       ) {

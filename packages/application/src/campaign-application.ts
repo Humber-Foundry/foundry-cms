@@ -49,6 +49,13 @@ function rejectionError(reason: string): Error {
   return new CampaignValidationError(reason);
 }
 
+function auditTargetId(targetId: string) {
+  return targetId.length <= 200 &&
+      /^[A-Za-z0-9:._-]+$/u.test(targetId)
+    ? targetId
+    : "campaign:invalid";
+}
+
 export function createCampaignApplication({
   siteId,
   store,
@@ -225,6 +232,7 @@ export function createCampaignApplication({
     actor: CampaignActor,
     command: CampaignCommandKey,
     action: CampaignAuditEvent["action"],
+    targetId = "campaign:unknown",
   ) {
     try {
       return await requireAuthor(actor);
@@ -232,7 +240,7 @@ export function createCampaignApplication({
       const reason = stableRejectionReason(error);
       const event = auditEvent({
         actorId: command.actorId,
-        targetId: "campaign:unknown",
+        targetId: auditTargetId(targetId),
         revisionId: null,
         requestId: command.requestId,
         inputHash: command.inputHash,
@@ -398,7 +406,7 @@ export function createCampaignApplication({
         commandName,
         input,
       });
-      await authorizeCommand(actor, command, action);
+      await authorizeCommand(actor, command, action, targetId);
       const existing = await store.findCommandReceipt(command);
       if (
         existing !== null &&
@@ -415,11 +423,7 @@ export function createCampaignApplication({
         command,
         audit: auditEvent({
           actorId: command.actorId,
-          targetId:
-            targetId.length <= 200 &&
-              /^[A-Za-z0-9:._-]+$/u.test(targetId)
-              ? targetId
-              : "campaign:invalid",
+          targetId: auditTargetId(targetId),
           revisionId: null,
           requestId: command.requestId,
           inputHash: command.inputHash,

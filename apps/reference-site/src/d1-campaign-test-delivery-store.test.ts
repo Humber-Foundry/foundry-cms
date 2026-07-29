@@ -121,6 +121,7 @@ describe("D1 campaign test delivery store", () => {
       },
       recipientIds: ["owner-primary"],
       state: "pending",
+      attemptNumber: 0,
       attemptLeaseUntil: null,
       providerCampaignId: null,
       failureCode: null,
@@ -145,8 +146,33 @@ describe("D1 campaign test delivery store", () => {
         leaseUntil: "2026-07-29T19:06:02.000Z",
       }),
     ).resolves.toBeNull();
+    const takeover = await store.beginAttempt({
+      operation: attempting!,
+      now: "2026-07-29T19:06:02.000Z",
+      leaseUntil: "2026-07-29T19:07:02.000Z",
+    });
+    expect(takeover).toMatchObject({
+      state: "attempting",
+      attemptNumber: 2,
+    });
+    await expect(
+      store.record({
+        ...attempting!,
+        state: "accepted",
+        attemptLeaseUntil: null,
+        providerCampaignId: "stale-17",
+        evidence: {
+          ...pending.binding,
+          executionId: pending.executionId,
+          providerCampaignId: "stale-17",
+          providerReceiptHash: "9".repeat(64),
+          acceptedAt: "2026-07-29T19:06:03.000Z",
+        },
+        updatedAt: "2026-07-29T19:06:03.000Z",
+      }),
+    ).rejects.toThrow(/campaign_test_delivery_state_conflict/u);
     const accepted: CampaignTestDeliveryOperation = {
-      ...attempting!,
+      ...takeover!,
       state: "accepted",
       attemptLeaseUntil: null,
       providerCampaignId: "17",

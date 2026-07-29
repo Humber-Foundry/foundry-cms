@@ -25,6 +25,11 @@ type BrevoCampaign = Readonly<{
   testSent?: unknown;
 }>;
 
+type CampaignRead =
+  | Readonly<{ outcome: "found"; campaign: BrevoCampaign }>
+  | Readonly<{ outcome: "not_found" }>
+  | Readonly<{ outcome: "ambiguous" }>;
+
 function campaignName(executionId: string) {
   return `foundry-test-${executionId}`;
 }
@@ -136,24 +141,39 @@ export function createBrevoNewsletterDeliveryAdapter({
       method: "GET",
       headers: headers(apiKey),
     });
-    return response.ok ? (await json(response)) as BrevoCampaign : null;
+    if (response.status === 404) return { outcome: "not_found" } as const;
+    if (!response.ok) return { outcome: "ambiguous" } as const;
+    return {
+      outcome: "found",
+      campaign: (await json(response)) as BrevoCampaign,
+    } as const;
   }
 
-  async function findCampaign(request: NewsletterTestRequest) {
+  async function findCampaign(
+    request: NewsletterTestRequest,
+  ): Promise<CampaignRead> {
     const response = await fetcher(
       `${endpoint}/emailCampaigns?type=classic&status=draft&limit=50&sort=desc`,
       { method: "GET", headers: headers(apiKey) },
     );
-    if (!response.ok) return null;
+    if (!response.ok) return { outcome: "ambiguous" };
     const body = await json(response) as {
       campaigns?: ReadonlyArray<BrevoCampaign>;
+      count?: unknown;
     } | null;
     const matches = (body?.campaigns ?? []).filter(
       (campaign) =>
         campaign.name === campaignName(request.executionId) &&
         campaign.tag === campaignTag(request.executionId),
     );
-    return matches.length === 1 ? matches[0]! : null;
+    if (matches.length === 1) {
+      return { outcome: "found", campaign: matches[0]! };
+    }
+    if (matches.length > 1) return { outcome: "ambiguous" };
+    const returned = body?.campaigns?.length ?? 0;
+    return typeof body?.count === "number" && body.count <= returned
+      ? { outcome: "not_found" }
+      : { outcome: "ambiguous" };
   }
 
   async function reconcile(
@@ -164,11 +184,18 @@ export function createBrevoNewsletterDeliveryAdapter({
     if (senderId === null) {
       return { outcome: "rejected", code: "provider_sender_unmapped" } as const;
     }
-    const campaign =
+    const read =
       campaignId === null
         ? await findCampaign(request)
         : await readCampaign(campaignId);
-    if (campaign === null) return { outcome: "not_found" } as const;
+    if (read.outcome === "ambiguous") {
+      return {
+        outcome: "ambiguous",
+        ...(campaignId === null ? {} : { providerCampaignId: campaignId }),
+      } as const;
+    }
+    if (read.outcome === "not_found") return read;
+    const campaign = read.campaign;
     if (!matchesCampaign(campaign, request, senderId)) {
       return {
         outcome: "rejected",
@@ -272,13 +299,22 @@ export function createBrevoNewsletterDeliveryAdapter({
           if (campaignId === null) return { outcome: "ambiguous" };
         } else {
           const existing = await readCampaign(campaignId);
+          if (existing.outcome === "ambiguous") {
+            return {
+              outcome: "ambiguous",
+              providerCampaignId: campaignId,
+            } as const;
+          }
           if (
-            existing === null ||
-            !matchesCampaign(existing, request, senderId)
+            existing.outcome !== "found" ||
+            !matchesCampaign(existing.campaign, request, senderId)
           ) {
             return {
               outcome: "rejected",
-              code: "provider_campaign_fingerprint_mismatch",
+              code:
+                existing.outcome === "not_found"
+                  ? "provider_campaign_not_found"
+                  : "provider_campaign_fingerprint_mismatch",
             } as const;
           }
         }

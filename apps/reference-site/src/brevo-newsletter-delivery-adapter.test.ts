@@ -111,6 +111,7 @@ describe("Brevo newsletter delivery adapter", () => {
   it("finds the fresh execution draft and reconciles before any retry after a lost create response", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       response(200, {
+        count: 1,
         campaigns: [
           {
             id: 18,
@@ -143,6 +144,50 @@ describe("Brevo newsletter delivery adapter", () => {
       providerReceipt: expect.stringMatching(/^brevo:test:/u),
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps transient reconciliation reads ambiguous and treats only a definitive 404 as absent", async () => {
+    const transientRead = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi.fn().mockResolvedValue(response(429)),
+    });
+    await expect(
+      transientRead.reconcileTest({
+        request,
+        providerCampaignId: "17",
+      }),
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: "17",
+    });
+
+    const transientSearch = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi.fn().mockResolvedValue(response(503)),
+    });
+    await expect(
+      transientSearch.reconcileTest({
+        request,
+        providerCampaignId: null,
+      }),
+    ).resolves.toEqual({ outcome: "ambiguous" });
+
+    const absent = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi.fn().mockResolvedValue(response(404)),
+    });
+    await expect(
+      absent.reconcileTest({
+        request,
+        providerCampaignId: "17",
+      }),
+    ).resolves.toEqual({ outcome: "not_found" });
   });
 
   it("keeps server errors ambiguous because either provider write may have applied", async () => {
