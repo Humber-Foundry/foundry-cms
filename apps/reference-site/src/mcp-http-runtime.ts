@@ -18,7 +18,6 @@ import {
   isRecord,
   jsonResponse,
   readBoundedText,
-  RequestDeadlineExceededError,
   sha256,
   type RequestExecutionContext,
 } from "./mcp-http-support";
@@ -213,6 +212,7 @@ export function createMcpHttpRuntime({
     ) {
       return authenticationFailure();
     }
+    let principal: McpConnectionPrincipal;
     try {
       const { payload, protectedHeader } = await jwtVerify(
         authorization.slice("Bearer ".length),
@@ -237,38 +237,37 @@ export function createMcpHttpRuntime({
       ) {
         return authenticationFailure();
       }
-      const principal: McpConnectionPrincipal = {
+      principal = {
         connectionId: payload.connection_id,
         actorId: payload.sub,
         clientId: payload.client_id,
         siteId,
         scopes: [mcpInitialScope],
       };
-      const current = await context.waitFor(
-        store.findCurrentConnection({
-          connectionId: principal.connectionId,
-          siteId,
-        }),
-      );
-      if (
-        current === null ||
-        current.status !== "active" ||
-        current.actorId !== principal.actorId ||
-        current.clientId !== principal.clientId ||
-        current.scopes.length !== 1 ||
-        current.scopes[0] !== mcpInitialScope
-      ) {
-        return authenticationFailure(
-          current?.status === "revoked"
-            ? "connection_revoked"
-            : "invalid_token",
-        );
-      }
-      return principal;
-    } catch (error) {
-      if (error instanceof RequestDeadlineExceededError) throw error;
+    } catch {
       return authenticationFailure();
     }
+    const current = await context.waitFor(
+      store.findCurrentConnection({
+        connectionId: principal.connectionId,
+        siteId,
+      }),
+    );
+    if (
+      current === null ||
+      current.status !== "active" ||
+      current.actorId !== principal.actorId ||
+      current.clientId !== principal.clientId ||
+      current.scopes.length !== 1 ||
+      current.scopes[0] !== mcpInitialScope
+    ) {
+      return authenticationFailure(
+        current?.status === "revoked"
+          ? "connection_revoked"
+          : "invalid_token",
+      );
+    }
+    return principal;
   }
 
   function readAuthorizationRequest(

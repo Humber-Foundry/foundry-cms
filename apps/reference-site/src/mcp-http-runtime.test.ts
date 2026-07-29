@@ -1320,6 +1320,26 @@ describe("production MCP HTTP runtime", () => {
     expect(state.rateLimitInputs).toEqual([]);
 
     releaseAuthenticationLookup?.();
+
+    const unavailable = fixture({
+      beforeFindCurrentConnection: async () => {
+        throw new Error("D1 unavailable");
+      },
+    });
+    const unavailableToken = await authorizeAndExchange(unavailable.runtime);
+    const unavailableResponse = await unavailable.runtime.fetch(
+      rpcRequest(unavailableToken.accessToken, {
+        jsonrpc: "2.0",
+        id: "authentication-dependency",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(unavailableResponse.status).toBe(503);
+    await expect(unavailableResponse.json()).resolves.toEqual({
+      error: "temporarily_unavailable",
+    });
+    expect(unavailable.rateLimitInputs).toEqual([]);
   });
 
   it("correlates malformed resource URIs and unexpected post-parse failures", async () => {
