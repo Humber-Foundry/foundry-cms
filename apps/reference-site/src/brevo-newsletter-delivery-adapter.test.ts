@@ -97,6 +97,14 @@ describe("Brevo newsletter delivery adapter", () => {
       providerReceipt: expect.stringMatching(/^brevo:test:/u),
     });
     expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      "https://api.brevo.com/v3/emailCampaigns",
+      expect.objectContaining({
+        method: "POST",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
       2,
       "https://api.brevo.com/v3/emailCampaigns/17/sendTest",
       expect.objectContaining({
@@ -297,6 +305,7 @@ describe("Brevo newsletter delivery adapter", () => {
         adapter,
         ownership: "evaluation",
         liveTestEvidence: evidence,
+        currentBinding: request.binding,
         ownerConfirmedReceipt: true,
       }),
     ).resolves.toMatchObject({
@@ -330,6 +339,7 @@ describe("Brevo newsletter delivery adapter", () => {
         adapter,
         ownership: "client_owned",
         liveTestEvidence: evidence,
+        currentBinding: request.binding,
         ownerConfirmedReceipt: true,
       }),
     ).resolves.toEqual({
@@ -338,6 +348,43 @@ describe("Brevo newsletter delivery adapter", () => {
       provider: "brevo",
       configurationFingerprint,
       acceptedAt: evidence.acceptedAt,
+    });
+  });
+
+  it("requires the complete current binding for client-owned readiness", async () => {
+    const evidence = {
+      ...request.binding,
+      executionId: request.executionId,
+      providerCampaignId: "17",
+      providerReceiptHash: "3".repeat(64),
+      acceptedAt: "2026-07-29T19:05:00.000Z",
+    } satisfies CampaignTestDeliveryEvidence;
+    const adapter = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi
+        .fn()
+        .mockResolvedValueOnce(response(200, {}))
+        .mockResolvedValueOnce(
+          response(200, { senders: [{ id: 42, active: true }] }),
+        ),
+    });
+
+    await expect(
+      assessBrevoTestDeliveryReadiness({
+        adapter,
+        ownership: "client_owned",
+        liveTestEvidence: evidence,
+        currentBinding: {
+          ...request.binding,
+          htmlFingerprint: "9".repeat(64),
+        },
+        ownerConfirmedReceipt: true,
+      }),
+    ).resolves.toMatchObject({
+      state: "live_test_required",
+      testDeliveryReady: false,
     });
   });
 });

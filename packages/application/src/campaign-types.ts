@@ -230,6 +230,12 @@ export interface CampaignStore {
     command: CampaignCommandKey;
     audit: CampaignAuditEvent;
   }): Promise<CampaignCommandStoreResult>;
+  acceptTestCommand(input: {
+    command: CampaignCommandKey;
+    campaign: Campaign;
+    revision: CampaignRevision;
+    audit: CampaignAuditEvent;
+  }): Promise<CampaignCommandStoreResult>;
   recordAudit(event: CampaignAuditEvent): Promise<void>;
 }
 
@@ -279,6 +285,23 @@ export type CampaignApplication = Readonly<{
       beforeState?: string | null;
       action?: CampaignAuditEvent["action"];
       commandName?: CampaignCommandName;
+    }): Promise<void>;
+    replayTestCommand(input: {
+      actor: CampaignActor;
+      requestId: string;
+      command: unknown;
+      targetId: string;
+    }): Promise<
+      Readonly<{ campaign: Campaign; revision: CampaignRevision }> | null
+    >;
+    recordAcceptedTestCommand(input: {
+      actor: CampaignActor;
+      requestId: string;
+      command: unknown;
+      campaign: Campaign;
+      revision: CampaignRevision;
+      beforeState: string;
+      afterState: string;
     }): Promise<void>;
   }>;
   queries: Readonly<{

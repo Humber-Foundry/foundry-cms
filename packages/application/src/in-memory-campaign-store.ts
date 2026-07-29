@@ -142,6 +142,14 @@ export function createInMemoryCampaignStore(): CampaignStore & {
       audits.push(audit);
       return Object.freeze({ receipt, replayed: false });
     },
+    async acceptTestCommand({ command, campaign, revision, audit }) {
+      const existing = existingResult(command);
+      if (existing !== null) return existing;
+      const receipt = acceptedReceipt(command, campaign, revision);
+      receipts.set(commandKey(command), receipt);
+      audits.push(audit);
+      return Object.freeze({ receipt, replayed: false });
+    },
     async recordAudit(event) {
       audits.push(Object.freeze({ ...event }));
     },

@@ -62,6 +62,8 @@ const channelConfiguration = {
 function createFixture(
   adapter: NewsletterDeliveryAdapter,
   clock = () => new Date("2026-07-29T19:05:00.000Z"),
+  createExecutionId = () =>
+    "40000000-0000-4000-8000-000000000001",
 ) {
   let sequence = 0;
   const campaignStore = createInMemoryCampaignStore();
@@ -96,16 +98,25 @@ function createFixture(
         id,
         address: `${id}@example.test`,
       })),
+    replayTestCommand: (command) =>
+      campaignApplication.commands.replayTestCommand(command),
+    recordAcceptedTestCommand: (command) =>
+      campaignApplication.commands.recordAcceptedTestCommand(command),
     clock,
-    createExecutionId: () =>
-      "40000000-0000-4000-8000-000000000001",
+    createExecutionId,
     recordRejectedCommand: async (command) => {
       rejectedCommands.push(command);
+      await campaignApplication.commands.recordRejectedCommand({
+        ...command,
+        action: "campaign.test",
+        commandName: "campaign.request_test",
+      });
     },
   });
   return {
     application,
     campaignApplication,
+    campaignStore,
     deliveryStore,
     rejectedCommands,
   };
@@ -371,7 +382,10 @@ describe("campaign test delivery", () => {
     now = new Date("2026-07-29T19:06:01.000Z");
     const recovery = await application.commands.requestTest(request);
 
-    expect(recovery.state).toBe("attempting");
+    expect(recovery).toMatchObject({
+      state: "ambiguous",
+      attemptLeaseUntil: "2026-07-29T19:07:01.000Z",
+    });
     expect(adapter.reconcileTest).toHaveBeenCalledTimes(1);
     expect(sendTest).toHaveBeenCalledTimes(1);
     completeSend({
@@ -380,6 +394,141 @@ describe("campaign test delivery", () => {
       providerReceipt: "brevo-test-accepted-22",
     });
     await expect(first).resolves.toMatchObject({ state: "accepted" });
+  });
+
+  it("recovers a crashed writer only after a reconciliation quarantine", async () => {
+    let now = new Date("2026-07-29T19:05:00.000Z");
+    const sendTest = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<never>(() => undefined),
+      )
+      .mockResolvedValueOnce({
+        outcome: "accepted",
+        providerCampaignId: "brevo-campaign-23",
+        providerReceipt: "brevo-test-accepted-23",
+      });
+    const adapter = capableAdapter({ sendTest });
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      () => now,
+    );
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-crashed-writer-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    void application.commands.requestTest(request);
+    await vi.waitFor(() => expect(sendTest).toHaveBeenCalledTimes(1));
+    now = new Date("2026-07-29T19:06:01.000Z");
+    const quarantined = await application.commands.requestTest(request);
+
+    expect(quarantined).toMatchObject({
+      state: "ambiguous",
+      providerCampaignId: null,
+      attemptLeaseUntil: "2026-07-29T19:07:01.000Z",
+    });
+    expect(sendTest).toHaveBeenCalledTimes(1);
+
+    now = new Date("2026-07-29T19:07:02.000Z");
+    await expect(
+      application.commands.requestTest(request),
+    ).resolves.toMatchObject({
+      state: "accepted",
+      providerCampaignId: "brevo-campaign-23",
+    });
+    expect(adapter.reconcileTest).toHaveBeenCalledTimes(2);
+    expect(sendTest).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks a second request identity while the revision has an unresolved test", async () => {
+    let completeSend!: (
+      outcome: Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>,
+    ) => void;
+    const sendTest = vi.fn(
+      () =>
+        new Promise<
+          Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>
+        >((resolve) => {
+          completeSend = resolve;
+        }),
+    );
+    const adapter = capableAdapter({ sendTest });
+    const { application, campaignApplication } = createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const first = application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-unresolved-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+    await vi.waitFor(() => expect(sendTest).toHaveBeenCalledTimes(1));
+
+    await expect(
+      application.commands.requestTest({
+        actor,
+        requestId: "campaign-test-unresolved-2",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary"],
+      }),
+    ).rejects.toMatchObject({ message: "test_delivery_in_progress" });
+    expect(sendTest).toHaveBeenCalledTimes(1);
+
+    completeSend({
+      outcome: "accepted",
+      providerCampaignId: "brevo-campaign-24",
+      providerReceipt: "brevo-test-accepted-24",
+    });
+    await first;
+  });
+
+  it("limits configured recipients to five at the shared application boundary", async () => {
+    const adapter = capableAdapter();
+    const { application, campaignApplication } = createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+
+    await expect(
+      application.commands.requestTest({
+        actor,
+        requestId: "campaign-test-too-many-recipients-1",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["one", "two", "three", "four", "five", "six"],
+      }),
+    ).rejects.toMatchObject({ message: "test_recipient_forbidden" });
+    expect(adapter.sendTest).not.toHaveBeenCalled();
+  });
+
+  it("rate limits new logical tests by site and campaign revision", async () => {
+    let execution = 0;
+    const adapter = capableAdapter();
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      undefined,
+      () =>
+        `40000000-0000-4000-8000-${String(++execution).padStart(12, "0")}`,
+    );
+    const created = await createCampaign(campaignApplication);
+
+    for (let index = 1; index <= 5; index += 1) {
+      await application.commands.requestTest({
+        actor,
+        requestId: `campaign-test-rate-${index}`,
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary"],
+      });
+    }
+    await expect(
+      application.commands.requestTest({
+        actor,
+        requestId: "campaign-test-rate-6",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary"],
+      }),
+    ).rejects.toMatchObject({ message: "test_delivery_rate_limited" });
+    expect(adapter.sendTest).toHaveBeenCalledTimes(5);
   });
 
   it("makes prior evidence stale after any send-affecting campaign edit", async () => {
@@ -458,5 +607,76 @@ describe("campaign test delivery", () => {
         }),
       },
     ]);
+  });
+
+  it("replays a durable pre-operation rejection without later sending", async () => {
+    const health = vi
+      .fn()
+      .mockResolvedValueOnce({
+        state: "unavailable",
+        credential: "unknown",
+        senderIdentity: "unknown",
+      })
+      .mockResolvedValue({
+        state: "healthy",
+        credential: "verified",
+        senderIdentity: "verified",
+      });
+    const adapter = capableAdapter({ health });
+    const { application, campaignApplication, campaignStore } =
+      createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-health-rejected-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    await expect(
+      application.commands.requestTest(request),
+    ).rejects.toMatchObject({ message: "provider_unhealthy" });
+    await expect(
+      application.commands.requestTest(request),
+    ).rejects.toMatchObject({ message: "provider_unhealthy" });
+
+    expect(health).toHaveBeenCalledTimes(1);
+    expect(adapter.sendTest).not.toHaveBeenCalled();
+    expect(
+      campaignStore.listAuditEvents().filter(
+        (event) =>
+          event.requestId === request.requestId &&
+          event.action === "campaign.test",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("writes one accepted test audit without recipient addresses", async () => {
+    const adapter = capableAdapter();
+    const { application, campaignApplication, campaignStore } =
+      createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-accepted-audit-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    await application.commands.requestTest(request);
+    await application.commands.requestTest(request);
+
+    const events = campaignStore.listAuditEvents().filter(
+      (event) =>
+        event.requestId === request.requestId &&
+        event.action === "campaign.test",
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      targetId: created.campaign.id,
+      revisionId: created.revision.id,
+      outcome: "accepted",
+    });
+    expect(JSON.stringify(events)).not.toContain("@example.test");
   });
 });

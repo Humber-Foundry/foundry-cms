@@ -389,6 +389,81 @@ export function createCampaignApplication({
   }
 
   const commands: CampaignApplication["commands"] = Object.freeze({
+    async replayTestCommand({
+      actor,
+      requestId,
+      command: input,
+      targetId,
+    }) {
+      const command = await commandKey({
+        actorId: identifyActor(actor),
+        requestId,
+        commandName: "campaign.request_test",
+        input,
+      });
+      await authorizeCommand(
+        actor,
+        command,
+        "campaign.test",
+        targetId,
+      );
+      const existing = await store.findCommandReceipt(command);
+      if (existing === null) return null;
+      const result = await resolveReceipt(
+        Object.freeze({ receipt: existing, replayed: true }),
+        command,
+        "campaign.test",
+      );
+      return Object.freeze({
+        campaign: result.campaign,
+        revision: result.revision,
+      });
+    },
+    async recordAcceptedTestCommand({
+      actor,
+      requestId,
+      command: input,
+      campaign,
+      revision,
+      beforeState,
+      afterState,
+    }) {
+      const command = await commandKey({
+        actorId: identifyActor(actor),
+        requestId,
+        commandName: "campaign.request_test",
+        input,
+      });
+      const author = await authorizeCommand(
+        actor,
+        command,
+        "campaign.test",
+        campaign.id,
+        beforeState,
+      );
+      await resolveReceipt(
+        await store.acceptTestCommand({
+          command,
+          campaign,
+          revision,
+          audit: auditEvent({
+            actorId: author.id,
+            targetId: campaign.id,
+            revisionId: revision.id,
+            requestId,
+            inputHash: command.inputHash,
+            action: "campaign.test",
+            outcome: "accepted",
+            reason: null,
+            beforeState,
+            afterState,
+            occurredAt: clock().toISOString(),
+          }),
+        }),
+        command,
+        "campaign.test",
+      );
+    },
     async recordRejectedCommand({
       actor,
       requestId,

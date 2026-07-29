@@ -92,7 +92,13 @@ function command(value: unknown): CampaignCommand | null {
       : null;
   }
   if (value.action === "request_test") {
-    return "campaignId" in value &&
+    return Object.keys(value).length === 3 &&
+      Object.keys(value).every((key) =>
+        key === "action" ||
+        key === "campaignId" ||
+        key === "testRecipientIds"
+      ) &&
+      "campaignId" in value &&
       typeof value.campaignId === "string" &&
       "testRecipientIds" in value &&
       Array.isArray(value.testRecipientIds) &&
@@ -223,11 +229,33 @@ export async function POST(request: Request) {
     const rawCommand = body.value;
     const parsed = command(rawCommand);
     if (parsed === null) {
+      const malformedTest =
+        typeof rawCommand === "object" &&
+        rawCommand !== null &&
+        "action" in rawCommand &&
+        rawCommand.action === "request_test";
+      const malformedTarget =
+        malformedTest &&
+        "campaignId" in rawCommand &&
+        typeof rawCommand.campaignId === "string"
+          ? rawCommand.campaignId
+          : "campaign:unknown";
       await context.application.commands.recordRejectedCommand({
         actor: context.identity,
         requestId,
         reason: "campaign_command_invalid",
         command: rawCommand ?? { invalidJson: body.receiptInput },
+        ...(malformedTest
+          ? {
+              action: "campaign.test" as const,
+              commandName: "campaign.request_test" as const,
+              targetId: malformedTarget,
+              beforeState: JSON.stringify({
+                current: { commandEnvelope: "invalid" },
+                required: { commandEnvelope: "valid_request_test" },
+              }),
+            }
+          : {}),
       });
       return Response.json(
         { error: "campaign_command_invalid" },
@@ -307,6 +335,7 @@ export async function POST(request: Request) {
       const isTestDeliveryReason =
         error.message === "provider_unhealthy" ||
         error.message === "test_recipient_forbidden" ||
+        error.message.startsWith("test_delivery_") ||
         error.message.startsWith("provider_test_") ||
         error.message.startsWith("provider_configuration_");
       return Response.json(
@@ -316,7 +345,14 @@ export async function POST(request: Request) {
             : "campaign_command_invalid",
         },
         {
-          status: error.message === "provider_unhealthy" ? 503 : 400,
+          status:
+            error.message === "provider_unhealthy"
+              ? 503
+              : error.message === "test_delivery_rate_limited"
+                ? 429
+                : error.message === "test_delivery_in_progress"
+                  ? 409
+                  : 400,
         },
       );
     }

@@ -1,4 +1,5 @@
 import type {
+  CampaignTestDeliveryBinding,
   CampaignTestDeliveryEvidence,
   NewsletterDeliveryAdapter,
   NewsletterDeliveryCapabilities,
@@ -136,10 +137,11 @@ export function createBrevoNewsletterDeliveryAdapter({
     plainTextArtifact: "unsupported",
   });
 
-  async function readCampaign(id: string) {
+  async function readCampaign(id: string, signal?: AbortSignal) {
     const response = await fetcher(`${endpoint}/emailCampaigns/${id}`, {
       method: "GET",
       headers: headers(apiKey),
+      ...(signal === undefined ? {} : { signal }),
     });
     if (response.status === 404) return { outcome: "not_found" } as const;
     if (!response.ok) return { outcome: "ambiguous" } as const;
@@ -268,11 +270,13 @@ export function createBrevoNewsletterDeliveryAdapter({
         return { outcome: "rejected", code: "provider_sender_unmapped" };
       }
       let campaignId: string | null = request.providerCampaignId;
+      const signal = AbortSignal.timeout(30_000);
       try {
         if (campaignId === null) {
           const created = await fetcher(`${endpoint}/emailCampaigns`, {
             method: "POST",
             headers: headers(apiKey),
+            signal,
             body: JSON.stringify({
               name: campaignName(request.executionId),
               tag: campaignTag(request.executionId),
@@ -298,7 +302,7 @@ export function createBrevoNewsletterDeliveryAdapter({
           campaignId = providerId(createdBody?.id);
           if (campaignId === null) return { outcome: "ambiguous" };
         } else {
-          const existing = await readCampaign(campaignId);
+          const existing = await readCampaign(campaignId, signal);
           if (existing.outcome === "ambiguous") {
             return {
               outcome: "ambiguous",
@@ -323,6 +327,7 @@ export function createBrevoNewsletterDeliveryAdapter({
           {
             method: "POST",
             headers: headers(apiKey),
+            signal,
             body: JSON.stringify({
               emailTo: request.recipients.map(
                 (recipient) => recipient.address,
@@ -377,11 +382,13 @@ export async function assessBrevoTestDeliveryReadiness({
   adapter,
   ownership,
   liveTestEvidence,
+  currentBinding,
   ownerConfirmedReceipt,
 }: {
   adapter: NewsletterDeliveryAdapter;
   ownership: "evaluation" | "client_owned";
   liveTestEvidence: CampaignTestDeliveryEvidence | null;
+  currentBinding: CampaignTestDeliveryBinding;
   ownerConfirmedReceipt: boolean;
 }) {
   const [capabilities, health] = await Promise.all([
@@ -390,7 +397,11 @@ export async function assessBrevoTestDeliveryReadiness({
   ]);
   const currentEvidence =
     liveTestEvidence !== null &&
-    liveTestEvidence.providerConfigurationFingerprint ===
+    Object.entries(currentBinding).every(
+      ([key, value]) =>
+        liveTestEvidence[key as keyof CampaignTestDeliveryBinding] === value,
+    ) &&
+    currentBinding.providerConfigurationFingerprint ===
       capabilities.configurationFingerprint;
   if (ownership !== "client_owned") {
     return Object.freeze({

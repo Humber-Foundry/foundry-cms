@@ -8,6 +8,7 @@ import {
   CampaignNotFoundError,
   CampaignValidationError,
   isCampaignRequestId,
+  type Campaign,
   type CampaignActor,
   type CampaignAuthor,
   type CampaignId,
@@ -141,6 +142,10 @@ export interface CampaignTestDeliveryStore {
   }): Promise<CampaignTestDeliveryOperation | null>;
 }
 
+export const maximumCampaignTestRecipients = 5;
+export const maximumCampaignTestsPerRevisionWindow = 5;
+export const campaignTestRateLimitWindowMs = 60 * 60 * 1_000;
+
 export type CampaignTestDeliveryApplication = Readonly<{
   commands: Readonly<{
     requestTest(input: {
@@ -182,7 +187,7 @@ function assertCapabilities(
 function assertRecipientIds(ids: ReadonlyArray<string>): void {
   if (
     ids.length === 0 ||
-    ids.length > 10 ||
+    ids.length > maximumCampaignTestRecipients ||
     new Set(ids).size !== ids.length ||
     ids.some(
       (id) =>
@@ -269,58 +274,63 @@ function sameBinding(
 }
 
 function testRejectionAuditState(reason: string) {
-  const state =
-    reason === "capability_not_authorized"
-      ? {
-          current: { authorization: "denied" },
-          required: { capability: "campaign.author" },
-        }
-      : reason === "provider_unhealthy"
-        ? {
-            current: { providerReadiness: "not_healthy" },
-            required: {
-              providerHealth: "healthy",
-              credential: "verified",
-              senderIdentity: "verified",
-            },
-          }
-        : reason.startsWith("provider_test_") ||
-            reason.startsWith("provider_configuration_")
-          ? {
-              current: { providerCapabilities: "unsupported_or_mismatched" },
-              required: {
-                apiTestDelivery: "supported",
-                explicitRecipients: "supported",
-                ambiguousOutcomeReconciliation: "supported",
-              },
-            }
-          : reason.startsWith("provider_")
-            ? {
-                current: { providerDelivery: reason },
-                required: {
-                  providerDelivery: "accepted_or_safely_reconciled",
-                },
-              }
-          : reason === "test_recipient_forbidden"
-            ? {
-                current: { recipientConfiguration: "not_allowed" },
-                required: { recipientConfiguration: "configured_identity" },
-              }
-            : reason === "campaign_not_found"
-              ? {
-                  current: { campaign: "not_found" },
-                  required: { campaign: "current_revision_exists" },
-                }
-              : reason.startsWith("campaign_idempotency_")
-                ? {
-                    current: { requestIdentity: "invalid_or_conflicting" },
-                    required: { requestIdentity: "valid_and_unique" },
-                  }
-                : {
-                    current: { testDelivery: "rejected", reason },
-                    required: { testDelivery: "eligible" },
-                  };
-  return JSON.stringify(state);
+  if (reason === "capability_not_authorized") {
+    return JSON.stringify({
+      current: { authorization: "denied" },
+      required: { capability: "campaign.author" },
+    });
+  }
+  if (reason === "provider_unhealthy") {
+    return JSON.stringify({
+      current: { providerReadiness: "not_healthy" },
+      required: {
+        providerHealth: "healthy",
+        credential: "verified",
+        senderIdentity: "verified",
+      },
+    });
+  }
+  if (
+    reason.startsWith("provider_test_") ||
+    reason.startsWith("provider_configuration_")
+  ) {
+    return JSON.stringify({
+      current: { providerCapabilities: "unsupported_or_mismatched" },
+      required: {
+        apiTestDelivery: "supported",
+        explicitRecipients: "supported",
+        ambiguousOutcomeReconciliation: "supported",
+      },
+    });
+  }
+  if (reason.startsWith("provider_")) {
+    return JSON.stringify({
+      current: { providerDelivery: reason },
+      required: { providerDelivery: "accepted_or_safely_reconciled" },
+    });
+  }
+  if (reason === "test_recipient_forbidden") {
+    return JSON.stringify({
+      current: { recipientConfiguration: "not_allowed" },
+      required: { recipientConfiguration: "configured_identity" },
+    });
+  }
+  if (reason === "campaign_not_found") {
+    return JSON.stringify({
+      current: { campaign: "not_found" },
+      required: { campaign: "current_revision_exists" },
+    });
+  }
+  if (reason.startsWith("campaign_idempotency_")) {
+    return JSON.stringify({
+      current: { requestIdentity: "invalid_or_conflicting" },
+      required: { requestIdentity: "valid_and_unique" },
+    });
+  }
+  return JSON.stringify({
+    current: { testDelivery: "rejected", reason },
+    required: { testDelivery: "eligible" },
+  });
 }
 
 function validateProviderText(value: string, code: string): string {
@@ -375,6 +385,8 @@ export function createCampaignTestDeliveryApplication({
   identifyActor,
   resolveAudience,
   resolveTestRecipients,
+  replayTestCommand,
+  recordAcceptedTestCommand,
   recordRejectedCommand,
   clock = () => new Date(),
   createExecutionId = () => crypto.randomUUID(),
@@ -394,6 +406,23 @@ export function createCampaignTestDeliveryApplication({
   resolveTestRecipients(
     recipientIds: ReadonlyArray<string>,
   ): Promise<ReadonlyArray<NewsletterTestRecipient>>;
+  replayTestCommand?(input: {
+    actor: CampaignActor;
+    requestId: string;
+    command: unknown;
+    targetId: string;
+  }): Promise<
+    Readonly<{ campaign: Campaign; revision: CampaignRevision }> | null
+  >;
+  recordAcceptedTestCommand?(input: {
+    actor: CampaignActor;
+    requestId: string;
+    command: unknown;
+    campaign: Campaign;
+    revision: CampaignRevision;
+    beforeState: string;
+    afterState: string;
+  }): Promise<void>;
   recordRejectedCommand?(input: {
     actor: CampaignActor;
     requestId: string;
@@ -417,23 +446,51 @@ export function createCampaignTestDeliveryApplication({
     return { campaign, revision };
   }
 
-  async function executeRequestTest({
-    actor,
-    requestId,
-    campaignId,
-    testRecipientIds,
-  }: {
-    actor: CampaignActor;
-    requestId: string;
-    campaignId: CampaignId;
-    testRecipientIds: ReadonlyArray<string>;
-  }) {
+  async function executeRequestTest(
+    {
+      actor,
+      requestId,
+      campaignId,
+      testRecipientIds,
+    }: {
+      actor: CampaignActor;
+      requestId: string;
+      campaignId: CampaignId;
+      testRecipientIds: ReadonlyArray<string>;
+    },
+    commandState: { accepted: boolean },
+  ) {
     await authorize(actor, "campaign.author");
     if (!isCampaignRequestId(requestId)) {
       throw new CampaignIdempotencyError("campaign_idempotency_key_invalid");
     }
     assertRecipientIds(testRecipientIds);
     const actorId = identifyActor(actor);
+    const command = {
+      action: "request_test",
+      campaignId,
+      testRecipientIds,
+    } as const;
+    const replayedCommand = (
+      await replayTestCommand?.({
+        actor,
+        requestId,
+        command,
+        targetId: campaignId,
+      })
+    ) ?? null;
+    commandState.accepted = replayedCommand !== null;
+    const existing = await store.findByRequest({
+      siteId,
+      actorId,
+      requestId,
+    });
+    if (
+      replayedCommand !== null &&
+      (existing?.state === "accepted" || existing?.state === "failed")
+    ) {
+      return existing;
+    }
     const capabilities = await adapter.capabilities();
     assertCapabilities(capabilities);
     const health = await adapter.health();
@@ -444,7 +501,8 @@ export function createCampaignTestDeliveryApplication({
     ) {
       throw new CampaignValidationError("provider_unhealthy");
     }
-    const { revision } = await currentCampaignRevision(campaignId);
+    const { campaign, revision } =
+      replayedCommand ?? await currentCampaignRevision(campaignId);
     const audience = await resolveAudience(revision.audienceDefinition);
     const rendered = await renderCampaignRevision(
       revision,
@@ -456,11 +514,6 @@ export function createCampaignTestDeliveryApplication({
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
       recipientIds: testRecipientIds,
-    });
-    const existing = await store.findByRequest({
-      siteId,
-      actorId,
-      requestId,
     });
     let operation: CampaignTestDeliveryOperation;
     let newlyClaimed = false;
@@ -502,6 +555,31 @@ export function createCampaignTestDeliveryApplication({
         "campaign_idempotency_key_reused",
       );
     }
+    await recordAcceptedTestCommand?.({
+      actor,
+      requestId,
+      command,
+      campaign,
+      revision,
+      beforeState: JSON.stringify({
+        current: {
+          testDelivery:
+            existing === null ? "not_started" : existing.state,
+        },
+        required: { testDelivery: "eligible" },
+      }),
+      afterState: JSON.stringify({
+        executionId: operation.executionId,
+        campaignRevisionId: operation.campaignRevisionId,
+        state: operation.state,
+        campaignFingerprint: operation.binding.campaignFingerprint,
+        providerConfigurationFingerprint:
+          operation.binding.providerConfigurationFingerprint,
+        recipientSetFingerprint:
+          operation.binding.recipientSetFingerprint,
+      }),
+    });
+    commandState.accepted = true;
     if (operation.state === "accepted" || operation.state === "failed") {
       return operation;
     }
@@ -538,7 +616,38 @@ export function createCampaignTestDeliveryApplication({
           ),
         );
       }
-      if (attemptExpired) return operation;
+      if (attemptExpired) {
+        const recoveryStartedAt = clock();
+        return store.record(
+          Object.freeze({
+            ...operation,
+            state: "ambiguous" as const,
+            attemptLeaseUntil: new Date(
+              recoveryStartedAt.getTime() + 60_000,
+            ).toISOString(),
+            providerCampaignId:
+              reconciled.outcome === "not_found"
+                ? null
+                : reconciled.outcome === "not_sent"
+                  ? reconciled.providerCampaignId
+                  : reconciled.outcome === "ambiguous" &&
+                      reconciled.providerCampaignId !== undefined
+                    ? validateProviderText(
+                        reconciled.providerCampaignId,
+                        "provider_campaign_id_invalid",
+                      )
+                    : operation.providerCampaignId,
+            updatedAt: recoveryStartedAt.toISOString(),
+          }),
+        );
+      }
+      if (
+        operation.state === "ambiguous" &&
+        operation.attemptLeaseUntil !== null &&
+        operation.attemptLeaseUntil > now
+      ) {
+        return operation;
+      }
       if (reconciled.outcome === "ambiguous") return operation;
       if (reconciled.outcome === "not_sent") {
         operation = await store.record(
@@ -648,11 +757,13 @@ export function createCampaignTestDeliveryApplication({
   async function requestTest(
     input: Parameters<typeof executeRequestTest>[0],
   ) {
+    const commandState = { accepted: false };
     try {
-      return await executeRequestTest(input);
+      return await executeRequestTest(input, commandState);
     } catch (error) {
       if (
         recordRejectedCommand !== undefined &&
+        !commandState.accepted &&
         isCampaignRequestId(input.requestId) &&
         (error instanceof CampaignValidationError ||
           error instanceof CampaignIdempotencyError ||
@@ -735,6 +846,32 @@ export function createInMemoryCampaignTestDeliveryStore():
       const key = requestKey(operation);
       const existing = operations.get(key);
       if (existing !== undefined) return existing;
+      if (
+        [...operations.values()].some(
+          (current) =>
+            current.siteId === operation.siteId &&
+            current.campaignRevisionId === operation.campaignRevisionId &&
+            (current.state === "pending" ||
+              current.state === "attempting" ||
+              current.state === "ambiguous"),
+        )
+      ) {
+        throw new CampaignValidationError("test_delivery_in_progress");
+      }
+      const windowStart = new Date(
+        new Date(operation.createdAt).getTime() -
+          campaignTestRateLimitWindowMs,
+      ).toISOString();
+      if (
+        [...operations.values()].filter(
+          (current) =>
+            current.siteId === operation.siteId &&
+            current.campaignRevisionId === operation.campaignRevisionId &&
+            current.createdAt >= windowStart,
+        ).length >= maximumCampaignTestsPerRevisionWindow
+      ) {
+        throw new CampaignValidationError("test_delivery_rate_limited");
+      }
       operations.set(key, operation);
       return operation;
     },
@@ -747,7 +884,9 @@ export function createInMemoryCampaignTestDeliveryStore():
         current.updatedAt !== operation.updatedAt ||
         !(
           current.state === "pending" ||
-          current.state === "ambiguous"
+          (current.state === "ambiguous" &&
+            (current.attemptLeaseUntil === null ||
+              current.attemptLeaseUntil <= now))
         )
       ) {
         return null;

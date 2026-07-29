@@ -140,6 +140,13 @@ describe("D1 campaign test delivery store", () => {
       attemptLeaseUntil: "2026-07-29T19:06:01.000Z",
     });
     await expect(
+      store.claim({
+        ...pending,
+        executionId: "40000000-0000-4000-8000-000000000002",
+        requestId: "campaign-test-durable-2",
+      }),
+    ).rejects.toThrow(/test_delivery_in_progress/u);
+    await expect(
       store.beginAttempt({
         operation: attempting!,
         now: "2026-07-29T19:06:02.000Z",
@@ -202,6 +209,29 @@ describe("D1 campaign test delivery store", () => {
       .bind(pending.executionId)
       .first<Record<string, string>>();
     expect(JSON.stringify(raw)).not.toContain("@");
+    for (let index = 2; index <= 5; index += 1) {
+      await store.claim({
+        ...pending,
+        executionId:
+          `40000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        requestId: `campaign-test-durable-${index}`,
+        state: "failed",
+        failureCode: "provider_test_rejected",
+        createdAt: `2026-07-29T19:0${index}:00.000Z`,
+        updatedAt: `2026-07-29T19:0${index}:00.000Z`,
+      });
+    }
+    await expect(
+      store.claim({
+        ...pending,
+        executionId: "40000000-0000-4000-8000-000000000006",
+        requestId: "campaign-test-durable-6",
+        state: "failed",
+        failureCode: "provider_test_rejected",
+        createdAt: "2026-07-29T19:06:00.000Z",
+        updatedAt: "2026-07-29T19:06:00.000Z",
+      }),
+    ).rejects.toThrow(/test_delivery_rate_limited/u);
     await expect(
       database
         .prepare(

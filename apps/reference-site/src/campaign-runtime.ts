@@ -260,6 +260,36 @@ export async function loadCampaignRequestContext(
           }
           return { id, address };
         }),
+      replayTestCommand: ({
+        actor,
+        requestId,
+        command,
+        targetId,
+      }) =>
+        application.commands.replayTestCommand({
+          actor,
+          requestId,
+          command,
+          targetId,
+        }),
+      recordAcceptedTestCommand: ({
+        actor,
+        requestId,
+        command,
+        campaign,
+        revision,
+        beforeState,
+        afterState,
+      }) =>
+        application.commands.recordAcceptedTestCommand({
+          actor,
+          requestId,
+          command,
+          campaign,
+          revision,
+          beforeState,
+          afterState,
+        }),
       recordRejectedCommand: ({
         actor,
         requestId,

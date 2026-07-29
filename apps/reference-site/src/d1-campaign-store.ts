@@ -578,6 +578,49 @@ export function createD1CampaignStore(
         (results[0]?.meta.changes ?? 0) === 0,
       );
     },
+    async acceptTestCommand({ command, campaign, revision, audit }) {
+      const resultJson = JSON.stringify({ campaign, revision });
+      const results = await database.batch([
+        claimInsert(database, command, audit.occurredAt),
+        commandAuditInsert(
+          database,
+          audit,
+          command,
+          `AND EXISTS (
+            SELECT 1 FROM campaign_revisions
+            WHERE id = ?19 AND site_id = ?20 AND campaign_id = ?21
+          )`,
+          [revision.id, revision.siteId, revision.campaignId],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'accepted', result_json = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND EXISTS (
+                 SELECT 1 FROM campaign_revisions
+                 WHERE id = ?8 AND site_id = ?1 AND campaign_id = ?9
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            resultJson,
+            audit.occurredAt,
+            revision.id,
+            campaign.id,
+          ),
+      ]);
+      return commandResult(
+        database,
+        command,
+        (results[0]?.meta.changes ?? 0) === 0,
+      );
+    },
     async recordAudit(event) {
       await auditInsert(database, event).run();
     },

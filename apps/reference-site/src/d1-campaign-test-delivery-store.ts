@@ -1,6 +1,9 @@
 import {
+  CampaignValidationError,
+  campaignTestRateLimitWindowMs,
   createCampaignId,
   createCampaignRevisionId,
+  maximumCampaignTestsPerRevisionWindow,
   type CampaignTestDeliveryOperation,
   type CampaignTestDeliveryStore,
 } from "@foundry/application";
@@ -105,10 +108,19 @@ export function createD1CampaignTestDeliveryStore(
              attempt_number, attempt_lease_until,
              provider_campaign_id, failure_code, evidence_json,
              created_at, updated_at
-           ) VALUES (
+           ) SELECT
              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
              ?12, ?13, ?14, ?15, ?16
+           WHERE NOT EXISTS (
+             SELECT 1 FROM campaign_test_deliveries
+             WHERE site_id = ?2 AND campaign_revision_id = ?6
+               AND state IN ('pending', 'attempting', 'ambiguous')
            )
+             AND (
+               SELECT COUNT(*) FROM campaign_test_deliveries
+               WHERE site_id = ?2 AND campaign_revision_id = ?6
+                 AND created_at >= ?17
+             ) < ${maximumCampaignTestsPerRevisionWindow}
            ON CONFLICT (site_id, actor_id, request_id) DO NOTHING`,
         )
         .bind(
@@ -130,10 +142,29 @@ export function createD1CampaignTestDeliveryStore(
             : JSON.stringify(operation.evidence),
           operation.createdAt,
           operation.updatedAt,
+          new Date(
+            new Date(operation.createdAt).getTime() -
+              campaignTestRateLimitWindowMs,
+          ).toISOString(),
         )
         .run();
       const claimed = await byRequest(database, operation);
-      if (claimed === null) throw new Error("campaign_test_delivery_missing");
+      if (claimed === null) {
+        const unresolved = await database
+          .prepare(
+            `SELECT execution_id FROM campaign_test_deliveries
+             WHERE site_id = ?1 AND campaign_revision_id = ?2
+               AND state IN ('pending', 'attempting', 'ambiguous')
+             LIMIT 1`,
+          )
+          .bind(operation.siteId, operation.campaignRevisionId)
+          .first();
+        throw new CampaignValidationError(
+          unresolved === null
+            ? "test_delivery_rate_limited"
+            : "test_delivery_in_progress",
+        );
+      }
       return claimed;
     },
     async beginAttempt({ operation, now, leaseUntil }) {
@@ -144,7 +175,12 @@ export function createD1CampaignTestDeliveryStore(
              attempt_lease_until = ?1,
              updated_at = ?2
            WHERE execution_id = ?3 AND site_id = ?4 AND updated_at = ?5
-             AND state IN ('pending', 'ambiguous')`,
+             AND (
+               state = 'pending' OR
+               (state = 'ambiguous' AND (
+                 attempt_lease_until IS NULL OR attempt_lease_until <= ?2
+               ))
+             )`,
         )
         .bind(
           leaseUntil,

@@ -2,7 +2,7 @@
 
 Foundry implements and verifies the newsletter test-delivery path without a
 production client credential. A client-owned Brevo account becomes
-production-ready through the owner-assisted ceremony below. An evaluation
+test-delivery-ready through the owner-assisted ceremony below. An evaluation
 account can exercise the same path while remaining explicitly
 `evaluation_only`.
 
@@ -52,7 +52,14 @@ reconciliation before another provider write. An expired in-flight writer
 remains reconciliation-only so a slow first call cannot race a replacement
 call. Automatic retry is possible only after the adapter has returned an
 ambiguous result and a later reconciliation definitively proves the prior
-draft or test is absent.
+draft or test is absent. A crashed call enters a one-minute reconciliation
+quarantine after the provider request's 30-second deadline; Foundry blocks a
+second execution for that revision while recovery remains unresolved.
+
+The shared application boundary accepts no more than five configured
+recipient identities and permits five new logical tests per site and campaign
+revision in a rolling hour. Retries with the same request identity recover the
+existing operation and do not consume another logical-test slot.
 
 The adapter reports Brevo's campaign API plain-text artifact capability as
 `unsupported`. Brevo receives the exact authored subject, preview text and

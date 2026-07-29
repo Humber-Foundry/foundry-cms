@@ -192,6 +192,33 @@ describe("D1 campaign store", () => {
       reason: "campaign_command_invalid",
       command: { action: "unknown" },
     });
+    const acceptedTest = {
+      actor,
+      requestId: "campaign-test-audit-durable-1",
+      command: {
+        action: "request_test",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary"],
+      },
+      campaign: created.campaign,
+      revision: created.revision,
+      beforeState: JSON.stringify({
+        current: { testDelivery: "not_started" },
+        required: { testDelivery: "eligible" },
+      }),
+      afterState: JSON.stringify({
+        testDelivery: "pending",
+        executionId: "40000000-0000-4000-8000-000000000001",
+      }),
+    };
+    await application.commands.recordAcceptedTestCommand(acceptedTest);
+    await application.commands.recordAcceptedTestCommand(acceptedTest);
+    await application.commands.replayTestCommand({
+      actor,
+      requestId: acceptedTest.requestId,
+      command: acceptedTest.command,
+      targetId: created.campaign.id,
+    });
 
     await expect(
       application.queries.getRevision({
@@ -204,7 +231,7 @@ describe("D1 campaign store", () => {
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_audit_events")
         .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 5 });
+    ).resolves.toEqual({ count: 6 });
     await expect(
       database
         .prepare(
@@ -215,7 +242,7 @@ describe("D1 campaign store", () => {
         .all<{ outcome: string; count: number }>(),
     ).resolves.toMatchObject({
       results: [
-        { outcome: "accepted", count: 2 },
+        { outcome: "accepted", count: 3 },
         { outcome: "rejected", count: 3 },
       ],
     });
@@ -229,7 +256,7 @@ describe("D1 campaign store", () => {
         .all<{ outcome: string; count: number }>(),
     ).resolves.toMatchObject({
       results: [
-        { outcome: "accepted", count: 2 },
+        { outcome: "accepted", count: 3 },
         { outcome: "rejected", count: 2 },
       ],
     });
@@ -245,6 +272,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { campaign_revision_id: created.revision.id },
+        { campaign_revision_id: expect.any(String) },
         { campaign_revision_id: expect.any(String) },
       ],
     });

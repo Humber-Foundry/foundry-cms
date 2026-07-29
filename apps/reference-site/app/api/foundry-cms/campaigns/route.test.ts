@@ -178,7 +178,6 @@ describe("campaign endpoint", () => {
           action: "request_test",
           campaignId: "20000000-0000-4000-8000-000000000001",
           testRecipientIds: ["owner-primary"],
-          emailTo: ["attacker@example.test"],
         }),
       }),
     );
@@ -190,9 +189,106 @@ describe("campaign endpoint", () => {
       campaignId: "20000000-0000-4000-8000-000000000001",
       testRecipientIds: ["owner-primary"],
     });
-    expect(JSON.stringify(mocks.requestTest.mock.calls)).not.toContain(
-      "attacker@example.test",
+  });
+
+  it("returns the stable shared rate-limit reason", async () => {
+    mocks.requestTest.mockRejectedValueOnce(
+      new CampaignValidationError("test_delivery_rate_limited"),
     );
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-rate-limited-1",
+        },
+        body: JSON.stringify({
+          action: "request_test",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          testRecipientIds: ["owner-primary"],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toEqual({
+      error: "test_delivery_rate_limited",
+    });
+  });
+
+  it("rejects forbidden recipient fields instead of silently ignoring them", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-forbidden-recipient-1",
+        },
+        body: JSON.stringify({
+          action: "request_test",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          testRecipientIds: ["owner-primary"],
+          emailTo: ["attacker@example.test"],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.requestTest).not.toHaveBeenCalled();
+    expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-test-forbidden-recipient-1",
+      reason: "campaign_command_invalid",
+      command: {
+        action: "request_test",
+        campaignId: "20000000-0000-4000-8000-000000000001",
+        testRecipientIds: ["owner-primary"],
+        emailTo: ["attacker@example.test"],
+      },
+      action: "campaign.test",
+      commandName: "campaign.request_test",
+      targetId: "20000000-0000-4000-8000-000000000001",
+      beforeState: JSON.stringify({
+        current: { commandEnvelope: "invalid" },
+        required: { commandEnvelope: "valid_request_test" },
+      }),
+    });
+  });
+
+  it("audits malformed test envelopes as test commands with required state", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-malformed-envelope-1",
+        },
+        body: JSON.stringify({
+          action: "request_test",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          testRecipientIds: "owner-primary",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordRejectedCommand).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-test-malformed-envelope-1",
+      reason: "campaign_command_invalid",
+      command: {
+        action: "request_test",
+        campaignId: "20000000-0000-4000-8000-000000000001",
+        testRecipientIds: "owner-primary",
+      },
+      action: "campaign.test",
+      commandName: "campaign.request_test",
+      targetId: "20000000-0000-4000-8000-000000000001",
+      beforeState: JSON.stringify({
+        current: { commandEnvelope: "invalid" },
+        required: { commandEnvelope: "valid_request_test" },
+      }),
+    });
   });
 
   it("reports a missing shared request key as an invalid command", async () => {
