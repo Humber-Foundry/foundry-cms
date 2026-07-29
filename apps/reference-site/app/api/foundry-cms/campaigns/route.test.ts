@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CampaignValidationError } from "@foundry/application";
 
 vi.mock("server-only", () => ({}));
 
@@ -62,6 +63,23 @@ describe("campaign endpoint", () => {
     expect(mocks.listCampaigns).toHaveBeenCalledWith({ actor: identity });
   });
 
+  it("reports renderer drift explicitly instead of serving mislabeled artifacts", async () => {
+    mocks.render.mockRejectedValueOnce(
+      new CampaignValidationError("campaign_renderer_mismatch"),
+    );
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/campaigns" +
+          "?campaignId=20000000-0000-4000-8000-000000000001",
+      ),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "campaign_renderer_mismatch",
+    });
+  });
+
   it("does not accept sender or compliance configuration from the caller", async () => {
     const response = await POST(
       new Request("https://foundry.example/api/foundry-cms/campaigns", {
@@ -97,6 +115,38 @@ describe("campaign endpoint", () => {
         emailContent: { version: "1.0.0", type: "document", children: [] },
       },
     });
+  });
+
+  it("returns the shared application replay instead of running a transport receipt", async () => {
+    mocks.createStandalone.mockResolvedValueOnce({
+      campaign: { id: "20000000-0000-4000-8000-000000000001" },
+      replayed: true,
+    });
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-create-replay-1",
+        },
+        body: JSON.stringify({
+          action: "create_standalone",
+          input: {
+            subject: "Campaign",
+            previewText: "Preview",
+            callToAction: { label: "Read", href: "https://example.com" },
+            emailContent: {
+              version: "1.0.0",
+              type: "document",
+              children: [],
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ replayed: true });
   });
 
   it("audits malformed authenticated commands", async () => {

@@ -17,6 +17,7 @@ import {
 } from "./human-access";
 import {
   CampaignConflictError,
+  CampaignIdempotencyError,
   CampaignNotFoundError,
   createCampaignApplication,
   createCampaignId,
@@ -93,6 +94,9 @@ const channelConfiguration = {
   complianceFooter: {
     version: "footer-v1",
     content: "You are receiving this update from Foundry.",
+    unsubscribePlaceholder:
+      "https://example.test/newsletter/unsubscribe" +
+      "?token={{foundry.unsubscribe.token}}",
   },
   audienceDefinition: {
     id: "canonical-consent-and-suppression",
@@ -164,6 +168,59 @@ describe("campaign authoring and rendering", () => {
     expect(Object.isFrozen(created.campaign)).toBe(true);
     expect(Object.isFrozen(created.revision)).toBe(true);
     expect(requestedCapabilities).toEqual(["campaign.author"]);
+  });
+
+  it("replays one durable request result and rejects changed input under the same key", async () => {
+    const { application, store } = createFixture();
+    const first = await application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-idempotent-1",
+      input: standaloneInput,
+    });
+    const replay = await application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-idempotent-1",
+      input: standaloneInput,
+    });
+
+    expect(first.replayed).toBe(false);
+    expect(replay).toEqual({ ...first, replayed: true });
+    await expect(
+      application.commands.createStandalone({
+        actor: editor,
+        requestId: "campaign-create-idempotent-1",
+        input: { ...standaloneInput, subject: "Changed input" },
+      }),
+    ).rejects.toBeInstanceOf(CampaignIdempotencyError);
+    expect(store.listAuditEvents()).toHaveLength(1);
+  });
+
+  it("replays terminal stale-write rejections without contradictory accepted audit", async () => {
+    const { application, store } = createFixture();
+    const created = await application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-before-stale-1",
+      input: standaloneInput,
+    });
+    const staleEdit = () =>
+      application.commands.edit({
+        actor: editor,
+        requestId: "campaign-edit-stale-idempotent-1",
+        campaignId: created.campaign.id,
+        expectedVersion: 0,
+        input: standaloneInput,
+      });
+
+    await expect(staleEdit()).rejects.toBeInstanceOf(CampaignConflictError);
+    await expect(staleEdit()).rejects.toBeInstanceOf(CampaignConflictError);
+    expect(store.listAuditEvents()).toMatchObject([
+      { outcome: "accepted", action: "campaign.create" },
+      {
+        outcome: "rejected",
+        action: "campaign.edit",
+        reason: "campaign_revision_conflict",
+      },
+    ]);
   });
 
   it("copies an exact post revision once and preserves provenance after later edits", async () => {
@@ -305,6 +362,7 @@ describe("campaign authoring and rendering", () => {
         "Read the update: https://example.com/update?from=email&kind=campaign",
         "",
         "You are receiving this update from Foundry.",
+        "Unsubscribe: https://example.test/newsletter/unsubscribe?token={{foundry.unsubscribe.token}}",
         "",
       ].join("\n"),
     );
@@ -325,6 +383,33 @@ describe("campaign authoring and rendering", () => {
     expect(differentRenderer.html.fingerprint).not.toBe(
       first.html.fingerprint,
     );
+  });
+
+  it("rejects revisions bound to a renderer other than the active renderer", async () => {
+    const { application, store } = createFixture();
+    const created = await application.commands.createStandalone({
+      actor: editor,
+      requestId: "campaign-create-renderer-binding-1",
+      input: standaloneInput,
+    });
+    const applicationAfterDeploy = createCampaignApplication({
+      siteId,
+      store,
+      authorize: async () => editorMembership,
+      identifyActor: () => editorMembership.id,
+      findPostRevision: async () => null,
+      resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
+      channelConfiguration,
+      rendererVersion: "2222222222222222222222222222222222222222",
+      schemaVersion: "1.3.0",
+    });
+
+    await expect(
+      applicationAfterDeploy.queries.render({
+        actor: editor,
+        campaignId: created.campaign.id,
+      }),
+    ).rejects.toMatchObject({ message: "campaign_renderer_mismatch" });
   });
 
   it("resolves the canonical audience without exposing identities to an Editor", async () => {

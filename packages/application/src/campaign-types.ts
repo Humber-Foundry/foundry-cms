@@ -64,7 +64,11 @@ export type CampaignEditableInput = Readonly<{
 
 export type CampaignChannelConfiguration = Readonly<{
   senderIdentityId: string;
-  complianceFooter: Readonly<{ version: string; content: string }>;
+  complianceFooter: Readonly<{
+    version: string;
+    content: string;
+    unsubscribePlaceholder: string;
+  }>;
   audienceDefinition: CampaignAudienceDefinition;
 }>;
 
@@ -142,12 +146,59 @@ export type CampaignAuditEvent = Readonly<{
   occurredAt: string;
 }>;
 
+export type CampaignCommandName =
+  | "campaign.create_standalone"
+  | "campaign.create_from_post"
+  | "campaign.edit";
+
+export type CampaignCommandReceipt =
+  | Readonly<{
+      siteId: SiteId;
+      actorId: string;
+      commandName: CampaignCommandName;
+      requestId: string;
+      inputHash: string;
+      outcome: "accepted";
+      campaign: Campaign;
+      revision: CampaignRevision;
+      reason: null;
+      completedAt: string;
+    }>
+  | Readonly<{
+      siteId: SiteId;
+      actorId: string;
+      commandName: CampaignCommandName;
+      requestId: string;
+      inputHash: string;
+      outcome: "rejected";
+      campaign: null;
+      revision: null;
+      reason: string;
+      completedAt: string;
+    }>;
+
+export type CampaignCommandKey = Readonly<
+  Pick<
+    CampaignCommandReceipt,
+    "siteId" | "actorId" | "commandName" | "requestId" | "inputHash"
+  >
+>;
+
+export type CampaignCommandStoreResult = Readonly<{
+  receipt: CampaignCommandReceipt;
+  replayed: boolean;
+}>;
+
 export interface CampaignStore {
+  findCommandReceipt(input: Omit<CampaignCommandKey, "inputHash">):
+    Promise<CampaignCommandReceipt | null>;
   create(input: {
+    command: CampaignCommandKey;
     campaign: Campaign;
     revision: CampaignRevision;
-    audit: CampaignAuditEvent;
-  }): Promise<boolean>;
+    acceptedAudit: CampaignAuditEvent;
+    rejectedAudit: CampaignAuditEvent;
+  }): Promise<CampaignCommandStoreResult>;
   findCampaign(input: {
     siteId: SiteId;
     campaignId: CampaignId;
@@ -159,11 +210,17 @@ export interface CampaignStore {
   }): Promise<CampaignRevision | null>;
   listCampaigns(siteId: SiteId): Promise<ReadonlyArray<Campaign>>;
   appendRevision(input: {
+    command: CampaignCommandKey;
     expectedVersion: number;
     campaign: Campaign;
     revision: CampaignRevision;
+    acceptedAudit: CampaignAuditEvent;
+    rejectedAudit: CampaignAuditEvent;
+  }): Promise<CampaignCommandStoreResult>;
+  rejectCommand(input: {
+    command: CampaignCommandKey;
     audit: CampaignAuditEvent;
-  }): Promise<boolean>;
+  }): Promise<CampaignCommandStoreResult>;
   recordAudit(event: CampaignAuditEvent): Promise<void>;
 }
 
@@ -173,19 +230,37 @@ export type CampaignApplication = Readonly<{
       actor: CampaignActor;
       requestId: string;
       input: CampaignEditableInput;
-    }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
+    }): Promise<
+      Readonly<{
+        campaign: Campaign;
+        revision: CampaignRevision;
+        replayed: boolean;
+      }>
+    >;
     createFromPost(input: {
       actor: CampaignActor;
       requestId: string;
       sourcePostRevisionId: string;
-    }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
+    }): Promise<
+      Readonly<{
+        campaign: Campaign;
+        revision: CampaignRevision;
+        replayed: boolean;
+      }>
+    >;
     edit(input: {
       actor: CampaignActor;
       requestId: string;
       campaignId: CampaignId;
       expectedVersion: number;
       input: CampaignEditableInput;
-    }): Promise<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>;
+    }): Promise<
+      Readonly<{
+        campaign: Campaign;
+        revision: CampaignRevision;
+        replayed: boolean;
+      }>
+    >;
     recordRejectedCommand(input: {
       actor: CampaignActor;
       requestId: string;
@@ -258,4 +333,26 @@ export class CampaignValidationError extends Error {
     super(code);
     this.name = "CampaignValidationError";
   }
+}
+
+export class CampaignIdempotencyError extends Error {
+  constructor(code: "campaign_idempotency_key_reused") {
+    super(code);
+    this.name = "CampaignIdempotencyError";
+  }
+}
+
+export type NewsletterUnsubscribeResolution = Readonly<{
+  identityKey: string;
+  providerEventId: string;
+}>;
+
+export interface NewsletterDeliveryAdapter {
+  readonly unsubscribePlaceholder: string;
+  createUnsubscribeUrl(input: {
+    identityKey: string;
+    expiresAt: string;
+  }): Promise<string>;
+  consumeUnsubscribeToken(token: string):
+    Promise<NewsletterUnsubscribeResolution>;
 }

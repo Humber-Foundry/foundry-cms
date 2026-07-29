@@ -1,4 +1,7 @@
-import { sha256Text } from "@foundry/application";
+import {
+  sha256Text,
+  type NewsletterDeliveryAdapter,
+} from "@foundry/application";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -100,4 +103,54 @@ export async function verifyNewsletterUnsubscribeToken({
     identityKey: parsed.identityKey,
     providerEventId: `unsubscribe:${await sha256Text(token)}`,
   });
+}
+
+const unsubscribeTokenPlaceholder = "{{foundry.unsubscribe.token}}";
+
+function unsubscribePlaceholder(baseUrl: string) {
+  const parsed = new URL(baseUrl);
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.username !== "" ||
+    parsed.password !== ""
+  ) {
+    throw new TypeError("unsubscribe_url_invalid");
+  }
+  parsed.searchParams.delete("token");
+  const separator = parsed.search === "" ? "?" : "&";
+  return `${parsed.toString()}${separator}token=${unsubscribeTokenPlaceholder}`;
+}
+
+export function createSignedNewsletterDeliveryAdapter({
+  unsubscribeUrl,
+  secret,
+}: {
+  unsubscribeUrl: string;
+  secret: string;
+}): NewsletterDeliveryAdapter {
+  const placeholder = unsubscribePlaceholder(unsubscribeUrl);
+  const adapter: NewsletterDeliveryAdapter = {
+    unsubscribePlaceholder: placeholder,
+    async createUnsubscribeUrl({
+      identityKey,
+      expiresAt,
+    }: {
+      identityKey: string;
+      expiresAt: string;
+    }) {
+      const token = await createNewsletterUnsubscribeToken({
+        identityKey,
+        expiresAt,
+        secret,
+      });
+      return placeholder.replace(
+        unsubscribeTokenPlaceholder,
+        encodeURIComponent(token),
+      );
+    },
+    consumeUnsubscribeToken(token: string) {
+      return verifyNewsletterUnsubscribeToken({ token, secret });
+    },
+  };
+  return Object.freeze(adapter);
 }

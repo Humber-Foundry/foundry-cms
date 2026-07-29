@@ -12,11 +12,13 @@ vi.mock("../../../src/human-access-environment", () => ({
   loadHumanAccessEnvironment: mocks.loadEnvironment,
 }));
 vi.mock("../../../src/human-access-configuration", () => ({
-  readSubscriberIdentityKeySecret: () =>
+  readNewsletterDeliverySecret: () =>
     "unsubscribe-test-secret-with-32-bytes",
 }));
 vi.mock("../../../src/newsletter-unsubscribe-token", () => ({
-  verifyNewsletterUnsubscribeToken: mocks.verify,
+  createSignedNewsletterDeliveryAdapter: () => ({
+    consumeUnsubscribeToken: mocks.verify,
+  }),
 }));
 vi.mock("../../../src/subscriber-ledger-runtime", () => ({
   loadSubscriberLedgerIntegrationApplication: async () => ({
@@ -29,7 +31,10 @@ import { GET, POST } from "./route";
 describe("public newsletter unsubscribe route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.loadEnvironment.mockResolvedValue({});
+    mocks.loadEnvironment.mockResolvedValue({
+      FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL:
+        "https://example.org/newsletter/unsubscribe",
+    });
     mocks.verify.mockResolvedValue({
       identityKey: "a".repeat(64),
       providerEventId: `unsubscribe:${"b".repeat(64)}`,

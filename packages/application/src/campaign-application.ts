@@ -3,8 +3,10 @@ import {
   validateCampaignChannelConfiguration,
   validateCampaignInput,
 } from "./campaign-renderer";
+import { sha256CanonicalJson } from "./deterministic-hash";
 import {
   CampaignConflictError,
+  CampaignIdempotencyError,
   CampaignNotFoundError,
   CampaignValidationError,
   createCampaignId,
@@ -16,6 +18,10 @@ import {
   type CampaignApplicationDependencies,
   type CampaignAuditEvent,
   type CampaignAuthor,
+  type CampaignCommandKey,
+  type CampaignCommandName,
+  type CampaignCommandReceipt,
+  type CampaignCommandStoreResult,
   type CampaignEditableInput,
   type CampaignProvenance,
   type CampaignRevision,
@@ -28,6 +34,14 @@ function stableRejectionReason(error: unknown): string {
     (error instanceof Error && /^[a-z][a-z0-9_]+$/u.test(error.message))
     ? error.message
     : "campaign_command_rejected";
+}
+
+function rejectionError(reason: string): Error {
+  if (reason === "campaign_revision_conflict") {
+    return new CampaignConflictError();
+  }
+  if (reason === "campaign_not_found") return new CampaignNotFoundError();
+  return new CampaignValidationError(reason);
 }
 
 export function createCampaignApplication({
@@ -45,13 +59,41 @@ export function createCampaignApplication({
 }: CampaignApplicationDependencies): CampaignApplication {
   const configuredChannel =
     validateCampaignChannelConfiguration(channelConfiguration);
-  const normalizedRendererVersion = rendererVersion.trim();
-  if (!/^[a-f0-9]{40}$/u.test(normalizedRendererVersion)) {
+  const activeRendererCommit = rendererVersion.trim();
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(activeRendererCommit)) {
     throw new CampaignValidationError("campaign_renderer_commit_invalid");
   }
 
   async function requireAuthor(actor: CampaignActor) {
     return authorize(actor, "campaign.author");
+  }
+
+  function auditEvent({
+    actorId,
+    targetId,
+    revisionId,
+    requestId,
+    action,
+    outcome,
+    reason,
+    beforeState,
+    afterState,
+    occurredAt,
+  }: Omit<CampaignAuditEvent, "id" | "siteId">): CampaignAuditEvent {
+    return Object.freeze({
+      id: createId("audit"),
+      siteId,
+      actorId,
+      targetId,
+      revisionId,
+      requestId,
+      action,
+      outcome,
+      reason,
+      beforeState,
+      afterState,
+      occurredAt,
+    });
   }
 
   async function recordRejected(
@@ -62,44 +104,20 @@ export function createCampaignApplication({
     targetId: string,
     beforeState: string | null = null,
   ) {
-    const auditId = createId("audit");
-    await store.recordAudit({
-      id: auditId,
-      siteId,
-      actorId: identifyActor(actor),
-      targetId,
-      revisionId: null,
-      requestId,
-      action,
-      outcome: "rejected",
-      reason,
-      beforeState,
-      afterState: null,
-      occurredAt: clock().toISOString(),
-    });
-  }
-
-  async function audited<T>(
-    actor: CampaignActor,
-    requestId: string,
-    action: CampaignAuditEvent["action"],
-    operation: () => Promise<T>,
-    targetId = "campaign:new",
-    observedState: () => string | null = () => null,
-  ): Promise<T> {
-    try {
-      return await operation();
-    } catch (error) {
-      await recordRejected(
-        actor,
+    await store.recordAudit(
+      auditEvent({
+        actorId: identifyActor(actor),
+        targetId,
+        revisionId: null,
         requestId,
         action,
-        stableRejectionReason(error),
-        targetId,
-        observedState(),
-      );
-      throw error;
-    }
+        outcome: "rejected",
+        reason,
+        beforeState,
+        afterState: null,
+        occurredAt: clock().toISOString(),
+      }),
+    );
   }
 
   async function getCampaign(campaignId: Campaign["id"]) {
@@ -121,20 +139,114 @@ export function createCampaignApplication({
     return revision;
   }
 
+  async function commandKey({
+    author,
+    requestId,
+    commandName,
+    input,
+  }: {
+    author: CampaignAuthor;
+    requestId: string;
+    commandName: CampaignCommandName;
+    input: unknown;
+  }): Promise<CampaignCommandKey> {
+    return Object.freeze({
+      siteId,
+      actorId: author.id,
+      commandName,
+      requestId,
+      inputHash: await sha256CanonicalJson(input),
+    });
+  }
+
+  function resolveReceipt(
+    result: CampaignCommandStoreResult,
+    expectedInputHash: string,
+  ) {
+    const { receipt } = result;
+    if (receipt.inputHash !== expectedInputHash) {
+      throw new CampaignIdempotencyError(
+        "campaign_idempotency_key_reused",
+      );
+    }
+    if (receipt.outcome === "rejected") {
+      throw rejectionError(receipt.reason);
+    }
+    return Object.freeze({
+      campaign: receipt.campaign,
+      revision: receipt.revision,
+      replayed: result.replayed,
+    });
+  }
+
+  async function replay(
+    command: CampaignCommandKey,
+  ): Promise<
+    ReturnType<typeof resolveReceipt> | null
+  > {
+    const receipt = await store.findCommandReceipt(command);
+    return receipt === null
+      ? null
+      : resolveReceipt(
+          Object.freeze({ receipt, replayed: true }),
+          command.inputHash,
+        );
+  }
+
+  async function rejectCommand({
+    command,
+    action,
+    error,
+    targetId,
+    beforeState = null,
+  }: {
+    command: CampaignCommandKey;
+    action: CampaignAuditEvent["action"];
+    error: unknown;
+    targetId: string;
+    beforeState?: string | null;
+  }) {
+    const reason = stableRejectionReason(error);
+    const result = await store.rejectCommand({
+      command,
+      audit: auditEvent({
+        actorId: command.actorId,
+        targetId,
+        revisionId: null,
+        requestId: command.requestId,
+        action,
+        outcome: "rejected",
+        reason,
+        beforeState,
+        afterState: null,
+        occurredAt: clock().toISOString(),
+      }),
+    });
+    return resolveReceipt(result, command.inputHash);
+  }
+
   async function createFirstRevision({
     author,
-    auditActorId,
-    requestId,
+    command,
     input,
     provenance,
   }: {
     author: CampaignAuthor;
-    auditActorId: string;
-    requestId: string;
+    command: CampaignCommandKey;
     input: CampaignEditableInput;
     provenance: CampaignProvenance;
   }) {
-    const authored = validateCampaignInput(input, configuredChannel);
+    let authored;
+    try {
+      authored = validateCampaignInput(input, configuredChannel);
+    } catch (error) {
+      return rejectCommand({
+        command,
+        action: "campaign.create",
+        error,
+        targetId: "campaign:new",
+      });
+    }
     const campaignId = createCampaignId(createId("campaign"));
     const revisionId = createCampaignRevisionId(createId("campaign_revision"));
     const timestamp = clock().toISOString();
@@ -146,7 +258,7 @@ export function createCampaignApplication({
       provenance,
       ...authored,
       schemaVersion,
-      rendererVersion: normalizedRendererVersion,
+      rendererVersion: activeRendererCommit,
       createdAt: timestamp,
       createdByActorId: author.id,
     });
@@ -159,14 +271,11 @@ export function createCampaignApplication({
       createdAt: timestamp,
       updatedAt: timestamp,
     });
-    const auditId = createId("audit");
-    const audit: CampaignAuditEvent = Object.freeze({
-      id: auditId,
-      siteId,
-      actorId: auditActorId,
+    const acceptedAudit = auditEvent({
+      actorId: author.id,
       targetId: campaign.id,
       revisionId: revision.id,
-      requestId,
+      requestId: command.requestId,
       action: "campaign.create",
       outcome: "accepted",
       reason: null,
@@ -174,10 +283,28 @@ export function createCampaignApplication({
       afterState: JSON.stringify(campaign),
       occurredAt: timestamp,
     });
-    if (!(await store.create({ campaign, revision, audit }))) {
-      throw new CampaignConflictError();
-    }
-    return Object.freeze({ campaign, revision });
+    const rejectedAudit = auditEvent({
+      actorId: author.id,
+      targetId: campaign.id,
+      revisionId: null,
+      requestId: command.requestId,
+      action: "campaign.create",
+      outcome: "rejected",
+      reason: "campaign_revision_conflict",
+      beforeState: null,
+      afterState: null,
+      occurredAt: timestamp,
+    });
+    return resolveReceipt(
+      await store.create({
+        command,
+        campaign,
+        revision,
+        acceptedAudit,
+        rejectedAudit,
+      }),
+      command.inputHash,
+    );
   }
 
   const commands: CampaignApplication["commands"] = Object.freeze({
@@ -191,116 +318,155 @@ export function createCampaignApplication({
       await recordRejected(actor, requestId, action, reason, targetId);
     },
     async createStandalone({ actor, requestId, input }) {
-      return audited(actor, requestId, "campaign.create", async () => {
-        const author = await requireAuthor(actor);
-        return createFirstRevision({
-          author,
-          auditActorId: author.id,
-          requestId,
-          input,
-          provenance: Object.freeze({ kind: "standalone" }),
-        });
+      const author = await requireAuthor(actor);
+      const command = await commandKey({
+        author,
+        requestId,
+        commandName: "campaign.create_standalone",
+        input,
+      });
+      const existing = await replay(command);
+      return existing ?? createFirstRevision({
+        author,
+        command,
+        input,
+        provenance: Object.freeze({ kind: "standalone" }),
       });
     },
     async createFromPost({ actor, requestId, sourcePostRevisionId }) {
-      return audited(actor, requestId, "campaign.create", async () => {
-        const author = await requireAuthor(actor);
-        const postRevisionId =
-          createSourcePostRevisionId(sourcePostRevisionId);
-        const post = await findPostRevision(siteId, postRevisionId);
+      const author = await requireAuthor(actor);
+      const command = await commandKey({
+        author,
+        requestId,
+        commandName: "campaign.create_from_post",
+        input: { sourcePostRevisionId },
+      });
+      const existing = await replay(command);
+      if (existing !== null) return existing;
+      let postRevisionId;
+      let post;
+      try {
+        postRevisionId = createSourcePostRevisionId(sourcePostRevisionId);
+        post = await findPostRevision(siteId, postRevisionId);
         if (post === null) throw new CampaignNotFoundError();
-        return createFirstRevision({
-          author,
-          auditActorId: author.id,
-          requestId,
-          input: {
-            subject: post.title,
-            previewText: post.excerpt,
-            callToAction: {
-              label: "Read more",
-              href: `/blog/${post.slug}`,
-            },
-            emailContent: post.body,
-          },
-          provenance: Object.freeze({
-            kind: "post_revision",
-            postId: post.id,
-            postRevisionId,
-            postRevisionNumber: post.revision,
-          }),
+      } catch (error) {
+        return rejectCommand({
+          command,
+          action: "campaign.create",
+          error,
+          targetId: "campaign:new",
         });
+      }
+      return createFirstRevision({
+        author,
+        command,
+        input: {
+          subject: post.title,
+          previewText: post.excerpt,
+          callToAction: {
+            label: "Read more",
+            href: `/blog/${post.slug}`,
+          },
+          emailContent: post.body,
+        },
+        provenance: Object.freeze({
+          kind: "post_revision",
+          postId: post.id,
+          postRevisionId,
+          postRevisionNumber: post.revision,
+        }),
       });
     },
     async edit({ actor, requestId, campaignId, expectedVersion, input }) {
-      let observedState: string | null = null;
-      return audited(
-        actor,
+      const author = await requireAuthor(actor);
+      const command = await commandKey({
+        author,
         requestId,
-        "campaign.edit",
-        async () => {
-          const author = await requireAuthor(actor);
-          const current = await getCampaign(campaignId);
-          observedState = JSON.stringify(current);
-          if (current.version !== expectedVersion) {
-            throw new CampaignConflictError();
-          }
-          const currentRevision = await getRevision(
-            campaignId,
-            current.version,
-          );
-          const authored = validateCampaignInput(input, configuredChannel);
-          const revisionId = createCampaignRevisionId(
-            createId("campaign_revision"),
-          );
-          const timestamp = clock().toISOString();
-          const revision: CampaignRevision = Object.freeze({
-            id: revisionId,
-            siteId,
-            campaignId,
-            revisionNumber: current.version + 1,
-            provenance: currentRevision.provenance,
-            ...authored,
-            schemaVersion,
-            rendererVersion: normalizedRendererVersion,
-            createdAt: timestamp,
-            createdByActorId: author.id,
-          });
-          const campaign: Campaign = Object.freeze({
-            ...current,
-            lifecycleState: "draft",
-            currentRevisionId: revisionId,
-            version: current.version + 1,
-            updatedAt: timestamp,
-          });
-          const auditId = createId("audit");
-          const audit: CampaignAuditEvent = Object.freeze({
-            id: auditId,
-            siteId,
-            actorId: author.id,
-            targetId: campaign.id,
-            revisionId: revision.id,
-            requestId,
-            action: "campaign.edit",
-            outcome: "accepted",
-            reason: null,
-            beforeState: JSON.stringify(current),
-            afterState: JSON.stringify(campaign),
-            occurredAt: timestamp,
-          });
-          if (
-            !(await store.appendRevision({
-              expectedVersion,
-              campaign,
-              revision,
-              audit,
-            }))
-          ) {
-            throw new CampaignConflictError();
-          }
-          return Object.freeze({ campaign, revision });
-        },
+        commandName: "campaign.edit",
+        input: { campaignId, expectedVersion, input },
+      });
+      const existing = await replay(command);
+      if (existing !== null) return existing;
+      let current: Campaign;
+      let currentRevision: CampaignRevision;
+      let authored;
+      try {
+        current = await getCampaign(campaignId);
+        if (current.version !== expectedVersion) {
+          throw new CampaignConflictError();
+        }
+        currentRevision = await getRevision(campaignId, current.version);
+        authored = validateCampaignInput(input, configuredChannel);
+      } catch (error) {
+        return rejectCommand({
+          command,
+          action: "campaign.edit",
+          error,
+          targetId: campaignId,
+          beforeState:
+            typeof current! === "undefined"
+              ? null
+              : JSON.stringify(current!),
+        });
+      }
+      const revisionId = createCampaignRevisionId(
+        createId("campaign_revision"),
+      );
+      const timestamp = clock().toISOString();
+      const revision: CampaignRevision = Object.freeze({
+        id: revisionId,
+        siteId,
         campaignId,
-        () => observedState,
+        revisionNumber: current.version + 1,
+        provenance: currentRevision.provenance,
+        ...authored,
+        schemaVersion,
+        rendererVersion: activeRendererCommit,
+        createdAt: timestamp,
+        createdByActorId: author.id,
+      });
+      const campaign: Campaign = Object.freeze({
+        ...current,
+        lifecycleState: "draft",
+        currentRevisionId: revisionId,
+        version: current.version + 1,
+        updatedAt: timestamp,
+      });
+      const beforeState = JSON.stringify(current);
+      const acceptedAudit = auditEvent({
+        actorId: author.id,
+        targetId: campaign.id,
+        revisionId: revision.id,
+        requestId,
+        action: "campaign.edit",
+        outcome: "accepted",
+        reason: null,
+        beforeState,
+        afterState: JSON.stringify(campaign),
+        occurredAt: timestamp,
+      });
+      const rejectedAudit = auditEvent({
+        actorId: author.id,
+        targetId: campaign.id,
+        revisionId: null,
+        requestId,
+        action: "campaign.edit",
+        outcome: "rejected",
+        reason: "campaign_revision_conflict",
+        beforeState,
+        afterState: null,
+        occurredAt: timestamp,
+      });
+      return resolveReceipt(
+        await store.appendRevision({
+          command,
+          expectedVersion,
+          campaign,
+          revision,
+          acceptedAudit,
+          rejectedAudit,
+        }),
+        command.inputHash,
       );
     },
   });
@@ -333,6 +499,9 @@ export function createCampaignApplication({
         campaignId,
         revisionNumber ?? campaign.version,
       );
+      if (revision.rendererVersion !== activeRendererCommit) {
+        throw new CampaignValidationError("campaign_renderer_mismatch");
+      }
       const audience = await resolveAudience(revision.audienceDefinition);
       return renderCampaignRevision(
         revision,

@@ -6,10 +6,10 @@ import {
   loadHumanAccessEnvironment,
 } from "../../../src/human-access-environment";
 import {
-  readSubscriberIdentityKeySecret,
+  readNewsletterDeliverySecret,
 } from "../../../src/human-access-configuration";
 import {
-  verifyNewsletterUnsubscribeToken,
+  createSignedNewsletterDeliveryAdapter,
 } from "../../../src/newsletter-unsubscribe-token";
 import {
   loadSubscriberLedgerIntegrationApplication,
@@ -43,6 +43,15 @@ function escapeAttribute(value: string) {
     .replaceAll(">", "&gt;");
 }
 
+function deliveryAdapter(
+  environment: Awaited<ReturnType<typeof loadHumanAccessEnvironment>>,
+) {
+  return createSignedNewsletterDeliveryAdapter({
+    unsubscribeUrl: environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
+    secret: readNewsletterDeliverySecret(environment),
+  });
+}
+
 export async function GET(request: Request) {
   const token = tokenFromUrl(request);
   if (token === "") {
@@ -50,10 +59,7 @@ export async function GET(request: Request) {
   }
   try {
     const environment = await loadHumanAccessEnvironment();
-    await verifyNewsletterUnsubscribeToken({
-      token,
-      secret: readSubscriberIdentityKeySecret(environment),
-    });
+    await deliveryAdapter(environment).consumeUnsubscribeToken(token);
   } catch {
     return html(
       "<main><h1>This unsubscribe link is invalid or expired</h1></main>",
@@ -73,10 +79,8 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const token = String(form.get("token") ?? "");
     const environment = await loadHumanAccessEnvironment();
-    const verified = await verifyNewsletterUnsubscribeToken({
-      token,
-      secret: readSubscriberIdentityKeySecret(environment),
-    });
+    const verified =
+      await deliveryAdapter(environment).consumeUnsubscribeToken(token);
     const application = await loadSubscriberLedgerIntegrationApplication();
     await application.provider.ingestSuppressionByIdentityKey({
       provider: "foundry_unsubscribe",

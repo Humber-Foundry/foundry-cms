@@ -50,7 +50,16 @@ export function validateCampaignChannelConfiguration(
   const complianceFooter = Object.freeze({
     version: requireText(input.complianceFooter.version, 200),
     content: requireText(input.complianceFooter.content, 2_000),
+    unsubscribePlaceholder: requireText(
+      input.complianceFooter.unsubscribePlaceholder,
+      2_000,
+    ),
   });
+  if (!safeLink.test(complianceFooter.unsubscribePlaceholder)) {
+    throw new CampaignValidationError(
+      "campaign_unsubscribe_placeholder_invalid",
+    );
+  }
   if (
     input.audienceDefinition.id !== campaignAudienceDefinition.id ||
     input.audienceDefinition.version !== campaignAudienceDefinition.version
@@ -199,7 +208,10 @@ function renderCampaignBytes(revision: CampaignRevision) {
     `<p><a href="${escapeHtml(revision.callToAction.href)}">${escapeHtml(
       revision.callToAction.label,
     )}</a></p>`,
-    `<footer>${escapeHtml(revision.complianceFooter.content)}</footer>`,
+    `<footer>${escapeHtml(revision.complianceFooter.content)} · ` +
+      `<a href="${escapeHtml(
+        revision.complianceFooter.unsubscribePlaceholder,
+      )}">Unsubscribe</a></footer>`,
     "</body></html>",
   ].join("");
   const text = [
@@ -212,6 +224,7 @@ function renderCampaignBytes(revision: CampaignRevision) {
     `${revision.callToAction.label}: ${revision.callToAction.href}`,
     "",
     revision.complianceFooter.content,
+    `Unsubscribe: ${revision.complianceFooter.unsubscribePlaceholder}`,
     "",
   ].join("\n");
   return { html, text };

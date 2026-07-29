@@ -26,9 +26,15 @@ import {
   loadHumanAccessRequestContext,
 } from "./human-access-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
+import {
+  readNewsletterDeliverySecret,
+} from "./human-access-configuration";
 import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
 import { referenceSiteApplication } from "./reference-installation";
+import {
+  createSignedNewsletterDeliveryAdapter,
+} from "./newsletter-unsubscribe-token";
 
 const localCampaignStore = createInMemoryCampaignStore();
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
@@ -39,8 +45,10 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
     version: "local-footer-v1",
     content:
       "Foundry local development · Local development only · " +
-      "Contact: https://example.test/contact · " +
-      "Unsubscribe: https://example.test/newsletter/unsubscribe",
+      "Contact: https://example.test/contact · Newsletter preferences",
+    unsubscribePlaceholder:
+      "https://example.test/newsletter/unsubscribe" +
+      "?token={{foundry.unsubscribe.token}}",
   }),
   audienceDefinition: Object.freeze({
     id: "canonical-consent-and-suppression" as const,
@@ -122,9 +130,16 @@ export async function loadCampaignRequestContext(
     if (environment.FOUNDRY_DB === undefined) {
       throw new Error("campaign_database_unavailable");
     }
-    rendererCommit = resolveContentReleaseInputs(environment)
-      .productionBaseCommit;
-    channelConfiguration = readCampaignChannelConfiguration(environment);
+    rendererCommit = resolveContentReleaseInputs(environment).rendererVersion;
+    const deliveryAdapter = createSignedNewsletterDeliveryAdapter({
+      unsubscribeUrl:
+        environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
+      secret: readNewsletterDeliverySecret(environment),
+    });
+    channelConfiguration = readCampaignChannelConfiguration(
+      environment,
+      deliveryAdapter.unsubscribePlaceholder,
+    );
     store = createD1CampaignStore(environment.FOUNDRY_DB);
     resolveAudience = createSubscriberLedgerAudienceResolver({
       siteId: referenceSiteApplication.siteId,

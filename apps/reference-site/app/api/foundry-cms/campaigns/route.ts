@@ -1,6 +1,7 @@
 import {
   AccessDeniedError,
   CampaignConflictError,
+  CampaignIdempotencyError,
   CampaignNotFoundError,
   CampaignValidationError,
   createCampaignId,
@@ -8,10 +9,7 @@ import {
 } from "@foundry/application";
 
 import { loadCampaignRequestContext } from "../../../../src/campaign-runtime";
-import {
-  executeIdempotentHumanMutation,
-  verifyHumanMutation,
-} from "../../../../src/human-mutation-runtime";
+import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
 
 type CampaignCommand =
   | Readonly<{
@@ -105,6 +103,12 @@ export async function GET(request: Request) {
     if (error instanceof TypeError) {
       return Response.json({ error: "campaign_id_invalid" }, { status: 400 });
     }
+    if (
+      error instanceof CampaignValidationError &&
+      error.message === "campaign_renderer_mismatch"
+    ) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
     throw error;
   }
 }
@@ -116,64 +120,57 @@ export async function POST(request: Request) {
     const rawCommand = await request.json().catch(() => null);
     const parsed = command(rawCommand);
     const requestId = request.headers.get("idempotency-key") ?? "";
-    return executeIdempotentHumanMutation({
-      request,
-      identity: context.identity,
-      command: rawCommand,
-      execute: async () => {
-        if (parsed === null) {
-          await context.application.commands.recordRejectedCommand({
+    if (parsed === null) {
+      await context.application.commands.recordRejectedCommand({
+        actor: context.identity,
+        requestId,
+        reason: "campaign_command_invalid",
+      });
+      return Response.json(
+        { error: "campaign_command_invalid" },
+        { status: 400 },
+      );
+    }
+    let editedCampaignId;
+    if (parsed.action === "edit") {
+      try {
+        editedCampaignId = createCampaignId(parsed.campaignId);
+      } catch {
+        await context.application.commands.recordRejectedCommand({
+          actor: context.identity,
+          requestId,
+          action: "campaign.edit",
+          targetId: parsed.campaignId,
+          reason: "campaign_id_invalid",
+        });
+        return Response.json(
+          { error: "campaign_command_invalid" },
+          { status: 400 },
+        );
+      }
+    }
+    const result = parsed.action === "create_standalone"
+      ? await context.application.commands.createStandalone({
+          actor: context.identity,
+          requestId,
+          input: parsed.input,
+        })
+      : parsed.action === "create_from_post"
+        ? await context.application.commands.createFromPost({
             actor: context.identity,
             requestId,
-            reason: "campaign_command_invalid",
+            sourcePostRevisionId: parsed.sourcePostRevisionId,
+          })
+        : await context.application.commands.edit({
+            actor: context.identity,
+            requestId,
+            campaignId: editedCampaignId!,
+            expectedVersion: parsed.expectedVersion,
+            input: parsed.input,
           });
-          return Response.json(
-            { error: "campaign_command_invalid" },
-            { status: 400 },
-          );
-        }
-        let editedCampaignId;
-        if (parsed.action === "edit") {
-          try {
-            editedCampaignId = createCampaignId(parsed.campaignId);
-          } catch {
-            await context.application.commands.recordRejectedCommand({
-              actor: context.identity,
-              requestId,
-              action: "campaign.edit",
-              targetId: parsed.campaignId,
-              reason: "campaign_id_invalid",
-            });
-            return Response.json(
-              { error: "campaign_command_invalid" },
-              { status: 400 },
-            );
-          }
-        }
-        const result = parsed.action === "create_standalone"
-          ? await context.application.commands.createStandalone({
-              actor: context.identity,
-              requestId,
-              input: parsed.input,
-            })
-          : parsed.action === "create_from_post"
-            ? await context.application.commands.createFromPost({
-                actor: context.identity,
-                requestId,
-                sourcePostRevisionId: parsed.sourcePostRevisionId,
-              })
-            : await context.application.commands.edit({
-                actor: context.identity,
-                requestId,
-                campaignId: editedCampaignId!,
-                expectedVersion: parsed.expectedVersion,
-                input: parsed.input,
-              });
-        return Response.json(result, {
-          status: parsed.action === "edit" ? 200 : 201,
-          headers: { "cache-control": "private, no-store" },
-        });
-      },
+    return Response.json(result, {
+      status: parsed.action === "edit" || result.replayed ? 200 : 201,
+      headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
     if (error instanceof AccessDeniedError) {
@@ -186,6 +183,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "campaign_command_invalid" }, { status: 400 });
     }
     if (error instanceof CampaignConflictError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof CampaignIdempotencyError) {
       return Response.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof CampaignNotFoundError) {

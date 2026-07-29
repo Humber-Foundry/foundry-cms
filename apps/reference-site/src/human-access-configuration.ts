@@ -22,6 +22,7 @@ export type HumanAccessEnvironment = Readonly<{
   FOUNDRY_CAMPAIGN_POSTAL_ADDRESS?: string;
   FOUNDRY_CAMPAIGN_CONTACT_URL?: string;
   FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL?: string;
+  FOUNDRY_NEWSLETTER_DELIVERY_SECRET?: string;
   CF_VERSION_METADATA?: Readonly<{ id: string }>;
   FOUNDRY_DB?: D1DatabaseBinding;
   FOUNDRY_GITHUB_APP_ID?: string;
@@ -107,6 +108,18 @@ export function readSubscriberIdentityKeySecret(
 ) {
   const secret = requireSetting(
     environment.FOUNDRY_SUBSCRIBER_IDENTITY_SECRET,
+  );
+  if (secret.length < 32) {
+    throw new HumanAccessConfigurationError();
+  }
+  return secret;
+}
+
+export function readNewsletterDeliverySecret(
+  environment: HumanAccessEnvironment,
+) {
+  const secret = requireSetting(
+    environment.FOUNDRY_NEWSLETTER_DELIVERY_SECRET,
   );
   if (secret.length < 32) {
     throw new HumanAccessConfigurationError();

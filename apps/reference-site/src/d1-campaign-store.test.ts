@@ -7,7 +7,11 @@ vi.mock("server-only", () => ({}));
 
 import {
   campaignAudienceDefinition,
+  CampaignConflictError,
+  CampaignIdempotencyError,
   createCampaignApplication,
+  createCampaignId,
+  createCampaignRevisionId,
   createHumanMembershipId,
   createHumanUserId,
   type ExternalHumanIdentity,
@@ -71,11 +75,12 @@ afterEach(async () => runtime.dispose());
 describe("D1 campaign store", () => {
   it("atomically persists immutable revisions with linked audit evidence", async () => {
     let id = 0;
+    const store = createD1CampaignStore(
+      database as unknown as D1DatabaseBinding,
+    );
     const application = createCampaignApplication({
       siteId,
-      store: createD1CampaignStore(
-        database as unknown as D1DatabaseBinding,
-      ),
+      store,
       authorize: async () => ({
         id: createHumanMembershipId("membership-editor"),
         siteId,
@@ -93,6 +98,9 @@ describe("D1 campaign store", () => {
         complianceFooter: {
           version: "footer-v1",
           content: "Durable compliance material.",
+          unsubscribePlaceholder:
+            "https://example.test/newsletter/unsubscribe" +
+            "?token={{foundry.unsubscribe.token}}",
         },
         audienceDefinition: campaignAudienceDefinition,
       },
@@ -116,6 +124,35 @@ describe("D1 campaign store", () => {
         emailContent: createRichTextDocumentFromPlainText("Durable body."),
       },
     });
+    const replayed = await application.commands.createStandalone({
+      actor,
+      requestId: "campaign-create-durable-1",
+      input: {
+        subject: "Durable campaign",
+        previewText: "Durable preview text.",
+        callToAction: {
+          label: "Read more",
+          href: "https://example.com",
+        },
+        emailContent: createRichTextDocumentFromPlainText("Durable body."),
+      },
+    });
+    expect(replayed).toEqual({ ...created, replayed: true });
+    await expect(
+      application.commands.createStandalone({
+        actor,
+        requestId: "campaign-create-durable-1",
+        input: {
+          subject: "Different command input",
+          previewText: "Durable preview text.",
+          callToAction: {
+            label: "Read more",
+            href: "https://example.com",
+          },
+          emailContent: createRichTextDocumentFromPlainText("Durable body."),
+        },
+      }),
+    ).rejects.toBeInstanceOf(CampaignIdempotencyError);
     await application.queries.render({
       actor,
       campaignId: created.campaign.id,
@@ -130,6 +167,19 @@ describe("D1 campaign store", () => {
         subject: "Independently edited",
       },
     });
+    const stale = () =>
+      application.commands.edit({
+        actor,
+        requestId: "campaign-edit-stale-durable-1",
+        campaignId: created.campaign.id,
+        expectedVersion: 1,
+        input: {
+          ...created.revision,
+          subject: "Stale edit",
+        },
+      });
+    await expect(stale()).rejects.toBeInstanceOf(CampaignConflictError);
+    await expect(stale()).rejects.toBeInstanceOf(CampaignConflictError);
 
     await expect(
       application.queries.getRevision({
@@ -142,7 +192,35 @@ describe("D1 campaign store", () => {
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_audit_events")
         .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 2 });
+    ).resolves.toEqual({ count: 3 });
+    await expect(
+      database
+        .prepare(
+          `SELECT outcome, COUNT(*) AS count
+           FROM campaign_audit_events
+           GROUP BY outcome ORDER BY outcome`,
+        )
+        .all<{ outcome: string; count: number }>(),
+    ).resolves.toMatchObject({
+      results: [
+        { outcome: "accepted", count: 2 },
+        { outcome: "rejected", count: 1 },
+      ],
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT outcome, COUNT(*) AS count
+           FROM campaign_command_receipts
+           GROUP BY outcome ORDER BY outcome`,
+        )
+        .all<{ outcome: string; count: number }>(),
+    ).resolves.toMatchObject({
+      results: [
+        { outcome: "accepted", count: 2 },
+        { outcome: "rejected", count: 1 },
+      ],
+    });
     await expect(
       database
         .prepare(
@@ -173,5 +251,69 @@ describe("D1 campaign store", () => {
         )
         .run(),
     ).rejects.toThrow(/campaign_audit_is_immutable/u);
+
+    const failedCampaign = {
+      ...created.campaign,
+      id: createCampaignId("20000000-0000-4000-8000-000000000002"),
+      currentRevisionId: createCampaignRevisionId(
+        "30000000-0000-4000-8000-000000000099",
+      ),
+    };
+    const failedRevision = {
+      ...created.revision,
+      id: failedCampaign.currentRevisionId,
+      campaignId: failedCampaign.id,
+    };
+    const failedCommand = {
+      siteId,
+      actorId: "membership-editor",
+      commandName: "campaign.create_standalone" as const,
+      requestId: "campaign-create-rollback-1",
+      inputHash: "f".repeat(64),
+    };
+    await expect(
+      store.create({
+        command: failedCommand,
+        campaign: failedCampaign,
+        revision: failedRevision,
+        acceptedAudit: {
+          id: "30000000-0000-4000-8000-000000000002",
+          siteId,
+          actorId: failedCommand.actorId,
+          targetId: failedCampaign.id,
+          revisionId: failedRevision.id,
+          requestId: failedCommand.requestId,
+          action: "campaign.create",
+          outcome: "accepted",
+          reason: null,
+          beforeState: null,
+          afterState: JSON.stringify(failedCampaign),
+          occurredAt: failedRevision.createdAt,
+        },
+        rejectedAudit: {
+          id: "30000000-0000-4000-8000-000000000098",
+          siteId,
+          actorId: failedCommand.actorId,
+          targetId: failedCampaign.id,
+          revisionId: null,
+          requestId: failedCommand.requestId,
+          action: "campaign.create",
+          outcome: "rejected",
+          reason: "campaign_revision_conflict",
+          beforeState: null,
+          afterState: null,
+          occurredAt: failedRevision.createdAt,
+        },
+      }),
+    ).rejects.toThrow();
+    await expect(
+      store.findCommandReceipt(failedCommand),
+    ).resolves.toBeNull();
+    await expect(
+      store.findCampaign({
+        siteId,
+        campaignId: failedCampaign.id,
+      }),
+    ).resolves.toBeNull();
   });
 });

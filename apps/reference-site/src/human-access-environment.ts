@@ -24,6 +24,8 @@ export async function loadHumanAccessEnvironment(): Promise<HumanAccessEnvironme
       FOUNDRY_CAMPAIGN_CONTACT_URL: "https://example.test/contact",
       FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL:
         "https://example.test/newsletter/unsubscribe",
+      FOUNDRY_NEWSLETTER_DELIVERY_SECRET:
+        "local-development-newsletter-delivery-secret",
     };
   }
   const { env } = await getCloudflareContext({ async: true });

@@ -63,7 +63,12 @@ describe("campaign controls browser acceptance", () => {
       callToAction: { label: "Read", href: "https://example.org" },
       emailContent: richEmailContent,
       senderIdentityId: "sender-primary",
-      complianceFooter: { version: "v1", content: "Compliance" },
+      complianceFooter: {
+        version: "v1",
+        content: "Compliance",
+        unsubscribePlaceholder:
+          "https://example.test/unsubscribe?token={{foundry.unsubscribe.token}}",
+      },
       audienceDefinition: {
         id: "canonical-consent-and-suppression",
         version: 1,

@@ -40,6 +40,7 @@ function requireAbsoluteHttpsUrl(value: string | undefined): string {
 
 export function readCampaignChannelConfiguration(
   environment: HumanAccessEnvironment,
+  unsubscribePlaceholder: string,
 ): CampaignChannelConfiguration {
   const legalName = requireSetting(environment.FOUNDRY_CAMPAIGN_LEGAL_NAME);
   const postalAddress = requireSetting(
@@ -47,9 +48,6 @@ export function readCampaignChannelConfiguration(
   );
   const contactUrl = requireAbsoluteHttpsUrl(
     environment.FOUNDRY_CAMPAIGN_CONTACT_URL,
-  );
-  const unsubscribeUrl = requireAbsoluteHttpsUrl(
-    environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL,
   );
   return Object.freeze({
     senderIdentityId: requireSetting(
@@ -61,7 +59,10 @@ export function readCampaignChannelConfiguration(
       ),
       content:
         `${legalName} · ${postalAddress} · Contact: ${contactUrl} · ` +
-        `Unsubscribe: ${unsubscribeUrl}`,
+        "Newsletter preferences",
+      unsubscribePlaceholder: requireAbsoluteHttpsUrl(
+        unsubscribePlaceholder,
+      ),
     }),
     audienceDefinition: Object.freeze({
       id: "canonical-consent-and-suppression",
