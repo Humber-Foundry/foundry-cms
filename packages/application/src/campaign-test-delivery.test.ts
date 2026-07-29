@@ -59,7 +59,10 @@ const channelConfiguration = {
   } as const,
 };
 
-function createFixture(adapter: NewsletterDeliveryAdapter) {
+function createFixture(
+  adapter: NewsletterDeliveryAdapter,
+  clock = () => new Date("2026-07-29T19:05:00.000Z"),
+) {
   let sequence = 0;
   const campaignStore = createInMemoryCampaignStore();
   const deliveryStore = createInMemoryCampaignTestDeliveryStore();
@@ -93,7 +96,7 @@ function createFixture(adapter: NewsletterDeliveryAdapter) {
         id,
         address: `${id}@example.test`,
       })),
-    clock: () => new Date("2026-07-29T19:05:00.000Z"),
+    clock,
     createExecutionId: () =>
       "40000000-0000-4000-8000-000000000001",
     recordRejectedCommand: async (command) => {
@@ -232,8 +235,8 @@ describe("campaign test delivery", () => {
       })
       .mockResolvedValueOnce({
         outcome: "accepted",
-        providerCampaignId: "brevo-campaign-19",
-        providerReceipt: "brevo-test-retried-19",
+        providerCampaignId: "brevo-campaign-21",
+        providerReceipt: "brevo-test-retried-21",
       });
     const adapter = capableAdapter({
       sendTest,
@@ -254,7 +257,10 @@ describe("campaign test delivery", () => {
     expect(second.state).toBe("accepted");
     expect(sendTest).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ executionId: first.executionId }),
+      expect.objectContaining({
+        executionId: first.executionId,
+        providerCampaignId: null,
+      }),
     );
   });
 
@@ -334,6 +340,48 @@ describe("campaign test delivery", () => {
     await expect(first).resolves.toMatchObject({ state: "accepted" });
   });
 
+  it("keeps an expired in-flight writer reconciliation-only until that writer completes", async () => {
+    let completeSend!: (
+      outcome: Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>,
+    ) => void;
+    let now = new Date("2026-07-29T19:05:00.000Z");
+    const sendTest = vi.fn(
+      () =>
+        new Promise<
+          Awaited<ReturnType<NewsletterDeliveryAdapter["sendTest"]>>
+        >((resolve) => {
+          completeSend = resolve;
+        }),
+    );
+    const adapter = capableAdapter({ sendTest });
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      () => now,
+    );
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-expired-writer-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    const first = application.commands.requestTest(request);
+    await vi.waitFor(() => expect(sendTest).toHaveBeenCalledTimes(1));
+    now = new Date("2026-07-29T19:06:01.000Z");
+    const recovery = await application.commands.requestTest(request);
+
+    expect(recovery.state).toBe("attempting");
+    expect(adapter.reconcileTest).toHaveBeenCalledTimes(1);
+    expect(sendTest).toHaveBeenCalledTimes(1);
+    completeSend({
+      outcome: "accepted",
+      providerCampaignId: "brevo-campaign-22",
+      providerReceipt: "brevo-test-accepted-22",
+    });
+    await expect(first).resolves.toMatchObject({ state: "accepted" });
+  });
+
   it("makes prior evidence stale after any send-affecting campaign edit", async () => {
     const { application, campaignApplication } =
       createFixture(capableAdapter());
@@ -400,6 +448,14 @@ describe("campaign test delivery", () => {
           testRecipientIds: ["owner-primary"],
         },
         targetId: created.campaign.id,
+        beforeState: JSON.stringify({
+          current: { providerCapabilities: "unsupported_or_mismatched" },
+          required: {
+            apiTestDelivery: "supported",
+            explicitRecipients: "supported",
+            ambiguousOutcomeReconciliation: "supported",
+          },
+        }),
       },
     ]);
   });

@@ -248,6 +248,10 @@ export async function POST(request: Request) {
               : "campaign.test",
           targetId: parsed.campaignId,
           reason: "campaign_id_invalid",
+          beforeState: JSON.stringify({
+            current: { campaignId: "invalid" },
+            required: { campaignId: "valid_uuid" },
+          }),
           command: rawCommand,
           commandName:
             parsed.action === "edit"

@@ -276,6 +276,7 @@ export type CampaignApplication = Readonly<{
       reason: string;
       command: unknown;
       targetId?: string;
+      beforeState?: string | null;
       action?: CampaignAuditEvent["action"];
       commandName?: CampaignCommandName;
     }): Promise<void>;

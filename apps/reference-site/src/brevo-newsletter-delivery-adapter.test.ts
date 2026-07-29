@@ -201,6 +201,16 @@ describe("Brevo newsletter delivery adapter", () => {
       outcome: "ambiguous",
     });
 
+    const createRateLimited = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi.fn().mockResolvedValue(response(429)),
+    });
+    await expect(createRateLimited.sendTest(request)).resolves.toEqual({
+      outcome: "ambiguous",
+    });
+
     const sendAmbiguous = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
@@ -213,6 +223,20 @@ describe("Brevo newsletter delivery adapter", () => {
     await expect(sendAmbiguous.sendTest(request)).resolves.toEqual({
       outcome: "ambiguous",
       providerCampaignId: "19",
+    });
+
+    const sendRateLimited = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      senderIds: { sender_primary: 42 },
+      fetcher: vi
+        .fn()
+        .mockResolvedValueOnce(response(201, { id: 20 }))
+        .mockResolvedValueOnce(response(429)),
+    });
+    await expect(sendRateLimited.sendTest(request)).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: "20",
     });
   });
 

@@ -266,6 +266,7 @@ export async function loadCampaignRequestContext(
         reason,
         command,
         targetId,
+        beforeState,
       }) =>
         application.commands.recordRejectedCommand({
           actor,
@@ -273,6 +274,7 @@ export async function loadCampaignRequestContext(
           reason,
           command,
           targetId,
+          beforeState,
           action: "campaign.test",
           commandName: "campaign.request_test",
         }),

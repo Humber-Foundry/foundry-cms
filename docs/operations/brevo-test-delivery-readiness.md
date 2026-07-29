@@ -48,7 +48,11 @@ rows, evidence, API results, logs, and source control.
 Every logical test creates a fresh Brevo draft tagged with its stable execution
 identity. Foundry reconciles Brevo's `testSent` state and the exact draft
 content before accepting evidence. A timeout or lost response enters
-reconciliation before another provider write.
+reconciliation before another provider write. An expired in-flight writer
+remains reconciliation-only so a slow first call cannot race a replacement
+call. Automatic retry is possible only after the adapter has returned an
+ambiguous result and a later reconciliation definitively proves the prior
+draft or test is absent.
 
 The adapter reports Brevo's campaign API plain-text artifact capability as
 `unsupported`. Brevo receives the exact authored subject, preview text and

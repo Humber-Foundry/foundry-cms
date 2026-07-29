@@ -268,6 +268,61 @@ function sameBinding(
   );
 }
 
+function testRejectionAuditState(reason: string) {
+  const state =
+    reason === "capability_not_authorized"
+      ? {
+          current: { authorization: "denied" },
+          required: { capability: "campaign.author" },
+        }
+      : reason === "provider_unhealthy"
+        ? {
+            current: { providerReadiness: "not_healthy" },
+            required: {
+              providerHealth: "healthy",
+              credential: "verified",
+              senderIdentity: "verified",
+            },
+          }
+        : reason.startsWith("provider_test_") ||
+            reason.startsWith("provider_configuration_")
+          ? {
+              current: { providerCapabilities: "unsupported_or_mismatched" },
+              required: {
+                apiTestDelivery: "supported",
+                explicitRecipients: "supported",
+                ambiguousOutcomeReconciliation: "supported",
+              },
+            }
+          : reason.startsWith("provider_")
+            ? {
+                current: { providerDelivery: reason },
+                required: {
+                  providerDelivery: "accepted_or_safely_reconciled",
+                },
+              }
+          : reason === "test_recipient_forbidden"
+            ? {
+                current: { recipientConfiguration: "not_allowed" },
+                required: { recipientConfiguration: "configured_identity" },
+              }
+            : reason === "campaign_not_found"
+              ? {
+                  current: { campaign: "not_found" },
+                  required: { campaign: "current_revision_exists" },
+                }
+              : reason.startsWith("campaign_idempotency_")
+                ? {
+                    current: { requestIdentity: "invalid_or_conflicting" },
+                    required: { requestIdentity: "valid_and_unique" },
+                  }
+                : {
+                    current: { testDelivery: "rejected", reason },
+                    required: { testDelivery: "eligible" },
+                  };
+  return JSON.stringify(state);
+}
+
 function validateProviderText(value: string, code: string): string {
   const normalized = value.trim();
   if (
@@ -345,6 +400,7 @@ export function createCampaignTestDeliveryApplication({
     reason: string;
     command: unknown;
     targetId: string;
+    beforeState: string;
   }): Promise<void>;
   clock?: () => Date;
   createExecutionId?: () => string;
@@ -482,6 +538,7 @@ export function createCampaignTestDeliveryApplication({
           ),
         );
       }
+      if (attemptExpired) return operation;
       if (reconciled.outcome === "ambiguous") return operation;
       if (reconciled.outcome === "not_sent") {
         operation = await store.record(
@@ -489,6 +546,20 @@ export function createCampaignTestDeliveryApplication({
             ...operation,
             state: "ambiguous" as const,
             providerCampaignId: reconciled.providerCampaignId,
+            attemptLeaseUntil: null,
+            updatedAt: clock().toISOString(),
+          }),
+        );
+      }
+      if (
+        reconciled.outcome === "not_found" &&
+        operation.providerCampaignId !== null
+      ) {
+        operation = await store.record(
+          Object.freeze({
+            ...operation,
+            state: "ambiguous" as const,
+            providerCampaignId: null,
             attemptLeaseUntil: null,
             updatedAt: clock().toISOString(),
           }),
@@ -598,6 +669,7 @@ export function createCampaignTestDeliveryApplication({
             testRecipientIds: input.testRecipientIds,
           },
           targetId: input.campaignId,
+          beforeState: testRejectionAuditState(error.message),
         });
       }
       throw error;
@@ -675,10 +747,7 @@ export function createInMemoryCampaignTestDeliveryStore():
         current.updatedAt !== operation.updatedAt ||
         !(
           current.state === "pending" ||
-          current.state === "ambiguous" ||
-          (current.state === "attempting" &&
-            current.attemptLeaseUntil !== null &&
-            current.attemptLeaseUntil <= now)
+          current.state === "ambiguous"
         )
       ) {
         return null;

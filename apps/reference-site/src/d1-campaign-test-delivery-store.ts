@@ -144,10 +144,7 @@ export function createD1CampaignTestDeliveryStore(
              attempt_lease_until = ?1,
              updated_at = ?2
            WHERE execution_id = ?3 AND site_id = ?4 AND updated_at = ?5
-             AND (
-               state IN ('pending', 'ambiguous') OR
-               (state = 'attempting' AND attempt_lease_until <= ?2)
-             )`,
+             AND state IN ('pending', 'ambiguous')`,
         )
         .bind(
           leaseUntil,

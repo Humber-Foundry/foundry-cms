@@ -299,6 +299,10 @@ describe("campaign endpoint", () => {
       action: "campaign.edit",
       targetId: "not-a-campaign-id",
       reason: "campaign_id_invalid",
+      beforeState: JSON.stringify({
+        current: { campaignId: "invalid" },
+        required: { campaignId: "valid_uuid" },
+      }),
       command: {
         action: "edit",
         campaignId: "not-a-campaign-id",
@@ -335,6 +339,10 @@ describe("campaign endpoint", () => {
       action: "campaign.test",
       targetId: "not-a-campaign-id",
       reason: "campaign_id_invalid",
+      beforeState: JSON.stringify({
+        current: { campaignId: "invalid" },
+        required: { campaignId: "valid_uuid" },
+      }),
       command: {
         action: "request_test",
         campaignId: "not-a-campaign-id",

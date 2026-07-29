@@ -292,6 +292,10 @@ describe("campaign authoring and rendering", () => {
           testRecipientIds: ["owner-primary"],
         },
         targetId: campaignId,
+        beforeState: JSON.stringify({
+          current: { authorization: "denied" },
+          required: { capability: "campaign.author" },
+        }),
         action: "campaign.test",
         commandName: "campaign.request_test",
       }),
@@ -305,6 +309,10 @@ describe("campaign authoring and rendering", () => {
         action: "campaign.test",
         outcome: "rejected",
         reason: "capability_not_authorized",
+        beforeState: JSON.stringify({
+          current: { authorization: "denied" },
+          required: { capability: "campaign.author" },
+        }),
       },
     ]);
   });

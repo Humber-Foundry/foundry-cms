@@ -141,13 +141,20 @@ describe("D1 campaign test delivery store", () => {
     });
     await expect(
       store.beginAttempt({
-        operation: pending,
-        now: "2026-07-29T19:05:02.000Z",
-        leaseUntil: "2026-07-29T19:06:02.000Z",
+        operation: attempting!,
+        now: "2026-07-29T19:06:02.000Z",
+        leaseUntil: "2026-07-29T19:07:02.000Z",
       }),
     ).resolves.toBeNull();
+    const ambiguous = await store.record({
+      ...attempting!,
+      state: "ambiguous",
+      attemptLeaseUntil: null,
+      providerCampaignId: "17",
+      updatedAt: "2026-07-29T19:05:03.000Z",
+    });
     const takeover = await store.beginAttempt({
-      operation: attempting!,
+      operation: ambiguous,
       now: "2026-07-29T19:06:02.000Z",
       leaseUntil: "2026-07-29T19:07:02.000Z",
     });

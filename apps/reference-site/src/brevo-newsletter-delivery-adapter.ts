@@ -63,7 +63,7 @@ function providerId(value: unknown): string | null {
 }
 
 function outcomeCouldBeAmbiguous(status: number) {
-  return status === 408 || status >= 500;
+  return status === 408 || status === 429 || status >= 500;
 }
 
 function expectedSenderId(

@@ -233,6 +233,7 @@ export function createCampaignApplication({
     command: CampaignCommandKey,
     action: CampaignAuditEvent["action"],
     targetId = "campaign:unknown",
+    beforeState: string | null = null,
   ) {
     try {
       return await requireAuthor(actor);
@@ -247,7 +248,7 @@ export function createCampaignApplication({
         action,
         outcome: "rejected",
         reason,
-        beforeState: null,
+        beforeState,
         afterState: null,
         occurredAt: clock().toISOString(),
       });
@@ -394,6 +395,7 @@ export function createCampaignApplication({
       reason,
       command: input,
       targetId = "campaign:unknown",
+      beforeState = null,
       action = "campaign.create",
       commandName =
         action === "campaign.edit"
@@ -406,7 +408,13 @@ export function createCampaignApplication({
         commandName,
         input,
       });
-      await authorizeCommand(actor, command, action, targetId);
+      await authorizeCommand(
+        actor,
+        command,
+        action,
+        targetId,
+        beforeState,
+      );
       const existing = await store.findCommandReceipt(command);
       if (
         existing !== null &&
@@ -430,7 +438,7 @@ export function createCampaignApplication({
           action,
           outcome: "rejected",
           reason,
-          beforeState: null,
+          beforeState,
           afterState: null,
           occurredAt: clock().toISOString(),
         }),
