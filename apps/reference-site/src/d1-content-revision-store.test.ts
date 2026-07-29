@@ -819,6 +819,53 @@ describe("D1 content revision store", () => {
     });
   });
 
+  it("reconciles the first verified removal of a bundled live post", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000ee",
+    );
+    await database
+      .prepare(
+        `INSERT INTO blog_posts (
+           site_id, post_id, collection_state, current_revision,
+           live_revision, last_verified_revision, last_verified_visibility,
+           last_verified_publication_id, last_verified_publication_sequence,
+           version, updated_at
+         ) VALUES (?1, ?2, 'active', 1, 1, 1, 'public', NULL, NULL, 1, ?3)`,
+      )
+      .bind(
+        referenceSiteDefinition.site.id,
+        postId,
+        "2026-07-27T14:30:00.000Z",
+      )
+      .run();
+
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      referenceSiteDefinition.site.id,
+      referenceSiteDefinition,
+      { id: "publication-first-removal", sequence: 1 },
+      "2026-07-27T14:31:00.000Z",
+    );
+
+    await expect(
+      database
+        .prepare(
+          `SELECT live_revision, last_verified_visibility,
+                  last_verified_publication_id,
+                  last_verified_publication_sequence
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first(),
+    ).resolves.toEqual({
+      live_revision: null,
+      last_verified_visibility: "absent",
+      last_verified_publication_id: "publication-first-removal",
+      last_verified_publication_sequence: 1,
+    });
+  });
+
   it("preserves a render artifact for each site revision", async () => {
     const postId = createBlogPostId(
       "00000000-0000-4000-8000-0000000000cc",

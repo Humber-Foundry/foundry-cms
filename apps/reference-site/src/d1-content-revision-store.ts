@@ -255,7 +255,10 @@ export async function reconcileVerifiedBlogPostPublication(
              last_verified_publication_sequence = ?2,
              updated_at = ?3
          WHERE site_id = ?4
-           AND last_verified_publication_sequence IS NOT NULL
+           AND (
+             live_revision IS NOT NULL
+             OR last_verified_publication_sequence IS NOT NULL
+           )
            AND (
              last_verified_publication_sequence IS NULL
              OR last_verified_publication_sequence < ?2
