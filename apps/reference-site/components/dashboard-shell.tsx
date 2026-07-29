@@ -140,6 +140,9 @@ export function DashboardShell({
                 mediaAssets={mediaAssets}
                 mediaOccurrences={mediaOccurrences}
                 mediaWorkspaceId={mediaWorkspaceId}
+                verifiedPublicPostIds={definition.blog.posts.map(
+                  ({ id }) => id,
+                )}
               />
             </>
           )}

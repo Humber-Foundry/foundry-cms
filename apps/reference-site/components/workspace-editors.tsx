@@ -6,6 +6,7 @@ import type {
   ContentRevision,
   MediaAsset,
 } from "@foundry/application";
+import type { BlogPostId } from "@foundry/site-definition";
 
 import { ContentEditor } from "./content-editor";
 import { MediaManager } from "./media-manager";
@@ -23,6 +24,7 @@ export function WorkspaceEditors({
   mediaAssets,
   mediaOccurrences,
   mediaWorkspaceId,
+  verifiedPublicPostIds,
 }: {
   csrfToken: string;
   contentRevision: ContentRevision;
@@ -33,6 +35,7 @@ export function WorkspaceEditors({
   mediaAssets: ReadonlyArray<MediaAsset>;
   mediaOccurrences: ReadonlyArray<MediaOccurrenceState>;
   mediaWorkspaceId: string;
+  verifiedPublicPostIds: ReadonlyArray<BlogPostId>;
 }) {
   const [head, setHead] = useState({
     revision: initialContentRevision,
@@ -76,7 +79,11 @@ export function WorkspaceEditors({
         onContentStale={() => setContentStale(true)}
         onAccessGranted={setMediaAccessToken}
       />
-      <BlogPostControls revision={head.revision} csrfToken={csrfToken} />
+      <BlogPostControls
+        revision={head.revision}
+        csrfToken={csrfToken}
+        verifiedPublicPostIds={verifiedPublicPostIds}
+      />
     </>
   );
 }

@@ -6,6 +6,8 @@ import type { ContentRevision } from "@foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   serializeRichTextDocument,
+  type BlogPost,
+  type BlogPostId,
 } from "@foundry/site-definition";
 
 import {
@@ -17,17 +19,39 @@ function mutationKey(operation: string) {
   return `${operation}:${crypto.randomUUID()}`;
 }
 
+export function blogPostLifecycleAction(
+  post: Pick<BlogPost, "id" | "targetVisibility">,
+  verifiedPublicPostIds: ReadonlySet<BlogPostId>,
+): "unpublish_blog_post" | "republish_blog_post" | null {
+  if (
+    post.targetVisibility === "public" &&
+    verifiedPublicPostIds.has(post.id)
+  ) {
+    return "unpublish_blog_post";
+  }
+  if (
+    post.targetVisibility === "unpublished" &&
+    !verifiedPublicPostIds.has(post.id)
+  ) {
+    return "republish_blog_post";
+  }
+  return null;
+}
+
 export function BlogPostControls({
   revision,
   csrfToken,
+  verifiedPublicPostIds,
 }: {
   revision: ContentRevision;
   csrfToken: string;
+  verifiedPublicPostIds: ReadonlyArray<BlogPostId>;
 }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingAttempt, setPendingAttempt] =
     useState<ContentRevisionAttempt | null>(null);
+  const verifiedPublicPosts = new Set(verifiedPublicPostIds);
 
   async function send(body: unknown, operation: string) {
     const attempt =
@@ -127,43 +151,47 @@ export function BlogPostControls({
         </button>
       </form>
       <ul className="blog-post-operations">
-        {revision.definition.blog.posts.map((post) => (
-          <li key={post.id}>
-            <div>
-              <strong>{post.title}</strong>
-              <span>
-                Revision {post.revision} · {post.targetVisibility} · /blog/{post.slug}
-              </span>
-            </div>
-            <button
-              type="button"
-              disabled={
-                busy ||
-                pendingAttempt !== null
-              }
-              onClick={() => {
-                const operation =
-                  post.targetVisibility === "public"
-                    ? "unpublish_blog_post"
-                    : "republish_blog_post";
-                void send(
-                  {
-                    operation,
-                    workspaceId: revision.workspaceId,
-                    schemaVersion: revision.definition.schemaVersion,
-                    baseRevision: revision.revision,
-                    postId: post.id,
-                  },
-                  operation,
-                );
-              }}
-            >
-              {post.targetVisibility === "public"
-                ? "Prepare unpublish"
-                : "Prepare republish"}
-            </button>
-          </li>
-        ))}
+        {revision.definition.blog.posts.map((post) => {
+          const operation = blogPostLifecycleAction(
+            post,
+            verifiedPublicPosts,
+          );
+          return (
+            <li key={post.id}>
+              <div>
+                <strong>{post.title}</strong>
+                <span>
+                  Revision {post.revision} · {post.targetVisibility} ·
+                  /blog/{post.slug}
+                </span>
+              </div>
+              {operation === null ? (
+                <span>Awaiting verified publication state</span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy || pendingAttempt !== null}
+                  onClick={() => {
+                    void send(
+                      {
+                        operation,
+                        workspaceId: revision.workspaceId,
+                        schemaVersion: revision.definition.schemaVersion,
+                        baseRevision: revision.revision,
+                        postId: post.id,
+                      },
+                      operation,
+                    );
+                  }}
+                >
+                  {operation === "unpublish_blog_post"
+                    ? "Prepare unpublish"
+                    : "Prepare republish"}
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {pendingAttempt === null ? null : (
         <button
