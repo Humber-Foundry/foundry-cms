@@ -946,24 +946,48 @@ export function createD1ContentRevisionStore(
         mediaOccurrence?.crop === null || mediaOccurrence === undefined
           ? null
           : JSON.stringify(mediaOccurrence.crop);
-      const blogGuardBindings: Array<string | number> = [];
+      const blogGuardBindings: Array<string | number | null> = [];
       let blogGuardParameter = 18;
       const blogTransitionGuards = (command.blogTransitions ?? [])
         .map((transition) => {
-          const postParameter = blogGuardParameter;
-          blogGuardBindings.push(transition.postId);
-          blogGuardParameter += 1;
-          if (transition.beforeState === null) {
+          const bindGuardValue = (value: string | number | null) => {
+            const parameter = blogGuardParameter;
+            blogGuardParameter += 1;
+            blogGuardBindings.push(value);
+            return `?${parameter}`;
+          };
+          const postParameter = bindGuardValue(transition.postId);
+          if (transition.observedAggregate === null) {
             return `AND NOT EXISTS (
               SELECT 1 FROM blog_posts
-              WHERE site_id = ?14 AND post_id = ?${postParameter}
+              WHERE site_id = ?14 AND post_id = ${postParameter}
             )`;
           }
+          const currentRevisionParameter = bindGuardValue(
+            transition.observedAggregate.currentRevision,
+          );
+          const liveRevisionParameter = bindGuardValue(
+            transition.observedAggregate.liveRevision,
+          );
+          const lastVerifiedRevisionParameter = bindGuardValue(
+            transition.observedAggregate.lastVerifiedRevision,
+          );
+          const lastVerifiedVisibilityParameter = bindGuardValue(
+            transition.observedAggregate.lastVerifiedVisibility,
+          );
+          const versionParameter = bindGuardValue(
+            transition.observedAggregate.version,
+          );
           return `AND EXISTS (
             SELECT 1 FROM blog_posts
             WHERE site_id = ?14
-              AND post_id = ?${postParameter}
+              AND post_id = ${postParameter}
               AND collection_state = 'active'
+              AND current_revision = ${currentRevisionParameter}
+              AND live_revision IS ${liveRevisionParameter}
+              AND last_verified_revision IS ${lastVerifiedRevisionParameter}
+              AND last_verified_visibility IS ${lastVerifiedVisibilityParameter}
+              AND version = ${versionParameter}
           )`;
         })
         .join("\n");

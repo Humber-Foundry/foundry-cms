@@ -230,6 +230,7 @@ type PersistContentRevisionCommand = Readonly<{
         postId: BlogPostId;
         revisionId: string;
         artifact: BlogPostArtifactFingerprint;
+        observedAggregate: BlogPostAggregateState | null;
       }>
   >;
   blogArtifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
@@ -501,9 +502,19 @@ export function createInMemoryContentRevisionStore({
         for (const transition of command.blogTransitions ?? []) {
           const aggregate = blogPosts.get(transition.postId);
           if (
-            (transition.beforeState === null && aggregate !== undefined) ||
-            (transition.beforeState !== null &&
-              aggregate === undefined)
+            (transition.observedAggregate === null &&
+              aggregate !== undefined) ||
+            (transition.observedAggregate !== null &&
+              (aggregate === undefined ||
+                aggregate.currentRevision !==
+                  transition.observedAggregate.currentRevision ||
+                aggregate.liveRevision !==
+                  transition.observedAggregate.liveRevision ||
+                aggregate.lastVerifiedRevision !==
+                  transition.observedAggregate.lastVerifiedRevision ||
+                aggregate.lastVerifiedVisibility !==
+                  transition.observedAggregate.lastVerifiedVisibility ||
+                aggregate.version !== transition.observedAggregate.version))
           ) {
             throw new ContentRevisionConflictError(currentRevision);
           }
@@ -625,7 +636,13 @@ export function createContentRevisionApplication({
       idempotencyKey: string;
     };
     requestIdentity: unknown;
-    mutate(base: SiteDefinition): SiteDefinition | Promise<SiteDefinition>;
+    mutate(
+      base: SiteDefinition,
+      observedBlogAggregates: ReadonlyMap<
+        BlogPostId,
+        BlogPostAggregateState | null
+      >,
+    ): SiteDefinition | Promise<SiteDefinition>;
     blogTransitions?: ReadonlyArray<Readonly<{
       postId: BlogPostId;
       commandType: BlogPostTransitionAudit["commandType"];
@@ -670,9 +687,23 @@ export function createContentRevisionApplication({
     ) {
       throw new ContentRevisionStaleError();
     }
+    const observedBlogAggregates = new Map<
+      BlogPostId,
+      BlogPostAggregateState | null
+    >(
+      await Promise.all(
+        (input.blogTransitions ?? []).map(async ({ postId }) => [
+          postId,
+          await store.getBlogPostAggregate(postId),
+        ] as const),
+      ),
+    );
     let definition: SiteDefinition;
     try {
-      definition = await input.mutate(base.definition);
+      definition = await input.mutate(
+        base.definition,
+        observedBlogAggregates,
+      );
     } catch (error) {
       if (error instanceof BlogPostSchemaError) {
         throw new ContentRevisionValidationError({
@@ -715,6 +746,8 @@ export function createContentRevisionApplication({
                 ...transition,
                 revisionId: artifact.postRevisionId,
                 artifact,
+                observedAggregate:
+                  observedBlogAggregates.get(transition.postId) ?? null,
                 requestId: input.command.idempotencyKey,
                 beforeState: blogPostAuditState(
                   base.definition,
@@ -1030,10 +1063,9 @@ export function createContentRevisionApplication({
                 operation: "unpublish_blog_post",
                 ...command,
               },
-              mutate: async (definition) => {
-                const aggregate = await store.getBlogPostAggregate(
-                  command.postId,
-                );
+              mutate: async (definition, observedBlogAggregates) => {
+                const aggregate =
+                  observedBlogAggregates.get(command.postId) ?? null;
                 if (
                   aggregate?.liveRevision === null ||
                   aggregate === null
@@ -1067,10 +1099,9 @@ export function createContentRevisionApplication({
                 operation: "republish_blog_post",
                 ...command,
               },
-              mutate: async (definition) => {
-                const aggregate = await store.getBlogPostAggregate(
-                  command.postId,
-                );
+              mutate: async (definition, observedBlogAggregates) => {
+                const aggregate =
+                  observedBlogAggregates.get(command.postId) ?? null;
                 if (
                   aggregate === null ||
                   aggregate.liveRevision !== null ||

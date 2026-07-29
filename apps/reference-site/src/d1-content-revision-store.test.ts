@@ -163,6 +163,109 @@ describe("D1 content revision store", () => {
     ).toEqual({ count: 0 });
   });
 
+  it("rejects an unpublish whose verified lifecycle changes before persistence", async () => {
+    const postId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000ca",
+    );
+    const definition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: postId,
+            revision: 1,
+            collectionState: "active" as const,
+            targetVisibility: "public" as const,
+            slug: "raced-unpublish",
+            title: "Raced unpublish",
+            excerpt: "A verified callback races the draft transition.",
+            seo: {
+              title: "Raced unpublish | Foundry",
+              description: "A verified callback races the draft transition.",
+            },
+            body: createRichTextDocumentFromPlainText("Initially live."),
+          },
+        ],
+      },
+    };
+    const initial = createApplication(
+      editorActorId,
+      workspaceId,
+      "2026-07-27T12:00:00.000Z",
+      definition,
+    );
+    await createWorkspace(initial, "d1-raced-unpublish-create");
+    const durableStore = createD1ContentRevisionStore(
+      database,
+      definition.site.id,
+      workspaceId,
+    );
+    let lifecycleRaced = false;
+    const racingStore = {
+      ...durableStore,
+      async getBlogPostAggregate(targetPostId: typeof postId) {
+        const observed =
+          await durableStore.getBlogPostAggregate(targetPostId);
+        if (!lifecycleRaced) {
+          lifecycleRaced = true;
+          await database
+            .prepare(
+              `UPDATE blog_posts
+               SET live_revision = NULL,
+                   last_verified_visibility = 'unpublished',
+                   last_verified_publication_id = 'publication-raced',
+                   last_verified_publication_sequence = 2,
+                   version = version + 1,
+                   updated_at = ?1
+               WHERE site_id = ?2 AND post_id = ?3`,
+            )
+            .bind(
+              "2026-07-27T12:01:00.000Z",
+              definition.site.id,
+              postId,
+            )
+            .run();
+        }
+        return observed;
+      },
+    };
+    const raced = createContentRevisionApplication({
+      siteDefinition: definition,
+      store: racingStore,
+      workspaceId,
+      actorId: editorActorId,
+      rendererVersion: "renderer-test-commit",
+      productionBase: "published:site_foundry_reference@1.1.0",
+      now: () => "2026-07-27T12:02:00.000Z",
+    });
+
+    await expect(
+      raced.commands.unpublishBlogPost({
+        actorId: editorActorId,
+        workspaceId,
+        siteId: definition.site.id,
+        schemaVersion: definition.schemaVersion,
+        baseRevision: 0,
+        postId,
+        idempotencyKey: "d1-raced-unpublish-command",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionConflictError);
+    await expect(raced.queries.getCurrent()).resolves.toMatchObject({
+      revision: 0,
+      definition: {
+        blog: {
+          posts: [
+            expect.objectContaining({
+              id: postId,
+              targetVisibility: "public",
+            }),
+          ],
+        },
+      },
+    });
+  });
+
   it(
     "persists blog revisions, transition audit, and live unpublish history in D1",
     { timeout: 60_000 },
