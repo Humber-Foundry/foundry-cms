@@ -11,6 +11,7 @@ import {
   createInMemoryCampaignTestDeliveryStore,
   type CampaignEditableInput,
   type NewsletterDeliveryAdapter,
+  type NewsletterProviderOwnershipEvidence,
 } from "./campaign";
 import { createInMemoryCampaignStore } from "./in-memory-campaign-store";
 import {
@@ -64,6 +65,12 @@ function createFixture(
   clock = () => new Date("2026-07-29T19:05:00.000Z"),
   createExecutionId = () =>
     "40000000-0000-4000-8000-000000000001",
+  providerOwnershipEvidence: NewsletterProviderOwnershipEvidence = {
+    classification: "evaluation" as const,
+    evidenceId: "provisioning-evaluation-1",
+    accountScopeFingerprint: "8".repeat(64),
+    verifiedAt: "2026-07-29T18:00:00.000Z",
+  },
 ) {
   let sequence = 0;
   const campaignStore = createInMemoryCampaignStore();
@@ -98,6 +105,7 @@ function createFixture(
         id,
         address: `${id}@example.test`,
       })),
+    providerOwnershipEvidence,
     replayTestCommand: (command) =>
       campaignApplication.commands.replayTestCommand(command),
     recordAcceptedTestCommand: (command) =>
@@ -206,6 +214,7 @@ describe("campaign test delivery", () => {
       sendTest: vi.fn().mockResolvedValue({
         outcome: "ambiguous",
         providerCampaignId: "brevo-campaign-18",
+        code: "provider_rate_limited",
       }),
       reconcileTest: vi.fn().mockResolvedValue({
         outcome: "accepted",
@@ -228,6 +237,7 @@ describe("campaign test delivery", () => {
     expect(ambiguous).toMatchObject({
       executionId: "40000000-0000-4000-8000-000000000001",
       state: "ambiguous",
+      failureCode: "provider_rate_limited",
     });
     expect(reconciled).toMatchObject({
       executionId: ambiguous.executionId,
@@ -485,6 +495,80 @@ describe("campaign test delivery", () => {
     await first;
   });
 
+  it("cancels an attempting test after a send-affecting edit before recovery", async () => {
+    let now = new Date("2026-07-29T19:05:00.000Z");
+    const sendTest = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
+    const adapter = capableAdapter({ sendTest });
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      () => now,
+    );
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-edit-attempting-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    void application.commands.requestTest(request);
+    await vi.waitFor(() => expect(sendTest).toHaveBeenCalledTimes(1));
+    await campaignApplication.commands.edit({
+      actor,
+      requestId: "campaign-edit-during-attempting-test-1",
+      campaignId: created.campaign.id,
+      expectedVersion: 1,
+      input: { ...input, subject: "Edited during provider test" },
+    });
+    now = new Date("2026-07-29T19:06:01.000Z");
+
+    await expect(
+      application.commands.requestTest(request),
+    ).resolves.toMatchObject({
+      state: "cancelled",
+      failureCode: "campaign_revision_changed",
+    });
+    expect(adapter.reconcileTest).not.toHaveBeenCalled();
+    expect(sendTest).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an ambiguous test after an edit without reconciling or retrying", async () => {
+    const adapter = capableAdapter({
+      sendTest: vi.fn().mockResolvedValue({
+        outcome: "ambiguous",
+        providerCampaignId: "brevo-campaign-25",
+      }),
+    });
+    const { application, campaignApplication } = createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const request = {
+      actor,
+      requestId: "campaign-test-edit-ambiguous-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    await application.commands.requestTest(request);
+    await campaignApplication.commands.edit({
+      actor,
+      requestId: "campaign-edit-after-ambiguous-test-1",
+      campaignId: created.campaign.id,
+      expectedVersion: 1,
+      input: { ...input, previewText: "Edited after uncertain delivery" },
+    });
+
+    await expect(
+      application.commands.requestTest(request),
+    ).resolves.toMatchObject({
+      state: "cancelled",
+      failureCode: "campaign_revision_changed",
+    });
+    expect(adapter.reconcileTest).not.toHaveBeenCalled();
+    expect(adapter.sendTest).toHaveBeenCalledTimes(1);
+  });
+
   it("limits configured recipients to five at the shared application boundary", async () => {
     const adapter = capableAdapter();
     const { application, campaignApplication } = createFixture(adapter);
@@ -678,5 +762,88 @@ describe("campaign test delivery", () => {
       outcome: "accepted",
     });
     expect(JSON.stringify(events)).not.toContain("@example.test");
+  });
+
+  it("requires a persisted Owner confirmation and client-owned provisioning evidence for readiness", async () => {
+    const adapter = capableAdapter();
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      undefined,
+      undefined,
+      {
+        classification: "client_owned",
+        evidenceId: "provisioning-client-owned-1",
+        accountScopeFingerprint: "8".repeat(64),
+        verifiedAt: "2026-07-29T18:00:00.000Z",
+      },
+    );
+    const created = await createCampaign(campaignApplication);
+    const operation = await application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-readiness-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+
+    await expect(
+      application.queries.readiness({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.toMatchObject({
+      state: "owner_confirmation_required",
+      testDeliveryReady: false,
+      ownershipEvidenceId: "provisioning-client-owned-1",
+    });
+
+    const confirmation = await application.commands.confirmReceipt({
+      actor,
+      requestId: "campaign-test-confirm-1",
+      executionId: operation.executionId,
+    });
+    expect(confirmation).toMatchObject({
+      executionId: operation.executionId,
+      ownerActorId: membership.id,
+    });
+    expect(JSON.stringify(confirmation)).not.toContain("@");
+
+    await expect(
+      application.queries.readiness({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.toMatchObject({
+      state: "ready",
+      testDeliveryReady: true,
+      ownershipEvidenceId: "provisioning-client-owned-1",
+    });
+  });
+
+  it("keeps evaluation ownership evidence outside the readiness gate", async () => {
+    const { application, campaignApplication } =
+      createFixture(capableAdapter());
+    const created = await createCampaign(campaignApplication);
+    const operation = await application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-evaluation-readiness-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+    await application.commands.confirmReceipt({
+      actor,
+      requestId: "campaign-test-evaluation-confirm-1",
+      executionId: operation.executionId,
+    });
+
+    await expect(
+      application.queries.readiness({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.toMatchObject({
+      state: "evaluation_only",
+      testDeliveryReady: false,
+      ownershipEvidenceId: "provisioning-evaluation-1",
+    });
   });
 });

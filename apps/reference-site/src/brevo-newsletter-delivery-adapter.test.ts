@@ -1,13 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  assessBrevoTestDeliveryReadiness,
-  createBrevoNewsletterDeliveryAdapter,
-} from "./brevo-newsletter-delivery-adapter";
-import type {
-  CampaignTestDeliveryEvidence,
-  NewsletterTestRequest,
-} from "@foundry/application";
+import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
+import type { NewsletterTestRequest } from "@foundry/application";
 
 const configurationFingerprint = "a".repeat(64);
 const request: NewsletterTestRequest = {
@@ -169,6 +163,7 @@ describe("Brevo newsletter delivery adapter", () => {
     ).resolves.toEqual({
       outcome: "ambiguous",
       providerCampaignId: "17",
+      code: "provider_rate_limited",
     });
 
     const transientSearch = createBrevoNewsletterDeliveryAdapter({
@@ -217,6 +212,7 @@ describe("Brevo newsletter delivery adapter", () => {
     });
     await expect(createRateLimited.sendTest(request)).resolves.toEqual({
       outcome: "ambiguous",
+      code: "provider_rate_limited",
     });
 
     const sendAmbiguous = createBrevoNewsletterDeliveryAdapter({
@@ -245,6 +241,7 @@ describe("Brevo newsletter delivery adapter", () => {
     await expect(sendRateLimited.sendTest(request)).resolves.toEqual({
       outcome: "ambiguous",
       providerCampaignId: "20",
+      code: "provider_rate_limited",
     });
   });
 
@@ -280,111 +277,4 @@ describe("Brevo newsletter delivery adapter", () => {
     expect(JSON.stringify(health)).not.toContain("@");
   });
 
-  it("keeps evaluation accounts non-production and requires current client-owned live evidence", async () => {
-    const evidence = {
-      ...request.binding,
-      executionId: request.executionId,
-      providerCampaignId: "17",
-      providerReceiptHash: "3".repeat(64),
-      acceptedAt: "2026-07-29T19:05:00.000Z",
-    } satisfies CampaignTestDeliveryEvidence;
-    const adapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      senderIds: { sender_primary: 42 },
-      fetcher: vi
-        .fn()
-        .mockResolvedValueOnce(response(200, {}))
-        .mockResolvedValueOnce(
-          response(200, { senders: [{ id: 42, active: true }] }),
-        ),
-    });
-
-    await expect(
-      assessBrevoTestDeliveryReadiness({
-        adapter,
-        ownership: "evaluation",
-        liveTestEvidence: evidence,
-        currentBinding: request.binding,
-        ownerConfirmedReceipt: true,
-      }),
-    ).resolves.toMatchObject({
-      state: "evaluation_only",
-      testDeliveryReady: false,
-    });
-  });
-
-  it("marks only healthy client-owned configuration with confirmed current live evidence ready", async () => {
-    const evidence = {
-      ...request.binding,
-      executionId: request.executionId,
-      providerCampaignId: "17",
-      providerReceiptHash: "3".repeat(64),
-      acceptedAt: "2026-07-29T19:05:00.000Z",
-    } satisfies CampaignTestDeliveryEvidence;
-    const adapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      senderIds: { sender_primary: 42 },
-      fetcher: vi
-        .fn()
-        .mockResolvedValueOnce(response(200, {}))
-        .mockResolvedValueOnce(
-          response(200, { senders: [{ id: 42, active: true }] }),
-        ),
-    });
-
-    await expect(
-      assessBrevoTestDeliveryReadiness({
-        adapter,
-        ownership: "client_owned",
-        liveTestEvidence: evidence,
-        currentBinding: request.binding,
-        ownerConfirmedReceipt: true,
-      }),
-    ).resolves.toEqual({
-      state: "ready",
-      testDeliveryReady: true,
-      provider: "brevo",
-      configurationFingerprint,
-      acceptedAt: evidence.acceptedAt,
-    });
-  });
-
-  it("requires the complete current binding for client-owned readiness", async () => {
-    const evidence = {
-      ...request.binding,
-      executionId: request.executionId,
-      providerCampaignId: "17",
-      providerReceiptHash: "3".repeat(64),
-      acceptedAt: "2026-07-29T19:05:00.000Z",
-    } satisfies CampaignTestDeliveryEvidence;
-    const adapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey: "test-key-not-a-real-secret",
-      configurationFingerprint,
-      senderIds: { sender_primary: 42 },
-      fetcher: vi
-        .fn()
-        .mockResolvedValueOnce(response(200, {}))
-        .mockResolvedValueOnce(
-          response(200, { senders: [{ id: 42, active: true }] }),
-        ),
-    });
-
-    await expect(
-      assessBrevoTestDeliveryReadiness({
-        adapter,
-        ownership: "client_owned",
-        liveTestEvidence: evidence,
-        currentBinding: {
-          ...request.binding,
-          htmlFingerprint: "9".repeat(64),
-        },
-        ownerConfirmedReceipt: true,
-      }),
-    ).resolves.toMatchObject({
-      state: "live_test_required",
-      testDeliveryReady: false,
-    });
-  });
 });

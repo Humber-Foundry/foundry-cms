@@ -1,6 +1,4 @@
 import type {
-  CampaignTestDeliveryBinding,
-  CampaignTestDeliveryEvidence,
   NewsletterDeliveryAdapter,
   NewsletterDeliveryCapabilities,
   NewsletterTestOutcome,
@@ -29,7 +27,7 @@ type BrevoCampaign = Readonly<{
 type CampaignRead =
   | Readonly<{ outcome: "found"; campaign: BrevoCampaign }>
   | Readonly<{ outcome: "not_found" }>
-  | Readonly<{ outcome: "ambiguous" }>;
+  | Readonly<{ outcome: "ambiguous"; code?: string }>;
 
 function campaignName(executionId: string) {
   return `foundry-test-${executionId}`;
@@ -144,7 +142,14 @@ export function createBrevoNewsletterDeliveryAdapter({
       ...(signal === undefined ? {} : { signal }),
     });
     if (response.status === 404) return { outcome: "not_found" } as const;
-    if (!response.ok) return { outcome: "ambiguous" } as const;
+    if (!response.ok) {
+      return {
+        outcome: "ambiguous",
+        ...(response.status === 429
+          ? { code: "provider_rate_limited" }
+          : {}),
+      } as const;
+    }
     return {
       outcome: "found",
       campaign: (await json(response)) as BrevoCampaign,
@@ -158,7 +163,14 @@ export function createBrevoNewsletterDeliveryAdapter({
       `${endpoint}/emailCampaigns?type=classic&status=draft&limit=50&sort=desc`,
       { method: "GET", headers: headers(apiKey) },
     );
-    if (!response.ok) return { outcome: "ambiguous" };
+    if (!response.ok) {
+      return {
+        outcome: "ambiguous",
+        ...(response.status === 429
+          ? { code: "provider_rate_limited" }
+          : {}),
+      };
+    }
     const body = await json(response) as {
       campaigns?: ReadonlyArray<BrevoCampaign>;
       count?: unknown;
@@ -194,6 +206,7 @@ export function createBrevoNewsletterDeliveryAdapter({
       return {
         outcome: "ambiguous",
         ...(campaignId === null ? {} : { providerCampaignId: campaignId }),
+        ...(read.code === undefined ? {} : { code: read.code }),
       } as const;
     }
     if (read.outcome === "not_found") return read;
@@ -288,7 +301,12 @@ export function createBrevoNewsletterDeliveryAdapter({
           });
           if (!created.ok) {
             if (outcomeCouldBeAmbiguous(created.status)) {
-              return { outcome: "ambiguous" } as const;
+              return {
+                outcome: "ambiguous",
+                ...(created.status === 429
+                  ? { code: "provider_rate_limited" }
+                  : {}),
+              } as const;
             }
             return {
               outcome: "rejected",
@@ -307,6 +325,9 @@ export function createBrevoNewsletterDeliveryAdapter({
             return {
               outcome: "ambiguous",
               providerCampaignId: campaignId,
+              ...(existing.code === undefined
+                ? {}
+                : { code: existing.code }),
             } as const;
           }
           if (
@@ -340,6 +361,9 @@ export function createBrevoNewsletterDeliveryAdapter({
             return {
               outcome: "ambiguous",
               providerCampaignId: campaignId,
+              ...(sent.status === 429
+                ? { code: "provider_rate_limited" }
+                : {}),
             } as const;
           }
           return {
@@ -376,74 +400,4 @@ export function createBrevoNewsletterDeliveryAdapter({
     },
   };
   return Object.freeze(adapter);
-}
-
-export async function assessBrevoTestDeliveryReadiness({
-  adapter,
-  ownership,
-  liveTestEvidence,
-  currentBinding,
-  ownerConfirmedReceipt,
-}: {
-  adapter: NewsletterDeliveryAdapter;
-  ownership: "evaluation" | "client_owned";
-  liveTestEvidence: CampaignTestDeliveryEvidence | null;
-  currentBinding: CampaignTestDeliveryBinding;
-  ownerConfirmedReceipt: boolean;
-}) {
-  const [capabilities, health] = await Promise.all([
-    adapter.capabilities(),
-    adapter.health(),
-  ]);
-  const currentEvidence =
-    liveTestEvidence !== null &&
-    Object.entries(currentBinding).every(
-      ([key, value]) =>
-        liveTestEvidence[key as keyof CampaignTestDeliveryBinding] === value,
-    ) &&
-    currentBinding.providerConfigurationFingerprint ===
-      capabilities.configurationFingerprint;
-  if (ownership !== "client_owned") {
-    return Object.freeze({
-      state: "evaluation_only" as const,
-      testDeliveryReady: false,
-      provider: capabilities.provider,
-      configurationFingerprint: capabilities.configurationFingerprint,
-    });
-  }
-  if (
-    health.state !== "healthy" ||
-    health.credential !== "verified" ||
-    health.senderIdentity !== "verified"
-  ) {
-    return Object.freeze({
-      state: "provider_unhealthy" as const,
-      testDeliveryReady: false,
-      provider: capabilities.provider,
-      configurationFingerprint: capabilities.configurationFingerprint,
-    });
-  }
-  if (!currentEvidence) {
-    return Object.freeze({
-      state: "live_test_required" as const,
-      testDeliveryReady: false,
-      provider: capabilities.provider,
-      configurationFingerprint: capabilities.configurationFingerprint,
-    });
-  }
-  if (!ownerConfirmedReceipt) {
-    return Object.freeze({
-      state: "owner_confirmation_required" as const,
-      testDeliveryReady: false,
-      provider: capabilities.provider,
-      configurationFingerprint: capabilities.configurationFingerprint,
-    });
-  }
-  return Object.freeze({
-    state: "ready" as const,
-    testDeliveryReady: true,
-    provider: capabilities.provider,
-    configurationFingerprint: capabilities.configurationFingerprint,
-    acceptedAt: liveTestEvidence.acceptedAt,
-  });
 }

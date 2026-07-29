@@ -4,6 +4,8 @@ import {
   createCampaignId,
   createCampaignRevisionId,
   maximumCampaignTestsPerRevisionWindow,
+  maximumProviderTestRecipientsPerDay,
+  type CampaignTestReceiptConfirmation,
   type CampaignTestDeliveryOperation,
   type CampaignTestDeliveryStore,
 } from "@foundry/application";
@@ -28,6 +30,14 @@ type TestDeliveryRow = Readonly<{
   evidence_json: string | null;
   created_at: string;
   updated_at: string;
+}>;
+
+type TestReceiptConfirmationRow = Readonly<{
+  execution_id: string;
+  site_id: string;
+  owner_actor_id: string;
+  request_id: string;
+  confirmed_at: string;
 }>;
 
 const projection = `
@@ -78,6 +88,18 @@ function toOperation(row: TestDeliveryRow): CampaignTestDeliveryOperation {
   });
 }
 
+function toConfirmation(
+  row: TestReceiptConfirmationRow,
+): CampaignTestReceiptConfirmation {
+  return Object.freeze({
+    executionId: row.execution_id,
+    siteId: row.site_id as SiteId,
+    ownerActorId: row.owner_actor_id,
+    requestId: row.request_id,
+    confirmedAt: row.confirmed_at,
+  });
+}
+
 async function byRequest(
   database: D1DatabaseBinding,
   input: { siteId: SiteId; actorId: string; requestId: string },
@@ -98,6 +120,16 @@ export function createD1CampaignTestDeliveryStore(
   const store: CampaignTestDeliveryStore = {
     findByRequest(input) {
       return byRequest(database, input);
+    },
+    async findByExecution({ siteId, executionId }) {
+      const row = await database
+        .prepare(
+          `${projection}
+           WHERE site_id = ?1 AND execution_id = ?2`,
+        )
+        .bind(siteId, executionId)
+        .first<TestDeliveryRow>();
+      return row === null ? null : toOperation(row);
     },
     async claim(operation) {
       await database
@@ -173,6 +205,7 @@ export function createD1CampaignTestDeliveryStore(
           `UPDATE campaign_test_deliveries
            SET state = 'attempting', attempt_number = attempt_number + 1,
              attempt_lease_until = ?1,
+             failure_code = NULL,
              updated_at = ?2
            WHERE execution_id = ?3 AND site_id = ?4 AND updated_at = ?5
              AND (
@@ -235,6 +268,96 @@ export function createD1CampaignTestDeliveryStore(
         .bind(siteId, campaignId)
         .first<TestDeliveryRow>();
       return row === null ? null : toOperation(row);
+    },
+    async confirmReceipt(confirmation) {
+      await database
+        .prepare(
+          `INSERT INTO campaign_test_receipt_confirmations (
+             execution_id, site_id, owner_actor_id, request_id, confirmed_at
+           )
+           SELECT ?1, ?2, ?3, ?4, ?5
+           WHERE EXISTS (
+             SELECT 1 FROM campaign_test_deliveries
+             WHERE execution_id = ?1 AND site_id = ?2
+               AND state = 'accepted' AND evidence_json IS NOT NULL
+           )
+           ON CONFLICT (execution_id) DO NOTHING`,
+        )
+        .bind(
+          confirmation.executionId,
+          confirmation.siteId,
+          confirmation.ownerActorId,
+          confirmation.requestId,
+          confirmation.confirmedAt,
+        )
+        .run();
+      const stored = await store.findReceiptConfirmation(confirmation);
+      if (stored === null) {
+        throw new CampaignValidationError("test_delivery_not_accepted");
+      }
+      return stored;
+    },
+    async findReceiptConfirmation({ siteId, executionId }) {
+      const row = await database
+        .prepare(
+          `SELECT execution_id, site_id, owner_actor_id, request_id,
+             confirmed_at
+           FROM campaign_test_receipt_confirmations
+           WHERE site_id = ?1 AND execution_id = ?2`,
+        )
+        .bind(siteId, executionId)
+        .first<TestReceiptConfirmationRow>();
+      return row === null ? null : toConfirmation(row);
+    },
+    async reserveDailyRecipientBudget(input) {
+      if (
+        input.recipientCount < 1 ||
+        input.recipientCount > 5 ||
+        !/^[a-f0-9]{64}$/u.test(input.accountScopeFingerprint) ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(input.budgetDay)
+      ) {
+        return false;
+      }
+      await database
+        .prepare(
+          `INSERT INTO campaign_test_recipient_budget (
+             account_scope_fingerprint, budget_day, execution_id,
+             attempt_number, recipient_count, reserved_at
+           )
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6
+           WHERE (
+             SELECT COALESCE(SUM(recipient_count), 0)
+             FROM campaign_test_recipient_budget
+             WHERE account_scope_fingerprint = ?1 AND budget_day = ?2
+           ) + ?5 <= ${maximumProviderTestRecipientsPerDay}
+           ON CONFLICT (
+             account_scope_fingerprint, budget_day, execution_id,
+             attempt_number
+           ) DO NOTHING`,
+        )
+        .bind(
+          input.accountScopeFingerprint,
+          input.budgetDay,
+          input.executionId,
+          input.attemptNumber,
+          input.recipientCount,
+          input.reservedAt,
+        )
+        .run();
+      const reservation = await database
+        .prepare(
+          `SELECT recipient_count FROM campaign_test_recipient_budget
+           WHERE account_scope_fingerprint = ?1 AND budget_day = ?2
+             AND execution_id = ?3 AND attempt_number = ?4`,
+        )
+        .bind(
+          input.accountScopeFingerprint,
+          input.budgetDay,
+          input.executionId,
+          input.attemptNumber,
+        )
+        .first<{ recipient_count: number }>();
+      return reservation?.recipient_count === input.recipientCount;
     },
   };
   return Object.freeze(store);

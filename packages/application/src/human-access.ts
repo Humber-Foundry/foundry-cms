@@ -69,7 +69,8 @@ export type HumanCapability =
   | "subscriber-ledger.export"
   | "forms.review"
   | "forms.delivery.manage"
-  | "forms.data.manage";
+  | "forms.data.manage"
+  | "campaign.test.confirm";
 
 export type ExternalIdentityBinding = Readonly<{
   issuer: string;
@@ -299,6 +300,7 @@ const roleCapabilities: Readonly<
     "forms.review",
     "forms.delivery.manage",
     "forms.data.manage",
+    "campaign.test.confirm",
   ]),
   editor: new Set(["dashboard.view", "content.write", "forms.review"]),
 };

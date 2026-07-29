@@ -8,7 +8,9 @@ CREATE TABLE campaign_test_deliveries (
   binding_json TEXT NOT NULL,
   recipient_ids_json TEXT NOT NULL,
   state TEXT NOT NULL CHECK (
-    state IN ('pending', 'attempting', 'ambiguous', 'accepted', 'failed')
+    state IN (
+      'pending', 'attempting', 'ambiguous', 'accepted', 'failed', 'cancelled'
+    )
   ),
   attempt_number INTEGER NOT NULL CHECK (attempt_number >= 0),
   attempt_lease_until TEXT,
@@ -25,8 +27,12 @@ CREATE TABLE campaign_test_deliveries (
       AND provider_campaign_id IS NOT NULL AND failure_code IS NULL) OR
     (state = 'failed' AND evidence_json IS NULL
       AND failure_code IS NOT NULL) OR
-    (state IN ('pending', 'attempting', 'ambiguous') AND evidence_json IS NULL
-      AND failure_code IS NULL)
+    (state = 'cancelled' AND evidence_json IS NULL
+      AND failure_code IS NOT NULL) OR
+    (state IN ('pending', 'attempting') AND evidence_json IS NULL
+      AND failure_code IS NULL) OR
+    (state = 'ambiguous' AND evidence_json IS NULL
+      AND (failure_code IS NULL OR failure_code = 'provider_rate_limited'))
   )
 );
 
@@ -35,9 +41,55 @@ ON campaign_test_deliveries (
   site_id, campaign_id, state, updated_at DESC
 );
 
+CREATE TABLE campaign_test_receipt_confirmations (
+  execution_id TEXT PRIMARY KEY,
+  site_id TEXT NOT NULL,
+  owner_actor_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  confirmed_at TEXT NOT NULL,
+  FOREIGN KEY (execution_id) REFERENCES campaign_test_deliveries(execution_id)
+);
+
+CREATE TRIGGER campaign_test_receipt_confirmations_prevent_update
+BEFORE UPDATE ON campaign_test_receipt_confirmations
+BEGIN
+  SELECT RAISE(ABORT, 'campaign_test_receipt_confirmation_is_immutable');
+END;
+
+CREATE TRIGGER campaign_test_receipt_confirmations_prevent_delete
+BEFORE DELETE ON campaign_test_receipt_confirmations
+BEGIN
+  SELECT RAISE(ABORT, 'campaign_test_receipt_confirmation_is_immutable');
+END;
+
+CREATE TABLE campaign_test_recipient_budget (
+  account_scope_fingerprint TEXT NOT NULL,
+  budget_day TEXT NOT NULL,
+  execution_id TEXT NOT NULL,
+  attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+  recipient_count INTEGER NOT NULL CHECK (recipient_count BETWEEN 1 AND 5),
+  reserved_at TEXT NOT NULL,
+  PRIMARY KEY (
+    account_scope_fingerprint, budget_day, execution_id, attempt_number
+  ),
+  FOREIGN KEY (execution_id) REFERENCES campaign_test_deliveries(execution_id)
+);
+
+CREATE TRIGGER campaign_test_recipient_budget_prevent_update
+BEFORE UPDATE ON campaign_test_recipient_budget
+BEGIN
+  SELECT RAISE(ABORT, 'campaign_test_recipient_budget_is_immutable');
+END;
+
+CREATE TRIGGER campaign_test_recipient_budget_prevent_delete
+BEFORE DELETE ON campaign_test_recipient_budget
+BEGIN
+  SELECT RAISE(ABORT, 'campaign_test_recipient_budget_is_immutable');
+END;
+
 CREATE TRIGGER campaign_test_deliveries_prevent_terminal_update
 BEFORE UPDATE ON campaign_test_deliveries
-WHEN OLD.state IN ('accepted', 'failed')
+WHEN OLD.state IN ('accepted', 'failed', 'cancelled')
 BEGIN
   SELECT RAISE(ABORT, 'campaign_test_delivery_is_terminal');
 END;

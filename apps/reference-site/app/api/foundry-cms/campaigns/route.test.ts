@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   listCampaigns: vi.fn(),
   render: vi.fn(),
   currentEvidence: vi.fn(),
+  readiness: vi.fn(),
   requestTest: vi.fn(),
+  confirmReceipt: vi.fn(),
   createStandalone: vi.fn(),
   createFromPost: vi.fn(),
   edit: vi.fn(),
@@ -35,8 +37,14 @@ const application = {
   },
 };
 const testDelivery = {
-  queries: { currentEvidence: mocks.currentEvidence },
-  commands: { requestTest: mocks.requestTest },
+  queries: {
+    currentEvidence: mocks.currentEvidence,
+    readiness: mocks.readiness,
+  },
+  commands: {
+    requestTest: mocks.requestTest,
+    confirmReceipt: mocks.confirmReceipt,
+  },
 };
 
 vi.mock("../../../../src/campaign-runtime", () => ({
@@ -65,9 +73,17 @@ describe("campaign endpoint", () => {
       campaign: { id: "20000000-0000-4000-8000-000000000001" },
     });
     mocks.currentEvidence.mockResolvedValue(null);
+    mocks.readiness.mockResolvedValue({
+      state: "evaluation_only",
+      testDeliveryReady: false,
+    });
     mocks.requestTest.mockResolvedValue({
       executionId: "40000000-0000-4000-8000-000000000001",
       state: "pending",
+    });
+    mocks.confirmReceipt.mockResolvedValue({
+      executionId: "40000000-0000-4000-8000-000000000001",
+      ownerActorId: "membership-owner",
     });
   });
 
@@ -188,6 +204,29 @@ describe("campaign endpoint", () => {
       requestId: "campaign-test-1",
       campaignId: "20000000-0000-4000-8000-000000000001",
       testRecipientIds: ["owner-primary"],
+    });
+  });
+
+  it("persists Owner receipt confirmation for an accepted execution", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-confirm-1",
+        },
+        body: JSON.stringify({
+          action: "confirm_test_receipt",
+          executionId: "40000000-0000-4000-8000-000000000001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.confirmReceipt).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-test-confirm-1",
+      executionId: "40000000-0000-4000-8000-000000000001",
     });
   });
 

@@ -31,6 +31,10 @@ type CampaignCommand =
       action: "request_test";
       campaignId: string;
       testRecipientIds: ReadonlyArray<string>;
+    }>
+  | Readonly<{
+      action: "confirm_test_receipt";
+      executionId: string;
     }>;
 
 const maximumCampaignCommandBytes = 256 * 1024;
@@ -112,6 +116,19 @@ function command(value: unknown): CampaignCommand | null {
         }
       : null;
   }
+  if (value.action === "confirm_test_receipt") {
+    return Object.keys(value).length === 2 &&
+      Object.keys(value).every(
+        (key) => key === "action" || key === "executionId",
+      ) &&
+      "executionId" in value &&
+      typeof value.executionId === "string"
+      ? {
+          action: value.action,
+          executionId: value.executionId,
+        }
+      : null;
+  }
   if (
     (value.action !== "create_standalone" && value.action !== "edit") ||
     !("input" in value) ||
@@ -167,7 +184,11 @@ export async function GET(request: Request) {
         actor: context.identity,
         campaignId,
       });
-    return Response.json({ rendered, testEvidence }, {
+    const testReadiness = await context.testDelivery.queries.readiness({
+      actor: context.identity,
+      campaignId,
+    });
+    return Response.json({ rendered, testEvidence, testReadiness }, {
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
@@ -299,6 +320,12 @@ export async function POST(request: Request) {
           campaignId: editedCampaignId!,
           testRecipientIds: parsed.testRecipientIds,
         })
+      : parsed.action === "confirm_test_receipt"
+        ? await context.testDelivery.commands.confirmReceipt({
+            actor: context.identity,
+            requestId,
+            executionId: parsed.executionId,
+          })
       : parsed.action === "create_standalone"
       ? await context.application.commands.createStandalone({
           actor: context.identity,
@@ -322,6 +349,7 @@ export async function POST(request: Request) {
       status:
         parsed.action === "edit" ||
         parsed.action === "request_test" ||
+        parsed.action === "confirm_test_receipt" ||
         ("replayed" in result && result.replayed)
           ? 200
           : 201,

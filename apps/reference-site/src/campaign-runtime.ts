@@ -19,6 +19,7 @@ import {
   type CampaignChannelConfiguration,
   type CampaignStore,
   type NewsletterDeliveryAdapter,
+  type NewsletterProviderOwnershipEvidence,
 } from "@foundry/application";
 import {
   upgradeSiteDefinition,
@@ -52,6 +53,13 @@ const localCampaignTestDeliveryStore =
   createInMemoryCampaignTestDeliveryStore();
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
+const developmentProviderOwnershipEvidence:
+  NewsletterProviderOwnershipEvidence = Object.freeze({
+    classification: "evaluation",
+    evidenceId: "local-evaluation",
+    accountScopeFingerprint: "0".repeat(64),
+    verifiedAt: "1970-01-01T00:00:00.000Z",
+  });
 const developmentChannelConfiguration: CampaignChannelConfiguration = Object.freeze({
   senderIdentityId: "sender_primary",
   complianceFooter: Object.freeze({
@@ -68,6 +76,50 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
     version: 1 as const,
   }),
 });
+
+function readProviderOwnershipEvidence(
+  value: string | undefined,
+  accountScopeFingerprint: string,
+): NewsletterProviderOwnershipEvidence {
+  if (value === undefined || value.trim() === "") {
+    return Object.freeze({
+      classification: "evaluation",
+      evidenceId: "brevo-evaluation-unverified",
+      accountScopeFingerprint,
+      verifiedAt: "1970-01-01T00:00:00.000Z",
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("brevo_provisioning_evidence_invalid");
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Object.keys(parsed).length !== 4 ||
+    !("classification" in parsed) ||
+    (parsed.classification !== "evaluation" &&
+      parsed.classification !== "client_owned") ||
+    !("evidenceId" in parsed) ||
+    typeof parsed.evidenceId !== "string" ||
+    !/^[A-Za-z0-9:._-]{1,200}$/u.test(parsed.evidenceId) ||
+    !("accountScopeFingerprint" in parsed) ||
+    parsed.accountScopeFingerprint !== accountScopeFingerprint ||
+    !("verifiedAt" in parsed) ||
+    typeof parsed.verifiedAt !== "string" ||
+    Number.isNaN(Date.parse(parsed.verifiedAt))
+  ) {
+    throw new Error("brevo_provisioning_evidence_invalid");
+  }
+  return Object.freeze({
+    classification: parsed.classification,
+    evidenceId: parsed.evidenceId,
+    accountScopeFingerprint,
+    verifiedAt: parsed.verifiedAt,
+  });
+}
 
 async function localPostRevision(
   siteId: SiteId,
@@ -167,6 +219,7 @@ export async function loadCampaignRequestContext(
       return { outcome: "not_found" as const };
     },
   };
+  let providerOwnershipEvidence = developmentProviderOwnershipEvidence;
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
     if (environment.FOUNDRY_DB === undefined) {
@@ -198,6 +251,10 @@ export async function loadCampaignRequestContext(
     if (!/^[a-f0-9]{64}$/u.test(accountScopeFingerprint)) {
       throw new Error("brevo_account_scope_fingerprint_invalid");
     }
+    providerOwnershipEvidence = readProviderOwnershipEvidence(
+      environment.FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON,
+      accountScopeFingerprint,
+    );
     const senderIds = JSON.parse(
       environment.FOUNDRY_BREVO_SENDER_IDS_JSON ?? "{}",
     ) as Record<string, number>;
@@ -260,6 +317,7 @@ export async function loadCampaignRequestContext(
           }
           return { id, address };
         }),
+      providerOwnershipEvidence,
       replayTestCommand: ({
         actor,
         requestId,

@@ -75,6 +75,7 @@ export type NewsletterTestOutcome =
   | Readonly<{
       outcome: "ambiguous";
       providerCampaignId?: string;
+      code?: string;
     }>
   | Readonly<{ outcome: "rejected"; code: string }>;
 
@@ -102,6 +103,21 @@ export type CampaignTestDeliveryEvidence =
     acceptedAt: string;
   }>;
 
+export type CampaignTestReceiptConfirmation = Readonly<{
+  executionId: string;
+  siteId: SiteId;
+  ownerActorId: string;
+  requestId: string;
+  confirmedAt: string;
+}>;
+
+export type NewsletterProviderOwnershipEvidence = Readonly<{
+  classification: "evaluation" | "client_owned";
+  evidenceId: string;
+  accountScopeFingerprint: string;
+  verifiedAt: string;
+}>;
+
 export type CampaignTestDeliveryOperation = Readonly<{
   executionId: string;
   siteId: SiteId;
@@ -111,7 +127,13 @@ export type CampaignTestDeliveryOperation = Readonly<{
   campaignRevisionId: CampaignRevisionId;
   binding: CampaignTestDeliveryBinding;
   recipientIds: ReadonlyArray<string>;
-  state: "pending" | "attempting" | "ambiguous" | "accepted" | "failed";
+  state:
+    | "pending"
+    | "attempting"
+    | "ambiguous"
+    | "accepted"
+    | "failed"
+    | "cancelled";
   attemptNumber: number;
   attemptLeaseUntil: string | null;
   providerCampaignId: string | null;
@@ -127,6 +149,10 @@ export interface CampaignTestDeliveryStore {
     actorId: string;
     requestId: string;
   }): Promise<CampaignTestDeliveryOperation | null>;
+  findByExecution(input: {
+    siteId: SiteId;
+    executionId: string;
+  }): Promise<CampaignTestDeliveryOperation | null>;
   claim(operation: CampaignTestDeliveryOperation):
     Promise<CampaignTestDeliveryOperation>;
   beginAttempt(input: {
@@ -140,11 +166,27 @@ export interface CampaignTestDeliveryStore {
     siteId: SiteId;
     campaignId: CampaignId;
   }): Promise<CampaignTestDeliveryOperation | null>;
+  confirmReceipt(
+    confirmation: CampaignTestReceiptConfirmation,
+  ): Promise<CampaignTestReceiptConfirmation>;
+  findReceiptConfirmation(input: {
+    siteId: SiteId;
+    executionId: string;
+  }): Promise<CampaignTestReceiptConfirmation | null>;
+  reserveDailyRecipientBudget(input: {
+    accountScopeFingerprint: string;
+    executionId: string;
+    attemptNumber: number;
+    recipientCount: number;
+    budgetDay: string;
+    reservedAt: string;
+  }): Promise<boolean>;
 }
 
 export const maximumCampaignTestRecipients = 5;
 export const maximumCampaignTestsPerRevisionWindow = 5;
 export const campaignTestRateLimitWindowMs = 60 * 60 * 1_000;
+export const maximumProviderTestRecipientsPerDay = 50;
 
 export type CampaignTestDeliveryApplication = Readonly<{
   commands: Readonly<{
@@ -154,12 +196,35 @@ export type CampaignTestDeliveryApplication = Readonly<{
       campaignId: CampaignId;
       testRecipientIds: ReadonlyArray<string>;
     }): Promise<CampaignTestDeliveryOperation>;
+    confirmReceipt(input: {
+      actor: CampaignActor;
+      requestId: string;
+      executionId: string;
+    }): Promise<CampaignTestReceiptConfirmation>;
   }>;
   queries: Readonly<{
     currentEvidence(input: {
       actor: CampaignActor;
       campaignId: CampaignId;
     }): Promise<CampaignTestDeliveryEvidence | null>;
+    readiness(input: {
+      actor: CampaignActor;
+      campaignId: CampaignId;
+    }): Promise<
+      Readonly<{
+        state:
+          | "evaluation_only"
+          | "provider_unhealthy"
+          | "live_test_required"
+          | "owner_confirmation_required"
+          | "ready";
+        testDeliveryReady: boolean;
+        provider: string;
+        configurationFingerprint: string;
+        acceptedAt?: string;
+        ownershipEvidenceId: string;
+      }>
+    >;
   }>;
 }>;
 
@@ -385,6 +450,7 @@ export function createCampaignTestDeliveryApplication({
   identifyActor,
   resolveAudience,
   resolveTestRecipients,
+  providerOwnershipEvidence,
   replayTestCommand,
   recordAcceptedTestCommand,
   recordRejectedCommand,
@@ -397,7 +463,7 @@ export function createCampaignTestDeliveryApplication({
   adapter: NewsletterDeliveryAdapter;
   authorize(
     actor: CampaignActor,
-    capability: "campaign.author",
+    capability: "campaign.author" | "campaign.test.confirm",
   ): Promise<CampaignAuthor>;
   identifyActor(actor: CampaignActor): string;
   resolveAudience(
@@ -406,6 +472,7 @@ export function createCampaignTestDeliveryApplication({
   resolveTestRecipients(
     recipientIds: ReadonlyArray<string>,
   ): Promise<ReadonlyArray<NewsletterTestRecipient>>;
+  providerOwnershipEvidence: NewsletterProviderOwnershipEvidence;
   replayTestCommand?(input: {
     actor: CampaignActor;
     requestId: string;
@@ -434,6 +501,17 @@ export function createCampaignTestDeliveryApplication({
   clock?: () => Date;
   createExecutionId?: () => string;
 }): CampaignTestDeliveryApplication {
+  if (
+    !fingerprintPattern.test(
+      providerOwnershipEvidence.accountScopeFingerprint,
+    ) ||
+    providerOwnershipEvidence.evidenceId.length === 0 ||
+    providerOwnershipEvidence.evidenceId.length > 200 ||
+    !/^[A-Za-z0-9:._-]+$/u.test(providerOwnershipEvidence.evidenceId) ||
+    Number.isNaN(Date.parse(providerOwnershipEvidence.verifiedAt))
+  ) {
+    throw new CampaignValidationError("provider_ownership_evidence_invalid");
+  }
   async function currentCampaignRevision(campaignId: CampaignId) {
     const campaign = await campaignStore.findCampaign({ siteId, campaignId });
     if (campaign === null) throw new CampaignNotFoundError();
@@ -487,9 +565,27 @@ export function createCampaignTestDeliveryApplication({
     });
     if (
       replayedCommand !== null &&
-      (existing?.state === "accepted" || existing?.state === "failed")
+      (existing?.state === "accepted" ||
+        existing?.state === "failed" ||
+        existing?.state === "cancelled")
     ) {
       return existing;
+    }
+    const current = await currentCampaignRevision(campaignId);
+    if (
+      existing !== null &&
+      existing.campaignRevisionId !== current.revision.id
+    ) {
+      commandState.accepted = replayedCommand !== null;
+      return store.record(
+        Object.freeze({
+          ...existing,
+          state: "cancelled" as const,
+          attemptLeaseUntil: null,
+          failureCode: "campaign_revision_changed",
+          updatedAt: clock().toISOString(),
+        }),
+      );
     }
     const capabilities = await adapter.capabilities();
     assertCapabilities(capabilities);
@@ -501,8 +597,7 @@ export function createCampaignTestDeliveryApplication({
     ) {
       throw new CampaignValidationError("provider_unhealthy");
     }
-    const { campaign, revision } =
-      replayedCommand ?? await currentCampaignRevision(campaignId);
+    const { campaign, revision } = current;
     const audience = await resolveAudience(revision.audienceDefinition);
     const rendered = await renderCampaignRevision(
       revision,
@@ -583,7 +678,11 @@ export function createCampaignTestDeliveryApplication({
       }),
     });
     commandState.accepted = true;
-    if (operation.state === "accepted" || operation.state === "failed") {
+    if (
+      operation.state === "accepted" ||
+      operation.state === "failed" ||
+      operation.state === "cancelled"
+    ) {
       return operation;
     }
     const now = clock().toISOString();
@@ -638,6 +737,10 @@ export function createCampaignTestDeliveryApplication({
                         "provider_campaign_id_invalid",
                       )
                     : operation.providerCampaignId,
+            failureCode:
+              reconciled.outcome === "ambiguous"
+                ? (reconciled.code ?? operation.failureCode)
+                : operation.failureCode,
             updatedAt: recoveryStartedAt.toISOString(),
           }),
         );
@@ -649,7 +752,21 @@ export function createCampaignTestDeliveryApplication({
       ) {
         return operation;
       }
-      if (reconciled.outcome === "ambiguous") return operation;
+      if (reconciled.outcome === "ambiguous") {
+        if (
+          reconciled.code === undefined ||
+          reconciled.code === operation.failureCode
+        ) {
+          return operation;
+        }
+        return store.record(
+          Object.freeze({
+            ...operation,
+            failureCode: reconciled.code,
+            updatedAt: clock().toISOString(),
+          }),
+        );
+      }
       if (reconciled.outcome === "not_sent") {
         operation = await store.record(
           Object.freeze({
@@ -657,6 +774,7 @@ export function createCampaignTestDeliveryApplication({
             state: "ambiguous" as const,
             providerCampaignId: reconciled.providerCampaignId,
             attemptLeaseUntil: null,
+            failureCode: null,
             updatedAt: clock().toISOString(),
           }),
         );
@@ -671,6 +789,7 @@ export function createCampaignTestDeliveryApplication({
             state: "ambiguous" as const,
             providerCampaignId: null,
             attemptLeaseUntil: null,
+            failureCode: null,
             updatedAt: clock().toISOString(),
           }),
         );
@@ -704,6 +823,38 @@ export function createCampaignTestDeliveryApplication({
       )!;
     }
     operation = attempt;
+    const latest = await currentCampaignRevision(campaignId);
+    if (latest.revision.id !== operation.campaignRevisionId) {
+      return store.record(
+        Object.freeze({
+          ...operation,
+          state: "cancelled" as const,
+          attemptLeaseUntil: null,
+          failureCode: "campaign_revision_changed",
+          updatedAt: clock().toISOString(),
+        }),
+      );
+    }
+    const budgetReserved = await store.reserveDailyRecipientBudget({
+      accountScopeFingerprint:
+        providerOwnershipEvidence.accountScopeFingerprint,
+      executionId: operation.executionId,
+      attemptNumber: operation.attemptNumber,
+      recipientCount: configuredRecipients.length,
+      budgetDay: attemptStartedAt.toISOString().slice(0, 10),
+      reservedAt: attemptStartedAt.toISOString(),
+    });
+    if (!budgetReserved) {
+      return store.record(
+        Object.freeze({
+          ...operation,
+          state: "failed" as const,
+          attemptLeaseUntil: null,
+          failureCode: "provider_test_daily_recipient_limit",
+          updatedAt: clock().toISOString(),
+        }),
+      );
+    }
     let outcome: NewsletterTestOutcome;
     try {
       outcome = await adapter.sendTest({
@@ -748,6 +899,7 @@ export function createCampaignTestDeliveryApplication({
                 outcome.providerCampaignId,
                 "provider_campaign_id_invalid",
               ),
+        failureCode: outcome.code ?? null,
         updatedAt: timestamp,
       }),
     );
@@ -786,8 +938,65 @@ export function createCampaignTestDeliveryApplication({
     }
   }
 
+  async function currentEvidenceFor(campaignId: CampaignId) {
+    const operation = await store.findLatestAccepted({
+      siteId,
+      campaignId,
+    });
+    if (operation?.evidence === null || operation === null) return null;
+    const capabilities = await adapter.capabilities();
+    assertCapabilities(capabilities);
+    const { revision } = await currentCampaignRevision(campaignId);
+    const audience = await resolveAudience(revision.audienceDefinition);
+    const rendered = await renderCampaignRevision(
+      revision,
+      audience.eligibleSubscriberCount,
+    );
+    const currentBinding = await bindingFor({
+      revision,
+      rendered,
+      providerConfigurationFingerprint:
+        capabilities.configurationFingerprint,
+      recipientIds: operation.recipientIds,
+    });
+    return sameBinding(operation.binding, currentBinding)
+      ? operation.evidence
+      : null;
+  }
+
+  async function confirmReceipt({
+    actor,
+    requestId,
+    executionId,
+  }: {
+    actor: CampaignActor;
+    requestId: string;
+    executionId: string;
+  }) {
+    const owner = await authorize(actor, "campaign.test.confirm");
+    if (!isCampaignRequestId(requestId)) {
+      throw new CampaignIdempotencyError("campaign_idempotency_key_invalid");
+    }
+    if (!uuidPattern.test(executionId)) {
+      throw new CampaignValidationError("test_execution_id_invalid");
+    }
+    const operation = await store.findByExecution({ siteId, executionId });
+    if (operation?.state !== "accepted" || operation.evidence === null) {
+      throw new CampaignValidationError("test_delivery_not_accepted");
+    }
+    return store.confirmReceipt(
+      Object.freeze({
+        executionId,
+        siteId,
+        ownerActorId: owner.id,
+        requestId,
+        confirmedAt: clock().toISOString(),
+      }),
+    );
+  }
+
   return Object.freeze({
-    commands: Object.freeze({ requestTest }),
+    commands: Object.freeze({ requestTest, confirmReceipt }),
     queries: Object.freeze({
       async currentEvidence({
         actor,
@@ -797,29 +1006,67 @@ export function createCampaignTestDeliveryApplication({
         campaignId: CampaignId;
       }) {
         await authorize(actor, "campaign.author");
-        const operation = await store.findLatestAccepted({
-          siteId,
-          campaignId,
-        });
-        if (operation?.evidence === null || operation === null) return null;
+        return currentEvidenceFor(campaignId);
+      },
+      async readiness({
+        actor,
+        campaignId,
+      }: {
+        actor: CampaignActor;
+        campaignId: CampaignId;
+      }) {
+        await authorize(actor, "campaign.author");
         const capabilities = await adapter.capabilities();
-        assertCapabilities(capabilities);
-        const { revision } = await currentCampaignRevision(campaignId);
-        const audience = await resolveAudience(revision.audienceDefinition);
-        const rendered = await renderCampaignRevision(
-          revision,
-          audience.eligibleSubscriberCount,
-        );
-        const currentBinding = await bindingFor({
-          revision,
-          rendered,
-          providerConfigurationFingerprint:
+        const health = await adapter.health();
+        const base = {
+          provider: capabilities.provider,
+          configurationFingerprint:
             capabilities.configurationFingerprint,
-          recipientIds: operation.recipientIds,
+          ownershipEvidenceId: providerOwnershipEvidence.evidenceId,
+        };
+        if (providerOwnershipEvidence.classification !== "client_owned") {
+          return Object.freeze({
+            ...base,
+            state: "evaluation_only" as const,
+            testDeliveryReady: false,
+          });
+        }
+        if (
+          health.state !== "healthy" ||
+          health.credential !== "verified" ||
+          health.senderIdentity !== "verified"
+        ) {
+          return Object.freeze({
+            ...base,
+            state: "provider_unhealthy" as const,
+            testDeliveryReady: false,
+          });
+        }
+        const evidence = await currentEvidenceFor(campaignId);
+        if (evidence === null) {
+          return Object.freeze({
+            ...base,
+            state: "live_test_required" as const,
+            testDeliveryReady: false,
+          });
+        }
+        const confirmation = await store.findReceiptConfirmation({
+          siteId,
+          executionId: evidence.executionId,
         });
-        return sameBinding(operation.binding, currentBinding)
-          ? operation.evidence
-          : null;
+        if (confirmation === null) {
+          return Object.freeze({
+            ...base,
+            state: "owner_confirmation_required" as const,
+            testDeliveryReady: false,
+          });
+        }
+        return Object.freeze({
+          ...base,
+          state: "ready" as const,
+          testDeliveryReady: true,
+          acceptedAt: evidence.acceptedAt,
+        });
       },
     }),
   });
@@ -830,6 +1077,8 @@ export function createInMemoryCampaignTestDeliveryStore():
     list(): ReadonlyArray<CampaignTestDeliveryOperation>;
   } {
   const operations = new Map<string, CampaignTestDeliveryOperation>();
+  const confirmations = new Map<string, CampaignTestReceiptConfirmation>();
+  const dailyRecipientReservations = new Map<string, number>();
   const requestKey = (operation: {
     siteId: SiteId;
     actorId: string;
@@ -840,6 +1089,15 @@ export function createInMemoryCampaignTestDeliveryStore():
   } = {
     async findByRequest(input) {
       return operations.get(requestKey(input)) ?? null;
+    },
+    async findByExecution({ siteId: requestedSiteId, executionId }) {
+      return (
+        [...operations.values()].find(
+          (operation) =>
+            operation.siteId === requestedSiteId &&
+            operation.executionId === executionId,
+        ) ?? null
+      );
     },
     async claim(operation) {
       const key = requestKey(operation);
@@ -895,6 +1153,7 @@ export function createInMemoryCampaignTestDeliveryStore():
         state: "attempting" as const,
         attemptNumber: current.attemptNumber + 1,
         attemptLeaseUntil: leaseUntil,
+        failureCode: null,
         updatedAt: now,
       });
       operations.set(key, attempting);
@@ -908,7 +1167,8 @@ export function createInMemoryCampaignTestDeliveryStore():
         current.executionId !== operation.executionId ||
         current.attemptNumber !== operation.attemptNumber ||
         current.state === "accepted" ||
-        current.state === "failed"
+        current.state === "failed" ||
+        current.state === "cancelled"
       ) {
         throw new CampaignValidationError("test_delivery_state_conflict");
       }
@@ -928,6 +1188,44 @@ export function createInMemoryCampaignTestDeliveryStore():
             right.updatedAt.localeCompare(left.updatedAt),
           )[0] ?? null
       );
+    },
+    async confirmReceipt(confirmation) {
+      const key = `${confirmation.siteId}:${confirmation.executionId}`;
+      const existing = confirmations.get(key);
+      if (existing !== undefined) return existing;
+      const operation = [...operations.values()].find(
+        (candidate) =>
+          candidate.siteId === confirmation.siteId &&
+          candidate.executionId === confirmation.executionId,
+      );
+      if (operation?.state !== "accepted") {
+        throw new CampaignValidationError("test_delivery_not_accepted");
+      }
+      confirmations.set(key, confirmation);
+      return confirmation;
+    },
+    async findReceiptConfirmation({ siteId: requestedSiteId, executionId }) {
+      return confirmations.get(`${requestedSiteId}:${executionId}`) ?? null;
+    },
+    async reserveDailyRecipientBudget(input) {
+      const reservationKey =
+        `${input.accountScopeFingerprint}:${input.budgetDay}:` +
+        `${input.executionId}:${input.attemptNumber}`;
+      if (dailyRecipientReservations.has(reservationKey)) return true;
+      const budgetPrefix =
+        `${input.accountScopeFingerprint}:${input.budgetDay}:`;
+      const used = [...dailyRecipientReservations.entries()]
+        .filter(([key]) => key.startsWith(budgetPrefix))
+        .reduce((total, [, count]) => total + count, 0);
+      if (
+        input.recipientCount < 1 ||
+        input.recipientCount > maximumCampaignTestRecipients ||
+        used + input.recipientCount > maximumProviderTestRecipientsPerDay
+      ) {
+        return false;
+      }
+      dailyRecipientReservations.set(reservationKey, input.recipientCount);
+      return true;
     },
     list() {
       return [...operations.values()];

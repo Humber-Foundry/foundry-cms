@@ -501,6 +501,18 @@ describe("human access application", () => {
         capability: "access.manage",
       }),
     ).resolves.toMatchObject({ role: "owner", status: "active" });
+    await expect(
+      application.queries.requireCapability({
+        actor: editorIdentity,
+        capability: "campaign.test.confirm",
+      }),
+    ).rejects.toEqual(new AccessDeniedError("capability_not_authorized"));
+    await expect(
+      application.queries.requireCapability({
+        actor: ownerIdentity,
+        capability: "campaign.test.confirm",
+      }),
+    ).resolves.toMatchObject({ role: "owner", status: "active" });
   });
 
   it("does not authorize an email match with a different issuer and subject", async () => {
