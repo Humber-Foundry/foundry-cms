@@ -256,6 +256,26 @@ describe("D1 campaign store", () => {
       command: acceptedTest.command,
       targetId: created.campaign.id,
     });
+    await database
+      .prepare(
+        `INSERT INTO campaign_test_deliveries (
+           execution_id, site_id, actor_id, request_id, campaign_id,
+           campaign_revision_id, binding_json, recipient_ids_json, state,
+           attempt_number, attempt_lease_until, provider_campaign_id,
+           failure_code, evidence_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
+           1, NULL, '18', NULL, '{}', ?7, ?7)`,
+      )
+      .bind(
+        "40000000-0000-4000-8000-000000000001",
+        siteId,
+        "membership-editor",
+        "campaign-test-confirm-source-1",
+        created.campaign.id,
+        created.revision.id,
+        "2026-07-29T19:06:00.000Z",
+      )
+      .run();
     const acceptedConfirmation = {
       ...acceptedTest,
       requestId: "campaign-test-confirm-audit-durable-1",
@@ -264,12 +284,18 @@ describe("D1 campaign store", () => {
         executionId: "40000000-0000-4000-8000-000000000001",
       },
       targetId: "40000000-0000-4000-8000-000000000001",
-      commandName: "campaign.confirm_test_receipt" as const,
+      confirmation: {
+        executionId: "40000000-0000-4000-8000-000000000001",
+        siteId,
+        ownerActorId: "membership-editor",
+        requestId: "campaign-test-confirm-audit-durable-1",
+        confirmedAt: "2026-07-29T19:07:00.000Z",
+      },
     };
-    await application.commands.recordAcceptedTestCommand(
+    await application.commands.recordAcceptedTestReceiptConfirmation(
       acceptedConfirmation,
     );
-    await application.commands.recordAcceptedTestCommand(
+    await application.commands.recordAcceptedTestReceiptConfirmation(
       acceptedConfirmation,
     );
     await application.commands.replayTestCommand({
@@ -277,8 +303,93 @@ describe("D1 campaign store", () => {
       requestId: acceptedConfirmation.requestId,
       command: acceptedConfirmation.command,
       targetId: acceptedConfirmation.targetId,
-      commandName: acceptedConfirmation.commandName,
+      commandName: "campaign.confirm_test_receipt",
     });
+    await expect(
+      database
+        .prepare(
+          `SELECT owner_actor_id, request_id
+           FROM campaign_test_receipt_confirmations
+           WHERE execution_id = ?1`,
+        )
+        .bind(acceptedConfirmation.confirmation.executionId)
+        .first(),
+    ).resolves.toMatchObject({
+      owner_actor_id: "membership-editor",
+      request_id: acceptedConfirmation.requestId,
+    });
+    await expect(
+      database
+        .prepare(
+          `UPDATE campaign_test_receipt_confirmations
+           SET owner_actor_id = 'other' WHERE execution_id = ?1`,
+        )
+        .bind(acceptedConfirmation.confirmation.executionId)
+        .run(),
+    ).rejects.toThrow(/campaign_test_receipt_confirmation_is_immutable/u);
+    await database
+      .prepare(
+        `INSERT INTO campaign_test_deliveries (
+           execution_id, site_id, actor_id, request_id, campaign_id,
+           campaign_revision_id, binding_json, recipient_ids_json, state,
+           attempt_number, attempt_lease_until, provider_campaign_id,
+           failure_code, evidence_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
+           1, NULL, '19', NULL, '{}', ?7, ?7)`,
+      )
+      .bind(
+        "40000000-0000-4000-8000-000000000002",
+        siteId,
+        "membership-editor",
+        "campaign-test-confirm-fault-source-1",
+        created.campaign.id,
+        created.revision.id,
+        "2026-07-29T19:08:00.000Z",
+      )
+      .run();
+    await database
+      .prepare(
+        `CREATE TRIGGER campaign_test_confirmation_fault
+         BEFORE INSERT ON campaign_audit_events
+         WHEN NEW.request_id = 'campaign-test-confirm-fault-durable-1'
+         BEGIN
+           SELECT RAISE(ABORT, 'simulated_confirmation_audit_failure');
+         END`,
+      )
+      .run();
+    await expect(
+      application.commands.recordAcceptedTestReceiptConfirmation({
+        ...acceptedConfirmation,
+        requestId: "campaign-test-confirm-fault-durable-1",
+        command: {
+          action: "confirm_test_receipt",
+          executionId: "40000000-0000-4000-8000-000000000002",
+        },
+        targetId: "40000000-0000-4000-8000-000000000002",
+        confirmation: {
+          ...acceptedConfirmation.confirmation,
+          executionId: "40000000-0000-4000-8000-000000000002",
+          requestId: "campaign-test-confirm-fault-durable-1",
+        },
+      }),
+    ).rejects.toThrow(/simulated_confirmation_audit_failure/u);
+    await expect(
+      database
+        .prepare(
+          `SELECT execution_id FROM campaign_test_receipt_confirmations
+           WHERE execution_id = ?1`,
+        )
+        .bind("40000000-0000-4000-8000-000000000002")
+        .first(),
+    ).resolves.toBeNull();
+    await expect(
+      database
+        .prepare(
+          `SELECT request_id FROM campaign_command_receipts
+           WHERE request_id = 'campaign-test-confirm-fault-durable-1'`,
+        )
+        .first(),
+    ).resolves.toBeNull();
 
     await expect(
       application.queries.getRevision({

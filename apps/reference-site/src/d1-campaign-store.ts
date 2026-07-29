@@ -646,6 +646,92 @@ export function createD1CampaignStore(
         (results[0]?.meta.changes ?? 0) === 0,
       );
     },
+    async acceptTestReceiptConfirmation({
+      command,
+      campaign,
+      revision,
+      audit,
+      confirmation,
+    }) {
+      const resultJson = JSON.stringify({ campaign, revision });
+      const results = await database.batch([
+        claimInsert(database, command, audit.occurredAt),
+        database
+          .prepare(
+            `INSERT INTO campaign_test_receipt_confirmations (
+               execution_id, site_id, owner_actor_id, request_id, confirmed_at
+             )
+             SELECT ?6, ?7, ?8, ?9, ?10
+             WHERE ${pendingCommandExists()}
+               AND ?7 = ?1 AND ?8 = ?2 AND ?9 = ?4
+               AND EXISTS (
+                 SELECT 1 FROM campaign_test_deliveries
+                 WHERE execution_id = ?6 AND site_id = ?7
+                   AND campaign_id = ?11
+                   AND campaign_revision_id = ?12
+                   AND state = 'accepted' AND evidence_json IS NOT NULL
+               )
+             ON CONFLICT DO NOTHING`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            confirmation.requestId,
+            confirmation.confirmedAt,
+            campaign.id,
+            revision.id,
+          ),
+        commandAuditInsert(
+          database,
+          audit,
+          command,
+          `AND EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+              AND owner_actor_id = ?21 AND request_id = ?22
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            confirmation.requestId,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'accepted', result_json = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+                   AND owner_actor_id = ?2 AND request_id = ?4
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            resultJson,
+            audit.occurredAt,
+            confirmation.executionId,
+          ),
+      ]);
+      return commandResult(
+        database,
+        command,
+        (results[0]?.meta.changes ?? 0) === 0,
+      );
+    },
     async recordAudit(event) {
       await auditInsert(database, event).run();
     },

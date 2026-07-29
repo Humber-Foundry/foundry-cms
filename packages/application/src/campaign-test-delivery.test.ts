@@ -81,9 +81,13 @@ function createFixture(
   let sequence = 0;
   let campaignSequence = 0;
   const deliveryStore = createInMemoryCampaignTestDeliveryStore();
-  const campaignStore = createInMemoryCampaignStore((input) =>
-    deliveryStore.cancelForCampaignEdit(input)
-  );
+  const campaignStore = createInMemoryCampaignStore({
+    cancelOpenTestDeliveries: (input) =>
+      deliveryStore.cancelForCampaignEdit(input),
+    persistTestReceiptConfirmation: async (confirmation) => {
+      await deliveryStore.persistReceiptConfirmation(confirmation);
+    },
+  });
   const rejectedCommands: unknown[] = [];
   const campaignApplication = createCampaignApplication({
     siteId,
@@ -113,14 +117,18 @@ function createFixture(
     providerOwnershipEvidence,
     replayTestCommand: (command) =>
       campaignApplication.commands.replayTestCommand(command),
-    recordAcceptedTestCommand: (command) => {
+    recordAcceptedTestCommand: (command) =>
+      campaignApplication.commands.recordAcceptedTestCommand(command),
+    recordAcceptedTestReceiptConfirmation: (command) => {
       if (
         failConfirmationReceipt &&
-        command.commandName === "campaign.confirm_test_receipt"
+        (command.command as { action?: unknown }).action ===
+          "confirm_test_receipt"
       ) {
         throw new Error("simulated_confirmation_receipt_failure");
       }
-      return campaignApplication.commands.recordAcceptedTestCommand(command);
+      return campaignApplication.commands
+        .recordAcceptedTestReceiptConfirmation(command);
     },
     clock,
     createExecutionId,
@@ -798,6 +806,43 @@ describe("campaign test delivery", () => {
     ).resolves.toBeNull();
   });
 
+  it("makes prior evidence stale when a configured recipient identity is remapped", async () => {
+    let address = "owner-original@example.test";
+    const resolveTestRecipients = async (
+      recipientIds: ReadonlyArray<string>,
+    ) =>
+      recipientIds.map((id) => ({ id, address }));
+    const { application, campaignApplication } = createFixture(
+      capableAdapter(),
+      undefined,
+      undefined,
+      undefined,
+      resolveTestRecipients,
+    );
+    const created = await createCampaign(campaignApplication);
+    await application.commands.requestTest({
+      actor,
+      requestId: "campaign-test-before-recipient-remap-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    });
+    await expect(
+      application.queries.currentEvidence({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.not.toBeNull();
+
+    address = "owner-remapped@example.test";
+
+    await expect(
+      application.queries.currentEvidence({
+        actor,
+        campaignId: created.campaign.id,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("fails closed when the configured provider lacks a required test capability", async () => {
     const adapter = capableAdapter({
       capabilities: vi.fn().mockResolvedValue({
@@ -1017,7 +1062,7 @@ describe("campaign test delivery", () => {
     });
   });
 
-  it("does not become ready when confirmation persists without its accepted command receipt", async () => {
+  it("atomically leaves no confirmation when its accepted command receipt fails", async () => {
     const {
       application,
       campaignApplication,
@@ -1055,7 +1100,7 @@ describe("campaign test delivery", () => {
         siteId,
         executionId: operation.executionId,
       }),
-    ).resolves.not.toBeNull();
+    ).resolves.toBeNull();
     await expect(
       application.queries.readiness({
         actor,

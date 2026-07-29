@@ -1,5 +1,4 @@
 import {
-  CampaignIdempotencyError,
   CampaignValidationError,
   campaignTestRateLimitWindowMs,
   createCampaignId,
@@ -269,61 +268,6 @@ export function createD1CampaignTestDeliveryStore(
         .bind(siteId, campaignId)
         .first<TestDeliveryRow>();
       return row === null ? null : toOperation(row);
-    },
-    async confirmReceipt(confirmation) {
-      await database
-        .prepare(
-          `INSERT INTO campaign_test_receipt_confirmations (
-             execution_id, site_id, owner_actor_id, request_id, confirmed_at
-           )
-           SELECT ?1, ?2, ?3, ?4, ?5
-           WHERE EXISTS (
-             SELECT 1 FROM campaign_test_deliveries
-             WHERE execution_id = ?1 AND site_id = ?2
-               AND state = 'accepted' AND evidence_json IS NOT NULL
-           )
-           ON CONFLICT DO NOTHING`,
-        )
-        .bind(
-          confirmation.executionId,
-          confirmation.siteId,
-          confirmation.ownerActorId,
-          confirmation.requestId,
-          confirmation.confirmedAt,
-        )
-        .run();
-      const stored = await store.findReceiptConfirmation(confirmation);
-      if (stored === null) {
-        const reused = await database
-          .prepare(
-            `SELECT execution_id FROM campaign_test_receipt_confirmations
-             WHERE site_id = ?1 AND owner_actor_id = ?2 AND request_id = ?3`,
-          )
-          .bind(
-            confirmation.siteId,
-            confirmation.ownerActorId,
-            confirmation.requestId,
-          )
-          .first<{ execution_id: string }>();
-        if (
-          reused !== null &&
-          reused.execution_id !== confirmation.executionId
-        ) {
-          throw new CampaignIdempotencyError(
-            "campaign_idempotency_key_reused",
-          );
-        }
-        throw new CampaignValidationError("test_delivery_not_accepted");
-      }
-      if (
-        stored.requestId !== confirmation.requestId ||
-        stored.ownerActorId !== confirmation.ownerActorId
-      ) {
-        throw new CampaignValidationError(
-          "test_receipt_already_confirmed",
-        );
-      }
-      return stored;
     },
     async findReceiptConfirmation({ siteId, executionId }) {
       const row = await database

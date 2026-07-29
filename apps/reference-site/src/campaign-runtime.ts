@@ -50,9 +50,15 @@ import {
 
 const localCampaignTestDeliveryStore =
   createInMemoryCampaignTestDeliveryStore();
-const localCampaignStore = createInMemoryCampaignStore((input) =>
-  localCampaignTestDeliveryStore.cancelForCampaignEdit(input)
-);
+const localCampaignStore = createInMemoryCampaignStore({
+  cancelOpenTestDeliveries: (input) =>
+    localCampaignTestDeliveryStore.cancelForCampaignEdit(input),
+  persistTestReceiptConfirmation: async (confirmation) => {
+    await localCampaignTestDeliveryStore.persistReceiptConfirmation(
+      confirmation,
+    );
+  },
+});
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
 const developmentProviderOwnershipEvidence:
@@ -272,6 +278,7 @@ export async function loadCampaignRequestContext(
     testAdapter = createBrevoNewsletterDeliveryAdapter({
       apiKey,
       configurationFingerprint,
+      accountScopeFingerprint,
       senderIds,
     });
   }
@@ -356,6 +363,8 @@ export async function loadCampaignRequestContext(
           targetId,
           commandName,
         }),
+      recordAcceptedTestReceiptConfirmation: (input) =>
+        application.commands.recordAcceptedTestReceiptConfirmation(input),
       recordRejectedCommand: ({
         actor,
         requestId,

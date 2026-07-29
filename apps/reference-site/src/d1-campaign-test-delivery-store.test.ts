@@ -201,28 +201,6 @@ describe("D1 campaign test delivery store", () => {
     };
 
     await expect(store.record(accepted)).resolves.toEqual(accepted);
-    const confirmation = {
-      executionId: accepted.executionId,
-      siteId: accepted.siteId,
-      ownerActorId: "membership-owner",
-      requestId: "campaign-test-confirm-1",
-      confirmedAt: "2026-07-29T19:07:00.000Z",
-    };
-    await expect(store.confirmReceipt(confirmation)).resolves.toEqual(
-      confirmation,
-    );
-    await expect(store.confirmReceipt(confirmation)).resolves.toEqual(
-      confirmation,
-    );
-    await expect(
-      database
-        .prepare(
-          `UPDATE campaign_test_receipt_confirmations
-           SET owner_actor_id = 'other' WHERE execution_id = ?1`,
-        )
-        .bind(accepted.executionId)
-        .run(),
-    ).rejects.toThrow(/campaign_test_receipt_confirmation_is_immutable/u);
     for (let attemptNumber = 1; attemptNumber <= 10; attemptNumber += 1) {
       await expect(
         store.reserveDailyRecipientBudget({

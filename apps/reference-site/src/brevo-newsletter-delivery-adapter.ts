@@ -1,8 +1,9 @@
-import type {
-  NewsletterDeliveryAdapter,
-  NewsletterDeliveryCapabilities,
-  NewsletterTestOutcome,
-  NewsletterTestRequest,
+import {
+  sha256Text,
+  type NewsletterDeliveryAdapter,
+  type NewsletterDeliveryCapabilities,
+  type NewsletterTestOutcome,
+  type NewsletterTestRequest,
 } from "@foundry/application";
 
 const defaultBaseUrl = "https://api.brevo.com/v3";
@@ -111,12 +112,14 @@ function accepted(
 export function createBrevoNewsletterDeliveryAdapter({
   apiKey,
   configurationFingerprint,
+  accountScopeFingerprint,
   senderIds,
   fetcher = fetch,
   baseUrl = defaultBaseUrl,
 }: {
   apiKey: string;
   configurationFingerprint: string;
+  accountScopeFingerprint: string;
   senderIds: Readonly<Record<string, number>>;
   fetcher?: Fetcher;
   baseUrl?: string;
@@ -124,6 +127,9 @@ export function createBrevoNewsletterDeliveryAdapter({
   if (apiKey.trim() === "") throw new Error("brevo_api_key_missing");
   if (!fingerprintPattern.test(configurationFingerprint)) {
     throw new Error("brevo_configuration_fingerprint_invalid");
+  }
+  if (!fingerprintPattern.test(accountScopeFingerprint)) {
+    throw new Error("brevo_account_scope_fingerprint_invalid");
   }
   const endpoint = baseUrl.replace(/\/+$/u, "");
   const capabilities: NewsletterDeliveryCapabilities = Object.freeze({
@@ -250,6 +256,26 @@ export function createBrevoNewsletterDeliveryAdapter({
           return {
             state: "unavailable",
             credential: account.status === 401 ? "invalid" : "unknown",
+            senderIdentity: "unknown",
+          } as const;
+        }
+        const accountBody = await json(account) as {
+          email?: unknown;
+        } | null;
+        const accountEmail =
+          typeof accountBody?.email === "string"
+            ? accountBody.email.trim().toLowerCase()
+            : "";
+        const observedAccountScopeFingerprint =
+          accountEmail === ""
+            ? null
+            : await sha256Text(
+                `foundry.brevo-account-scope.v1:${accountEmail}`,
+              );
+        if (observedAccountScopeFingerprint !== accountScopeFingerprint) {
+          return {
+            state: "degraded",
+            credential: "invalid",
             senderIdentity: "unknown",
           } as const;
         }

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { sha256Text, type NewsletterTestRequest } from "@foundry/application";
+
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
-import type { NewsletterTestRequest } from "@foundry/application";
 
 const configurationFingerprint = "a".repeat(64);
 const request: NewsletterTestRequest = {
@@ -81,6 +82,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const adapter = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher,
     });
@@ -131,6 +133,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const adapter = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher,
     });
@@ -152,6 +155,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const transientRead = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(429)),
     });
@@ -169,6 +173,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const transientSearch = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(503)),
     });
@@ -182,6 +187,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const absent = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(404)),
     });
@@ -197,6 +203,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const createAmbiguous = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(503)),
     });
@@ -207,6 +214,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const createRateLimited = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi.fn().mockResolvedValue(response(429)),
     });
@@ -218,6 +226,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const sendAmbiguous = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi
         .fn()
@@ -232,6 +241,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const sendRateLimited = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
       senderIds: { sender_primary: 42 },
       fetcher: vi
         .fn()
@@ -246,9 +256,17 @@ describe("Brevo newsletter delivery adapter", () => {
   });
 
   it("reports explicit capabilities and checks account plus sender health without returning account identity", async () => {
+    const accountScopeFingerprint = await sha256Text(
+      "foundry.brevo-account-scope.v1:owner@example.test",
+    );
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(response(200, { plan: [{ status: "active" }] }))
+      .mockResolvedValueOnce(
+        response(200, {
+          email: "Owner@Example.Test",
+          plan: [{ status: "active" }],
+        }),
+      )
       .mockResolvedValueOnce(
         response(200, {
           senders: [{ id: 42, active: true, email: "secret@example.test" }],
@@ -257,6 +275,7 @@ describe("Brevo newsletter delivery adapter", () => {
     const adapter = createBrevoNewsletterDeliveryAdapter({
       apiKey: "test-key-not-a-real-secret",
       configurationFingerprint,
+      accountScopeFingerprint,
       senderIds: { sender_primary: 42 },
       fetcher,
     });
@@ -277,4 +296,26 @@ describe("Brevo newsletter delivery adapter", () => {
     expect(JSON.stringify(health)).not.toContain("@");
   });
 
+  it("fails health when the credential belongs to a different provisioned account", async () => {
+    const adapter = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      accountScopeFingerprint: "8".repeat(64),
+      senderIds: { sender_primary: 42 },
+      fetcher: vi
+        .fn()
+        .mockResolvedValueOnce(
+          response(200, { email: "other-account@example.test" }),
+        )
+        .mockResolvedValueOnce(
+          response(200, { senders: [{ id: 42, active: true }] }),
+        ),
+    });
+
+    await expect(adapter.health()).resolves.toEqual({
+      state: "degraded",
+      credential: "invalid",
+      senderIdentity: "unknown",
+    });
+  });
 });

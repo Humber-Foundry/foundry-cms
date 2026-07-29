@@ -14,7 +14,9 @@ Install these values in the client-owned Worker configuration:
   Brevo authority required by the newsletter adapter.
 - `FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT` — a 64-character one-way account
   binding produced by provisioning. The raw Brevo account identifier stays out
-  of source and application evidence.
+  of source and application evidence. Provisioning computes SHA-256 over
+  `foundry.brevo-account-scope.v1:` followed by the lowercase, trimmed account
+  email returned by Brevo's account API.
 - `FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON` — protected provisioning evidence
   containing the ownership classification, a stable evidence ID, the exact
   account-scope fingerprint, and its verification timestamp. If it is absent,
@@ -28,6 +30,9 @@ The runtime derives the provider-configuration fingerprint from the account
 scope, sender mapping, and pinned adapter version. Recipient addresses pass
 directly to Brevo for the explicit test request and are absent from operation
 rows, evidence, API results, logs, and source control.
+Provider health independently reads the credential's Brevo account, derives
+the same one-way account scope, and fails closed if it differs from the
+provisioned scope.
 
 ## Owner-assisted ceremony
 
@@ -43,10 +48,9 @@ rows, evidence, API results, logs, and source control.
 5. Confirm the delivered message in the Owner's mailbox. An authenticated
    Owner records confirmation with `confirm_test_receipt` and the stable
    execution ID; the immutable confirmation and its accepted command receipt
-   are persisted in D1. Readiness requires both records, so an interrupted
-   command remains confirmation-required until its idempotent retry completes
-   the receipt. Reusing its request key with another execution is rejected and
-   confirmation audits contain no recipient address.
+   are persisted atomically in one D1 batch. Reusing its request key with
+   another execution is rejected and confirmation audits contain no recipient
+   address.
 6. Evaluate test-delivery readiness with the successful current test evidence.
    `ready`
    requires healthy credentials and sender identity, `client_owned`

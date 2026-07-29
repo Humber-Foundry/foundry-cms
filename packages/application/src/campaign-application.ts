@@ -467,6 +467,54 @@ export function createCampaignApplication({
         "campaign.test",
       );
     },
+    async recordAcceptedTestReceiptConfirmation({
+      actor,
+      requestId,
+      command: input,
+      campaign,
+      revision,
+      beforeState,
+      afterState,
+      targetId,
+      confirmation,
+    }) {
+      const command = await commandKey({
+        actorId: identifyActor(actor),
+        requestId,
+        commandName: "campaign.confirm_test_receipt",
+        input,
+      });
+      const author = await authorizeCommand(
+        actor,
+        command,
+        "campaign.test",
+        targetId,
+        beforeState,
+      );
+      await resolveReceipt(
+        await store.acceptTestReceiptConfirmation({
+          command,
+          campaign,
+          revision,
+          confirmation,
+          audit: auditEvent({
+            actorId: author.id,
+            targetId,
+            revisionId: revision.id,
+            requestId,
+            inputHash: command.inputHash,
+            action: "campaign.test",
+            outcome: "accepted",
+            reason: null,
+            beforeState,
+            afterState,
+            occurredAt: confirmation.confirmedAt,
+          }),
+        }),
+        command,
+        "campaign.test",
+      );
+    },
     async recordRejectedCommand({
       actor,
       requestId,

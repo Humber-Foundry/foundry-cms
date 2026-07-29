@@ -9,12 +9,19 @@ import type {
 } from "./campaign";
 
 export function createInMemoryCampaignStore(
-  cancelOpenTestDeliveries?: (input: {
-    siteId: Campaign["siteId"];
-    campaignId: Campaign["id"];
-    retainedRevisionId: CampaignRevision["id"];
-    cancelledAt: string;
-  }) => Promise<void>,
+  options: Readonly<{
+    cancelOpenTestDeliveries?: (input: {
+      siteId: Campaign["siteId"];
+      campaignId: Campaign["id"];
+      retainedRevisionId: CampaignRevision["id"];
+      cancelledAt: string;
+    }) => Promise<void>;
+    persistTestReceiptConfirmation?: (
+      confirmation: Parameters<
+        CampaignStore["acceptTestReceiptConfirmation"]
+      >[0]["confirmation"],
+    ) => Promise<void>;
+  }> = {},
 ): CampaignStore & {
   listAuditEvents(): ReadonlyArray<CampaignAuditEvent>;
 } {
@@ -134,7 +141,7 @@ export function createInMemoryCampaignStore(
         audits.push(rejectedAudit);
         return Object.freeze({ receipt, replayed: false });
       }
-      await cancelOpenTestDeliveries?.({
+      await options.cancelOpenTestDeliveries?.({
         siteId: campaign.siteId,
         campaignId: campaign.id,
         retainedRevisionId: revision.id,
@@ -158,6 +165,21 @@ export function createInMemoryCampaignStore(
     async acceptTestCommand({ command, campaign, revision, audit }) {
       const existing = existingResult(command);
       if (existing !== null) return existing;
+      const receipt = acceptedReceipt(command, campaign, revision);
+      receipts.set(commandKey(command), receipt);
+      audits.push(audit);
+      return Object.freeze({ receipt, replayed: false });
+    },
+    async acceptTestReceiptConfirmation({
+      command,
+      campaign,
+      revision,
+      audit,
+      confirmation,
+    }) {
+      const existing = existingResult(command);
+      if (existing !== null) return existing;
+      await options.persistTestReceiptConfirmation?.(confirmation);
       const receipt = acceptedReceipt(command, campaign, revision);
       receipts.set(commandKey(command), receipt);
       audits.push(audit);

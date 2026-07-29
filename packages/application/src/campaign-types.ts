@@ -199,6 +199,14 @@ export type CampaignCommandStoreResult = Readonly<{
   replayed: boolean;
 }>;
 
+export type CampaignTestReceiptConfirmationRecord = Readonly<{
+  executionId: string;
+  siteId: SiteId;
+  ownerActorId: string;
+  requestId: string;
+  confirmedAt: string;
+}>;
+
 export interface CampaignStore {
   findCommandReceipt(input: Omit<CampaignCommandKey, "inputHash">):
     Promise<CampaignCommandReceipt | null>;
@@ -236,6 +244,13 @@ export interface CampaignStore {
     campaign: Campaign;
     revision: CampaignRevision;
     audit: CampaignAuditEvent;
+  }): Promise<CampaignCommandStoreResult>;
+  acceptTestReceiptConfirmation(input: {
+    command: CampaignCommandKey;
+    campaign: Campaign;
+    revision: CampaignRevision;
+    audit: CampaignAuditEvent;
+    confirmation: CampaignTestReceiptConfirmationRecord;
   }): Promise<CampaignCommandStoreResult>;
   recordAudit(event: CampaignAuditEvent): Promise<void>;
 }
@@ -310,6 +325,17 @@ export type CampaignApplication = Readonly<{
       commandName?:
         | "campaign.request_test"
         | "campaign.confirm_test_receipt";
+    }): Promise<void>;
+    recordAcceptedTestReceiptConfirmation(input: {
+      actor: CampaignActor;
+      requestId: string;
+      command: unknown;
+      campaign: Campaign;
+      revision: CampaignRevision;
+      beforeState: string;
+      afterState: string;
+      targetId: string;
+      confirmation: CampaignTestReceiptConfirmationRecord;
     }): Promise<void>;
   }>;
   queries: Readonly<{

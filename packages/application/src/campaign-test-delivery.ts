@@ -15,6 +15,7 @@ import {
   type CampaignRevision,
   type CampaignRevisionId,
   type CampaignStore,
+  type CampaignTestReceiptConfirmationRecord,
   type RenderedCampaign,
 } from "./campaign-types";
 
@@ -103,13 +104,8 @@ export type CampaignTestDeliveryEvidence =
     acceptedAt: string;
   }>;
 
-export type CampaignTestReceiptConfirmation = Readonly<{
-  executionId: string;
-  siteId: SiteId;
-  ownerActorId: string;
-  requestId: string;
-  confirmedAt: string;
-}>;
+export type CampaignTestReceiptConfirmation =
+  CampaignTestReceiptConfirmationRecord;
 
 export type NewsletterProviderOwnershipEvidence = Readonly<{
   classification: "evaluation" | "client_owned";
@@ -166,9 +162,6 @@ export interface CampaignTestDeliveryStore {
     siteId: SiteId;
     campaignId: CampaignId;
   }): Promise<CampaignTestDeliveryOperation | null>;
-  confirmReceipt(
-    confirmation: CampaignTestReceiptConfirmation,
-  ): Promise<CampaignTestReceiptConfirmation>;
   findReceiptConfirmation(input: {
     siteId: SiteId;
     executionId: string;
@@ -289,12 +282,12 @@ async function bindingFor({
   revision,
   rendered,
   providerConfigurationFingerprint,
-  recipientIds,
+  recipients,
 }: {
   revision: CampaignRevision;
   rendered: RenderedCampaign;
   providerConfigurationFingerprint: string;
-  recipientIds: ReadonlyArray<string>;
+  recipients: ReadonlyArray<NewsletterTestRecipient>;
 }): Promise<CampaignTestDeliveryBinding> {
   const [
     senderFingerprint,
@@ -315,8 +308,11 @@ async function bindingFor({
       complianceFooter: revision.complianceFooter,
     }),
     sha256CanonicalJson({
-      version: "foundry.campaign-test-recipients.v1",
-      recipientIds,
+      version: "foundry.campaign-test-recipients.v2",
+      recipients: recipients.map((recipient) => ({
+        id: recipient.id,
+        address: recipient.address.trim().toLowerCase(),
+      })),
     }),
   ]);
   return Object.freeze({
@@ -459,6 +455,7 @@ export function createCampaignTestDeliveryApplication({
   providerOwnershipEvidence,
   replayTestCommand,
   recordAcceptedTestCommand,
+  recordAcceptedTestReceiptConfirmation,
   recordRejectedCommand,
   clock = () => new Date(),
   createExecutionId = () => crypto.randomUUID(),
@@ -503,6 +500,17 @@ export function createCampaignTestDeliveryApplication({
       | "campaign.request_test"
       | "campaign.confirm_test_receipt";
   }): Promise<void>;
+  recordAcceptedTestReceiptConfirmation(input: {
+    actor: CampaignActor;
+    requestId: string;
+    command: unknown;
+    campaign: Campaign;
+    revision: CampaignRevision;
+    beforeState: string;
+    afterState: string;
+    targetId: string;
+    confirmation: CampaignTestReceiptConfirmation;
+  }): Promise<void>;
   recordRejectedCommand?(input: {
     actor: CampaignActor;
     requestId: string;
@@ -538,6 +546,37 @@ export function createCampaignTestDeliveryApplication({
     });
     if (revision === null) throw new CampaignNotFoundError();
     return { campaign, revision };
+  }
+
+  async function recordOperation(
+    operation: CampaignTestDeliveryOperation,
+  ): Promise<CampaignTestDeliveryOperation> {
+    try {
+      return await store.record(operation);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !/^(campaign_)?test_delivery_state_conflict$/u.test(error.message)
+      ) {
+        throw error;
+      }
+      const current = await store.findByRequest({
+        siteId: operation.siteId,
+        actorId: operation.actorId,
+        requestId: operation.requestId,
+      });
+      if (
+        current !== null &&
+        (current.state === "accepted" ||
+          current.state === "failed" ||
+          current.state === "cancelled" ||
+          current.attemptNumber !== operation.attemptNumber ||
+          current.updatedAt !== operation.updatedAt)
+      ) {
+        return current;
+      }
+      throw error;
+    }
   }
 
   async function executeRequestTest(
@@ -593,7 +632,7 @@ export function createCampaignTestDeliveryApplication({
       existing.campaignRevisionId !== current.revision.id
     ) {
       commandState.accepted = replayedCommand !== null;
-      return store.record(
+      return recordOperation(
         Object.freeze({
           ...existing,
           state: "cancelled" as const,
@@ -619,16 +658,16 @@ export function createCampaignTestDeliveryApplication({
       revision,
       audience.eligibleSubscriberCount,
     );
+    const configuredRecipients =
+      await resolveTestRecipients(testRecipientIds);
+    assertResolvedRecipients(testRecipientIds, configuredRecipients);
     const binding = await bindingFor({
       revision,
       rendered,
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
-      recipientIds: testRecipientIds,
+      recipients: configuredRecipients,
     });
-    const configuredRecipients =
-      await resolveTestRecipients(testRecipientIds);
-    assertResolvedRecipients(testRecipientIds, configuredRecipients);
     let operation: CampaignTestDeliveryOperation;
     let newlyClaimed = false;
     if (existing === null) {
@@ -738,7 +777,7 @@ export function createCampaignTestDeliveryApplication({
         return postReconcileOperation;
       }
       if (reconciled.outcome === "accepted") {
-        return store.record(
+        return recordOperation(
           await acceptedOperation(
             operation,
             reconciled,
@@ -748,7 +787,7 @@ export function createCampaignTestDeliveryApplication({
       }
       if (attemptExpired) {
         const recoveryStartedAt = clock();
-        return store.record(
+        return recordOperation(
           Object.freeze({
             ...operation,
             state: "ambiguous" as const,
@@ -789,7 +828,7 @@ export function createCampaignTestDeliveryApplication({
         ) {
           return operation;
         }
-        return store.record(
+        return recordOperation(
           Object.freeze({
             ...operation,
             failureCode: reconciled.code,
@@ -798,7 +837,7 @@ export function createCampaignTestDeliveryApplication({
         );
       }
       if (reconciled.outcome === "not_sent") {
-        operation = await store.record(
+        operation = await recordOperation(
           Object.freeze({
             ...operation,
             state: "ambiguous" as const,
@@ -813,7 +852,7 @@ export function createCampaignTestDeliveryApplication({
         reconciled.outcome === "not_found" &&
         operation.providerCampaignId !== null
       ) {
-        operation = await store.record(
+        operation = await recordOperation(
           Object.freeze({
             ...operation,
             state: "ambiguous" as const,
@@ -825,7 +864,7 @@ export function createCampaignTestDeliveryApplication({
         );
       }
       if (reconciled.outcome === "rejected") {
-        return store.record(
+        return recordOperation(
           Object.freeze({
             ...operation,
             state: "failed" as const,
@@ -855,7 +894,7 @@ export function createCampaignTestDeliveryApplication({
     operation = attempt;
     const latest = await currentCampaignRevision(campaignId);
     if (latest.revision.id !== operation.campaignRevisionId) {
-      return store.record(
+      return recordOperation(
         Object.freeze({
           ...operation,
           state: "cancelled" as const,
@@ -875,7 +914,7 @@ export function createCampaignTestDeliveryApplication({
       reservedAt: attemptStartedAt.toISOString(),
     });
     if (!budgetReserved) {
-      return store.record(
+      return recordOperation(
         Object.freeze({
           ...operation,
           state: "failed" as const,
@@ -910,12 +949,12 @@ export function createCampaignTestDeliveryApplication({
     }
     const timestamp = clock().toISOString();
     if (outcome.outcome === "accepted") {
-      return store.record(
+      return recordOperation(
         await acceptedOperation(operation, outcome, timestamp),
       );
     }
     if (outcome.outcome === "rejected") {
-      return store.record(
+      return recordOperation(
         Object.freeze({
           ...operation,
           state: "failed" as const,
@@ -925,7 +964,7 @@ export function createCampaignTestDeliveryApplication({
         }),
       );
     }
-    return store.record(
+    return recordOperation(
       Object.freeze({
         ...operation,
         state: "ambiguous" as const,
@@ -990,12 +1029,26 @@ export function createCampaignTestDeliveryApplication({
       revision,
       audience.eligibleSubscriberCount,
     );
+    let configuredRecipients: ReadonlyArray<NewsletterTestRecipient>;
+    try {
+      configuredRecipients =
+        await resolveTestRecipients(operation.recipientIds);
+      assertResolvedRecipients(operation.recipientIds, configuredRecipients);
+    } catch (error) {
+      if (
+        error instanceof CampaignValidationError &&
+        error.message === "test_recipient_forbidden"
+      ) {
+        return null;
+      }
+      throw error;
+    }
     const currentBinding = await bindingFor({
       revision,
       rendered,
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
-      recipientIds: operation.recipientIds,
+      recipients: configuredRecipients,
     });
     return sameBinding(operation.binding, currentBinding)
       ? operation.evidence
@@ -1062,16 +1115,14 @@ export function createCampaignTestDeliveryApplication({
           "test_receipt_already_confirmed",
         );
       }
-      const confirmation = await store.confirmReceipt(
-        Object.freeze({
-          executionId,
-          siteId,
-          ownerActorId: owner.id,
-          requestId,
-          confirmedAt: clock().toISOString(),
-        }),
-      );
-      await recordAcceptedTestCommand?.({
+      const confirmation = Object.freeze({
+        executionId,
+        siteId,
+        ownerActorId: owner.id,
+        requestId,
+        confirmedAt: clock().toISOString(),
+      });
+      await recordAcceptedTestReceiptConfirmation({
         actor,
         requestId,
         command,
@@ -1086,10 +1137,19 @@ export function createCampaignTestDeliveryApplication({
           ownerReceiptConfirmation: "confirmed",
         }),
         targetId: executionId,
-        commandName: "campaign.confirm_test_receipt",
+        confirmation,
       });
       accepted = true;
-      return confirmation;
+      const storedConfirmation = await store.findReceiptConfirmation({
+        siteId,
+        executionId,
+      });
+      if (storedConfirmation === null) {
+        throw new CampaignValidationError(
+          "test_receipt_confirmation_missing",
+        );
+      }
+      return storedConfirmation;
     } catch (error) {
       if (
         recordRejectedCommand !== undefined &&
@@ -1183,25 +1243,6 @@ export function createCampaignTestDeliveryApplication({
             testDeliveryReady: false,
           });
         }
-        const acceptedConfirmationReceipt = (
-          await replayTestCommand?.({
-            actor,
-            requestId: confirmation.requestId,
-            command: {
-              action: "confirm_test_receipt",
-              executionId: evidence.executionId,
-            },
-            targetId: evidence.executionId,
-            commandName: "campaign.confirm_test_receipt",
-          })
-        ) ?? null;
-        if (acceptedConfirmationReceipt === null) {
-          return Object.freeze({
-            ...base,
-            state: "owner_confirmation_required" as const,
-            testDeliveryReady: false,
-          });
-        }
         return Object.freeze({
           ...base,
           state: "ready" as const,
@@ -1216,6 +1257,9 @@ export function createCampaignTestDeliveryApplication({
 export function createInMemoryCampaignTestDeliveryStore():
   CampaignTestDeliveryStore & {
     list(): ReadonlyArray<CampaignTestDeliveryOperation>;
+    persistReceiptConfirmation(
+      confirmation: CampaignTestReceiptConfirmation,
+    ): Promise<CampaignTestReceiptConfirmation>;
   } {
   const operations = new Map<string, CampaignTestDeliveryOperation>();
   const confirmations = new Map<string, CampaignTestReceiptConfirmation>();
@@ -1228,6 +1272,9 @@ export function createInMemoryCampaignTestDeliveryStore():
   }) => `${operation.siteId}:${operation.actorId}:${operation.requestId}`;
   const store: CampaignTestDeliveryStore & {
     list(): ReadonlyArray<CampaignTestDeliveryOperation>;
+    persistReceiptConfirmation(
+      confirmation: CampaignTestReceiptConfirmation,
+    ): Promise<CampaignTestReceiptConfirmation>;
   } = {
     async findByRequest(input) {
       return operations.get(requestKey(input)) ?? null;
@@ -1331,7 +1378,7 @@ export function createInMemoryCampaignTestDeliveryStore():
           )[0] ?? null
       );
     },
-    async confirmReceipt(confirmation) {
+    async persistReceiptConfirmation(confirmation) {
       const key = `${confirmation.siteId}:${confirmation.executionId}`;
       const requestKey =
         `${confirmation.siteId}:${confirmation.ownerActorId}:` +
