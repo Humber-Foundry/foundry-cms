@@ -20,6 +20,7 @@ import {
 } from "./content-revision-runtime";
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import {
+  findContentRevision,
   findVerifiedPublicationOrder,
   listContentRevisionContributors,
   reconcileVerifiedBlogPostPublication,
@@ -101,8 +102,16 @@ export async function loadContentPublicationApplication(
     return createContentPublicationApplication({
       store: localRuntime.__foundryContentPublicationStore!,
       revisions: {
-        getRevision: (_workspaceId, revision) =>
-          revisionApplication.queries.getRevision(revision),
+        async getRevision(targetWorkspaceId, revision) {
+          const targetApplication =
+            targetWorkspaceId === workspaceId
+              ? revisionApplication
+              : await loadContentRevisionApplication(
+                  targetWorkspaceId,
+                  actorId,
+                );
+          return targetApplication.queries.getRevision(revision);
+        },
         getCurrent: () => revisionApplication.queries.getCurrent(),
         isCurrent: (revision) =>
           revisionApplication.queries.isRevisionCurrent(revision),
@@ -130,8 +139,12 @@ export async function loadContentPublicationApplication(
   return createContentPublicationApplication({
     store,
     revisions: {
-      getRevision: (_workspaceId, revision) =>
-        revisionApplication.queries.getRevision(revision),
+      getRevision: (targetWorkspaceId, revision) =>
+        findContentRevision(
+          environment.FOUNDRY_DB!,
+          targetWorkspaceId,
+          revision,
+        ),
       getCurrent: () => revisionApplication.queries.getCurrent(),
       isCurrent: (revision) =>
         revisionApplication.queries.isRevisionCurrent(revision),

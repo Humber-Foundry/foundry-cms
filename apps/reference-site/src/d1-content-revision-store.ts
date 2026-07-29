@@ -502,6 +502,29 @@ const revisionProjection = `
   FROM content_revisions
 `;
 
+async function findContentRevisionFrom(
+  connection: Pick<D1DatabaseBinding, "prepare">,
+  workspaceId: ContentWorkspaceId,
+  revision: number,
+): Promise<ContentRevision | null> {
+  const row = await connection
+    .prepare(
+      `${revisionProjection}
+       WHERE workspace_id = ?1 AND revision = ?2`,
+    )
+    .bind(workspaceId, revision)
+    .first<RevisionRow>();
+  return row === null ? null : toRevision(row);
+}
+
+export function findContentRevision(
+  database: D1DatabaseBinding,
+  workspaceId: ContentWorkspaceId,
+  revision: number,
+): Promise<ContentRevision | null> {
+  return findContentRevisionFrom(database, workspaceId, revision);
+}
+
 function requireBookmark(bookmark: string | null): string {
   if (bookmark === null) {
     throw new ContentRevisionConfigurationError();
@@ -532,14 +555,7 @@ export function createD1ContentRevisionStore(
     connection: Pick<D1DatabaseBinding, "prepare">,
     revision: number,
   ) {
-    const row = await connection
-      .prepare(
-        `${revisionProjection}
-         WHERE workspace_id = ?1 AND revision = ?2`,
-      )
-      .bind(workspaceId, revision)
-      .first<RevisionRow>();
-    return row === null ? null : toRevision(row);
+    return findContentRevisionFrom(connection, workspaceId, revision);
   }
 
   async function getCurrentFrom(

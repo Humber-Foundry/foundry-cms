@@ -21,6 +21,7 @@ import {
 
 import {
   createD1ContentRevisionStore,
+  findContentRevision,
   findLatestContentWorkspaceIdForActor,
   hydrateManagedBlogPosts,
   reconcileVerifiedBlogPostPublication,
@@ -161,6 +162,82 @@ describe("D1 content revision store", () => {
         .bind(workspaceId)
         .first<{ count: number }>(),
     ).toEqual({ count: 0 });
+  });
+
+  it("loads an immutable revision from its own workspace during global recovery", async () => {
+    const firstWorkspaceId = createContentWorkspaceId(
+      "workspace_recovery_first",
+    );
+    const secondWorkspaceId = createContentWorkspaceId(
+      "workspace_recovery_second",
+    );
+    const first = createApplication(
+      editorActorId,
+      firstWorkspaceId,
+    );
+    const second = createApplication(
+      editorActorId,
+      secondWorkspaceId,
+    );
+    await first.commands.create({
+      actorId: editorActorId,
+      workspaceId: firstWorkspaceId,
+      idempotencyKey: "d1-recovery-first-create",
+    });
+    await second.commands.create({
+      actorId: editorActorId,
+      workspaceId: secondWorkspaceId,
+      idempotencyKey: "d1-recovery-second-create",
+    });
+    await first.commands.save({
+      actorId: editorActorId,
+      workspaceId: firstWorkspaceId,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "First workspace" }],
+      idempotencyKey: "d1-recovery-first-save",
+    });
+    await second.commands.save({
+      actorId: editorActorId,
+      workspaceId: secondWorkspaceId,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 0,
+      edits: [{ path: "section_hero.title", value: "Second workspace" }],
+      idempotencyKey: "d1-recovery-second-save",
+    });
+
+    await expect(
+      findContentRevision(database, firstWorkspaceId, 1),
+    ).resolves.toMatchObject({
+      workspaceId: firstWorkspaceId,
+      definition: {
+        home: {
+          sections: [
+            expect.objectContaining({
+              id: "section_hero",
+              title: "First workspace",
+            }),
+            ...referenceSiteDefinition.home.sections.slice(1),
+          ],
+        },
+      },
+    });
+    await expect(
+      findContentRevision(database, secondWorkspaceId, 1),
+    ).resolves.toMatchObject({
+      workspaceId: secondWorkspaceId,
+      definition: {
+        home: {
+          sections: [
+            expect.objectContaining({
+              id: "section_hero",
+              title: "Second workspace",
+            }),
+            ...referenceSiteDefinition.home.sections.slice(1),
+          ],
+        },
+      },
+    });
   });
 
   it("rejects an unpublish whose verified lifecycle changes before persistence", async () => {
