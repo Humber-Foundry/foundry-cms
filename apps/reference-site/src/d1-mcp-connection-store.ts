@@ -1,5 +1,6 @@
 import type {
   McpConnectionGrant,
+  McpConnectionSummary,
   McpConnectionStore,
   McpReadAuditEvent,
 } from "@foundry/application";
@@ -25,6 +26,14 @@ export type ConsumedMcpAuthorizationCode = McpConnectionGrant &
   Readonly<{
     codeChallenge: string;
   }>;
+
+export type McpRefreshRotation =
+  | Readonly<{
+      state: "rotated";
+      connection: McpConnectionGrant;
+    }>
+  | Readonly<{ state: "reuse_detected" }>
+  | Readonly<{ state: "invalid" }>;
 
 function toConnection(row: ConnectionRow): McpConnectionGrant {
   const parsedScopes: unknown = JSON.parse(row.scopes_json);
@@ -62,9 +71,11 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       codeChallenge: string;
       expiresAt: string;
       now: string;
+      inputHash: string;
     }): Promise<void>;
     consumeAuthorizationCode(input: {
       codeHash: string;
+      codeChallenge: string;
       clientId: string;
       redirectUri: string;
       now: string;
@@ -74,7 +85,38 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       connectionId: string;
       ownerMembershipId: string;
       now: string;
+      reason: string;
+      inputHash: string;
     }): Promise<boolean>;
+    saveRefreshToken(input: {
+      tokenHash: string;
+      familyId: string;
+      connectionId: string;
+      clientId: string;
+      expiresAt: string;
+      now: string;
+    }): Promise<void>;
+    rotateRefreshToken(input: {
+      tokenHash: string;
+      nextTokenHash: string;
+      clientId: string;
+      nextExpiresAt: string;
+      now: string;
+    }): Promise<McpRefreshRotation>;
+    consumeRateLimit(input: {
+      siteId: SiteId;
+      bucketKey: string;
+      windowStartedAt: string;
+      limit: number;
+    }): Promise<boolean>;
+    listConnections(siteId: SiteId): Promise<
+      ReadonlyArray<McpConnectionSummary>
+    >;
+    findLiveRelease(siteId: SiteId): Promise<{
+      gitSha: string;
+      releaseId: string;
+      observedAt: string;
+    } | null>;
   } = {
     async createAuthorizationGrant(input) {
       const results = await database.batch([
@@ -125,10 +167,12 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           .prepare(
             `INSERT INTO mcp_audit_events (
                invocation_id, connection_id, actor_id, site_id, operation,
-               scopes_json, outcome, reason, occurred_at, contract_version
+               input_hash, protocol_version, scopes_json, outcome, reason,
+               human_actor_id, revocation_reason, occurred_at, contract_version
              )
              SELECT ?1, ?2, ?3, ?4, 'foundry.connection.authorize',
-                    '["site.read"]', 'allowed', NULL, ?5, 'foundry.mcp.v1'
+                    ?7, '2025-11-25', '["site.read"]', 'allowed', NULL,
+                    ?8, NULL, ?5, 'foundry.mcp.v1'
              WHERE EXISTS (
                SELECT 1 FROM mcp_authorization_codes
                WHERE code_hash = ?6 AND connection_id = ?2
@@ -141,6 +185,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
             input.siteId,
             input.now,
             input.codeHash,
+            input.inputHash,
+            input.ownerMembershipId,
           ),
       ]);
       if (
@@ -157,6 +203,7 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           `UPDATE mcp_authorization_codes
            SET consumed_at = ?1
            WHERE code_hash = ?2
+             AND code_challenge = ?5
              AND consumed_at IS NULL
              AND expires_at > ?1
              AND EXISTS (
@@ -173,6 +220,7 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           input.codeHash,
           input.clientId,
           input.redirectUri,
+          input.codeChallenge,
         )
         .first<AuthorizationCodeRow>();
       if (consumed === null) {
@@ -226,10 +274,12 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           .prepare(
             `INSERT INTO mcp_audit_events (
                invocation_id, connection_id, actor_id, site_id, operation,
-               scopes_json, outcome, reason, occurred_at, contract_version
+               input_hash, protocol_version, scopes_json, outcome, reason,
+               human_actor_id, revocation_reason, occurred_at, contract_version
              )
              SELECT ?1, id, actor_id, site_id, 'foundry.connection.revoke',
-                    scopes_json, 'allowed', NULL, ?2, 'foundry.mcp.v1'
+                    ?5, '2025-11-25', scopes_json, 'allowed', NULL,
+                    ?6, ?7, ?2, 'foundry.mcp.v1'
              FROM mcp_connections
              WHERE id = ?3 AND site_id = ?4 AND status = 'revoked'
                AND revoked_at = ?2`,
@@ -239,6 +289,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
             input.now,
             input.connectionId,
             input.siteId,
+            input.inputHash,
+            input.ownerMembershipId,
+            input.reason,
           ),
       ]);
       return (
@@ -251,8 +304,12 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         .prepare(
           `INSERT INTO mcp_audit_events (
              invocation_id, connection_id, actor_id, site_id, operation,
-             scopes_json, outcome, reason, occurred_at, contract_version
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+             input_hash, protocol_version, scopes_json, outcome, reason,
+             human_actor_id, revocation_reason, occurred_at, contract_version
+           ) VALUES (
+             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+             NULL, NULL, ?11, ?12
+           )`,
         )
         .bind(
           event.invocationId,
@@ -260,6 +317,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           event.actorId,
           event.siteId,
           event.operation,
+          event.inputHash,
+          event.protocolVersion,
           JSON.stringify(event.scopesEvaluated),
           event.outcome,
           event.reason,
@@ -267,6 +326,241 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           event.contractVersion,
         )
         .run();
+    },
+    async saveRefreshToken(input) {
+      const result = await database
+        .prepare(
+          `INSERT INTO mcp_refresh_tokens (
+             token_hash, family_id, connection_id, oauth_client_id,
+             expires_at, issued_at
+           )
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6
+           WHERE EXISTS (
+             SELECT 1 FROM mcp_connections
+             WHERE id = ?3
+               AND oauth_client_id = ?4
+               AND status = 'active'
+           )`,
+        )
+        .bind(
+          input.tokenHash,
+          input.familyId,
+          input.connectionId,
+          input.clientId,
+          input.expiresAt,
+          input.now,
+        )
+        .run();
+      if ((result.meta.changes ?? 0) !== 1) {
+        throw new TypeError("mcp_refresh_token_not_created");
+      }
+    },
+    async rotateRefreshToken(input) {
+      const existing = await database
+        .prepare(
+          `SELECT
+             token.family_id, token.connection_id, token.expires_at,
+             token.consumed_at, token.revoked_at,
+             connection.actor_id, connection.site_id, connection.scopes_json
+           FROM mcp_refresh_tokens AS token
+           JOIN mcp_connections AS connection
+             ON connection.id = token.connection_id
+           WHERE token.token_hash = ?1 AND token.oauth_client_id = ?2`,
+        )
+        .bind(input.tokenHash, input.clientId)
+        .first<{
+          family_id: string;
+          connection_id: string;
+          expires_at: string;
+          consumed_at: string | null;
+          revoked_at: string | null;
+          actor_id: string;
+          site_id: string;
+          scopes_json: string;
+        }>();
+      if (
+        existing === null ||
+        existing.revoked_at !== null ||
+        existing.expires_at <= input.now
+      ) {
+        return { state: "invalid" };
+      }
+      if (existing.consumed_at !== null) {
+        await database.batch([
+          database
+            .prepare(
+              `UPDATE mcp_refresh_tokens
+               SET revoked_at = COALESCE(revoked_at, ?1)
+               WHERE family_id = ?2`,
+            )
+            .bind(input.now, existing.family_id),
+          database
+            .prepare(
+              `UPDATE mcp_connections
+               SET status = 'revoked', revoked_at = COALESCE(revoked_at, ?1)
+               WHERE id = ?2 AND status = 'active'`,
+            )
+            .bind(input.now, existing.connection_id),
+          database
+            .prepare(
+              `INSERT INTO mcp_audit_events (
+                 invocation_id, connection_id, actor_id, site_id, operation,
+                 input_hash, protocol_version, scopes_json, outcome, reason,
+                 human_actor_id, revocation_reason, occurred_at,
+                 contract_version
+               ) VALUES (
+                 ?1, ?2, ?3, ?4, 'foundry.connection.refresh_reuse',
+                 ?5, '2025-11-25', ?6, 'denied',
+                 'CONNECTION_REVOKED', NULL, 'refresh_token_reuse', ?7,
+                 'foundry.mcp.v1'
+               )`,
+            )
+            .bind(
+              `refresh-reuse:${existing.family_id}:${input.now}`,
+              existing.connection_id,
+              existing.actor_id,
+              existing.site_id,
+              input.tokenHash,
+              existing.scopes_json,
+              input.now,
+            ),
+        ]);
+        return { state: "reuse_detected" };
+      }
+      const results = await database.batch([
+        database
+          .prepare(
+            `UPDATE mcp_refresh_tokens
+             SET consumed_at = ?1, replacement_hash = ?2
+             WHERE token_hash = ?3
+               AND consumed_at IS NULL
+               AND revoked_at IS NULL
+               AND expires_at > ?1`,
+          )
+          .bind(input.now, input.nextTokenHash, input.tokenHash),
+        database
+          .prepare(
+            `INSERT INTO mcp_refresh_tokens (
+               token_hash, family_id, connection_id, oauth_client_id,
+               expires_at, issued_at
+             )
+             SELECT ?1, family_id, connection_id, oauth_client_id, ?2, ?3
+             FROM mcp_refresh_tokens
+             WHERE token_hash = ?4
+               AND consumed_at = ?3
+               AND replacement_hash = ?1
+               AND revoked_at IS NULL`,
+          )
+          .bind(
+            input.nextTokenHash,
+            input.nextExpiresAt,
+            input.now,
+            input.tokenHash,
+          ),
+      ]);
+      if (
+        (results[0]?.meta.changes ?? 0) !== 1 ||
+        (results[1]?.meta.changes ?? 0) !== 1
+      ) {
+        return store.rotateRefreshToken(input);
+      }
+      const connection = await store.findCurrentConnection({
+        connectionId: existing.connection_id,
+        siteId: (
+          await database
+            .prepare(`SELECT site_id FROM mcp_connections WHERE id = ?1`)
+            .bind(existing.connection_id)
+            .first<{ site_id: string }>()
+        )?.site_id as SiteId,
+      });
+      return connection === null || connection.status !== "active"
+        ? { state: "invalid" }
+        : { state: "rotated", connection };
+    },
+    async consumeRateLimit(input) {
+      const row = await database
+        .prepare(
+          `INSERT INTO mcp_rate_limit_buckets (
+             site_id, bucket_key, window_started_at, request_count
+           ) VALUES (?1, ?2, ?3, 1)
+           ON CONFLICT (site_id, bucket_key, window_started_at)
+           DO UPDATE SET request_count = request_count + 1
+           WHERE request_count < ?4
+           RETURNING request_count`,
+        )
+        .bind(
+          input.siteId,
+          input.bucketKey,
+          input.windowStartedAt,
+          input.limit,
+        )
+        .first<{ request_count: number }>();
+      return row !== null;
+    },
+    async listConnections(siteId) {
+      const rows = await database
+        .prepare(
+          `SELECT
+             connection.id, connection.actor_id, connection.site_id,
+             connection.oauth_client_id, connection.scopes_json,
+             connection.status, connection.created_at, connection.revoked_at,
+             MAX(audit.occurred_at) AS last_used_at
+           FROM mcp_connections AS connection
+           LEFT JOIN mcp_audit_events AS audit
+             ON audit.connection_id = connection.id
+            AND audit.operation NOT IN (
+              'foundry.connection.authorize',
+              'foundry.connection.revoke'
+            )
+           WHERE connection.site_id = ?1
+           GROUP BY connection.id
+           ORDER BY connection.created_at DESC, connection.id`,
+        )
+        .bind(siteId)
+        .all<
+          ConnectionRow & {
+            created_at: string;
+            revoked_at: string | null;
+            last_used_at: string | null;
+          }
+        >();
+      return rows.results.map((row) => ({
+        ...toConnection(row),
+        createdAt: row.created_at,
+        revokedAt: row.revoked_at,
+        lastUsedAt: row.last_used_at,
+      }));
+    },
+    async findLiveRelease(siteId) {
+      const row = await database
+        .prepare(
+          `SELECT commit_sha, deployment_id, updated_at
+           FROM content_publications
+           WHERE status = 'verified-live'
+             AND commit_sha IS NOT NULL
+             AND deployment_id IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM content_revisions AS revision
+               WHERE revision.workspace_id = content_publications.workspace_id
+                 AND revision.revision = content_publications.revision
+                 AND revision.site_id = ?1
+             )
+           ORDER BY updated_at DESC, id DESC
+           LIMIT 1`,
+        )
+        .bind(siteId)
+        .first<{
+          commit_sha: string;
+          deployment_id: string;
+          updated_at: string;
+        }>();
+      return row === null
+        ? null
+        : {
+            gitSha: row.commit_sha,
+            releaseId: row.deployment_id,
+            observedAt: row.updated_at,
+          };
     },
   };
 

@@ -5,6 +5,7 @@ import type {
   CampaignRevision,
   FailedPublicFormDelivery,
   HumanMembership,
+  McpConnectionSummary,
   MediaAsset,
   PublicFormDeliveryHealth,
   SuspectedSpamSubmission,
@@ -19,6 +20,7 @@ import { FormOperationsControls } from "./form-operations-controls";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { WorkspaceEditors } from "./workspace-editors";
 import { CampaignControls } from "./campaign-controls";
+import { McpConnectionControls } from "./mcp-connection-controls";
 
 export function contentWorkspaceRequiresSchemaRecovery(
   definition: SiteDefinition,
@@ -54,6 +56,7 @@ export function DashboardShell({
   mediaWorkspaceId,
   campaignPostArtifacts,
   campaigns,
+  mcpConnections,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -78,6 +81,7 @@ export function DashboardShell({
   campaigns: ReadonlyArray<
     Readonly<{ campaign: Campaign; revision: CampaignRevision }>
   >;
+  mcpConnections: ReadonlyArray<McpConnectionSummary>;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined
@@ -250,6 +254,23 @@ export function DashboardShell({
               </div>
             </dl>
           </section>
+          {currentMembership.role === "owner" ? (
+            <section aria-labelledby="agent-connections">
+              <div className="dashboard-section-heading">
+                <div>
+                  <h2 id="agent-connections">Agent connections</h2>
+                  <p>
+                    Every connection is read-only, bound to this site, and
+                    independently revocable.
+                  </p>
+                </div>
+              </div>
+              <McpConnectionControls
+                connections={mcpConnections}
+                csrfToken={mutationToken}
+              />
+            </section>
+          ) : null}
           {currentMembership.role === "owner" ? (
             <section aria-labelledby="human-access">
               <div className="dashboard-section-heading">

@@ -76,11 +76,22 @@ describe("D1 MCP connection store", () => {
       codeChallenge: "challenge-1",
       expiresAt: "2026-07-29T18:05:00.000Z",
       now: "2026-07-29T18:00:00.000Z",
+      inputHash: "a".repeat(64),
     });
 
     await expect(
       store.consumeAuthorizationCode({
         codeHash: "code-hash-1",
+        codeChallenge: "wrong-challenge",
+        clientId: "https://client.example/metadata.json",
+        redirectUri: "https://client.example/callback",
+        now: "2026-07-29T18:00:59.000Z",
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      store.consumeAuthorizationCode({
+        codeHash: "code-hash-1",
+        codeChallenge: "challenge-1",
         clientId: "https://client.example/metadata.json",
         redirectUri: "https://client.example/callback",
         now: "2026-07-29T18:01:00.000Z",
@@ -97,6 +108,7 @@ describe("D1 MCP connection store", () => {
     await expect(
       store.consumeAuthorizationCode({
         codeHash: "code-hash-1",
+        codeChallenge: "challenge-1",
         clientId: "https://client.example/metadata.json",
         redirectUri: "https://client.example/callback",
         now: "2026-07-29T18:01:01.000Z",
@@ -125,6 +137,7 @@ describe("D1 MCP connection store", () => {
       codeChallenge: "challenge-2",
       expiresAt: "2026-07-29T18:05:00.000Z",
       now: "2026-07-29T18:00:00.000Z",
+      inputHash: "b".repeat(64),
     });
 
     await expect(
@@ -133,6 +146,8 @@ describe("D1 MCP connection store", () => {
         connectionId: "connection-2",
         ownerMembershipId: "membership-owner",
         now: "2026-07-29T18:02:00.000Z",
+        reason: "Owner ended the test connection.",
+        inputHash: "c".repeat(64),
       }),
     ).resolves.toBe(true);
     await expect(
@@ -146,6 +161,32 @@ describe("D1 MCP connection store", () => {
         status: "revoked",
       }),
     );
+    await expect(
+      store.listConnections(referenceSiteDefinition.site.id),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        connectionId: "connection-2",
+        clientId: "https://client.example/metadata.json",
+        scopes: ["site.read"],
+        status: "revoked",
+        revokedAt: "2026-07-29T18:02:00.000Z",
+      }),
+    ]);
+    await expect(
+      database
+        .prepare(
+          `SELECT human_actor_id, revocation_reason, input_hash,
+                  protocol_version
+           FROM mcp_audit_events
+           WHERE operation = 'foundry.connection.revoke'`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      human_actor_id: "membership-owner",
+      revocation_reason: "Owner ended the test connection.",
+      input_hash: "c".repeat(64),
+      protocol_version: "2025-11-25",
+    });
   });
 
   it("writes attributable, redacted invocation history", async () => {
@@ -161,6 +202,7 @@ describe("D1 MCP connection store", () => {
       codeChallenge: "challenge-3",
       expiresAt: "2026-07-29T18:05:00.000Z",
       now: "2026-07-29T18:00:00.000Z",
+      inputHash: "d".repeat(64),
     });
     const event: McpReadAuditEvent = {
       invocationId: "invocation-3",
@@ -168,6 +210,8 @@ describe("D1 MCP connection store", () => {
       actorId: "mcp-actor-3",
       siteId: referenceSiteDefinition.site.id,
       operation: "foundry.content.list",
+      inputHash: "e".repeat(64),
+      protocolVersion: "2025-11-25",
       scopesEvaluated: ["site.read"],
       outcome: "allowed",
       reason: null,
@@ -179,8 +223,9 @@ describe("D1 MCP connection store", () => {
     await expect(
       database
         .prepare(
-          `SELECT invocation_id, actor_id, operation, scopes_json, outcome,
-                  reason, contract_version
+          `SELECT invocation_id, actor_id, operation, input_hash,
+                  protocol_version, scopes_json, outcome, reason,
+                  contract_version
            FROM mcp_audit_events WHERE invocation_id = ?1`,
         )
         .bind(event.invocationId)
@@ -189,10 +234,81 @@ describe("D1 MCP connection store", () => {
       invocation_id: "invocation-3",
       actor_id: "mcp-actor-3",
       operation: "foundry.content.list",
+      input_hash: "e".repeat(64),
+      protocol_version: "2025-11-25",
       scopes_json: '["site.read"]',
       outcome: "allowed",
       reason: null,
       contract_version: "foundry.mcp.v1",
     });
+  });
+
+  it("rotates refresh tokens once and revokes the whole grant on reuse", async () => {
+    const store = createD1McpConnectionStore(database);
+    await store.createAuthorizationGrant({
+      connectionId: "connection-refresh",
+      actorId: "mcp-actor-refresh",
+      siteId: referenceSiteDefinition.site.id,
+      clientId: "https://client.example/metadata.json",
+      redirectUri: "https://client.example/callback",
+      ownerMembershipId: "membership-owner",
+      codeHash: "code-hash-refresh",
+      codeChallenge: "challenge-refresh",
+      expiresAt: "2026-07-29T18:05:00.000Z",
+      now: "2026-07-29T18:00:00.000Z",
+      inputHash: "f".repeat(64),
+    });
+    await store.saveRefreshToken({
+      tokenHash: "refresh-hash-1",
+      familyId: "refresh-family-1",
+      connectionId: "connection-refresh",
+      clientId: "https://client.example/metadata.json",
+      expiresAt: "2026-08-28T18:00:00.000Z",
+      now: "2026-07-29T18:00:00.000Z",
+    });
+
+    await expect(
+      store.rotateRefreshToken({
+        tokenHash: "refresh-hash-1",
+        nextTokenHash: "refresh-hash-2",
+        clientId: "https://client.example/metadata.json",
+        nextExpiresAt: "2026-08-28T18:01:00.000Z",
+        now: "2026-07-29T18:01:00.000Z",
+      }),
+    ).resolves.toEqual({
+      state: "rotated",
+      connection: expect.objectContaining({
+        connectionId: "connection-refresh",
+        status: "active",
+      }),
+    });
+    await expect(
+      store.rotateRefreshToken({
+        tokenHash: "refresh-hash-1",
+        nextTokenHash: "refresh-hash-3",
+        clientId: "https://client.example/metadata.json",
+        nextExpiresAt: "2026-08-28T18:02:00.000Z",
+        now: "2026-07-29T18:02:00.000Z",
+      }),
+    ).resolves.toEqual({ state: "reuse_detected" });
+    await expect(
+      store.findCurrentConnection({
+        siteId: referenceSiteDefinition.site.id,
+        connectionId: "connection-refresh",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ status: "revoked" }));
+  });
+
+  it("atomically enforces bounded rate buckets", async () => {
+    const store = createD1McpConnectionStore(database);
+    const input = {
+      siteId: referenceSiteDefinition.site.id,
+      bucketKey: "connection:tool",
+      windowStartedAt: "2026-07-29T18:00:00.000Z",
+      limit: 2,
+    };
+    await expect(store.consumeRateLimit(input)).resolves.toBe(true);
+    await expect(store.consumeRateLimit(input)).resolves.toBe(true);
+    await expect(store.consumeRateLimit(input)).resolves.toBe(false);
   });
 });

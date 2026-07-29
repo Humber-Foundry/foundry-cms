@@ -1,27 +1,38 @@
 import { SignJWT, jwtVerify } from "jose";
 
 import {
-  McpReadError,
-  mcpContractVersion,
   mcpInitialScope,
+  sha256CanonicalJson,
   type McpConnectionGrant,
   type McpConnectionPrincipal,
   type McpConnectionStore,
-  type McpCursorBinding,
   type McpCursorCodec,
-  type createMcpReadApplication,
 } from "@foundry/application";
+import type { SiteId } from "@foundry/site-definition";
+
 import {
-  siteDefinitionSchema,
-  type SiteId,
-} from "@foundry/site-definition";
+  base64UrlEncode,
+  escapeHtml,
+  hasExactKeys,
+  isRecord,
+  jsonResponse,
+  readBoundedText,
+  sha256,
+  withTimeout,
+} from "./mcp-http-support";
+import {
+  createMcpProtocolRuntime,
+  mcpProtocolVersion,
+} from "./mcp-protocol-runtime";
+import type { McpReadApplication } from "./mcp-tool-registry";
 
-import type { ConsumedMcpAuthorizationCode } from "./d1-mcp-connection-store";
+export { createSignedMcpCursorCodec } from "./mcp-http-support";
 
-const protocolVersion = "2025-11-25";
 const accessTokenLifetimeSeconds = 5 * 60;
 const authorizationCodeLifetimeSeconds = 5 * 60;
-const cursorLifetimeSeconds = 15 * 60;
+const refreshTokenLifetimeSeconds = 30 * 24 * 60 * 60;
+const oauthBodyLimitBytes = 16 * 1024;
+const rpcTimeoutMs = 10_000;
 
 export type McpAuthorizationGrantInput = Readonly<{
   connectionId: string;
@@ -34,6 +45,7 @@ export type McpAuthorizationGrantInput = Readonly<{
   codeChallenge: string;
   expiresAt: string;
   now: string;
+  inputHash: string;
 }>;
 
 export type McpAuthorizationRuntimeStore = McpConnectionStore &
@@ -41,371 +53,66 @@ export type McpAuthorizationRuntimeStore = McpConnectionStore &
     createAuthorizationGrant(input: McpAuthorizationGrantInput): Promise<void>;
     consumeAuthorizationCode(input: {
       codeHash: string;
+      codeChallenge: string;
       clientId: string;
       redirectUri: string;
       now: string;
-    }): Promise<ConsumedMcpAuthorizationCode | null>;
+    }): Promise<
+      (McpConnectionGrant & Readonly<{ codeChallenge: string }>) | null
+    >;
     revokeConnection(input: {
       siteId: SiteId;
       connectionId: string;
       ownerMembershipId: string;
       now: string;
+      reason: string;
+      inputHash: string;
+    }): Promise<boolean>;
+    saveRefreshToken(input: {
+      tokenHash: string;
+      familyId: string;
+      connectionId: string;
+      clientId: string;
+      expiresAt: string;
+      now: string;
+    }): Promise<void>;
+    rotateRefreshToken(input: {
+      tokenHash: string;
+      nextTokenHash: string;
+      clientId: string;
+      nextExpiresAt: string;
+      now: string;
+    }): Promise<
+      | Readonly<{ state: "rotated"; connection: McpConnectionGrant }>
+      | Readonly<{ state: "reuse_detected" | "invalid" }>
+    >;
+    consumeRateLimit(input: {
+      siteId: SiteId;
+      bucketKey: string;
+      windowStartedAt: string;
+      limit: number;
     }): Promise<boolean>;
   }>;
 
-type McpReadApplication = ReturnType<typeof createMcpReadApplication>;
 type OwnerAuthenticationIntent = Readonly<{
   mode: "view" | "mutate";
   csrfToken: string | null;
 }>;
 
-type RpcRequest = Readonly<{
-  jsonrpc: "2.0";
-  id?: string | number | null;
-  method: string;
-  params?: unknown;
+type AuthorizationRequest = Readonly<{
+  responseType: "code";
+  clientId: string;
+  clientName: string;
+  redirectUri: string;
+  resource: string;
+  scope: typeof mcpInitialScope;
+  state: string;
+  codeChallenge: string;
+  codeChallengeMethod: "S256";
 }>;
 
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(
-  value: JsonRecord,
-  required: ReadonlyArray<string>,
-  optional: ReadonlyArray<string> = [],
-) {
-  const keys = Object.keys(value).sort();
-  const allowed = new Set([...required, ...optional]);
-  return (
-    required.every((key) => Object.hasOwn(value, key)) &&
-    keys.every((key) => allowed.has(key))
-  );
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
-}
-
-function base64UrlDecode(value: string): Uint8Array {
-  const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
-  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-  const binary = atob(padded);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return base64UrlEncode(new Uint8Array(digest));
-}
-
-async function hmacKey(secret: string) {
-  if (secret.length < 32) {
-    throw new TypeError("mcp_signing_secret_invalid");
-  }
-  return crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-}
-
-export function createSignedMcpCursorCodec({
-  secret,
-  now = () => new Date(),
-}: {
-  secret: string;
-  now?: () => Date;
-}): McpCursorCodec {
-  return {
-    async encode(binding) {
-      const payload = base64UrlEncode(
-        new TextEncoder().encode(
-          JSON.stringify({
-            ...binding,
-            expiresAt:
-              Math.floor(now().getTime() / 1_000) + cursorLifetimeSeconds,
-          }),
-        ),
-      );
-      const signature = await crypto.subtle.sign(
-        "HMAC",
-        await hmacKey(secret),
-        new TextEncoder().encode(payload),
-      );
-      return `${payload}.${base64UrlEncode(new Uint8Array(signature))}`;
-    },
-    async decode(cursor) {
-      const [payload, signature, unexpected] = cursor.split(".");
-      if (
-        payload === undefined ||
-        signature === undefined ||
-        unexpected !== undefined
-      ) {
-        throw new TypeError("mcp_cursor_invalid");
-      }
-      const verified = await crypto.subtle.verify(
-        "HMAC",
-        await hmacKey(secret),
-        base64UrlDecode(signature).buffer as ArrayBuffer,
-        new TextEncoder().encode(payload),
-      );
-      const decoded: unknown = JSON.parse(
-        new TextDecoder().decode(base64UrlDecode(payload)),
-      );
-      if (
-        !verified ||
-        !isRecord(decoded) ||
-        typeof decoded.siteId !== "string" ||
-        typeof decoded.actorId !== "string" ||
-        typeof decoded.query !== "string" ||
-        typeof decoded.offset !== "number" ||
-        typeof decoded.expiresAt !== "number" ||
-        decoded.expiresAt < Math.floor(now().getTime() / 1_000)
-      ) {
-        throw new TypeError("mcp_cursor_invalid");
-      }
-      return {
-        siteId: decoded.siteId as SiteId,
-        actorId: decoded.actorId,
-        query: decoded.query,
-        offset: decoded.offset,
-      } satisfies McpCursorBinding;
-    },
-  };
-}
-
-function jsonResponse(
-  value: unknown,
-  status = 200,
-  headers: HeadersInit = {},
-) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "cache-control": "no-store",
-      "content-type": "application/json; charset=utf-8",
-      ...headers,
-    },
-  });
-}
-
-function rpcResult(id: RpcRequest["id"], result: unknown) {
-  return jsonResponse({ jsonrpc: "2.0", id: id ?? null, result });
-}
-
-function rpcError(
-  id: RpcRequest["id"],
-  code: number,
-  message: string,
-  data?: unknown,
-) {
-  return jsonResponse({
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: {
-      code,
-      message,
-      ...(data === undefined ? {} : { data }),
-    },
-  });
-}
-
-function safeErrorMessage(code: McpReadError["code"]) {
-  const messages = {
-    AUTHENTICATION_REQUIRED: "Authentication is required.",
-    INSUFFICIENT_SCOPE: "The connection lacks the required permission.",
-    CONNECTION_REVOKED: "The MCP connection has been revoked.",
-    OBJECT_NOT_FOUND: "The requested object was not found.",
-    VALIDATION_FAILED: "The request is invalid.",
-    TEMPORARILY_UNAVAILABLE: "The service is temporarily unavailable.",
-  } as const;
-  return messages[code];
-}
-
-function toolResult(
-  structuredContent: unknown,
-  isError: boolean,
-) {
-  return {
-    isError,
-    structuredContent,
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(structuredContent),
-      },
-    ],
-  };
-}
-
-function successOutputSchema(result: unknown) {
-  return {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      contractVersion: { const: mcpContractVersion },
-      invocationId: { type: "string", minLength: 1 },
-      result,
-      meta: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          replayed: { const: false },
-          observedAt: { type: "string", format: "date-time" },
-        },
-        required: ["replayed", "observedAt"],
-      },
-    },
-    required: ["contractVersion", "invocationId", "result", "meta"],
-    $defs: siteDefinitionSchema.$defs,
-  };
-}
-
-const toolCatalog = [
-  {
-    name: "foundry.site.get",
-    description: "Read this connection's site metadata.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {},
-    },
-    outputSchema: successOutputSchema({
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        siteId: { type: "string" },
-        displayName: { type: "string" },
-        canonicalUrl: { type: "string", format: "uri" },
-        locale: { type: "string" },
-        timeZone: { type: "string" },
-        schemaVersion: { type: "string" },
-      },
-      required: [
-        "siteId",
-        "displayName",
-        "canonicalUrl",
-        "locale",
-        "timeZone",
-        "schemaVersion",
-      ],
-    }),
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-    execution: { taskSupport: "forbidden" },
-  },
-  {
-    name: "foundry.content.list",
-    description: "List published page and post documents with bounded pagination.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        kind: { anyOf: [{ enum: ["page", "post"] }, { type: "null" }] },
-        limit: { type: "integer", minimum: 1, maximum: 100 },
-        cursor: { anyOf: [{ type: "string" }, { type: "null" }] },
-      },
-      required: ["kind", "limit", "cursor"],
-    },
-    outputSchema: successOutputSchema({
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              kind: { enum: ["page", "post"] },
-              contentId: { type: "string" },
-              title: { type: "string" },
-              revision: { type: "integer", minimum: 0 },
-            },
-            required: ["kind", "contentId", "title", "revision"],
-          },
-        },
-        nextCursor: {
-          anyOf: [{ type: "string" }, { type: "null" }],
-        },
-      },
-      required: ["items", "nextCursor"],
-    }),
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-    execution: { taskSupport: "forbidden" },
-  },
-  {
-    name: "foundry.content.get",
-    description: "Read one published page or post document.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        kind: { enum: ["page", "post"] },
-        contentId: { type: "string", minLength: 1, maxLength: 200 },
-      },
-      required: ["kind", "contentId"],
-    },
-    outputSchema: successOutputSchema({
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        kind: { enum: ["page", "post"] },
-        contentId: { type: "string" },
-        revision: { type: "integer", minimum: 0 },
-        document: {
-          oneOf: [
-            siteDefinitionSchema.properties.home,
-            siteDefinitionSchema.$defs.blogPost,
-          ],
-        },
-      },
-      required: ["kind", "contentId", "revision", "document"],
-    }),
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-    execution: { taskSupport: "forbidden" },
-  },
-] as const;
-
 function protectedResourceMetadataPath(resourceUri: string) {
-  const resource = new URL(resourceUri);
-  return `/.well-known/oauth-protected-resource${resource.pathname}`;
+  return `/.well-known/oauth-protected-resource${new URL(resourceUri).pathname}`;
 }
 
 export function createMcpHttpRuntime({
@@ -417,11 +124,19 @@ export function createMcpHttpRuntime({
   siteName,
   store,
   readApplication,
+  cursors,
   registeredClients,
   authenticateOwner,
   authorizationPath = `${new URL(resourceUri).pathname}/oauth/authorize`,
   ownerRevocationPath = "/api/foundry-cms/mcp-connections/revoke",
-  createOpaqueValue = () => crypto.randomUUID(),
+  createAuthorizationCode = () =>
+    base64UrlEncode(crypto.getRandomValues(new Uint8Array(32))),
+  createConnectionId = () => crypto.randomUUID(),
+  createActorId = () => crypto.randomUUID(),
+  createTokenId = () => crypto.randomUUID(),
+  createRefreshToken = () =>
+    base64UrlEncode(crypto.getRandomValues(new Uint8Array(32))),
+  createRefreshFamilyId = () => crypto.randomUUID(),
   now = () => new Date(),
 }: {
   resourceUri: string;
@@ -432,6 +147,7 @@ export function createMcpHttpRuntime({
   siteName: string;
   store: McpAuthorizationRuntimeStore;
   readApplication: McpReadApplication;
+  cursors: McpCursorCodec;
   registeredClients: Readonly<
     Record<
       string,
@@ -444,21 +160,38 @@ export function createMcpHttpRuntime({
   ): Promise<{ membershipId: string; csrfToken?: string }>;
   authorizationPath?: string;
   ownerRevocationPath?: string;
-  createOpaqueValue?: () => string;
+  createAuthorizationCode?: () => string;
+  createConnectionId?: () => string;
+  createActorId?: () => string;
+  createTokenId?: () => string;
+  createRefreshToken?: () => string;
+  createRefreshFamilyId?: () => string;
   now?: () => Date;
 }) {
   const resource = new URL(resourceUri);
+  const issuer = new URL(authorizationIssuer);
   if (
     resource.protocol !== "https:" ||
     resource.origin !== canonicalOrigin ||
-    new URL(authorizationIssuer).protocol !== "https:"
+    issuer.protocol !== "https:" ||
+    signingSecret.length < 32
   ) {
     throw new TypeError("mcp_production_origin_invalid");
   }
-  const metadataUri = `${canonicalOrigin}${protectedResourceMetadataPath(resourceUri)}`;
+  const signingKey = new TextEncoder().encode(signingSecret);
+  const metadataUri =
+    `${canonicalOrigin}${protectedResourceMetadataPath(resourceUri)}`;
   const challengeHeader =
     `Bearer resource_metadata="${metadataUri}", scope="${mcpInitialScope}"`;
-  const signingKey = new TextEncoder().encode(signingSecret);
+  const protocol = createMcpProtocolRuntime({
+    canonicalOrigin,
+    siteId,
+    siteName,
+    store,
+    readApplication,
+    cursors,
+    now,
+  });
 
   function authenticationFailure(error = "invalid_token") {
     return jsonResponse(
@@ -519,7 +252,6 @@ export function createMcpHttpRuntime({
         current.status !== "active" ||
         current.actorId !== principal.actorId ||
         current.clientId !== principal.clientId ||
-        current.siteId !== principal.siteId ||
         current.scopes.length !== 1 ||
         current.scopes[0] !== mcpInitialScope
       ) {
@@ -535,7 +267,9 @@ export function createMcpHttpRuntime({
     }
   }
 
-  function readAuthorizationRequest(body: unknown) {
+  function readAuthorizationRequest(
+    body: unknown,
+  ): AuthorizationRequest | null {
     if (
       !isRecord(body) ||
       !hasExactKeys(body, [
@@ -569,7 +303,7 @@ export function createMcpHttpRuntime({
       return null;
     }
     return {
-      responseType: body.response_type,
+      responseType: "code",
       clientId: body.client_id,
       clientName: client.name,
       redirectUri: body.redirect_uri,
@@ -577,48 +311,56 @@ export function createMcpHttpRuntime({
       scope: body.scope,
       state: body.state,
       codeChallenge: body.code_challenge,
-      codeChallengeMethod: body.code_challenge_method,
+      codeChallengeMethod: "S256",
     };
   }
 
-  async function handleAuthorization(request: Request) {
-    if (request.method === "GET") {
-      const query = Object.fromEntries(new URL(request.url).searchParams);
-      const authorization = readAuthorizationRequest(query);
-      if (authorization === null) {
-        return jsonResponse({ error: "invalid_request" }, 400);
-      }
-      let owner;
-      try {
-        owner = await authenticateOwner(request, {
-          mode: "view",
-          csrfToken: null,
-        });
-      } catch {
-        return jsonResponse({ error: "access_denied" }, 403);
-      }
-      if (owner.csrfToken === undefined) {
-        return jsonResponse({ error: "access_denied" }, 403);
-      }
-      const hidden = {
-        response_type: authorization.responseType,
-        client_id: authorization.clientId,
-        redirect_uri: authorization.redirectUri,
-        resource: authorization.resource,
-        scope: authorization.scope,
-        state: authorization.state,
-        code_challenge: authorization.codeChallenge,
-        code_challenge_method: authorization.codeChallengeMethod,
-        csrf_token: owner.csrfToken,
+  async function readAuthorizationBody(request: Request) {
+    const contentType = request.headers.get("content-type")?.toLowerCase();
+    if (contentType?.startsWith("application/json") === true) {
+      return {
+        body: JSON.parse(
+          await readBoundedText(request, oauthBodyLimitBytes),
+        ) as unknown,
+        csrfToken: null,
       };
-      const fields = Object.entries(hidden)
-        .map(
-          ([name, value]) =>
-            `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
-        )
-        .join("\n");
-      return new Response(
-        `<!doctype html>
+    }
+    if (
+      contentType?.startsWith("application/x-www-form-urlencoded") === true
+    ) {
+      const form = new URLSearchParams(
+        await readBoundedText(request, oauthBodyLimitBytes),
+      );
+      const csrfToken = form.get("csrf_token");
+      form.delete("csrf_token");
+      return { body: Object.fromEntries(form), csrfToken };
+    }
+    throw new TypeError("invalid_request");
+  }
+
+  function authorizationConsent(
+    authorization: AuthorizationRequest,
+    csrfToken: string,
+  ) {
+    const hidden = {
+      response_type: authorization.responseType,
+      client_id: authorization.clientId,
+      redirect_uri: authorization.redirectUri,
+      resource: authorization.resource,
+      scope: authorization.scope,
+      state: authorization.state,
+      code_challenge: authorization.codeChallenge,
+      code_challenge_method: authorization.codeChallengeMethod,
+      csrf_token: csrfToken,
+    };
+    const fields = Object.entries(hidden)
+      .map(
+        ([name, value]) =>
+          `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+      )
+      .join("\n");
+    return new Response(
+      `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Connect MCP client</title></head>
   <body>
@@ -633,17 +375,38 @@ export function createMcpHttpRuntime({
     </main>
   </body>
 </html>`,
-        {
-          status: 200,
-          headers: {
-            "cache-control": "no-store",
-            "content-security-policy":
-              "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-            "content-type": "text/html; charset=utf-8",
-            "x-content-type-options": "nosniff",
-          },
+      {
+        status: 200,
+        headers: {
+          "cache-control": "no-store",
+          "content-security-policy":
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+          "content-type": "text/html; charset=utf-8",
+          "x-content-type-options": "nosniff",
         },
+      },
+    );
+  }
+
+  async function handleAuthorization(request: Request) {
+    if (request.method === "GET") {
+      const authorization = readAuthorizationRequest(
+        Object.fromEntries(new URL(request.url).searchParams),
       );
+      if (authorization === null) {
+        return jsonResponse({ error: "invalid_request" }, 400);
+      }
+      try {
+        const owner = await authenticateOwner(request, {
+          mode: "view",
+          csrfToken: null,
+        });
+        return owner.csrfToken === undefined
+          ? jsonResponse({ error: "access_denied" }, 403)
+          : authorizationConsent(authorization, owner.csrfToken);
+      } catch {
+        return jsonResponse({ error: "access_denied" }, 403);
+      }
     }
     if (request.method !== "POST") {
       return jsonResponse({ error: "method_not_allowed" }, 405, {
@@ -653,26 +416,13 @@ export function createMcpHttpRuntime({
     if (request.headers.get("origin") !== canonicalOrigin) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
-    const contentType = request.headers.get("content-type")?.toLowerCase();
-    let body: unknown;
-    let csrfToken: string | null = null;
+    let parsed: Awaited<ReturnType<typeof readAuthorizationBody>>;
     try {
-      if (contentType?.startsWith("application/json") === true) {
-        body = await request.json();
-      } else if (
-        contentType?.startsWith("application/x-www-form-urlencoded") === true
-      ) {
-        const form = new URLSearchParams(await request.text());
-        csrfToken = form.get("csrf_token");
-        form.delete("csrf_token");
-        body = Object.fromEntries(form);
-      } else {
-        return jsonResponse({ error: "invalid_request" }, 400);
-      }
+      parsed = await readAuthorizationBody(request);
     } catch {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
-    const authorization = readAuthorizationRequest(body);
+    const authorization = readAuthorizationRequest(parsed.body);
     if (authorization === null) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
@@ -680,18 +430,16 @@ export function createMcpHttpRuntime({
     try {
       owner = await authenticateOwner(request, {
         mode: "mutate",
-        csrfToken,
+        csrfToken: parsed.csrfToken,
       });
     } catch {
       return jsonResponse({ error: "access_denied" }, 403);
     }
-    const code = createOpaqueValue();
-    const connectionId = `connection-${createOpaqueValue()}`;
-    const actorId = `mcp-${createOpaqueValue()}`;
+    const code = createAuthorizationCode();
     const observedAt = now();
     await store.createAuthorizationGrant({
-      connectionId,
-      actorId,
+      connectionId: createConnectionId(),
+      actorId: createActorId(),
       siteId,
       clientId: authorization.clientId,
       redirectUri: authorization.redirectUri,
@@ -702,6 +450,12 @@ export function createMcpHttpRuntime({
         observedAt.getTime() + authorizationCodeLifetimeSeconds * 1_000,
       ).toISOString(),
       now: observedAt.toISOString(),
+      inputHash: await sha256CanonicalJson({
+        clientId: authorization.clientId,
+        redirectUri: authorization.redirectUri,
+        resource: authorization.resource,
+        scope: authorization.scope,
+      }),
     });
     const redirect = new URL(authorization.redirectUri);
     redirect.searchParams.set("code", code);
@@ -715,6 +469,27 @@ export function createMcpHttpRuntime({
     });
   }
 
+  async function issueAccessToken(connection: McpConnectionGrant) {
+    const issuedAt = Math.floor(now().getTime() / 1_000);
+    return new SignJWT({
+      resource: resourceUri,
+      token_type: "access_token",
+      connection_id: connection.connectionId,
+      client_id: connection.clientId,
+      site_id: siteId,
+      scope: mcpInitialScope,
+    })
+      .setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+      .setIssuer(authorizationIssuer)
+      .setAudience(resourceUri)
+      .setSubject(connection.actorId)
+      .setIssuedAt(issuedAt)
+      .setNotBefore(issuedAt)
+      .setExpirationTime(issuedAt + accessTokenLifetimeSeconds)
+      .setJti(createTokenId())
+      .sign(signingKey);
+  }
+
   async function handleToken(request: Request) {
     if (
       request.method !== "POST" ||
@@ -725,57 +500,87 @@ export function createMcpHttpRuntime({
     ) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
-    const form = new URLSearchParams(await request.text());
-    const code = form.get("code");
+    let form: URLSearchParams;
+    try {
+      form = new URLSearchParams(
+        await readBoundedText(request, oauthBodyLimitBytes),
+      );
+    } catch {
+      return jsonResponse({ error: "invalid_request" }, 400);
+    }
     const clientId = form.get("client_id");
-    const redirectUri = form.get("redirect_uri");
-    const verifier = form.get("code_verifier");
-    if (
-      form.get("grant_type") !== "authorization_code" ||
-      form.get("resource") !== resourceUri ||
-      code === null ||
-      clientId === null ||
-      redirectUri === null ||
-      verifier === null ||
-      !/^[A-Za-z0-9._~-]{43,128}$/u.test(verifier)
-    ) {
+    if (form.get("resource") !== resourceUri || clientId === null) {
       return jsonResponse({ error: "invalid_grant" }, 400);
     }
-    const exchanged = await store.consumeAuthorizationCode({
-      codeHash: await sha256(code),
-      clientId,
-      redirectUri,
-      now: now().toISOString(),
-    });
-    if (
-      exchanged === null ||
-      exchanged.siteId !== siteId ||
-      exchanged.scopes.length !== 1 ||
-      exchanged.scopes[0] !== mcpInitialScope ||
-      (await sha256(verifier)) !== exchanged.codeChallenge
-    ) {
-      return jsonResponse({ error: "invalid_grant" }, 400);
+    const observedAt = now();
+    let connection: McpConnectionGrant;
+    let refreshToken: string;
+    if (form.get("grant_type") === "authorization_code") {
+      const code = form.get("code");
+      const redirectUri = form.get("redirect_uri");
+      const verifier = form.get("code_verifier");
+      if (
+        code === null ||
+        redirectUri === null ||
+        verifier === null ||
+        !/^[A-Za-z0-9._~-]{43,128}$/u.test(verifier)
+      ) {
+        return jsonResponse({ error: "invalid_grant" }, 400);
+      }
+      const codeChallenge = await sha256(verifier);
+      const exchanged = await store.consumeAuthorizationCode({
+        codeHash: await sha256(code),
+        codeChallenge,
+        clientId,
+        redirectUri,
+        now: observedAt.toISOString(),
+      });
+      if (
+        exchanged === null ||
+        exchanged.siteId !== siteId ||
+        exchanged.scopes.length !== 1 ||
+        exchanged.scopes[0] !== mcpInitialScope ||
+        codeChallenge !== exchanged.codeChallenge
+      ) {
+        return jsonResponse({ error: "invalid_grant" }, 400);
+      }
+      connection = exchanged;
+      refreshToken = createRefreshToken();
+      await store.saveRefreshToken({
+        tokenHash: await sha256(refreshToken),
+        familyId: createRefreshFamilyId(),
+        connectionId: connection.connectionId,
+        clientId,
+        expiresAt: new Date(
+          observedAt.getTime() + refreshTokenLifetimeSeconds * 1_000,
+        ).toISOString(),
+        now: observedAt.toISOString(),
+      });
+    } else if (form.get("grant_type") === "refresh_token") {
+      const presented = form.get("refresh_token");
+      if (presented === null) {
+        return jsonResponse({ error: "invalid_grant" }, 400);
+      }
+      refreshToken = createRefreshToken();
+      const rotation = await store.rotateRefreshToken({
+        tokenHash: await sha256(presented),
+        nextTokenHash: await sha256(refreshToken),
+        clientId,
+        nextExpiresAt: new Date(
+          observedAt.getTime() + refreshTokenLifetimeSeconds * 1_000,
+        ).toISOString(),
+        now: observedAt.toISOString(),
+      });
+      if (rotation.state !== "rotated") {
+        return jsonResponse({ error: "invalid_grant" }, 400);
+      }
+      connection = rotation.connection;
+    } else {
+      return jsonResponse({ error: "unsupported_grant_type" }, 400);
     }
-    const issuedAt = Math.floor(now().getTime() / 1_000);
-    const accessToken = await new SignJWT({
-      resource: resourceUri,
-      token_type: "access_token",
-      connection_id: exchanged.connectionId,
-      client_id: exchanged.clientId,
-      site_id: siteId,
-      scope: mcpInitialScope,
-    })
-      .setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
-      .setIssuer(authorizationIssuer)
-      .setAudience(resourceUri)
-      .setSubject(exchanged.actorId)
-      .setIssuedAt(issuedAt)
-      .setNotBefore(issuedAt)
-      .setExpirationTime(issuedAt + accessTokenLifetimeSeconds)
-      .setJti(createOpaqueValue())
-      .sign(signingKey);
     return jsonResponse({
-      access_token: accessToken,
+      access_token: await issueAccessToken(connection),
+      refresh_token: refreshToken,
       token_type: "Bearer",
       expires_in: accessTokenLifetimeSeconds,
       scope: mcpInitialScope,
@@ -783,274 +588,62 @@ export function createMcpHttpRuntime({
     });
   }
 
-  async function callTool(
-    principal: McpConnectionPrincipal,
-    name: unknown,
-    argumentsValue: unknown,
-  ) {
-    try {
-      if (!isRecord(argumentsValue)) {
-        return null;
-      }
-      if (
-        name === "foundry.site.get" &&
-        hasExactKeys(argumentsValue, [])
-      ) {
-        return toolResult(await readApplication.getSite(principal), false);
-      }
-      if (
-        name === "foundry.content.list" &&
-        hasExactKeys(argumentsValue, ["kind", "limit", "cursor"]) &&
-        (argumentsValue.kind === null ||
-          argumentsValue.kind === "page" ||
-          argumentsValue.kind === "post") &&
-        typeof argumentsValue.limit === "number" &&
-        (argumentsValue.cursor === null ||
-          typeof argumentsValue.cursor === "string")
-      ) {
-        return toolResult(
-          await readApplication.listContent(principal, {
-            kind: argumentsValue.kind,
-            limit: argumentsValue.limit,
-            cursor: argumentsValue.cursor,
-          }),
-          false,
-        );
-      }
-      if (
-        name === "foundry.content.get" &&
-        hasExactKeys(argumentsValue, ["kind", "contentId"]) &&
-        (argumentsValue.kind === "page" ||
-          argumentsValue.kind === "post") &&
-        typeof argumentsValue.contentId === "string" &&
-        argumentsValue.contentId.length >= 1 &&
-        argumentsValue.contentId.length <= 200
-      ) {
-        return toolResult(
-          await readApplication.getContent(principal, {
-            kind: argumentsValue.kind,
-            contentId: argumentsValue.contentId,
-          }),
-          false,
-        );
-      }
-      return null;
-    } catch (error) {
-      if (!(error instanceof McpReadError)) throw error;
-      const observedAt = error.observedAt ?? now().toISOString();
-      return toolResult(
-        {
-          contractVersion: mcpContractVersion,
-          invocationId: error.invocationId ?? crypto.randomUUID(),
-          error: {
-            code: error.code,
-            message: safeErrorMessage(error.code),
-            retryable: error.retryable,
-            requiredScopes:
-              error.code === "INSUFFICIENT_SCOPE" ? [mcpInitialScope] : [],
-          },
-          meta: {
-            replayed: false,
-            observedAt,
-          },
-        },
-        true,
-      );
-    }
-  }
-
-  async function readResource(
-    principal: McpConnectionPrincipal,
-    uri: string,
-  ) {
-    if (uri === "foundry://site") {
-      const envelope = await readApplication.getSite(principal);
-      return {
-        uri,
-        mimeType: "application/json",
-        text: JSON.stringify(envelope),
-      };
-    }
-    if (uri === "foundry://schemas/content") {
-      const envelope = await readApplication.getContentSchema(principal);
-      return {
-        uri,
-        mimeType: "application/schema+json",
-        text: JSON.stringify(envelope),
-      };
-    }
-    const match = /^foundry:\/\/content\/(page|post)\/([^/]+)$/u.exec(uri);
-    if (match !== null) {
-      const envelope = await readApplication.getContent(principal, {
-        kind: match[1] as "page" | "post",
-        contentId: decodeURIComponent(match[2]!),
-      });
-      return {
-        uri,
-        mimeType: "application/json",
-        text: JSON.stringify(envelope),
-      };
-    }
-    throw new McpReadError(
-      "OBJECT_NOT_FOUND",
-      "The requested object was not found.",
-    );
-  }
-
-  async function handleMcp(
-    request: Request,
-    principal: McpConnectionPrincipal,
-  ) {
-    if (request.method !== "POST") {
-      return jsonResponse({ error: "method_not_allowed" }, 405, {
-        allow: "POST",
-      });
-    }
-    const origin = request.headers.get("origin");
-    if (origin !== null && origin !== canonicalOrigin) {
-      return jsonResponse({ error: "origin_not_allowed" }, 403);
-    }
-    const accept = request.headers.get("accept") ?? "";
+  async function handleOwnerRevocation(request: Request) {
     if (
-      !accept.includes("application/json") ||
-      !accept.includes("text/event-stream") ||
+      request.method !== "POST" ||
+      request.headers.get("origin") !== canonicalOrigin ||
       request.headers
         .get("content-type")
         ?.toLowerCase()
         .startsWith("application/json") !== true
     ) {
-      return jsonResponse({ error: "unsupported_media_type" }, 415);
+      return jsonResponse({ error: "invalid_request" }, 400);
     }
-    let value: unknown;
+    let owner;
     try {
-      value = await request.json();
+      owner = await authenticateOwner(request, {
+        mode: "mutate",
+        csrfToken: null,
+      });
     } catch {
-      return rpcError(null, -32700, "Parse error");
+      return jsonResponse({ error: "access_denied" }, 403);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBoundedText(request, oauthBodyLimitBytes));
+    } catch {
+      return jsonResponse({ error: "invalid_request" }, 400);
     }
     if (
-      !isRecord(value) ||
-      value.jsonrpc !== "2.0" ||
-      typeof value.method !== "string" ||
-      !hasExactKeys(value, ["jsonrpc", "method"], ["id", "params"])
+      !isRecord(body) ||
+      !hasExactKeys(body, ["connectionId", "reason"]) ||
+      typeof body.connectionId !== "string" ||
+      body.connectionId.length < 1 ||
+      body.connectionId.length > 200 ||
+      typeof body.reason !== "string" ||
+      body.reason.trim().length < 1 ||
+      body.reason.length > 240
     ) {
-      return rpcError(null, -32600, "Invalid Request");
+      return jsonResponse({ error: "invalid_request" }, 400);
     }
-    const rpc = value as RpcRequest;
-    if (rpc.method !== "initialize") {
-      const requestedProtocol = request.headers.get("mcp-protocol-version");
-      if (requestedProtocol !== protocolVersion) {
-        return rpcError(rpc.id, -32600, "Unsupported MCP protocol version");
-      }
-    }
-    if (rpc.method === "notifications/initialized") {
-      return new Response(null, { status: 202 });
-    }
-    if (rpc.method === "initialize") {
-      if (
-        !isRecord(rpc.params) ||
-        rpc.params.protocolVersion !== protocolVersion
-      ) {
-        return rpcError(rpc.id, -32602, "Unsupported MCP protocol version");
-      }
-      return rpcResult(rpc.id, {
-        protocolVersion,
-        capabilities: {
-          tools: { listChanged: false },
-          resources: { subscribe: false, listChanged: false },
-          prompts: { listChanged: false },
-        },
-        serverInfo: {
-          name: "foundry-cms",
-          version: "0.1.0",
-          description: `${siteName} read-only MCP resource (${mcpContractVersion})`,
-        },
-      });
-    }
-    if (rpc.method === "tools/list") {
-      return rpcResult(rpc.id, { tools: toolCatalog, nextCursor: null });
-    }
-    if (rpc.method === "tools/call") {
-      if (
-        !isRecord(rpc.params) ||
-        !hasExactKeys(rpc.params, ["name", "arguments"]) ||
-        typeof rpc.params.name !== "string"
-      ) {
-        return rpcError(rpc.id, -32602, "Invalid tool arguments");
-      }
-      const result = await callTool(
-        principal,
-        rpc.params.name,
-        rpc.params.arguments,
-      );
-      return result === null
-        ? rpcError(rpc.id, -32602, "Invalid tool arguments")
-        : rpcResult(rpc.id, result);
-    }
-    if (rpc.method === "resources/list") {
-      const site = await readApplication.getSite(principal);
-      const content = await readApplication.listContent(principal, {
-        kind: null,
-        limit: 100,
-        cursor: null,
-      });
-      return rpcResult(rpc.id, {
-        resources: [
-          {
-            uri: "foundry://site",
-            name: site.result.displayName,
-            mimeType: "application/json",
-          },
-          {
-            uri: "foundry://schemas/content",
-            name: "Content schema",
-            mimeType: "application/schema+json",
-          },
-          ...content.result.items.map((item) => ({
-            uri: `foundry://content/${item.kind}/${encodeURIComponent(item.contentId)}`,
-            name: item.title,
-            mimeType: "application/json",
-          })),
-        ],
-        nextCursor: null,
-      });
-    }
-    if (rpc.method === "resources/templates/list") {
-      return rpcResult(rpc.id, {
-        resourceTemplates: [
-          {
-            uriTemplate: "foundry://content/{kind}/{contentId}",
-            name: "Published content",
-            mimeType: "application/json",
-          },
-        ],
-        nextCursor: null,
-      });
-    }
-    if (rpc.method === "resources/read") {
-      if (
-        !isRecord(rpc.params) ||
-        !hasExactKeys(rpc.params, ["uri"]) ||
-        typeof rpc.params.uri !== "string"
-      ) {
-        return rpcError(rpc.id, -32602, "Invalid resource request");
-      }
-      try {
-        return rpcResult(rpc.id, {
-          contents: [await readResource(principal, rpc.params.uri)],
-        });
-      } catch (error) {
-        if (error instanceof McpReadError) {
-          return rpcError(rpc.id, -32002, safeErrorMessage(error.code), {
-            code: error.code,
-          });
-        }
-        throw error;
-      }
-    }
-    if (rpc.method === "prompts/list") {
-      return rpcResult(rpc.id, { prompts: [], nextCursor: null });
-    }
-    return rpcError(rpc.id, -32601, "Method not found");
+    const reason = body.reason.trim();
+    const revoked = await store.revokeConnection({
+      siteId,
+      connectionId: body.connectionId,
+      ownerMembershipId: owner.membershipId,
+      now: now().toISOString(),
+      reason,
+      inputHash: await sha256CanonicalJson({
+        connectionId: body.connectionId,
+        reason,
+      }),
+    });
+    return revoked
+      ? new Response(null, {
+          status: 204,
+          headers: { "cache-control": "no-store" },
+        })
+      : jsonResponse({ error: "not_found" }, 404);
   }
 
   return {
@@ -1079,7 +672,7 @@ export function createMcpHttpRuntime({
           authorization_endpoint: `${canonicalOrigin}${authorizationPath}`,
           token_endpoint: `${resourceUri}/oauth/token`,
           response_types_supported: ["code"],
-          grant_types_supported: ["authorization_code"],
+          grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
           token_endpoint_auth_methods_supported: ["none"],
           scopes_supported: [mcpInitialScope],
@@ -1095,52 +688,7 @@ export function createMcpHttpRuntime({
         url.origin === canonicalOrigin &&
         url.pathname === ownerRevocationPath
       ) {
-        if (
-          request.method !== "POST" ||
-          request.headers.get("origin") !== canonicalOrigin ||
-          request.headers
-            .get("content-type")
-            ?.toLowerCase()
-            .startsWith("application/json") !== true
-        ) {
-          return jsonResponse({ error: "invalid_request" }, 400);
-        }
-        let owner;
-        try {
-          owner = await authenticateOwner(request, {
-            mode: "mutate",
-            csrfToken: null,
-          });
-        } catch {
-          return jsonResponse({ error: "access_denied" }, 403);
-        }
-        let body: unknown;
-        try {
-          body = await request.json();
-        } catch {
-          return jsonResponse({ error: "invalid_request" }, 400);
-        }
-        if (
-          !isRecord(body) ||
-          !hasExactKeys(body, ["connectionId"]) ||
-          typeof body.connectionId !== "string" ||
-          body.connectionId.length < 1 ||
-          body.connectionId.length > 200
-        ) {
-          return jsonResponse({ error: "invalid_request" }, 400);
-        }
-        const revoked = await store.revokeConnection({
-          siteId,
-          connectionId: body.connectionId,
-          ownerMembershipId: owner.membershipId,
-          now: now().toISOString(),
-        });
-        return revoked
-          ? new Response(null, {
-              status: 204,
-              headers: { "cache-control": "no-store" },
-            })
-          : jsonResponse({ error: "not_found" }, 404);
+        return handleOwnerRevocation(request);
       }
       if (
         url.origin === canonicalOrigin &&
@@ -1156,7 +704,18 @@ export function createMcpHttpRuntime({
       }
       const principal = await authenticateMcpRequest(request);
       if (principal instanceof Response) return principal;
-      return handleMcp(request, principal);
+      try {
+        return await withTimeout(
+          protocol.handle(request, principal),
+          rpcTimeoutMs,
+        );
+      } catch {
+        return jsonResponse(
+          { error: "temporarily_unavailable" },
+          503,
+          { "retry-after": "1" },
+        );
+      }
     },
   };
 }

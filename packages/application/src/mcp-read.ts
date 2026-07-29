@@ -1,10 +1,12 @@
 import {
+  designContract,
   siteDefinitionSchema,
   type SiteDefinition,
   type SiteId,
 } from "@foundry/site-definition";
 
 import type { SiteApplication } from "./index";
+import { sha256CanonicalJson } from "./deterministic-hash";
 
 export const mcpContractVersion = "foundry.mcp.v1" as const;
 export const mcpInitialScope = "site.read" as const;
@@ -24,12 +26,21 @@ export type McpConnectionGrant = McpConnectionPrincipal &
     status: McpConnectionStatus;
   }>;
 
+export type McpConnectionSummary = McpConnectionGrant &
+  Readonly<{
+    createdAt: string;
+    revokedAt: string | null;
+    lastUsedAt: string | null;
+  }>;
+
 export type McpReadAuditEvent = Readonly<{
   invocationId: string;
   connectionId: string;
   actorId: string;
   siteId: SiteId;
   operation: string;
+  inputHash: string;
+  protocolVersion: "2025-11-25";
   scopesEvaluated: ReadonlyArray<string>;
   outcome: "allowed" | "denied";
   reason: McpReadErrorCode | null;
@@ -104,20 +115,29 @@ type PublishedContentSummary = Readonly<{
   kind: PublishedContentKind;
   contentId: string;
   title: string;
-  revision: number;
+  revision: number | null;
+  contentHash: string;
+  liveGitSha: string | null;
+  lastModified: string | null;
 }>;
 
 type PublishedContentDocument =
   | Readonly<{
       kind: "page";
       contentId: string;
-      revision: number;
+      revision: null;
+      contentHash: string;
+      liveGitSha: string | null;
+      lastModified: string | null;
       document: SiteDefinition["home"];
     }>
   | Readonly<{
       kind: "post";
       contentId: string;
       revision: number;
+      contentHash: string;
+      liveGitSha: string | null;
+      lastModified: string | null;
       document: SiteDefinition["blog"]["posts"][number];
     }>;
 
@@ -125,34 +145,52 @@ const allowedReadScope = new Set<string>([mcpInitialScope]);
 
 function contentSummaries(
   definition: SiteDefinition,
+  liveRelease: Readonly<{
+    gitSha: string;
+    observedAt: string;
+  }> | null,
 ): ReadonlyArray<PublishedContentSummary> {
-  return [
+  const summaries = [
     {
-      kind: "page",
+      kind: "page" as const,
       contentId: definition.home.id,
       title: definition.home.seo.title,
-      revision: 1,
+      revision: null,
+      contentHash: "",
+      liveGitSha: liveRelease?.gitSha ?? null,
+      lastModified: liveRelease?.observedAt ?? null,
     },
     ...definition.blog.posts.map((post) => ({
       kind: "post" as const,
       contentId: post.id,
       title: post.title,
       revision: post.revision,
+      contentHash: "",
+      liveGitSha: liveRelease?.gitSha ?? null,
+      lastModified: liveRelease?.observedAt ?? null,
     })),
   ];
+  return summaries;
 }
 
 function contentDocument(
   definition: SiteDefinition,
   kind: PublishedContentKind,
   contentId: string,
+  liveRelease: Readonly<{
+    gitSha: string;
+    observedAt: string;
+  }> | null,
 ): PublishedContentDocument | null {
   if (kind === "page") {
     return definition.home.id === contentId
       ? {
           kind,
           contentId,
-          revision: 1,
+          revision: null,
+          contentHash: "",
+          liveGitSha: liveRelease?.gitSha ?? null,
+          lastModified: liveRelease?.observedAt ?? null,
           document: definition.home,
         }
       : null;
@@ -164,6 +202,9 @@ function contentDocument(
         kind,
         contentId,
         revision: post.revision,
+        contentHash: "",
+        liveGitSha: liveRelease?.gitSha ?? null,
+        lastModified: liveRelease?.observedAt ?? null,
         document: post,
       };
 }
@@ -177,9 +218,9 @@ function isAuthenticConnection(
     current.connectionId === principal.connectionId &&
     current.actorId === principal.actorId &&
     current.clientId === principal.clientId &&
-    current.actorId.startsWith("mcp-") &&
     current.scopes.length > 0 &&
     current.scopes.every((scope) => allowedReadScope.has(scope)) &&
+    principal.scopes.length > 0 &&
     principal.scopes.every((scope) => current.scopes.includes(scope)) &&
     principal.scopes.every((scope) => allowedReadScope.has(scope))
   );
@@ -198,6 +239,11 @@ export function createMcpReadApplication({
     canonicalUrl: string;
     locale: string;
     timeZone: string;
+    getLiveRelease(): Promise<{
+      gitSha: string;
+      releaseId: string;
+      observedAt: string;
+    } | null>;
   }>;
   connections: McpConnectionStore;
   cursors: McpCursorCodec;
@@ -214,14 +260,17 @@ export function createMcpReadApplication({
   async function execute<Result>({
     principal,
     operation,
+    auditInput,
     run,
   }: {
     principal: McpConnectionPrincipal;
     operation: string;
+    auditInput: unknown;
     run(): Promise<Result>;
   }): Promise<McpSuccess<Result>> {
     const invocationId = createInvocationId();
     const observedAt = now();
+    const inputHash = await sha256CanonicalJson(auditInput);
     try {
       const current = await loadConnection(principal);
       if (current === null || !isAuthenticConnection(current, principal)) {
@@ -236,7 +285,10 @@ export function createMcpReadApplication({
           "The MCP connection has been revoked.",
         );
       }
-      if (!current.scopes.includes(mcpInitialScope)) {
+      if (
+        !current.scopes.includes(mcpInitialScope) ||
+        !principal.scopes.includes(mcpInitialScope)
+      ) {
         throw new McpReadError(
           "INSUFFICIENT_SCOPE",
           "The current connection does not grant site.read.",
@@ -249,6 +301,8 @@ export function createMcpReadApplication({
         actorId: principal.actorId,
         siteId: principal.siteId,
         operation,
+        inputHash,
+        protocolVersion: "2025-11-25",
         scopesEvaluated: [mcpInitialScope],
         outcome: "allowed",
         reason: null,
@@ -288,6 +342,8 @@ export function createMcpReadApplication({
         actorId: principal.actorId,
         siteId: principal.siteId,
         operation,
+        inputHash,
+        protocolVersion: "2025-11-25",
         scopesEvaluated: [mcpInitialScope],
         outcome: "denied",
         reason: safeError.code,
@@ -304,8 +360,10 @@ export function createMcpReadApplication({
       return execute({
         principal,
         operation: "foundry.site.get",
+        auditInput: {},
         async run() {
           const definition = await site.queries.getPublishedSite();
+          const liveRelease = await siteMetadata.getLiveRelease();
           return {
             siteId: site.siteId,
             displayName: definition.site.name,
@@ -313,6 +371,7 @@ export function createMcpReadApplication({
             locale: siteMetadata.locale,
             timeZone: siteMetadata.timeZone,
             schemaVersion: definition.schemaVersion,
+            liveRelease,
           };
         },
       });
@@ -321,11 +380,36 @@ export function createMcpReadApplication({
       return execute({
         principal,
         operation: "foundry.schema.content.get",
+        auditInput: {},
         async run() {
           const definition = await site.queries.getPublishedSite();
+          const liveRelease = await siteMetadata.getLiveRelease();
           return {
             schemaVersion: definition.schemaVersion,
             schema: siteDefinitionSchema,
+            contentHash: await sha256CanonicalJson(siteDefinitionSchema),
+            lastModified: liveRelease?.observedAt ?? null,
+          };
+        },
+      });
+    },
+    getDesignSchema(principal: McpConnectionPrincipal) {
+      return execute({
+        principal,
+        operation: "foundry.schema.design.get",
+        auditInput: {},
+        async run() {
+          const definition = await site.queries.getPublishedSite();
+          const liveRelease = await siteMetadata.getLiveRelease();
+          const schema = {
+            schemaVersion: definition.schemaVersion,
+            design: siteDefinitionSchema.properties.design,
+            contract: designContract,
+          };
+          return {
+            ...schema,
+            contentHash: await sha256CanonicalJson(schema),
+            lastModified: liveRelease?.observedAt ?? null,
           };
         },
       });
@@ -341,6 +425,7 @@ export function createMcpReadApplication({
       return execute({
         principal,
         operation: "foundry.content.list",
+        auditInput: input,
         async run() {
           if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
             throw new McpReadError(
@@ -375,15 +460,34 @@ export function createMcpReadApplication({
             offset = binding.offset;
           }
           const definition = await site.queries.getPublishedSite();
-          const allItems = contentSummaries(definition).filter(
+          const liveRelease = await siteMetadata.getLiveRelease();
+          const allItemsWithDocuments = contentSummaries(
+            definition,
+            liveRelease,
+          );
+          const allItems = await Promise.all(
+            allItemsWithDocuments.map(async (item) => {
+              const document =
+                item.kind === "page"
+                  ? definition.home
+                  : definition.blog.posts.find(
+                      (post) => post.id === item.contentId,
+                    );
+              return {
+                ...item,
+                contentHash: await sha256CanonicalJson(document),
+              };
+            }),
+          );
+          const filteredItems = allItems.filter(
             (item) => input.kind === null || item.kind === input.kind,
           );
-          const items = allItems.slice(offset, offset + input.limit);
+          const items = filteredItems.slice(offset, offset + input.limit);
           const nextOffset = offset + items.length;
           return {
             items,
             nextCursor:
-              nextOffset < allItems.length
+              nextOffset < filteredItems.length
                 ? await cursors.encode({
                     siteId: principal.siteId,
                     actorId: principal.actorId,
@@ -405,12 +509,15 @@ export function createMcpReadApplication({
       return execute({
         principal,
         operation: "foundry.content.get",
+        auditInput: input,
         async run() {
           const definition = await site.queries.getPublishedSite();
+          const liveRelease = await siteMetadata.getLiveRelease();
           const document = contentDocument(
             definition,
             input.kind,
             input.contentId,
+            liveRelease,
           );
           if (document === null) {
             throw new McpReadError(
@@ -418,7 +525,10 @@ export function createMcpReadApplication({
               "The requested object was not found.",
             );
           }
-          return document;
+          return {
+            ...document,
+            contentHash: await sha256CanonicalJson(document.document),
+          };
         },
       });
     },

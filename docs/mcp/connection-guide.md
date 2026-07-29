@@ -12,10 +12,9 @@ and its AI use only the permissions you approve, on one site. It does not give
 the agent your dashboard login, Cloudflare account, GitHub account or email
 provider credentials.
 
-Start with the smallest useful permission. For example, grant **Read site** and
-**Edit content drafts** for a writing assistant. Add **Publish approved work**
-only if you want the agent to start publication after you have reviewed and
-approved the exact preview.
+Start with the smallest useful permission. The current production connection
+grants exactly **Read site** (`site.read`). Draft editing and publication scopes
+remain contract designs and are not available from this connection.
 
 ## Installation configuration for read-only connections
 
@@ -57,16 +56,22 @@ missing or short signing secret fail closed with no MCP command execution.
 Neither setting contains an access token; the signing key must still remain a
 Worker secret.
 
+Access tokens last five minutes. The server issues a 30-day rotating refresh
+token; every successful refresh invalidates the presented token and returns a
+replacement. Reuse of an invalidated refresh token revokes its whole token
+family and the connection. MCP JSON bodies are capped at 256 KiB and 32 levels
+of nesting, requests time out after 10 seconds, and per-site, per-connection and
+per-tool minute buckets return HTTP `429` with `Retry-After` when exhausted.
+
 ## Connect
 
-1. In Foundry, open **Settings → Agent connections → Add connection**.
-2. Name the connection for the client and purpose, such as “Claude — blog
-   drafting.” Avoid naming it after a person; the audit identifies it as an
-   agent connection.
-3. Copy the displayed MCP server address into your MCP client.
-4. Your browser opens Foundry. Confirm the client name, this site's name and the
+1. Add the installation's `/api/foundry-mcp` server address to a client that
+   the installation operator has pre-registered.
+2. Start the connection from that client. Your browser opens Foundry.
+3. Confirm the client name, this site's name and the
    requested permissions. Decline anything you did not expect.
-5. Return to the client. Ask it to read the site summary. Foundry shows the new
+4. Approve the connection as a site Owner.
+5. Return to the client and ask it to read the site summary. Foundry shows the new
    connection, approved permissions, last use and a **Revoke** button.
 
 The address is not a secret, and it does not contain a token. Do not paste access
@@ -102,10 +107,12 @@ the delivered test and use the separate bulk-send authorization workflow.
 In **Agent connections**, you can:
 
 - see the client, one bound site, permissions, creation time and recent use;
-- reduce permissions, which requires the client to authorize again before using
-  them;
 - revoke the connection immediately; and
-- inspect its drafts, publication operations and audit trail.
+- retain attributable authorization, command, refresh-reuse and revocation
+  audit history.
+
+This read-only release does not edit a connection's scopes. Revoke it and
+complete a new Owner approval if a replacement connection is needed.
 
 Revocation takes effect on the next request even if the client's sign-in token
 has not expired. It does not erase attribution or published Git history. Open

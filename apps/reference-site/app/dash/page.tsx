@@ -33,6 +33,7 @@ import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-he
 import { durableSchemaRecoveryEdits } from "@/src/content-schema-recovery";
 import type { StaleRecoveryEdit } from "@/src/content-editor-recovery";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
+import { loadMcpConnectionsForDashboard } from "@/src/mcp-dashboard-runtime";
 
 import "./dashboard.css";
 import "../public.css";
@@ -123,6 +124,10 @@ export default async function DashboardPage({
   const campaigns = await (
     await loadCampaignRequestContext(requestHeaders)
   ).application.queries.listCampaigns({ actor: access.identity });
+  const mcpConnections =
+    access.membership.role === "owner"
+      ? await loadMcpConnectionsForDashboard()
+      : [];
   const formOperations = await loadPublicFormOperationsDashboard(access);
   let workspaceId;
   const requestedWorkspace =
@@ -218,6 +223,7 @@ export default async function DashboardPage({
             })
       }
       campaigns={campaigns}
+      mcpConnections={mcpConnections}
     />
   );
 }

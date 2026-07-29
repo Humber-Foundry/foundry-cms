@@ -79,6 +79,13 @@ function fixture(overrides: {
         canonicalUrl: "https://foundry.example",
         locale: "en-CA",
         timeZone: "America/Vancouver",
+        async getLiveRelease() {
+          return {
+            gitSha: "a".repeat(40),
+            releaseId: "release-1",
+            observedAt: "2026-07-29T17:59:00.000Z",
+          };
+        },
       },
       connections: {
         async findCurrentConnection() {
@@ -117,6 +124,11 @@ describe("site-scoped MCP read application", () => {
         locale: "en-CA",
         timeZone: "America/Vancouver",
         schemaVersion: referenceSiteDefinition.schemaVersion,
+        liveRelease: {
+          gitSha: "a".repeat(40),
+          releaseId: "release-1",
+          observedAt: "2026-07-29T17:59:00.000Z",
+        },
       },
       meta: {
         observedAt: "2026-07-29T18:00:00.000Z",
@@ -228,6 +240,17 @@ describe("site-scoped MCP read application", () => {
   ])("fails closed on %s", async (_label, connection) => {
     const { application } = fixture({ connection });
     await expect(application.getSite(principal)).rejects.toEqual(
+      expect.objectContaining({
+        code: "AUTHENTICATION_REQUIRED",
+      }),
+    );
+  });
+
+  it("requires site.read on both the presented principal and current connection", async () => {
+    const { application } = fixture();
+    await expect(
+      application.getSite({ ...principal, scopes: [] }),
+    ).rejects.toEqual(
       expect.objectContaining({
         code: "AUTHENTICATION_REQUIRED",
       }),

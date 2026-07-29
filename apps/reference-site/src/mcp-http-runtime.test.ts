@@ -9,7 +9,12 @@ import {
   type McpConnectionGrant,
   type McpReadAuditEvent,
 } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
+  referenceSiteDefinition,
+  type SiteDefinition,
+} from "@foundry/site-definition";
 
 import {
   createMcpHttpRuntime,
@@ -43,13 +48,23 @@ async function digest(value: string) {
   return encodeBase64Url(new Uint8Array(bytes));
 }
 
-function createStore() {
+function createStore(allowRateLimit = true) {
   const connections = new Map<string, McpConnectionGrant>();
   const codes = new Map<
     string,
     McpAuthorizationGrantInput & { consumed: boolean }
   >();
   const audit: McpReadAuditEvent[] = [];
+  const refreshTokens = new Map<
+    string,
+    {
+      familyId: string;
+      connectionId: string;
+      clientId: string;
+      consumed: boolean;
+      revoked: boolean;
+    }
+  >();
   const store: McpAuthorizationRuntimeStore = {
     async createAuthorizationGrant(input) {
       connections.set(input.connectionId, {
@@ -67,6 +82,7 @@ function createStore() {
       if (
         code === undefined ||
         code.consumed ||
+        code.codeChallenge !== input.codeChallenge ||
         code.clientId !== input.clientId ||
         code.redirectUri !== input.redirectUri ||
         code.expiresAt <= input.now
@@ -92,6 +108,48 @@ function createStore() {
       });
       return true;
     },
+    async saveRefreshToken(input) {
+      refreshTokens.set(input.tokenHash, {
+        familyId: input.familyId,
+        connectionId: input.connectionId,
+        clientId: input.clientId,
+        consumed: false,
+        revoked: false,
+      });
+    },
+    async rotateRefreshToken(input) {
+      const existing = refreshTokens.get(input.tokenHash);
+      if (
+        existing === undefined ||
+        existing.clientId !== input.clientId ||
+        existing.revoked
+      ) {
+        return { state: "invalid" };
+      }
+      if (existing.consumed) {
+        for (const token of refreshTokens.values()) {
+          if (token.familyId === existing.familyId) token.revoked = true;
+        }
+        const connection = connections.get(existing.connectionId)!;
+        connections.set(existing.connectionId, {
+          ...connection,
+          status: "revoked",
+        });
+        return { state: "reuse_detected" };
+      }
+      existing.consumed = true;
+      refreshTokens.set(input.nextTokenHash, {
+        ...existing,
+        consumed: false,
+      });
+      return {
+        state: "rotated",
+        connection: connections.get(existing.connectionId)!,
+      };
+    },
+    async consumeRateLimit() {
+      return allowRateLimit;
+    },
     async recordInvocation(event) {
       audit.push(event);
     },
@@ -99,8 +157,37 @@ function createStore() {
   return { store, connections, audit };
 }
 
-function fixture() {
-  const state = createStore();
+function fixture(
+  options: { allowRateLimit?: boolean; contentCount?: number } = {},
+) {
+  const state = createStore(options.allowRateLimit ?? true);
+  const contentCount = options.contentCount ?? 0;
+  const definition = {
+    ...referenceSiteDefinition,
+    blog: {
+      ...referenceSiteDefinition.blog,
+      posts: Array.from({ length: contentCount }, (_, index) => ({
+        id: createBlogPostId(
+          `00000000-0000-4000-8000-${(index + 1)
+            .toString(16)
+            .padStart(12, "0")}`,
+        ),
+        revision: 1,
+        collectionState: "active" as const,
+        targetVisibility: "public" as const,
+        slug: `post-${index + 1}`,
+        title: `Post ${index + 1}`,
+        excerpt: `Published post ${index + 1}.`,
+        seo: {
+          title: `Post ${index + 1}`,
+          description: `Published post ${index + 1}.`,
+        },
+        body: createRichTextDocumentFromPlainText(
+          `Published post ${index + 1}.`,
+        ),
+      })),
+    },
+  } satisfies SiteDefinition;
   const cursors = createSignedMcpCursorCodec({
     secret: signingSecret,
     now: () => now,
@@ -109,20 +196,26 @@ function fixture() {
     site: createSiteApplication({
       siteId: referenceSiteDefinition.site.id,
       publishedSites: createInMemoryPublishedSiteRepository([
-        createPublishedSiteBundle(referenceSiteDefinition),
+        createPublishedSiteBundle(definition),
       ]),
     }),
     siteMetadata: {
       canonicalUrl: canonicalOrigin,
       locale: "en-CA",
       timeZone: "America/Vancouver",
+      async getLiveRelease() {
+        return {
+          gitSha: "a".repeat(40),
+          releaseId: "release-1",
+          observedAt: "2026-07-29T17:59:00.000Z",
+        };
+      },
     },
     connections: state.store,
     cursors,
     createInvocationId: () => crypto.randomUUID(),
     now: () => now.toISOString(),
   });
-  let nextId = 0;
   const runtime = createMcpHttpRuntime({
     resourceUri,
     authorizationIssuer: canonicalOrigin,
@@ -132,6 +225,7 @@ function fixture() {
     siteName: referenceSiteDefinition.site.name,
     store: state.store,
     readApplication,
+    cursors,
     registeredClients: {
       [clientId]: {
         name: "Test MCP Client",
@@ -142,16 +236,24 @@ function fixture() {
       membershipId: "membership-owner",
       csrfToken: "owner-bound-csrf",
     }),
-    createOpaqueValue: () => `opaque-${++nextId}`,
+    createAuthorizationCode: () => "opaque-authorization-code",
+    createConnectionId: () => "11111111-1111-4111-8111-111111111111",
+    createActorId: () => "22222222-2222-4222-8222-222222222222",
+    createTokenId: () => "33333333-3333-4333-8333-333333333333",
+    createRefreshToken: (() => {
+      let refresh = 0;
+      return () => `refresh-token-${++refresh}-${"r".repeat(43)}`;
+    })(),
+    createRefreshFamilyId: () => "44444444-4444-4444-8444-444444444444",
     now: () => now,
   });
   return { runtime, ...state };
 }
 
-async function authorizeAndExchange(
+async function authorize(
   runtime: ReturnType<typeof createMcpHttpRuntime>,
+  verifier: string,
 ) {
-  const verifier = "v".repeat(64);
   const challenge = await digest(verifier);
   const authorize = await runtime.fetch(
     new Request(`${resourceUri}/oauth/authorize`, {
@@ -177,7 +279,14 @@ async function authorizeAndExchange(
   const redirected = new URL(authorize.headers.get("location")!);
   expect(redirected.origin + redirected.pathname).toBe(redirectUri);
   expect(redirected.searchParams.get("state")).toBe("client-state");
+  return redirected.searchParams.get("code")!;
+}
 
+async function authorizeAndExchange(
+  runtime: ReturnType<typeof createMcpHttpRuntime>,
+) {
+  const verifier = "v".repeat(64);
+  const code = await authorize(runtime, verifier);
   const token = await runtime.fetch(
     new Request(`${resourceUri}/oauth/token`, {
       method: "POST",
@@ -186,7 +295,7 @@ async function authorizeAndExchange(
       },
       body: new URLSearchParams({
         grant_type: "authorization_code",
-        code: redirected.searchParams.get("code")!,
+        code,
         client_id: clientId,
         redirect_uri: redirectUri,
         resource: resourceUri,
@@ -197,17 +306,22 @@ async function authorizeAndExchange(
   expect(token.status).toBe(200);
   const body = (await token.json()) as {
     access_token: string;
+    refresh_token: string;
     scope: string;
     token_type: string;
   };
   expect(body).toEqual(
     expect.objectContaining({
       access_token: expect.any(String),
+      refresh_token: expect.any(String),
       scope: "site.read",
       token_type: "Bearer",
     }),
   );
-  return body.access_token;
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token,
+  };
 }
 
 function rpcRequest(token: string, body: unknown) {
@@ -278,6 +392,7 @@ describe("production MCP HTTP runtime", () => {
         authorization_endpoint: `${resourceUri}/oauth/authorize`,
         token_endpoint: `${resourceUri}/oauth/token`,
         code_challenge_methods_supported: ["S256"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
         scopes_supported: ["site.read"],
       }),
     );
@@ -314,7 +429,7 @@ describe("production MCP HTTP runtime", () => {
 
   it("completes authorization code + PKCE and exposes typed read-only catalogs", async () => {
     const { runtime } = fixture();
-    const token = await authorizeAndExchange(runtime);
+    const { accessToken: token } = await authorizeAndExchange(runtime);
 
     const initialize = await runtime.fetch(
       rpcRequest(token, {
@@ -348,13 +463,34 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     const toolsBody = (await tools.json()) as {
-      result: { tools: Array<{ name: string; inputSchema: unknown }> };
+      result: {
+        tools: Array<{ name: string; inputSchema: unknown }>;
+        nextCursor: string | null;
+      };
     };
     expect(toolsBody.result.tools.map((tool) => tool.name)).toEqual([
       "foundry.site.get",
       "foundry.content.list",
-      "foundry.content.get",
     ]);
+    expect(toolsBody.result.nextCursor).toEqual(expect.any(String));
+    const remainingTools = await runtime.fetch(
+      rpcRequest(token, {
+        jsonrpc: "2.0",
+        id: 21,
+        method: "tools/list",
+        params: { cursor: toolsBody.result.nextCursor },
+      }),
+    );
+    const remainingToolsBody = (await remainingTools.json()) as {
+      result: {
+        tools: Array<{ name: string }>;
+        nextCursor: string | null;
+      };
+    };
+    expect(remainingToolsBody.result).toEqual({
+      tools: [expect.objectContaining({ name: "foundry.content.get" })],
+      nextCursor: null,
+    });
     expect(JSON.stringify(toolsBody)).not.toMatch(
       /subscriber|recipient|bulk.send|human.role/iu,
     );
@@ -381,9 +517,37 @@ describe("production MCP HTTP runtime", () => {
     );
   });
 
+  it("does not consume an authorization code when the PKCE verifier is wrong", async () => {
+    const { runtime } = fixture();
+    const verifier = "v".repeat(64);
+    const code = await authorize(runtime, verifier);
+
+    async function exchange(codeVerifier: string) {
+      return runtime.fetch(
+        new Request(`${resourceUri}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            client_id: clientId,
+            redirect_uri: redirectUri,
+            resource: resourceUri,
+            code_verifier: codeVerifier,
+          }),
+        }),
+      );
+    }
+
+    expect((await exchange("w".repeat(64))).status).toBe(400);
+    expect((await exchange(verifier)).status).toBe(200);
+  });
+
   it("returns structured tool results and stable execution errors", async () => {
     const { runtime } = fixture();
-    const token = await authorizeAndExchange(runtime);
+    const { accessToken: token } = await authorizeAndExchange(runtime);
 
     const list = await runtime.fetch(
       rpcRequest(token, {
@@ -438,9 +602,53 @@ describe("production MCP HTTP runtime", () => {
     expect(missingText).not.toContain("other-site-canary");
   });
 
+  it("paginates resource discovery without repeating fixed resources", async () => {
+    const { runtime } = fixture({ contentCount: 55 });
+    const { accessToken } = await authorizeAndExchange(runtime);
+    const first = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: 31,
+        method: "resources/list",
+        params: {},
+      }),
+    );
+    const firstBody = (await first.json()) as {
+      result: {
+        resources: Array<{ uri: string }>;
+        nextCursor: string | null;
+      };
+    };
+    expect(firstBody.result.resources).toHaveLength(50);
+    expect(firstBody.result.resources.map(({ uri }) => uri)).toContain(
+      "foundry://schemas/design",
+    );
+    expect(firstBody.result.nextCursor).toEqual(expect.any(String));
+
+    const second = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: 32,
+        method: "resources/list",
+        params: { cursor: firstBody.result.nextCursor },
+      }),
+    );
+    const secondBody = (await second.json()) as {
+      result: {
+        resources: Array<{ uri: string }>;
+        nextCursor: string | null;
+      };
+    };
+    expect(secondBody.result.resources).toHaveLength(9);
+    expect(secondBody.result.resources.map(({ uri }) => uri)).not.toContain(
+      "foundry://site",
+    );
+    expect(secondBody.result.nextCursor).toBeNull();
+  });
+
   it("rechecks D1 connection state so an unexpired token fails on the first post-revocation call", async () => {
     const { runtime, connections } = fixture();
-    const token = await authorizeAndExchange(runtime);
+    const { accessToken: token } = await authorizeAndExchange(runtime);
     const [connection] = [...connections.values()];
     connections.set(connection!.connectionId, {
       ...connection!,
@@ -466,7 +674,7 @@ describe("production MCP HTTP runtime", () => {
 
   it("lets the authenticated Owner revoke the immutable connection without erasing it", async () => {
     const { runtime, connections } = fixture();
-    const token = await authorizeAndExchange(runtime);
+    const { accessToken: token } = await authorizeAndExchange(runtime);
     const [connection] = [...connections.values()];
 
     const revoked = await runtime.fetch(
@@ -481,6 +689,7 @@ describe("production MCP HTTP runtime", () => {
           },
           body: JSON.stringify({
             connectionId: connection!.connectionId,
+            reason: "Owner ended the test connection.",
           }),
         },
       ),
@@ -506,12 +715,63 @@ describe("production MCP HTTP runtime", () => {
     ).toBe(401);
   });
 
+  it("rotates refresh tokens and revokes the connection when an old token is reused", async () => {
+    const { runtime, connections } = fixture();
+    const first = await authorizeAndExchange(runtime);
+
+    async function refresh(refreshToken: string) {
+      return runtime.fetch(
+        new Request(`${resourceUri}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            client_id: clientId,
+            resource: resourceUri,
+          }),
+        }),
+      );
+    }
+
+    const rotated = await refresh(first.refreshToken);
+    expect(rotated.status).toBe(200);
+    const rotatedBody = (await rotated.json()) as {
+      access_token: string;
+      refresh_token: string;
+    };
+    expect(rotatedBody.refresh_token).not.toBe(first.refreshToken);
+
+    const reuse = await refresh(first.refreshToken);
+    expect(reuse.status).toBe(400);
+    await expect(reuse.json()).resolves.toEqual({
+      error: "invalid_grant",
+    });
+    expect([...connections.values()][0]).toEqual(
+      expect.objectContaining({ status: "revoked" }),
+    );
+    expect(
+      (
+        await runtime.fetch(
+          rpcRequest(rotatedBody.access_token, {
+            jsonrpc: "2.0",
+            id: 10,
+            method: "tools/list",
+            params: {},
+          }),
+        )
+      ).status,
+    ).toBe(401);
+  });
+
   it.each([
     ["foreign Origin", { origin: "https://attacker.example" }],
     ["token in query", { queryToken: true }],
   ])("fails closed for %s", async (_label, attempt) => {
     const { runtime } = fixture();
-    const token = await authorizeAndExchange(runtime);
+    const { accessToken: token } = await authorizeAndExchange(runtime);
     const queryToken = "queryToken" in attempt && attempt.queryToken === true;
     const url = queryToken
       ? `${resourceUri}?access_token=${encodeURIComponent(token)}`
@@ -562,5 +822,55 @@ describe("production MCP HTTP runtime", () => {
     expect(response.headers.get("www-authenticate")).toContain(
       "scope=\"site.read\"",
     );
+  });
+
+  it("bounds request size, nesting, and durable request budgets", async () => {
+    const ordinary = fixture();
+    const { accessToken } = await authorizeAndExchange(ordinary.runtime);
+    const oversized = await ordinary.runtime.fetch(
+      new Request(resourceUri, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          origin: canonicalOrigin,
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          "mcp-protocol-version": "2025-11-25",
+        },
+        body: JSON.stringify({ payload: "x".repeat(300_000) }),
+      }),
+    );
+    expect(oversized.status).toBe(413);
+
+    let nested: unknown = "leaf";
+    for (let index = 0; index < 40; index += 1) {
+      nested = { nested };
+    }
+    const tooDeep = await ordinary.runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/list",
+        params: nested,
+      }),
+    );
+    await expect(tooDeep.json()).resolves.toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({ code: -32602 }),
+      }),
+    );
+
+    const limited = fixture({ allowRateLimit: false });
+    const limitedToken = await authorizeAndExchange(limited.runtime);
+    const rateLimited = await limited.runtime.fetch(
+      rpcRequest(limitedToken.accessToken, {
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(rateLimited.status).toBe(429);
+    expect(Number(rateLimited.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 });

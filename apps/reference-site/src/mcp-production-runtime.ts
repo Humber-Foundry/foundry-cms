@@ -158,6 +158,8 @@ export function createProductionMcpRuntime(
       canonicalUrl: canonicalOrigin,
       locale: environment.FOUNDRY_SITE_LOCALE ?? "en-CA",
       timeZone: environment.FOUNDRY_SITE_TIME_ZONE ?? "America/Vancouver",
+      getLiveRelease: () =>
+        store.findLiveRelease(referenceSiteDefinition.site.id),
     },
     connections: store,
     cursors,
@@ -172,6 +174,7 @@ export function createProductionMcpRuntime(
     siteName: referenceSiteDefinition.site.name,
     store,
     readApplication,
+    cursors,
     registeredClients: readMcpRegisteredClients(
       environment.FOUNDRY_MCP_CLIENTS,
     ),
