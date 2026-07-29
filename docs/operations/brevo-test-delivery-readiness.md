@@ -42,7 +42,9 @@ rows, evidence, API results, logs, and source control.
    keys, not email addresses.
 5. Confirm the delivered message in the Owner's mailbox. An authenticated
    Owner records confirmation with `confirm_test_receipt` and the stable
-   execution ID; the immutable confirmation is persisted in D1.
+   execution ID; the immutable confirmation and its accepted command receipt
+   are persisted in D1. Reusing its request key with another execution is
+   rejected and confirmation audits contain no recipient address.
 6. Evaluate test-delivery readiness with the successful current test evidence.
    `ready`
    requires healthy credentials and sender identity, `client_owned`
@@ -60,6 +62,10 @@ ambiguous result and a later reconciliation definitively proves the prior
 draft or test is absent. A crashed call enters a one-minute reconciliation
 quarantine after the provider request's 30-second deadline; Foundry blocks a
 second execution for that revision while recovery remains unresolved.
+Editing a campaign revision cancels every open test for the replaced revision
+inside the same durable edit transaction. A request that was still preparing
+its provider call rechecks the revision before the write; an already in-flight
+provider result cannot restore acceptance or evidence after cancellation.
 
 The shared application boundary accepts no more than five configured
 recipient identities and permits five new logical tests per site and campaign

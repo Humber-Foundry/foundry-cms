@@ -394,11 +394,12 @@ export function createCampaignApplication({
       requestId,
       command: input,
       targetId,
+      commandName = "campaign.request_test",
     }) {
       const command = await commandKey({
         actorId: identifyActor(actor),
         requestId,
-        commandName: "campaign.request_test",
+        commandName,
         input,
       });
       await authorizeCommand(
@@ -427,11 +428,13 @@ export function createCampaignApplication({
       revision,
       beforeState,
       afterState,
+      targetId = campaign.id,
+      commandName = "campaign.request_test",
     }) {
       const command = await commandKey({
         actorId: identifyActor(actor),
         requestId,
-        commandName: "campaign.request_test",
+        commandName,
         input,
       });
       const author = await authorizeCommand(
@@ -448,7 +451,7 @@ export function createCampaignApplication({
           revision,
           audit: auditEvent({
             actorId: author.id,
-            targetId: campaign.id,
+            targetId,
             revisionId: revision.id,
             requestId,
             inputHash: command.inputHash,

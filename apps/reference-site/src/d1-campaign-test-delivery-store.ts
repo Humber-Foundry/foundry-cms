@@ -1,4 +1,5 @@
 import {
+  CampaignIdempotencyError,
   CampaignValidationError,
   campaignTestRateLimitWindowMs,
   createCampaignId,
@@ -281,7 +282,7 @@ export function createD1CampaignTestDeliveryStore(
              WHERE execution_id = ?1 AND site_id = ?2
                AND state = 'accepted' AND evidence_json IS NOT NULL
            )
-           ON CONFLICT (execution_id) DO NOTHING`,
+           ON CONFLICT DO NOTHING`,
         )
         .bind(
           confirmation.executionId,
@@ -293,7 +294,34 @@ export function createD1CampaignTestDeliveryStore(
         .run();
       const stored = await store.findReceiptConfirmation(confirmation);
       if (stored === null) {
+        const reused = await database
+          .prepare(
+            `SELECT execution_id FROM campaign_test_receipt_confirmations
+             WHERE site_id = ?1 AND owner_actor_id = ?2 AND request_id = ?3`,
+          )
+          .bind(
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            confirmation.requestId,
+          )
+          .first<{ execution_id: string }>();
+        if (
+          reused !== null &&
+          reused.execution_id !== confirmation.executionId
+        ) {
+          throw new CampaignIdempotencyError(
+            "campaign_idempotency_key_reused",
+          );
+        }
         throw new CampaignValidationError("test_delivery_not_accepted");
+      }
+      if (
+        stored.requestId !== confirmation.requestId ||
+        stored.ownerActorId !== confirmation.ownerActorId
+      ) {
+        throw new CampaignValidationError(
+          "test_receipt_already_confirmed",
+        );
       }
       return stored;
     },
@@ -358,6 +386,24 @@ export function createD1CampaignTestDeliveryStore(
         )
         .first<{ recipient_count: number }>();
       return reservation?.recipient_count === input.recipientCount;
+    },
+    async cancelForCampaignEdit(input) {
+      await database
+        .prepare(
+          `UPDATE campaign_test_deliveries
+           SET state = 'cancelled', attempt_lease_until = NULL,
+             failure_code = 'campaign_revision_changed', updated_at = ?1
+           WHERE site_id = ?2 AND campaign_id = ?3
+             AND campaign_revision_id != ?4
+             AND state IN ('pending', 'attempting', 'ambiguous')`,
+        )
+        .bind(
+          input.cancelledAt,
+          input.siteId,
+          input.campaignId,
+          input.retainedRevisionId,
+        )
+        .run();
     },
   };
   return Object.freeze(store);

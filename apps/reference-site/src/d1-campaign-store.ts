@@ -479,6 +479,31 @@ export function createD1CampaignStore(
             campaign.id,
             expectedVersion,
           ),
+        database
+          .prepare(
+            `UPDATE campaign_test_deliveries
+             SET state = 'cancelled', attempt_lease_until = NULL,
+               failure_code = 'campaign_revision_changed', updated_at = ?6
+             WHERE site_id = ?1 AND campaign_id = ?7
+               AND campaign_revision_id != ?8
+               AND state IN ('pending', 'attempting', 'ambiguous')
+               AND EXISTS (
+                 SELECT 1 FROM campaigns
+                 WHERE site_id = ?1 AND id = ?7
+                   AND current_revision_id = ?8 AND version = ?9
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            revision.createdAt,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ),
         commandAuditInsert(
           database,
           acceptedAudit,

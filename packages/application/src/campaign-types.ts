@@ -151,7 +151,8 @@ export type CampaignCommandName =
   | "campaign.create_standalone"
   | "campaign.create_from_post"
   | "campaign.edit"
-  | "campaign.request_test";
+  | "campaign.request_test"
+  | "campaign.confirm_test_receipt";
 
 export function isCampaignRequestId(value: string): boolean {
   return (
@@ -291,6 +292,9 @@ export type CampaignApplication = Readonly<{
       requestId: string;
       command: unknown;
       targetId: string;
+      commandName?:
+        | "campaign.request_test"
+        | "campaign.confirm_test_receipt";
     }): Promise<
       Readonly<{ campaign: Campaign; revision: CampaignRevision }> | null
     >;
@@ -302,6 +306,10 @@ export type CampaignApplication = Readonly<{
       revision: CampaignRevision;
       beforeState: string;
       afterState: string;
+      targetId?: string;
+      commandName?:
+        | "campaign.request_test"
+        | "campaign.confirm_test_receipt";
     }): Promise<void>;
   }>;
   queries: Readonly<{

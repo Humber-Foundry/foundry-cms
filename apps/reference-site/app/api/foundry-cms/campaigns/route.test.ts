@@ -230,6 +230,34 @@ describe("campaign endpoint", () => {
     });
   });
 
+  it("classifies malformed receipt confirmation as a test command rejection", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-test-confirm-malformed-1",
+        },
+        body: JSON.stringify({
+          action: "confirm_test_receipt",
+          executionId: "40000000-0000-4000-8000-000000000001",
+          ownerConfirmed: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordRejectedCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "campaign-test-confirm-malformed-1",
+        action: "campaign.test",
+        commandName: "campaign.confirm_test_receipt",
+        targetId: "40000000-0000-4000-8000-000000000001",
+      }),
+    );
+    expect(mocks.confirmReceipt).not.toHaveBeenCalled();
+  });
+
   it("returns the stable shared rate-limit reason", async () => {
     mocks.requestTest.mockRejectedValueOnce(
       new CampaignValidationError("test_delivery_rate_limited"),

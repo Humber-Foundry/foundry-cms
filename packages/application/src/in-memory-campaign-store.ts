@@ -8,7 +8,14 @@ import type {
   CampaignStore,
 } from "./campaign";
 
-export function createInMemoryCampaignStore(): CampaignStore & {
+export function createInMemoryCampaignStore(
+  cancelOpenTestDeliveries?: (input: {
+    siteId: Campaign["siteId"];
+    campaignId: Campaign["id"];
+    retainedRevisionId: CampaignRevision["id"];
+    cancelledAt: string;
+  }) => Promise<void>,
+): CampaignStore & {
   listAuditEvents(): ReadonlyArray<CampaignAuditEvent>;
 } {
   const campaigns = new Map<string, Campaign>();
@@ -127,6 +134,12 @@ export function createInMemoryCampaignStore(): CampaignStore & {
         audits.push(rejectedAudit);
         return Object.freeze({ receipt, replayed: false });
       }
+      await cancelOpenTestDeliveries?.({
+        siteId: campaign.siteId,
+        campaignId: campaign.id,
+        retainedRevisionId: revision.id,
+        cancelledAt: revision.createdAt,
+      });
       campaigns.set(key, campaign);
       revisions.set(revisionKey(revision), revision);
       audits.push(acceptedAudit);

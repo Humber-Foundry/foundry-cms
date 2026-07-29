@@ -47,6 +47,7 @@ CREATE TABLE campaign_test_receipt_confirmations (
   owner_actor_id TEXT NOT NULL,
   request_id TEXT NOT NULL,
   confirmed_at TEXT NOT NULL,
+  UNIQUE (site_id, owner_actor_id, request_id),
   FOREIGN KEY (execution_id) REFERENCES campaign_test_deliveries(execution_id)
 );
 

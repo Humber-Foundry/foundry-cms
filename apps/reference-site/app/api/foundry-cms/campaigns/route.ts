@@ -250,16 +250,25 @@ export async function POST(request: Request) {
     const rawCommand = body.value;
     const parsed = command(rawCommand);
     if (parsed === null) {
+      const rawRecord =
+        typeof rawCommand === "object" && rawCommand !== null
+          ? rawCommand as Record<string, unknown>
+          : null;
       const malformedTest =
-        typeof rawCommand === "object" &&
-        rawCommand !== null &&
-        "action" in rawCommand &&
-        rawCommand.action === "request_test";
+        rawRecord !== null &&
+        (rawRecord.action === "request_test" ||
+          rawRecord.action === "confirm_test_receipt");
+      const malformedConfirmation =
+        malformedTest &&
+        rawRecord!.action === "confirm_test_receipt";
       const malformedTarget =
         malformedTest &&
-        "campaignId" in rawCommand &&
-        typeof rawCommand.campaignId === "string"
-          ? rawCommand.campaignId
+        (malformedConfirmation
+          ? typeof rawRecord!.executionId === "string"
+          : typeof rawRecord!.campaignId === "string")
+          ? malformedConfirmation
+            ? rawRecord!.executionId as string
+            : rawRecord!.campaignId as string
           : "campaign:unknown";
       await context.application.commands.recordRejectedCommand({
         actor: context.identity,
@@ -269,11 +278,17 @@ export async function POST(request: Request) {
         ...(malformedTest
           ? {
               action: "campaign.test" as const,
-              commandName: "campaign.request_test" as const,
+              commandName: malformedConfirmation
+                ? "campaign.confirm_test_receipt" as const
+                : "campaign.request_test" as const,
               targetId: malformedTarget,
               beforeState: JSON.stringify({
                 current: { commandEnvelope: "invalid" },
-                required: { commandEnvelope: "valid_request_test" },
+                required: {
+                  commandEnvelope: malformedConfirmation
+                    ? "valid_confirm_test_receipt"
+                    : "valid_request_test",
+                },
               }),
             }
           : {}),
@@ -364,6 +379,8 @@ export async function POST(request: Request) {
         error.message === "provider_unhealthy" ||
         error.message === "test_recipient_forbidden" ||
         error.message.startsWith("test_delivery_") ||
+        error.message.startsWith("test_receipt_") ||
+        error.message.startsWith("test_execution_") ||
         error.message.startsWith("provider_test_") ||
         error.message.startsWith("provider_configuration_");
       return Response.json(

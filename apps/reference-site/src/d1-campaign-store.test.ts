@@ -61,12 +61,17 @@ beforeEach(async () => {
     d1Databases: ["FOUNDRY_DB"],
   });
   database = await runtime.getD1Database("FOUNDRY_DB");
-  const migration = await readFile(
-    new URL("../migrations/0016_campaign_authoring.sql", import.meta.url),
-    "utf8",
-  );
-  for (const statement of migrationStatements(migration)) {
-    await database.exec(statement);
+  for (const name of [
+    "0016_campaign_authoring.sql",
+    "0018_campaign_test_delivery.sql",
+  ]) {
+    const migration = await readFile(
+      new URL(`../migrations/${name}`, import.meta.url),
+      "utf8",
+    );
+    for (const statement of migrationStatements(migration)) {
+      await database.exec(statement);
+    }
   }
 });
 
@@ -157,6 +162,26 @@ describe("D1 campaign store", () => {
       actor,
       campaignId: created.campaign.id,
     });
+    await database
+      .prepare(
+        `INSERT INTO campaign_test_deliveries (
+           execution_id, site_id, actor_id, request_id, campaign_id,
+           campaign_revision_id, binding_json, recipient_ids_json, state,
+           attempt_number, attempt_lease_until, provider_campaign_id,
+           failure_code, evidence_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'ambiguous',
+           1, NULL, '17', NULL, NULL, ?7, ?7)`,
+      )
+      .bind(
+        "40000000-0000-4000-8000-000000000051",
+        siteId,
+        "membership-editor",
+        "campaign-test-before-edit-1",
+        created.campaign.id,
+        created.revision.id,
+        "2026-07-29T19:05:00.000Z",
+      )
+      .run();
     await application.commands.edit({
       actor,
       requestId: "campaign-edit-durable-1",
@@ -166,6 +191,18 @@ describe("D1 campaign store", () => {
         ...created.revision,
         subject: "Independently edited",
       },
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT state, failure_code FROM campaign_test_deliveries
+           WHERE execution_id = ?1`,
+        )
+        .bind("40000000-0000-4000-8000-000000000051")
+        .first(),
+    ).resolves.toMatchObject({
+      state: "cancelled",
+      failure_code: "campaign_revision_changed",
     });
     const stale = () =>
       application.commands.edit({
@@ -219,6 +256,29 @@ describe("D1 campaign store", () => {
       command: acceptedTest.command,
       targetId: created.campaign.id,
     });
+    const acceptedConfirmation = {
+      ...acceptedTest,
+      requestId: "campaign-test-confirm-audit-durable-1",
+      command: {
+        action: "confirm_test_receipt",
+        executionId: "40000000-0000-4000-8000-000000000001",
+      },
+      targetId: "40000000-0000-4000-8000-000000000001",
+      commandName: "campaign.confirm_test_receipt" as const,
+    };
+    await application.commands.recordAcceptedTestCommand(
+      acceptedConfirmation,
+    );
+    await application.commands.recordAcceptedTestCommand(
+      acceptedConfirmation,
+    );
+    await application.commands.replayTestCommand({
+      actor,
+      requestId: acceptedConfirmation.requestId,
+      command: acceptedConfirmation.command,
+      targetId: acceptedConfirmation.targetId,
+      commandName: acceptedConfirmation.commandName,
+    });
 
     await expect(
       application.queries.getRevision({
@@ -231,7 +291,7 @@ describe("D1 campaign store", () => {
       database
         .prepare("SELECT COUNT(*) AS count FROM campaign_audit_events")
         .first<{ count: number }>(),
-    ).resolves.toEqual({ count: 6 });
+    ).resolves.toEqual({ count: 7 });
     await expect(
       database
         .prepare(
@@ -242,7 +302,7 @@ describe("D1 campaign store", () => {
         .all<{ outcome: string; count: number }>(),
     ).resolves.toMatchObject({
       results: [
-        { outcome: "accepted", count: 3 },
+        { outcome: "accepted", count: 4 },
         { outcome: "rejected", count: 3 },
       ],
     });
@@ -256,7 +316,7 @@ describe("D1 campaign store", () => {
         .all<{ outcome: string; count: number }>(),
     ).resolves.toMatchObject({
       results: [
-        { outcome: "accepted", count: 3 },
+        { outcome: "accepted", count: 4 },
         { outcome: "rejected", count: 2 },
       ],
     });
@@ -272,6 +332,7 @@ describe("D1 campaign store", () => {
     ).resolves.toMatchObject({
       results: [
         { campaign_revision_id: created.revision.id },
+        { campaign_revision_id: expect.any(String) },
         { campaign_revision_id: expect.any(String) },
         { campaign_revision_id: expect.any(String) },
       ],

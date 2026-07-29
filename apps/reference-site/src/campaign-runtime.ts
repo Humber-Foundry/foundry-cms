@@ -48,9 +48,11 @@ import {
   createBrevoNewsletterDeliveryAdapter,
 } from "./brevo-newsletter-delivery-adapter";
 
-const localCampaignStore = createInMemoryCampaignStore();
 const localCampaignTestDeliveryStore =
   createInMemoryCampaignTestDeliveryStore();
+const localCampaignStore = createInMemoryCampaignStore((input) =>
+  localCampaignTestDeliveryStore.cancelForCampaignEdit(input)
+);
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
 const developmentProviderOwnershipEvidence:
@@ -323,12 +325,14 @@ export async function loadCampaignRequestContext(
         requestId,
         command,
         targetId,
+        commandName,
       }) =>
         application.commands.replayTestCommand({
           actor,
           requestId,
           command,
           targetId,
+          commandName,
         }),
       recordAcceptedTestCommand: ({
         actor,
@@ -338,6 +342,8 @@ export async function loadCampaignRequestContext(
         revision,
         beforeState,
         afterState,
+        targetId,
+        commandName,
       }) =>
         application.commands.recordAcceptedTestCommand({
           actor,
@@ -347,6 +353,8 @@ export async function loadCampaignRequestContext(
           revision,
           beforeState,
           afterState,
+          targetId,
+          commandName,
         }),
       recordRejectedCommand: ({
         actor,
@@ -355,6 +363,7 @@ export async function loadCampaignRequestContext(
         command,
         targetId,
         beforeState,
+        commandName,
       }) =>
         application.commands.recordRejectedCommand({
           actor,
@@ -364,7 +373,7 @@ export async function loadCampaignRequestContext(
           targetId,
           beforeState,
           action: "campaign.test",
-          commandName: "campaign.request_test",
+          commandName: commandName ?? "campaign.request_test",
         }),
     }),
   };

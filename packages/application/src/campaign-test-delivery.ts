@@ -181,6 +181,12 @@ export interface CampaignTestDeliveryStore {
     budgetDay: string;
     reservedAt: string;
   }): Promise<boolean>;
+  cancelForCampaignEdit(input: {
+    siteId: SiteId;
+    campaignId: CampaignId;
+    retainedRevisionId: CampaignRevisionId;
+    cancelledAt: string;
+  }): Promise<void>;
 }
 
 export const maximumCampaignTestRecipients = 5;
@@ -478,6 +484,9 @@ export function createCampaignTestDeliveryApplication({
     requestId: string;
     command: unknown;
     targetId: string;
+    commandName?:
+      | "campaign.request_test"
+      | "campaign.confirm_test_receipt";
   }): Promise<
     Readonly<{ campaign: Campaign; revision: CampaignRevision }> | null
   >;
@@ -489,6 +498,10 @@ export function createCampaignTestDeliveryApplication({
     revision: CampaignRevision;
     beforeState: string;
     afterState: string;
+    targetId?: string;
+    commandName?:
+      | "campaign.request_test"
+      | "campaign.confirm_test_receipt";
   }): Promise<void>;
   recordRejectedCommand?(input: {
     actor: CampaignActor;
@@ -497,6 +510,9 @@ export function createCampaignTestDeliveryApplication({
     command: unknown;
     targetId: string;
     beforeState: string;
+    commandName?:
+      | "campaign.request_test"
+      | "campaign.confirm_test_receipt";
   }): Promise<void>;
   clock?: () => Date;
   createExecutionId?: () => string;
@@ -870,6 +886,14 @@ export function createCampaignTestDeliveryApplication({
     } catch {
       outcome = { outcome: "ambiguous" };
     }
+    const postWriteOperation = await store.findByRequest({
+      siteId,
+      actorId,
+      requestId,
+    });
+    if (postWriteOperation?.state === "cancelled") {
+      return postWriteOperation;
+    }
     const timestamp = clock().toISOString();
     if (outcome.outcome === "accepted") {
       return store.record(
@@ -973,26 +997,110 @@ export function createCampaignTestDeliveryApplication({
     requestId: string;
     executionId: string;
   }) {
-    const owner = await authorize(actor, "campaign.test.confirm");
-    if (!isCampaignRequestId(requestId)) {
-      throw new CampaignIdempotencyError("campaign_idempotency_key_invalid");
-    }
-    if (!uuidPattern.test(executionId)) {
-      throw new CampaignValidationError("test_execution_id_invalid");
-    }
-    const operation = await store.findByExecution({ siteId, executionId });
-    if (operation?.state !== "accepted" || operation.evidence === null) {
-      throw new CampaignValidationError("test_delivery_not_accepted");
-    }
-    return store.confirmReceipt(
-      Object.freeze({
-        executionId,
+    const command = {
+      action: "confirm_test_receipt",
+      executionId,
+    } as const;
+    let accepted = false;
+    try {
+      const owner = await authorize(actor, "campaign.test.confirm");
+      if (!isCampaignRequestId(requestId)) {
+        throw new CampaignIdempotencyError("campaign_idempotency_key_invalid");
+      }
+      if (!uuidPattern.test(executionId)) {
+        throw new CampaignValidationError("test_execution_id_invalid");
+      }
+      const replayed = (
+        await replayTestCommand?.({
+          actor,
+          requestId,
+          command,
+          targetId: executionId,
+          commandName: "campaign.confirm_test_receipt",
+        })
+      ) ?? null;
+      if (replayed !== null) {
+        const confirmation = await store.findReceiptConfirmation({
+          siteId,
+          executionId,
+        });
+        if (confirmation === null) {
+          throw new CampaignValidationError(
+            "test_receipt_confirmation_missing",
+          );
+        }
+        return confirmation;
+      }
+      const operation = await store.findByExecution({ siteId, executionId });
+      if (operation?.state !== "accepted" || operation.evidence === null) {
+        throw new CampaignValidationError("test_delivery_not_accepted");
+      }
+      const current = await currentCampaignRevision(operation.campaignId);
+      if (current.revision.id !== operation.campaignRevisionId) {
+        throw new CampaignValidationError("test_delivery_not_current");
+      }
+      const existing = await store.findReceiptConfirmation({
         siteId,
-        ownerActorId: owner.id,
+        executionId,
+      });
+      if (existing !== null && existing.requestId !== requestId) {
+        throw new CampaignValidationError(
+          "test_receipt_already_confirmed",
+        );
+      }
+      const confirmation = await store.confirmReceipt(
+        Object.freeze({
+          executionId,
+          siteId,
+          ownerActorId: owner.id,
+          requestId,
+          confirmedAt: clock().toISOString(),
+        }),
+      );
+      await recordAcceptedTestCommand?.({
+        actor,
         requestId,
-        confirmedAt: clock().toISOString(),
-      }),
-    );
+        command,
+        campaign: current.campaign,
+        revision: current.revision,
+        beforeState: JSON.stringify({
+          current: { ownerReceiptConfirmation: "unconfirmed" },
+          required: { ownerReceiptConfirmation: "confirmed" },
+        }),
+        afterState: JSON.stringify({
+          executionId,
+          ownerReceiptConfirmation: "confirmed",
+        }),
+        targetId: executionId,
+        commandName: "campaign.confirm_test_receipt",
+      });
+      accepted = true;
+      return confirmation;
+    } catch (error) {
+      if (
+        recordRejectedCommand !== undefined &&
+        !accepted &&
+        isCampaignRequestId(requestId) &&
+        (error instanceof CampaignValidationError ||
+          error instanceof CampaignIdempotencyError ||
+          error instanceof CampaignNotFoundError ||
+          error instanceof AccessDeniedError)
+      ) {
+        await recordRejectedCommand({
+          actor,
+          requestId,
+          reason: error.message,
+          command,
+          targetId: executionId,
+          beforeState: JSON.stringify({
+            current: { ownerReceiptConfirmation: "not_accepted" },
+            required: { ownerReceiptConfirmation: "accepted_test" },
+          }),
+          commandName: "campaign.confirm_test_receipt",
+        });
+      }
+      throw error;
+    }
   }
 
   return Object.freeze({
@@ -1078,6 +1186,7 @@ export function createInMemoryCampaignTestDeliveryStore():
   } {
   const operations = new Map<string, CampaignTestDeliveryOperation>();
   const confirmations = new Map<string, CampaignTestReceiptConfirmation>();
+  const confirmationRequests = new Map<string, string>();
   const dailyRecipientReservations = new Map<string, number>();
   const requestKey = (operation: {
     siteId: SiteId;
@@ -1191,8 +1300,30 @@ export function createInMemoryCampaignTestDeliveryStore():
     },
     async confirmReceipt(confirmation) {
       const key = `${confirmation.siteId}:${confirmation.executionId}`;
+      const requestKey =
+        `${confirmation.siteId}:${confirmation.ownerActorId}:` +
+        confirmation.requestId;
+      const requestExecution = confirmationRequests.get(requestKey);
+      if (
+        requestExecution !== undefined &&
+        requestExecution !== confirmation.executionId
+      ) {
+        throw new CampaignIdempotencyError(
+          "campaign_idempotency_key_reused",
+        );
+      }
       const existing = confirmations.get(key);
-      if (existing !== undefined) return existing;
+      if (existing !== undefined) {
+        if (
+          existing.requestId !== confirmation.requestId ||
+          existing.ownerActorId !== confirmation.ownerActorId
+        ) {
+          throw new CampaignValidationError(
+            "test_receipt_already_confirmed",
+          );
+        }
+        return existing;
+      }
       const operation = [...operations.values()].find(
         (candidate) =>
           candidate.siteId === confirmation.siteId &&
@@ -1202,6 +1333,7 @@ export function createInMemoryCampaignTestDeliveryStore():
         throw new CampaignValidationError("test_delivery_not_accepted");
       }
       confirmations.set(key, confirmation);
+      confirmationRequests.set(requestKey, confirmation.executionId);
       return confirmation;
     },
     async findReceiptConfirmation({ siteId: requestedSiteId, executionId }) {
@@ -1226,6 +1358,34 @@ export function createInMemoryCampaignTestDeliveryStore():
       }
       dailyRecipientReservations.set(reservationKey, input.recipientCount);
       return true;
+    },
+    async cancelForCampaignEdit({
+      siteId: requestedSiteId,
+      campaignId,
+      retainedRevisionId,
+      cancelledAt,
+    }) {
+      for (const [key, operation] of operations) {
+        if (
+          operation.siteId === requestedSiteId &&
+          operation.campaignId === campaignId &&
+          operation.campaignRevisionId !== retainedRevisionId &&
+          (operation.state === "pending" ||
+            operation.state === "attempting" ||
+            operation.state === "ambiguous")
+        ) {
+          operations.set(
+            key,
+            Object.freeze({
+              ...operation,
+              state: "cancelled" as const,
+              attemptLeaseUntil: null,
+              failureCode: "campaign_revision_changed",
+              updatedAt: cancelledAt,
+            }),
+          );
+        }
+      }
     },
     list() {
       return [...operations.values()];
