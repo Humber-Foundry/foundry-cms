@@ -32,9 +32,20 @@ CREATE TABLE campaign_test_deliveries (
     (state = 'accepted' AND evidence_json IS NOT NULL
       AND provider_campaign_id IS NOT NULL AND failure_code IS NULL) OR
     (state = 'failed' AND evidence_json IS NULL
-      AND failure_code IS NOT NULL) OR
+      AND failure_code IN (
+        'foundry_send_proof_invalid',
+        'provider_campaign_create_rejected',
+        'provider_campaign_fingerprint_mismatch',
+        'provider_campaign_not_found',
+        'provider_sender_unmapped',
+        'provider_test_daily_recipient_limit',
+        'provider_test_rejected',
+        'provider_unavailable',
+        'test_recipient_binding_changed',
+        'test_recipient_forbidden'
+      )) OR
     (state = 'cancelled' AND evidence_json IS NULL
-      AND failure_code IS NOT NULL) OR
+      AND failure_code = 'campaign_revision_changed') OR
     (state IN ('pending', 'attempting') AND evidence_json IS NULL
       AND failure_code IS NULL) OR
     (state = 'ambiguous' AND evidence_json IS NULL

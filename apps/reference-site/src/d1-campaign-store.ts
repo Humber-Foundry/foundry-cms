@@ -652,6 +652,7 @@ export function createD1CampaignStore(
       revision,
       audit,
       conflictAudit,
+      staleAudit,
       confirmation,
     }) {
       const resultJson = JSON.stringify({ campaign, revision });
@@ -666,11 +667,16 @@ export function createD1CampaignStore(
              WHERE ${pendingCommandExists()}
                AND ?7 = ?1 AND ?8 = ?2 AND ?9 = ?4
                AND EXISTS (
-                 SELECT 1 FROM campaign_test_deliveries
+               SELECT 1 FROM campaign_test_deliveries
                  WHERE execution_id = ?6 AND site_id = ?7
                    AND campaign_id = ?11
                    AND campaign_revision_id = ?12
                    AND state = 'accepted' AND evidence_json IS NOT NULL
+               )
+               AND EXISTS (
+                 SELECT 1 FROM campaigns
+                 WHERE site_id = ?7 AND id = ?11
+                   AND current_revision_id = ?12 AND version = ?13
                )
              ON CONFLICT DO NOTHING`,
           )
@@ -687,6 +693,7 @@ export function createD1CampaignStore(
             confirmation.confirmedAt,
             campaign.id,
             revision.id,
+            campaign.version,
           ),
         commandAuditInsert(
           database,
@@ -725,6 +732,56 @@ export function createD1CampaignStore(
             resultJson,
             audit.occurredAt,
             confirmation.executionId,
+          ),
+        commandAuditInsert(
+          database,
+          staleAudit,
+          command,
+          `AND NOT EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM campaigns
+            WHERE site_id = ?20 AND id = ?21
+              AND current_revision_id = ?22 AND version = ?23
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'rejected', reason = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaigns
+                 WHERE site_id = ?1 AND id = ?9
+                   AND current_revision_id = ?10 AND version = ?11
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            staleAudit.reason,
+            staleAudit.occurredAt,
+            confirmation.executionId,
+            campaign.id,
+            revision.id,
+            campaign.version,
           ),
         commandAuditInsert(
           database,

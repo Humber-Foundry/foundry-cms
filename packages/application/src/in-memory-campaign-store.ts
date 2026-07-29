@@ -176,6 +176,7 @@ export function createInMemoryCampaignStore(
       revision,
       audit,
       conflictAudit,
+      staleAudit,
       confirmation,
     }) {
       const existing = existingResult(command);
@@ -190,6 +191,15 @@ export function createInMemoryCampaignStore(
           const receipt = rejectedReceipt(command, conflictAudit);
           receipts.set(commandKey(command), receipt);
           audits.push(conflictAudit);
+          return Object.freeze({ receipt, replayed: false });
+        }
+        if (
+          error instanceof Error &&
+          error.message === "test_delivery_not_current"
+        ) {
+          const receipt = rejectedReceipt(command, staleAudit);
+          receipts.set(commandKey(command), receipt);
+          audits.push(staleAudit);
           return Object.freeze({ receipt, replayed: false });
         }
         throw error;

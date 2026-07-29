@@ -27,7 +27,7 @@ type TestDeliveryRow = Readonly<{
   attempt_lease_until: string | null;
   provider_campaign_id: string | null;
   foundry_send_proof: string | null;
-  failure_code: string | null;
+  failure_code: CampaignTestDeliveryOperation["failureCode"];
   evidence_json: string | null;
   created_at: string;
   updated_at: string;

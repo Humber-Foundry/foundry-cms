@@ -3,6 +3,7 @@ import {
   sha256Text,
   type NewsletterDeliveryAdapter,
   type NewsletterDeliveryCapabilities,
+  type NewsletterTestAmbiguityCode,
   type NewsletterTestOutcome,
   type NewsletterTestRequest,
 } from "@foundry/application";
@@ -29,7 +30,10 @@ type BrevoCampaign = Readonly<{
 type CampaignRead =
   | Readonly<{ outcome: "found"; campaign: BrevoCampaign }>
   | Readonly<{ outcome: "not_found" }>
-  | Readonly<{ outcome: "ambiguous"; code?: string }>;
+  | Readonly<{
+      outcome: "ambiguous";
+      code?: NewsletterTestAmbiguityCode;
+    }>;
 
 function campaignName(executionId: string) {
   return `foundry-test-${executionId}`;
@@ -100,6 +104,7 @@ function accepted(
   return {
     outcome: "accepted",
     providerCampaignId: id,
+    foundrySendProof,
     providerReceipt: [
       "brevo:test:v1",
       request.executionId,
@@ -164,7 +169,10 @@ export function createBrevoNewsletterDeliveryAdapter({
     });
   }
 
-  async function readCampaign(id: string, signal?: AbortSignal) {
+  async function readCampaign(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<CampaignRead> {
     const response = await fetcher(`${endpoint}/emailCampaigns/${id}`, {
       method: "GET",
       headers: headers(apiKey),
@@ -373,10 +381,7 @@ export function createBrevoNewsletterDeliveryAdapter({
             }
             return {
               outcome: "rejected",
-              code:
-                created.status === 429
-                  ? "provider_rate_limited"
-                  : "provider_campaign_create_rejected",
+              code: "provider_campaign_create_rejected",
             } as const;
           }
           const createdBody = await json(created) as { id?: unknown } | null;
@@ -484,10 +489,7 @@ export function createBrevoNewsletterDeliveryAdapter({
           }
           return {
             outcome: "rejected",
-            code:
-              sent.status === 429
-                ? "provider_rate_limited"
-                : "provider_test_rejected",
+            code: "provider_test_rejected",
           } as const;
         }
         return accepted(

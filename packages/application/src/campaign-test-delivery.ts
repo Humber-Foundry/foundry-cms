@@ -68,19 +68,39 @@ export type NewsletterTestRequest = Readonly<{
   binding: CampaignTestDeliveryBinding;
 }>;
 
+export type NewsletterTestAmbiguityCode = "provider_rate_limited";
+
+export type NewsletterTestRejectionCode =
+  | "foundry_send_proof_invalid"
+  | "provider_campaign_create_rejected"
+  | "provider_campaign_fingerprint_mismatch"
+  | "provider_campaign_not_found"
+  | "provider_sender_unmapped"
+  | "provider_test_rejected"
+  | "provider_unavailable";
+
+export type CampaignTestDeliveryFailureCode =
+  | NewsletterTestAmbiguityCode
+  | NewsletterTestRejectionCode
+  | "campaign_revision_changed"
+  | "provider_test_daily_recipient_limit"
+  | "test_recipient_binding_changed"
+  | "test_recipient_forbidden";
+
 export type NewsletterTestOutcome =
   | Readonly<{
       outcome: "accepted";
       providerCampaignId: string;
+      foundrySendProof: string;
       providerReceipt: string;
     }>
   | Readonly<{
       outcome: "ambiguous";
       providerCampaignId?: string;
       foundrySendProof?: string;
-      code?: string;
+      code?: NewsletterTestAmbiguityCode;
     }>
-  | Readonly<{ outcome: "rejected"; code: string }>;
+  | Readonly<{ outcome: "rejected"; code: NewsletterTestRejectionCode }>;
 
 export type NewsletterTestReconciliation =
   | NewsletterTestOutcome
@@ -96,9 +116,9 @@ export type NewsletterTestPreparation =
   | Readonly<{
       outcome: "ambiguous";
       providerCampaignId?: string;
-      code?: string;
+      code?: NewsletterTestAmbiguityCode;
     }>
-  | Readonly<{ outcome: "rejected"; code: string }>;
+  | Readonly<{ outcome: "rejected"; code: NewsletterTestRejectionCode }>;
 
 export interface NewsletterDeliveryAdapter {
   capabilities(): Promise<NewsletterDeliveryCapabilities>;
@@ -152,7 +172,7 @@ export type CampaignTestDeliveryOperation = Readonly<{
   attemptLeaseUntil: string | null;
   providerCampaignId: string | null;
   foundrySendProof: string | null;
-  failureCode: string | null;
+  failureCode: CampaignTestDeliveryFailureCode | null;
   evidence: CampaignTestDeliveryEvidence | null;
   createdAt: string;
   updatedAt: string;
@@ -447,6 +467,18 @@ async function acceptedOperation(
     outcome.providerCampaignId,
     "provider_campaign_id_invalid",
   );
+  const foundrySendProof = validateFingerprint(
+    outcome.foundrySendProof,
+    "foundry_send_proof_invalid",
+  );
+  if (
+    operation.providerCampaignId !== providerCampaignId ||
+    operation.foundrySendProof !== foundrySendProof
+  ) {
+    throw new CampaignValidationError(
+      "provider_test_acceptance_binding_mismatch",
+    );
+  }
   const providerReceiptHash = await sha256Text(outcome.providerReceipt);
   if (outcome.providerReceipt.length === 0) {
     throw new CampaignValidationError("provider_test_evidence_invalid");
@@ -467,6 +499,18 @@ async function acceptedOperation(
     evidence,
     updatedAt: timestamp,
   });
+}
+
+function matchesPreparedAcceptance(
+  operation: CampaignTestDeliveryOperation,
+  outcome: Extract<NewsletterTestOutcome, { outcome: "accepted" }>,
+) {
+  return (
+    operation.providerCampaignId !== null &&
+    operation.foundrySendProof !== null &&
+    outcome.providerCampaignId.trim() === operation.providerCampaignId &&
+    outcome.foundrySendProof === operation.foundrySendProof
+  );
 }
 
 export function createCampaignTestDeliveryApplication({
@@ -684,7 +728,7 @@ export function createCampaignTestDeliveryApplication({
       revision,
       audience.eligibleSubscriberCount,
     );
-    const configuredRecipients =
+    let configuredRecipients =
       await resolveTestRecipients(testRecipientIds);
     assertResolvedRecipients(testRecipientIds, configuredRecipients);
     const binding = await bindingFor({
@@ -805,6 +849,17 @@ export function createCampaignTestDeliveryApplication({
         return postReconcileOperation;
       }
       if (reconciled.outcome === "accepted") {
+        if (!matchesPreparedAcceptance(operation, reconciled)) {
+          return recordOperation(
+            Object.freeze({
+              ...operation,
+              state: "ambiguous" as const,
+              attemptLeaseUntil: null,
+              failureCode: null,
+              updatedAt: clock().toISOString(),
+            }),
+          );
+        }
         return recordOperation(
           await acceptedOperation(
             operation,
@@ -823,7 +878,9 @@ export function createCampaignTestDeliveryApplication({
               recoveryStartedAt.getTime() + 60_000,
             ).toISOString(),
             providerCampaignId:
-              reconciled.outcome === "not_found"
+              operation.foundrySendProof !== null
+                ? operation.providerCampaignId
+                : reconciled.outcome === "not_found"
                 ? operation.providerCampaignId
                 : reconciled.outcome === "not_sent"
                   ? reconciled.providerCampaignId
@@ -863,6 +920,12 @@ export function createCampaignTestDeliveryApplication({
             updatedAt: clock().toISOString(),
           }),
         );
+      }
+      if (
+        reconciled.outcome === "not_sent" &&
+        operation.foundrySendProof !== null
+      ) {
+        return operation;
       }
       if (reconciled.outcome === "not_sent") {
         operation = await recordOperation(
@@ -1033,6 +1096,50 @@ export function createCampaignTestDeliveryApplication({
         }),
       );
     }
+    let preWriteRecipients: ReadonlyArray<NewsletterTestRecipient>;
+    try {
+      preWriteRecipients =
+        await resolveTestRecipients(operation.recipientIds);
+      assertResolvedRecipients(
+        operation.recipientIds,
+        preWriteRecipients,
+      );
+    } catch (error) {
+      if (
+        error instanceof CampaignValidationError &&
+        error.message === "test_recipient_forbidden"
+      ) {
+        return recordOperation(
+          Object.freeze({
+            ...operation,
+            state: "failed" as const,
+            attemptLeaseUntil: null,
+            failureCode: "test_recipient_forbidden",
+            updatedAt: clock().toISOString(),
+          }),
+        );
+      }
+      throw error;
+    }
+    const preWriteBinding = await bindingFor({
+      revision: preWriteRevision.revision,
+      rendered,
+      providerConfigurationFingerprint:
+        capabilities.configurationFingerprint,
+      recipients: preWriteRecipients,
+    });
+    if (!sameBinding(operation.binding, preWriteBinding)) {
+      return recordOperation(
+        Object.freeze({
+          ...operation,
+          state: "failed" as const,
+          attemptLeaseUntil: null,
+          failureCode: "test_recipient_binding_changed",
+          updatedAt: clock().toISOString(),
+        }),
+      );
+    }
+    configuredRecipients = preWriteRecipients;
     let outcome: NewsletterTestOutcome;
     try {
       outcome = await adapter.sendTest({
@@ -1059,6 +1166,17 @@ export function createCampaignTestDeliveryApplication({
     }
     const timestamp = clock().toISOString();
     if (outcome.outcome === "accepted") {
+      if (!matchesPreparedAcceptance(operation, outcome)) {
+        return recordOperation(
+          Object.freeze({
+            ...operation,
+            state: "ambiguous" as const,
+            attemptLeaseUntil: null,
+            failureCode: null,
+            updatedAt: timestamp,
+          }),
+        );
+      }
       return recordOperation(
         await acceptedOperation(operation, outcome, timestamp),
       );
@@ -1080,19 +1198,8 @@ export function createCampaignTestDeliveryApplication({
         state: "ambiguous" as const,
         attemptLeaseUntil: null,
         providerCampaignId:
-          outcome.providerCampaignId === undefined
-            ? operation.providerCampaignId
-            : validateProviderText(
-                outcome.providerCampaignId,
-                "provider_campaign_id_invalid",
-              ),
-        foundrySendProof:
-          outcome.foundrySendProof === undefined
-            ? operation.foundrySendProof
-            : validateFingerprint(
-                outcome.foundrySendProof,
-                "foundry_send_proof_invalid",
-              ),
+          operation.providerCampaignId,
+        foundrySendProof: operation.foundrySendProof,
         failureCode: outcome.code ?? null,
         updatedAt: timestamp,
       }),

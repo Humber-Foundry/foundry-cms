@@ -111,6 +111,7 @@ describe("Brevo newsletter delivery adapter", () => {
     await expect(adapter.sendTest(prepared)).resolves.toEqual({
       outcome: "accepted",
       providerCampaignId: "17",
+      foundrySendProof: prepared.foundrySendProof,
       providerReceipt: expect.stringMatching(/^brevo:test:/u),
     });
     expect(fetcher).toHaveBeenNthCalledWith(

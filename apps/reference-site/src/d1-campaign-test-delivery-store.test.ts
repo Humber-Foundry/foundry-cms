@@ -131,6 +131,16 @@ describe("D1 campaign test delivery store", () => {
       updatedAt: "2026-07-29T19:05:00.000Z",
     };
     await store.claim(pending);
+    await expect(
+      database
+        .prepare(
+          `UPDATE campaign_test_deliveries
+           SET state = 'ambiguous', failure_code = 'arbitrary_provider_code'
+           WHERE execution_id = ?1`,
+        )
+        .bind(pending.executionId)
+        .run(),
+    ).rejects.toThrow(/CHECK constraint failed/u);
     const attempting = await store.beginAttempt({
       operation: pending,
       now: "2026-07-29T19:05:01.000Z",

@@ -32,7 +32,12 @@ Install these values in the client-owned Worker configuration:
   rejects inactive, non-Owner, or unknown membership IDs.
 
 The runtime derives the provider-configuration fingerprint from the account
-scope, sender mapping, and pinned adapter version. Recipient addresses pass
+scope, sender mapping, pinned adapter version, and a one-way fingerprint of
+the installation proof key. Rotating the Brevo API credential alone preserves
+the send-intent binding. Rotating the installation proof key intentionally
+changes the provider-configuration fingerprint, invalidates prior accepted
+test evidence, and requires a new exact test and Owner confirmation. Recipient
+addresses pass
 directly to Brevo for the explicit test request and are absent from operation
 rows, evidence, API results, logs, and source control.
 Provider health independently reads the credential's Brevo account, derives

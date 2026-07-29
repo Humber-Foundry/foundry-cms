@@ -182,7 +182,7 @@ describe("D1 campaign store", () => {
         "2026-07-29T19:05:00.000Z",
       )
       .run();
-    await application.commands.edit({
+    const edited = await application.commands.edit({
       actor,
       requestId: "campaign-edit-durable-1",
       campaignId: created.campaign.id,
@@ -237,8 +237,8 @@ describe("D1 campaign store", () => {
         campaignId: created.campaign.id,
         testRecipientIds: ["owner-primary"],
       },
-      campaign: created.campaign,
-      revision: created.revision,
+      campaign: edited.campaign,
+      revision: edited.revision,
       beforeState: JSON.stringify({
         current: { testDelivery: "not_started" },
         required: { testDelivery: "eligible" },
@@ -271,8 +271,8 @@ describe("D1 campaign store", () => {
         siteId,
         "membership-editor",
         "campaign-test-confirm-source-1",
-        created.campaign.id,
-        created.revision.id,
+        acceptedTest.campaign.id,
+        acceptedTest.revision.id,
         "2026-07-29T19:06:00.000Z",
       )
       .run();
@@ -337,8 +337,8 @@ describe("D1 campaign store", () => {
     const secondOwnerResult =
       await store.acceptTestReceiptConfirmation({
         command: secondOwnerCommand,
-        campaign: created.campaign,
-        revision: created.revision,
+        campaign: acceptedTest.campaign,
+        revision: acceptedTest.revision,
         confirmation: {
           executionId: acceptedConfirmation.confirmation.executionId,
           siteId,
@@ -351,7 +351,7 @@ describe("D1 campaign store", () => {
           siteId,
           actorId: secondOwnerCommand.actorId,
           targetId: acceptedConfirmation.confirmation.executionId,
-          revisionId: created.revision.id,
+          revisionId: acceptedTest.revision.id,
           requestId: secondOwnerCommand.requestId,
           inputHash: secondOwnerCommand.inputHash,
           action: "campaign.test",
@@ -366,12 +366,27 @@ describe("D1 campaign store", () => {
           siteId,
           actorId: secondOwnerCommand.actorId,
           targetId: acceptedConfirmation.confirmation.executionId,
-          revisionId: created.revision.id,
+          revisionId: acceptedTest.revision.id,
           requestId: secondOwnerCommand.requestId,
           inputHash: secondOwnerCommand.inputHash,
           action: "campaign.test",
           outcome: "rejected",
           reason: "test_receipt_already_confirmed",
+          beforeState: "{}",
+          afterState: null,
+          occurredAt: "2026-07-29T19:07:01.000Z",
+        },
+        staleAudit: {
+          id: "50000000-0000-4000-8000-000000000073" as never,
+          siteId,
+          actorId: secondOwnerCommand.actorId,
+          targetId: acceptedConfirmation.confirmation.executionId,
+          revisionId: acceptedTest.revision.id,
+          requestId: secondOwnerCommand.requestId,
+          inputHash: secondOwnerCommand.inputHash,
+          action: "campaign.test",
+          outcome: "rejected",
+          reason: "test_delivery_not_current",
           beforeState: "{}",
           afterState: null,
           occurredAt: "2026-07-29T19:07:01.000Z",
@@ -405,8 +420,8 @@ describe("D1 campaign store", () => {
         siteId,
         "membership-editor",
         "campaign-test-confirm-fault-source-1",
-        created.campaign.id,
-        created.revision.id,
+        acceptedTest.campaign.id,
+        acceptedTest.revision.id,
         "2026-07-29T19:08:00.000Z",
       )
       .run();
@@ -505,12 +520,69 @@ describe("D1 campaign store", () => {
         .all<{ campaign_revision_id: string }>(),
     ).resolves.toMatchObject({
       results: [
-        { campaign_revision_id: created.revision.id },
+        { campaign_revision_id: acceptedTest.revision.id },
         { campaign_revision_id: expect.any(String) },
         { campaign_revision_id: expect.any(String) },
         { campaign_revision_id: expect.any(String) },
       ],
     });
+    await database
+      .prepare(
+        `INSERT INTO campaign_test_deliveries (
+           execution_id, site_id, actor_id, request_id, campaign_id,
+           campaign_revision_id, binding_json, recipient_ids_json, state,
+           attempt_number, attempt_lease_until, provider_campaign_id,
+           failure_code, evidence_json, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
+           1, NULL, '20', NULL, '{}', ?7, ?7)`,
+      )
+      .bind(
+        "40000000-0000-4000-8000-000000000003",
+        siteId,
+        "membership-editor",
+        "campaign-test-confirm-stale-source-1",
+        created.campaign.id,
+        created.revision.id,
+        "2026-07-29T19:09:00.000Z",
+      )
+      .run();
+    await expect(
+      application.commands.recordAcceptedTestReceiptConfirmation({
+        ...acceptedConfirmation,
+        campaign: created.campaign,
+        revision: created.revision,
+        requestId: "campaign-test-confirm-stale-durable-1",
+        command: {
+          action: "confirm_test_receipt",
+          executionId: "40000000-0000-4000-8000-000000000003",
+        },
+        targetId: "40000000-0000-4000-8000-000000000003",
+        confirmation: {
+          ...acceptedConfirmation.confirmation,
+          executionId: "40000000-0000-4000-8000-000000000003",
+          requestId: "campaign-test-confirm-stale-durable-1",
+        },
+      }),
+    ).rejects.toMatchObject({ message: "test_delivery_not_current" });
+    await expect(
+      database
+        .prepare(
+          `SELECT outcome, reason FROM campaign_command_receipts
+           WHERE request_id = 'campaign-test-confirm-stale-durable-1'`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      outcome: "rejected",
+      reason: "test_delivery_not_current",
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT execution_id FROM campaign_test_receipt_confirmations
+           WHERE execution_id = '40000000-0000-4000-8000-000000000003'`,
+        )
+        .first(),
+    ).resolves.toBeNull();
     await expect(
       database
         .prepare(
