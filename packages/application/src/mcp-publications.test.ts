@@ -20,6 +20,7 @@ import {
   mcpInitialScope,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
+  sha256CanonicalJson,
   type ContentPublication,
   type McpConnectionGrant,
   type McpConnectionPrincipal,
@@ -270,6 +271,17 @@ describe("MCP publication orchestration", () => {
         replayed: false,
       }),
     ]);
+    // The audit result hash is the hash of the receipt the caller was given,
+    // so the row the store commits in the claim transaction and the row the
+    // application records for the same idempotency key agree by construction.
+    expect(publicationAudit[0]?.resultHash).toBe(
+      await sha256CanonicalJson({
+        operationId: publicationId,
+        state: "requested",
+        statusResource: `foundry://publications/${publicationId}`,
+        replayed: false,
+      }),
+    );
   });
 
   it("passes a current-grant fence to the shared publisher", async () => {
