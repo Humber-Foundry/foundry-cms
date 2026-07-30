@@ -133,6 +133,14 @@ function prepareJoinedMcpAuditInsert(
     );
 }
 
+export type D1ContentRevisionInitializationExtension = Readonly<{
+  blogPostAdvanceAuthority: "archived-restore";
+  prepareStatements(input: Readonly<{
+    revision: ContentRevision;
+    artifacts: ReadonlyArray<BlogPostArtifactFingerprint>;
+  }>): ReadonlyArray<ReturnType<D1DatabaseBinding["prepare"]>>;
+}>;
+
 function prepareBlogRenderArtifactInsert(
   target: D1StatementPreparer,
   input: Readonly<{
@@ -245,32 +253,59 @@ export async function hydrateManagedBlogPosts(
 ): Promise<SiteDefinition> {
   const rows = await database
     .prepare(
-      `SELECT revision.snapshot_json, post.last_verified_visibility
+      `SELECT post.post_id, revision.snapshot_json,
+              post.current_revision, post.live_revision,
+              post.last_verified_revision, post.last_verified_visibility,
+              COALESCE(collection.collection_state, 'active')
+                AS collection_state
        FROM blog_posts AS post
        JOIN blog_post_revisions AS revision
          ON revision.site_id = post.site_id
         AND revision.post_id = post.post_id
-        AND revision.revision_id = post.current_revision_id
+        AND revision.revision = CASE
+          WHEN post.live_revision IS NOT NULL
+            AND post.last_verified_visibility = 'public'
+          THEN post.live_revision
+          ELSE post.current_revision
+        END
+       LEFT JOIN blog_post_collection_states AS collection
+         ON collection.site_id = post.site_id
+        AND collection.post_id = post.post_id
        WHERE post.site_id = ?1
-         AND post.live_revision IS NULL
-         AND (
-           (
-             post.last_verified_visibility = 'unpublished'
-             AND post.last_verified_revision = post.current_revision
-           )
-           OR (
-             post.last_verified_visibility = 'absent'
-             AND post.last_verified_revision = post.current_revision
-           )
-         )
        ORDER BY post.post_id`,
     )
     .bind(definition.site.id)
     .all<{
+      post_id: string;
       snapshot_json: string;
-      last_verified_visibility: "unpublished" | "absent";
+      current_revision: number;
+      live_revision: number | null;
+      last_verified_revision: number | null;
+      last_verified_visibility: "public" | "unpublished" | "absent";
+      collection_state: "active" | "archiving" | "archived";
     }>();
-  const managed = rows.results.map(
+  const managed = rows.results.filter((row) =>
+    (
+      row.collection_state === "active" &&
+      (
+        (
+          row.live_revision !== null &&
+          row.last_verified_visibility === "public"
+        ) ||
+        (
+          row.live_revision === null &&
+          row.last_verified_revision === row.current_revision &&
+          ["unpublished", "absent"].includes(
+            row.last_verified_visibility,
+          )
+        )
+      )
+    ) ||
+    (
+      row.collection_state === "archiving" &&
+      row.live_revision !== null
+    )
+  ).map(
     ({ snapshot_json, last_verified_visibility }) => {
       const post = JSON.parse(snapshot_json) as BlogPost;
       return last_verified_visibility === "absent" &&
@@ -283,14 +318,16 @@ export async function hydrateManagedBlogPosts(
         : post;
     },
   );
-  const publishedIds = new Set(definition.blog.posts.map(({ id }) => id));
+  const managedIds = new Set(
+    rows.results.map(({ post_id }) => post_id),
+  );
   const hydrated = {
     ...definition,
     blog: {
       ...definition.blog,
       posts: [
-        ...definition.blog.posts,
-        ...managed.filter(({ id }) => !publishedIds.has(id)),
+        ...definition.blog.posts.filter(({ id }) => !managedIds.has(id)),
+        ...managed,
       ],
     },
   };
@@ -397,12 +434,22 @@ export async function reconcileVerifiedBlogPostPublication(
                WHERE incoming.post_id = blog_posts.post_id
              ),
              current_revision = (
-               SELECT incoming.revision
+               SELECT CASE
+                 WHEN blog_posts.current_revision >
+                   CAST(incoming.revision AS INTEGER)
+                 THEN blog_posts.current_revision
+                 ELSE CAST(incoming.revision AS INTEGER)
+               END
                FROM incoming_posts AS incoming
                WHERE incoming.post_id = blog_posts.post_id
              ),
              current_revision_id = (
-               SELECT incoming.revision_id
+               SELECT CASE
+                 WHEN blog_posts.current_revision >
+                   CAST(incoming.revision AS INTEGER)
+                 THEN blog_posts.current_revision_id
+                 ELSE incoming.revision_id
+               END
                FROM incoming_posts AS incoming
                WHERE incoming.post_id = blog_posts.post_id
              ),
@@ -513,8 +560,13 @@ export async function reconcileVerifiedBlogPostPublication(
             aggregate.last_verified_publication_sequence = ?3
             AND (
               aggregate.last_verified_publication_id <> ?4
-              OR aggregate.current_revision <> incoming.revision
-              OR aggregate.current_revision_id <> incoming.revision_id
+              OR aggregate.current_revision <
+                CAST(incoming.revision AS INTEGER)
+              OR (
+                aggregate.current_revision =
+                  CAST(incoming.revision AS INTEGER)
+                AND aggregate.current_revision_id <> incoming.revision_id
+              )
               OR aggregate.last_verified_revision <> incoming.revision
               OR aggregate.last_verified_visibility <>
                 incoming.target_visibility
@@ -632,6 +684,7 @@ export function createD1ContentRevisionStore(
   database: D1DatabaseBinding,
   siteId: SiteId,
   workspaceId: ContentWorkspaceId,
+  initializationExtension?: D1ContentRevisionInitializationExtension,
 ): ContentRevisionStore {
   async function findReceipt(
     connection: Pick<D1DatabaseBinding, "prepare">,
@@ -842,7 +895,22 @@ export function createD1ContentRevisionStore(
                version = blog_posts.version + 1,
                updated_at = excluded.updated_at
              WHERE blog_posts.live_revision IS NULL
-               AND blog_posts.last_verified_visibility = 'absent'
+               AND (
+                 blog_posts.last_verified_visibility = 'absent'
+                 OR (
+                   ?4 = 1
+                   AND (
+                     blog_posts.last_verified_visibility = 'unpublished'
+                     OR EXISTS (
+                       SELECT 1 FROM blog_post_collection_states
+                       WHERE site_id = blog_posts.site_id
+                         AND post_id = blog_posts.post_id
+                         AND collection_state = 'archived'
+                         AND restore_request_id IS NOT NULL
+                     )
+                   )
+                 )
+               )
                AND blog_posts.current_revision + 1 =
                    excluded.current_revision`,
           )
@@ -850,6 +918,10 @@ export function createD1ContentRevisionStore(
             siteId,
             JSON.stringify(initialPosts),
             initialRevision.createdAt,
+            initializationExtension?.blogPostAdvanceAuthority ===
+              "archived-restore"
+              ? 1
+              : 0,
           ),
         database
           .prepare(
@@ -926,6 +998,10 @@ export function createD1ContentRevisionStore(
                 joinedResult,
               ),
             ]),
+        ...(initializationExtension?.prepareStatements({
+          revision: initialRevision,
+          artifacts: initialArtifacts,
+        }) ?? []),
       ]);
       return (results[0]?.meta.changes ?? 0) === 1;
     },
@@ -1185,11 +1261,37 @@ export function createD1ContentRevisionStore(
           const versionParameter = bindGuardValue(
             observedAggregate.version,
           );
+          const collectionAuthority =
+            transition.commandType === "blog.post.unpublish"
+              ? `(
+                  COALESCE((
+                    SELECT collection_state
+                    FROM blog_post_collection_states
+                    WHERE site_id = blog_posts.site_id
+                      AND post_id = blog_posts.post_id
+                  ), collection_state) = 'active'
+                  OR EXISTS (
+                    SELECT 1
+                    FROM blog_post_collection_states AS withdrawal
+                    WHERE withdrawal.site_id = blog_posts.site_id
+                      AND withdrawal.post_id = blog_posts.post_id
+                      AND withdrawal.collection_state = 'archiving'
+                      AND withdrawal.withdrawal_workspace_id = ?1
+                      AND withdrawal.withdrawal_content_revision = ?2
+                      AND withdrawal.withdrawal_created_by = ?10
+                  )
+                )`
+              : `COALESCE((
+                  SELECT collection_state
+                  FROM blog_post_collection_states
+                  WHERE site_id = blog_posts.site_id
+                    AND post_id = blog_posts.post_id
+                ), collection_state) = 'active'`;
           return `AND EXISTS (
             SELECT 1 FROM blog_posts
             WHERE site_id = ?14
               AND post_id = ${postParameter}
-              AND collection_state = 'active'
+              AND ${collectionAuthority}
               AND current_revision = ${currentRevisionParameter}
               AND live_revision IS ${liveRevisionParameter}
               AND last_verified_revision IS ${lastVerifiedRevisionParameter}

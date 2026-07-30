@@ -219,6 +219,12 @@ export type ContentPublicationClaim =
       publication: ContentPublication;
     }>;
 
+export type ContentPublicationReservationProof = Readonly<{
+  executionId: string;
+  attempt: number;
+  leaseToken: string;
+}>;
+
 export type ContentPublicationStore = Readonly<{
   saveApproval(approval: ContentApproval): Promise<ContentApproval>;
   findApproval(id: ContentApprovalId): Promise<ContentApproval | null>;
@@ -229,6 +235,7 @@ export type ContentPublicationStore = Readonly<{
   }): Promise<ContentApproval | null>;
   claimPublication(
     publication: ContentPublication,
+    reservationProof?: ContentPublicationReservationProof,
   ): Promise<ContentPublicationClaim>;
   hasPublicationLease(input: {
     publicationId: ContentPublicationId;
@@ -240,6 +247,7 @@ export type ContentPublicationStore = Readonly<{
     leaseToken: string;
     now: string;
     leaseExpiresAt: string;
+    reservationProof?: ContentPublicationReservationProof;
     expectedStatus?: "requested" | "committed";
     expectedDetail?: string;
     expectedDeploymentId?: string;
@@ -251,6 +259,7 @@ export type ContentPublicationStore = Readonly<{
       expectedLeaseValidAt?: string;
       expectedStatus?: ContentPublicationStatus;
       expectedUpdatedAt?: string;
+      reservationProof?: ContentPublicationReservationProof;
     },
   ): Promise<ContentPublication>;
   findPublication(id: ContentPublicationId): Promise<ContentPublication | null>;
@@ -426,6 +435,8 @@ export class ContentPublicationValidationError extends Error {
     | "idempotency_key_invalid"
     | "production_base_invalid"
     | "publication_no_changes"
+    | "publication_reservation_lost"
+    | "publication_requester_not_active"
     | "deployment_retry_not_available"
     | "deployment_retry_head_moved"
     | "deployment_retry_release_marker_mismatch"
@@ -1195,6 +1206,7 @@ export function createContentPublicationApplication({
     publication: ContentPublication;
     leaseToken: string;
     requestedBy: HumanMembershipId;
+    reservationProof?: ContentPublicationReservationProof;
   }) {
     return async () => {
       let currentApproval: ContentApproval;
@@ -1221,6 +1233,9 @@ export function createContentPublicationApplication({
         leaseExpiresAt: new Date(
           new Date(leaseNow).getTime() + publicationLeaseDurationMs,
         ).toISOString(),
+        ...(input.reservationProof === undefined
+          ? {}
+          : { reservationProof: input.reservationProof }),
       });
     };
   }
@@ -1264,6 +1279,7 @@ export function createContentPublicationApplication({
   async function claimFailedPublicationRetry(
     publication: ContentPublication,
     detail: string,
+    reservationProof?: ContentPublicationReservationProof,
   ) {
     if ((await store.findActivePublication()) !== null) {
       throw new ContentPublicationValidationError(
@@ -1288,6 +1304,9 @@ export function createContentPublicationApplication({
         {
           expectedStatus: "failed",
           expectedUpdatedAt: publication.updatedAt,
+          ...(reservationProof === undefined
+            ? {}
+            : { reservationProof }),
         },
       );
     } catch (error) {
@@ -1301,7 +1320,12 @@ export function createContentPublicationApplication({
     return { dispatching, leaseToken };
   }
 
-  async function refreshPublication(publicationId: ContentPublicationId) {
+  async function refreshPublication(
+    publicationId: ContentPublicationId,
+    reservationProof?: ContentPublicationReservationProof,
+  ) {
+    const reservationFence =
+      reservationProof === undefined ? {} : { reservationProof };
     const publication = await store.findPublication(publicationId);
     if (publication === null) {
       return null;
@@ -1361,6 +1385,7 @@ export function createContentPublicationApplication({
           {
             expectedStatus: currentPublication.status,
             expectedUpdatedAt: currentPublication.updatedAt,
+            ...reservationFence,
           },
         );
       }
@@ -1393,6 +1418,7 @@ export function createContentPublicationApplication({
         {
           expectedStatus: publication.status,
           expectedUpdatedAt: publication.updatedAt,
+          ...reservationFence,
         },
       );
     }
@@ -1440,6 +1466,7 @@ export function createContentPublicationApplication({
           {
             expectedStatus: publication.status,
             expectedUpdatedAt: publication.updatedAt,
+            ...reservationFence,
           },
         );
         if (
@@ -1482,6 +1509,7 @@ export function createContentPublicationApplication({
             {
               expectedStatus: publication.status,
               expectedUpdatedAt: publication.updatedAt,
+              ...reservationFence,
             },
           );
         }
@@ -1523,6 +1551,7 @@ export function createContentPublicationApplication({
               {
                 expectedStatus: currentPublication.status,
                 expectedUpdatedAt: currentPublication.updatedAt,
+                ...reservationFence,
               },
             );
           }
@@ -1542,6 +1571,7 @@ export function createContentPublicationApplication({
             {
               expectedStatus: currentPublication.status,
               expectedUpdatedAt: currentPublication.updatedAt,
+              ...reservationFence,
             },
           )
         : currentPublication;
@@ -1583,6 +1613,7 @@ export function createContentPublicationApplication({
         {
           expectedStatus: currentPublication.status,
           expectedUpdatedAt: currentPublication.updatedAt,
+          ...reservationFence,
         },
       );
 
@@ -1697,6 +1728,7 @@ export function createContentPublicationApplication({
         approvalId: ContentApprovalId;
         requestedBy: HumanMembershipId;
         idempotencyKey: string;
+        reservationProof?: ContentPublicationReservationProof;
       }) {
         if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
           throw new ContentPublicationValidationError(
@@ -1733,9 +1765,10 @@ export function createContentPublicationApplication({
         if (approval.workspaceId !== input.workspaceId) {
           throw new ContentApprovalInvalidError("approval_not_found");
         }
-        const recoverableCandidate = await store.findLatestPublication(
-          approval.workspaceId,
-        );
+        const recoverableCandidate =
+          input.reservationProof === undefined
+            ? await store.findLatestPublication(approval.workspaceId)
+            : null;
         const terminalAttemptCanBeRestarted =
           recoverableCandidate?.commitSha === null &&
           ((recoverableCandidate.status === "failed" &&
@@ -1755,9 +1788,11 @@ export function createContentPublicationApplication({
                 recoverableCandidate
             : recoverableCandidate;
         }
-        const activePublication = await store.findActivePublication();
-        if (activePublication !== null) {
-          await refreshPublication(activePublication.id);
+        if (input.reservationProof === undefined) {
+          const activePublication = await store.findActivePublication();
+          if (activePublication !== null) {
+            await refreshPublication(activePublication.id);
+          }
         }
         const base = parseProductionBase(approval.fingerprint.productionBase);
         const [headResult, baseIsLiveResult] = await Promise.allSettled([
@@ -1817,11 +1852,18 @@ export function createContentPublicationApplication({
           requestedAt,
           updatedAt: requestedAt,
         });
-        const claim = await store.claimPublication(publication);
+        const claim = await store.claimPublication(
+          publication,
+          input.reservationProof,
+        );
         if (claim.state !== "claimed") {
           return claim.publication;
         }
         const leaseToken = publication.leaseToken;
+        const reservationFence =
+          input.reservationProof === undefined
+            ? {}
+            : { reservationProof: input.reservationProof };
         const blockForLostLease = () =>
           store.updatePublication(
             nextPublication(publication, {
@@ -1831,7 +1873,10 @@ export function createContentPublicationApplication({
               leaseExpiresAt: null,
               updatedAt: now(),
             }),
-            { expectedLeaseToken: leaseToken ?? undefined },
+            {
+              expectedLeaseToken: leaseToken ?? undefined,
+              ...reservationFence,
+            },
           );
         if (leaseToken === null) {
           return blockForLostLease();
@@ -1840,6 +1885,7 @@ export function createContentPublicationApplication({
           publication,
           leaseToken,
           requestedBy: input.requestedBy,
+          ...reservationFence,
         });
         if (!(await renewLease())) {
           return blockForLostLease();
@@ -1856,7 +1902,10 @@ export function createContentPublicationApplication({
                 leaseExpiresAt: null,
                 updatedAt: now(),
               }),
-              { expectedLeaseToken: leaseToken },
+              {
+                expectedLeaseToken: leaseToken,
+                ...reservationFence,
+              },
             );
           }
           throw error;
@@ -1881,6 +1930,7 @@ export function createContentPublicationApplication({
             {
               expectedLeaseToken: leaseToken,
               expectedLeaseValidAt: updatedAt,
+              ...reservationFence,
             },
           );
         }
@@ -1899,20 +1949,32 @@ export function createContentPublicationApplication({
             updatedAt,
           }),
           reconciliationCandidate(result.detail) === undefined
-            ? {
-                expectedLeaseToken: leaseToken,
-                expectedLeaseValidAt: updatedAt,
-              }
-            : { expectedLeaseToken: leaseToken },
+              ? {
+                  expectedLeaseToken: leaseToken,
+                  expectedLeaseValidAt: updatedAt,
+                  ...reservationFence,
+                }
+              : {
+                  expectedLeaseToken: leaseToken,
+                  ...reservationFence,
+                },
         );
       },
-      async refresh(publicationId: ContentPublicationId) {
-        return refreshPublication(publicationId);
+      async refresh(
+        publicationId: ContentPublicationId,
+        reservationProof?: ContentPublicationReservationProof,
+      ) {
+        return refreshPublication(publicationId, reservationProof);
       },
       async retryDeployment(
         publicationId: ContentPublicationId,
         requestedBy: HumanMembershipId,
+        reservationProof?: ContentPublicationReservationProof,
       ) {
+        const reservationFence =
+          reservationProof === undefined
+            ? {}
+            : { reservationProof };
         let publication = await store.findPublication(publicationId);
         if (
           publication !== null &&
@@ -1965,6 +2027,7 @@ export function createContentPublicationApplication({
               {
                 expectedStatus: "failed",
                 expectedUpdatedAt: publication.updatedAt,
+                ...reservationFence,
               },
             );
           } else {
@@ -1989,6 +2052,7 @@ export function createContentPublicationApplication({
                 {
                   expectedStatus: "failed",
                   expectedUpdatedAt: publication.updatedAt,
+                  ...reservationFence,
                 },
               );
             } else {
@@ -2002,6 +2066,7 @@ export function createContentPublicationApplication({
                 await claimFailedPublicationRetry(
                   publication,
                   "git_result_unknown",
+                  reservationProof,
                 );
               if (
                 dispatching.status !== "requested" ||
@@ -2014,6 +2079,7 @@ export function createContentPublicationApplication({
                 publication: retryPublication,
                 leaseToken,
                 requestedBy,
+                reservationProof,
               });
               let result = await attemptAtomicPublicationCommit({
                 publication: retryPublication,
@@ -2068,6 +2134,7 @@ export function createContentPublicationApplication({
                 {
                   expectedLeaseToken: leaseToken,
                   expectedLeaseValidAt: updatedAt,
+                  ...reservationFence,
                 },
               );
             }
@@ -2099,6 +2166,7 @@ export function createContentPublicationApplication({
               {
                 expectedStatus: "failed",
                 expectedUpdatedAt: publication.updatedAt,
+                ...reservationFence,
               },
             );
             if (publication.commitSha !== candidateCommitSha) {
@@ -2129,6 +2197,7 @@ export function createContentPublicationApplication({
             await claimFailedPublicationRetry(
               publication,
               `git_reference_result_unknown:${candidateCommitSha}`,
+              reservationProof,
             );
           if (
             dispatching.status !== "requested" ||
@@ -2140,6 +2209,7 @@ export function createContentPublicationApplication({
             publication,
             leaseToken,
             requestedBy,
+            reservationProof,
           });
           const result = await publisher.retryReference({
             publishId: publication.id,
@@ -2188,6 +2258,7 @@ export function createContentPublicationApplication({
             {
               expectedLeaseToken: leaseToken,
               expectedLeaseValidAt: updatedAt,
+              ...reservationFence,
             },
           );
         }
@@ -2214,6 +2285,7 @@ export function createContentPublicationApplication({
               {
                 expectedStatus: "failed",
                 expectedUpdatedAt: publication.updatedAt,
+                ...reservationFence,
               },
             );
           }
@@ -2249,6 +2321,7 @@ export function createContentPublicationApplication({
               {
                 expectedStatus: "failed",
                 expectedUpdatedAt: publication.updatedAt,
+                ...reservationFence,
               },
             );
           }
@@ -2297,6 +2370,7 @@ export function createContentPublicationApplication({
             {
               expectedStatus: "failed",
               expectedUpdatedAt: publication.updatedAt,
+              ...reservationFence,
             },
           );
         } catch (error) {
@@ -2331,6 +2405,7 @@ export function createContentPublicationApplication({
               expectedLeaseToken: leaseToken,
               expectedStatus: "committed",
               expectedUpdatedAt: dispatching.updatedAt,
+              ...reservationFence,
             },
           );
         }
@@ -2351,6 +2426,7 @@ export function createContentPublicationApplication({
               expectedLeaseToken: leaseToken,
               expectedStatus: "committed",
               expectedUpdatedAt: dispatching.updatedAt,
+              ...reservationFence,
             },
           );
         }
@@ -2374,6 +2450,7 @@ export function createContentPublicationApplication({
               expectedLeaseToken: leaseToken,
               expectedStatus: "committed",
               expectedUpdatedAt: dispatching.updatedAt,
+              ...reservationFence,
             },
           );
         }
@@ -2389,6 +2466,7 @@ export function createContentPublicationApplication({
             expectedStatus: "committed",
             expectedDetail: "deployment_retry_dispatching",
             expectedDeploymentId: dispatchToken,
+            ...reservationFence,
           });
         };
         const assertDispatch = async () => {
@@ -2427,6 +2505,7 @@ export function createContentPublicationApplication({
                   expectedLeaseValidAt: verifiedAt,
                   expectedStatus: "committed",
                   expectedUpdatedAt: dispatching.updatedAt,
+                  ...reservationFence,
                 },
               );
             } catch {
@@ -2461,6 +2540,7 @@ export function createContentPublicationApplication({
                 expectedLeaseValidAt: invalidatedAt,
                 expectedStatus: "committed",
                 expectedUpdatedAt: dispatching.updatedAt,
+                ...reservationFence,
               },
             );
             return false;
@@ -2505,6 +2585,7 @@ export function createContentPublicationApplication({
             expectedLeaseToken: leaseToken,
             expectedStatus: "committed",
             expectedUpdatedAt: dispatching.updatedAt,
+            ...reservationFence,
           },
         );
       },

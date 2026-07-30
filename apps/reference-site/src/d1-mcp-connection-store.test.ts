@@ -34,7 +34,10 @@ describe("D1 MCP connection store", () => {
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
       "0008_media_assets.sql",
+      "0009_content_publication_history_evidence.sql",
+      "0010_content_publication_restore_identity.sql",
       "0011_blog_post_transition_audit.sql",
+      "0012_content_approval_revision_hash.sql",
       "0013_blog_post_verified_state.sql",
       "0014_blog_post_artifact_fingerprints.sql",
       "0015_blog_post_render_artifacts.sql",
@@ -42,6 +45,7 @@ describe("D1 MCP connection store", () => {
       "0018_mcp_draft_scopes.sql",
       "0019_mcp_preview_artifacts.sql",
       "0020_mcp_mutation_receipts.sql",
+      "0022_blog_post_scheduling_archive.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -1664,3 +1668,192 @@ describe("D1 MCP connection store", () => {
     ).resolves.toBeNull();
   });
 });
+
+it("upgrades the exact pre-blog schema without rewriting applied migrations", async () => {
+  const upgradeMiniflare = new Miniflare({
+    compatibilityDate: "2026-07-26",
+    modules: true,
+    script: "export default { fetch() { return new Response('ok') } }",
+    d1Databases: ["FOUNDRY_DB"],
+  });
+  try {
+    const upgradeDatabase =
+      await upgradeMiniflare.getD1Database("FOUNDRY_DB");
+    const applyMigration = async (migrationName: string) => {
+      const migration = await readFile(
+        new URL(`../migrations/${migrationName}`, import.meta.url),
+        "utf8",
+      );
+      for (const statement of migration.trim().split(/\n\n+/u)) {
+        await upgradeDatabase.prepare(statement).run();
+      }
+    };
+    for (const migrationName of [
+      "0001_human_access.sql",
+      "0002_subscriber_ledger.sql",
+      "0003_public_forms.sql",
+      "0004_public_form_notifications.sql",
+      "0005_content_revisions.sql",
+      "0006_public_form_privacy.sql",
+      "0007_content_publication.sql",
+      "0008_media_assets.sql",
+      "0009_content_publication_history_evidence.sql",
+      "0010_content_publication_restore_identity.sql",
+      "0011_blog_post_transition_audit.sql",
+      "0012_content_approval_revision_hash.sql",
+      "0013_blog_post_verified_state.sql",
+      "0014_blog_post_artifact_fingerprints.sql",
+      "0015_blog_post_render_artifacts.sql",
+      "0016_campaign_authoring.sql",
+      "0017_mcp_readonly_connections.sql",
+    ]) {
+      await applyMigration(migrationName);
+    }
+    await upgradeDatabase.batch([
+      upgradeDatabase
+        .prepare(
+          `INSERT INTO human_users (id, email, created_at)
+           VALUES ('upgrade-owner', 'upgrade@example.test', ?1)`,
+        )
+        .bind("2026-07-29T18:00:00.000Z"),
+      upgradeDatabase
+        .prepare(
+          `INSERT INTO human_memberships (
+             id, site_id, user_id, email, identity_issuer, identity_subject,
+             role, status, created_at, updated_at
+           ) VALUES (
+             'upgrade-membership', ?1, 'upgrade-owner',
+             'upgrade@example.test', 'https://access.example',
+             'upgrade-owner', 'owner', 'active', ?2, ?2
+           )`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          "2026-07-29T18:00:00.000Z",
+        ),
+    ]);
+    await upgradeDatabase.batch([
+      upgradeDatabase.prepare(
+        `INSERT INTO mcp_connections (
+           id, actor_id, site_id, oauth_client_id, redirect_uri,
+           scopes_json, status, created_by_membership_id, created_at
+         ) VALUES (
+           'upgrade-connection', 'upgrade-mcp-actor', ?1,
+           'upgrade-client', 'https://client.example/callback',
+           '["site.read"]', 'active', 'upgrade-membership', ?2
+         )`,
+      ).bind(
+        referenceSiteDefinition.site.id,
+        "2026-07-29T18:00:00.000Z",
+      ),
+      upgradeDatabase.prepare(
+        `INSERT INTO mcp_authorization_codes (
+           code_hash, connection_id, code_challenge, expires_at, created_at
+         ) VALUES (
+           'upgrade-code', 'upgrade-connection', 'challenge', ?1, ?2
+         )`,
+      ).bind(
+        "2026-07-29T18:05:00.000Z",
+        "2026-07-29T18:00:00.000Z",
+      ),
+      upgradeDatabase.prepare(
+        `INSERT INTO mcp_refresh_tokens (
+           token_hash, family_id, connection_id, oauth_client_id,
+           expires_at, issued_at
+         ) VALUES (
+           'upgrade-refresh', 'upgrade-family', 'upgrade-connection',
+           'upgrade-client', ?1, ?2
+         )`,
+      ).bind(
+        "2026-08-29T18:00:00.000Z",
+        "2026-07-29T18:00:00.000Z",
+      ),
+    ]);
+
+    await applyMigration("0018_mcp_draft_scopes.sql");
+    await applyMigration("0019_mcp_preview_artifacts.sql");
+    await applyMigration("0020_mcp_mutation_receipts.sql");
+    await applyMigration("0021_campaign_test_delivery.sql");
+    await applyMigration("0022_blog_post_scheduling_archive.sql");
+
+    await expect(
+      upgradeDatabase
+        .prepare(
+          `SELECT connection.actor_id, code.connection_id,
+                  token.connection_id
+           FROM mcp_connections AS connection
+           JOIN mcp_authorization_codes AS code
+             ON code.connection_id = connection.id
+           JOIN mcp_refresh_tokens AS token
+             ON token.connection_id = connection.id
+           WHERE connection.id = 'upgrade-connection'`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      actor_id: "upgrade-mcp-actor",
+      connection_id: "upgrade-connection",
+    });
+    await expect(upgradeDatabase.batch([
+      upgradeDatabase
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'draft-connection', 'draft-actor', ?1,
+             'draft-client', 'https://client.example/draft',
+             '["site.read"]', 'active', 'upgrade-membership', ?2
+           )`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          "2026-07-29T18:01:00.000Z",
+        ),
+      upgradeDatabase.prepare(
+         `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('draft-connection', 'site.read'),
+           ('draft-connection', 'content.draft')`,
+      ),
+    ])).resolves.toBeDefined();
+    await expect(
+      upgradeDatabase
+        .prepare(
+          `SELECT group_concat(scope, ',') AS scopes
+           FROM (
+             SELECT scope
+             FROM mcp_connection_scopes
+             WHERE connection_id = 'draft-connection'
+             ORDER BY scope
+           )`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      scopes: "content.draft,site.read",
+    });
+    await expect(
+      upgradeDatabase
+        .prepare(
+          `UPDATE mcp_connections
+           SET actor_id = 'changed'
+           WHERE id = 'upgrade-connection'`,
+        )
+        .run(),
+    ).rejects.toThrow(/mcp_connection_identity_is_immutable/u);
+    expect(
+      await upgradeDatabase
+        .prepare("PRAGMA foreign_key_check")
+        .all(),
+    ).toMatchObject({ results: [] });
+    expect(
+      await upgradeDatabase
+        .prepare(
+          `SELECT name FROM sqlite_master
+           WHERE type = 'table' AND name = 'blog_post_schedules'`,
+        )
+        .first(),
+    ).toEqual({ name: "blog_post_schedules" });
+  } finally {
+    await upgradeMiniflare.dispose();
+  }
+}, 15_000);

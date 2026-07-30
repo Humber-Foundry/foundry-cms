@@ -12,8 +12,10 @@ import {
   type ContentPublisher,
   type ContentWorkspaceId,
 } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
 
+import {
+  createD1ContentPublicationApplication,
+} from "./content-publication-environment-runtime";
 import {
   loadContentRevisionApplication,
   loadRestoredContentRevisionApplication,
@@ -21,15 +23,14 @@ import {
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import {
   findContentRevision,
-  findVerifiedPublicationOrder,
   listContentRevisionContributors,
-  reconcileVerifiedBlogPostPublication,
 } from "./d1-content-revision-store";
 import {
   createGitHubContentPublisher,
   readGitHubContentPublisherConfiguration,
 } from "./github-content-publisher";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
+import type { HumanAccessEnvironment } from "./human-access-environment";
 
 const localRuntime = globalThis as typeof globalThis & {
   __foundryContentPublicationStore?: ReturnType<
@@ -93,12 +94,17 @@ export async function loadContentPublicationApplication(
   workspaceId: ContentWorkspaceId,
   actorId: ContentActorId,
   restoreSourcePublication?: ContentPublication,
+  environmentOverride?: HumanAccessEnvironment,
 ) {
   const revisionApplication = await loadContentRevisionApplication(
     workspaceId,
     actorId,
+    environmentOverride,
   );
-  if (process.env.NODE_ENV === "development") {
+  if (
+    process.env.NODE_ENV === "development" &&
+    environmentOverride === undefined
+  ) {
     return createContentPublicationApplication({
       store: localRuntime.__foundryContentPublicationStore!,
       revisions: {
@@ -109,6 +115,7 @@ export async function loadContentPublicationApplication(
               : await loadContentRevisionApplication(
                   targetWorkspaceId,
                   actorId,
+                  environmentOverride,
                 );
           return targetApplication.queries.getRevision(revision);
         },
@@ -128,16 +135,16 @@ export async function loadContentPublicationApplication(
       restoreSourcePublication,
     });
   }
-  const environment = await loadHumanAccessEnvironment();
+  const environment =
+    environmentOverride ?? await loadHumanAccessEnvironment();
   if (environment.FOUNDRY_DB === undefined) {
     throw new ContentRevisionConfigurationError();
   }
-  const store = createD1ContentPublicationStore(environment.FOUNDRY_DB);
   const publisher = createGitHubContentPublisher({
     configuration: readGitHubContentPublisherConfiguration(environment),
   });
-  return createContentPublicationApplication({
-    store,
+  return createD1ContentPublicationApplication({
+    database: environment.FOUNDRY_DB,
     revisions: {
       getRevision: (targetWorkspaceId, revision) =>
         findContentRevision(
@@ -156,17 +163,6 @@ export async function loadContentPublicationApplication(
         ),
     },
     publisher,
-    onVerifiedLive: async (publication, revision) =>
-      reconcileVerifiedBlogPostPublication(
-        environment.FOUNDRY_DB!,
-        referenceSiteDefinition.site.id,
-        revision.definition,
-        await findVerifiedPublicationOrder(
-          environment.FOUNDRY_DB!,
-          publication.id,
-        ),
-        publication.requestedAt,
-      ),
     publishedRevisions: publisher,
     restoreSourcePublication,
     draftRestorer: {

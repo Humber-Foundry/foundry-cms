@@ -27,6 +27,9 @@ import {
   isMcpProductionRequest,
   type McpProductionEnvironment,
 } from "./src/mcp-production-runtime";
+import {
+  runScheduledBlogPostPublications,
+} from "./src/blog-post-operations-runtime";
 
 type ExecutionContext = Readonly<{
   waitUntil(promise: Promise<unknown>): void;
@@ -57,6 +60,9 @@ async function runScheduledWork(
 ) {
   await Promise.all([
     reconcileHumanAccessEligibilityIfDue(environment),
+    runScheduledBlogPostPublications(environment).catch(() => {
+      console.error("scheduled_blog_publication_failed");
+    }),
     (async () => {
       try {
         await runPublicFormRetentionMaintenanceIfDue(environment);

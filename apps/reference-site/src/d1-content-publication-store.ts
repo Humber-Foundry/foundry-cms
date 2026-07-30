@@ -9,12 +9,14 @@ import type {
   ContentPublicationId,
   ContentPublicationStatus,
   ContentPublicationStore,
+  ContentPublicationReservationProof,
   ContentWorkspaceId,
   HumanMembershipId,
 } from "@foundry/application";
 import {
   assertContentPublicationIdempotency,
   ContentPublicationIdempotencyError,
+  ContentPublicationValidationError,
   ContentApprovalInvalidError,
   createContentActorId,
   createContentApprovalId,
@@ -72,6 +74,7 @@ type PublicationRow = {
   requested_at: string;
   updated_at: string;
   mutation_token: string;
+  schedule_execution_id: string | null;
 };
 
 type PublicationEventRow = {
@@ -129,7 +132,8 @@ const publicationProjection = `
     lease_expires_at,
     requested_at,
     updated_at,
-    mutation_token
+    mutation_token,
+    schedule_execution_id
   FROM content_publications
 `;
 
@@ -200,9 +204,16 @@ function toPublication(row: PublicationRow): ContentPublication {
   };
 }
 
+export type D1ContentPublicationStore = ContentPublicationStore & {
+  hasScheduledPublicationOwnership(input: {
+    publicationId: ContentPublicationId;
+    executionId?: string;
+  }): Promise<boolean>;
+};
+
 export function createD1ContentPublicationStore(
   database: D1DatabaseBinding,
-): ContentPublicationStore {
+): D1ContentPublicationStore {
   async function findApproval(
     id: ContentApprovalId,
   ): Promise<ContentApproval | null> {
@@ -245,22 +256,85 @@ export function createD1ContentPublicationStore(
     return row;
   }
 
+  function requireReplayOwnership(
+    row: PublicationRow,
+    proof?: ContentPublicationReservationProof,
+  ) {
+    if (
+      (proof === undefined && row.schedule_execution_id !== null) ||
+      (
+        proof !== undefined &&
+        row.schedule_execution_id !== proof.executionId
+      )
+    ) {
+      throw new ContentPublicationValidationError(
+        "publication_reservation_lost",
+      );
+    }
+  }
+
   function insertPublicationStatement(
     publication: ContentPublication,
     requireCurrentApproval: boolean,
     mutationToken: string,
+    reservationProof?: ContentPublicationReservationProof,
   ) {
+    const reservationGuard =
+      reservationProof === undefined
+        ? `AND EXISTS (
+             SELECT 1
+             FROM content_workspaces AS authority_workspace
+             JOIN human_memberships AS authority_membership
+               ON authority_membership.site_id =
+                 authority_workspace.site_id
+              AND authority_membership.id = ?8
+              AND authority_membership.status = 'active'
+              AND authority_membership.role IN ('owner', 'editor')
+             WHERE authority_workspace.workspace_id = ?2
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM blog_post_schedule_publication_reservations
+             WHERE state = 'reserved'
+           )`
+        : `AND EXISTS (
+             SELECT 1
+             FROM blog_post_schedule_publication_reservations AS reservation
+             JOIN blog_post_schedule_executions AS execution
+               ON execution.execution_id = reservation.execution_id
+             JOIN blog_post_schedules AS schedule
+               ON schedule.id = execution.schedule_id
+             WHERE reservation.execution_id = ?22
+               AND reservation.attempt = ?23
+               AND reservation.lease_token = ?24
+               AND reservation.state = 'reserved'
+               AND reservation.publication_idempotency_key = ?6
+               AND execution.execution_id = ?22
+               AND execution.attempt = ?23
+               AND execution.lease_token = ?24
+               AND execution.state = 'claimed'
+               AND execution.lease_expires_at > ?18
+               AND schedule.workspace_id = ?2
+               AND schedule.content_revision = ?3
+               AND schedule.approval_id = ?4
+               AND schedule.approval_fingerprint = ?5
+               AND ?8 = CASE
+                 WHEN execution.attempt_actor_id = 'system:scheduler'
+                   THEN schedule.activated_by
+                 ELSE execution.attempt_actor_id
+               END
+           )`;
     const statement = database.prepare(
       `INSERT INTO content_publications (
            id, workspace_id, revision, approval_id, fingerprint,
            idempotency_key, command_identity, requested_by, contributors_json,
            expected_head, status, commit_sha, deployment_id,
            deployment_requested_at, detail, lease_token, lease_expires_at,
-           requested_at, updated_at, mutation_token
+           requested_at, updated_at, mutation_token, schedule_execution_id
          )
          SELECT
            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-           ?15, ?16, ?17, ?18, ?19, ?20
+           ?15, ?16, ?17, ?18, ?19, ?20, ?21
          ${requireCurrentApproval
            ? `WHERE EXISTS (
                 SELECT 1
@@ -276,7 +350,8 @@ export function createD1ContentPublicationStore(
                     SELECT 1 FROM content_approval_invalidations
                     WHERE approval_id = approval.id
                   )
-              )`
+              )
+              ${reservationGuard}`
            : ""}`,
     );
     return statement
@@ -301,6 +376,14 @@ export function createD1ContentPublicationStore(
         publication.requestedAt,
         publication.updatedAt,
         mutationToken,
+        reservationProof?.executionId ?? null,
+        ...(reservationProof === undefined
+          ? []
+          : [
+              reservationProof.executionId,
+              reservationProof.attempt,
+              reservationProof.leaseToken,
+            ]),
       );
   }
 
@@ -351,6 +434,7 @@ export function createD1ContentPublicationStore(
   async function insertPublication(
     publication: ContentPublication,
     requireCurrentApproval: boolean,
+    reservationProof?: ContentPublicationReservationProof,
   ) {
     const mutationToken = crypto.randomUUID();
     const results = await database.batch([
@@ -358,6 +442,7 @@ export function createD1ContentPublicationStore(
         publication,
         requireCurrentApproval,
         mutationToken,
+        reservationProof,
       ),
       auditStatement(publication, mutationToken),
       reconciliationOrderStatement(publication, mutationToken),
@@ -377,6 +462,53 @@ export function createD1ContentPublicationStore(
       )
       .first<PublicationRow>();
     return row === null ? null : toPublication(row);
+  }
+
+  async function reservationProofIsCurrent(
+    publication: ContentPublication,
+    proof: ContentPublicationReservationProof,
+  ) {
+    const row = await database
+      .prepare(
+        `SELECT 1 AS valid
+         FROM blog_post_schedule_publication_reservations AS reservation
+         JOIN blog_post_schedule_executions AS execution
+           ON execution.execution_id = reservation.execution_id
+         JOIN blog_post_schedules AS schedule
+           ON schedule.id = execution.schedule_id
+         WHERE reservation.execution_id = ?1
+           AND reservation.attempt = ?2
+           AND reservation.lease_token = ?3
+           AND reservation.state = 'reserved'
+           AND reservation.publication_idempotency_key = ?4
+           AND execution.attempt = ?2
+           AND execution.lease_token = ?3
+           AND execution.state = 'claimed'
+           AND execution.lease_expires_at > ?5
+           AND schedule.workspace_id = ?6
+           AND schedule.content_revision = ?7
+           AND schedule.approval_id = ?8
+           AND schedule.approval_fingerprint = ?9
+           AND ?10 = CASE
+             WHEN execution.attempt_actor_id = 'system:scheduler'
+               THEN schedule.activated_by
+             ELSE execution.attempt_actor_id
+           END`,
+      )
+      .bind(
+        proof.executionId,
+        proof.attempt,
+        proof.leaseToken,
+        publication.idempotencyKey,
+        publication.requestedAt,
+        publication.workspaceId,
+        publication.revision,
+        publication.approvalId,
+        publication.fingerprint,
+        publication.requestedBy,
+      )
+      .first<{ valid: number }>();
+    return row !== null;
   }
 
   return {
@@ -402,7 +534,8 @@ export function createD1ContentPublicationStore(
       if (duplicate !== null) {
         return toApproval(duplicate);
       }
-      await database.batch([
+      try {
+        await database.batch([
         database
           .prepare(
             `INSERT INTO content_approval_invalidations (
@@ -467,11 +600,20 @@ export function createD1ContentPublicationStore(
             approval.approvedBy,
             approval.approvedAt,
           ),
-      ]).then((results) => {
-        if ((results[1]?.meta.changes ?? 0) < 1) {
-          throw new ContentApprovalInvalidError("revision_not_current");
+        ]).then((results) => {
+          if ((results[1]?.meta.changes ?? 0) < 1) {
+            throw new ContentApprovalInvalidError("revision_not_current");
+          }
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes("blog_post_collection_authority_stale")
+        ) {
+          throw new ContentApprovalInvalidError("approval_stale");
         }
-      });
+        throw error;
+      }
       return approval;
     },
     findApproval,
@@ -490,12 +632,16 @@ export function createD1ContentPublicationStore(
         .run();
       return findApproval(approvalId);
     },
-    async claimPublication(publication): Promise<ContentPublicationClaim> {
+    async claimPublication(
+      publication,
+      reservationProof,
+    ): Promise<ContentPublicationClaim> {
       const replayRow = await findPublicationRowByKey(
         publication.workspaceId,
         publication.idempotencyKey,
       );
       if (replayRow !== null) {
+        requireReplayOwnership(replayRow, reservationProof);
         assertContentPublicationIdempotency(
           replayRow.command_identity,
           publication,
@@ -505,9 +651,97 @@ export function createD1ContentPublicationStore(
           publication: toPublication(replayRow),
         };
       }
+      if (reservationProof === undefined) {
+        const attributed = await database
+          .prepare(
+            `SELECT 1 AS attributed
+             FROM blog_post_schedule_publication_attributions
+             WHERE publication_idempotency_key = ?1`,
+          )
+          .bind(publication.idempotencyKey)
+          .first<{ attributed: number }>();
+        if (attributed !== null) {
+          throw new ContentPublicationValidationError(
+            "publication_reservation_lost",
+          );
+        }
+        const reservation = await database
+          .prepare(
+            `SELECT publication_idempotency_key
+             FROM blog_post_schedule_publication_reservations
+             WHERE state = 'reserved'
+             LIMIT 1`,
+          )
+          .first<{ publication_idempotency_key: string }>();
+        if (
+          reservation?.publication_idempotency_key ===
+          publication.idempotencyKey
+        ) {
+          throw new ContentPublicationValidationError(
+            "publication_reservation_lost",
+          );
+        }
+        if (reservation !== null) {
+          const blocked = {
+            ...publication,
+            status: "blocked" as const,
+            detail: "publication_in_progress",
+            leaseToken: null,
+            leaseExpiresAt: null,
+          };
+          await insertPublication(blocked, false);
+          return { state: "blocked", publication: blocked };
+        }
+      }
+      if (
+        reservationProof !== undefined &&
+        !(await reservationProofIsCurrent(publication, reservationProof))
+      ) {
+        throw new ContentPublicationValidationError(
+          "publication_reservation_lost",
+        );
+      }
       try {
-        const inserted = await insertPublication(publication, true);
+        const inserted = await insertPublication(
+          publication,
+          true,
+          reservationProof,
+        );
         if (inserted < 1) {
+          if (
+            reservationProof !== undefined &&
+            !(await reservationProofIsCurrent(
+              publication,
+              reservationProof,
+            ))
+          ) {
+            throw new ContentPublicationValidationError(
+              "publication_reservation_lost",
+            );
+          }
+          if (reservationProof === undefined) {
+            const currentRequester = await database
+              .prepare(
+                `SELECT 1 AS allowed
+                 FROM content_workspaces AS workspace
+                 JOIN human_memberships AS membership
+                   ON membership.site_id = workspace.site_id
+                  AND membership.id = ?1
+                  AND membership.status = 'active'
+                  AND membership.role IN ('owner', 'editor')
+                 WHERE workspace.workspace_id = ?2`,
+              )
+              .bind(
+                publication.requestedBy,
+                publication.workspaceId,
+              )
+              .first();
+            if (currentRequester === null) {
+              throw new ContentPublicationValidationError(
+                "publication_requester_not_active",
+              );
+            }
+          }
           const blocked = {
             ...publication,
             status: "blocked" as const,
@@ -524,6 +758,7 @@ export function createD1ContentPublicationStore(
           publication.idempotencyKey,
         );
         if (racedReplay !== null) {
+          requireReplayOwnership(racedReplay, reservationProof);
           assertContentPublicationIdempotency(
             racedReplay.command_identity,
             publication,
@@ -532,6 +767,20 @@ export function createD1ContentPublicationStore(
             state: "replayed",
             publication: toPublication(racedReplay),
           };
+        }
+        if (
+          error instanceof Error &&
+          error.message.includes("blog_post_collection_authority_stale")
+        ) {
+          const blocked = {
+            ...publication,
+            status: "blocked" as const,
+            detail: "approval_stale",
+            leaseToken: null,
+            leaseExpiresAt: null,
+          };
+          await insertPublication(blocked, false);
+          return { state: "blocked", publication: blocked };
         }
         if (
           !(
@@ -586,6 +835,7 @@ export function createD1ContentPublicationStore(
       leaseToken,
       now,
       leaseExpiresAt,
+      reservationProof,
       expectedStatus = "requested",
       expectedDetail,
       expectedDeploymentId,
@@ -609,6 +859,34 @@ export function createD1ContentPublicationStore(
                SELECT 1 FROM content_workspaces
                WHERE workspace_id = content_publications.workspace_id
                  AND current_revision = content_publications.revision
+             )
+             AND (
+               NOT EXISTS (
+                 SELECT 1
+                 FROM blog_post_schedule_publication_reservations
+                 WHERE publication_idempotency_key =
+                       content_publications.idempotency_key
+               )
+               OR (
+                 ?9 IS NOT NULL
+                 AND EXISTS (
+                   SELECT 1
+                   FROM blog_post_schedule_publication_reservations AS reservation
+                   JOIN blog_post_schedule_executions AS execution
+                     ON execution.execution_id = reservation.execution_id
+                   WHERE reservation.publication_idempotency_key =
+                           content_publications.idempotency_key
+                     AND reservation.execution_id = ?9
+                     AND content_publications.schedule_execution_id = ?9
+                     AND reservation.attempt = ?10
+                     AND reservation.lease_token = ?11
+                     AND reservation.state = 'reserved'
+                     AND execution.state = 'claimed'
+                     AND execution.attempt = ?10
+                     AND execution.lease_token = ?11
+                     AND execution.lease_expires_at > ?4
+                 )
+               )
              )`,
         )
         .bind(
@@ -620,6 +898,9 @@ export function createD1ContentPublicationStore(
           expectedStatus,
           expectedDetail ?? null,
           expectedDeploymentId ?? null,
+          reservationProof?.executionId ?? null,
+          reservationProof?.attempt ?? null,
+          reservationProof?.leaseToken ?? null,
         )
         .run();
       return (result.meta.changes ?? 0) === 1;
@@ -630,6 +911,7 @@ export function createD1ContentPublicationStore(
         options?.expectedLeaseValidAt ?? null;
       const expectedStatus = options?.expectedStatus ?? null;
       const expectedUpdatedAt = options?.expectedUpdatedAt ?? null;
+      const reservationProof = options?.reservationProof;
       const mutationToken = crypto.randomUUID();
       const results = await database.batch([
         database
@@ -679,6 +961,34 @@ export function createD1ContentPublicationStore(
                    detail = 'deployment_retry_dispatching'
                    AND ?1 = 'unknown'
                  )
+               )
+               AND (
+                 NOT EXISTS (
+                   SELECT 1
+                   FROM blog_post_schedule_publication_reservations
+                   WHERE publication_idempotency_key =
+                         content_publications.idempotency_key
+                 )
+                 OR (
+                   ?15 IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1
+                     FROM blog_post_schedule_publication_reservations AS reservation
+                     JOIN blog_post_schedule_executions AS execution
+                       ON execution.execution_id = reservation.execution_id
+                     WHERE reservation.publication_idempotency_key =
+                             content_publications.idempotency_key
+                       AND reservation.execution_id = ?15
+                       AND content_publications.schedule_execution_id = ?15
+                       AND reservation.attempt = ?16
+                       AND reservation.lease_token = ?17
+                       AND reservation.state = 'reserved'
+                       AND execution.state = 'claimed'
+                       AND execution.attempt = ?16
+                       AND execution.lease_token = ?17
+                       AND execution.lease_expires_at > ?8
+                   )
+                 )
                )`,
           )
           .bind(
@@ -696,6 +1006,9 @@ export function createD1ContentPublicationStore(
             expectedLeaseValidAt,
             expectedStatus,
             expectedUpdatedAt,
+            reservationProof?.executionId ?? null,
+            reservationProof?.attempt ?? null,
+            reservationProof?.leaseToken ?? null,
           ),
         auditStatement(publication, mutationToken),
       ]);
@@ -709,6 +1022,28 @@ export function createD1ContentPublicationStore(
       return publication;
     },
     findPublication,
+    async hasScheduledPublicationOwnership({
+      publicationId,
+      executionId,
+    }) {
+      const row = await database
+        .prepare(
+          `SELECT 1 AS owned
+           FROM content_publications AS publication
+           JOIN blog_post_schedule_executions AS execution
+             ON execution.execution_id =
+                publication.schedule_execution_id
+           JOIN blog_post_schedule_publication_attributions AS attribution
+             ON attribution.schedule_id = execution.schedule_id
+            AND attribution.publication_idempotency_key =
+                publication.idempotency_key
+           WHERE publication.id = ?1
+             AND (?2 IS NULL OR execution.execution_id = ?2)`,
+        )
+        .bind(publicationId, executionId ?? null)
+        .first<{ owned: number }>();
+      return row !== null;
+    },
     findPublicationByIdempotency({
       workspaceId,
       idempotencyKey,

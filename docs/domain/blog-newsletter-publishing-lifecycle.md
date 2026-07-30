@@ -259,6 +259,7 @@ The UI may summarize combinations as “Published with unpublished changes” or
 | Unpublish | Post currently live; no conflicting publish | Owner or Editor | Cancel schedule; create idempotent removal publication; old revision remains live until verified | `POST_NOT_LIVE`, `PUBLISH_IN_PROGRESS` |
 | Unpublish verified | Release marker proves route absent/new content hash | Deployment integration | Clear `liveRevisionId`; set `unpublished` | `RELEASE_MARKER_MISMATCH` |
 | Archive | Active post | Owner or Editor | Cancel schedule and approvals. If not live, archive immediately; if live, enter `archiving` and start removal publication | `POST_ALREADY_ARCHIVED` |
+| Recover archive withdrawal access | Archiving post, exact archive request and persisted withdrawal workspace | Owner or Editor | Grant the current human collaborator access to review and approve the existing withdrawal draft; append recovery audit | `ARCHIVE_REQUEST_NOT_FOUND`, `HUMAN_AUTHORITY_REQUIRED` |
 | Archive withdrawal verified | Archiving post and matching operation | Deployment integration | Clear live pointer; create archive record; set `archived` | `OPERATION_MISMATCH` |
 | Restore | Archived post | Owner or Editor | Set active; create new editing revision copied from selected archived revision; remain unpublished | `POST_NOT_ARCHIVED`, `REVISION_NOT_FOUND` |
 
