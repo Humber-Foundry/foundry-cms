@@ -1,6 +1,9 @@
 import type { SiteId } from "@foundry/site-definition";
 
-import { sha256CanonicalJson } from "./deterministic-hash";
+import {
+  hmacSha256CanonicalJson,
+  sha256CanonicalJson,
+} from "./deterministic-hash";
 import { AccessDeniedError } from "./human-access";
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
@@ -343,12 +346,14 @@ async function bindingFor({
   rendered,
   providerConfigurationFingerprint,
   senderConfigurationFingerprint,
+  recipientFingerprintKey,
   recipients,
 }: {
   revision: CampaignRevision;
   rendered: RenderedCampaign;
   providerConfigurationFingerprint: string;
   senderConfigurationFingerprint: string;
+  recipientFingerprintKey: string;
   recipients: ReadonlyArray<NewsletterTestRecipient>;
 }): Promise<CampaignTestDeliveryBinding> {
   const [
@@ -370,8 +375,8 @@ async function bindingFor({
       version: "foundry.campaign-test-compliance.v1",
       complianceFooter: revision.complianceFooter,
     }),
-    sha256CanonicalJson({
-      version: "foundry.campaign-test-recipients.v2",
+    hmacSha256CanonicalJson(recipientFingerprintKey, {
+      version: "foundry.campaign-test-recipients.v3",
       recipients: recipients.map((recipient) => ({
         id: recipient.id,
         address: recipient.address.trim().toLowerCase(),
@@ -571,6 +576,7 @@ export function createCampaignTestDeliveryApplication({
   resolveAudience,
   resolveTestRecipients,
   providerOwnershipEvidence,
+  recipientFingerprintKey,
   activeRendererVersion,
   replayTestCommand,
   recordAcceptedTestCommand,
@@ -595,6 +601,7 @@ export function createCampaignTestDeliveryApplication({
     recipientIds: ReadonlyArray<string>,
   ): Promise<ReadonlyArray<NewsletterTestRecipient>>;
   providerOwnershipEvidence: NewsletterProviderOwnershipEvidence;
+  recipientFingerprintKey: string;
   activeRendererVersion(): string;
   replayTestCommand?(input: {
     actor: CampaignActor;
@@ -645,6 +652,9 @@ export function createCampaignTestDeliveryApplication({
   clock?: () => Date;
   createExecutionId?: () => string;
 }): CampaignTestDeliveryApplication {
+  if (recipientFingerprintKey.length < 32) {
+    throw new CampaignValidationError("recipient_fingerprint_key_invalid");
+  }
   if (
     !fingerprintPattern.test(
       providerOwnershipEvidence.accountScopeFingerprint,
@@ -806,6 +816,7 @@ export function createCampaignTestDeliveryApplication({
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
       senderConfigurationFingerprint,
+      recipientFingerprintKey,
       recipients: configuredRecipients,
     });
     let operation: CampaignTestDeliveryOperation;
@@ -1215,6 +1226,7 @@ export function createCampaignTestDeliveryApplication({
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
       senderConfigurationFingerprint,
+      recipientFingerprintKey,
       recipients: preWriteRecipients,
     });
     if (!sameBinding(operation.binding, preWriteBinding)) {
@@ -1398,6 +1410,7 @@ export function createCampaignTestDeliveryApplication({
       providerConfigurationFingerprint:
         capabilities.configurationFingerprint,
       senderConfigurationFingerprint,
+      recipientFingerprintKey,
       recipients: configuredRecipients,
     });
     return sameBinding(operation.binding, currentBinding)

@@ -201,7 +201,6 @@ describe("D1 campaign test delivery store", () => {
     });
     const webhookEvidence = {
       eventFingerprint: "3".repeat(64),
-      providerEventId: "17",
       payloadFingerprint: "2".repeat(64),
       siteId: pending.siteId,
       executionId: pending.executionId,

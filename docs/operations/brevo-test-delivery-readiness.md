@@ -46,6 +46,8 @@ test evidence, and requires a new exact test and Owner confirmation. Recipient
 addresses pass
 directly to Brevo for the explicit test request and are absent from operation
 rows, evidence, API results, logs, and source control.
+The recipient-set binding fingerprint is keyed with the installation proof key,
+so an API-visible fingerprint cannot be used to test guessed Owner addresses.
 Each delivery binding also includes the fingerprint of the selected sender's
 exact expected ID, address and display name. Provider health independently
 reads the credential's Brevo account, derives
@@ -110,11 +112,12 @@ error remains ambiguous. Foundry does not issue another provider write for that
 logical operation. The authenticated webhook persists the provider message ID,
 event type and installation-keyed recipient fingerprint only when the event
 carries the exact execution tag and pre-send proof. It never stores a recipient
-address. Brevo's integer `id` is normalized to decimal text and, with the site
-and provider, forms the sole retry identity. A separate payload fingerprint
-detects and rejects reuse of that ID with changed evidence. If `id` is absent,
-Foundry uses a deterministic stable-payload identity. Local receipt time is
-evidence metadata and never part of retry identity.
+address. Brevo's integer `id` identifies the configured webhook, so Foundry
+does not use it to identify an event. Retry identity is a canonical stable
+fingerprint of the site, provider, execution ID, pre-send proof, provider
+message ID, installation-keyed recipient fingerprint, event type, and provider
+event timestamp. Local receipt time is evidence metadata and never part of
+retry identity.
 Reconciliation uses this durable webhook evidence to authenticate
 Foundry's send origin, then queries Brevo's event report, message record and
 each per-recipient sent-content record to verify the sender, exact recipient

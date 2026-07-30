@@ -8,7 +8,6 @@ import type {
 
 type EvidenceRow = Readonly<{
   event_fingerprint: string;
-  provider_event_id: string | null;
   payload_fingerprint: string;
   site_id: string;
   execution_id: string;
@@ -23,7 +22,6 @@ type EvidenceRow = Readonly<{
 function evidence(row: EvidenceRow): BrevoTestWebhookEvidence {
   return Object.freeze({
     eventFingerprint: row.event_fingerprint,
-    providerEventId: row.provider_event_id,
     payloadFingerprint: row.payload_fingerprint,
     siteId: row.site_id as SiteId,
     executionId: row.execution_id,
@@ -50,10 +48,10 @@ export function createD1BrevoTestWebhookEvidenceStore({
         .prepare(
           `INSERT INTO campaign_test_brevo_webhook_evidence (
              event_fingerprint, site_id, execution_id, foundry_send_proof,
-             provider_event_id, payload_fingerprint, provider_message_id,
-             recipient_fingerprint, event_type, occurred_at, received_at
+             payload_fingerprint, provider_message_id, recipient_fingerprint,
+             event_type, occurred_at, received_at
            )
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
            WHERE EXISTS (
              SELECT 1 FROM campaign_test_deliveries
              WHERE execution_id = ?3 AND site_id = ?2
@@ -67,7 +65,6 @@ export function createD1BrevoTestWebhookEvidenceStore({
           input.siteId,
           input.executionId,
           input.foundrySendProof,
-          input.providerEventId,
           input.payloadFingerprint,
           input.providerMessageId,
           input.recipientFingerprint,
@@ -93,9 +90,9 @@ export function createD1BrevoTestWebhookEvidenceStore({
     async listVerified({ executionId, foundrySendProof }) {
       const result = await database
         .prepare(
-          `SELECT event_fingerprint, provider_event_id, payload_fingerprint,
-             site_id, execution_id, foundry_send_proof, provider_message_id,
-             recipient_fingerprint, event_type, occurred_at, received_at
+          `SELECT event_fingerprint, payload_fingerprint, site_id, execution_id,
+             foundry_send_proof, provider_message_id, recipient_fingerprint,
+             event_type, occurred_at, received_at
            FROM campaign_test_brevo_webhook_evidence
            WHERE site_id = ?1 AND execution_id = ?2
              AND foundry_send_proof = ?3

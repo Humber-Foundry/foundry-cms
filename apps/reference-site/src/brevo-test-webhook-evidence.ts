@@ -3,7 +3,6 @@ import type { SiteId } from "@foundry/site-definition";
 
 export type BrevoTestWebhookEvidence = Readonly<{
   eventFingerprint: string;
-  providerEventId: string | null;
   payloadFingerprint: string;
   siteId: SiteId;
   executionId: string;

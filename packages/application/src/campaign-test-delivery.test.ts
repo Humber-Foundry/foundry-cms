@@ -14,6 +14,7 @@ import {
   type NewsletterDeliveryAdapter,
   type NewsletterProviderOwnershipEvidence,
 } from "./campaign";
+import { hmacSha256CanonicalJson } from "./deterministic-hash";
 import { createInMemoryCampaignStore } from "./in-memory-campaign-store";
 import {
   createHumanMembershipId,
@@ -23,6 +24,8 @@ import {
 } from "./human-access";
 
 const siteId = createSiteId("site_reference");
+const defaultRecipientFingerprintKey =
+  "recipient-fingerprint-key-".padEnd(48, "k");
 const actor: ExternalHumanIdentity = {
   binding: { issuer: "https://access.example", subject: "editor" },
   email: "editor@example.com",
@@ -89,6 +92,7 @@ function createFixture(
   failConfirmationReceipt = false,
   authorizedMembership: HumanMembership = membership,
   activeRendererVersion = () => "1".repeat(40),
+  recipientFingerprintKey = defaultRecipientFingerprintKey,
 ) {
   let sequence = 0;
   let campaignSequence = 0;
@@ -127,6 +131,7 @@ function createFixture(
     resolveAudience: async () => ({ eligibleSubscriberCount: 3 }),
     resolveTestRecipients,
     providerOwnershipEvidence,
+    recipientFingerprintKey,
     activeRendererVersion,
     replayTestCommand: (command) =>
       campaignApplication.commands.replayTestCommand(command),
@@ -254,6 +259,20 @@ describe("campaign test delivery", () => {
     );
     expect(JSON.stringify(deliveryStore.list())).not.toContain(
       "owner-primary@example.test",
+    );
+    await expect(
+      hmacSha256CanonicalJson(defaultRecipientFingerprintKey, {
+        version: "foundry.campaign-test-recipients.v3",
+        recipients: [
+          {
+            id: "owner-primary",
+            address: "owner-primary@example.test",
+          },
+        ],
+      }),
+    ).resolves.toBe(result.binding.recipientSetFingerprint);
+    expect(JSON.stringify(result)).not.toContain(
+      defaultRecipientFingerprintKey,
     );
   });
 

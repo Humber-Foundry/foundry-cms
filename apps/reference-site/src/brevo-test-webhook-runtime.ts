@@ -63,14 +63,6 @@ function providerOccurredAt(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function providerEventId(value: unknown) {
-  return typeof value === "number" &&
-      Number.isSafeInteger(value) &&
-      value >= 0
-    ? String(value)
-    : null;
-}
-
 export function createBrevoTestWebhookHandler({
   authenticationToken,
   installationProofKey,
@@ -152,34 +144,26 @@ export function createBrevoTestWebhookHandler({
       );
       const providerTimestamp = providerOccurredAt(event.ts_event);
       const eventOccurredAt = providerTimestamp ?? receivedAt;
-      const eventId = providerEventId(event.id);
-      const payloadFingerprint = await sha256CanonicalJson({
-        version: "foundry.brevo-test-webhook-payload.v1",
+      const stablePayloadIdentity = {
         executionId,
         foundrySendProof,
         providerMessageId,
         recipientFingerprint,
         eventType,
         providerTimestamp,
+      };
+      const payloadFingerprint = await sha256CanonicalJson({
+        version: "foundry.brevo-test-webhook-payload.v1",
+        ...stablePayloadIdentity,
       });
       const eventFingerprint = await sha256CanonicalJson({
-        version: "foundry.brevo-test-webhook-event.v3",
+        version: "foundry.brevo-test-webhook-event.v4",
         siteId: referenceSiteApplication.siteId,
         provider: "brevo",
-        identity:
-          eventId === null
-            ? {
-                kind: "stable_payload",
-                payloadFingerprint,
-              }
-            : {
-                kind: "provider_event_id",
-                providerEventId: eventId,
-              },
+        ...stablePayloadIdentity,
       });
       const recordResult = await store.recordVerified({
         eventFingerprint,
-        providerEventId: eventId,
         payloadFingerprint,
         siteId: referenceSiteApplication.siteId,
         executionId,

@@ -117,11 +117,13 @@ evidence.
   through verified webhooks and applied to local suppression before routine
   reconciliation.
 - Webhook processing verifies authenticity, acknowledges quickly, deduplicates,
-  and tolerates retry and out-of-order delivery. The site, provider and
-  normalized integer provider event ID are the sole identity when Brevo
-  supplies `id`; a separate payload fingerprint rejects changed evidence under
-  that identity. Without `id`, a deterministic stable-payload identity is
-  used. Locally observed receipt time is never part of either identity.
+  and tolerates retry and out-of-order delivery. Brevo's integer `id` identifies
+  the webhook configuration, not an individual event, so Foundry does not use
+  it as event identity. The retry identity is a canonical fingerprint of the
+  site, provider, execution ID, pre-send proof, provider message ID,
+  installation-keyed recipient fingerprint, event type, and provider event
+  timestamp. Locally observed receipt time is evidence metadata and is never
+  part of retry identity.
 - Delivery, open, and click data may be ingested through webhooks or provider
   report polling. Polling is also a reconciliation backstop for campaign and
   subscriber state.

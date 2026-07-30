@@ -202,6 +202,8 @@ export async function loadCampaignRequestContext(
   let channelConfiguration = developmentChannelConfiguration;
   let testDeliveryStore: CampaignTestDeliveryStore =
     localCampaignTestDeliveryStore;
+  let recipientFingerprintKey =
+    "foundry-development-recipient-fingerprint-key-v1";
   let testRecipients: Readonly<Record<string, string>> = {};
   let testAdapter: NewsletterDeliveryAdapter = {
     async capabilities() {
@@ -261,6 +263,7 @@ export async function loadCampaignRequestContext(
     const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
     const installationProofKey =
       environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";
+    recipientFingerprintKey = installationProofKey;
     const webhookAuthenticationToken =
       environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN?.trim() ?? "";
     const accountScopeFingerprint =
@@ -363,6 +366,7 @@ export async function loadCampaignRequestContext(
         });
       },
       providerOwnershipEvidence,
+      recipientFingerprintKey,
       replayTestCommand: ({
         actor,
         requestId,

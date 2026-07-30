@@ -30,6 +30,28 @@ export async function sha256Text(value: string): Promise<string> {
   ).join("");
 }
 
+export async function hmacSha256CanonicalJson(
+  keyValue: string,
+  value: unknown,
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(keyValue),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(canonicalJson(value)),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 export function lengthDelimitedText(parts: ReadonlyArray<string>): string {
   const encoder = new TextEncoder();
   return parts

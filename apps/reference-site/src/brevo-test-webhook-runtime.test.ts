@@ -99,7 +99,6 @@ describe("Brevo test webhook runtime", () => {
     expect(records.size).toBe(1);
     const [recorded] = [...records.values()];
     expect(recorded).toMatchObject({
-      providerEventId: "17",
       payloadFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
       executionId,
       foundrySendProof,
@@ -140,13 +139,12 @@ describe("Brevo test webhook runtime", () => {
       store,
       clock: () => receivedAt,
     });
-    const timestampFreeEvent = event({ id: undefined, ts_event: undefined });
+    const timestampFreeEvent = event({ ts_event: undefined });
 
     expect((await handler(request(timestampFreeEvent))).status).toBe(204);
     receivedAt = new Date("2026-07-29T20:05:00.000Z");
     expect(
       (await handler(request(event({
-        id: undefined,
         ts_event: "invalid",
       })))).status,
     ).toBe(204);
@@ -158,7 +156,7 @@ describe("Brevo test webhook runtime", () => {
     });
   });
 
-  it("rejects a changed payload that reuses the same integer provider event ID", async () => {
+  it("records distinct events that share Brevo's integer webhook configuration ID", async () => {
     const { records, store } = memoryStore();
     const handler = createBrevoTestWebhookHandler({
       authenticationToken,
@@ -173,9 +171,14 @@ describe("Brevo test webhook runtime", () => {
       (await handler(request(event({
         id: 42,
         event: "opened",
+        ts_event: 1_785_347_260,
       })))).status,
-    ).toBe(409);
+    ).toBe(204);
 
-    expect(records.size).toBe(1);
+    expect(records.size).toBe(2);
+    expect([...records.values()].map(({ eventType }) => eventType)).toEqual([
+      "request",
+      "opened",
+    ]);
   });
 });
