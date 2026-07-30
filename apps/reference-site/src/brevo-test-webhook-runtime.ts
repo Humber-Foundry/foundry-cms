@@ -55,12 +55,20 @@ function tags(event: Record<string, unknown>): ReadonlyArray<string> {
   }
 }
 
-function occurredAt(value: unknown, receivedAt: string) {
+function providerOccurredAt(value: unknown) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    return receivedAt;
+    return null;
   }
   const date = new Date(value * 1_000);
-  return Number.isNaN(date.getTime()) ? receivedAt : date.toISOString();
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function providerEventId(event: Record<string, unknown>) {
+  for (const key of ["event-id", "eventId"]) {
+    const candidate = string(event[key], 512);
+    if (candidate !== null) return candidate;
+  }
+  return null;
 }
 
 export function createBrevoTestWebhookHandler({
@@ -142,16 +150,30 @@ export function createBrevoTestWebhookHandler({
         installationProofKey,
         recipient,
       );
-      const eventOccurredAt = occurredAt(event.ts_event, receivedAt);
+      const providerTimestamp = providerOccurredAt(event.ts_event);
+      const eventOccurredAt = providerTimestamp ?? receivedAt;
+      const eventId = providerEventId(event);
       const eventFingerprint = await sha256CanonicalJson({
-        version: "foundry.brevo-test-webhook-event.v1",
+        version: "foundry.brevo-test-webhook-event.v2",
         siteId: referenceSiteApplication.siteId,
         executionId,
         foundrySendProof,
-        providerMessageId,
-        recipientFingerprint,
-        eventType,
-        occurredAt: eventOccurredAt,
+        identity:
+          eventId === null
+            ? {
+                kind: "stable_payload",
+                providerMessageId,
+                recipientFingerprint,
+                eventType,
+                providerTimestamp,
+              }
+            : {
+                kind: "provider_event_id",
+                providerEventId: eventId,
+                providerMessageId,
+                recipientFingerprint,
+                eventType,
+              },
       });
       await store.recordVerified({
         eventFingerprint,
@@ -171,12 +193,23 @@ export function createBrevoTestWebhookHandler({
 
 export async function handleBrevoTestWebhook(request: Request) {
   const environment = await loadHumanAccessEnvironment();
+  const authenticationToken =
+    environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN ?? "";
+  const authorization = request.headers.get("authorization") ?? "";
+  const presented = authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : "";
+  if (
+    authenticationToken.length < 32 ||
+    !await sameSecret(presented, authenticationToken)
+  ) {
+    return new Response(null, { status: 401 });
+  }
   if (environment.FOUNDRY_DB === undefined) {
     return new Response(null, { status: 503 });
   }
   return createBrevoTestWebhookHandler({
-    authenticationToken:
-      environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN ?? "",
+    authenticationToken,
     installationProofKey:
       environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY ?? "",
     store: createD1BrevoTestWebhookEvidenceStore({

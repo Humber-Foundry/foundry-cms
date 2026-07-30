@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   acceptCredentialThroughSlot,
   assertDeclaredCredentialSlotsSatisfied,
+  brevoTransactionalWebhookPath,
   computeAccountScopeFingerprint,
   createBootstrapManifest,
   createCredentialSlot,
@@ -113,6 +114,9 @@ function createProbe(overrides: Record<string, ProbeResponse> = {}) {
     }
     if (parsed.pathname === "/") {
       return probeResponse({ body: "<html>Acme Marine</html>" });
+    }
+    if (parsed.pathname === brevoTransactionalWebhookPath) {
+      return probeResponse({ status: 401 });
     }
     if (
       ["/dash", "/api/foundry-cms", "/__foundry/preview"].some((family) =>
@@ -413,7 +417,9 @@ describe("scaffolding and deploying one client-owned installation", () => {
             configuration: {
               workerBindings: [{ name: "DB", target: d1Name }],
               dnsTargets: [canonicalHostname],
-              webhookUrls: [`https://${canonicalHostname}/api/providers/brevo`],
+              webhookUrls: [
+                `https://${canonicalHostname}${brevoTransactionalWebhookPath}`,
+              ],
               schedulerEndpoints: [`https://${canonicalHostname}/__scheduled`],
               accessIssuer: "https://acme.cloudflareaccess.com",
               buildTokenOwnerPrincipal: "client-build-token-owner",

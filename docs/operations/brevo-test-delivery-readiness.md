@@ -62,7 +62,10 @@ provisioned scope or if a sender changes under its numeric ID.
 3. Use Brevo's
    [webhook API](https://developers.brevo.com/reference/create-webhook) to
    register a transactional webhook at
-   `/api/foundry-cms/webhooks/brevo`. Configure its `auth` object with
+   `/api/integrations/brevo/webhooks/transactional`. This integration
+   namespace must remain outside the Cloudflare Access application that
+   protects `/api/foundry-cms`; its exact bearer check is the callback's only
+   application authentication boundary. Configure Brevo's `auth` object with
    `type: "bearer"` and the exact webhook token. Subscribe to `request`,
    `delivered`, `softBounce`, `hardBounce`, `blocked`, `invalid`, `deferred`,
    `error`, `opened`, `uniqueOpened`, `click`, `spam` and `unsubscribed`.
@@ -70,6 +73,9 @@ provisioned scope or if a sender changes under its numeric ID.
    [Secure webhook calls](https://developers.brevo.com/docs/secured-webhooks)
    and the event payloads in
    [Transactional webhooks](https://developers.brevo.com/docs/transactional-webhooks).
+   Installation verification must observe an application-level `401` from an
+   unauthenticated callback probe while `/api/foundry-cms/revisions` still
+   produces a Cloudflare Access challenge.
 4. Run the adapter health check. It verifies API access and every configured
    sender through Brevo account and sender reads.
 5. Create or select the exact campaign revision in Foundry and request a test
@@ -104,7 +110,10 @@ error remains ambiguous. Foundry does not issue another provider write for that
 logical operation. The authenticated webhook persists the provider message ID,
 event type and installation-keyed recipient fingerprint only when the event
 carries the exact execution tag and pre-send proof. It never stores a recipient
-address. Reconciliation uses this durable webhook evidence to authenticate
+address. Webhook retries deduplicate by an explicit provider event ID when
+available, otherwise by a deterministic stable-payload fingerprint. Local
+receipt time is evidence metadata and never part of retry identity.
+Reconciliation uses this durable webhook evidence to authenticate
 Foundry's send origin, then queries Brevo's event report, message record and
 each per-recipient sent-content record to verify the sender, exact recipient
 set, subject and actual sent HTML. Polling can enrich or contradict the

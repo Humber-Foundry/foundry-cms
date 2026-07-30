@@ -15,14 +15,17 @@ const foundrySendProof = "c".repeat(64);
 const ownerAddress = "Owner.Primary@example.test";
 
 function request(payload: unknown, token = authenticationToken) {
-  return new Request("https://example.test/api/foundry-cms/webhooks/brevo", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
+  return new Request(
+    "https://example.test/api/integrations/brevo/webhooks/transactional",
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+  );
 }
 
 function memoryStore() {
@@ -118,5 +121,49 @@ describe("Brevo test webhook runtime", () => {
 
     expect(response.status).toBe(204);
     expect(records.size).toBe(0);
+  });
+
+  it("deduplicates timestamp-free retries without using receipt time as identity", async () => {
+    const { records, store } = memoryStore();
+    let receivedAt = new Date("2026-07-29T20:00:00.000Z");
+    const handler = createBrevoTestWebhookHandler({
+      authenticationToken,
+      installationProofKey,
+      store,
+      clock: () => receivedAt,
+    });
+    const timestampFreeEvent = event({ ts_event: undefined });
+
+    expect((await handler(request(timestampFreeEvent))).status).toBe(204);
+    receivedAt = new Date("2026-07-29T20:05:00.000Z");
+    expect(
+      (await handler(request(event({ ts_event: "invalid" })))).status,
+    ).toBe(204);
+
+    expect(records.size).toBe(1);
+    expect([...records.values()][0]).toMatchObject({
+      occurredAt: "2026-07-29T20:00:00.000Z",
+      receivedAt: "2026-07-29T20:00:00.000Z",
+    });
+  });
+
+  it("prefers a stable provider event ID over changing retry timestamps", async () => {
+    const { records, store } = memoryStore();
+    const handler = createBrevoTestWebhookHandler({
+      authenticationToken,
+      installationProofKey,
+      store,
+    });
+
+    await handler(request(event({
+      eventId: "brevo-event-17",
+      ts_event: 1_785_347_200,
+    })));
+    await handler(request(event({
+      eventId: "brevo-event-17",
+      ts_event: 1_785_347_260,
+    })));
+
+    expect(records.size).toBe(1);
   });
 });

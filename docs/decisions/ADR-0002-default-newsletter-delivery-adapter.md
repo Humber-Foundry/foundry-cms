@@ -102,6 +102,11 @@ evidence.
   tagged events prove
   terminal non-delivery for every exact recipient and no delivery-derived
   event such as delivery, open, click, complaint, proxy open, or unsubscribe.
+- The Brevo callback is exposed only at
+  `/api/integrations/brevo/webhooks/transactional`. It remains outside the
+  human Cloudflare Access application so Brevo can reach it, but exact bearer
+  verification happens before payload parsing or database access. The bearer
+  is not accepted by any human CMS route.
 - Scheduling, cancellation, and rescheduling use stored UTC intent, provider
   identifiers, and idempotency records. An accepted API response alone does not
   prove that a campaign was sent.
@@ -112,7 +117,9 @@ evidence.
   through verified webhooks and applied to local suppression before routine
   reconciliation.
 - Webhook processing verifies authenticity, acknowledges quickly, deduplicates,
-  and tolerates retry and out-of-order delivery.
+  and tolerates retry and out-of-order delivery. Retry identity uses a provider
+  event ID when one exists or a deterministic stable-payload fingerprint;
+  locally observed receipt time is never part of the identity.
 - Delivery, open, and click data may be ingested through webhooks or provider
   report polling. Polling is also a reconciliation backstop for campaign and
   subscriber state.

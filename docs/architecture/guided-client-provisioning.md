@@ -660,7 +660,10 @@ OTP or client IdP, sets the starting session policy, enables the binding cookie
 where compatible and verifies that no Bypass, Everyone or domain-wide rule
 exists. Only after DNS, Access application and policy readback pass does it
 enable the Worker route. It immediately proves that protected paths are gated
-and public paths expose only the bootstrap placeholder. There is no interval in
+and public paths expose only the bootstrap placeholder. Provider integration
+callbacks are tested separately: the unauthenticated Brevo callback must reach
+the Worker and return its bearer-authentication `401`, while the CMS API
+continues to return an Access challenge. There is no interval in
 which the claim seam is publicly reachable without Access.
 
 It stores the first Owner as a one-use D1 bootstrap invitation only after the
