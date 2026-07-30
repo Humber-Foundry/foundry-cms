@@ -51,7 +51,16 @@ CREATE TABLE campaign_test_deliveries (
     (state IN ('pending', 'attempting') AND evidence_json IS NULL
       AND failure_code IS NULL) OR
     (state = 'ambiguous' AND evidence_json IS NULL
-      AND (failure_code IS NULL OR failure_code = 'provider_rate_limited'))
+      AND (failure_code IS NULL OR failure_code IN (
+        'foundry_send_proof_invalid',
+        'provider_campaign_create_rejected',
+        'provider_campaign_fingerprint_mismatch',
+        'provider_campaign_not_found',
+        'provider_rate_limited',
+        'provider_sender_unmapped',
+        'provider_test_rejected',
+        'provider_unavailable'
+      )))
   )
 );
 

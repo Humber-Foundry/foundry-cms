@@ -466,10 +466,48 @@ describe("campaign test delivery", () => {
     expect(sendTest).toHaveBeenCalledTimes(2);
   });
 
-  it("retries with the stable execution identity only after reconciliation proves no delivery", async () => {
+  it("keeps a conflicting reconciliation unresolved and blocks a replacement write", async () => {
+    const sendTest = vi.fn().mockResolvedValue({
+      outcome: "ambiguous",
+      providerCampaignId: "brevo-campaign-17",
+      foundrySendProof: "9".repeat(64),
+    });
+    const adapter = capableAdapter({
+      sendTest,
+      reconcileTest: vi.fn().mockResolvedValue({
+        outcome: "rejected",
+        code: "provider_campaign_fingerprint_mismatch",
+      }),
+    });
+    const { application, campaignApplication } = createFixture(adapter);
+    const created = await createCampaign(campaignApplication);
+    const originalRequest = {
+      actor,
+      requestId: "campaign-test-conflicting-evidence-1",
+      campaignId: created.campaign.id,
+      testRecipientIds: ["owner-primary"],
+    };
+
+    await application.commands.requestTest(originalRequest);
+    await expect(
+      application.commands.requestTest(originalRequest),
+    ).resolves.toMatchObject({
+      state: "ambiguous",
+      failureCode: "provider_campaign_fingerprint_mismatch",
+    });
+    await expect(
+      application.commands.requestTest({
+        ...originalRequest,
+        requestId: "campaign-test-conflicting-evidence-2",
+      }),
+    ).rejects.toMatchObject({ message: "test_delivery_in_progress" });
+    expect(sendTest).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a preparation crash with no provider correlation or proof", async () => {
     const prepareTest = vi
       .fn()
-      .mockResolvedValueOnce({ outcome: "ambiguous" })
+      .mockRejectedValueOnce(new Error("preparation_crashed"))
       .mockResolvedValueOnce({
         outcome: "prepared",
         providerCampaignId: "brevo-campaign-21",
@@ -484,7 +522,7 @@ describe("campaign test delivery", () => {
     const adapter = capableAdapter({
       prepareTest,
       sendTest,
-      reconcileTest: vi.fn().mockResolvedValue({ outcome: "not_found" }),
+      reconcileTest: vi.fn(),
     });
     const { application, campaignApplication } = createFixture(adapter);
     const created = await createCampaign(campaignApplication);
@@ -513,6 +551,7 @@ describe("campaign test delivery", () => {
         providerCampaignId: null,
       }),
     );
+    expect(adapter.reconcileTest).not.toHaveBeenCalled();
   });
 
   it("does not retry a known provider campaign when reconciliation reports it missing", async () => {
@@ -1119,6 +1158,35 @@ describe("campaign test delivery", () => {
         testRecipientIds: ["one", "two", "three", "four", "five", "six"],
       }),
     ).rejects.toMatchObject({ message: "test_recipient_forbidden" });
+    expect(adapter.sendTest).not.toHaveBeenCalled();
+  });
+
+  it("rejects recipient identities that resolve to the same normalized address", async () => {
+    const adapter = capableAdapter();
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      undefined,
+      undefined,
+      undefined,
+      async (recipientIds) =>
+        recipientIds.map((id, index) => ({
+          id,
+          address: index === 0
+            ? "Owner@Example.Test"
+            : "owner@example.test",
+        })),
+    );
+    const created = await createCampaign(campaignApplication);
+
+    await expect(
+      application.commands.requestTest({
+        actor,
+        requestId: "campaign-test-duplicate-addresses-1",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary", "owner-secondary"],
+      }),
+    ).rejects.toMatchObject({ message: "test_recipient_forbidden" });
+    expect(adapter.prepareTest).not.toHaveBeenCalled();
     expect(adapter.sendTest).not.toHaveBeenCalled();
   });
 

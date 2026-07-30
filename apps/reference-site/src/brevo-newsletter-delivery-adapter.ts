@@ -18,7 +18,7 @@ type Fetcher = (
 type BrevoSenderIdentity = Readonly<{
   id: number;
   email: string;
-  name?: string;
+  name: string;
 }>;
 
 function headers(apiKey: string) {
@@ -58,15 +58,16 @@ function normalizedSender(sender: unknown) {
     !Number.isSafeInteger(candidate.id) ||
     candidate.id <= 0 ||
     email === null ||
-    (candidate.name !== undefined && name === undefined) ||
-    (name !== undefined && (name.length === 0 || name.length > 200))
+    name === undefined ||
+    name.length === 0 ||
+    name.length > 200
   ) {
     return null;
   }
   return Object.freeze({
     id: candidate.id,
     email,
-    ...(name === undefined ? {} : { name }),
+    name,
   });
 }
 
@@ -250,8 +251,7 @@ export function createBrevoNewsletterDeliveryAdapter({
                   sender.id === expected.id &&
                   sender.active === true &&
                   recipientAddress(sender.email) === expected.email &&
-                  (expected.name === undefined ||
-                    sender.name === expected.name),
+                  sender.name === expected.name,
               ),
           );
         return {
@@ -312,7 +312,7 @@ export function createBrevoNewsletterDeliveryAdapter({
           body: JSON.stringify({
             sender: {
               email: sender.email,
-              ...(sender.name === undefined ? {} : { name: sender.name }),
+              name: sender.name,
             },
             to: request.recipients.map((recipient) => ({
               email: recipient.address,
@@ -440,6 +440,11 @@ export function createBrevoNewsletterDeliveryAdapter({
         const messageIds = new Set(
           events.map((event) => providerMessageId(event.messageId)),
         );
+        const observedMessageIds = new Set(
+          [...messageIds].filter(
+            (messageId): messageId is string => messageId !== null,
+          ),
+        );
         const eventSenders = new Set(
           events.map((event) => recipientAddress(event.from)),
         );
@@ -448,7 +453,7 @@ export function createBrevoNewsletterDeliveryAdapter({
             (address) =>
               address !== null && !expectedRecipients.has(address),
           ) ||
-          messageIds.size > 1 ||
+          observedMessageIds.size > 1 ||
           [...eventSenders].some(
             (address) => address !== null && address !== senderEmail,
           );
@@ -464,7 +469,7 @@ export function createBrevoNewsletterDeliveryAdapter({
           messageIds.has(null) ||
           eventSenders.has(null) ||
           eventRecipients.size !== expectedRecipients.size ||
-          messageIds.size !== 1 ||
+          observedMessageIds.size !== 1 ||
           eventSenders.size !== 1
         ) {
           return {
@@ -504,7 +509,7 @@ export function createBrevoNewsletterDeliveryAdapter({
             code: "provider_test_definitively_not_delivered",
           };
         }
-        const messageId = [...messageIds][0]!;
+        const messageId = [...observedMessageIds][0]!;
         const emailListResponse = await fetcher(
           `${endpoint}/smtp/emails?messageId=${encodeURIComponent(messageId!)}`,
           {

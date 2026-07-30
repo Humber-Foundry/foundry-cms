@@ -271,7 +271,7 @@ export async function loadCampaignRequestContext(
     );
     const senders = JSON.parse(
       environment.FOUNDRY_BREVO_SENDERS_JSON ?? "{}",
-    ) as Record<string, { id: number; email: string; name?: string }>;
+    ) as Record<string, { id: number; email: string; name: string }>;
     testRecipients = JSON.parse(
       environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
     ) as Record<string, string>;

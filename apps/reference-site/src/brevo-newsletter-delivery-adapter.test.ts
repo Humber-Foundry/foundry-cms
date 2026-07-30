@@ -365,6 +365,43 @@ describe("Brevo newsletter delivery adapter", () => {
     });
   });
 
+  it("keeps a valid message event plus an incomplete event ambiguous", async () => {
+    const messageId = "<message-partial@brevo.test>";
+    const delivery = adapter(
+      vi.fn().mockResolvedValue(
+        response(200, {
+          events: [
+            {
+              email: "owner-primary@example.test",
+              event: "delivered",
+              messageId,
+              from: "sender@example.test",
+              tag: request.executionId,
+            },
+            {
+              email: "owner-primary@example.test",
+              event: "opened",
+              from: "sender@example.test",
+              tag: request.executionId,
+            },
+          ],
+        }),
+      ),
+    );
+    const prepared = await prepareRequest(delivery);
+
+    await expect(
+      delivery.reconcileTest({
+        request: prepared,
+        providerCampaignId: correlationId,
+      }),
+    ).resolves.toEqual({
+      outcome: "ambiguous",
+      providerCampaignId: correlationId,
+      foundrySendProof: prepared.foundrySendProof,
+    });
+  });
+
   it("keeps an exact recipient subset ambiguous", async () => {
     const requestWithTwoRecipients: NewsletterTestRequest = {
       ...request,
@@ -536,6 +573,46 @@ describe("Brevo newsletter delivery adapter", () => {
               id: 42,
               active: true,
               email: "changed@example.test",
+              name: "Foundry Sender",
+            }],
+          }),
+        ),
+    });
+
+    await expect(delivery.health()).resolves.toEqual({
+      state: "degraded",
+      credential: "verified",
+      senderIdentity: "invalid",
+    });
+  });
+
+  it("fails health when the exact sender display name is absent", async () => {
+    const accountScopeFingerprint = await sha256Text(
+      "foundry.brevo-account-scope.v1:owner@example.test",
+    );
+    const delivery = createBrevoNewsletterDeliveryAdapter({
+      apiKey: "test-key-not-a-real-secret",
+      configurationFingerprint,
+      accountScopeFingerprint,
+      installationProofKey: "p".repeat(64),
+      senders: {
+        sender_primary: {
+          id: 42,
+          email: "sender@example.test",
+          name: undefined,
+        },
+      } as never,
+      fetcher: vi
+        .fn()
+        .mockResolvedValueOnce(
+          response(200, { email: "owner@example.test" }),
+        )
+        .mockResolvedValueOnce(
+          response(200, {
+            senders: [{
+              id: 42,
+              active: true,
+              email: "sender@example.test",
               name: "Foundry Sender",
             }],
           }),

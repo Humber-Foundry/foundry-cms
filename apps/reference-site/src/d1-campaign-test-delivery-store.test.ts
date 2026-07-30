@@ -184,8 +184,17 @@ describe("D1 campaign test delivery store", () => {
       updatedAt: "2026-07-29T19:06:31.000Z",
     });
     expect(ambiguous.foundrySendProof).toBe("7".repeat(64));
+    const driftAmbiguous = await store.record({
+      ...ambiguous,
+      failureCode: "provider_campaign_fingerprint_mismatch",
+      updatedAt: "2026-07-29T19:06:31.500Z",
+    });
+    expect(driftAmbiguous).toMatchObject({
+      state: "ambiguous",
+      failureCode: "provider_campaign_fingerprint_mismatch",
+    });
     const takeover = await store.beginAttempt({
-      operation: ambiguous,
+      operation: driftAmbiguous,
       now: "2026-07-29T19:06:32.000Z",
       leaseUntil: "2026-07-29T19:07:02.000Z",
     });
@@ -215,6 +224,7 @@ describe("D1 campaign test delivery store", () => {
       state: "accepted",
       attemptLeaseUntil: null,
       providerCampaignId: "17",
+      failureCode: null,
       evidence: {
         ...pending.binding,
         executionId: pending.executionId,

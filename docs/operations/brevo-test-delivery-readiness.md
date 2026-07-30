@@ -27,7 +27,7 @@ Install these values in the client-owned Worker configuration:
   the runtime classifies the account as `evaluation` and cannot report ready.
 - `FOUNDRY_BREVO_SENDERS_JSON` — a protected mapping from each Foundry logical
   sender identity to its verified Brevo numeric ID and exact expected email
-  address, plus its expected display name when configured.
+  address and required display name.
 - `FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON` — a protected mapping from configured
   active Owner membership ID to verified delivery address. Runtime resolution
   rejects inactive, non-Owner, or unknown membership IDs.

@@ -317,9 +317,16 @@ function assertResolvedRecipients(
     recipients.some(
       (recipient, index) =>
         recipient.id !== requestedIds[index] ||
+        typeof recipient.address !== "string" ||
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(recipient.address),
     )
   ) {
+    throw new CampaignValidationError("test_recipient_forbidden");
+  }
+  const normalizedAddresses = recipients.map((recipient) =>
+    recipient.address.trim().toLowerCase()
+  );
+  if (new Set(normalizedAddresses).size !== normalizedAddresses.length) {
     throw new CampaignValidationError("test_recipient_forbidden");
   }
 }
@@ -848,14 +855,14 @@ export function createCampaignTestDeliveryApplication({
       operation.state === "attempting" &&
       operation.attemptLeaseUntil !== null &&
       operation.attemptLeaseUntil <= now;
-    const safelyRestartablePreWriteAttempt =
-      attemptExpired &&
+    const safelyRestartablePreWriteState =
+      (attemptExpired || operation.state === "ambiguous") &&
       operation.providerCampaignId === null &&
       operation.foundrySendProof === null;
     if (
       !newlyClaimed &&
-      (operation.state === "ambiguous" ||
-        (attemptExpired && !safelyRestartablePreWriteAttempt))
+      (operation.state === "ambiguous" || attemptExpired) &&
+      !safelyRestartablePreWriteState
     ) {
       const reconciled = await adapter.reconcileTest({
         request: {
@@ -903,6 +910,29 @@ export function createCampaignTestDeliveryApplication({
             reconciled,
             clock().toISOString(),
           ),
+        );
+      }
+      if (reconciled.outcome === "rejected") {
+        const reconciledAt = clock();
+        const definitivelyNotDelivered =
+          reconciled.code ===
+            "provider_test_definitively_not_delivered";
+        return recordOperation(
+          Object.freeze({
+            ...operation,
+            state: definitivelyNotDelivered
+              ? ("failed" as const)
+              : ("ambiguous" as const),
+            attemptLeaseUntil: definitivelyNotDelivered
+              ? null
+              : attemptExpired
+                ? new Date(
+                    reconciledAt.getTime() + 60_000,
+                  ).toISOString()
+                : null,
+            failureCode: reconciled.code,
+            updatedAt: reconciledAt.toISOString(),
+          }),
         );
       }
       if (attemptExpired) {
@@ -981,17 +1011,6 @@ export function createCampaignTestDeliveryApplication({
         operation.providerCampaignId !== null
       ) {
         return operation;
-      }
-      if (reconciled.outcome === "rejected") {
-        return recordOperation(
-          Object.freeze({
-            ...operation,
-            state: "failed" as const,
-            attemptLeaseUntil: null,
-            failureCode: reconciled.code,
-            updatedAt: clock().toISOString(),
-          }),
-        );
       }
     }
     if (operation.state === "attempting" && !attemptExpired) {
