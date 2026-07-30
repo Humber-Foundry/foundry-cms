@@ -1,6 +1,9 @@
 import {
+  createContentWorkspaceId,
   McpReadError,
+  mcpContentDraftScope,
   mcpContractVersion,
+  mcpDesignDraftScope,
   mcpInitialScope,
   mcpProtocolVersion,
   type McpConnectionPrincipal,
@@ -8,6 +11,9 @@ import {
   type McpExecutionContext,
 } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
+import Ajv2020, {
+  type ValidateFunction,
+} from "ajv/dist/2020.js";
 
 import {
   RequestBodyLimitError,
@@ -53,6 +59,12 @@ type McpProtocolRateStore = Readonly<{
   }): Promise<boolean>;
 }>;
 
+export type AuthenticatedMcpSession = Readonly<{
+  principal: McpConnectionPrincipal;
+  sessionState: "missing" | "valid" | "invalid";
+  issueSessionId(): Promise<string>;
+}>;
+
 function safeErrorMessage(code: McpReadError["code"]) {
   const messages = {
     AUTHENTICATION_REQUIRED: "Authentication is required.",
@@ -60,6 +72,9 @@ function safeErrorMessage(code: McpReadError["code"]) {
     CONNECTION_REVOKED: "The MCP connection has been revoked.",
     OBJECT_NOT_FOUND: "The requested object was not found.",
     VALIDATION_FAILED: "The request is invalid.",
+    STALE_REVISION: "The workspace revision changed.",
+    IDEMPOTENCY_KEY_REUSED:
+      "The idempotency key was reused for different input.",
     TEMPORARILY_UNAVAILABLE: "The service is temporarily unavailable.",
   } as const;
   return messages[code];
@@ -110,6 +125,30 @@ export function createMcpProtocolRuntime({
   now?: () => Date;
 }) {
   const tools = createMcpToolRegistry(readApplication);
+  const schemaValidator = new Ajv2020({
+    strict: false,
+    formats: {
+      uuid:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu,
+      "date-time": true,
+      uri: true,
+      "uri-reference": true,
+    },
+  });
+  const toolInputValidators = new Map<string, ValidateFunction>();
+
+  function toolInputIsValid(
+    name: string,
+    schema: object,
+    input: unknown,
+  ) {
+    let validate = toolInputValidators.get(name);
+    if (validate === undefined) {
+      validate = schemaValidator.compile(schema);
+      toolInputValidators.set(name, validate);
+    }
+    return validate(input);
+  }
 
   function paginationCursor(nextCursor: string | null) {
     return nextCursor === null ? {} : { nextCursor };
@@ -209,6 +248,81 @@ export function createMcpProtocolRuntime({
         ),
       };
     }
+    const workspaceMatch =
+      /^foundry:\/\/workspaces\/([^/]+)$/u.exec(uri);
+    if (workspaceMatch !== null) {
+      if (readApplication.getWorkspace === undefined) {
+        throw new McpReadError(
+          "OBJECT_NOT_FOUND",
+          "The requested object was not found.",
+        );
+      }
+      let workspaceId;
+      try {
+        workspaceId = createContentWorkspaceId(
+          decodeURIComponent(workspaceMatch[1]!),
+        );
+      } catch {
+        throw new McpReadError(
+          "VALIDATION_FAILED",
+          "The resource URI is invalid.",
+        );
+      }
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify(
+          await readApplication.getWorkspace(
+            principal,
+            workspaceId,
+            context,
+          ),
+        ),
+      };
+    }
+    const revisionMatch =
+      /^foundry:\/\/workspaces\/([^/]+)\/revisions\/([0-9]+)$/u.exec(uri);
+    if (revisionMatch !== null) {
+      if (readApplication.getWorkspaceRevision === undefined) {
+        throw new McpReadError(
+          "OBJECT_NOT_FOUND",
+          "The requested object was not found.",
+        );
+      }
+      let workspaceId;
+      const revision = Number(revisionMatch[2]);
+      try {
+        workspaceId = createContentWorkspaceId(
+          decodeURIComponent(revisionMatch[1]!),
+        );
+      } catch {
+        throw new McpReadError(
+          "VALIDATION_FAILED",
+          "The resource URI is invalid.",
+        );
+      }
+      if (
+        !Number.isSafeInteger(revision) ||
+        String(revision) !== revisionMatch[2]
+      ) {
+        throw new McpReadError(
+          "VALIDATION_FAILED",
+          "The resource URI is invalid.",
+        );
+      }
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify(
+          await readApplication.getWorkspaceRevision(
+            principal,
+            workspaceId,
+            revision,
+            context,
+          ),
+        ),
+      };
+    }
     const match = /^foundry:\/\/content\/(page|post)\/([^/]+)$/u.exec(uri);
     if (match !== null) {
       let contentId: string;
@@ -249,6 +363,19 @@ export function createMcpProtocolRuntime({
   ) {
     const tool = tools.get(name);
     if (tool === null) return null;
+    const visible = tools
+      .list(principal)
+      .some(({ name: visibleName }) => visibleName === name);
+    if (
+      visible &&
+      !toolInputIsValid(
+        name,
+        tool.descriptor.inputSchema,
+        argumentsValue,
+      )
+    ) {
+      return null;
+    }
     try {
       return toolResult(
         await tool.execute(principal, argumentsValue, context),
@@ -266,10 +393,14 @@ export function createMcpProtocolRuntime({
             message: safeErrorMessage(error.code),
             retryable: error.retryable,
             requiredScopes:
-              error.code === "INSUFFICIENT_SCOPE" ? [mcpInitialScope] : [],
+              error.code === "INSUFFICIENT_SCOPE"
+                ? error.requiredScopes
+                : [],
+            latestRevision: error.latestRevision,
+            conflictResource: error.conflictResource,
           },
           meta: {
-            replayed: false,
+            replayed: error.replayed,
             observedAt,
           },
         },
@@ -405,7 +536,7 @@ export function createMcpProtocolRuntime({
         serverInfo: {
           name: "foundry-cms",
           version: "0.1.0",
-          description: `${siteName} read-only MCP resource (${mcpContractVersion})`,
+          description: `${siteName} scoped MCP resource (${mcpContractVersion})`,
         },
       });
     }
@@ -414,7 +545,7 @@ export function createMcpProtocolRuntime({
         principal,
         params: rpc.params,
         query: "tools",
-        values: tools.list(),
+        values: tools.list(principal),
         pageSize: 2,
         context,
       });
@@ -506,6 +637,12 @@ export function createMcpProtocolRuntime({
     }
     if (rpc.method === "resources/templates/list") {
       const site = await readApplication.getSite(principal, context);
+      const canReadDraftResources =
+        readApplication.getWorkspace !== undefined &&
+        (
+          principal.scopes.includes(mcpContentDraftScope) ||
+          principal.scopes.includes(mcpDesignDraftScope)
+        );
       const page = await paginateDiscovery({
         principal,
         params: rpc.params,
@@ -519,6 +656,23 @@ export function createMcpProtocolRuntime({
               site.result.liveRelease?.observedAt ?? null,
             ),
           },
+          ...(canReadDraftResources
+            ? [
+                {
+                  uriTemplate: "foundry://workspaces/{workspaceId}",
+                  name: "Canonical draft workspace",
+                  mimeType: "application/json",
+                  annotations: resourceAnnotations(null),
+                },
+                {
+                  uriTemplate:
+                    "foundry://workspaces/{workspaceId}/revisions/{revision}",
+                  name: "Immutable canonical draft revision",
+                  mimeType: "application/json",
+                  annotations: resourceAnnotations(null),
+                },
+              ]
+            : []),
         ],
         pageSize: 50,
         context,
@@ -550,6 +704,10 @@ export function createMcpProtocolRuntime({
           }
           return rpcError(rpc.id, -32002, safeErrorMessage(error.code), {
             code: error.code,
+            requiredScopes:
+              error.code === "INSUFFICIENT_SCOPE"
+                ? error.requiredScopes
+                : [],
           });
         }
         throw error;
@@ -577,7 +735,7 @@ export function createMcpProtocolRuntime({
   return {
     async handle(
       request: Request,
-      authenticate: () => Promise<McpConnectionPrincipal | Response>,
+      authenticate: () => Promise<AuthenticatedMcpSession | Response>,
       context: RequestExecutionContext,
     ): Promise<Response> {
       if (request.method !== "POST") {
@@ -611,9 +769,9 @@ export function createMcpProtocolRuntime({
           400,
         );
       }
-      let principal: McpConnectionPrincipal | Response;
+      let authenticated: AuthenticatedMcpSession | Response;
       try {
-        principal = await context.run(authenticate);
+        authenticated = await context.run(authenticate);
       } catch (error) {
         return error instanceof RequestDeadlineExceededError
           ? jsonResponse(
@@ -623,7 +781,8 @@ export function createMcpProtocolRuntime({
             )
           : jsonResponse({ error: "temporarily_unavailable" }, 503);
       }
-      if (principal instanceof Response) return principal;
+      if (authenticated instanceof Response) return authenticated;
+      const principal = authenticated.principal;
       let value: unknown;
       let bodyFailure: Response | null = null;
       try {
@@ -721,6 +880,30 @@ export function createMcpProtocolRuntime({
           "Invalid Request",
         );
       }
+      if (
+        value.method !== "initialize" &&
+        authenticated.sessionState === "missing"
+      ) {
+        return rpcError(
+          isRequestId(value.id) ? value.id : null,
+          -32600,
+          "MCP-Session-Id header required",
+          undefined,
+          400,
+        );
+      }
+      if (
+        value.method !== "initialize" &&
+        authenticated.sessionState === "invalid"
+      ) {
+        return rpcError(
+          isRequestId(value.id) ? value.id : null,
+          -32001,
+          "MCP session not found",
+          undefined,
+          404,
+        );
+      }
       if (value.id === undefined) {
         return value.method === "initialize" ||
           requestedVersion === mcpProtocolVersion
@@ -749,7 +932,32 @@ export function createMcpProtocolRuntime({
         );
       }
       try {
-        return await dispatch(principal, value as RpcRequest, context);
+        const response = await dispatch(
+          principal,
+          value as RpcRequest,
+          context,
+        );
+        if (value.method !== "initialize" || response.status >= 400) {
+          return response;
+        }
+        const initializedResult =
+          await response.clone().json() as unknown;
+        if (
+          !isRecord(initializedResult) ||
+          !isRecord(initializedResult.result)
+        ) {
+          return response;
+        }
+        const headers = new Headers(response.headers);
+        headers.set(
+          "mcp-session-id",
+          await context.run(() => authenticated.issueSessionId()),
+        );
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
       } catch (error) {
         return error instanceof RequestDeadlineExceededError
           ? rpcError(

@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { referenceSiteDefinition } from "@foundry/site-definition";
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
@@ -6,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   isRevisionCurrent: vi.fn(),
   loadApplication: vi.fn(),
   loadIdentity: vi.fn(),
+  loadMcpPreview: vi.fn(),
   verifyCapability: vi.fn(),
 }));
 
@@ -44,10 +47,17 @@ vi.mock("./content-revision-runtime", () => ({
 vi.mock("./preview-capability-runtime", () => ({
   verifyRevisionPreviewCapability: mocks.verifyCapability,
 }));
+vi.mock("./mcp-preview-review-runtime", () => ({
+  loadMcpPreviewForHuman: mocks.loadMcpPreview,
+}));
 
 import { loadRevisionPreview } from "./revision-preview-page";
 
 describe("revision preview page", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("memoizes one authenticated revision for metadata and body", async () => {
     const identity = {
       binding: { issuer: "issuer", subject: "subject" },
@@ -110,5 +120,67 @@ describe("revision preview page", () => {
     expect(mocks.verifyCapability).toHaveBeenCalledTimes(1);
     expect(mocks.getRevision).toHaveBeenCalledTimes(1);
     expect(mocks.isRevisionCurrent).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps MCP review on the authenticated revision capability path", async () => {
+    const identity = {
+      binding: { issuer: "issuer", subject: "subject" },
+      email: "owner@example.com",
+    };
+    const revision = {
+      workspaceId: "workspace_mcp_review",
+      revision: 2,
+      bookmark: "mcp-bookmark",
+      createdAt: "2026-07-29T20:00:00.000Z",
+      definition: referenceSiteDefinition,
+      inputs: {
+        contentHash: "c".repeat(64),
+        schemaVersion: referenceSiteDefinition.schemaVersion,
+        rendererVersion: "renderer-55",
+        productionBase: "a".repeat(40),
+      },
+    };
+    const review = {
+      previewId: "preview-mcp-55",
+      actorId: "agent-55",
+      changedDocuments: ["site_foundry.name"],
+      designChanges: [],
+      publicEffect: "No public effect. This review does not approve or publish.",
+    };
+    mocks.loadIdentity.mockResolvedValue({ identity });
+    mocks.authorize.mockResolvedValue({
+      state: "authorized",
+      identity,
+      membership: {
+        id: "membership-owner",
+        siteId: referenceSiteDefinition.site.id,
+      },
+    });
+    mocks.loadMcpPreview.mockResolvedValue({ revision, review });
+
+    await expect(
+      loadRevisionPreview({
+        params: Promise.resolve({
+          workspaceId: revision.workspaceId,
+          revision: String(revision.revision),
+        }),
+        searchParams: Promise.resolve({
+          capability: "short-lived-capability",
+          bookmark: revision.bookmark,
+          previewId: review.previewId,
+        }),
+      }),
+    ).resolves.toEqual({ ...revision, mcpReview: review });
+    expect(mocks.verifyCapability).toHaveBeenCalledWith({
+      capability: "short-lived-capability",
+      identity,
+      workspaceId: revision.workspaceId,
+      revision: revision.revision,
+    });
+    expect(mocks.loadMcpPreview).toHaveBeenCalledWith({
+      previewId: review.previewId,
+      siteId: referenceSiteDefinition.site.id,
+    });
+    expect(mocks.loadApplication).not.toHaveBeenCalled();
   });
 });

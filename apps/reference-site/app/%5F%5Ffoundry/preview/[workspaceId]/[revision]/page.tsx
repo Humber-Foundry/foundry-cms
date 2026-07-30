@@ -26,11 +26,13 @@ export default async function RevisionPreviewPage(
   props: RevisionPreviewPageProps,
 ) {
   const revision = await loadRevisionPreview(props);
-  const { accessToken, capability, bookmark } = await props.searchParams;
+  const { accessToken, capability, bookmark, previewId } =
+    await props.searchParams;
   const previewQuery = new URLSearchParams({
     capability: typeof capability === "string" ? capability : "",
     bookmark: typeof bookmark === "string" ? bookmark : "",
     ...(typeof accessToken === "string" ? { accessToken } : {}),
+    ...(typeof previewId === "string" ? { previewId } : {}),
   });
   return (
     <>
@@ -57,6 +59,30 @@ export default async function RevisionPreviewPage(
             <dd>{revision.inputs.productionBase}</dd>
           </div>
         </dl>
+        {revision.mcpReview === undefined ? null : (
+          <dl>
+            <div>
+              <dt>MCP actor</dt>
+              <dd>{revision.mcpReview.actorId}</dd>
+            </div>
+            <div>
+              <dt>Changed content</dt>
+              <dd>
+                {revision.mcpReview.changedDocuments.join(", ") || "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Design changes</dt>
+              <dd>
+                {revision.mcpReview.designChanges.join(", ") || "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Public effect</dt>
+              <dd>{revision.mcpReview.publicEffect}</dd>
+            </div>
+          </dl>
+        )}
         <a
           href={`/dash?workspace=${encodeURIComponent(revision.workspaceId)}`}
         >

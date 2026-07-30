@@ -11,11 +11,13 @@ import {
   ContentWorkspaceAccessError,
   createContentActorId,
   createContentWorkspaceId,
+  type ContentRevision,
 } from "@foundry/application";
 
 import { AccessIdentityError } from "./access-identity";
 import { loadContentRevisionApplication } from "./content-revision-runtime";
 import { HumanAccessConfigurationError } from "./human-access-configuration";
+import { loadMcpPreviewForHuman } from "./mcp-preview-review-runtime";
 import {
   authorizeAuthenticatedHumanIdentity,
   loadHumanIdentityRequestContext,
@@ -29,6 +31,17 @@ export type RevisionPreviewPageProps = {
     capability?: string | string[];
     bookmark?: string | string[];
     accessToken?: string | string[];
+    previewId?: string | string[];
+  }>;
+};
+
+type RevisionPreview = ContentRevision & {
+  mcpReview?: Readonly<{
+    previewId: string;
+    actorId: string;
+    changedDocuments: ReadonlyArray<string>;
+    designChanges: ReadonlyArray<string>;
+    publicEffect: string;
   }>;
 };
 
@@ -37,7 +50,8 @@ const loadSelectedRevision = cache(async function loadSelectedRevision(
   revisionParameter: string,
   capability: string,
   bookmark: string,
-) {
+  previewId: string,
+): Promise<RevisionPreview> {
   const revisionNumber = Number(revisionParameter);
   if (
     !Number.isSafeInteger(revisionNumber) ||
@@ -64,6 +78,21 @@ const loadSelectedRevision = cache(async function loadSelectedRevision(
       workspaceId,
       revision: revisionNumber,
     });
+    if (previewId !== "") {
+      const selected = await loadMcpPreviewForHuman({
+        previewId,
+        siteId: access.membership.siteId,
+      });
+      if (
+        selected === null ||
+        selected.revision.workspaceId !== workspaceId ||
+        selected.revision.revision !== revisionNumber ||
+        selected.revision.bookmark !== bookmark
+      ) {
+        notFound();
+      }
+      return { ...selected.revision, mcpReview: selected.review };
+    }
     const application = await loadContentRevisionApplication(
       workspaceId,
       createContentActorId(access.membership.id),
@@ -104,7 +133,7 @@ export async function loadRevisionPreview({
     workspaceId: workspaceIdParameter,
     revision: revisionParameter,
   } = await params;
-  const { capability, bookmark } = await searchParams;
+  const { capability, bookmark, previewId } = await searchParams;
   if (typeof capability !== "string" || typeof bookmark !== "string") {
     notFound();
   }
@@ -113,5 +142,6 @@ export async function loadRevisionPreview({
     revisionParameter,
     capability,
     bookmark,
+    typeof previewId === "string" ? previewId : "",
   );
 }

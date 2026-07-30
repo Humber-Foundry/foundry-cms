@@ -27,11 +27,15 @@ on the next call. Historical attribution remains.
 | `analytics.read` | Bounded aggregate analytics views with suppression and quality metadata | Raw events, arbitrary dimensions/SQL, identities |
 | `connection.admin` | Read this connection's grant and revoke this connection | Other connections, human users, role or secret management |
 
-`site.read` is the only scope in `scopes_supported` and the initial
-`WWW-Authenticate` challenge. Additional scopes use the MCP step-up
-authorization flow and a fresh Owner consent. The authorization server displays
-the exact site, client identity and incremental scopes. No wildcard scope and
-no `*` suffix exists.
+`site.read` is the only scope in the initial unauthenticated
+`WWW-Authenticate` challenge. An authenticated direct call to an omitted draft
+tool returns a `403 insufficient_scope` challenge containing `site.read` plus
+exactly the missing `content.draft` or `design.draft` scope, allowing a
+conforming client to begin step-up. Protected-resource metadata also advertises
+those delivered step-up scopes. Additional scopes use the MCP step-up
+authorization flow and a fresh Owner consent. The authorization server
+displays the exact site, client identity and incremental scopes. No wildcard
+scope and no `*` suffix exists.
 
 ## Capability matrix
 

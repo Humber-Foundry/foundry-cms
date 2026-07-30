@@ -2221,7 +2221,10 @@ describe("D1 content revision store", () => {
       await realStore.persist(command);
     });
     await expect(racedStore.persist(command)).resolves.toEqual(
-      expect.objectContaining({ workspaceId, revision: 1 }),
+      {
+        revision: expect.objectContaining({ workspaceId, revision: 1 }),
+        replayed: true,
+      },
     );
 
     const mismatchedStore = storeWithFirstReceiptMiss(async () => {});

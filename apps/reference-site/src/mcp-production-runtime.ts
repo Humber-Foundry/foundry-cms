@@ -1,5 +1,6 @@
 import {
   createInMemoryPublishedSiteRepository,
+  createMcpDraftApplication,
   createMcpReadApplication,
   createPublishedSiteBundle,
   createSiteApplication,
@@ -9,6 +10,11 @@ import { referenceSiteDefinition } from "@foundry/site-definition";
 import { authenticateCloudflareAccessIdentity } from "./access-authentication";
 import { createD1HumanAccessStore } from "./d1-human-access-store";
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
+import { createD1McpPreviewStore } from "./d1-mcp-preview-store";
+import {
+  mcpPreviewReviewUrl,
+  revisionPreviewGatewayUrl,
+} from "./content-revision-links";
 import {
   HumanAccessConfigurationError,
   readHumanMutationConfiguration,
@@ -165,6 +171,29 @@ export function createProductionMcpRuntime(
     connections: store,
     cursors,
   });
+  const draftApplication = createMcpDraftApplication({
+    base: readApplication,
+    runtime: {
+      ...createD1McpPreviewStore(database),
+      async open({ actorId, idempotencyKey }) {
+        const {
+          contentWorkspaceIdForMutation,
+          loadContentRevisionApplication,
+        } = await import("./content-revision-runtime");
+        return loadContentRevisionApplication(
+          await contentWorkspaceIdForMutation(actorId, idempotencyKey),
+          actorId,
+        );
+      },
+      async load({ actorId, workspaceId }) {
+        const { loadContentRevisionApplication } =
+          await import("./content-revision-runtime");
+        return loadContentRevisionApplication(workspaceId, actorId);
+      },
+      humanReviewUrl: (previewId) =>
+        mcpPreviewReviewUrl(canonicalOrigin, previewId),
+    },
+  });
   const humanStore = createD1HumanAccessStore(database);
   return createMcpHttpRuntime({
     resourceUri: `${canonicalOrigin}${resourcePath}`,
@@ -174,7 +203,7 @@ export function createProductionMcpRuntime(
     siteId: referenceSiteDefinition.site.id,
     siteName: referenceSiteDefinition.site.name,
     store,
-    readApplication,
+    readApplication: Object.assign(readApplication, draftApplication),
     cursors,
     registeredClients: readMcpRegisteredClients(
       environment.FOUNDRY_MCP_CLIENTS,

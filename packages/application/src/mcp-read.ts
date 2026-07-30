@@ -6,10 +6,24 @@ import {
 } from "@foundry/site-definition";
 
 import type { SiteApplication } from "./index";
+import {
+  ContentRevisionConflictError,
+  ContentRevisionIdempotencyError,
+  ContentRevisionStaleError,
+  ContentRevisionValidationError,
+  ContentWorkspaceAccessError,
+} from "./content-revisions";
 import { sha256CanonicalJson } from "./deterministic-hash";
 
 export const mcpContractVersion = "foundry.mcp.v1" as const;
 export const mcpInitialScope = "site.read" as const;
+export const mcpContentDraftScope = "content.draft" as const;
+export const mcpDesignDraftScope = "design.draft" as const;
+export const mcpSupportedScopes = Object.freeze([
+  mcpInitialScope,
+  mcpContentDraftScope,
+  mcpDesignDraftScope,
+] as const);
 export const mcpProtocolVersion = "2025-11-25" as const;
 
 export type McpConnectionStatus = "active" | "revoked";
@@ -81,6 +95,8 @@ export type McpReadErrorCode =
   | "CONNECTION_REVOKED"
   | "OBJECT_NOT_FOUND"
   | "VALIDATION_FAILED"
+  | "STALE_REVISION"
+  | "IDEMPOTENCY_KEY_REUSED"
   | "TEMPORARILY_UNAVAILABLE";
 
 export class McpReadError extends Error {
@@ -88,13 +104,23 @@ export class McpReadError extends Error {
   readonly retryable: boolean;
   readonly invocationId: string | null;
   readonly observedAt: string | null;
+  readonly requiredScopes: ReadonlyArray<string>;
+  readonly latestRevision: number | null;
+  readonly conflictResource: string | null;
+  readonly replayed: boolean;
+  readonly auditRecorded: boolean;
 
   constructor(
     code: McpReadErrorCode,
     message: string,
     context: Readonly<{
-      invocationId: string;
-      observedAt: string;
+      invocationId?: string;
+      observedAt?: string;
+      requiredScopes?: ReadonlyArray<string>;
+      latestRevision?: number;
+      conflictResource?: string;
+      replayed?: boolean;
+      auditRecorded?: boolean;
     }> | null = null,
   ) {
     super(message);
@@ -103,6 +129,11 @@ export class McpReadError extends Error {
     this.retryable = code === "TEMPORARILY_UNAVAILABLE";
     this.invocationId = context?.invocationId ?? null;
     this.observedAt = context?.observedAt ?? null;
+    this.requiredScopes = context?.requiredScopes ?? [];
+    this.latestRevision = context?.latestRevision ?? null;
+    this.conflictResource = context?.conflictResource ?? null;
+    this.replayed = context?.replayed ?? false;
+    this.auditRecorded = context?.auditRecorded ?? false;
   }
 }
 
@@ -111,7 +142,7 @@ type McpSuccess<Result> = Readonly<{
   invocationId: string;
   result: Result;
   meta: Readonly<{
-    replayed: false;
+    replayed: boolean;
     observedAt: string;
   }>;
 }>;
@@ -148,7 +179,7 @@ type PublishedContentDocument =
       document: SiteDefinition["blog"]["posts"][number];
     }>;
 
-const allowedReadScope = new Set<string>([mcpInitialScope]);
+const allowedScopes = new Set<string>(mcpSupportedScopes);
 
 function contentSummaries(
   definition: SiteDefinition,
@@ -226,10 +257,10 @@ function isAuthenticConnection(
     current.actorId === principal.actorId &&
     current.clientId === principal.clientId &&
     current.scopes.length > 0 &&
-    current.scopes.every((scope) => allowedReadScope.has(scope)) &&
+    current.scopes.every((scope) => allowedScopes.has(scope)) &&
     principal.scopes.length > 0 &&
     principal.scopes.every((scope) => current.scopes.includes(scope)) &&
-    principal.scopes.every((scope) => allowedReadScope.has(scope))
+    principal.scopes.every((scope) => allowedScopes.has(scope))
   );
 }
 
@@ -281,18 +312,33 @@ export function createMcpReadApplication({
     auditInput,
     run,
     context,
+    requiredScopes = [mcpInitialScope],
+    successfulScopesEvaluated,
+    joinedAudit = false,
+    recordJoinedFailure,
   }: {
     principal: McpConnectionPrincipal;
     operation: string;
     auditInput: unknown;
-    run(context: McpExecutionContext): Promise<Result>;
+    run(
+      context: McpExecutionContext,
+      audit: McpReadAuditEvent,
+    ): Promise<Result>;
     context: McpExecutionContext;
+    requiredScopes?: ReadonlyArray<string>;
+    successfulScopesEvaluated?: () => ReadonlyArray<string>;
+    joinedAudit?: boolean;
+    recordJoinedFailure?: (
+      audit: McpReadAuditEvent,
+      error: McpReadError,
+    ) => Promise<McpReadError | void>;
   }): Promise<McpSuccess<Result>> {
     const invocationId = createInvocationId();
     const observedAt = now();
     const inputHash = await context.run(() =>
       sha256CanonicalJson(auditInput),
     );
+    let allowedAudit: McpReadAuditEvent | null = null;
     try {
       const current = await loadConnection(principal, context);
       if (current === null || !isAuthenticConnection(current, principal)) {
@@ -308,38 +354,56 @@ export function createMcpReadApplication({
         );
       }
       if (
-        !current.scopes.includes(mcpInitialScope) ||
-        !principal.scopes.includes(mcpInitialScope)
+        requiredScopes.some(
+          (scope) =>
+            !current.scopes.includes(scope) ||
+            !principal.scopes.includes(scope),
+        )
       ) {
         throw new McpReadError(
           "INSUFFICIENT_SCOPE",
-          "The current connection does not grant site.read.",
+          "The current connection does not grant the required scope.",
         );
       }
-      const result = await run(context);
+      allowedAudit = {
+        invocationId,
+        connectionId: principal.connectionId,
+        actorId: principal.actorId,
+        siteId: principal.siteId,
+        operation,
+        inputHash,
+        protocolVersion: mcpProtocolVersion,
+        scopesEvaluated: requiredScopes,
+        outcome: "allowed",
+        reason: null,
+        occurredAt: observedAt,
+        contractVersion: mcpContractVersion,
+      };
+      const result = await run(context, allowedAudit);
       context.throwIfExpired();
-      await context.finishDurably(() =>
-        connections.recordInvocation({
-          invocationId,
-          connectionId: principal.connectionId,
-          actorId: principal.actorId,
-          siteId: principal.siteId,
-          operation,
-          inputHash,
-          protocolVersion: mcpProtocolVersion,
-          scopesEvaluated: [mcpInitialScope],
-          outcome: "allowed",
-          reason: null,
-          occurredAt: observedAt,
-          contractVersion: mcpContractVersion,
-        }),
-      );
+      if (!joinedAudit) {
+        const completedAudit = {
+          ...allowedAudit,
+          scopesEvaluated:
+            successfulScopesEvaluated?.() ?? requiredScopes,
+        };
+        await context.finishDurably(() =>
+          connections.recordInvocation(completedAudit),
+        );
+      }
+      const replayed =
+        typeof result === "object" &&
+        result !== null &&
+        "replayed" in result &&
+        typeof result.replayed === "boolean"
+          ? result.replayed
+          : false;
       return {
         contractVersion: mcpContractVersion,
         invocationId,
         result,
         meta: {
-          replayed: false,
+          replayed,
           observedAt,
         },
       };
@@ -353,48 +417,148 @@ export function createMcpReadApplication({
                 "OBJECT_NOT_FOUND",
                 "The requested object was not found.",
               )
+          : error instanceof ContentRevisionConflictError
+            ? new McpReadError(
+                "STALE_REVISION",
+                "The workspace revision changed.",
+              )
+          : error instanceof ContentRevisionIdempotencyError
+            ? new McpReadError(
+                "IDEMPOTENCY_KEY_REUSED",
+                "The idempotency key was already used for different input.",
+              )
+          : error instanceof ContentRevisionStaleError
+            ? new McpReadError(
+                "STALE_REVISION",
+                "The workspace revision changed.",
+                error.acknowledgedRevision === undefined
+                  ? null
+                  : { latestRevision: error.acknowledgedRevision },
+              )
+          : error instanceof ContentRevisionValidationError
+            ? new McpReadError(
+                "VALIDATION_FAILED",
+                "The draft command failed validation.",
+              )
+          : error instanceof ContentWorkspaceAccessError
+            ? new McpReadError(
+                "OBJECT_NOT_FOUND",
+                "The requested object was not found.",
+              )
           : new McpReadError(
               "TEMPORARILY_UNAVAILABLE",
               "The request could not be completed safely.",
             );
+      const scopesEvaluated =
+        safeError.requiredScopes.length > 0
+          ? safeError.requiredScopes
+          : requiredScopes;
       const contextualError = new McpReadError(
         safeError.code,
         safeError.message,
-        { invocationId, observedAt },
-      );
-      await context.finishDurably(() =>
-        connections.recordInvocation({
+        {
           invocationId,
-          connectionId: principal.connectionId,
-          actorId: principal.actorId,
-          siteId: principal.siteId,
-          operation,
-          inputHash,
-          protocolVersion: mcpProtocolVersion,
-          scopesEvaluated: [mcpInitialScope],
-          outcome: "denied",
-          reason: safeError.code,
-          occurredAt: observedAt,
-          contractVersion: mcpContractVersion,
-        }),
+          observedAt:
+            safeError.replayed && safeError.observedAt !== null
+              ? safeError.observedAt
+              : observedAt,
+          requiredScopes:
+            safeError.code === "INSUFFICIENT_SCOPE"
+              ? scopesEvaluated
+              : [],
+          ...(safeError.latestRevision === null
+            ? {}
+            : { latestRevision: safeError.latestRevision }),
+          ...(safeError.conflictResource === null
+            ? {}
+            : { conflictResource: safeError.conflictResource }),
+          replayed: safeError.replayed,
+          auditRecorded: safeError.auditRecorded,
+        },
       );
-      throw contextualError;
+      const terminalBusinessError =
+        safeError.code === "OBJECT_NOT_FOUND" ||
+        safeError.code === "VALIDATION_FAILED" ||
+        safeError.code === "STALE_REVISION";
+      let reportedError = contextualError;
+      let joinedFailureRecorded = safeError.auditRecorded;
+      if (
+        !joinedFailureRecorded &&
+        allowedAudit !== null &&
+        recordJoinedFailure !== undefined &&
+        terminalBusinessError
+      ) {
+        const joinedFailureAudit = {
+          ...allowedAudit,
+          scopesEvaluated,
+        };
+        try {
+          const authoritativeError = await context.finishDurably(() =>
+            recordJoinedFailure(joinedFailureAudit, safeError),
+          );
+          if (authoritativeError instanceof McpReadError) {
+            reportedError = authoritativeError;
+          }
+          joinedFailureRecorded = true;
+        } catch {
+          joinedFailureRecorded = false;
+        }
+      }
+      if (!joinedFailureRecorded) {
+        await context.finishDurably(() =>
+          connections.recordInvocation({
+            invocationId,
+            connectionId: principal.connectionId,
+            actorId: principal.actorId,
+            siteId: principal.siteId,
+            operation,
+            inputHash,
+            protocolVersion: mcpProtocolVersion,
+            scopesEvaluated,
+            outcome: "denied",
+            reason: safeError.code,
+            occurredAt: observedAt,
+            contractVersion: mcpContractVersion,
+          }),
+        );
+      }
+      throw new McpReadError(
+        reportedError.code,
+        reportedError.message,
+        {
+          invocationId,
+          observedAt:
+            reportedError.observedAt ??
+            contextualError.observedAt ??
+            undefined,
+          requiredScopes: reportedError.requiredScopes,
+          latestRevision:
+            reportedError.latestRevision ?? undefined,
+          conflictResource:
+            reportedError.conflictResource ?? undefined,
+          replayed: reportedError.replayed,
+          auditRecorded: joinedFailureRecorded,
+        },
+      );
     }
   }
 
   return {
+    executeScoped: execute,
     loadConnection,
     rejectInvalidInput(
       principal: McpConnectionPrincipal,
       operation: string,
       input: unknown,
       context: McpExecutionContext = uninterruptedContext,
+      requiredScopes: ReadonlyArray<string> = [mcpInitialScope],
     ): Promise<unknown> {
       return execute({
         principal,
         operation,
         auditInput: input,
         context,
+        requiredScopes,
         async run(): Promise<never> {
           throw new McpReadError(
             "VALIDATION_FAILED",

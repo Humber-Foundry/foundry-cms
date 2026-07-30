@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createBlogPostId,
@@ -9,6 +9,7 @@ import {
 } from "@foundry/site-definition";
 
 import {
+  ContentRevisionStaleError,
   McpReadError,
   createInMemoryPublishedSiteRepository,
   createMcpReadApplication,
@@ -255,5 +256,177 @@ describe("site-scoped MCP read application", () => {
         code: "AUTHENTICATION_REQUIRED",
       }),
     );
+  });
+
+  it("audits every scope evaluated by a denial discovered during execution", async () => {
+    const { application, audit } = fixture({
+      connection: activeConnection({
+        scopes: ["site.read", "content.draft", "design.draft"],
+      }),
+    });
+    const mixedPrincipal = {
+      ...principal,
+      scopes: ["site.read", "design.draft"],
+    };
+
+    await expect(
+      application.executeScoped({
+        principal: mixedPrincipal,
+        operation: "foundry.preview.prepare",
+        auditInput: { workspaceId: "workspace_mixed" },
+        requiredScopes: ["design.draft"],
+        context: {
+          throwIfExpired() {},
+          run: (operation) => operation(),
+          finishDurably: (operation) => operation(),
+        },
+        async run() {
+          throw new McpReadError(
+            "INSUFFICIENT_SCOPE",
+            "The preview includes content and design changes.",
+            { requiredScopes: ["content.draft", "design.draft"] },
+          );
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: ["content.draft", "design.draft"],
+    });
+    expect(audit).toEqual([
+      expect.objectContaining({
+        outcome: "denied",
+        scopesEvaluated: ["content.draft", "design.draft"],
+      }),
+    ]);
+  });
+
+  it("joins every dynamically evaluated scope into terminal mutation failures", async () => {
+    const { application } = fixture({
+      connection: activeConnection({
+        scopes: ["site.read", "content.draft", "design.draft"],
+      }),
+    });
+    const recordJoinedFailure = vi.fn(async () => {});
+
+    await expect(
+      application.executeScoped({
+        principal: {
+          ...principal,
+          scopes: ["site.read", "content.draft", "design.draft"],
+        },
+        operation: "foundry.preview.prepare",
+        auditInput: { idempotencyKey: "drift-key" },
+        requiredScopes: ["design.draft"],
+        context: {
+          throwIfExpired() {},
+          run: (operation) => operation(),
+          finishDurably: (operation) => operation(),
+        },
+        joinedAudit: true,
+        recordJoinedFailure,
+        async run() {
+          throw new McpReadError(
+            "VALIDATION_FAILED",
+            "The preview revision no longer matches the current deployment.",
+            { requiredScopes: ["content.draft", "design.draft"] },
+          );
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      requiredScopes: [],
+      auditRecorded: true,
+    });
+    expect(recordJoinedFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopesEvaluated: ["content.draft", "design.draft"],
+      }),
+      expect.objectContaining({
+        code: "VALIDATION_FAILED",
+      }),
+    );
+  });
+
+  it("maps a stale stored revision to a replayable terminal mutation error", async () => {
+    const { application } = fixture();
+    const recordJoinedFailure = vi.fn(async () => {});
+
+    await expect(
+      application.executeScoped({
+        principal,
+        operation: "foundry.content.patch",
+        auditInput: { idempotencyKey: "stale-key" },
+        requiredScopes: ["site.read"],
+        context: {
+          throwIfExpired() {},
+          run: (operation) => operation(),
+          finishDurably: (operation) => operation(),
+        },
+        joinedAudit: true,
+        recordJoinedFailure,
+        async run() {
+          throw new ContentRevisionStaleError(4);
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "STALE_REVISION",
+      latestRevision: 4,
+      replayed: false,
+      auditRecorded: true,
+    });
+    expect(recordJoinedFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "foundry.content.patch",
+      }),
+      expect.objectContaining({
+        code: "STALE_REVISION",
+        latestRevision: 4,
+      }),
+    );
+  });
+
+  it("returns the authoritative joined failure when a terminal mutation loses an idempotency race", async () => {
+    const { application, audit } = fixture();
+    const recordJoinedFailure = vi.fn(async () =>
+      new McpReadError(
+        "IDEMPOTENCY_KEY_REUSED",
+        "The idempotency key was already used for different input.",
+        {
+          observedAt: "2026-07-29T18:10:00.000Z",
+          replayed: true,
+          auditRecorded: true,
+        },
+      )
+    );
+
+    await expect(
+      application.executeScoped({
+        principal,
+        operation: "foundry.content.patch",
+        auditInput: { idempotencyKey: "raced-terminal-key" },
+        requiredScopes: ["site.read"],
+        context: {
+          throwIfExpired() {},
+          run: (operation) => operation(),
+          finishDurably: (operation) => operation(),
+        },
+        joinedAudit: true,
+        recordJoinedFailure,
+        async run() {
+          throw new McpReadError(
+            "VALIDATION_FAILED",
+            "The losing local failure must not escape.",
+          );
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "IDEMPOTENCY_KEY_REUSED",
+      message:
+        "The idempotency key was already used for different input.",
+      observedAt: "2026-07-29T18:10:00.000Z",
+      replayed: true,
+      auditRecorded: true,
+    });
+    expect(audit).toEqual([]);
   });
 });

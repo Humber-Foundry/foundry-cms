@@ -18,8 +18,11 @@ The server implements MCP's stable 2025-11-25 authorization profile:
 
 - It is an OAuth 2.1 resource server and publishes RFC 9728 protected resource
   metadata.
-- Its `401` includes `WWW-Authenticate: Bearer` with `resource_metadata` and
-  the minimum scope needed for the attempted operation.
+- Its unauthenticated `401` includes `WWW-Authenticate: Bearer` with
+  `resource_metadata` and the initial `site.read` scope. An authenticated call
+  that lacks a draft scope returns `403` with
+  `error="insufficient_scope"` and a scope value containing `site.read` plus
+  exactly the required incremental draft scope.
 - The authorization server publishes RFC 8414 or OIDC discovery metadata and
   supports authorization code with PKCE `S256`.
 - Clients include the exact `resource` in authorization and token requests.
@@ -39,7 +42,7 @@ Example protected resource metadata:
 {
   "resource": "https://cms.example.com/api/foundry-mcp",
   "authorization_servers": ["https://cms.example.com"],
-  "scopes_supported": ["site.read"],
+  "scopes_supported": ["site.read", "content.draft", "design.draft"],
   "bearer_methods_supported": ["header"],
   "resource_name": "Example Site — Foundry CMS"
 }
@@ -84,8 +87,24 @@ sequenceDiagram
 
 Tools and templates not allowed by current scopes are omitted from discovery.
 Direct calls to omitted tools are still denied. Scope upgrades run a new
-authorization request and Owner consent; they never happen from a tool
-argument.
+authorization request bound to the existing connection ID, a short-lived
+signed step-up token and fresh Owner consent; they never happen from a tool
+argument. The token response exposes the opaque `connection_id` and
+`step_up_token` as extension fields, so a conforming client can initiate
+step-up without decoding the access-token JWT. The signed token binds the
+access-token identity, actor, client, site, connection, original authorization
+redirect URI and exact current scope snapshot. Foundry rejects a missing,
+expired, cross-connection, alternate-redirect or stale token before showing or
+accepting consent. The consent page names the exact existing connection and
+shows both its current and requested permissions. The requested scope set is an
+ordered additive superset of the connection's current scopes, so step-up cannot
+silently replace, remove, wildcard, or broaden a permission.
+The completed authorization issues a replacement token. The client reconnects
+and reinitializes with that token before discovering the added tools and
+templates; an existing token never gains authority or receives a live
+list-change signal. Refresh-token families retain the exact scopes present when
+their authorization code was redeemed, so an older family cannot mint a token
+with a newly consented scope.
 
 ## Preview and publication sequence
 
@@ -99,7 +118,7 @@ sequenceDiagram
     participant Git as GitHub publisher
     participant CF as Cloudflare deployment
 
-    Agent->>MCP: content.patch(baseRevision, idempotencyKey)
+    Agent->>MCP: content.patch(expectedRevision, idempotencyKey)
     MCP->>App: PatchDraft(actor, site, command)
     App->>D1: CAS revision + audit + idempotency result
     D1-->>App: revision N + contentHash
@@ -127,6 +146,9 @@ The reviewer authenticates through the human boundary. MCP elicitation MAY use
 URL mode to help the user navigate to this page, but URL elicitation is
 convenience only: it neither authenticates nor records approval. Clients without
 elicitation receive the URL as ordinary structured output.
+The review route revalidates the stored revision against the current schema,
+renderer and production base, then verifies the immutable artifact hash. It
+refuses to render after deployment drift.
 
 Approval is immutable and records:
 
@@ -160,7 +182,7 @@ Every mutation requires:
 
 ```text
 idempotencyKey: UUID generated once per logical user intent
-baseRevision: integer for a workspace mutation
+expectedRevision: integer for a workspace mutation
 ```
 
 The server stores `(siteId, actorId, toolName, idempotencyKey)` with a canonical
@@ -169,7 +191,7 @@ input hash and result. Behavior:
 - Same key and same canonical input returns the original success or terminal
   business error with `replayed: true`.
 - Same key with different input returns `IDEMPOTENCY_KEY_REUSED`.
-- A lower or different `baseRevision` returns `STALE_REVISION` plus the latest
+- A lower or different `expectedRevision` returns `STALE_REVISION` plus the latest
   revision and conflict resource URI; it makes no change.
 - A timeout is retried with the same key. The server reconciles ambiguous Git
   outcomes by publish ID before attempting a new commit.

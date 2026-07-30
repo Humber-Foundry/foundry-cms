@@ -10,3 +10,13 @@ export function revisionPreviewGatewayUrl(
   });
   return `/api/foundry-cms/revisions?${query.toString()}`;
 }
+
+export function mcpPreviewReviewUrl(
+  canonicalOrigin: string,
+  previewId: string,
+): string {
+  return new URL(
+    `/dash/review/${encodeURIComponent(previewId)}`,
+    canonicalOrigin,
+  ).toString();
+}

@@ -10,7 +10,9 @@ Return to the [contract index](README.md).
   (`additionalProperties: false`) and returns `structuredContent`.
 - For backward compatibility, the same JSON is serialized into one text content
   block. The text contains data only, never new instructions.
-- All IDs are UUIDs except revision integers, Git SHAs and opaque cursors.
+- Idempotency keys are UUIDs. Domain IDs are stable opaque values constrained
+  by their advertised schema; revision numbers and Git SHAs retain their native
+  integer and hexadecimal forms.
 - Site is derived from the authenticated resource. No input accepts a site,
   repository, hostname, provider, file path, URL or SQL expression.
 - Tool annotations accurately describe expected behavior but are not security
@@ -31,7 +33,6 @@ resolved object; guessing an ID never expands access.
 | `foundry://content/{kind}/{contentId}` | `application/json` | `site.read` | Published canonical document and live Git SHA |
 | `foundry://workspaces/{workspaceId}` | `application/json` | matching draft scope | Workspace manifest, base, current revision and state |
 | `foundry://workspaces/{workspaceId}/revisions/{revision}` | `application/json` | matching draft scope | Immutable canonical revision |
-| `foundry://previews/{previewId}` | `application/json` | matching draft scope | Fingerprint, human review URL and approval state; no approval capability |
 | `foundry://publications/{operationId}` | `application/json` | publish/schedule scope | Durable state, safe failure and Git/release result |
 | `foundry://analytics/definitions` | `application/json` | `analytics.read` | Metric definitions, quality meanings, retention and freshness |
 | `foundry://connections/self` | `application/json` | `connection.admin` | Caller connection, site, client, scopes and state |
@@ -160,10 +161,10 @@ schemas through `tools/list`; generated schema snapshots are conformance-tested.
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "purpose": {"type": "string", "minLength": 1, "maxLength": 240},
+      "expectedRevision": {"const": 0},
       "idempotencyKey": {"type": "string", "format": "uuid"}
     },
-    "required": ["purpose", "idempotencyKey"]
+    "required": ["expectedRevision", "idempotencyKey"]
   },
   "outputSchema": {
     "type": "object",
@@ -175,13 +176,30 @@ schemas through `tools/list`; generated schema snapshots are conformance-tested.
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "workspaceId": {"type": "string", "format": "uuid"},
+          "workspaceId": {
+            "type": "string",
+            "pattern": "^workspace_[a-z0-9_]+$"
+          },
           "revision": {"type": "integer", "minimum": 0},
-          "baseCommit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "contentHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "schemaVersion": {"type": "string"},
-          "state": {"const": "open"}
+          "validation": {
+            "type": "object",
+            "properties": {
+              "valid": {"const": true},
+              "issues": {"type": "array", "maxItems": 0}
+            }
+          },
+          "replayed": {"type": "boolean"}
         },
-        "required": ["workspaceId", "revision", "baseCommit", "schemaVersion", "state"]
+        "required": [
+          "workspaceId",
+          "revision",
+          "contentHash",
+          "schemaVersion",
+          "validation",
+          "replayed"
+        ]
       },
       "meta": {
         "type": "object",
@@ -205,33 +223,32 @@ schemas through `tools/list`; generated schema snapshots are conformance-tested.
 }
 ```
 
-### Patch content or prepare a campaign
-
-`documentKind: "campaign"` creates only a campaign draft artifact. The patch
-command has no recipient, audience, provider, send or email schedule operation.
-Test delivery is a separate, scoped command.
+### Patch content
 
 ```json
 {
-  "workspaceId": "3a0fc8d4-b70e-4a07-a5bd-acde5433b2ba",
-  "baseRevision": 4,
+  "workspaceId": "workspace_mcp_3a0fc8d4",
+  "expectedRevision": 4,
   "idempotencyKey": "02c4a830-e14c-4d54-a0de-4c474463543a",
-  "document": {
-    "kind": "post",
-    "contentId": "ae8b6710-6f98-42f3-931d-cff6d0310c60"
-  },
   "operations": [
     {
       "op": "set",
-      "field": "title",
+      "field": "site_foundry.name",
       "value": "A practical guide"
     },
     {
-      "op": "replace_rich_text",
-      "field": "body",
+      "op": "set",
+      "field": "section_call_to_action.body",
+      "format": "richText",
       "value": {
-        "type": "doc",
-        "content": []
+        "version": "1.0.0",
+        "type": "document",
+        "children": [
+          {
+            "type": "paragraph",
+            "children": [{"type": "text", "text": "Canonical copy."}]
+          }
+        ]
       }
     }
   ]
@@ -241,24 +258,27 @@ Test delivery is a separate, scoped command.
 Input schema constraints:
 
 - `operations` contains 1–100 discriminated commands.
-- `field` must resolve to an editable stable schema field for the document kind.
+- `field` must be one of the full stable paths advertised by the content schema.
 - Rich text is the canonical editor JSON, not HTML.
-- Relationships use stable content/asset IDs and are checked at the same site.
-- Delete/unset commands are allowed only where schema permits and therefore make
-  `destructiveHint: true` accurate.
-- The output returns `workspaceId`, new `revision`, `contentHash`,
-  `changedDocuments`, validation warnings and `replayed`.
+- This v1 patch surface exposes only `set`; it never accepts delete, unset,
+  relationship, file, code or markup commands.
+- The output returns the workspace, new revision, content and preview hashes,
+  schema version, validation result and replay status.
 
 ### Patch design
 
 ```json
 {
-  "workspaceId": "3a0fc8d4-b70e-4a07-a5bd-acde5433b2ba",
-  "baseRevision": 5,
+  "workspaceId": "workspace_mcp_3a0fc8d4",
+  "expectedRevision": 5,
   "idempotencyKey": "0b048343-41e5-4e63-bcdd-eae156c35f53",
   "operations": [
-    {"op": "set_token", "token": "color.accent", "value": "#295F4E"},
-    {"op": "set_variant", "slot": "hero", "variant": "split"}
+    {"op": "set_token", "token": "colour.accent", "value": "moss"},
+    {
+      "op": "set_variant",
+      "componentId": "section_hero",
+      "value": "focused"
+    }
   ]
 }
 ```
@@ -273,8 +293,8 @@ Request:
 
 ```json
 {
-  "workspaceId": "3a0fc8d4-b70e-4a07-a5bd-acde5433b2ba",
-  "revision": 6,
+  "workspaceId": "workspace_mcp_3a0fc8d4",
+  "expectedRevision": 6,
   "idempotencyKey": "ce578518-f227-46ee-8c48-16dd7ed7d203"
 }
 ```
@@ -287,13 +307,15 @@ Result:
   "invocationId": "01J...",
   "result": {
     "previewId": "3314031d-6368-46dc-a563-537866cf6ebf",
-    "workspaceId": "3a0fc8d4-b70e-4a07-a5bd-acde5433b2ba",
+    "workspaceId": "workspace_mcp_3a0fc8d4",
     "revision": 6,
-    "contentHash": "sha256:...",
+    "contentHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "schemaVersion": "2026-07-26.1",
-    "rendererCommit": "4f83...",
+    "validation": {"valid": true, "issues": []},
+    "previewArtifact": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
     "approvalStatus": "pending_human_review",
-    "humanReviewUrl": "https://cms.example.com/dash/review/3314031d-..."
+    "replayed": false,
+    "humanReviewUrl": "https://cms.example.com/dash/review/3314031d-6368-46dc-a563-537866cf6ebf"
   },
   "meta": {"replayed": false, "observedAt": "2026-07-26T20:00:00Z"}
 }
@@ -406,7 +428,16 @@ subscriber, visitor, form respondent, recipient, message or raw-event fields.
 ## Discovery compatibility
 
 The server supports pagination for `tools/list`, `resources/list`,
-`resources/templates/list` and `prompts/list`. It emits list-changed
-notifications when a scope grant changes, while clients must still reconnect or
-reauthorize after revocation. Tool names remain namespaced and within MCP's
-portable character set. Client-specific aliases are prohibited.
+`resources/templates/list` and `prompts/list`. Discovery is stable for the
+lifetime of an access token, so the server advertises `listChanged: false`.
+After an Owner grants an additive scope, the client must use the replacement
+token and successfully reinitialize before discovering the added tools and
+templates. Every access token follows the same Streamable HTTP session
+contract: initialize first, then send the returned `MCP-Session-Id` on every
+subsequent request. A missing required session ID returns HTTP `400`; an
+unknown, stale or wrong-token session ID returns HTTP `404`, directing a
+conforming client to initialize a replacement session. The signed session ID
+is bound to that access token and exact scope set.
+Revocation also requires reconnection or reauthorization. Tool names remain
+namespaced and within MCP's portable character set. Client-specific aliases are
+prohibited.
