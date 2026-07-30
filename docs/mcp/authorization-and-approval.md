@@ -241,8 +241,13 @@ publish_id -> git_commit_sha -> release_marker
 
 The linked MCP audit row commits in the same D1 transaction as an accepted
 publication claim, schedule or cancellation receipt, before any external
-provider continuation. Failures discovered after command admission use the
-same publication-specific recorder, including current-grant loss. Audit records
+provider continuation. Its result hash covers the outcome as admitted, because
+the terminal state is only reached after that transaction and audit rows are
+append-only. Failures discovered after command admission use the same
+publication-specific recorder, including current-grant loss. One invocation
+records one row, so when a claim already committed a linked row, that row
+stands as the invocation's record and the publication's own status and history
+carry the terminal outcome. Audit records
 include timestamps, contract/protocol version, scopes evaluated, object IDs,
 policy decision, affected revision and safe error code. They exclude
 tokens, authorization codes, PKCE values, prompts, model reasoning, raw content,
