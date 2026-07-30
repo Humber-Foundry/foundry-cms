@@ -97,13 +97,15 @@ provisioned scope or if a sender changes under its numeric ID.
    Owner's receipt confirmation. This result is test-delivery evidence, not a
    production-readiness declaration.
 
-Every logical test prepares a stable provider correlation ID and canonical
-Foundry send proof without creating a mutable Brevo draft. Foundry persists
+Every logical test prepares a stable provider correlation ID and an
+installation-keyed HMAC Foundry send proof without creating a mutable Brevo
+draft. Foundry persists
 that proof, acquires a durable send lease, and makes one transactional-email
 request containing the exact rendered HTML, subject, verified sender address
 and display name, and explicit recipient addresses. The request also carries
 the execution ID as a Brevo tag, uses it as the provider idempotency key, and
-carries the execution/proof values as a custom header. A Brevo 201 response
+carries it under Brevo's exact `Idempotency-Key` custom-header field. The
+execution/proof values use a separate custom header. A Brevo 201 response
 must contain a message ID before Foundry stores accepted evidence. Other
 successful-looking HTTP statuses remain ambiguous.
 

@@ -1,4 +1,5 @@
 import {
+  hmacSha256CanonicalJson,
   sha256CanonicalJson,
   sha256Text,
   type NewsletterDeliveryAdapter,
@@ -168,9 +169,9 @@ export function createBrevoNewsletterDeliveryAdapter({
     request: NewsletterTestRequest,
     providerCampaignId: string,
   ) {
-    return sha256CanonicalJson({
-      version: "foundry.brevo-transactional-test-send-proof.v1",
-      installationProofKey,
+    return hmacSha256CanonicalJson(installationProofKey, {
+      domain: "foundry.brevo-transactional-test-send-proof",
+      version: 2,
       executionId: request.executionId,
       providerCampaignId,
       subject: request.subject,
@@ -329,7 +330,7 @@ export function createBrevoNewsletterDeliveryAdapter({
             htmlContent: request.renderedCampaign.html.bytes,
             tags: [request.executionId],
             headers: {
-              idempotencyKey: request.executionId,
+              "Idempotency-Key": request.executionId,
               "X-Mailin-custom":
                 `foundry_execution:${request.executionId}` +
                 `|foundry_proof:${sendProof}`,

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+import { hmacSha256CanonicalJson } from "@foundry/application";
+
 import { createBrevoTestWebhookHandler } from "./brevo-test-webhook-runtime";
 import type {
   BrevoTestWebhookEvidence,
@@ -107,10 +109,18 @@ describe("Brevo test webhook runtime", () => {
       receivedAt: "2026-07-29T20:00:00.000Z",
     });
     expect(recorded?.recipientFingerprint).toMatch(/^[0-9a-f]{64}$/u);
+    await expect(
+      hmacSha256CanonicalJson(installationProofKey, {
+        domain: "foundry.brevo-test-recipient-fingerprint",
+        version: 2,
+        address: ownerAddress.toLowerCase(),
+      }),
+    ).resolves.toBe(recorded?.recipientFingerprint);
     expect(JSON.stringify(recorded)).not.toContain(ownerAddress);
     expect(JSON.stringify(recorded)).not.toContain(
       ownerAddress.toLowerCase(),
     );
+    expect(JSON.stringify(recorded)).not.toContain(installationProofKey);
   });
 
   it("ignores authenticated events that lack an exact execution tag or proof header", async () => {

@@ -82,8 +82,10 @@ evidence.
   explicit recipients in one provider request. The delivery binding includes
   the selected sender's exact ID, address and display name. It does not read
   and then send a mutable provider draft.
-- Foundry persists an installation-keyed proof of the exact test binding before
-  the provider request. It accepts the direct result only when Brevo returns
+- Foundry persists a domain-separated, installation-keyed HMAC proof of the
+  exact test binding before the provider request. The transactional payload
+  carries the execution ID in Brevo's exact `Idempotency-Key` custom-header
+  field. Foundry accepts the direct result only when Brevo returns
   HTTP 201 and a message ID; an uncertain response remains ambiguous.
 - Ambiguous transactional writes reconcile through Brevo's
   authenticated

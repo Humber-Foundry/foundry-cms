@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  hmacSha256CanonicalJson,
   sha256Text,
   type NewsletterDeliveryAdapter,
   type NewsletterTestRequest,
@@ -137,7 +138,7 @@ function proofBearingEvidence(
 }
 
 describe("Brevo newsletter delivery adapter", () => {
-  it("sends the exact content, sender, subject, and recipients in one provider write", async () => {
+  it("uses Brevo's exact transactional wire contract for one provider write", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       response(201, { messageId: "<message-17@brevo.test>" }),
     );
@@ -171,7 +172,7 @@ describe("Brevo newsletter delivery adapter", () => {
           htmlContent: request.renderedCampaign.html.bytes,
           tags: [request.executionId],
           headers: {
-            idempotencyKey: request.executionId,
+            "Idempotency-Key": request.executionId,
             "X-Mailin-custom":
               `foundry_execution:${request.executionId}` +
               `|foundry_proof:${prepared.foundrySendProof}`,
@@ -179,6 +180,14 @@ describe("Brevo newsletter delivery adapter", () => {
         }),
       }),
     );
+    const sentBody = JSON.parse(
+      (fetcher.mock.calls[0]?.[1]?.body as string),
+    ) as { headers: Record<string, string> };
+    expect(sentBody.headers).toHaveProperty(
+      "Idempotency-Key",
+      request.executionId,
+    );
+    expect(sentBody.headers).not.toHaveProperty("idempotencyKey");
   });
 
   it("prepares deterministic proof without a mutable provider draft", async () => {
@@ -194,11 +203,20 @@ describe("Brevo newsletter delivery adapter", () => {
 
     const beforeRotation = await before.prepareTest(request);
     const afterRotation = await after.prepareTest(request);
+    const expectedProof = await hmacSha256CanonicalJson("p".repeat(64), {
+      domain: "foundry.brevo-transactional-test-send-proof",
+      version: 2,
+      executionId: request.executionId,
+      providerCampaignId: correlationId,
+      subject: request.subject,
+      senderIdentityId: request.senderIdentityId,
+      binding: request.binding,
+    });
     expect(beforeRotation).toEqual(afterRotation);
     expect(beforeRotation).toEqual({
       outcome: "prepared",
       providerCampaignId: correlationId,
-      foundrySendProof: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      foundrySendProof: expectedProof,
     });
   });
 

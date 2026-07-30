@@ -1,4 +1,4 @@
-import { sha256CanonicalJson } from "@foundry/application";
+import { hmacSha256CanonicalJson } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
 
 export type BrevoTestWebhookEvidence = Readonly<{
@@ -32,9 +32,9 @@ export function brevoTestRecipientFingerprint(
   installationProofKey: string,
   address: string,
 ) {
-  return sha256CanonicalJson({
-    version: "foundry.brevo-test-recipient-proof.v1",
-    installationProofKey,
+  return hmacSha256CanonicalJson(installationProofKey, {
+    domain: "foundry.brevo-test-recipient-fingerprint",
+    version: 2,
     address: address.trim().toLowerCase(),
   });
 }
