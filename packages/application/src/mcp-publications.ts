@@ -954,6 +954,15 @@ export function createMcpPublicationApplication({
               input.revision,
               execution,
             );
+            // Cancellation is a side effect on an active schedule, so the
+            // live grant is revalidated here as the request and schedule
+            // commands do, rather than resting on the scope checked at
+            // admission.
+            await requireCurrentGrant(
+              principal,
+              scopesEvaluated,
+              execution,
+            );
             const application = await execution.run(() =>
               runtime.loadBlogOperations(principal),
             );

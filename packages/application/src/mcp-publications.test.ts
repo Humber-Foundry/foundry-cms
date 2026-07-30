@@ -745,6 +745,69 @@ describe("MCP publication orchestration", () => {
     ]);
   });
 
+  it("does not cancel a schedule after the grant is revoked", async () => {
+    // The connection is admitted holding the schedule scope and loses its
+    // live grant before the cancellation runs. Revocation must produce no
+    // side effect, so the command is never entered.
+    const cancelSchedule = vi.fn();
+    const schedulePrincipal: McpConnectionPrincipal = {
+      ...principal,
+      scopes: [
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpPublicationScheduleScope,
+      ],
+    };
+    let reads = 0;
+    const { application, publicationAudit } = await fixture({
+      connectionAt: () => {
+        reads += 1;
+        return reads <= 1
+          ? { ...schedulePrincipal, status: "active" }
+          : null;
+      },
+      blogOperations: {
+        commands: { cancelSchedule },
+        queries: {
+          async getSchedule() {
+            return {
+              id: "schedule-56",
+              postId: "post-56",
+              workspaceId,
+              contentRevision: 1,
+              approvalId,
+              state: "active",
+            };
+          },
+          async findScheduleCancellationByRequest() {
+            return null;
+          },
+        },
+      } as unknown as BlogOperationsStub,
+    });
+
+    await expect(
+      application.cancelPublicationSchedule(
+        schedulePrincipal,
+        {
+          workspaceId,
+          revision: 1,
+          scheduleId: "schedule-56",
+          idempotencyKey: "eeeeeee1-eeee-4eee-8eee-eeeeeeeeeeee",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_SCOPE" });
+    expect(cancelSchedule).not.toHaveBeenCalled();
+    expect(publicationAudit).toEqual([
+      expect.objectContaining({
+        operation: "foundry.publication.cancel",
+        outcome: "denied",
+        reason: "INSUFFICIENT_SCOPE",
+      }),
+    ]);
+  });
+
   it("reads schedule status under the schedule scope alone", async () => {
     // The object named by the operation id decides the required scope, so a
     // connection granted only scheduling can read a schedule's status.
