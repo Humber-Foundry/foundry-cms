@@ -1691,6 +1691,42 @@ describe("content publication application", () => {
     expect(createCommit).not.toHaveBeenCalled();
   });
 
+  it("does not reconcile or verify a refresh after MCP authority is revoked", async () => {
+    const { app, approval } = await approve();
+    createCommit.mockResolvedValueOnce({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${"c".repeat(40)}`,
+    });
+    const inFlight = await app.commands.publish({
+      workspaceId,
+      revision: 1,
+      approvalId: approval.id,
+      requestedBy: createContentActorId("mcp-agent-56"),
+      idempotencyKey: "mcp-refresh-revoked",
+      assertCurrentAuthority: vi.fn().mockResolvedValue(true),
+    });
+    expect(inFlight.status).toBe("unknown");
+    const reconcileCommit = publisher.reconcileCommit as ReturnType<
+      typeof vi.fn
+    >;
+    reconcileCommit.mockClear();
+    getDeploymentStatus.mockClear();
+    isReleaseLive.mockClear();
+
+    const refreshed = await app.commands.refresh(
+      inFlight.id,
+      undefined,
+      vi.fn().mockResolvedValue(false),
+    );
+
+    // No provider read, no deployment signal, no release verification, and no
+    // durable state advance: the revoked grant produced no side effect.
+    expect(reconcileCommit).not.toHaveBeenCalled();
+    expect(getDeploymentStatus).not.toHaveBeenCalled();
+    expect(isReleaseLive).not.toHaveBeenCalled();
+    expect(refreshed).toEqual(inFlight);
+  });
+
   it("commits identical bytes, paths and release evidence for human and MCP requests", async () => {
     async function publishOnce(
       requestedBy: Parameters<

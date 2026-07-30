@@ -1325,6 +1325,12 @@ export function createInMemoryBlogPostOperationsStore(seed: {
     connectionId: string;
     actorId: string;
     siteId: SiteId | string;
+    /**
+     * Scopes the connection grants. Omit to grant whatever a command asks for,
+     * which keeps a test focused on connection identity; supply it to exercise
+     * a connection that lacks a scope the command requires.
+     */
+    scopes?: ReadonlyArray<string>;
   }>;
 } = {}) {
   type StoredExecution = BlogPostScheduleExecution & {
@@ -1350,12 +1356,15 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         `${actorId}\0${siteId}\0${postId}`,
     ),
   );
-  const mcpScheduleAccess = new Set(
+  const mcpScheduleGrants = new Map(
     (seed.mcpScheduleAccess ?? []).map(
-      ({ connectionId, actorId, siteId }) =>
+      ({ connectionId, actorId, siteId, scopes }) => [
         `${connectionId}\0${actorId}\0${siteId}`,
+        scopes,
+      ],
     ),
   );
+  const mcpScheduleAccess = new Set(mcpScheduleGrants.keys());
   const schedules = new Map<string, BlogPostSchedule>();
   const scheduleAuthorities = new Map<string, McpBlogScheduleAuthority>();
   const scheduleRequests = new Map<string, BlogPostSchedule>();
@@ -1517,8 +1526,13 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         );
     },
     async hasMcpScheduleAuthority(input) {
-      return mcpScheduleAccess.has(
-        `${input.connectionId}\0${input.actorId}\0${input.siteId}`,
+      const key =
+        `${input.connectionId}\0${input.actorId}\0${input.siteId}`;
+      if (!mcpScheduleGrants.has(key)) return false;
+      const granted = mcpScheduleGrants.get(key);
+      return (
+        granted === undefined ||
+        input.requiredScopes.every((scope) => granted.includes(scope))
       );
     },
     async findMcpScheduleAuthority(scheduleId) {

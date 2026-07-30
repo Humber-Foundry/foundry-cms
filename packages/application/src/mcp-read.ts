@@ -509,9 +509,14 @@ export function createMcpReadApplication({
         allowedAudit !== null &&
         recordJoinedFailure !== undefined
       ) {
+        // The admitted audit is the base, but this is a denial: record the
+        // policy decision and safe error code rather than inheriting the
+        // "allowed" outcome the admission check produced.
         const joinedFailureAudit = {
           ...allowedAudit,
           scopesEvaluated,
+          outcome: "denied" as const,
+          reason: safeError.code,
         };
         try {
           const authoritativeError = await context.finishDurably(() =>

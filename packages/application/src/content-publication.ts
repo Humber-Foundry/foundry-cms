@@ -1342,7 +1342,6 @@ export function createContentPublicationApplication({
     reservationProof?: ContentPublicationReservationProof,
     assertCurrentAuthority?: () => Promise<boolean>,
   ) {
-    void assertCurrentAuthority;
     const reservationFence =
       reservationProof === undefined ? {} : { reservationProof };
     const publication = await store.findPublication(publicationId);
@@ -1350,15 +1349,25 @@ export function createContentPublicationApplication({
       return null;
     }
     if (
-      publication.status === "verified-live"
-    ) {
-      await reconcileVerifiedPublication(publication);
-      return publication;
-    }
-    if (
       publication.status === "failed" ||
       publication.status === "blocked"
     ) {
+      return publication;
+    }
+    // A scheduler refresh runs on behalf of one MCP connection and can reach
+    // the Git reconciliation and deployment boundaries below. Losing that
+    // grant must stop the refresh before any provider read or state advance,
+    // leaving the publication exactly as it was.
+    if (
+      assertCurrentAuthority !== undefined &&
+      !(await assertCurrentAuthority())
+    ) {
+      return publication;
+    }
+    if (
+      publication.status === "verified-live"
+    ) {
+      await reconcileVerifiedPublication(publication);
       return publication;
     }
     const boundApproval = await store.findApproval(publication.approvalId);

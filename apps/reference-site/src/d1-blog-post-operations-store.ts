@@ -1410,6 +1410,14 @@ export function createD1BlogPostOperationsStore(
                      AND connection.actor_id = ?10
                      AND connection.site_id = ?1
                      AND connection.status = 'active'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM json_each(?11) AS required
+                       WHERE NOT EXISTS (
+                         SELECT 1 FROM mcp_connection_scopes AS granted
+                         WHERE granted.connection_id = connection.id
+                           AND granted.scope = required.value
+                       )
+                     )
                  )
                )
              )
@@ -1432,6 +1440,9 @@ export function createD1BlogPostOperationsStore(
             input.authority?.kind ?? null,
             input.authority?.connectionId ?? null,
             input.authority?.actorId ?? null,
+            input.authority === undefined
+              ? "[]"
+              : JSON.stringify([...input.authority.requiredScopes].sort()),
           ),
         database
           .prepare(

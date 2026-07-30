@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
+// Imported from its own module rather than the package barrel: the barrel
+// re-exports this file's subject, so going through it can leave the hash
+// helper uninitialised when only this test file is loaded.
+import { sha256CanonicalJson } from "./deterministic-hash";
+
 import {
   ContentApprovalInvalidError,
   createContentActorId,
@@ -20,7 +25,6 @@ import {
   mcpInitialScope,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
-  sha256CanonicalJson,
   type ContentPublication,
   type McpConnectionGrant,
   type McpConnectionPrincipal,

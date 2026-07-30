@@ -157,7 +157,12 @@ function staleRevision(
   );
 }
 
-function publicationError(error: unknown): McpReadError {
+function publicationError(
+  error: unknown,
+  requiredScope:
+    | typeof mcpPublicationPublishScope
+    | typeof mcpPublicationScheduleScope,
+): McpReadError {
   if (error instanceof McpReadError) return error;
   if (error instanceof ContentApprovalInvalidError) {
     return new McpReadError(
@@ -179,8 +184,8 @@ function publicationError(error: unknown): McpReadError {
     if (error.code === "publication_authority_not_current") {
       return new McpReadError(
         "INSUFFICIENT_SCOPE",
-        "The connection no longer grants publication publishing.",
-        { requiredScopes: [mcpPublicationPublishScope] },
+        "The connection no longer grants the required publication authority.",
+        { requiredScopes: [requiredScope] },
       );
     }
     return new McpReadError(
@@ -249,6 +254,15 @@ function createMcpPublicationResult(
 
 function hashMcpPublicationResult(result: McpPublicationResult) {
   return sha256CanonicalJson(result);
+}
+
+/**
+ * An operation id names either a publication or a blog schedule. The kind is
+ * what a status read is authorized against, so it is derived from the
+ * identifier rather than from whichever scope the caller happens to hold.
+ */
+function namesPublication(operationId: string) {
+  return operationId.startsWith("publish_");
 }
 
 /**
@@ -596,14 +610,16 @@ export function createMcpPublicationApplication({
               workspaceId,
               revision: input.revision,
               approvalId,
-              publicationId: publication.id,
+              // The receipt and the audit row must name the same publication,
+              // including when the claim reported a durable replay.
+              publicationId: receiptPublication.id,
               scheduleId: null,
               resultHash: await hashMcpPublicationResult(result),
               replayed,
             });
             return result;
           } catch (error) {
-            throw publicationError(error);
+            throw publicationError(error, mcpPublicationPublishScope);
           }
         },
       });
@@ -813,7 +829,7 @@ export function createMcpPublicationApplication({
             });
             return result;
           } catch (error) {
-            throw publicationError(error);
+            throw publicationError(error, mcpPublicationScheduleScope);
           }
         },
       });
@@ -828,9 +844,7 @@ export function createMcpPublicationApplication({
       }>,
       context: McpExecutionContext,
     ) {
-      const requiredScope = principal.scopes.includes(
-        mcpPublicationPublishScope,
-      )
+      const requiredScope = namesPublication(input.operationId)
         ? mcpPublicationPublishScope
         : mcpPublicationScheduleScope;
       return base.executeScoped({
@@ -849,7 +863,7 @@ export function createMcpPublicationApplication({
             input.revision,
             execution,
           );
-          if (input.operationId.startsWith("publish_")) {
+          if (namesPublication(input.operationId)) {
             const application = await execution.run(() =>
               runtime.loadPublication({ principal, workspaceId }),
             );
@@ -1034,7 +1048,7 @@ export function createMcpPublicationApplication({
             });
             return result;
           } catch (error) {
-            throw publicationError(error);
+            throw publicationError(error, mcpPublicationScheduleScope);
           }
         },
       });
