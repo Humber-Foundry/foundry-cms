@@ -372,6 +372,72 @@ describe("D1 content publication store", () => {
     ).resolves.toEqual({ state: "claimed", publication: requested });
   });
 
+  it("blocks a stale-approval MCP claim exactly as the human path does", async () => {
+    // A claim can fail on the approval guard rather than the authority guard.
+    // When the grant is still current the cause is the approved material, so
+    // the MCP request must record the same blocked evidence a human request
+    // records instead of reporting a lost authority.
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri, scopes_json,
+             status, created_by_membership_id, created_at, revoked_at
+           ) VALUES (
+             'connection-stale', 'actor-stale', ?1, 'client-stale',
+             'https://client.example/callback', '["site.read"]', 'active',
+             ?2, ?3, NULL
+           )`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          membershipId,
+          "2026-07-27T10:02:00.000Z",
+        ),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope) VALUES
+           ('connection-stale', 'site.read'),
+           ('connection-stale', 'content.draft'),
+           ('connection-stale', 'publication.publish')`,
+      ),
+    ]);
+    await store.invalidateApproval({
+      approvalId: approval.id,
+      invalidatedAt: "2026-07-27T10:05:00.000Z",
+      reason: "production_changed",
+    });
+
+    const humanClaim = await store.claimPublication(
+      publication("1", "stale-approval-human"),
+    );
+    const mcpClaim = await store.claimPublication(
+      {
+        ...publication("2", "stale-approval-mcp"),
+        requestedBy: createContentActorId("mcp-actor-stale"),
+      },
+      undefined,
+      {
+        kind: "mcp",
+        connectionId: "connection-stale",
+        actorId: "actor-stale",
+        operation: "foundry.publication.request",
+        requiredScopes: ["publication.publish", "content.draft"],
+      },
+    );
+
+    expect(humanClaim.state).toBe("blocked");
+    expect(mcpClaim.state).toBe(humanClaim.state);
+    expect(mcpClaim.publication.status).toBe(
+      humanClaim.publication.status,
+    );
+    expect(mcpClaim.publication.detail).toBe(
+      humanClaim.publication.detail,
+    );
+    expect(mcpClaim.publication.detail).toBe("approval_stale");
+  });
+
   it("requires the publish scope for an immediate claim that lists none", async () => {
     // The publication scope implied by the operation kind is enforced by the
     // claim statement itself, so a caller cannot omit it from requiredScopes

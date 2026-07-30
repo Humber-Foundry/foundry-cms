@@ -487,6 +487,62 @@ export function createD1ContentPublicationStore(
       .bind(publication.id, mutationToken);
   }
 
+  /**
+   * Mirrors the MCP authority guard the claim statement applies, so a failed
+   * claim can tell "the grant went away" apart from "the approved material
+   * changed" without widening what the claim itself accepts.
+   */
+  async function mcpAuthorityIsCurrent(
+    publication: ContentPublication,
+    authority: ContentPublicationMcpAuthority,
+    reservationProof?: ContentPublicationReservationProof,
+  ) {
+    const current = await database
+      .prepare(
+        `SELECT 1 AS is_current
+         FROM content_workspaces AS mcp_workspace
+         JOIN mcp_connections AS mcp_connection
+           ON mcp_connection.site_id = mcp_workspace.site_id
+          AND mcp_connection.id = ?1
+          AND mcp_connection.actor_id = ?2
+          AND mcp_connection.status = 'active'
+         WHERE mcp_workspace.workspace_id = ?3
+           AND ?4 = CASE
+             WHEN ?5 IS NULL THEN 'foundry.publication.request'
+             ELSE 'foundry.publication.schedule'
+           END
+           AND EXISTS (
+             SELECT 1
+             FROM mcp_connection_scopes AS publication_scope
+             WHERE publication_scope.connection_id = mcp_connection.id
+               AND publication_scope.scope = CASE
+                 WHEN ?5 IS NULL THEN 'publication.publish'
+                 ELSE 'publication.schedule'
+               END
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM json_each(?6) AS required_scope
+             WHERE NOT EXISTS (
+               SELECT 1
+               FROM mcp_connection_scopes AS granted_scope
+               WHERE granted_scope.connection_id = mcp_connection.id
+                 AND granted_scope.scope = required_scope.value
+             )
+           )`,
+      )
+      .bind(
+        authority.connectionId,
+        authority.actorId,
+        publication.workspaceId,
+        authority.operation,
+        reservationProof?.executionId ?? null,
+        JSON.stringify([...authority.requiredScopes].sort()),
+      )
+      .first();
+    return current !== null;
+  }
+
   async function mcpAuditStatement(
     publication: ContentPublication,
     mutationToken: string,
@@ -841,11 +897,23 @@ export function createD1ContentPublicationStore(
             );
           }
           if (authority !== undefined) {
-            throw new ContentPublicationValidationError(
-              "publication_authority_not_current",
-            );
-          }
-          if (reservationProof === undefined) {
+            // The claim statement can fail on the authority guard or on the
+            // approval, fingerprint and object-state guards beside it. Re-read
+            // only the authority: when it is still current the cause was the
+            // approved material, and the request records a blocked publication
+            // exactly as the human path does.
+            if (
+              !(await mcpAuthorityIsCurrent(
+                publication,
+                authority,
+                reservationProof,
+              ))
+            ) {
+              throw new ContentPublicationValidationError(
+                "publication_authority_not_current",
+              );
+            }
+          } else if (reservationProof === undefined) {
             const currentRequester = await database
               .prepare(
                 `SELECT 1 AS allowed
