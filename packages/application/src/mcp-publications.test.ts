@@ -223,6 +223,10 @@ async function fixture({
         publicationAudit.push(event);
       },
     },
+    // Pinned so the scheduling window check is evaluated against a fixed
+    // instant rather than the wall clock, which would eventually reorder
+    // which validation a scheduling test reaches first.
+    now: () => now,
   });
   return {
     application,

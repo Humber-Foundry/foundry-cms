@@ -1119,6 +1119,16 @@ export function createContentPublicationApplication({
     );
   }
 
+  /**
+   * The approval check no longer receives the requester, so this keeps the
+   * blank-requester refusal the publish and retry commands have always made.
+   */
+  function requireNamedRequester(requestedBy: string) {
+    if (requestedBy.trim() === "") {
+      throw new ContentApprovalInvalidError("approval_not_found");
+    }
+  }
+
   async function requireApproval(approvalId: ContentApprovalId) {
     const approval = await store.findApproval(approvalId);
     if (approval === null) {
@@ -1779,6 +1789,10 @@ export function createContentPublicationApplication({
             "idempotency_key_invalid",
           );
         }
+        // A requester naming nobody can never satisfy the membership or
+        // connection guard the claim applies, so refuse it here rather than
+        // letting it reach the store.
+        requireNamedRequester(input.requestedBy);
         const recordedApproval = await store.findApproval(input.approvalId);
         if (recordedApproval !== null) {
           if (recordedApproval.workspaceId !== input.workspaceId) {
@@ -2041,6 +2055,7 @@ export function createContentPublicationApplication({
         reservationProof?: ContentPublicationReservationProof,
         assertCurrentAuthority?: () => Promise<boolean>,
       ) {
+        requireNamedRequester(requestedBy);
         const reservationFence =
           reservationProof === undefined
             ? {}
