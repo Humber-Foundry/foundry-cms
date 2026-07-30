@@ -154,6 +154,23 @@ const approvalIdSchema = {
   pattern: "^approval_[a-f0-9]{32}$",
 } as const;
 
+const scheduleIdPattern =
+  "schedule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+const scheduleIdSchema = {
+  type: "string",
+  pattern: `^${scheduleIdPattern}$`,
+} as const;
+
+// A status read names either a publication or a blog schedule. Constraining
+// the shape here keeps a malformed identifier a terminal validation failure
+// rather than a retryable error raised from an identifier constructor deeper
+// in the application layer.
+const operationIdSchema = {
+  type: "string",
+  pattern: `^(publish_[a-f0-9]{32}|${scheduleIdPattern})$`,
+} as const;
+
 const publicationOperationResult = {
   type: "object",
   additionalProperties: false,
@@ -1009,11 +1026,7 @@ const descriptors = {
       properties: {
         workspaceId: workspaceIdSchema,
         revision: { type: "integer", minimum: 0 },
-        operationId: {
-          type: "string",
-          minLength: 1,
-          maxLength: 200,
-        },
+        operationId: operationIdSchema,
       },
       required: ["workspaceId", "revision", "operationId"],
     },
@@ -1030,11 +1043,7 @@ const descriptors = {
       properties: {
         workspaceId: workspaceIdSchema,
         revision: { type: "integer", minimum: 0 },
-        scheduleId: {
-          type: "string",
-          minLength: 1,
-          maxLength: 200,
-        },
+        scheduleId: scheduleIdSchema,
         idempotencyKey: idempotencyKeySchema,
       },
       required: [

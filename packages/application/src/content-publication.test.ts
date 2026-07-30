@@ -1727,6 +1727,37 @@ describe("content publication application", () => {
     expect(refreshed).toEqual(inFlight);
   });
 
+  it("does not verify a release when MCP authority is lost during a refresh", async () => {
+    const { app, approval } = await approve();
+    const inFlight = await app.commands.publish({
+      workspaceId,
+      revision: 1,
+      approvalId: approval.id,
+      requestedBy: createContentActorId("mcp-agent-56"),
+      idempotencyKey: "mcp-refresh-revoked-mid-pass",
+      assertCurrentAuthority: vi.fn().mockResolvedValue(true),
+    });
+    getDeploymentStatus.mockClear();
+    isReleaseLive.mockClear();
+    // The grant is current when the refresh starts and gone by the time it
+    // reaches the deployment boundary.
+    const assertCurrentAuthority = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValue(false);
+
+    const refreshed = await app.commands.refresh(
+      inFlight.id,
+      undefined,
+      assertCurrentAuthority,
+    );
+
+    expect(assertCurrentAuthority.mock.calls.length).toBeGreaterThan(1);
+    expect(getDeploymentStatus).not.toHaveBeenCalled();
+    expect(isReleaseLive).not.toHaveBeenCalled();
+    expect(refreshed).toEqual(inFlight);
+  });
+
   it("commits identical bytes, paths and release evidence for human and MCP requests", async () => {
     async function publishOnce(
       requestedBy: Parameters<

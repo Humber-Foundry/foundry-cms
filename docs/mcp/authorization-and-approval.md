@@ -191,9 +191,12 @@ Campaign and email artifacts are rejected by the scheduling command.
 
 Cancellation is accepted only when D1 commits a schedule-bound cancellation
 receipt. Repeating the same key and command returns that receipt with
-`replayed: true`; using the key for another command returns
-`IDEMPOTENCY_KEY_REUSED`. A cancellation arriving after the schedule leaves its
-active state is rejected.
+`replayed: true`; reusing that key against a different schedule or revision
+under the same command returns `IDEMPOTENCY_KEY_REUSED`. A receipt is stored
+per command, as the storage key below states, so one client key presented to
+two different commands records two independent operations rather than a reuse
+error. A cancellation arriving after the schedule leaves its active state is
+rejected.
 
 ## Idempotency and concurrency
 

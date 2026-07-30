@@ -75,6 +75,63 @@ describe("MCP draft tool registry", () => {
     ]);
   });
 
+  it("rejects a malformed publication or schedule identifier at the schema", () => {
+    const tools = registry().list(
+      principal([
+        mcpInitialScope,
+        mcpPublicationScheduleScope,
+        mcpPublicationPublishScope,
+      ]),
+    );
+    const validator = new Ajv2020({
+      strict: false,
+      formats: { uuid: true, "date-time": true, "uri-reference": true },
+    });
+    const schemaFor = (name: string) => {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (tool === undefined) throw new Error(`missing tool ${name}`);
+      return validator.compile(tool.inputSchema);
+    };
+    const status = schemaFor("foundry.publication.status");
+    const cancel = schemaFor("foundry.publication.cancel");
+    const workspaceId = "workspace_registry";
+    const scheduleId = "schedule_0123abcd-4567-89ab-cdef-0123456789ab";
+    const publicationId = `publish_${"a".repeat(32)}`;
+    const idempotencyKey = "11111111-1111-4111-8111-111111111111";
+
+    // Well-formed identifiers of either kind are accepted.
+    expect(
+      status({ workspaceId, revision: 1, operationId: publicationId }),
+    ).toBe(true);
+    expect(
+      status({ workspaceId, revision: 1, operationId: scheduleId }),
+    ).toBe(true);
+    // A malformed identifier is a terminal schema rejection, so it never
+    // reaches an identifier constructor whose failure would surface as a
+    // retryable error.
+    for (const operationId of [
+      "publish_!",
+      "publish_short",
+      `publish_${"A".repeat(32)}`,
+      "schedule_not-a-uuid",
+      "../publish_etc",
+    ]) {
+      expect(status({ workspaceId, revision: 1, operationId })).toBe(false);
+    }
+    // Cancellation names a schedule, never a publication.
+    expect(
+      cancel({ workspaceId, revision: 1, scheduleId, idempotencyKey }),
+    ).toBe(true);
+    expect(
+      cancel({
+        workspaceId,
+        revision: 1,
+        scheduleId: publicationId,
+        idempotencyKey,
+      }),
+    ).toBe(false);
+  });
+
   it("publishes exact revision and approval inputs without a campaign scheduling path", () => {
     const tools = registry().list(
       principal([

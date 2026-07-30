@@ -1357,11 +1357,13 @@ export function createContentPublicationApplication({
     // A scheduler refresh runs on behalf of one MCP connection and can reach
     // the Git reconciliation and deployment boundaries below. Losing that
     // grant must stop the refresh before any provider read or state advance,
-    // leaving the publication exactly as it was.
-    if (
-      assertCurrentAuthority !== undefined &&
-      !(await assertCurrentAuthority())
-    ) {
+    // leaving the publication exactly as it was. Every durable write here also
+    // carries the reservation fence, so the grant is re-checked at the
+    // remaining provider crossings rather than only on entry.
+    const authorityCurrent = async () =>
+      assertCurrentAuthority === undefined ||
+      (await assertCurrentAuthority());
+    if (!(await authorityCurrent())) {
       return publication;
     }
     if (
@@ -1564,6 +1566,7 @@ export function createContentPublicationApplication({
       if (approval !== null) {
         try {
           if (
+            (await authorityCurrent()) &&
             await publisher.isReleaseLive({
               commitSha,
               contentHash: approval.fingerprint.contentHash,
@@ -1603,6 +1606,9 @@ export function createContentPublicationApplication({
             },
           )
         : currentPublication;
+    }
+    if (!(await authorityCurrent())) {
+      return currentPublication;
     }
     const deployment = await publisher.getDeploymentStatus(
       commitSha,
