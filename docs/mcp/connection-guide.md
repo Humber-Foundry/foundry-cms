@@ -29,11 +29,13 @@ authorization-server metadata is at
 
 Before enabling connections, the installation operator must:
 
-- apply D1 migrations `0017_mcp_readonly_connections.sql`,
-  `0018_mcp_draft_scopes.sql`, `0019_mcp_preview_artifacts.sql`,
-  `0020_mcp_mutation_receipts.sql`,
+- apply every D1 migration in numeric order through
+  `0023_mcp_publication_scopes.sql`. The connection surface itself is defined by
+  `0017_mcp_readonly_connections.sql`, `0018_mcp_draft_scopes.sql`,
+  `0019_mcp_preview_artifacts.sql`, `0020_mcp_mutation_receipts.sql`,
   `0022_blog_post_scheduling_archive.sql` and
-  `0023_mcp_publication_scopes.sql` in order;
+  `0023_mcp_publication_scopes.sql`, but the sequence is cumulative and no
+  migration in the range may be skipped;
 - set `FOUNDRY_MCP_OAUTH_SIGNING_KEY` as a Worker secret with at least 32
   random characters;
 - set `FOUNDRY_MCP_CLIENTS` to a non-secret JSON object whose keys are
