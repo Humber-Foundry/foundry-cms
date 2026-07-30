@@ -1585,6 +1585,126 @@ describe("D1 content revision store", () => {
     ).toEqual({ count: 3, ids: 3, contents: 3 });
   });
 
+  it("omits archived tracked posts while hydrating authoritative active states", async () => {
+    const activePostId = createBlogPostId(
+      "00000000-0000-4000-8000-00000000001a",
+    );
+    const archivingPostId = createBlogPostId(
+      "00000000-0000-4000-8000-00000000001b",
+    );
+    const archivedPostId = createBlogPostId(
+      "00000000-0000-4000-8000-00000000001c",
+    );
+    const post = (
+      id: typeof activePostId,
+      slug: string,
+      title: string,
+    ) => ({
+      id,
+      revision: 1,
+      collectionState: "active" as const,
+      targetVisibility: "public" as const,
+      slug,
+      title,
+      excerpt: `${title} excerpt.`,
+      seo: {
+        title: `${title} | Foundry`,
+        description: `${title} description.`,
+      },
+      body: createRichTextDocumentFromPlainText(`${title} body.`),
+    });
+    const definition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          post(activePostId, "active-managed", "Active authoritative"),
+          post(
+            archivingPostId,
+            "archiving-managed",
+            "Archiving authoritative",
+          ),
+          post(
+            archivedPostId,
+            "archived-managed",
+            "Archived authoritative",
+          ),
+        ],
+      },
+    };
+    const application = createApplication(
+      editorActorId,
+      workspaceId,
+      "2026-07-27T14:10:00.000Z",
+      definition,
+    );
+    await createWorkspace(
+      application,
+      "d1-hydrate-collection-authority",
+    );
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO blog_post_collection_states (
+             site_id, post_id, collection_state, previous_live_revision_id,
+             updated_at
+           ) VALUES (?1, ?2, 'archiving', (
+             SELECT current_revision_id
+             FROM blog_posts
+             WHERE site_id = ?1 AND post_id = ?2
+           ), ?3)`,
+        )
+        .bind(
+          definition.site.id,
+          archivingPostId,
+          "2026-07-27T14:11:00.000Z",
+        ),
+      database
+        .prepare(
+          `INSERT INTO blog_post_collection_states (
+             site_id, post_id, collection_state, updated_at
+           ) VALUES (?1, ?2, 'archived', ?3)`,
+        )
+        .bind(
+          definition.site.id,
+          archivedPostId,
+          "2026-07-27T14:11:00.000Z",
+        ),
+    ]);
+    const staleDefinition = {
+      ...definition,
+      blog: {
+        ...definition.blog,
+        posts: definition.blog.posts.map((candidate) => ({
+          ...candidate,
+          title: `Stale ${candidate.title}`,
+        })),
+      },
+    };
+
+    const hydrated = await hydrateManagedBlogPosts(
+      database,
+      staleDefinition,
+    );
+
+    expect(hydrated.blog.posts).toHaveLength(2);
+    expect(
+      hydrated.blog.posts.find(({ id }) => id === activePostId),
+    ).toMatchObject({
+      revision: 1,
+      title: "Active authoritative",
+    });
+    expect(
+      hydrated.blog.posts.find(({ id }) => id === archivingPostId),
+    ).toMatchObject({
+      revision: 1,
+      title: "Archiving authoritative",
+    });
+    expect(
+      hydrated.blog.posts.some(({ id }) => id === archivedPostId),
+    ).toBe(false);
+  });
+
   it("fails verified-live reconciliation when a post aggregate is missing", async () => {
     const missingPostDefinition = {
       ...referenceSiteDefinition,

@@ -253,7 +253,11 @@ export async function hydrateManagedBlogPosts(
 ): Promise<SiteDefinition> {
   const rows = await database
     .prepare(
-      `SELECT revision.snapshot_json, post.last_verified_visibility
+      `SELECT post.post_id, revision.snapshot_json,
+              post.current_revision, post.live_revision,
+              post.last_verified_revision, post.last_verified_visibility,
+              COALESCE(collection.collection_state, 'active')
+                AS collection_state
        FROM blog_posts AS post
        JOIN blog_post_revisions AS revision
          ON revision.site_id = post.site_id
@@ -268,34 +272,40 @@ export async function hydrateManagedBlogPosts(
          ON collection.site_id = post.site_id
         AND collection.post_id = post.post_id
        WHERE post.site_id = ?1
-         AND (
-           (
-             COALESCE(collection.collection_state, 'active') = 'active'
-             AND (
-               (
-                 post.live_revision IS NOT NULL
-                 AND post.last_verified_visibility = 'public'
-               )
-               OR (
-                 post.live_revision IS NULL
-                 AND post.last_verified_revision = post.current_revision
-                 AND post.last_verified_visibility IN ('unpublished', 'absent')
-               )
-             )
-           )
-           OR (
-             collection.collection_state = 'archiving'
-             AND post.live_revision IS NOT NULL
-           )
-         )
        ORDER BY post.post_id`,
     )
     .bind(definition.site.id)
     .all<{
+      post_id: string;
       snapshot_json: string;
+      current_revision: number;
+      live_revision: number | null;
+      last_verified_revision: number | null;
       last_verified_visibility: "public" | "unpublished" | "absent";
+      collection_state: "active" | "archiving" | "archived";
     }>();
-  const managed = rows.results.map(
+  const managed = rows.results.filter((row) =>
+    (
+      row.collection_state === "active" &&
+      (
+        (
+          row.live_revision !== null &&
+          row.last_verified_visibility === "public"
+        ) ||
+        (
+          row.live_revision === null &&
+          row.last_verified_revision === row.current_revision &&
+          ["unpublished", "absent"].includes(
+            row.last_verified_visibility,
+          )
+        )
+      )
+    ) ||
+    (
+      row.collection_state === "archiving" &&
+      row.live_revision !== null
+    )
+  ).map(
     ({ snapshot_json, last_verified_visibility }) => {
       const post = JSON.parse(snapshot_json) as BlogPost;
       return last_verified_visibility === "absent" &&
@@ -308,7 +318,9 @@ export async function hydrateManagedBlogPosts(
         : post;
     },
   );
-  const managedIds = new Set(managed.map(({ id }) => id));
+  const managedIds = new Set(
+    rows.results.map(({ post_id }) => post_id),
+  );
   const hydrated = {
     ...definition,
     blog: {
