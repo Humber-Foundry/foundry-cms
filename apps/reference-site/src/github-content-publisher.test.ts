@@ -223,6 +223,68 @@ describe("GitHub content publisher", () => {
     }
   });
 
+  it("reconciles a signed exact campaign artifact through stable path history", async () => {
+    const operationId = "60000000-0000-4000-8000-000000000052";
+    const path = `content/campaign-sends/${operationId}.json`;
+    const bytes = '{"version":"foundry.campaign-bulk-send-artifact.v2"}\n';
+    const artifactHash = createHash("sha256").update(bytes).digest("hex");
+    const parentSha = "a".repeat(40);
+    const commitSha = "b".repeat(40);
+    const message = [
+      `Record campaign send artifact ${operationId}`,
+      "",
+      `Foundry-Bulk-Operation: ${operationId}`,
+      `Foundry-Bulk-Artifact: ${artifactHash}`,
+    ].join("\n");
+    const signedMessage = signedPublicationMessage({
+      expectedHead: parentSha,
+      serializationVersion: "foundry.site-publication-artifacts.v2",
+      artifacts: [{ path }],
+      artifactHash,
+      contentHash: artifactHash,
+      message,
+    });
+    const blobSha = createHash("sha1")
+      .update(`blob ${Buffer.byteLength(bytes)}\0${bytes}`)
+      .digest("hex");
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/access_tokens")) {
+        return json({
+          token: "installation-token",
+          expires_at: "2099-01-01T00:00:00.000Z",
+        });
+      }
+      if (url.includes(`/commits/${commitSha}`)) {
+        return json({
+          parents: [{ sha: parentSha }],
+          files: [{ filename: path, status: "added", sha: blobSha }],
+          commit: { message: signedMessage },
+        });
+      }
+      if (url.includes("/contents/")) {
+        return new Response(bytes, { status: 200 });
+      }
+      if (url.includes("/commits?")) {
+        return json([{ sha: commitSha, commit: { message: signedMessage } }]);
+      }
+      throw new Error(`unexpected_fetch:${url}`);
+    });
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetcher as typeof fetch,
+    });
+
+    await expect(
+      publisher.reconcile({ operationId, artifactHash, bytes }),
+    ).resolves.toEqual({ outcome: "committed", commitSha });
+    expect(
+      fetcher.mock.calls.some(([input]) =>
+        String(input).includes(`path=${encodeURIComponent(path)}`),
+      ),
+    ).toBe(true);
+  });
+
   it("reads the exact historical published artifact by immutable commit", async () => {
     const bytes = "{\"schemaVersion\":\"1.0.0\"}\n";
     const fetchMock = vi

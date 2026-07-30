@@ -12,6 +12,10 @@ import {
   brevoTestRecipientFingerprint,
   type BrevoTestWebhookEvidenceReader,
 } from "./brevo-test-webhook-evidence";
+import {
+  brevoSenderConfigurationFingerprint,
+  normalizedBrevoSender,
+} from "./brevo-sender-fingerprint";
 
 const defaultBaseUrl = "https://api.brevo.com/v3";
 const fingerprintPattern = /^[a-f0-9]{64}$/u;
@@ -47,41 +51,11 @@ function outcomeCouldBeAmbiguous(status: number) {
   return status === 408 || status === 429 || status >= 500;
 }
 
-function normalizedSender(sender: unknown) {
-  if (typeof sender !== "object" || sender === null) {
-    return null;
-  }
-  const candidate = sender as {
-    id?: unknown;
-    email?: unknown;
-    name?: unknown;
-  };
-  const email = recipientAddress(candidate.email);
-  const name =
-    typeof candidate.name === "string" ? candidate.name.trim() : undefined;
-  if (
-    typeof candidate.id !== "number" ||
-    !Number.isSafeInteger(candidate.id) ||
-    candidate.id <= 0 ||
-    email === null ||
-    name === undefined ||
-    name.length === 0 ||
-    name.length > 200
-  ) {
-    return null;
-  }
-  return Object.freeze({
-    id: candidate.id,
-    email,
-    name,
-  });
-}
-
 function expectedSender(
   request: NewsletterTestRequest,
   senders: Readonly<Record<string, BrevoSenderIdentity>>,
 ) {
-  return normalizedSender(senders[request.senderIdentityId]);
+  return normalizedBrevoSender(senders[request.senderIdentityId]);
 }
 
 function providerCorrelationId(executionId: string) {
@@ -138,16 +112,9 @@ export function createBrevoNewsletterDeliveryAdapter({
   const endpoint = baseUrl.replace(/\/+$/u, "");
   const capabilities = Promise.all(
     Object.entries(senders).map(async ([logicalId, sender]) => {
-      const normalized = normalizedSender(sender);
       return [
         logicalId,
-        await sha256CanonicalJson({
-          version: "foundry.brevo-sender-configuration.v1",
-          logicalId,
-          id: normalized?.id ?? null,
-          email: normalized?.email ?? null,
-          name: normalized?.name ?? null,
-        }),
+        await brevoSenderConfigurationFingerprint(logicalId, sender),
       ] as const;
     }),
   ).then(
@@ -249,7 +216,7 @@ export function createBrevoNewsletterDeliveryAdapter({
           }>;
         } | null;
         const configuredSenders =
-          Object.values(senders).map(normalizedSender);
+          Object.values(senders).map(normalizedBrevoSender);
         const allVerified =
           configuredSenders.length > 0 &&
           configuredSenders.every(

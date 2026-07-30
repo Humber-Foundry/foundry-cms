@@ -11,6 +11,8 @@ export * from "./in-memory-human-access-store";
 export * from "./subscriber-ledger";
 export * from "./in-memory-subscriber-ledger-store";
 export * from "./campaign";
+export * from "./campaign-bulk-delivery";
+export * from "./in-memory-campaign-bulk-state-store";
 export * from "./in-memory-campaign-store";
 export * from "./public-form";
 export * from "./content-revisions";

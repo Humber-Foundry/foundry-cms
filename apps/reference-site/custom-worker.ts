@@ -30,6 +30,9 @@ import {
 import {
   runScheduledBlogPostPublications,
 } from "./src/blog-post-operations-runtime";
+import {
+  runScheduledCampaignBulkDeliveries,
+} from "./src/campaign-bulk-scheduler-runtime";
 
 type ExecutionContext = Readonly<{
   waitUntil(promise: Promise<unknown>): void;
@@ -62,6 +65,9 @@ async function runScheduledWork(
     reconcileHumanAccessEligibilityIfDue(environment),
     runScheduledBlogPostPublications(environment).catch(() => {
       console.error("scheduled_blog_publication_failed");
+    }),
+    runScheduledCampaignBulkDeliveries(environment).catch(() => {
+      console.error("scheduled_campaign_delivery_failed");
     }),
     (async () => {
       try {

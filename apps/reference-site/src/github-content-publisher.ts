@@ -2,6 +2,7 @@ import { SignJWT, importPKCS8 } from "jose";
 
 import type {
   ContentPublicationArtifact,
+  CampaignBulkArtifactPublisher,
   ContentPublisher,
   ContentPublicationId,
   ContentPublishedRevisionReader,
@@ -564,7 +565,9 @@ export function createGitHubContentPublisher({
   configuration: GitHubContentPublisherConfiguration;
   fetch?: GitHubFetch;
   now?: () => Date;
-}): ContentPublisher & ContentPublishedRevisionReader {
+}): ContentPublisher &
+  ContentPublishedRevisionReader &
+  CampaignBulkArtifactPublisher {
   const repositoryPath =
     `/repos/${encodeURIComponent(configuration.owner)}` +
     `/${encodeURIComponent(configuration.repository)}`;
@@ -908,6 +911,145 @@ export function createGitHubContentPublisher({
     );
   }
 
+  function campaignSendArtifactPath(operationId: string) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+        operationId,
+      )
+    ) {
+      throw new Error("campaign_send_operation_id_invalid");
+    }
+    return `content/campaign-sends/${operationId}.json`;
+  }
+
+  async function campaignSendCommitMatches({
+    token,
+    commitSha,
+    path,
+    message,
+    input,
+  }: {
+    token: string;
+    commitSha: string;
+    path: string;
+    message: string;
+    input: {
+      operationId: string;
+      artifactHash: string;
+      bytes: string;
+    };
+  }) {
+    const commit = await request(
+      token,
+      `/commits/${encodeURIComponent(commitSha)}`,
+    );
+    if (
+      !Array.isArray(commit.parents) ||
+      commit.parents.length !== 1 ||
+      typeof commit.parents[0]?.sha !== "string" ||
+      !Array.isArray(commit.files) ||
+      commit.files.length !== 1
+    ) {
+      return false;
+    }
+    const parentSha = commit.parents[0].sha;
+    const expectedMessage = await signPublicationMessage(
+      configuration.publicationSigningSecret,
+      {
+        expectedHead: parentSha,
+        serializationVersion: "foundry.site-publication-artifacts.v2",
+        path,
+        artifactHash: input.artifactHash,
+        contentHash: input.artifactHash,
+        message,
+      },
+    );
+    const file = commit.files[0];
+    if (
+      normalizeCommitMessage(commit.commit?.message) !==
+        normalizeCommitMessage(expectedMessage) ||
+      file?.filename !== path ||
+      (file.status !== "added" && file.status !== "modified") ||
+      typeof file.sha !== "string" ||
+      file.sha !== (await gitBlobSha(input.bytes, commitSha))
+    ) {
+      return false;
+    }
+    const bytes = await requestRaw(
+      token,
+      `/contents/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}?ref=${encodeURIComponent(commitSha)}`,
+    );
+    return bytes !== null && new TextDecoder().decode(bytes) === input.bytes;
+  }
+
+  async function reconcileCampaignSendArtifact(input: {
+    operationId: string;
+    artifactHash: string;
+    bytes: string;
+  }) {
+    try {
+      if ((await sha256(input.bytes)) !== input.artifactHash) {
+        return {
+          outcome: "failed" as const,
+          code: "git_artifact_hash_invalid",
+        };
+      }
+      const token = await installationToken();
+      const path = campaignSendArtifactPath(input.operationId);
+      const operationTrailer = `Foundry-Bulk-Operation: ${input.operationId}`;
+      const artifactTrailer = `Foundry-Bulk-Artifact: ${input.artifactHash}`;
+      const message = [
+        `Record campaign send artifact ${input.operationId}`,
+        "",
+        operationTrailer,
+        artifactTrailer,
+      ].join("\n");
+      for (let page = 1; ; page += 1) {
+        const commits = await request(
+          token,
+          `/commits?sha=${encodeURIComponent(
+            configuration.productionBranch,
+          )}&path=${encodeURIComponent(path)}&per_page=100&page=${page}`,
+        );
+        if (!Array.isArray(commits)) {
+          return {
+            outcome: "ambiguous" as const,
+            code: "git_result_unknown",
+          };
+        }
+        for (const commit of commits) {
+          if (
+            typeof commit?.sha === "string" &&
+            typeof commit?.commit?.message === "string" &&
+            commit.commit.message.split("\n").includes(operationTrailer) &&
+            commit.commit.message.split("\n").includes(artifactTrailer) &&
+            (await campaignSendCommitMatches({
+              token,
+              commitSha: commit.sha,
+              path,
+              message,
+              input,
+            }))
+          ) {
+            return {
+              outcome: "committed" as const,
+              commitSha: commit.sha,
+            };
+          }
+        }
+        if (commits.length < 100) return { outcome: "not_found" as const };
+      }
+    } catch {
+      return {
+        outcome: "ambiguous" as const,
+        code: "git_result_unknown",
+      };
+    }
+  }
+
   return {
     async getChannelConfigurationHash(serializationVersion) {
       const root =
@@ -1063,6 +1205,103 @@ export function createGitHubContentPublisher({
     },
     getProductionHead() {
       return productionHead();
+    },
+    reconcile(input) {
+      return reconcileCampaignSendArtifact(input);
+    },
+    async publish(input) {
+      const reconciled = await reconcileCampaignSendArtifact(input);
+      if (reconciled.outcome !== "not_found") return reconciled;
+      if ((await sha256(input.bytes)) !== input.artifactHash) {
+        return {
+          outcome: "failed" as const,
+          code: "git_artifact_hash_invalid",
+        };
+      }
+      let gitSideEffectStarted = false;
+      try {
+        const token = await installationToken();
+        const expectedHead = await productionHead(token);
+        const path = campaignSendArtifactPath(input.operationId);
+        const message = [
+          `Record campaign send artifact ${input.operationId}`,
+          "",
+          `Foundry-Bulk-Operation: ${input.operationId}`,
+          `Foundry-Bulk-Artifact: ${input.artifactHash}`,
+        ].join("\n");
+        const signedMessage = await signPublicationMessage(
+          configuration.publicationSigningSecret,
+          {
+            expectedHead,
+            serializationVersion: "foundry.site-publication-artifacts.v2",
+            path,
+            artifactHash: input.artifactHash,
+            contentHash: input.artifactHash,
+            message,
+          },
+        );
+        const separator = signedMessage.indexOf("\n\n");
+        gitSideEffectStarted = true;
+        const result = await graphqlRequest(
+          token,
+          `mutation CreateFoundryBulkSendArtifact(
+            $input: CreateCommitOnBranchInput!
+          ) {
+            createCommitOnBranch(input: $input) {
+              commit { oid }
+            }
+          }`,
+          {
+            input: {
+              branch: {
+                repositoryNameWithOwner: `${configuration.owner}/${configuration.repository}`,
+                branchName: configuration.productionBranch,
+              },
+              expectedHeadOid: expectedHead,
+              message: {
+                headline:
+                  separator === -1
+                    ? signedMessage
+                    : signedMessage.slice(0, separator),
+                ...(separator === -1
+                  ? {}
+                  : { body: signedMessage.slice(separator + 2) }),
+              },
+              fileChanges: {
+                additions: [
+                  {
+                    path,
+                    contents: encodeBase64Utf8(input.bytes),
+                  },
+                ],
+              },
+            },
+          },
+        );
+        const commitSha = result.data?.createCommitOnBranch?.commit?.oid;
+        return typeof commitSha === "string"
+          ? { outcome: "committed" as const, commitSha }
+          : {
+              outcome: "ambiguous" as const,
+              code: "git_result_unknown",
+            };
+      } catch (error) {
+        if (isDefiniteHttpRejection(error) && !isExpectedHeadMismatch(error)) {
+          return {
+            outcome: "failed" as const,
+            code: "git_operation_failed",
+          };
+        }
+        // An expected-head mismatch is a definite rejection: the branch moved
+        // and no commit was created, whether or not the request was sent.
+        return {
+          outcome: "ambiguous" as const,
+          code:
+            gitSideEffectStarted && !isExpectedHeadMismatch(error)
+              ? "git_result_unknown"
+              : "git_head_moved",
+        };
+      }
     },
     async readPublishedArtifact(input: {
       commitSha: string;
