@@ -62,6 +62,7 @@ beforeEach(async () => {
   });
   database = await runtime.getD1Database("FOUNDRY_DB");
   for (const name of [
+    "0001_human_access.sql",
     "0016_campaign_authoring.sql",
     "0018_campaign_test_delivery.sql",
   ]) {
@@ -73,6 +74,31 @@ beforeEach(async () => {
       await database.exec(statement);
     }
   }
+  await database
+    .prepare(
+      `INSERT INTO human_users (id, email, created_at)
+       VALUES ('user-editor', ?1, '2026-07-29T19:00:00.000Z')`,
+    )
+    .bind(actor.email)
+    .run();
+  await database
+    .prepare(
+      `INSERT INTO human_memberships (
+         id, site_id, user_id, email, identity_issuer, identity_subject,
+         role, status, created_at, updated_at
+       ) VALUES (
+         'membership-editor', ?1, 'user-editor', ?2, ?3, ?4,
+         'owner', 'active', ?5, ?5
+       )`,
+    )
+    .bind(
+      siteId,
+      actor.email,
+      actor.binding.issuer,
+      actor.binding.subject,
+      "2026-07-29T19:00:00.000Z",
+    )
+    .run();
 });
 
 afterEach(async () => runtime.dispose());
@@ -168,9 +194,10 @@ describe("D1 campaign store", () => {
            execution_id, site_id, actor_id, request_id, campaign_id,
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
+           provider_message_id,
            failure_code, evidence_json, created_at, updated_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'attempting',
-           1, '9999-12-31T23:59:59.999Z', '17', NULL, NULL, ?7, ?7)`,
+           1, '9999-12-31T23:59:59.999Z', '17', NULL, NULL, NULL, ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000051",
@@ -296,10 +323,12 @@ describe("D1 campaign store", () => {
            execution_id, site_id, actor_id, request_id, campaign_id,
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
-           foundry_send_proof, failure_code, evidence_json,
+           provider_message_id, foundry_send_proof, failure_code, evidence_json,
            created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
-           1, NULL, '18', '${"a".repeat(64)}', NULL, '{}', ?7, ?7)`,
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}',
+           '["membership-editor"]', 'accepted',
+           1, NULL, '18', '<message-18@brevo.test>',
+           '${"a".repeat(64)}', NULL, '{}', ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000001",
@@ -426,6 +455,21 @@ describe("D1 campaign store", () => {
           afterState: null,
           occurredAt: "2026-07-29T19:07:01.000Z",
         },
+        authorityAudit: {
+          id: "50000000-0000-4000-8000-000000000074" as never,
+          siteId,
+          actorId: secondOwnerCommand.actorId,
+          targetId: acceptedConfirmation.confirmation.executionId,
+          revisionId: acceptedTest.revision.id,
+          requestId: secondOwnerCommand.requestId,
+          inputHash: secondOwnerCommand.inputHash,
+          action: "campaign.test",
+          outcome: "rejected",
+          reason: "test_confirmation_owner_not_recipient",
+          beforeState: "{}",
+          afterState: null,
+          occurredAt: "2026-07-29T19:07:01.000Z",
+        },
       });
     expect(secondOwnerResult.receipt).toMatchObject({
       outcome: "rejected",
@@ -446,10 +490,12 @@ describe("D1 campaign store", () => {
            execution_id, site_id, actor_id, request_id, campaign_id,
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
-           foundry_send_proof, failure_code, evidence_json,
+           provider_message_id, foundry_send_proof, failure_code, evidence_json,
            created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
-           1, NULL, '19', '${"b".repeat(64)}', NULL, '{}', ?7, ?7)`,
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}',
+           '["membership-editor"]', 'accepted',
+           1, NULL, '19', '<message-19@brevo.test>',
+           '${"b".repeat(64)}', NULL, '{}', ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000002",
@@ -568,10 +614,116 @@ describe("D1 campaign store", () => {
            execution_id, site_id, actor_id, request_id, campaign_id,
            campaign_revision_id, binding_json, recipient_ids_json, state,
            attempt_number, attempt_lease_until, provider_campaign_id,
-           foundry_send_proof, failure_code, evidence_json,
+           provider_message_id, foundry_send_proof, failure_code, evidence_json,
            created_at, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}', '[]', 'accepted',
-           1, NULL, '20', '${"c".repeat(64)}', NULL, '{}', ?7, ?7)`,
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}',
+           '["membership-editor"]', 'accepted',
+           1, NULL, '21', '<message-21@brevo.test>',
+           '${"d".repeat(64)}', NULL, '{}', ?7, ?7)`,
+      )
+      .bind(
+        "40000000-0000-4000-8000-000000000004",
+        siteId,
+        "membership-editor",
+        "campaign-test-confirm-authority-source-1",
+        acceptedTest.campaign.id,
+        acceptedTest.revision.id,
+        "2026-07-29T19:08:30.000Z",
+      )
+      .run();
+    await database
+      .prepare(
+        `INSERT INTO human_users (id, email, created_at)
+         VALUES ('user-backup-owner', 'backup-owner@example.com', ?1)`,
+      )
+      .bind("2026-07-29T19:08:31.000Z")
+      .run();
+    await database
+      .prepare(
+        `INSERT INTO human_memberships (
+           id, site_id, user_id, email, identity_issuer, identity_subject,
+           role, status, created_at, updated_at
+         ) VALUES (
+           'membership-backup-owner', ?1, 'user-backup-owner',
+           'backup-owner@example.com', 'https://access.example', 'backup-owner',
+           'owner', 'active', ?2, ?2
+         )`,
+      )
+      .bind(siteId, "2026-07-29T19:08:31.000Z")
+      .run();
+    await database
+      .prepare(
+        `UPDATE human_memberships
+         SET status = 'suspended', updated_at = ?2
+         WHERE id = 'membership-editor' AND site_id = ?1`,
+      )
+      .bind(siteId, "2026-07-29T19:08:32.000Z")
+      .run();
+    await expect(
+      application.commands.recordAcceptedTestReceiptConfirmation({
+        ...acceptedConfirmation,
+        requestId: "campaign-test-confirm-authority-race-1",
+        command: {
+          action: "confirm_test_receipt",
+          executionId: "40000000-0000-4000-8000-000000000004",
+        },
+        targetId: "40000000-0000-4000-8000-000000000004",
+        confirmation: {
+          ...acceptedConfirmation.confirmation,
+          executionId: "40000000-0000-4000-8000-000000000004",
+          requestId: "campaign-test-confirm-authority-race-1",
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: "test_confirmation_owner_not_recipient",
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT outcome, reason FROM campaign_command_receipts
+           WHERE request_id = 'campaign-test-confirm-authority-race-1'`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      outcome: "rejected",
+      reason: "test_confirmation_owner_not_recipient",
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT execution_id FROM campaign_test_receipt_confirmations
+           WHERE execution_id = '40000000-0000-4000-8000-000000000004'`,
+        )
+        .first(),
+    ).resolves.toBeNull();
+    await expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM campaign_command_receipts
+           WHERE outcome = 'pending'`,
+        )
+        .first(),
+    ).resolves.toEqual({ count: 0 });
+    await database
+      .prepare(
+        `UPDATE human_memberships
+         SET status = 'active', updated_at = ?2
+         WHERE id = 'membership-editor' AND site_id = ?1`,
+      )
+      .bind(siteId, "2026-07-29T19:08:33.000Z")
+      .run();
+    await database
+      .prepare(
+        `INSERT INTO campaign_test_deliveries (
+           execution_id, site_id, actor_id, request_id, campaign_id,
+           campaign_revision_id, binding_json, recipient_ids_json, state,
+           attempt_number, attempt_lease_until, provider_campaign_id,
+           provider_message_id, foundry_send_proof, failure_code, evidence_json,
+           created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '{}',
+           '["membership-editor"]', 'accepted',
+           1, NULL, '20', '<message-20@brevo.test>',
+           '${"c".repeat(64)}', NULL, '{}', ?7, ?7)`,
       )
       .bind(
         "40000000-0000-4000-8000-000000000003",

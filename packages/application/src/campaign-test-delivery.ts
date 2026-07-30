@@ -1,6 +1,6 @@
 import type { SiteId } from "@foundry/site-definition";
 
-import { sha256CanonicalJson, sha256Text } from "./deterministic-hash";
+import { sha256CanonicalJson } from "./deterministic-hash";
 import { AccessDeniedError } from "./human-access";
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
@@ -93,8 +93,13 @@ export type NewsletterTestOutcome =
   | Readonly<{
       outcome: "accepted";
       providerCampaignId: string;
+      providerMessageId: string;
       foundrySendProof: string;
-      providerReceipt: string;
+      providerReceipt: Readonly<{
+        version: "foundry.newsletter-test-provider-receipt.v1";
+        provider: string;
+        messageId: string;
+      }>;
     }>
   | Readonly<{
       outcome: "ambiguous";
@@ -140,6 +145,7 @@ export type CampaignTestDeliveryEvidence =
   Readonly<{
     executionId: string;
     providerCampaignId: string;
+    providerMessageId: string;
     providerReceiptHash: string;
     acceptedAt: string;
   }>;
@@ -173,6 +179,7 @@ export type CampaignTestDeliveryOperation = Readonly<{
   attemptNumber: number;
   attemptLeaseUntil: string | null;
   providerCampaignId: string | null;
+  providerMessageId: string | null;
   foundrySendProof: string | null;
   failureCode: CampaignTestDeliveryFailureCode | null;
   evidence: CampaignTestDeliveryEvidence | null;
@@ -468,6 +475,18 @@ function validateProviderText(value: string, code: string): string {
   return normalized;
 }
 
+function validateProviderMessageId(value: string): string {
+  const normalized = value.trim();
+  if (
+    normalized.length === 0 ||
+    normalized.length > 512 ||
+    !/^[\x21-\x7e]+$/u.test(normalized)
+  ) {
+    throw new CampaignValidationError("provider_message_id_invalid");
+  }
+  return normalized;
+}
+
 function validateFingerprint(value: string, code: string): string {
   if (!fingerprintPattern.test(value)) {
     throw new CampaignValidationError(code);
@@ -488,22 +507,33 @@ async function acceptedOperation(
     outcome.foundrySendProof,
     "foundry_send_proof_invalid",
   );
+  const providerMessageId =
+    validateProviderMessageId(outcome.providerMessageId);
+  const receiptProvider = validateProviderText(
+    outcome.providerReceipt.provider,
+    "provider_receipt_invalid",
+  );
   if (
     operation.providerCampaignId !== providerCampaignId ||
-    operation.foundrySendProof !== foundrySendProof
+    operation.foundrySendProof !== foundrySendProof ||
+    outcome.providerReceipt.version !==
+      "foundry.newsletter-test-provider-receipt.v1" ||
+    outcome.providerReceipt.messageId !== providerMessageId
   ) {
     throw new CampaignValidationError(
       "provider_test_acceptance_binding_mismatch",
     );
   }
-  const providerReceiptHash = await sha256Text(outcome.providerReceipt);
-  if (outcome.providerReceipt.length === 0) {
-    throw new CampaignValidationError("provider_test_evidence_invalid");
-  }
+  const providerReceiptHash = await sha256CanonicalJson({
+    version: "foundry.newsletter-test-provider-receipt.v1",
+    provider: receiptProvider,
+    messageId: providerMessageId,
+  });
   const evidence = Object.freeze({
     ...operation.binding,
     executionId: operation.executionId,
     providerCampaignId,
+    providerMessageId,
     providerReceiptHash,
     acceptedAt: timestamp,
   });
@@ -512,6 +542,7 @@ async function acceptedOperation(
     state: "accepted" as const,
     attemptLeaseUntil: null,
     providerCampaignId,
+    providerMessageId,
     failureCode: null,
     evidence,
     updatedAt: timestamp,
@@ -799,6 +830,7 @@ export function createCampaignTestDeliveryApplication({
           attemptNumber: 0,
           attemptLeaseUntil: null,
           providerCampaignId: null,
+          providerMessageId: null,
           foundrySendProof: null,
           failureCode: null,
           evidence: null,
@@ -1319,6 +1351,11 @@ export function createCampaignTestDeliveryApplication({
       operation === null ||
       operation.evidence === null ||
       operation.providerCampaignId === null ||
+      operation.providerMessageId === null ||
+      operation.evidence.providerCampaignId !==
+        operation.providerCampaignId ||
+      operation.evidence.providerMessageId !==
+        operation.providerMessageId ||
       operation.foundrySendProof === null
     ) {
       return null;
@@ -1416,6 +1453,11 @@ export function createCampaignTestDeliveryApplication({
         operation?.state !== "accepted" ||
         operation.evidence === null ||
         operation.providerCampaignId === null ||
+        operation.providerMessageId === null ||
+        operation.evidence.providerCampaignId !==
+          operation.providerCampaignId ||
+        operation.evidence.providerMessageId !==
+          operation.providerMessageId ||
         operation.foundrySendProof === null
       ) {
         throw new CampaignValidationError("test_delivery_not_accepted");
@@ -1703,6 +1745,11 @@ export function createInMemoryCampaignTestDeliveryStore():
         operation.state === "accepted" &&
         (operation.evidence === null ||
           operation.providerCampaignId === null ||
+          operation.providerMessageId === null ||
+          operation.evidence.providerCampaignId !==
+            operation.providerCampaignId ||
+          operation.evidence.providerMessageId !==
+            operation.providerMessageId ||
           operation.foundrySendProof === null)
       ) {
         throw new CampaignValidationError(
@@ -1734,6 +1781,7 @@ export function createInMemoryCampaignTestDeliveryStore():
               operation.state === "accepted" &&
               operation.evidence !== null &&
               operation.providerCampaignId !== null &&
+              operation.providerMessageId !== null &&
               operation.foundrySendProof !== null,
           )
           .sort((left, right) =>

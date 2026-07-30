@@ -29,6 +29,7 @@ import {
 
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
+import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
 import {
@@ -260,8 +261,13 @@ export async function loadCampaignRequestContext(
     const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
     const installationProofKey =
       environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";
+    const webhookAuthenticationToken =
+      environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN?.trim() ?? "";
     const accountScopeFingerprint =
       environment.FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT?.trim() ?? "";
+    if (webhookAuthenticationToken.length < 32) {
+      throw new Error("brevo_webhook_authentication_token_invalid");
+    }
     if (!/^[a-f0-9]{64}$/u.test(accountScopeFingerprint)) {
       throw new Error("brevo_account_scope_fingerprint_invalid");
     }
@@ -276,12 +282,13 @@ export async function loadCampaignRequestContext(
       environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
     ) as Record<string, string>;
     const configurationFingerprint = await sha256CanonicalJson({
-      version: "foundry.brevo-test-configuration.v2",
+      version: "foundry.brevo-test-configuration.v3",
       accountScopeFingerprint,
       senders,
       installationProofKeyFingerprint:
         await sha256Text(installationProofKey),
-      adapterVersion: "brevo-transactional-test-v2",
+      adapterVersion: "brevo-transactional-test-v3",
+      webhookEvidenceVersion: "brevo-transactional-webhook-v1",
     });
     testAdapter = createBrevoNewsletterDeliveryAdapter({
       apiKey,
@@ -289,6 +296,10 @@ export async function loadCampaignRequestContext(
       accountScopeFingerprint,
       installationProofKey,
       senders,
+      webhookEvidence: createD1BrevoTestWebhookEvidenceStore({
+        database: environment.FOUNDRY_DB,
+        siteId: referenceSiteApplication.siteId,
+      }),
     });
   }
   const application = createCampaignApplication({

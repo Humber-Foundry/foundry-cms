@@ -10,6 +10,7 @@ import {
 } from "@foundry/application";
 import { createSiteId } from "@foundry/site-definition";
 
+import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 
@@ -124,6 +125,7 @@ describe("D1 campaign test delivery store", () => {
       attemptNumber: 0,
       attemptLeaseUntil: null,
       providerCampaignId: null,
+      providerMessageId: null,
       foundrySendProof: null,
       failureCode: null,
       evidence: null,
@@ -193,6 +195,51 @@ describe("D1 campaign test delivery store", () => {
       state: "ambiguous",
       failureCode: "provider_campaign_fingerprint_mismatch",
     });
+    const webhookStore = createD1BrevoTestWebhookEvidenceStore({
+      database: database as unknown as D1DatabaseBinding,
+      siteId: pending.siteId,
+    });
+    const webhookEvidence = {
+      eventFingerprint: "3".repeat(64),
+      siteId: pending.siteId,
+      executionId: pending.executionId,
+      foundrySendProof: "7".repeat(64),
+      providerMessageId: "<message-17@brevo.test>",
+      recipientFingerprint: "4".repeat(64),
+      eventType: "request",
+      occurredAt: "2026-07-29T19:06:31.600Z",
+      receivedAt: "2026-07-29T19:06:31.700Z",
+    };
+    await expect(
+      webhookStore.recordVerified(webhookEvidence),
+    ).resolves.toBe(true);
+    await expect(
+      webhookStore.recordVerified(webhookEvidence),
+    ).resolves.toBe(false);
+    await expect(
+      webhookStore.recordVerified({
+        ...webhookEvidence,
+        eventFingerprint: "5".repeat(64),
+        foundrySendProof: "6".repeat(64),
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      webhookStore.listVerified({
+        executionId: pending.executionId,
+        foundrySendProof: "7".repeat(64),
+      }),
+    ).resolves.toEqual([webhookEvidence]);
+    await expect(
+      database
+        .prepare(
+          `UPDATE campaign_test_brevo_webhook_evidence
+           SET event_type = 'opened' WHERE event_fingerprint = ?1`,
+        )
+        .bind(webhookEvidence.eventFingerprint)
+        .run(),
+    ).rejects.toThrow(
+      /campaign_test_brevo_webhook_evidence_is_immutable/u,
+    );
     const takeover = await store.beginAttempt({
       operation: driftAmbiguous,
       now: "2026-07-29T19:06:32.000Z",
@@ -208,11 +255,13 @@ describe("D1 campaign test delivery store", () => {
         state: "accepted",
         attemptLeaseUntil: null,
         providerCampaignId: "stale-17",
+        providerMessageId: "stale-message-17",
         foundrySendProof: "7".repeat(64),
         evidence: {
           ...pending.binding,
           executionId: pending.executionId,
           providerCampaignId: "stale-17",
+          providerMessageId: "stale-message-17",
           providerReceiptHash: "9".repeat(64),
           acceptedAt: "2026-07-29T19:06:03.000Z",
         },
@@ -224,11 +273,13 @@ describe("D1 campaign test delivery store", () => {
       state: "accepted",
       attemptLeaseUntil: null,
       providerCampaignId: "17",
+      providerMessageId: "message-17",
       failureCode: null,
       evidence: {
         ...pending.binding,
         executionId: pending.executionId,
         providerCampaignId: "17",
+        providerMessageId: "message-17",
         providerReceiptHash: "2".repeat(64),
         acceptedAt: "2026-07-29T19:06:00.000Z",
       },
@@ -254,6 +305,34 @@ describe("D1 campaign test delivery store", () => {
         .run(),
     ).rejects.toThrow(/CHECK constraint failed/u);
     await expect(store.record(accepted)).resolves.toEqual(accepted);
+    await database
+      .prepare(
+        `INSERT INTO campaigns (
+           id, site_id, lifecycle_state, current_revision_id,
+           version, created_at, updated_at
+         ) VALUES (?1, ?2, 'draft', ?3, 1, ?4, ?4)`,
+      )
+      .bind(
+        "20000000-0000-4000-8000-000000000002",
+        pending.siteId,
+        pending.campaignRevisionId,
+        "2026-07-29T19:06:01.000Z",
+      )
+      .run();
+    await expect(
+      store.claim({
+        ...pending,
+        executionId: "40000000-0000-4000-8000-000000000099",
+        requestId: "campaign-test-mismatched-revision-1",
+        campaignId: createCampaignId(
+          "20000000-0000-4000-8000-000000000002",
+        ),
+        state: "failed",
+        failureCode: "provider_test_rejected",
+        createdAt: "2026-07-29T19:06:01.000Z",
+        updatedAt: "2026-07-29T19:06:01.000Z",
+      }),
+    ).rejects.toThrow(/FOREIGN KEY constraint failed/u);
     for (let attemptNumber = 1; attemptNumber <= 10; attemptNumber += 1) {
       await expect(
         store.reserveDailyRecipientBudget({

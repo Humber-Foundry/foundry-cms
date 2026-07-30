@@ -86,14 +86,22 @@ evidence.
   the provider request. It accepts the direct result only when Brevo returns
   HTTP 201 and a message ID; an uncertain response remains ambiguous.
 - Ambiguous transactional writes reconcile through Brevo's
+  authenticated
+  [transactional webhook](https://developers.brevo.com/docs/transactional-webhooks),
   [tag-filtered event report](https://developers.brevo.com/reference/get-email-event-report),
   [message lookup](https://developers.brevo.com/reference/get-transac-emails-list)
   and
   [sent-content lookup](https://developers.brevo.com/reference/get-transac-email-content).
-  Acceptance requires exact sender, recipient-set, subject and actual HTML
-  agreement with the durable Foundry proof. Missing or partial evidence remains
-  ambiguous. A replacement request is permitted only after tagged events prove
-  terminal non-delivery for every exact recipient and no delivery event.
+  The webhook must carry Brevo's configured bearer authorization, the exact
+  execution tag, pre-send proof, provider message ID and recipient. Foundry
+  stores only an installation-keyed recipient fingerprint. Polling cannot
+  authenticate Foundry origin by itself; it only enriches or contradicts the
+  durable webhook evidence. Acceptance requires exact sender, recipient-set,
+  subject and actual HTML agreement with that proof. Missing or partial
+  evidence remains ambiguous. A replacement request is permitted only after
+  tagged events prove
+  terminal non-delivery for every exact recipient and no delivery-derived
+  event such as delivery, open, click, complaint, proxy open, or unsubscribe.
 - Scheduling, cancellation, and rescheduling use stored UTC intent, provider
   identifiers, and idempotency records. An accepted API response alone does not
   prove that a campaign was sent.

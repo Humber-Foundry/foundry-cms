@@ -60,6 +60,15 @@ const channelConfiguration = {
     version: 1,
   } as const,
 };
+const testProviderMessageId = "<foundry-test-message@brevo.test>";
+
+function testProviderReceipt() {
+  return {
+    version: "foundry.newsletter-test-provider-receipt.v1" as const,
+    provider: "brevo",
+    messageId: testProviderMessageId,
+  };
+}
 
 function createFixture(
   adapter: NewsletterDeliveryAdapter,
@@ -182,8 +191,9 @@ function capableAdapter(
     sendTest: vi.fn().mockResolvedValue({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "9".repeat(64),
-      providerReceipt: "brevo-test-accepted-17",
+      providerReceipt: testProviderReceipt(),
     }),
     reconcileTest: vi.fn().mockResolvedValue({ outcome: "not_found" }),
     ...overrides,
@@ -227,6 +237,7 @@ describe("campaign test delivery", () => {
           expect.stringMatching(/^[a-f0-9]{64}$/u),
         complianceFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
         providerConfigurationFingerprint: "a".repeat(64),
+        providerMessageId: testProviderMessageId,
         providerReceiptHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
         acceptedAt: "2026-07-29T19:05:00.000Z",
       },
@@ -241,7 +252,9 @@ describe("campaign test delivery", () => {
         ],
       }),
     );
-    expect(JSON.stringify(deliveryStore.list())).not.toContain("@");
+    expect(JSON.stringify(deliveryStore.list())).not.toContain(
+      "owner-primary@example.test",
+    );
   });
 
   it("persists the exact Foundry send proof before invoking the provider test write", async () => {
@@ -262,8 +275,9 @@ describe("campaign test delivery", () => {
         return {
           outcome: "accepted" as const,
           providerCampaignId: request.providerCampaignId!,
+          providerMessageId: testProviderMessageId,
           foundrySendProof: request.foundrySendProof!,
-          providerReceipt: "brevo-test-durable-proof-1",
+          providerReceipt: testProviderReceipt(),
         };
       },
     );
@@ -304,8 +318,9 @@ describe("campaign test delivery", () => {
         sendTest: vi.fn().mockResolvedValue({
           outcome: "accepted",
           providerCampaignId,
+          providerMessageId: testProviderMessageId,
           foundrySendProof,
-          providerReceipt: "brevo-test-mismatched-acceptance",
+          providerReceipt: testProviderReceipt(),
         }),
       });
       const { application, campaignApplication } =
@@ -378,8 +393,9 @@ describe("campaign test delivery", () => {
       reconcileTest: vi.fn().mockResolvedValue({
         outcome: "accepted",
         providerCampaignId: "brevo-campaign-17",
+        providerMessageId: testProviderMessageId,
         foundrySendProof: "9".repeat(64),
-        providerReceipt: "brevo-test-reconciled-18",
+        providerReceipt: testProviderReceipt(),
       }),
     });
     const { application, campaignApplication } = createFixture(adapter);
@@ -418,8 +434,9 @@ describe("campaign test delivery", () => {
       .mockResolvedValueOnce({
         outcome: "accepted",
         providerCampaignId: "brevo-campaign-17",
+        providerMessageId: testProviderMessageId,
         foundrySendProof: "9".repeat(64),
-        providerReceipt: "brevo-test-restarted-17",
+        providerReceipt: testProviderReceipt(),
       });
     const adapter = capableAdapter({
       sendTest,
@@ -516,8 +533,9 @@ describe("campaign test delivery", () => {
     const sendTest = vi.fn().mockResolvedValue({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-21",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "8".repeat(64),
-      providerReceipt: "brevo-test-retried-21",
+      providerReceipt: testProviderReceipt(),
     });
     const adapter = capableAdapter({
       prepareTest,
@@ -600,8 +618,9 @@ describe("campaign test delivery", () => {
     const sendTest = vi.fn().mockResolvedValue({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-20",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "8".repeat(64),
-      providerReceipt: "brevo-test-recovered-20",
+      providerReceipt: testProviderReceipt(),
     });
     const adapter = capableAdapter({
       prepareTest,
@@ -664,8 +683,9 @@ describe("campaign test delivery", () => {
     completeSend({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "9".repeat(64),
-      providerReceipt: "brevo-test-accepted-21",
+      providerReceipt: testProviderReceipt(),
     });
     await expect(first).resolves.toMatchObject({ state: "accepted" });
   });
@@ -769,8 +789,9 @@ describe("campaign test delivery", () => {
     completeSend({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "9".repeat(64),
-      providerReceipt: "brevo-test-accepted-22",
+      providerReceipt: testProviderReceipt(),
     });
     await expect(first).resolves.toMatchObject({ state: "accepted" });
   });
@@ -854,8 +875,9 @@ describe("campaign test delivery", () => {
     completeSend({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "9".repeat(64),
-      providerReceipt: "brevo-test-accepted-24",
+      providerReceipt: testProviderReceipt(),
     });
     await first;
   });
@@ -908,8 +930,9 @@ describe("campaign test delivery", () => {
     completeSend({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "9".repeat(64),
-      providerReceipt: "brevo-test-cancelled-1",
+      providerReceipt: testProviderReceipt(),
     });
     await expect(first).resolves.toMatchObject({
       state: "accepted",
@@ -990,8 +1013,9 @@ describe("campaign test delivery", () => {
     completeSend({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "9".repeat(64),
-      providerReceipt: "brevo-test-renewed-fence-1",
+      providerReceipt: testProviderReceipt(),
     });
     await expect(requested).resolves.toMatchObject({ state: "accepted" });
   });
@@ -1131,8 +1155,9 @@ describe("campaign test delivery", () => {
     completeReconciliation({
       outcome: "accepted",
       providerCampaignId: "brevo-campaign-17",
+      providerMessageId: testProviderMessageId,
       foundrySendProof: "9".repeat(64),
-      providerReceipt: "brevo-test-reconcile-race-1",
+      providerReceipt: testProviderReceipt(),
     });
 
     await expect(reconciling).resolves.toMatchObject({

@@ -7,6 +7,11 @@ import {
   type NewsletterTestRequest,
 } from "@foundry/application";
 
+import {
+  brevoTestRecipientFingerprint,
+  type BrevoTestWebhookEvidenceReader,
+} from "./brevo-test-webhook-evidence";
+
 const defaultBaseUrl = "https://api.brevo.com/v3";
 const fingerprintPattern = /^[a-f0-9]{64}$/u;
 
@@ -102,6 +107,11 @@ export function createBrevoNewsletterDeliveryAdapter({
   accountScopeFingerprint,
   installationProofKey,
   senders,
+  webhookEvidence = {
+    async listVerified() {
+      return [];
+    },
+  },
   fetcher = fetch,
   baseUrl = defaultBaseUrl,
 }: {
@@ -110,6 +120,7 @@ export function createBrevoNewsletterDeliveryAdapter({
   accountScopeFingerprint: string;
   installationProofKey: string;
   senders: Readonly<Record<string, BrevoSenderIdentity>>;
+  webhookEvidence?: BrevoTestWebhookEvidenceReader;
   fetcher?: Fetcher;
   baseUrl?: string;
 }): NewsletterDeliveryAdapter {
@@ -175,16 +186,13 @@ export function createBrevoNewsletterDeliveryAdapter({
     return {
       outcome: "accepted",
       providerCampaignId: providerCorrelationId(request.executionId),
+      providerMessageId: messageId,
       foundrySendProof: request.foundrySendProof!,
-      providerReceipt: [
-        "brevo:transactional-test:v1",
-        request.executionId,
+      providerReceipt: Object.freeze({
+        version: "foundry.newsletter-test-provider-receipt.v1" as const,
+        provider: "brevo",
         messageId,
-        request.binding.campaignFingerprint,
-        request.binding.providerConfigurationFingerprint,
-        request.binding.recipientSetFingerprint,
-        request.foundrySendProof,
-      ].join(":"),
+      }),
     };
   }
 
@@ -466,10 +474,8 @@ export function createBrevoNewsletterDeliveryAdapter({
         if (
           senderEmail === null ||
           eventRecipients.has(null) ||
-          messageIds.has(null) ||
           eventSenders.has(null) ||
           eventRecipients.size !== expectedRecipients.size ||
-          observedMessageIds.size !== 1 ||
           eventSenders.size !== 1
         ) {
           return {
@@ -484,6 +490,15 @@ export function createBrevoNewsletterDeliveryAdapter({
           "hardBounces",
           "invalid",
         ]);
+        const deliveryEvidenceEvents = new Set([
+          "clicks",
+          "delivered",
+          "loadedByProxy",
+          "opened",
+          "spam",
+          "unique_opened",
+          "unsubscribed",
+        ]);
         const everyRecipientDefinitelyNotDelivered =
           [...expectedRecipients].every((address) =>
             events.some(
@@ -495,10 +510,8 @@ export function createBrevoNewsletterDeliveryAdapter({
           );
         const anyRecipientDelivered = events.some(
           (event) =>
-            event.event === "delivered" ||
-            event.event === "opened" ||
-            event.event === "unique_opened" ||
-            event.event === "clicks",
+            typeof event.event === "string" &&
+            deliveryEvidenceEvents.has(event.event),
         );
         if (
           everyRecipientDefinitelyNotDelivered &&
@@ -507,6 +520,16 @@ export function createBrevoNewsletterDeliveryAdapter({
           return {
             outcome: "rejected",
             code: "provider_test_definitively_not_delivered",
+          };
+        }
+        if (
+          messageIds.has(null) ||
+          observedMessageIds.size !== 1
+        ) {
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
           };
         }
         const messageId = [...observedMessageIds][0]!;
@@ -548,8 +571,10 @@ export function createBrevoNewsletterDeliveryAdapter({
           rows.some(
             (row) =>
               (row.messageId !== undefined &&
+                row.messageId !== null &&
                 row.messageId !== messageId) ||
               (row.subject !== undefined &&
+                row.subject !== null &&
                 row.subject !== request.subject),
           );
         if (conflictingRows) {
@@ -608,20 +633,87 @@ export function createBrevoNewsletterDeliveryAdapter({
           subject?: unknown;
           body?: unknown;
         } | null>;
+        const contentRecipients = new Set(
+          contents.map((content) =>
+            recipientAddress(content?.email)
+          ),
+        );
+        const conflictingContents =
+          [...contentRecipients].some(
+            (address) =>
+              address !== null && !expectedRecipients.has(address),
+          ) ||
+          contents.some(
+            (content) =>
+              content !== null &&
+              ((content.subject !== undefined &&
+                content.subject !== null &&
+                content.subject !== request.subject) ||
+                (content.body !== undefined &&
+                  content.body !== null &&
+                  content.body !== request.renderedCampaign.html.bytes)),
+          );
+        if (conflictingContents) {
+          return {
+            outcome: "rejected",
+            code: "provider_campaign_fingerprint_mismatch",
+          };
+        }
         if (
+          contentRecipients.has(null) ||
+          contentRecipients.size !== expectedRecipients.size ||
           contents.some(
             (content) =>
               content === null ||
-              !expectedRecipients.has(
-                recipientAddress(content.email) ?? "",
-              ) ||
               content.subject !== request.subject ||
               content.body !== request.renderedCampaign.html.bytes,
           )
         ) {
           return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
+          };
+        }
+        const expectedWebhookRecipients = new Set(
+          await Promise.all(
+            request.recipients.map((recipient) =>
+              brevoTestRecipientFingerprint(
+                installationProofKey,
+                recipient.address,
+              )
+            ),
+          ),
+        );
+        const proofBearingEvidence = await webhookEvidence.listVerified({
+          executionId: request.executionId,
+          foundrySendProof: request.foundrySendProof,
+        });
+        const webhookRecipients = new Set(
+          proofBearingEvidence.map((event) => event.recipientFingerprint),
+        );
+        const conflictingWebhookEvidence =
+          proofBearingEvidence.some(
+            (event) =>
+              event.providerMessageId !== messageId ||
+              !expectedWebhookRecipients.has(event.recipientFingerprint),
+          );
+        if (conflictingWebhookEvidence) {
+          return {
             outcome: "rejected",
             code: "provider_campaign_fingerprint_mismatch",
+          };
+        }
+        if (
+          webhookRecipients.size !== expectedWebhookRecipients.size ||
+          [...expectedWebhookRecipients].some(
+            (fingerprint) => !webhookRecipients.has(fingerprint),
+          )
+        ) {
+          return {
+            outcome: "ambiguous",
+            providerCampaignId: correlationId,
+            foundrySendProof: request.foundrySendProof,
           };
         }
         return accepted(request, messageId!);

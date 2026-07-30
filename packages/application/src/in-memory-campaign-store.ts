@@ -184,6 +184,7 @@ export function createInMemoryCampaignStore(
       audit,
       conflictAudit,
       staleAudit,
+      authorityAudit,
       confirmation,
     }) {
       const existing = existingResult(command);
@@ -207,6 +208,15 @@ export function createInMemoryCampaignStore(
           const receipt = rejectedReceipt(command, staleAudit);
           receipts.set(commandKey(command), receipt);
           audits.push(staleAudit);
+          return Object.freeze({ receipt, replayed: false });
+        }
+        if (
+          error instanceof Error &&
+          error.message === "test_confirmation_owner_not_recipient"
+        ) {
+          const receipt = rejectedReceipt(command, authorityAudit);
+          receipts.set(commandKey(command), receipt);
+          audits.push(authorityAudit);
           return Object.freeze({ receipt, replayed: false });
         }
         throw error;

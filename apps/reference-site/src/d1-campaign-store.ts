@@ -670,6 +670,7 @@ export function createD1CampaignStore(
       audit,
       conflictAudit,
       staleAudit,
+      authorityAudit,
       confirmation,
     }) {
       const resultJson = JSON.stringify({ campaign, revision });
@@ -684,13 +685,23 @@ export function createD1CampaignStore(
              WHERE ${pendingCommandExists()}
                AND ?7 = ?1 AND ?8 = ?2 AND ?9 = ?4
                AND EXISTS (
+                 SELECT 1 FROM human_memberships
+                 WHERE id = ?8 AND site_id = ?7
+                   AND role = 'owner' AND status = 'active'
+               )
+               AND EXISTS (
                SELECT 1 FROM campaign_test_deliveries
                  WHERE execution_id = ?6 AND site_id = ?7
                    AND campaign_id = ?11
                    AND campaign_revision_id = ?12
                    AND state = 'accepted' AND evidence_json IS NOT NULL
                    AND provider_campaign_id IS NOT NULL
+                   AND provider_message_id IS NOT NULL
                    AND foundry_send_proof IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1 FROM json_each(recipient_ids_json)
+                     WHERE value = ?8
+                   )
                )
                AND EXISTS (
                  SELECT 1 FROM campaigns
@@ -710,6 +721,115 @@ export function createD1CampaignStore(
             confirmation.ownerActorId,
             confirmation.requestId,
             confirmation.confirmedAt,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ),
+        commandAuditInsert(
+          database,
+          authorityAudit,
+          command,
+          `AND NOT EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+          )
+          AND EXISTS (
+            SELECT 1 FROM campaigns
+            WHERE site_id = ?20 AND id = ?22
+              AND current_revision_id = ?23 AND version = ?24
+          )
+          AND EXISTS (
+            SELECT 1 FROM campaign_test_deliveries
+            WHERE execution_id = ?19 AND site_id = ?20
+              AND campaign_id = ?22 AND campaign_revision_id = ?23
+              AND state = 'accepted' AND evidence_json IS NOT NULL
+              AND provider_campaign_id IS NOT NULL
+              AND provider_message_id IS NOT NULL
+              AND foundry_send_proof IS NOT NULL
+          )
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM human_memberships
+              WHERE id = ?21 AND site_id = ?20
+                AND role = 'owner' AND status = 'active'
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM campaign_test_deliveries
+              WHERE execution_id = ?19 AND site_id = ?20
+                AND campaign_id = ?22 AND campaign_revision_id = ?23
+                AND state = 'accepted' AND evidence_json IS NOT NULL
+                AND provider_campaign_id IS NOT NULL
+                AND provider_message_id IS NOT NULL
+                AND foundry_send_proof IS NOT NULL
+                AND EXISTS (
+                  SELECT 1 FROM json_each(recipient_ids_json)
+                  WHERE value = ?21
+                )
+            )
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'rejected', reason = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+               )
+               AND EXISTS (
+                 SELECT 1 FROM campaigns
+                 WHERE site_id = ?1 AND id = ?9
+                   AND current_revision_id = ?10 AND version = ?11
+               )
+               AND EXISTS (
+                 SELECT 1 FROM campaign_test_deliveries
+                 WHERE execution_id = ?8 AND site_id = ?1
+                   AND campaign_id = ?9 AND campaign_revision_id = ?10
+                   AND state = 'accepted' AND evidence_json IS NOT NULL
+                   AND provider_campaign_id IS NOT NULL
+                   AND provider_message_id IS NOT NULL
+                   AND foundry_send_proof IS NOT NULL
+               )
+               AND (
+                 NOT EXISTS (
+                   SELECT 1 FROM human_memberships
+                   WHERE id = ?2 AND site_id = ?1
+                     AND role = 'owner' AND status = 'active'
+                 )
+                 OR NOT EXISTS (
+                   SELECT 1 FROM campaign_test_deliveries
+                   WHERE execution_id = ?8 AND site_id = ?1
+                     AND campaign_id = ?9 AND campaign_revision_id = ?10
+                     AND state = 'accepted' AND evidence_json IS NOT NULL
+                     AND provider_campaign_id IS NOT NULL
+                     AND provider_message_id IS NOT NULL
+                     AND foundry_send_proof IS NOT NULL
+                     AND EXISTS (
+                       SELECT 1 FROM json_each(recipient_ids_json)
+                       WHERE value = ?2
+                     )
+                 )
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            authorityAudit.reason,
+            authorityAudit.occurredAt,
+            confirmation.executionId,
             campaign.id,
             revision.id,
             campaign.version,
@@ -760,10 +880,21 @@ export function createD1CampaignStore(
             SELECT 1 FROM campaign_test_receipt_confirmations
             WHERE execution_id = ?19 AND site_id = ?20
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM campaigns
-            WHERE site_id = ?20 AND id = ?21
-              AND current_revision_id = ?22 AND version = ?23
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM campaigns
+              WHERE site_id = ?20 AND id = ?21
+                AND current_revision_id = ?22 AND version = ?23
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM campaign_test_deliveries
+              WHERE execution_id = ?19 AND site_id = ?20
+                AND campaign_id = ?21 AND campaign_revision_id = ?22
+                AND state = 'accepted' AND evidence_json IS NOT NULL
+                AND provider_campaign_id IS NOT NULL
+                AND provider_message_id IS NOT NULL
+                AND foundry_send_proof IS NOT NULL
+            )
           )`,
           [
             confirmation.executionId,
@@ -783,10 +914,21 @@ export function createD1CampaignStore(
                  SELECT 1 FROM campaign_test_receipt_confirmations
                  WHERE execution_id = ?8 AND site_id = ?1
                )
-               AND NOT EXISTS (
-                 SELECT 1 FROM campaigns
-                 WHERE site_id = ?1 AND id = ?9
-                   AND current_revision_id = ?10 AND version = ?11
+               AND (
+                 NOT EXISTS (
+                   SELECT 1 FROM campaigns
+                   WHERE site_id = ?1 AND id = ?9
+                     AND current_revision_id = ?10 AND version = ?11
+                 )
+                 OR NOT EXISTS (
+                   SELECT 1 FROM campaign_test_deliveries
+                   WHERE execution_id = ?8 AND site_id = ?1
+                     AND campaign_id = ?9 AND campaign_revision_id = ?10
+                     AND state = 'accepted' AND evidence_json IS NOT NULL
+                     AND provider_campaign_id IS NOT NULL
+                     AND provider_message_id IS NOT NULL
+                     AND foundry_send_proof IS NOT NULL
+                 )
                )`,
           )
           .bind(

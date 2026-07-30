@@ -16,6 +16,10 @@ Install these values in the client-owned Worker configuration:
   secret used only to bind the durable pre-send intent to the exact execution,
   provider campaign, configuration, and recipient set. Rotate it separately
   from the Brevo credential and only after open test operations are resolved.
+- `FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN` — a random, installation-specific Worker
+  secret of at least 32 characters. Configure the same value as the bearer
+  token on Brevo's transactional webhook. Rotate the Brevo webhook and Worker
+  secret together.
 - `FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT` — a 64-character one-way account
   binding produced by provisioning. The raw Brevo account identifier stays out
   of source and application evidence. Provisioning computes SHA-256 over
@@ -52,21 +56,33 @@ provisioned scope or if a sender changes under its numeric ID.
 
 1. Install the provisioning evidence produced by the account-ownership
    workflow. Application callers cannot assert account ownership.
-2. Install the API key and campaign-test proof key through the client-owned
-   secret surface, then install the four protected configuration values.
-3. Run the adapter health check. It verifies API access and every configured
+2. Install the API key, campaign-test proof key and webhook bearer token
+   through the client-owned secret surface, then install the four protected
+   configuration values.
+3. Use Brevo's
+   [webhook API](https://developers.brevo.com/reference/create-webhook) to
+   register a transactional webhook at
+   `/api/foundry-cms/webhooks/brevo`. Configure its `auth` object with
+   `type: "bearer"` and the exact webhook token. Subscribe to `request`,
+   `delivered`, `softBounce`, `hardBounce`, `blocked`, `invalid`, `deferred`,
+   `error`, `opened`, `uniqueOpened`, `click`, `spam` and `unsubscribed`.
+   Brevo documents the bearer-token mechanism in
+   [Secure webhook calls](https://developers.brevo.com/docs/secured-webhooks)
+   and the event payloads in
+   [Transactional webhooks](https://developers.brevo.com/docs/transactional-webhooks).
+4. Run the adapter health check. It verifies API access and every configured
    sender through Brevo account and sender reads.
-4. Create or select the exact campaign revision in Foundry and request a test
+5. Create or select the exact campaign revision in Foundry and request a test
    for configured recipient identities. The application API accepts identity
    keys, not email addresses.
-5. Confirm the delivered message in the Owner's mailbox. An authenticated
+6. Confirm the delivered message in the Owner's mailbox. An authenticated
    Owner records confirmation with `confirm_test_receipt` and the stable
    execution ID; the immutable confirmation and its accepted command receipt
    are persisted atomically in one D1 batch. Reusing its request key with
    another execution is rejected and confirmation audits contain no recipient
    address. The confirming Owner must be one of the membership IDs that
    received that exact test.
-6. Evaluate test-delivery readiness with the successful current test evidence.
+7. Evaluate test-delivery readiness with the successful current test evidence.
    `ready`
    requires healthy credentials and sender identity, `client_owned`
    classification, an exact provider-configuration fingerprint match, and the
@@ -85,15 +101,21 @@ successful-looking HTTP statuses remain ambiguous.
 
 A timeout, lost response, malformed success response, rate limit or server
 error remains ambiguous. Foundry does not issue another provider write for that
-logical operation. Reconciliation queries Brevo's tagged transactional events,
-then the message record and each per-recipient sent-content record. It accepts
-only when the verified sender, exact recipient set, subject and actual sent HTML
-all match the durable Foundry binding. Provider drift is rejected. Missing,
-partial or unavailable evidence remains ambiguous.
+logical operation. The authenticated webhook persists the provider message ID,
+event type and installation-keyed recipient fingerprint only when the event
+carries the exact execution tag and pre-send proof. It never stores a recipient
+address. Reconciliation uses this durable webhook evidence to authenticate
+Foundry's send origin, then queries Brevo's event report, message record and
+each per-recipient sent-content record to verify the sender, exact recipient
+set, subject and actual sent HTML. Polling can enrich or contradict the
+authenticated evidence, but polling alone cannot turn an ambiguous write into
+accepted evidence. Provider drift is rejected. Missing, partial or unavailable
+evidence remains ambiguous.
 
 To restart an unresolved test safely, replay the same request so Foundry
 reconciles it first. A restart is available only when tagged evidence proves
-terminal non-delivery for every exact recipient and shows no delivery event.
+terminal non-delivery for every exact recipient and shows no delivery-derived
+event such as delivery, open, click, complaint, proxy open, or unsubscribe.
 Foundry then records the original operation as failed; the operator can issue a
 new logical request with a new request ID. An empty result, a recipient subset,
 or conflicting delivery evidence leaves the original operation unresolved and
