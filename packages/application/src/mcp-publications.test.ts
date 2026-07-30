@@ -556,6 +556,38 @@ describe("MCP publication orchestration", () => {
     ]);
   });
 
+  it("reports a publication blocked by the fence inside the command", async () => {
+    // The grant survives admission and the pre-flight check, then fails at the
+    // command's own fence. The receipt must report the blocked state rather
+    // than a success, and no external publication may be claimed as live.
+    let reads = 0;
+    const { application, publish, publicationAudit } = await fixture({
+      connectionAt: () => {
+        reads += 1;
+        return reads <= 2 ? { ...principal, status: "active" } : null;
+      },
+    });
+
+    const response = await application.requestPublication(
+      principal,
+      {
+        workspaceId,
+        revision: 1,
+        approvalId,
+        idempotencyKey: "ddddddd1-dddd-4ddd-8ddd-dddddddddddd",
+      },
+      context,
+    );
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(response).toMatchObject({
+      result: { operationId: publicationId, state: "blocked" },
+    });
+    expect(publicationAudit).toEqual([
+      expect.objectContaining({ publicationId, replayed: false }),
+    ]);
+  });
+
   it("reports the state the publication command finally reached", async () => {
     // The claim is observed before the command commits to Git and verifies the
     // release, so the receipt must follow the command's return value. Reporting
