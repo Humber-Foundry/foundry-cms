@@ -201,6 +201,8 @@ describe("D1 campaign test delivery store", () => {
     });
     const webhookEvidence = {
       eventFingerprint: "3".repeat(64),
+      providerEventId: "17",
+      payloadFingerprint: "2".repeat(64),
       siteId: pending.siteId,
       executionId: pending.executionId,
       foundrySendProof: "7".repeat(64),
@@ -212,17 +214,23 @@ describe("D1 campaign test delivery store", () => {
     };
     await expect(
       webhookStore.recordVerified(webhookEvidence),
-    ).resolves.toBe(true);
+    ).resolves.toBe("recorded");
     await expect(
       webhookStore.recordVerified(webhookEvidence),
-    ).resolves.toBe(false);
+    ).resolves.toBe("duplicate");
+    await expect(
+      webhookStore.recordVerified({
+        ...webhookEvidence,
+        payloadFingerprint: "9".repeat(64),
+      }),
+    ).resolves.toBe("conflict");
     await expect(
       webhookStore.recordVerified({
         ...webhookEvidence,
         eventFingerprint: "5".repeat(64),
         foundrySendProof: "6".repeat(64),
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe("conflict");
     await expect(
       webhookStore.listVerified({
         executionId: pending.executionId,

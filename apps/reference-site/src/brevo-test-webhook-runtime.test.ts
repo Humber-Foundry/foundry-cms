@@ -32,9 +32,14 @@ function memoryStore() {
   const records = new Map<string, BrevoTestWebhookEvidence>();
   const store: BrevoTestWebhookEvidenceStore = {
     async recordVerified(evidence) {
-      if (records.has(evidence.eventFingerprint)) return false;
+      const existing = records.get(evidence.eventFingerprint);
+      if (existing !== undefined) {
+        return existing.payloadFingerprint === evidence.payloadFingerprint
+          ? "duplicate"
+          : "conflict";
+      }
       records.set(evidence.eventFingerprint, evidence);
-      return true;
+      return "recorded";
     },
     async listVerified({
       executionId: expectedExecutionId,
@@ -52,6 +57,7 @@ function memoryStore() {
 
 function event(overrides: Record<string, unknown> = {}) {
   return {
+    id: 17,
     event: "request",
     email: ownerAddress,
     "message-id": "<message-17@brevo.test>",
@@ -93,6 +99,8 @@ describe("Brevo test webhook runtime", () => {
     expect(records.size).toBe(1);
     const [recorded] = [...records.values()];
     expect(recorded).toMatchObject({
+      providerEventId: "17",
+      payloadFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
       executionId,
       foundrySendProof,
       providerMessageId: "<message-17@brevo.test>",
@@ -132,12 +140,15 @@ describe("Brevo test webhook runtime", () => {
       store,
       clock: () => receivedAt,
     });
-    const timestampFreeEvent = event({ ts_event: undefined });
+    const timestampFreeEvent = event({ id: undefined, ts_event: undefined });
 
     expect((await handler(request(timestampFreeEvent))).status).toBe(204);
     receivedAt = new Date("2026-07-29T20:05:00.000Z");
     expect(
-      (await handler(request(event({ ts_event: "invalid" })))).status,
+      (await handler(request(event({
+        id: undefined,
+        ts_event: "invalid",
+      })))).status,
     ).toBe(204);
 
     expect(records.size).toBe(1);
@@ -147,7 +158,7 @@ describe("Brevo test webhook runtime", () => {
     });
   });
 
-  it("prefers a stable provider event ID over changing retry timestamps", async () => {
+  it("rejects a changed payload that reuses the same integer provider event ID", async () => {
     const { records, store } = memoryStore();
     const handler = createBrevoTestWebhookHandler({
       authenticationToken,
@@ -155,14 +166,15 @@ describe("Brevo test webhook runtime", () => {
       store,
     });
 
-    await handler(request(event({
-      eventId: "brevo-event-17",
-      ts_event: 1_785_347_200,
-    })));
-    await handler(request(event({
-      eventId: "brevo-event-17",
-      ts_event: 1_785_347_260,
-    })));
+    expect(
+      (await handler(request(event({ id: 42 })))).status,
+    ).toBe(204);
+    expect(
+      (await handler(request(event({
+        id: 42,
+        event: "opened",
+      })))).status,
+    ).toBe(409);
 
     expect(records.size).toBe(1);
   });

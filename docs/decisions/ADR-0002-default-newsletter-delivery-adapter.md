@@ -117,9 +117,11 @@ evidence.
   through verified webhooks and applied to local suppression before routine
   reconciliation.
 - Webhook processing verifies authenticity, acknowledges quickly, deduplicates,
-  and tolerates retry and out-of-order delivery. Retry identity uses a provider
-  event ID when one exists or a deterministic stable-payload fingerprint;
-  locally observed receipt time is never part of the identity.
+  and tolerates retry and out-of-order delivery. The site, provider and
+  normalized integer provider event ID are the sole identity when Brevo
+  supplies `id`; a separate payload fingerprint rejects changed evidence under
+  that identity. Without `id`, a deterministic stable-payload identity is
+  used. Locally observed receipt time is never part of either identity.
 - Delivery, open, and click data may be ingested through webhooks or provider
   report polling. Polling is also a reconciliation backstop for campaign and
   subscriber state.

@@ -8,6 +8,8 @@ import type {
 
 type EvidenceRow = Readonly<{
   event_fingerprint: string;
+  provider_event_id: string | null;
+  payload_fingerprint: string;
   site_id: string;
   execution_id: string;
   foundry_send_proof: string;
@@ -21,6 +23,8 @@ type EvidenceRow = Readonly<{
 function evidence(row: EvidenceRow): BrevoTestWebhookEvidence {
   return Object.freeze({
     eventFingerprint: row.event_fingerprint,
+    providerEventId: row.provider_event_id,
+    payloadFingerprint: row.payload_fingerprint,
     siteId: row.site_id as SiteId,
     executionId: row.execution_id,
     foundrySendProof: row.foundry_send_proof,
@@ -41,15 +45,15 @@ export function createD1BrevoTestWebhookEvidenceStore({
 }): BrevoTestWebhookEvidenceStore {
   const store: BrevoTestWebhookEvidenceStore = {
     async recordVerified(input) {
-      if (input.siteId !== siteId) return false;
+      if (input.siteId !== siteId) return "conflict";
       const result = await database
         .prepare(
           `INSERT INTO campaign_test_brevo_webhook_evidence (
              event_fingerprint, site_id, execution_id, foundry_send_proof,
-             provider_message_id, recipient_fingerprint, event_type,
-             occurred_at, received_at
+             provider_event_id, payload_fingerprint, provider_message_id,
+             recipient_fingerprint, event_type, occurred_at, received_at
            )
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
            WHERE EXISTS (
              SELECT 1 FROM campaign_test_deliveries
              WHERE execution_id = ?3 AND site_id = ?2
@@ -63,6 +67,8 @@ export function createD1BrevoTestWebhookEvidenceStore({
           input.siteId,
           input.executionId,
           input.foundrySendProof,
+          input.providerEventId,
+          input.payloadFingerprint,
           input.providerMessageId,
           input.recipientFingerprint,
           input.eventType,
@@ -70,13 +76,25 @@ export function createD1BrevoTestWebhookEvidenceStore({
           input.receivedAt,
         )
         .run();
-      return (result.meta.changes ?? 0) === 1;
+      if ((result.meta.changes ?? 0) === 1) return "recorded";
+      const existing = await database
+        .prepare(
+          `SELECT payload_fingerprint
+           FROM campaign_test_brevo_webhook_evidence
+           WHERE event_fingerprint = ?1 AND site_id = ?2`,
+        )
+        .bind(input.eventFingerprint, siteId)
+        .first<{ payload_fingerprint: string }>();
+      if (existing === null) return "conflict";
+      return existing.payload_fingerprint === input.payloadFingerprint
+        ? "duplicate"
+        : "conflict";
     },
     async listVerified({ executionId, foundrySendProof }) {
       const result = await database
         .prepare(
-          `SELECT event_fingerprint, site_id, execution_id,
-             foundry_send_proof, provider_message_id,
+          `SELECT event_fingerprint, provider_event_id, payload_fingerprint,
+             site_id, execution_id, foundry_send_proof, provider_message_id,
              recipient_fingerprint, event_type, occurred_at, received_at
            FROM campaign_test_brevo_webhook_evidence
            WHERE site_id = ?1 AND execution_id = ?2

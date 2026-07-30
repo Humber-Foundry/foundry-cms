@@ -110,9 +110,11 @@ error remains ambiguous. Foundry does not issue another provider write for that
 logical operation. The authenticated webhook persists the provider message ID,
 event type and installation-keyed recipient fingerprint only when the event
 carries the exact execution tag and pre-send proof. It never stores a recipient
-address. Webhook retries deduplicate by an explicit provider event ID when
-available, otherwise by a deterministic stable-payload fingerprint. Local
-receipt time is evidence metadata and never part of retry identity.
+address. Brevo's integer `id` is normalized to decimal text and, with the site
+and provider, forms the sole retry identity. A separate payload fingerprint
+detects and rejects reuse of that ID with changed evidence. If `id` is absent,
+Foundry uses a deterministic stable-payload identity. Local receipt time is
+evidence metadata and never part of retry identity.
 Reconciliation uses this durable webhook evidence to authenticate
 Foundry's send origin, then queries Brevo's event report, message record and
 each per-recipient sent-content record to verify the sender, exact recipient

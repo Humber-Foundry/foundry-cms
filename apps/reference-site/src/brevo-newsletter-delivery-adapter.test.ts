@@ -118,6 +118,8 @@ function proofBearingEvidence(
       return Promise.all(
         candidate.recipients.map(async (recipient, index) => ({
           eventFingerprint: String(index + 1).repeat(64),
+          providerEventId: String(index + 1),
+          payloadFingerprint: String(index + 2).repeat(64),
           siteId: "site_reference" as never,
           executionId,
           foundrySendProof,

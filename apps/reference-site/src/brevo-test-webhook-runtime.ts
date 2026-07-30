@@ -63,12 +63,12 @@ function providerOccurredAt(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function providerEventId(event: Record<string, unknown>) {
-  for (const key of ["event-id", "eventId"]) {
-    const candidate = string(event[key], 512);
-    if (candidate !== null) return candidate;
-  }
-  return null;
+function providerEventId(value: unknown) {
+  return typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value >= 0
+    ? String(value)
+    : null;
 }
 
 export function createBrevoTestWebhookHandler({
@@ -152,31 +152,35 @@ export function createBrevoTestWebhookHandler({
       );
       const providerTimestamp = providerOccurredAt(event.ts_event);
       const eventOccurredAt = providerTimestamp ?? receivedAt;
-      const eventId = providerEventId(event);
-      const eventFingerprint = await sha256CanonicalJson({
-        version: "foundry.brevo-test-webhook-event.v2",
-        siteId: referenceSiteApplication.siteId,
+      const eventId = providerEventId(event.id);
+      const payloadFingerprint = await sha256CanonicalJson({
+        version: "foundry.brevo-test-webhook-payload.v1",
         executionId,
         foundrySendProof,
+        providerMessageId,
+        recipientFingerprint,
+        eventType,
+        providerTimestamp,
+      });
+      const eventFingerprint = await sha256CanonicalJson({
+        version: "foundry.brevo-test-webhook-event.v3",
+        siteId: referenceSiteApplication.siteId,
+        provider: "brevo",
         identity:
           eventId === null
             ? {
                 kind: "stable_payload",
-                providerMessageId,
-                recipientFingerprint,
-                eventType,
-                providerTimestamp,
+                payloadFingerprint,
               }
             : {
                 kind: "provider_event_id",
                 providerEventId: eventId,
-                providerMessageId,
-                recipientFingerprint,
-                eventType,
               },
       });
-      await store.recordVerified({
+      const recordResult = await store.recordVerified({
         eventFingerprint,
+        providerEventId: eventId,
+        payloadFingerprint,
         siteId: referenceSiteApplication.siteId,
         executionId,
         foundrySendProof,
@@ -186,6 +190,12 @@ export function createBrevoTestWebhookHandler({
         occurredAt: eventOccurredAt,
         receivedAt,
       });
+      if (recordResult === "conflict") {
+        return Response.json(
+          { error: "webhook_event_identity_conflict" },
+          { status: 409 },
+        );
+      }
     }
     return new Response(null, { status: 204 });
   };

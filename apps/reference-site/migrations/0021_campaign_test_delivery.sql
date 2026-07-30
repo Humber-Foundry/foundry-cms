@@ -94,6 +94,11 @@ CREATE TABLE campaign_test_brevo_webhook_evidence (
     length(foundry_send_proof) = 64
     AND foundry_send_proof NOT GLOB '*[^0-9a-f]*'
   ),
+  provider_event_id TEXT,
+  payload_fingerprint TEXT NOT NULL CHECK (
+    length(payload_fingerprint) = 64
+    AND payload_fingerprint NOT GLOB '*[^0-9a-f]*'
+  ),
   provider_message_id TEXT NOT NULL,
   recipient_fingerprint TEXT NOT NULL CHECK (
     length(recipient_fingerprint) = 64
