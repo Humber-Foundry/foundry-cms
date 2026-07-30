@@ -175,19 +175,22 @@ async function fixture({
     now: () => now,
   });
   let storedPublication: ContentPublication | null = null;
+  // Mirrors the real command's ordering: the claim is observed first, carrying
+  // the publication as it was claimed, and only then does the command reach the
+  // lease and authority fences that decide the state it finally returns.
   const publish = vi.fn(async (input: {
     assertCurrentAuthority?: () => Promise<boolean>;
     observeClaim?: (claim: ContentPublicationClaim) => void;
   }) => {
+    input.observeClaim?.({
+      state: "claimed",
+      publication: publication("requested"),
+    });
     storedPublication = publication(
       await input.assertCurrentAuthority?.() === false
         ? "blocked"
         : "requested",
     );
-    input.observeClaim?.({
-      state: "claimed",
-      publication: storedPublication,
-    });
     return storedPublication;
   });
   const application = createMcpPublicationApplication({
@@ -553,6 +556,39 @@ describe("MCP publication orchestration", () => {
     ]);
   });
 
+  it("reports the state the publication command finally reached", async () => {
+    // The claim is observed before the command commits to Git and verifies the
+    // release, so the receipt must follow the command's return value. Reporting
+    // the claimed publication instead would always say "requested".
+    const { application, publish } = await fixture();
+    publish.mockImplementationOnce(async (input) => {
+      input.observeClaim?.({
+        state: "claimed",
+        publication: publication("requested"),
+      });
+      return publication("verified-live");
+    });
+
+    await expect(
+      application.requestPublication(
+        principal,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId,
+          idempotencyKey: "ccccccc1-cccc-4ccc-8ccc-cccccccccccc",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      result: {
+        operationId: publicationId,
+        state: "verified-live",
+        replayed: false,
+      },
+    });
+  });
+
   it("reports a store-detected durable replay from the claim", async () => {
     // A durable replay can be committed between the idempotency lookup and the
     // claim. Only the claim reports that race, so the receipt and the audit row
@@ -565,12 +601,13 @@ describe("MCP publication orchestration", () => {
       ),
     };
     publish.mockImplementationOnce(async (input) => {
+      // A replayed claim short-circuits the command, which returns the
+      // pre-existing publication rather than the one it just built.
       input.observeClaim?.({
         state: "replayed",
         publication: replayedPublication,
       });
-      // The command returns the publication it built, not the durable one.
-      return publication("requested");
+      return replayedPublication;
     });
 
     const response = await application.requestPublication(

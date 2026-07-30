@@ -393,6 +393,10 @@ describe("site-scoped MCP read application", () => {
       expect.objectContaining({
         operation: "foundry.publication.request",
         scopesEvaluated: ["publication.publish", "content.draft"],
+        // The row records this denial and its safe error code, rather than
+        // inheriting the allowed outcome of the admission check it derives from.
+        outcome: "denied",
+        reason: "INSUFFICIENT_SCOPE",
       }),
       expect.objectContaining({ code: "INSUFFICIENT_SCOPE" }),
     );

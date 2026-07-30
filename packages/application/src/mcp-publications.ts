@@ -591,13 +591,16 @@ export function createMcpPublicationApplication({
                   },
                 }),
             );
-            const receiptPublication =
-              observed.claim?.publication ?? publication;
+            // The command's return value is authoritative for identity and
+            // state: it returns the pre-existing publication when the claim
+            // replayed, and the final publication otherwise. The claim is
+            // consulted only to learn whether this call created that
+            // publication, which the returned value cannot say on its own.
             const replayed =
               prior !== null || observed.claim?.state === "replayed";
             const result = createMcpPublicationResult(
-              receiptPublication.id,
-              receiptPublication.status,
+              publication.id,
+              publication.status,
               replayed,
             );
             await record(execution, {
@@ -608,9 +611,7 @@ export function createMcpPublicationApplication({
               workspaceId,
               revision: input.revision,
               approvalId,
-              // The receipt and the audit row must name the same publication,
-              // including when the claim reported a durable replay.
-              publicationId: receiptPublication.id,
+              publicationId: publication.id,
               scheduleId: null,
               resultHash: await hashMcpPublicationResult(result),
               replayed,

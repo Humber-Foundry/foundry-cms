@@ -135,8 +135,10 @@ blog content, but may not authorize bulk sending or access subscriber
 identities.
 
 **MCP agent** — A site-scoped non-human author that may prepare drafts, request
-tests and propose schedules but may not approve its own work, activate
-schedules or send bulk email.
+tests and propose schedules, and may request publication or blog scheduling for
+a revision a human already approved. It may not approve its own work, supply
+its own approval evidence, publish or schedule anything a human has not
+approved, or send bulk email.
 
 **Integration** — A narrowly scoped non-human adapter or callback identity. It
 reports external facts or performs requested provider operations; it does not
