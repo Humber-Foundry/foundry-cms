@@ -41,6 +41,7 @@ describe("D1 content publication store", () => {
     });
     database = await miniflare.getD1Database("FOUNDRY_DB");
     for (const migrationName of [
+      "0001_human_access.sql",
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
       "0008_media_assets.sql",
@@ -51,6 +52,7 @@ describe("D1 content publication store", () => {
       "0013_blog_post_verified_state.sql",
       "0014_blog_post_artifact_fingerprints.sql",
       "0015_blog_post_render_artifacts.sql",
+      "0022_blog_post_scheduling_archive.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -60,6 +62,29 @@ describe("D1 content publication store", () => {
         await database.prepare(statement).run();
       }
     }
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO human_users (id, email, created_at)
+           VALUES ('user-editor', 'editor@example.test', ?1)`,
+        )
+        .bind("2026-07-27T09:59:00.000Z"),
+      database
+        .prepare(
+          `INSERT INTO human_memberships (
+             id, site_id, user_id, email, identity_issuer, identity_subject,
+             role, status, created_at, updated_at
+           ) VALUES (
+             ?1, ?2, 'user-editor', 'editor@example.test',
+             'https://access.example', 'editor', 'editor', 'active', ?3, ?3
+           )`,
+        )
+        .bind(
+          membershipId,
+          referenceSiteDefinition.site.id,
+          "2026-07-27T09:59:00.000Z",
+        ),
+    ]);
     revisionApplication = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
       store: createD1ContentRevisionStore(
@@ -169,6 +194,40 @@ describe("D1 content publication store", () => {
         .bind(approval.id)
         .run(),
     ).rejects.toThrow(/content_approvals_are_immutable/u);
+  });
+
+  it("rejects a human publication claim when membership is revoked before the D1 commit", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await database
+      .prepare(
+        `UPDATE human_memberships
+         SET status = 'suspended', updated_at = ?1
+         WHERE site_id = ?2 AND id = ?3`,
+      )
+      .bind(
+        "2026-07-27T10:02:00.000Z",
+        referenceSiteDefinition.site.id,
+        membershipId,
+      )
+      .run();
+
+    await expect(
+      store.claimPublication(
+        publication("1", "revoked-before-publication-commit"),
+      ),
+    ).rejects.toMatchObject({
+      code: "publication_requester_not_active",
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM content_publications
+           WHERE idempotency_key = 'revoked-before-publication-commit'`,
+        )
+        .first(),
+    ).toEqual({ count: 0 });
   });
 
   it("reads a v1 approval row and fails it closed at the v2 publication boundary", async () => {

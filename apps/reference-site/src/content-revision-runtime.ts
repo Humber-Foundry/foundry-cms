@@ -210,8 +210,12 @@ function cropsMatch(
 export async function loadContentRevisionApplication(
   workspaceId: ContentWorkspaceId,
   actorId: ContentActorId,
+  environmentOverride?: HumanAccessEnvironment,
 ) {
-  if (process.env.NODE_ENV === "development") {
+  if (
+    process.env.NODE_ENV === "development" &&
+    environmentOverride === undefined
+  ) {
     let store =
       localRuntime.__foundryContentRevisionStores!.get(workspaceId);
     if (store === undefined) {
@@ -244,7 +248,8 @@ export async function loadContentRevisionApplication(
     });
   }
 
-  const environment = await loadHumanAccessEnvironment();
+  const environment =
+    environmentOverride ?? await loadHumanAccessEnvironment();
   if (environment.FOUNDRY_DB === undefined) {
     throw new ContentRevisionConfigurationError();
   }
@@ -272,6 +277,7 @@ export async function loadRestoredContentRevisionApplication(
   workspaceId: ContentWorkspaceId,
   actorId: ContentActorId,
   definition: SiteDefinition,
+  environmentOverride?: HumanAccessEnvironment,
 ) {
   let currentDefinition: SiteDefinition;
   try {
@@ -288,7 +294,10 @@ export async function loadRestoredContentRevisionApplication(
   ) {
     throw new ContentRevisionConfigurationError();
   }
-  if (process.env.NODE_ENV === "development") {
+  if (
+    process.env.NODE_ENV === "development" &&
+    environmentOverride === undefined
+  ) {
     let store =
       localRuntime.__foundryContentRevisionStores!.get(workspaceId);
     if (store === undefined) {
@@ -306,7 +315,8 @@ export async function loadRestoredContentRevisionApplication(
       initialCreatedBy: actorId,
     });
   }
-  const environment = await loadHumanAccessEnvironment();
+  const environment =
+    environmentOverride ?? await loadHumanAccessEnvironment();
   if (environment.FOUNDRY_DB === undefined) {
     throw new ContentRevisionConfigurationError();
   }

@@ -2641,6 +2641,235 @@ describe("content publication application", () => {
     );
   });
 
+  it("carries the exact scheduler reservation through every deployment retry mutation", async () => {
+    const underlyingStore = createInMemoryContentPublicationStore();
+    const observedProofs: unknown[] = [];
+    let captureRetryMutations = false;
+    const store = {
+      ...underlyingStore,
+      async updatePublication(
+        ...args: Parameters<typeof underlyingStore.updatePublication>
+      ) {
+        if (captureRetryMutations) {
+          observedProofs.push(args[1]?.reservationProof);
+        }
+        return underlyingStore.updatePublication(...args);
+      },
+      async renewPublicationLease(
+        ...args: Parameters<typeof underlyingStore.renewPublicationLease>
+      ) {
+        if (captureRetryMutations) {
+          observedProofs.push(args[0].reservationProof);
+        }
+        return underlyingStore.renewPublicationLease(...args);
+      },
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-reservation-fenced-retry",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    isReleaseLive.mockResolvedValue(false);
+    const reservationProof = {
+      executionId: "execution-reservation-fenced-retry",
+      attempt: 2,
+      leaseToken: "scheduler-reservation-fenced-retry",
+    };
+
+    captureRetryMutations = true;
+    await app.commands.retryDeployment(
+      publication.id,
+      membershipId,
+      reservationProof,
+    );
+
+    expect(observedProofs.length).toBeGreaterThanOrEqual(3);
+    expect(observedProofs).toEqual(
+      observedProofs.map(() => reservationProof),
+    );
+  });
+
+  it("carries the exact scheduler reservation through every initial publish mutation", async () => {
+    const underlyingStore = createInMemoryContentPublicationStore();
+    const observedProofs: unknown[] = [];
+    const store = {
+      ...underlyingStore,
+      async updatePublication(
+        ...args: Parameters<typeof underlyingStore.updatePublication>
+      ) {
+        observedProofs.push(args[1]?.reservationProof);
+        return underlyingStore.updatePublication(...args);
+      },
+      async renewPublicationLease(
+        ...args: Parameters<typeof underlyingStore.renewPublicationLease>
+      ) {
+        observedProofs.push(args[0].reservationProof);
+        return underlyingStore.renewPublicationLease(...args);
+      },
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const reservationProof = {
+      executionId: "execution-reservation-fenced-publish",
+      attempt: 1,
+      leaseToken: "scheduler-reservation-fenced-publish",
+    };
+
+    await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-reservation-fenced-initial",
+      reservationProof,
+    });
+
+    expect(observedProofs.length).toBeGreaterThanOrEqual(2);
+    expect(observedProofs).toEqual(
+      observedProofs.map(() => reservationProof),
+    );
+  });
+
+  it("does not adopt schedule A's terminal publication for schedule B", async () => {
+    const underlyingStore = createInMemoryContentPublicationStore();
+    const findLatestPublication = vi.fn(
+      underlyingStore.findLatestPublication,
+    );
+    const findActivePublication = vi.fn(
+      underlyingStore.findActivePublication,
+    );
+    const store = {
+      ...underlyingStore,
+      findLatestPublication,
+      findActivePublication,
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const scheduleA = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "scheduled-publication:schedule-a",
+    });
+    const failedA = await underlyingStore.updatePublication({
+      ...scheduleA,
+      status: "failed",
+      detail: "deployment_failed",
+      leaseToken: null,
+      leaseExpiresAt: null,
+      updatedAt: "2026-07-27T10:04:30.000Z",
+    }, {
+      expectedStatus: scheduleA.status,
+      expectedUpdatedAt: scheduleA.updatedAt,
+    });
+    expect(failedA.status).toBe("failed");
+    findLatestPublication.mockClear();
+    findActivePublication.mockClear();
+
+    const scheduleB = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "scheduled-publication:schedule-b",
+      reservationProof: {
+        executionId: "execution-schedule-b",
+        attempt: 1,
+        leaseToken: "lease-schedule-b",
+      },
+    });
+
+    expect(scheduleB.id).not.toBe(scheduleA.id);
+    expect(scheduleB.idempotencyKey).toBe(
+      "scheduled-publication:schedule-b",
+    );
+    expect(findLatestPublication).not.toHaveBeenCalled();
+    expect(findActivePublication).not.toHaveBeenCalled();
+  });
+
+  it("carries the exact scheduler reservation through publication refresh mutations", async () => {
+    const underlyingStore = createInMemoryContentPublicationStore();
+    const observedProofs: unknown[] = [];
+    let captureRefreshMutations = false;
+    const store = {
+      ...underlyingStore,
+      async updatePublication(
+        ...args: Parameters<typeof underlyingStore.updatePublication>
+      ) {
+        if (captureRefreshMutations) {
+          observedProofs.push(args[1]?.reservationProof);
+        }
+        return underlyingStore.updatePublication(...args);
+      },
+    };
+    const app = createContentPublicationApplication({
+      store,
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-reservation-fenced-refresh",
+    });
+    const reservationProof = {
+      executionId: "execution-reservation-fenced-refresh",
+      attempt: 3,
+      leaseToken: "scheduler-reservation-fenced-refresh",
+    };
+    getDeploymentStatus.mockResolvedValue("building");
+
+    captureRefreshMutations = true;
+    await app.commands.refresh(publication.id, reservationProof);
+
+    expect(observedProofs.length).toBeGreaterThanOrEqual(1);
+    expect(observedProofs).toEqual(
+      observedProofs.map(() => reservationProof),
+    );
+  });
+
   it("never resends a known manual build after timeout without exact failure evidence", async () => {
     let currentTime = "2026-07-27T10:01:00.000Z";
     const app = createContentPublicationApplication({

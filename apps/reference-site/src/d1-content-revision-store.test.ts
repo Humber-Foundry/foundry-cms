@@ -53,6 +53,7 @@ describe("D1 content revision store", () => {
       "0013_blog_post_verified_state.sql",
       "0014_blog_post_artifact_fingerprints.sql",
       "0015_blog_post_render_artifacts.sql",
+      "0022_blog_post_scheduling_archive.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -1689,6 +1690,162 @@ describe("D1 content revision store", () => {
       current_revision_id: danglingRevisionId,
       live_revision: null,
       last_verified_publication_id: null,
+    });
+  });
+
+  it("records crossed-Git live snapshots without orphaning same-post or unrelated successor drafts", async () => {
+    const scheduledPostId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000e1",
+    );
+    const unrelatedPostId = createBlogPostId(
+      "00000000-0000-4000-8000-0000000000e2",
+    );
+    const publishedDefinition = {
+      ...referenceSiteDefinition,
+      blog: {
+        ...referenceSiteDefinition.blog,
+        posts: [
+          {
+            id: scheduledPostId,
+            revision: 1,
+            collectionState: "active" as const,
+            targetVisibility: "public" as const,
+            slug: "scheduled-crossed-git",
+            title: "Scheduled published title",
+            excerpt: "The scheduled post crossed Git.",
+            seo: {
+              title: "Scheduled published title | Foundry",
+              description: "The scheduled post crossed Git.",
+            },
+            body: createRichTextDocumentFromPlainText(
+              "Scheduled published body.",
+            ),
+          },
+          {
+            id: unrelatedPostId,
+            revision: 1,
+            collectionState: "active" as const,
+            targetVisibility: "public" as const,
+            slug: "unrelated-crossed-git",
+            title: "Unrelated published title",
+            excerpt: "This post has its own successor draft.",
+            seo: {
+              title: "Unrelated published title | Foundry",
+              description: "This post has its own successor draft.",
+            },
+            body: createRichTextDocumentFromPlainText(
+              "Unrelated published body.",
+            ),
+          },
+        ],
+      },
+    };
+    const application = createApplication(
+      editorActorId,
+      workspaceId,
+      "2026-07-27T16:00:00.000Z",
+      publishedDefinition,
+    );
+    const published = await createWorkspace(
+      application,
+      "create-crossed-git-successor-workspace",
+    );
+    await application.commands.save({
+      actorId: editorActorId,
+      workspaceId,
+      schemaVersion: publishedDefinition.schemaVersion,
+      baseRevision: 0,
+      edits: [{
+        path: `${scheduledPostId}.title`,
+        value: "Scheduled successor draft",
+      }],
+      idempotencyKey: "edit-scheduled-crossed-git-successor",
+    });
+    await application.commands.save({
+      actorId: editorActorId,
+      workspaceId,
+      schemaVersion: publishedDefinition.schemaVersion,
+      baseRevision: 1,
+      edits: [{
+        path: `${unrelatedPostId}.title`,
+        value: "Unrelated successor draft",
+      }],
+      idempotencyKey: "edit-unrelated-crossed-git-successor",
+    });
+    await database
+      .prepare(
+        `UPDATE blog_posts
+         SET current_revision = 2,
+             current_revision_id = (
+               SELECT revision.revision_id
+               FROM blog_post_revisions AS revision
+               WHERE revision.site_id = blog_posts.site_id
+                 AND revision.post_id = blog_posts.post_id
+                 AND revision.revision = 2
+             )
+         WHERE site_id = ?1 AND post_id IN (?2, ?3)`,
+      )
+      .bind(
+        publishedDefinition.site.id,
+        scheduledPostId,
+        unrelatedPostId,
+      )
+      .run();
+
+    await reconcileVerifiedBlogPostPublication(
+      database,
+      publishedDefinition.site.id,
+      published.definition,
+      { id: "publication-crossed-git-successors", sequence: 1 },
+      "2026-07-27T16:05:00.000Z",
+    );
+
+    expect(
+      await database
+        .prepare(
+          `SELECT post_id, current_revision, live_revision,
+                  last_verified_revision
+           FROM blog_posts
+           WHERE site_id = ?1 AND post_id IN (?2, ?3)
+           ORDER BY post_id`,
+        )
+        .bind(
+          publishedDefinition.site.id,
+          scheduledPostId,
+          unrelatedPostId,
+        )
+        .all(),
+    ).toMatchObject({
+      results: [
+        {
+          post_id: scheduledPostId,
+          current_revision: 2,
+          live_revision: 1,
+          last_verified_revision: 1,
+        },
+        {
+          post_id: unrelatedPostId,
+          current_revision: 2,
+          live_revision: 1,
+          last_verified_revision: 1,
+        },
+      ],
+    });
+    const hydrated = await hydrateManagedBlogPosts(
+      database,
+      publishedDefinition,
+    );
+    expect(
+      hydrated.blog.posts.find(({ id }) => id === scheduledPostId),
+    ).toMatchObject({
+      revision: 1,
+      title: "Scheduled published title",
+    });
+    expect(
+      hydrated.blog.posts.find(({ id }) => id === unrelatedPostId),
+    ).toMatchObject({
+      revision: 1,
+      title: "Unrelated published title",
     });
   });
 
