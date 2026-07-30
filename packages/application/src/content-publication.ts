@@ -1751,7 +1751,12 @@ export function createContentPublicationApplication({
         assertCurrentAuthority?: () => Promise<boolean>;
         authority?: ContentPublicationMcpAuthority;
         reservationProof?: ContentPublicationReservationProof;
-        onClaimed?: (claim: ContentPublicationClaim) => void;
+        /**
+         * Observes the store's claim outcome. The returned publication alone
+         * cannot distinguish a fresh claim from a durable replay, which an
+         * MCP receipt has to report accurately.
+         */
+        observeClaim?: (claim: ContentPublicationClaim) => void;
       }) {
         if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
           throw new ContentPublicationValidationError(
@@ -1893,7 +1898,7 @@ export function createContentPublicationApplication({
           input.reservationProof,
           input.authority,
         );
-        input.onClaimed?.(claim);
+        input.observeClaim?.(claim);
         if (claim.state !== "claimed") {
           return claim.publication;
         }

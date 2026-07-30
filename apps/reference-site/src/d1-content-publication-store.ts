@@ -18,20 +18,15 @@ import {
   ContentPublicationIdempotencyError,
   ContentPublicationValidationError,
   ContentApprovalInvalidError,
-  createMcpPublicationResult,
   createContentActorId,
   createContentApprovalId,
   createContentPublicationId,
   createContentWorkspaceId,
   createHumanMembershipId,
   isBlogPostArtifactFingerprint,
-  hashMcpPublicationResult,
-  mcpContentDraftScope,
-  mcpDefinitionScopes,
   serializeContentPublicationCommandIdentity,
   serializeContentRestoreIdentity,
 } from "@foundry/application";
-import type { SiteDefinition } from "@foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 
@@ -309,6 +304,15 @@ export function createD1ContentPublicationStore(
                  WHEN ?21 IS NULL THEN 'foundry.publication.request'
                  ELSE 'foundry.publication.schedule'
                END
+               AND EXISTS (
+                 SELECT 1
+                 FROM mcp_connection_scopes AS publication_scope
+                 WHERE publication_scope.connection_id = mcp_connection.id
+                   AND publication_scope.scope = CASE
+                     WHEN ?21 IS NULL THEN 'publication.publish'
+                     ELSE 'publication.schedule'
+                   END
+               )
                AND NOT EXISTS (
                  SELECT 1
                  FROM json_each(?25) AS required_scope
@@ -490,13 +494,10 @@ export function createD1ContentPublicationStore(
   ) {
     const audit = authority?.audit;
     if (audit === undefined) return null;
-    const resultHash = await hashMcpPublicationResult(
-      createMcpPublicationResult(
-        publication.id,
-        publication.status,
-        false,
-      ),
-    );
+    const resultHash = await audit.deriveResultHash({
+      operationId: publication.id,
+      state: publication.status,
+    });
     return database
       .prepare(
         `INSERT INTO mcp_audit_events (
@@ -765,47 +766,6 @@ export function createD1ContentPublicationStore(
           publication: toPublication(replayRow),
         };
       }
-      let effectiveAuthority = authority;
-      if (authority !== undefined) {
-        const revisions = await database
-          .prepare(
-            `SELECT revision, definition_json
-             FROM content_revisions
-             WHERE workspace_id = ?1 AND revision IN (0, ?2)
-             ORDER BY revision`,
-          )
-          .bind(publication.workspaceId, publication.revision)
-          .all<{ revision: number; definition_json: string }>();
-        const base = revisions.results.find(({ revision }) => revision === 0);
-        const exact = revisions.results.find(
-          ({ revision }) => revision === publication.revision,
-        );
-        if (base === undefined || exact === undefined) {
-          throw new ContentPublicationValidationError(
-            "publication_authority_not_current",
-          );
-        }
-        const requiredScopes = [
-          "publication.publish",
-          ...mcpDefinitionScopes(
-            JSON.parse(base.definition_json) as SiteDefinition,
-            JSON.parse(exact.definition_json) as SiteDefinition,
-            mcpContentDraftScope,
-          ),
-        ];
-        effectiveAuthority = {
-          ...authority,
-          requiredScopes,
-          ...(authority.audit === undefined
-            ? {}
-            : {
-                audit: {
-                  ...authority.audit,
-                  scopesEvaluated: requiredScopes,
-                },
-              }),
-        };
-      }
       if (reservationProof === undefined) {
         const attributed = await database
           .prepare(
@@ -848,7 +808,7 @@ export function createD1ContentPublicationStore(
             blocked,
             false,
             undefined,
-            effectiveAuthority,
+            authority,
           );
           return { state: "blocked", publication: blocked };
         }
@@ -866,7 +826,7 @@ export function createD1ContentPublicationStore(
           publication,
           true,
           reservationProof,
-          effectiveAuthority,
+          authority,
         );
         if (inserted < 1) {
           if (
@@ -880,7 +840,7 @@ export function createD1ContentPublicationStore(
               "publication_reservation_lost",
             );
           }
-          if (effectiveAuthority !== undefined) {
+          if (authority !== undefined) {
             throw new ContentPublicationValidationError(
               "publication_authority_not_current",
             );
@@ -919,7 +879,7 @@ export function createD1ContentPublicationStore(
             blocked,
             false,
             reservationProof,
-            effectiveAuthority,
+            authority,
           );
           return { state: "blocked", publication: blocked };
         }
@@ -954,7 +914,7 @@ export function createD1ContentPublicationStore(
             blocked,
             false,
             reservationProof,
-            effectiveAuthority,
+            authority,
           );
           return { state: "blocked", publication: blocked };
         }
@@ -979,7 +939,7 @@ export function createD1ContentPublicationStore(
             blocked,
             false,
             reservationProof,
-            effectiveAuthority,
+            authority,
           );
           return { state: "blocked", publication: blocked };
         } catch {

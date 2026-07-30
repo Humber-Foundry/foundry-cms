@@ -3,8 +3,6 @@ import {
   createBlogPostOperationsApplication,
   createContentApprovalId,
   createContentWorkspaceId,
-  mcpContentDraftScope,
-  mcpDefinitionScopes,
   type BlogPostApprovalEvidence,
   type BlogPostArchiveResult,
   type BlogPostOperationalState,
@@ -134,7 +132,7 @@ function scheduleFromRow(row: ScheduleRow): BlogPostSchedule {
   };
 }
 
-function prepareMcpScheduleAudit(
+async function prepareMcpScheduleAudit(
   database: D1DatabaseBinding,
   authority: McpBlogScheduleAuthority | undefined,
   schedule: BlogPostSchedule,
@@ -143,6 +141,10 @@ function prepareMcpScheduleAudit(
 ) {
   const audit = authority?.audit;
   if (audit === undefined) return null;
+  const resultHash = await audit.deriveResultHash({
+    operationId: schedule.id,
+    state: schedule.state,
+  });
   return database
     .prepare(
       `INSERT INTO mcp_audit_events (
@@ -182,7 +184,7 @@ function prepareMcpScheduleAudit(
       audit.occurredAt,
       audit.contractVersion,
       audit.idempotencyKey,
-      audit.resultHash,
+      resultHash,
       audit.workspaceId,
       audit.revision,
       audit.approvalId,
@@ -889,45 +891,6 @@ export function createD1BlogPostOperationsStore(
       return row === null ? null : scheduleProposalFromRow(row);
     },
     async saveSchedule(schedule, idempotencyKey, authority) {
-      let effectiveAuthority = authority;
-      if (authority !== undefined) {
-        const revisions = await database
-          .prepare(
-            `SELECT revision, definition_json
-             FROM content_revisions
-             WHERE workspace_id = ?1 AND revision IN (0, ?2)
-             ORDER BY revision`,
-          )
-          .bind(schedule.workspaceId, schedule.contentRevision)
-          .all<{ revision: number; definition_json: string }>();
-        const base = revisions.results.find(({ revision }) => revision === 0);
-        const current = revisions.results.find(
-          ({ revision }) => revision === schedule.contentRevision,
-        );
-        if (base === undefined || current === undefined) {
-          throw new BlogPostOperationError("approval_stale");
-        }
-        const requiredScopes = [
-          "publication.schedule",
-          ...mcpDefinitionScopes(
-            JSON.parse(base.definition_json) as SiteDefinition,
-            JSON.parse(current.definition_json) as SiteDefinition,
-            mcpContentDraftScope,
-          ),
-        ];
-        effectiveAuthority = {
-          ...authority,
-          requiredScopes,
-          ...(authority.audit === undefined
-            ? {}
-            : {
-                audit: {
-                  ...authority.audit,
-                  scopesEvaluated: requiredScopes,
-                },
-              }),
-        };
-      }
       const beforeState = await store.findPost(
         schedule.siteId,
         schedule.postId,
@@ -970,9 +933,9 @@ export function createD1BlogPostOperationsStore(
         }
         return scheduleFromRow(replay);
       }
-      const linkedScheduleAudit = prepareMcpScheduleAudit(
+      const linkedScheduleAudit = await prepareMcpScheduleAudit(
         database,
-        effectiveAuthority,
+        authority,
         schedule,
         "activate",
         idempotencyKey,
@@ -1067,10 +1030,10 @@ export function createD1BlogPostOperationsStore(
             schedule.activatedAt,
             schedule.activatedBy,
             schedule.executeAtUtc,
-            effectiveAuthority?.kind ?? null,
-            effectiveAuthority?.connectionId ?? null,
-            effectiveAuthority?.actorId ?? null,
-            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
+            authority?.kind ?? null,
+            authority?.connectionId ?? null,
+            authority?.actorId ?? null,
+            JSON.stringify(authority?.requiredScopes ?? []),
           ),
         database
           .prepare(
@@ -1119,10 +1082,10 @@ export function createD1BlogPostOperationsStore(
             schedule.activatedBy,
             schedule.executeAtUtc,
             schedule.activatedAt,
-            effectiveAuthority?.kind ?? null,
-            effectiveAuthority?.connectionId ?? null,
-            effectiveAuthority?.actorId ?? null,
-            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
+            authority?.kind ?? null,
+            authority?.connectionId ?? null,
+            authority?.actorId ?? null,
+            JSON.stringify(authority?.requiredScopes ?? []),
           ),
         database
           .prepare(
@@ -1196,10 +1159,10 @@ export function createD1BlogPostOperationsStore(
             schedule.activationAuditId,
             schedule.activatedAt,
             idempotencyKey,
-            effectiveAuthority?.kind ?? null,
-            effectiveAuthority?.connectionId ?? null,
-            effectiveAuthority?.actorId ?? null,
-            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
+            authority?.kind ?? null,
+            authority?.connectionId ?? null,
+            authority?.actorId ?? null,
+            JSON.stringify(authority?.requiredScopes ?? []),
           ),
         database
           .prepare(
@@ -1243,12 +1206,12 @@ export function createD1BlogPostOperationsStore(
           )
           .bind(
             schedule.id,
-            effectiveAuthority?.connectionId ?? null,
-            effectiveAuthority?.actorId ?? null,
-            effectiveAuthority?.operation ?? "foundry.publication.schedule",
-            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
+            authority?.connectionId ?? null,
+            authority?.actorId ?? null,
+            authority?.operation ?? "foundry.publication.schedule",
+            JSON.stringify(authority?.requiredScopes ?? []),
             schedule.activatedAt,
-            effectiveAuthority?.kind ?? null,
+            authority?.kind ?? null,
             schedule.siteId,
           ),
         prepareAcceptedBlogPostAudit(
@@ -1282,20 +1245,20 @@ export function createD1BlogPostOperationsStore(
       );
       if ((results[2]?.meta.changes ?? 0) !== 1) {
         const hasAuthority =
-          effectiveAuthority === undefined
+          authority === undefined
             ? await store.hasHumanContentAuthority({
                 siteId: schedule.siteId,
                 actorId: schedule.activatedBy,
               })
             : await store.hasMcpScheduleAuthority({
                 siteId: schedule.siteId,
-                connectionId: effectiveAuthority.connectionId,
-                actorId: effectiveAuthority.actorId,
-                requiredScopes: effectiveAuthority.requiredScopes,
+                connectionId: authority.connectionId,
+                actorId: authority.actorId,
+                requiredScopes: authority.requiredScopes,
               });
         if (!hasAuthority) {
           throw new BlogPostOperationError(
-            effectiveAuthority === undefined
+            authority === undefined
               ? "human_authority_required"
               : "mcp_schedule_authority_required",
           );
@@ -1404,7 +1367,7 @@ export function createD1BlogPostOperationsStore(
         state: "cancelled",
         detail: "human_cancelled",
       };
-      const linkedCancellationAudit = prepareMcpScheduleAudit(
+      const linkedCancellationAudit = await prepareMcpScheduleAudit(
         database,
         input.authority,
         cancelled,

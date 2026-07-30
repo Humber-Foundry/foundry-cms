@@ -73,6 +73,15 @@ export type McpLinkedPublicationAudit = McpReadAuditEvent &
     workspaceId: string;
     revision: number;
     approvalId: string | null;
+    /**
+     * Derives the audit `result_hash` from the outcome the store is about to
+     * commit. The caller owns the tool result envelope, so a store never has
+     * to reproduce its shape; passing a precomputed hash is not possible
+     * because the operation identity is only known once the claim is built.
+     */
+    deriveResultHash(
+      outcome: Readonly<{ operationId: string; state: string }>,
+    ): Promise<string>;
   }>;
 
 export type McpConnectionStore = Readonly<{

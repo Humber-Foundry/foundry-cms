@@ -227,14 +227,14 @@ function publicationError(error: unknown): McpReadError {
   );
 }
 
-export type McpPublicationResult = Readonly<{
+type McpPublicationResult = Readonly<{
   operationId: string;
   state: string;
   statusResource: string;
   replayed: boolean;
 }>;
 
-export function createMcpPublicationResult(
+function createMcpPublicationResult(
   operationId: string,
   state: string,
   replayed: boolean,
@@ -247,10 +247,21 @@ export function createMcpPublicationResult(
   };
 }
 
-export function hashMcpPublicationResult(
-  result: McpPublicationResult,
-) {
+function hashMcpPublicationResult(result: McpPublicationResult) {
   return sha256CanonicalJson(result);
+}
+
+/**
+ * Result hash for the audit row a store commits in the same transaction as a
+ * fresh claim, schedule or cancellation receipt. A linked row is written only
+ * when that write lands, so its recorded outcome is never a replay.
+ */
+function linkedResultHash(
+  outcome: Readonly<{ operationId: string; state: string }>,
+) {
+  return hashMcpPublicationResult(
+    createMcpPublicationResult(outcome.operationId, outcome.state, false),
+  );
 }
 
 export function createMcpPublicationApplication({
@@ -528,7 +539,13 @@ export function createMcpPublicationApplication({
                 "The idempotency key was already used for different input.",
               );
             }
-            let transactionClaim: ContentPublicationClaim | null = null;
+            // The store is the only authority on whether this call actually
+            // wrote the publication: a durable replay can be committed
+            // between the idempotency lookup above and the claim below, and
+            // only the claim reports that race truthfully.
+            const observed: { claim: ContentPublicationClaim | null } = {
+              claim: null,
+            };
             const publication = await execution.run(async () =>
               prior ?? application.commands.publish({
                   workspaceId,
@@ -536,8 +553,8 @@ export function createMcpPublicationApplication({
                   approvalId,
                   requestedBy: createMcpContentActorId(principal),
                   idempotencyKey: durableKey,
-                  onClaimed(claim) {
-                    transactionClaim = claim;
+                  observeClaim(claim) {
+                    observed.claim = claim;
                   },
                   assertCurrentAuthority: assertCurrentAuthority(
                     principal,
@@ -557,14 +574,15 @@ export function createMcpPublicationApplication({
                       workspaceId,
                       revision: input.revision,
                       approvalId,
+                      deriveResultHash: linkedResultHash,
                     },
                   },
                 }),
             );
             const receiptPublication =
-              transactionClaim?.publication ?? publication;
+              observed.claim?.publication ?? publication;
             const replayed =
-              prior !== null || transactionClaim?.state === "replayed";
+              prior !== null || observed.claim?.state === "replayed";
             const result = createMcpPublicationResult(
               receiptPublication.id,
               receiptPublication.status,
@@ -769,6 +787,7 @@ export function createMcpPublicationApplication({
                     workspaceId,
                     revision: input.revision,
                     approvalId,
+                    deriveResultHash: linkedResultHash,
                   },
                 },
               }),
@@ -989,6 +1008,7 @@ export function createMcpPublicationApplication({
                       workspaceId,
                       revision: input.revision,
                       approvalId: schedule.approvalId,
+                      deriveResultHash: linkedResultHash,
                   },
                 },
               }),

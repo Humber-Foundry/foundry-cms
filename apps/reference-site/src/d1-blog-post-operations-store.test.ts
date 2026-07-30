@@ -366,7 +366,12 @@ describe("D1 blog post operations store", () => {
       connectionId: "connection-schedule-56",
       actorId: "agent-56",
       operation: "foundry.publication.schedule" as const,
-      requiredScopes: ["publication.schedule"],
+      // The MCP application layer derives the complete scope set from
+      // revision 0 and the approved revision before the command reaches the
+      // store. `mcp-publications.test.ts` proves that derivation; here the
+      // store must persist the given set verbatim so execution-time
+      // revalidation re-checks every scope the operation actually needed.
+      requiredScopes: ["publication.schedule", "content.draft"],
     };
     const durableApp = createBlogPostOperationsApplication({
       store: durableStore,
@@ -389,13 +394,7 @@ describe("D1 blog post operations store", () => {
     });
     await expect(
       durableStore.findMcpScheduleAuthority(persisted.id),
-    ).resolves.toEqual({
-      ...authority,
-      requiredScopes: [
-        "publication.schedule",
-        "content.draft",
-      ],
-    });
+    ).resolves.toEqual(authority);
     const app = createBlogPostOperationsApplication({
       store: {
         ...durableStore,

@@ -291,7 +291,8 @@ describe("D1 content publication store", () => {
           workspaceId,
           revision: 0,
           approvalId: approval.id,
-          resultHash: "2".repeat(64),
+          deriveResultHash: ({ operationId, state }) =>
+            Promise.resolve(`derived:${operationId}:${state}`),
         },
       }),
     ).resolves.toEqual({ state: "claimed", publication: requested });
@@ -302,7 +303,7 @@ describe("D1 content publication store", () => {
       database
         .prepare(
           `SELECT idempotency_key, workspace_id, revision, approval_id,
-                  publication_id, schedule_id, scopes_json
+                  publication_id, schedule_id, scopes_json, result_hash
            FROM mcp_audit_events
            WHERE invocation_id = 'invocation-mcp-immediate-publication'`,
         )
@@ -318,6 +319,9 @@ describe("D1 content publication store", () => {
         "publication.publish",
         "content.draft",
       ]),
+      // The store records the hash the caller derives from the outcome it is
+      // about to commit, not a value the caller supplied up front.
+      result_hash: `derived:${requested.id}:${requested.status}`,
     });
   });
 
