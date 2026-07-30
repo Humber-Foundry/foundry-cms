@@ -548,6 +548,147 @@ describe("MCP publication orchestration", () => {
     ]);
   });
 
+  it("returns the committed cancellation receipt on a repeated key", async () => {
+    const schedule = {
+      id: "schedule-56",
+      postId: "post-56",
+      workspaceId,
+      contentRevision: 1,
+      approvalId,
+      state: "cancelled",
+    };
+    const cancelSchedule = vi.fn(async () => schedule);
+    let committed: typeof schedule | null = null;
+    const schedulePrincipal: McpConnectionPrincipal = {
+      ...principal,
+      scopes: [
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpPublicationScheduleScope,
+      ],
+    };
+    const { application, publicationAudit } = await fixture({
+      connectionAt: () => ({ ...schedulePrincipal, status: "active" }),
+      blogOperations: {
+        commands: {
+          async cancelSchedule(...args: ReadonlyArray<unknown>) {
+            committed = await cancelSchedule(
+              ...(args as Parameters<typeof cancelSchedule>),
+            );
+            return committed;
+          },
+        },
+        queries: {
+          async getSchedule() {
+            return { ...schedule, state: "active" };
+          },
+          // Committed only once the cancellation receipt exists.
+          async findScheduleCancellationByRequest() {
+            return committed;
+          },
+        },
+      } as unknown as BlogOperationsStub,
+    });
+    const input = {
+      workspaceId,
+      revision: 1,
+      scheduleId: schedule.id,
+      idempotencyKey: "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    };
+
+    const first = await application.cancelPublicationSchedule(
+      schedulePrincipal,
+      input,
+      context,
+    );
+    const replay = await application.cancelPublicationSchedule(
+      schedulePrincipal,
+      input,
+      context,
+    );
+
+    expect(first).toMatchObject({
+      result: { operationId: schedule.id, replayed: false },
+    });
+    // Repeating the same key and command returns that receipt with
+    // replayed: true, and cancels nothing a second time.
+    expect(replay).toMatchObject({
+      result: { operationId: schedule.id, replayed: true },
+    });
+    expect(cancelSchedule).toHaveBeenCalledTimes(1);
+    expect(publicationAudit.map(({ replayed }) => replayed)).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("reads schedule status under the schedule scope alone", async () => {
+    // The object named by the operation id decides the required scope, so a
+    // connection granted only scheduling can read a schedule's status.
+    const schedulePrincipal: McpConnectionPrincipal = {
+      ...principal,
+      scopes: [
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpPublicationScheduleScope,
+      ],
+    };
+    const { application } = await fixture({
+      connectionAt: () => ({ ...schedulePrincipal, status: "active" }),
+      blogOperations: {
+        commands: {},
+        queries: {
+          async getSchedule() {
+            return {
+              id: "schedule-56",
+              postId: "post-56",
+              workspaceId,
+              contentRevision: 1,
+              approvalId,
+              state: "active",
+            };
+          },
+        },
+      } as unknown as BlogOperationsStub,
+    });
+
+    await expect(
+      application.publicationStatus(
+        schedulePrincipal,
+        {
+          workspaceId,
+          revision: 1,
+          operationId: "schedule-56",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      result: { operationId: "schedule-56", state: "active" },
+    });
+  });
+
+  it("denies schedule status to a publish-only connection", async () => {
+    // The contract assigns schedule status to publication.schedule. A
+    // publish-only connection must not read it by virtue of holding the one
+    // publication scope it does have.
+    const { application } = await fixture();
+
+    await expect(
+      application.publicationStatus(
+        principal,
+        {
+          workspaceId,
+          revision: 1,
+          operationId: "schedule-56",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpPublicationScheduleScope],
+    });
+  });
+
   it("replays a durable publication after a successor revision", async () => {
     const {
       application,

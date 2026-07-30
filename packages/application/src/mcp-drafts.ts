@@ -217,7 +217,7 @@ export function mcpRevisionScopes(
   return mcpDefinitionScopes(base.definition, revision.definition, fallback);
 }
 
-export function mcpDefinitionScopes(
+function mcpDefinitionScopes(
   base: SiteDefinition,
   revision: SiteDefinition,
   fallback: typeof mcpContentDraftScope | typeof mcpDesignDraftScope,
