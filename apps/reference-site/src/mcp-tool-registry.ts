@@ -177,10 +177,9 @@ const publicationOperationResult = {
   properties: {
     operationId: { type: "string", minLength: 1, maxLength: 200 },
     state: { type: "string", minLength: 1, maxLength: 100 },
-    statusResource: { type: "string", format: "uri-reference" },
     replayed: { type: "boolean" },
   },
-  required: ["operationId", "state", "statusResource", "replayed"],
+  required: ["operationId", "state", "replayed"],
 } as const;
 
 const contentFields = listEditableSiteFields(referenceSiteDefinition)

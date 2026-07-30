@@ -235,7 +235,6 @@ function publicationError(
 type McpPublicationResult = Readonly<{
   operationId: string;
   state: string;
-  statusResource: string;
   replayed: boolean;
 }>;
 
@@ -247,7 +246,6 @@ function createMcpPublicationResult(
   return {
     operationId,
     state,
-    statusResource: `foundry://publications/${operationId}`,
     replayed,
   };
 }

@@ -288,7 +288,6 @@ describe("MCP publication orchestration", () => {
       await sha256CanonicalJson({
         operationId: publicationId,
         state: "requested",
-        statusResource: `foundry://publications/${publicationId}`,
         replayed: false,
       }),
     );
