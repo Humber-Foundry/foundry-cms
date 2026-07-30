@@ -439,6 +439,12 @@ export function createD1CampaignStore(
                  SELECT 1 FROM campaigns
                  WHERE site_id = ?1 AND id = ?7 AND version = ?11
                )
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_deliveries
+                 WHERE site_id = ?1 AND campaign_id = ?7
+                   AND state = 'attempting'
+                   AND attempt_lease_until > ?10
+               )
              ON CONFLICT DO NOTHING`,
           )
           .bind(
@@ -461,6 +467,12 @@ export function createD1CampaignStore(
                version = ?8, updated_at = ?9
              WHERE site_id = ?1 AND id = ?10 AND version = ?11
                AND ${pending}
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_deliveries
+                 WHERE site_id = ?1 AND campaign_id = ?10
+                   AND state = 'attempting'
+                   AND attempt_lease_until > ?9
+               )
                AND EXISTS (
                  SELECT 1 FROM campaign_revisions
                  WHERE id = ?7 AND site_id = ?1
@@ -478,6 +490,36 @@ export function createD1CampaignStore(
             campaign.updatedAt,
             campaign.id,
             expectedVersion,
+          ),
+        database
+          .prepare(
+            `UPDATE campaign_test_deliveries
+             SET state = 'cancelled', attempt_lease_until = NULL,
+               failure_code = 'campaign_revision_changed', updated_at = ?6
+             WHERE site_id = ?1 AND campaign_id = ?7
+               AND campaign_revision_id != ?8
+               AND (
+                 state IN ('pending', 'ambiguous') OR
+                 (state = 'attempting' AND (
+                   attempt_lease_until IS NULL OR attempt_lease_until <= ?6
+                 ))
+               )
+               AND EXISTS (
+                 SELECT 1 FROM campaigns
+                 WHERE site_id = ?1 AND id = ?7
+                   AND current_revision_id = ?8 AND version = ?9
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            revision.createdAt,
+            campaign.id,
+            revision.id,
+            campaign.version,
           ),
         commandAuditInsert(
           database,
@@ -570,6 +612,375 @@ export function createD1CampaignStore(
             command.inputHash,
             audit.reason,
             audit.occurredAt,
+          ),
+      ]);
+      return commandResult(
+        database,
+        command,
+        (results[0]?.meta.changes ?? 0) === 0,
+      );
+    },
+    async acceptTestCommand({ command, campaign, revision, audit }) {
+      const resultJson = JSON.stringify({ campaign, revision });
+      const results = await database.batch([
+        claimInsert(database, command, audit.occurredAt),
+        commandAuditInsert(
+          database,
+          audit,
+          command,
+          `AND EXISTS (
+            SELECT 1 FROM campaign_revisions
+            WHERE id = ?19 AND site_id = ?20 AND campaign_id = ?21
+          )`,
+          [revision.id, revision.siteId, revision.campaignId],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'accepted', result_json = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND EXISTS (
+                 SELECT 1 FROM campaign_revisions
+                 WHERE id = ?8 AND site_id = ?1 AND campaign_id = ?9
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            resultJson,
+            audit.occurredAt,
+            revision.id,
+            campaign.id,
+          ),
+      ]);
+      return commandResult(
+        database,
+        command,
+        (results[0]?.meta.changes ?? 0) === 0,
+      );
+    },
+    async acceptTestReceiptConfirmation({
+      command,
+      campaign,
+      revision,
+      audit,
+      conflictAudit,
+      staleAudit,
+      authorityAudit,
+      confirmation,
+    }) {
+      const resultJson = JSON.stringify({ campaign, revision });
+      const results = await database.batch([
+        claimInsert(database, command, audit.occurredAt),
+        database
+          .prepare(
+            `INSERT INTO campaign_test_receipt_confirmations (
+               execution_id, site_id, owner_actor_id, request_id, confirmed_at
+             )
+             SELECT ?6, ?7, ?8, ?9, ?10
+             WHERE ${pendingCommandExists()}
+               AND ?7 = ?1 AND ?8 = ?2 AND ?9 = ?4
+               AND EXISTS (
+                 SELECT 1 FROM human_memberships
+                 WHERE id = ?8 AND site_id = ?7
+                   AND role = 'owner' AND status = 'active'
+               )
+               AND EXISTS (
+               SELECT 1 FROM campaign_test_deliveries
+                 WHERE execution_id = ?6 AND site_id = ?7
+                   AND campaign_id = ?11
+                   AND campaign_revision_id = ?12
+                   AND state = 'accepted' AND evidence_json IS NOT NULL
+                   AND provider_campaign_id IS NOT NULL
+                   AND provider_message_id IS NOT NULL
+                   AND foundry_send_proof IS NOT NULL
+                   AND EXISTS (
+                     SELECT 1 FROM json_each(recipient_ids_json)
+                     WHERE value = ?8
+                   )
+               )
+               AND EXISTS (
+                 SELECT 1 FROM campaigns
+                 WHERE site_id = ?7 AND id = ?11
+                   AND current_revision_id = ?12 AND version = ?13
+               )
+             ON CONFLICT DO NOTHING`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            confirmation.requestId,
+            confirmation.confirmedAt,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ),
+        commandAuditInsert(
+          database,
+          authorityAudit,
+          command,
+          `AND NOT EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+          )
+          AND EXISTS (
+            SELECT 1 FROM campaigns
+            WHERE site_id = ?20 AND id = ?22
+              AND current_revision_id = ?23 AND version = ?24
+          )
+          AND EXISTS (
+            SELECT 1 FROM campaign_test_deliveries
+            WHERE execution_id = ?19 AND site_id = ?20
+              AND campaign_id = ?22 AND campaign_revision_id = ?23
+              AND state = 'accepted' AND evidence_json IS NOT NULL
+              AND provider_campaign_id IS NOT NULL
+              AND provider_message_id IS NOT NULL
+              AND foundry_send_proof IS NOT NULL
+          )
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM human_memberships
+              WHERE id = ?21 AND site_id = ?20
+                AND role = 'owner' AND status = 'active'
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM campaign_test_deliveries
+              WHERE execution_id = ?19 AND site_id = ?20
+                AND campaign_id = ?22 AND campaign_revision_id = ?23
+                AND state = 'accepted' AND evidence_json IS NOT NULL
+                AND provider_campaign_id IS NOT NULL
+                AND provider_message_id IS NOT NULL
+                AND foundry_send_proof IS NOT NULL
+                AND EXISTS (
+                  SELECT 1 FROM json_each(recipient_ids_json)
+                  WHERE value = ?21
+                )
+            )
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'rejected', reason = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+               )
+               AND EXISTS (
+                 SELECT 1 FROM campaigns
+                 WHERE site_id = ?1 AND id = ?9
+                   AND current_revision_id = ?10 AND version = ?11
+               )
+               AND EXISTS (
+                 SELECT 1 FROM campaign_test_deliveries
+                 WHERE execution_id = ?8 AND site_id = ?1
+                   AND campaign_id = ?9 AND campaign_revision_id = ?10
+                   AND state = 'accepted' AND evidence_json IS NOT NULL
+                   AND provider_campaign_id IS NOT NULL
+                   AND provider_message_id IS NOT NULL
+                   AND foundry_send_proof IS NOT NULL
+               )
+               AND (
+                 NOT EXISTS (
+                   SELECT 1 FROM human_memberships
+                   WHERE id = ?2 AND site_id = ?1
+                     AND role = 'owner' AND status = 'active'
+                 )
+                 OR NOT EXISTS (
+                   SELECT 1 FROM campaign_test_deliveries
+                   WHERE execution_id = ?8 AND site_id = ?1
+                     AND campaign_id = ?9 AND campaign_revision_id = ?10
+                     AND state = 'accepted' AND evidence_json IS NOT NULL
+                     AND provider_campaign_id IS NOT NULL
+                     AND provider_message_id IS NOT NULL
+                     AND foundry_send_proof IS NOT NULL
+                     AND EXISTS (
+                       SELECT 1 FROM json_each(recipient_ids_json)
+                       WHERE value = ?2
+                     )
+                 )
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            authorityAudit.reason,
+            authorityAudit.occurredAt,
+            confirmation.executionId,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ),
+        commandAuditInsert(
+          database,
+          audit,
+          command,
+          `AND EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+              AND owner_actor_id = ?21 AND request_id = ?22
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            confirmation.requestId,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'accepted', result_json = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+                   AND owner_actor_id = ?2 AND request_id = ?4
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            resultJson,
+            audit.occurredAt,
+            confirmation.executionId,
+          ),
+        commandAuditInsert(
+          database,
+          staleAudit,
+          command,
+          `AND NOT EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+          )
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM campaigns
+              WHERE site_id = ?20 AND id = ?21
+                AND current_revision_id = ?22 AND version = ?23
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM campaign_test_deliveries
+              WHERE execution_id = ?19 AND site_id = ?20
+                AND campaign_id = ?21 AND campaign_revision_id = ?22
+                AND state = 'accepted' AND evidence_json IS NOT NULL
+                AND provider_campaign_id IS NOT NULL
+                AND provider_message_id IS NOT NULL
+                AND foundry_send_proof IS NOT NULL
+            )
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'rejected', reason = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+               )
+               AND (
+                 NOT EXISTS (
+                   SELECT 1 FROM campaigns
+                   WHERE site_id = ?1 AND id = ?9
+                     AND current_revision_id = ?10 AND version = ?11
+                 )
+                 OR NOT EXISTS (
+                   SELECT 1 FROM campaign_test_deliveries
+                   WHERE execution_id = ?8 AND site_id = ?1
+                     AND campaign_id = ?9 AND campaign_revision_id = ?10
+                     AND state = 'accepted' AND evidence_json IS NOT NULL
+                     AND provider_campaign_id IS NOT NULL
+                     AND provider_message_id IS NOT NULL
+                     AND foundry_send_proof IS NOT NULL
+                 )
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            staleAudit.reason,
+            staleAudit.occurredAt,
+            confirmation.executionId,
+            campaign.id,
+            revision.id,
+            campaign.version,
+          ),
+        commandAuditInsert(
+          database,
+          conflictAudit,
+          command,
+          `AND EXISTS (
+            SELECT 1 FROM campaign_test_receipt_confirmations
+            WHERE execution_id = ?19 AND site_id = ?20
+              AND (owner_actor_id != ?21 OR request_id != ?22)
+          )`,
+          [
+            confirmation.executionId,
+            confirmation.siteId,
+            confirmation.ownerActorId,
+            confirmation.requestId,
+          ],
+        ),
+        database
+          .prepare(
+            `UPDATE campaign_command_receipts
+             SET outcome = 'rejected', reason = ?6, completed_at = ?7
+             WHERE ${commandPredicate()} AND input_hash = ?5
+               AND outcome = 'pending'
+               AND EXISTS (
+                 SELECT 1 FROM campaign_test_receipt_confirmations
+                 WHERE execution_id = ?8 AND site_id = ?1
+                   AND (owner_actor_id != ?2 OR request_id != ?4)
+               )`,
+          )
+          .bind(
+            command.siteId,
+            command.actorId,
+            command.commandName,
+            command.requestId,
+            command.inputHash,
+            conflictAudit.reason,
+            conflictAudit.occurredAt,
+            confirmation.executionId,
           ),
       ]);
       return commandResult(

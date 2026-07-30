@@ -301,10 +301,12 @@ campaign is immutable; “send again” clones it to a new campaign ID.
 | Cancel schedule | Not provider-queued | Owner only | Deactivate local schedule; cancel provider work if present; state returns to `approved` only if authorization remains valid | `OWNER_REQUIRED`, `TOO_LATE_TO_CANCEL` |
 | Clone sent campaign | Source campaign is terminal | Owner, Editor, scoped MCP agent | New campaign ID and revision with provenance; state `draft` | `SOURCE_CAMPAIGN_NOT_FOUND` |
 
-The adapter may create or update a provider draft during preview/testing, but it
-does not make that draft authoritative. Before dispatch, the application
-compares the provider draft fingerprint to the current approved artifact.
-Provider UI drift blocks the send and is visible.
+The adapter may create or update a provider draft while preparing a bulk send,
+but it does not make that draft authoritative. Before bulk dispatch, the
+application compares the provider draft fingerprint to the current approved
+artifact. Provider UI drift blocks the send and is visible. A campaign test
+uses one provider request with inline immutable content and explicit recipients
+so a mutable provider draft cannot race the test write.
 
 ## Scheduling policy
 
@@ -405,7 +407,7 @@ sequenceDiagram
 
     M->>A: Save and preview campaign revision
     M->>A: Request real test
-    A->>P: Sync fingerprinted draft and send test
+    A->>P: Send inline exact test with durable correlation
     P-->>A: Reconciled test receipt
     O->>A: Authorize exact fingerprint + test
     O->>A: Activate schedule
@@ -444,7 +446,7 @@ sequenceDiagram
 | D1 command | Idempotency key returns the original result; a different payload with the same key is rejected. |
 | Git create/update | Reconcile by publish/send ID and expected parent before retry. Never automatically commit on a newer head. |
 | Deployment | Retry deployment of the same commit; do not create a content commit. |
-| Provider draft/test | Reconcile stored provider ID, correlation metadata and fingerprint before retry. |
+| Provider test | Do not retry an ambiguous provider write. Retain its stable execution and correlation evidence for explicit investigation. |
 | Provider bulk send | Never blindly retry an ambiguous response. Poll by provider ID/correlation; retry only when the adapter proves no queue/send exists. |
 | Webhook | Verify, deduplicate by provider event ID or deterministic fallback, acknowledge quickly, process asynchronously. |
 | Scheduled claim | Lease may be reclaimed only with the same logical operation ID. Database uniqueness prevents a second execution. |

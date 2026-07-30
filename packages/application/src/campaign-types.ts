@@ -139,7 +139,7 @@ export type CampaignAuditEvent = Readonly<{
   revisionId: CampaignRevisionId | null;
   requestId: string;
   inputHash: string;
-  action: "campaign.create" | "campaign.edit";
+  action: "campaign.create" | "campaign.edit" | "campaign.test";
   outcome: "accepted" | "rejected";
   reason: string | null;
   beforeState: string | null;
@@ -150,7 +150,9 @@ export type CampaignAuditEvent = Readonly<{
 export type CampaignCommandName =
   | "campaign.create_standalone"
   | "campaign.create_from_post"
-  | "campaign.edit";
+  | "campaign.edit"
+  | "campaign.request_test"
+  | "campaign.confirm_test_receipt";
 
 export function isCampaignRequestId(value: string): boolean {
   return (
@@ -197,6 +199,14 @@ export type CampaignCommandStoreResult = Readonly<{
   replayed: boolean;
 }>;
 
+export type CampaignTestReceiptConfirmationRecord = Readonly<{
+  executionId: string;
+  siteId: SiteId;
+  ownerActorId: string;
+  requestId: string;
+  confirmedAt: string;
+}>;
+
 export interface CampaignStore {
   findCommandReceipt(input: Omit<CampaignCommandKey, "inputHash">):
     Promise<CampaignCommandReceipt | null>;
@@ -228,6 +238,22 @@ export interface CampaignStore {
   rejectCommand(input: {
     command: CampaignCommandKey;
     audit: CampaignAuditEvent;
+  }): Promise<CampaignCommandStoreResult>;
+  acceptTestCommand(input: {
+    command: CampaignCommandKey;
+    campaign: Campaign;
+    revision: CampaignRevision;
+    audit: CampaignAuditEvent;
+  }): Promise<CampaignCommandStoreResult>;
+  acceptTestReceiptConfirmation(input: {
+    command: CampaignCommandKey;
+    campaign: Campaign;
+    revision: CampaignRevision;
+    audit: CampaignAuditEvent;
+    conflictAudit: CampaignAuditEvent;
+    staleAudit: CampaignAuditEvent;
+    authorityAudit: CampaignAuditEvent;
+    confirmation: CampaignTestReceiptConfirmationRecord;
   }): Promise<CampaignCommandStoreResult>;
   recordAudit(event: CampaignAuditEvent): Promise<void>;
 }
@@ -275,8 +301,44 @@ export type CampaignApplication = Readonly<{
       reason: string;
       command: unknown;
       targetId?: string;
+      beforeState?: string | null;
       action?: CampaignAuditEvent["action"];
       commandName?: CampaignCommandName;
+    }): Promise<void>;
+    replayTestCommand(input: {
+      actor: CampaignActor;
+      requestId: string;
+      command: unknown;
+      targetId: string;
+      commandName?:
+        | "campaign.request_test"
+        | "campaign.confirm_test_receipt";
+    }): Promise<
+      Readonly<{ campaign: Campaign; revision: CampaignRevision }> | null
+    >;
+    recordAcceptedTestCommand(input: {
+      actor: CampaignActor;
+      requestId: string;
+      command: unknown;
+      campaign: Campaign;
+      revision: CampaignRevision;
+      beforeState: string;
+      afterState: string;
+      targetId?: string;
+      commandName?:
+        | "campaign.request_test"
+        | "campaign.confirm_test_receipt";
+    }): Promise<void>;
+    recordAcceptedTestReceiptConfirmation(input: {
+      actor: CampaignActor;
+      requestId: string;
+      command: unknown;
+      campaign: Campaign;
+      revision: CampaignRevision;
+      beforeState: string;
+      afterState: string;
+      targetId: string;
+      confirmation: CampaignTestReceiptConfirmationRecord;
     }): Promise<void>;
   }>;
   queries: Readonly<{
@@ -362,7 +424,7 @@ export type NewsletterUnsubscribeResolution = Readonly<{
   providerEventId: string;
 }>;
 
-export interface NewsletterDeliveryAdapter {
+export interface NewsletterUnsubscribeAdapter {
   readonly unsubscribePlaceholder: string;
   createUnsubscribeUrl(input: {
     identityKey: string;

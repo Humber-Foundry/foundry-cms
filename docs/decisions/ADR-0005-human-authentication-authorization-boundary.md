@@ -57,6 +57,13 @@ Access-fronted hostname. Disable public `workers.dev`, branch-preview and
 deployment-preview aliases, or place their equivalent protected paths behind an
 Access application with the same audience and policy before release.
 
+Provider callbacks use a separate public integration namespace and never sit
+under `/api/foundry-cms`. The Brevo transactional callback is
+`/api/integrations/brevo/webhooks/transactional`; it verifies its exact bearer
+before parsing the payload or accessing D1. Installation verification requires
+that an unauthenticated callback reaches the application and returns `401`
+while every human CMS API probe still receives an Access challenge.
+
 The default Allow policy:
 
 - includes only exact, Owner-approved email addresses;

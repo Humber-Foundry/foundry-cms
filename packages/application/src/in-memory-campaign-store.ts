@@ -8,7 +8,21 @@ import type {
   CampaignStore,
 } from "./campaign";
 
-export function createInMemoryCampaignStore(): CampaignStore & {
+export function createInMemoryCampaignStore(
+  options: Readonly<{
+    cancelOpenTestDeliveries?: (input: {
+      siteId: Campaign["siteId"];
+      campaignId: Campaign["id"];
+      retainedRevisionId: CampaignRevision["id"];
+      cancelledAt: string;
+    }) => Promise<boolean>;
+    persistTestReceiptConfirmation?: (
+      confirmation: Parameters<
+        CampaignStore["acceptTestReceiptConfirmation"]
+      >[0]["confirmation"],
+    ) => Promise<void>;
+  }> = {},
+): CampaignStore & {
   listAuditEvents(): ReadonlyArray<CampaignAuditEvent>;
 } {
   const campaigns = new Map<string, Campaign>();
@@ -127,6 +141,19 @@ export function createInMemoryCampaignStore(): CampaignStore & {
         audits.push(rejectedAudit);
         return Object.freeze({ receipt, replayed: false });
       }
+      if (
+        await options.cancelOpenTestDeliveries?.({
+          siteId: campaign.siteId,
+          campaignId: campaign.id,
+          retainedRevisionId: revision.id,
+          cancelledAt: revision.createdAt,
+        }) === false
+      ) {
+        const receipt = rejectedReceipt(command, rejectedAudit);
+        receipts.set(commandKey(command), receipt);
+        audits.push(rejectedAudit);
+        return Object.freeze({ receipt, replayed: false });
+      }
       campaigns.set(key, campaign);
       revisions.set(revisionKey(revision), revision);
       audits.push(acceptedAudit);
@@ -138,6 +165,63 @@ export function createInMemoryCampaignStore(): CampaignStore & {
       const existing = existingResult(command);
       if (existing !== null) return existing;
       const receipt = rejectedReceipt(command, audit);
+      receipts.set(commandKey(command), receipt);
+      audits.push(audit);
+      return Object.freeze({ receipt, replayed: false });
+    },
+    async acceptTestCommand({ command, campaign, revision, audit }) {
+      const existing = existingResult(command);
+      if (existing !== null) return existing;
+      const receipt = acceptedReceipt(command, campaign, revision);
+      receipts.set(commandKey(command), receipt);
+      audits.push(audit);
+      return Object.freeze({ receipt, replayed: false });
+    },
+    async acceptTestReceiptConfirmation({
+      command,
+      campaign,
+      revision,
+      audit,
+      conflictAudit,
+      staleAudit,
+      authorityAudit,
+      confirmation,
+    }) {
+      const existing = existingResult(command);
+      if (existing !== null) return existing;
+      try {
+        await options.persistTestReceiptConfirmation?.(confirmation);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "test_receipt_already_confirmed"
+        ) {
+          const receipt = rejectedReceipt(command, conflictAudit);
+          receipts.set(commandKey(command), receipt);
+          audits.push(conflictAudit);
+          return Object.freeze({ receipt, replayed: false });
+        }
+        if (
+          error instanceof Error &&
+          error.message === "test_delivery_not_current"
+        ) {
+          const receipt = rejectedReceipt(command, staleAudit);
+          receipts.set(commandKey(command), receipt);
+          audits.push(staleAudit);
+          return Object.freeze({ receipt, replayed: false });
+        }
+        if (
+          error instanceof Error &&
+          error.message === "test_confirmation_owner_not_recipient"
+        ) {
+          const receipt = rejectedReceipt(command, authorityAudit);
+          receipts.set(commandKey(command), receipt);
+          audits.push(authorityAudit);
+          return Object.freeze({ receipt, replayed: false });
+        }
+        throw error;
+      }
+      const receipt = acceptedReceipt(command, campaign, revision);
       receipts.set(commandKey(command), receipt);
       audits.push(audit);
       return Object.freeze({ receipt, replayed: false });

@@ -5,13 +5,21 @@ import {
   canonicalJson,
   createBlogPostRevisionId,
   createCampaignApplication,
+  createCampaignTestDeliveryApplication,
+  createInMemoryCampaignTestDeliveryStore,
+  CampaignValidationError,
   createInMemoryCampaignStore,
   createInMemorySubscriberLedgerStore,
   createSubscriberLedgerAudienceResolver,
   sha256Text,
+  sha256CanonicalJson,
   type CampaignApplication,
+  type CampaignTestDeliveryApplication,
+  type CampaignTestDeliveryStore,
   type CampaignChannelConfiguration,
   type CampaignStore,
+  type NewsletterDeliveryAdapter,
+  type NewsletterProviderOwnershipEvidence,
 } from "@foundry/application";
 import {
   upgradeSiteDefinition,
@@ -20,6 +28,8 @@ import {
 } from "@foundry/site-definition";
 
 import { createD1CampaignStore } from "./d1-campaign-store";
+import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
+import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
 import {
@@ -35,10 +45,30 @@ import { referenceSiteApplication } from "./reference-installation";
 import {
   createSignedNewsletterDeliveryAdapter,
 } from "./newsletter-unsubscribe-token";
+import {
+  createBrevoNewsletterDeliveryAdapter,
+} from "./brevo-newsletter-delivery-adapter";
 
-const localCampaignStore = createInMemoryCampaignStore();
+const localCampaignTestDeliveryStore =
+  createInMemoryCampaignTestDeliveryStore();
+const localCampaignStore = createInMemoryCampaignStore({
+  cancelOpenTestDeliveries: (input) =>
+    localCampaignTestDeliveryStore.cancelForCampaignEdit(input),
+  persistTestReceiptConfirmation: async (confirmation) => {
+    await localCampaignTestDeliveryStore.persistReceiptConfirmation(
+      confirmation,
+    );
+  },
+});
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
+const developmentProviderOwnershipEvidence:
+  NewsletterProviderOwnershipEvidence = Object.freeze({
+    classification: "evaluation",
+    evidenceId: "local-evaluation",
+    accountScopeFingerprint: "0".repeat(64),
+    verifiedAt: "1970-01-01T00:00:00.000Z",
+  });
 const developmentChannelConfiguration: CampaignChannelConfiguration = Object.freeze({
   senderIdentityId: "sender_primary",
   complianceFooter: Object.freeze({
@@ -55,6 +85,50 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
     version: 1 as const,
   }),
 });
+
+function readProviderOwnershipEvidence(
+  value: string | undefined,
+  accountScopeFingerprint: string,
+): NewsletterProviderOwnershipEvidence {
+  if (value === undefined || value.trim() === "") {
+    return Object.freeze({
+      classification: "evaluation",
+      evidenceId: "brevo-evaluation-unverified",
+      accountScopeFingerprint,
+      verifiedAt: "1970-01-01T00:00:00.000Z",
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("brevo_provisioning_evidence_invalid");
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Object.keys(parsed).length !== 4 ||
+    !("classification" in parsed) ||
+    (parsed.classification !== "evaluation" &&
+      parsed.classification !== "client_owned") ||
+    !("evidenceId" in parsed) ||
+    typeof parsed.evidenceId !== "string" ||
+    !/^[A-Za-z0-9:._-]{1,200}$/u.test(parsed.evidenceId) ||
+    !("accountScopeFingerprint" in parsed) ||
+    parsed.accountScopeFingerprint !== accountScopeFingerprint ||
+    !("verifiedAt" in parsed) ||
+    typeof parsed.verifiedAt !== "string" ||
+    Number.isNaN(Date.parse(parsed.verifiedAt))
+  ) {
+    throw new Error("brevo_provisioning_evidence_invalid");
+  }
+  return Object.freeze({
+    classification: parsed.classification,
+    evidenceId: parsed.evidenceId,
+    accountScopeFingerprint,
+    verifiedAt: parsed.verifiedAt,
+  });
+}
 
 async function localPostRevision(
   siteId: SiteId,
@@ -112,6 +186,7 @@ export async function loadCampaignRequestContext(
     ReturnType<typeof loadHumanAccessRequestContext>
   >["identity"];
   application: CampaignApplication;
+  testDelivery: CampaignTestDeliveryApplication;
 }>> {
   const human = await loadHumanAccessRequestContext(requestHeaders);
   if (human.state !== "authorized") {
@@ -125,6 +200,41 @@ export async function loadCampaignRequestContext(
   let findPostRevision = localPostRevision;
   let rendererCommit = developmentRendererCommit;
   let channelConfiguration = developmentChannelConfiguration;
+  let testDeliveryStore: CampaignTestDeliveryStore =
+    localCampaignTestDeliveryStore;
+  let recipientFingerprintKey =
+    "foundry-development-recipient-fingerprint-key-v1";
+  let testRecipients: Readonly<Record<string, string>> = {};
+  let testAdapter: NewsletterDeliveryAdapter = {
+    async capabilities() {
+      return {
+        provider: "brevo",
+        configurationFingerprint: "0".repeat(64),
+        senderConfigurationFingerprints: {},
+        apiTestDelivery: "supported" as const,
+        explicitRecipients: "supported" as const,
+        ambiguousOutcomeReconciliation: "supported" as const,
+        plainTextArtifact: "unsupported" as const,
+      };
+    },
+    async health() {
+      return {
+        state: "unavailable" as const,
+        credential: "unknown" as const,
+        senderIdentity: "unknown" as const,
+      };
+    },
+    async prepareTest() {
+      return { outcome: "rejected" as const, code: "provider_unavailable" };
+    },
+    async sendTest() {
+      return { outcome: "rejected" as const, code: "provider_unavailable" };
+    },
+    async reconcileTest() {
+      return { outcome: "not_found" as const };
+    },
+  };
+  let providerOwnershipEvidence = developmentProviderOwnershipEvidence;
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
     if (environment.FOUNDRY_DB === undefined) {
@@ -141,18 +251,86 @@ export async function loadCampaignRequestContext(
       deliveryAdapter.unsubscribePlaceholder,
     );
     store = createD1CampaignStore(environment.FOUNDRY_DB);
+    testDeliveryStore = createD1CampaignTestDeliveryStore(
+      environment.FOUNDRY_DB,
+    );
     resolveAudience = createSubscriberLedgerAudienceResolver({
       siteId: referenceSiteApplication.siteId,
       store: createD1SubscriberLedgerStore(environment.FOUNDRY_DB),
     });
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
+    const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
+    const installationProofKey =
+      environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";
+    recipientFingerprintKey = installationProofKey;
+    const webhookAuthenticationToken =
+      environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN?.trim() ?? "";
+    const accountScopeFingerprint =
+      environment.FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT?.trim() ?? "";
+    if (webhookAuthenticationToken.length < 32) {
+      throw new Error("brevo_webhook_authentication_token_invalid");
+    }
+    if (!/^[a-f0-9]{64}$/u.test(accountScopeFingerprint)) {
+      throw new Error("brevo_account_scope_fingerprint_invalid");
+    }
+    providerOwnershipEvidence = readProviderOwnershipEvidence(
+      environment.FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON,
+      accountScopeFingerprint,
+    );
+    const senders = JSON.parse(
+      environment.FOUNDRY_BREVO_SENDERS_JSON ?? "{}",
+    ) as Record<string, { id: number; email: string; name: string }>;
+    testRecipients = JSON.parse(
+      environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
+    ) as Record<string, string>;
+    const configurationFingerprint = await sha256CanonicalJson({
+      version: "foundry.brevo-test-configuration.v3",
+      accountScopeFingerprint,
+      senders,
+      installationProofKeyFingerprint:
+        await sha256Text(installationProofKey),
+      adapterVersion: "brevo-transactional-test-v3",
+      webhookEvidenceVersion: "brevo-transactional-webhook-v1",
+    });
+    testAdapter = createBrevoNewsletterDeliveryAdapter({
+      apiKey,
+      configurationFingerprint,
+      accountScopeFingerprint,
+      installationProofKey,
+      senders,
+      webhookEvidence: createD1BrevoTestWebhookEvidenceStore({
+        database: environment.FOUNDRY_DB,
+        siteId: referenceSiteApplication.siteId,
+      }),
+    });
   }
+  const application = createCampaignApplication({
+    siteId: referenceSiteApplication.siteId,
+    store,
+    authorize: (actor, capability) =>
+      human.application.queries.requireCapability({
+        actor,
+        capability:
+          capability === "campaign.author"
+            ? "content.write"
+            : capability,
+      }),
+    identifyActor: () => human.membership.id,
+    findPostRevision,
+    resolveAudience,
+    channelConfiguration,
+    rendererVersion: rendererCommit,
+    schemaVersion: "1.3.0",
+  });
   return {
     identity: human.identity,
-    application: createCampaignApplication({
+    application,
+    testDelivery: createCampaignTestDeliveryApplication({
       siteId: referenceSiteApplication.siteId,
-      store,
+      campaignStore: store,
+      store: testDeliveryStore,
+      adapter: testAdapter,
       authorize: (actor, capability) =>
         human.application.queries.requireCapability({
           actor,
@@ -162,11 +340,90 @@ export async function loadCampaignRequestContext(
               : capability,
         }),
       identifyActor: () => human.membership.id,
-      findPostRevision,
       resolveAudience,
-      channelConfiguration,
-      rendererVersion: rendererCommit,
-      schemaVersion: "1.3.0",
+      activeRendererVersion: () => rendererCommit,
+      resolveTestRecipients: async (recipientIds) => {
+        const activeOwnerIds = new Set<string>(
+          (
+            await human.application.queries
+              .listActiveOwnerIdsForTestDelivery({
+                actor: human.identity,
+              })
+          ),
+        );
+        return recipientIds.map((id) => {
+          if (!activeOwnerIds.has(id)) {
+            throw new CampaignValidationError("test_recipient_forbidden");
+          }
+          const address = testRecipients[id];
+          if (
+            typeof address !== "string" ||
+            address.trim() === ""
+          ) {
+            throw new CampaignValidationError("test_recipient_forbidden");
+          }
+          return { id, address: address.trim() };
+        });
+      },
+      providerOwnershipEvidence,
+      recipientFingerprintKey,
+      replayTestCommand: ({
+        actor,
+        requestId,
+        command,
+        targetId,
+        commandName,
+      }) =>
+        application.commands.replayTestCommand({
+          actor,
+          requestId,
+          command,
+          targetId,
+          commandName,
+        }),
+      recordAcceptedTestCommand: ({
+        actor,
+        requestId,
+        command,
+        campaign,
+        revision,
+        beforeState,
+        afterState,
+        targetId,
+        commandName,
+      }) =>
+        application.commands.recordAcceptedTestCommand({
+          actor,
+          requestId,
+          command,
+          campaign,
+          revision,
+          beforeState,
+          afterState,
+          targetId,
+          commandName,
+        }),
+      recordAcceptedTestReceiptConfirmation: (input) =>
+        application.commands.recordAcceptedTestReceiptConfirmation(input),
+      recordRejectedCommand: ({
+        actor,
+        requestId,
+        reason,
+        command,
+        targetId,
+        beforeState,
+        commandName,
+      }) =>
+        application.commands.recordRejectedCommand({
+          actor,
+          requestId,
+          reason,
+          command,
+          targetId,
+          beforeState,
+          action: "campaign.test",
+          commandName: commandName ?? "campaign.request_test",
+        }),
     }),
   };
 }

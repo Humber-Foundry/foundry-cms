@@ -71,6 +71,9 @@ const publicProbePaths = Object.freeze([
   "/.well-known/foundry-release.json",
 ]);
 
+export const brevoTransactionalWebhookPath =
+  "/api/integrations/brevo/webhooks/transactional";
+
 function check(
   checkId: string,
   {
@@ -253,6 +256,17 @@ export async function verifyDashProtected({
     if (response.status !== 200) {
       return fail("auth.public_path_unavailable");
     }
+  }
+
+  const integrationCallback = await probe(
+    `https://${canonicalHostname}${brevoTransactionalWebhookPath}`,
+    { method: "POST", headers: {} },
+  );
+  if (
+    integrationCallback.status !== 401 ||
+    isAccessChallenge(integrationCallback)
+  ) {
+    return fail("auth.integration_callback_not_public");
   }
 
   for (const path of protectedProbePaths) {

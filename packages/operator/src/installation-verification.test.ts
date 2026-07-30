@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createCredentialSlot } from "./credential-slots";
 import {
+  brevoTransactionalWebhookPath,
   protectedPathFamilies,
   verifyAttributedPublication,
   verifyCreatedInstallation,
@@ -50,6 +51,9 @@ function createProbe(routes: Record<string, ProbeResponse> = {}) {
     }
     if (parsed.pathname === "/") {
       return response({ status: 200, body: "<html>Acme Marine</html>" });
+    }
+    if (parsed.pathname === brevoTransactionalWebhookPath) {
+      return response({ status: 401 });
     }
     if (
       protectedPathFamilies.some((family) =>
@@ -166,14 +170,42 @@ describe("public reference site", () => {
 
 describe("protected dashboard namespaces", () => {
   it("passes when every protected family challenges and public paths serve", async () => {
+    const probe = createProbe();
     const result = await verifyDashProtected({
       canonicalHostname,
       bypassOrigins: ["acme.workers.dev", "preview-1.acme.workers.dev"],
-      probe: createProbe(),
+      probe,
       observedAt,
     });
 
     expect(result.status).toBe("pass");
+    expect(probe).toHaveBeenCalledWith(
+      `https://${canonicalHostname}${brevoTransactionalWebhookPath}`,
+      { method: "POST", headers: {} },
+    );
+    expect(probe).toHaveBeenCalledWith(
+      `https://${canonicalHostname}/api/foundry-cms/revisions`,
+      { method: "GET", headers: {} },
+    );
+  });
+
+  it("fails when Access intercepts the provider callback or the app accepts no bearer", async () => {
+    for (const callbackResponse of [
+      accessChallenge,
+      response({ status: 204 }),
+    ]) {
+      const result = await verifyDashProtected({
+        canonicalHostname,
+        bypassOrigins: [],
+        probe: createProbe({
+          [`POST ${canonicalHostname}${brevoTransactionalWebhookPath}`]:
+            callbackResponse,
+        }),
+        observedAt,
+      });
+
+      expect(result.code).toBe("auth.integration_callback_not_public");
+    }
   });
 
   it("fails when any protected path answers with the application", async () => {
@@ -482,7 +514,9 @@ function configuration(
       { name: "MEDIA", target: "acme-kmnpqrstuvwxyzab-media" },
     ],
     dnsTargets: [canonicalHostname],
-    webhookUrls: [`https://${canonicalHostname}/api/providers/brevo`],
+    webhookUrls: [
+      `https://${canonicalHostname}${brevoTransactionalWebhookPath}`,
+    ],
     schedulerEndpoints: [`https://${canonicalHostname}/__scheduled`],
     accessIssuer: "https://acme.cloudflareaccess.com",
     buildTokenOwnerPrincipal: "client-build-token-owner",

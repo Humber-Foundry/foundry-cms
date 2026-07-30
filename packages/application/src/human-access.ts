@@ -69,7 +69,8 @@ export type HumanCapability =
   | "subscriber-ledger.export"
   | "forms.review"
   | "forms.delivery.manage"
-  | "forms.data.manage";
+  | "forms.data.manage"
+  | "campaign.test.confirm";
 
 export type ExternalIdentityBinding = Readonly<{
   issuer: string;
@@ -109,6 +110,7 @@ export type MembershipStatusChange =
       reason:
         | "membership_not_found"
         | "last_owner"
+        | "campaign_test_send_in_progress"
         | "membership_transition_not_allowed";
     }>;
 
@@ -174,6 +176,9 @@ export type HumanAccessApplication = Readonly<{
     listMembers(input: {
       actor: ExternalHumanIdentity;
     }): Promise<ReadonlyArray<HumanMembership>>;
+    listActiveOwnerIdsForTestDelivery(input: {
+      actor: ExternalHumanIdentity;
+    }): Promise<ReadonlyArray<HumanMembershipId>>;
     canActivateInvitation(input: {
       actor: ExternalHumanIdentity;
     }): Promise<boolean>;
@@ -205,6 +210,7 @@ export class AccessDeniedError extends Error {
     | "capability_not_authorized"
     | "invitation_not_claimable"
     | "membership_email_ambiguous"
+    | "campaign_test_send_in_progress"
     | "membership_transition_not_allowed";
 
   constructor(code: AccessDeniedError["code"]) {
@@ -299,6 +305,7 @@ const roleCapabilities: Readonly<
     "forms.review",
     "forms.delivery.manage",
     "forms.data.manage",
+    "campaign.test.confirm",
   ]),
   editor: new Set(["dashboard.view", "content.write", "forms.review"]),
 };
@@ -459,6 +466,9 @@ export function createHumanAccessApplication({
       if (result.reason === "membership_transition_not_allowed") {
         throw new AccessDeniedError("membership_transition_not_allowed");
       }
+      if (result.reason === "campaign_test_send_in_progress") {
+        throw new AccessDeniedError("campaign_test_send_in_progress");
+      }
       throw new AccessDeniedError("membership_not_found");
     }
     await synchronizeEligibility();
@@ -470,6 +480,15 @@ export function createHumanAccessApplication({
     async listMembers({ actor }) {
       await requireCapability({ actor, capability: "access.manage" });
       return store.listMemberships(siteId);
+    },
+    async listActiveOwnerIdsForTestDelivery({ actor }) {
+      await requireCapability({ actor, capability: "content.write" });
+      return (await store.listMemberships(siteId))
+        .filter(
+          (membership) =>
+            membership.role === "owner" && membership.status === "active",
+        )
+        .map((membership) => membership.id);
     },
     async canActivateInvitation({ actor }) {
       return (

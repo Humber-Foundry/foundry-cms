@@ -1,6 +1,6 @@
 import {
   sha256Text,
-  type NewsletterDeliveryAdapter,
+  type NewsletterUnsubscribeAdapter,
 } from "@foundry/application";
 
 const encoder = new TextEncoder();
@@ -130,9 +130,9 @@ export function createSignedNewsletterDeliveryAdapter({
 }: {
   unsubscribeUrl: string;
   secret: string;
-}): NewsletterDeliveryAdapter {
+}): NewsletterUnsubscribeAdapter {
   const placeholder = unsubscribePlaceholder(unsubscribeUrl);
-  const adapter: NewsletterDeliveryAdapter = {
+  const adapter: NewsletterUnsubscribeAdapter = {
     unsubscribePlaceholder: placeholder,
     async createUnsubscribeUrl({
       identityKey,

@@ -79,12 +79,18 @@ beforeEach(async () => {
     d1Databases: ["FOUNDRY_DB"],
   });
   database = await runtime.getD1Database("FOUNDRY_DB");
-  const migration = await readFile(
-    new URL("../migrations/0001_human_access.sql", import.meta.url),
-    "utf8",
-  );
-  for (const statement of migrationStatements(migration)) {
-    await database.exec(statement);
+  for (const name of [
+    "0001_human_access.sql",
+    "0016_campaign_authoring.sql",
+    "0021_campaign_test_delivery.sql",
+  ]) {
+    const migration = await readFile(
+      new URL(`../migrations/${name}`, import.meta.url),
+      "utf8",
+    );
+    for (const statement of migrationStatements(migration)) {
+      await database.exec(statement);
+    }
   }
   await database.batch([
     database
@@ -129,6 +135,106 @@ afterEach(async () => {
 });
 
 describe("D1 human access store", () => {
+  it("serializes Owner revocation against an active campaign test send lease", async () => {
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO human_users (id, email, created_at)
+           VALUES ('user-owner-secondary', 'secondary@example.com', ?1)`,
+        )
+        .bind(now.toISOString()),
+      database
+        .prepare(
+          `INSERT INTO human_memberships (
+             id, site_id, user_id, email, identity_issuer, identity_subject,
+             role, status, created_at, updated_at
+           ) VALUES (
+             'membership-owner-secondary', ?1, 'user-owner-secondary',
+             'secondary@example.com', 'https://foundry.cloudflareaccess.com',
+             'owner-secondary', 'owner', 'active', ?2, ?2
+           )`,
+        )
+        .bind(siteId, now.toISOString()),
+      database
+        .prepare(
+          `INSERT INTO campaigns (
+             id, site_id, lifecycle_state, current_revision_id,
+             version, created_at, updated_at
+           ) VALUES ('campaign-send-fence', ?1, 'draft',
+             'revision-send-fence', 1, ?2, ?2)`,
+        )
+        .bind(siteId, now.toISOString()),
+      database
+        .prepare(
+          `INSERT INTO campaign_revisions (
+             id, site_id, campaign_id, revision_number,
+             revision_json, created_at
+           ) VALUES (
+             'revision-send-fence', ?1, 'campaign-send-fence', 1, '{}', ?2
+           )`,
+        )
+        .bind(siteId, now.toISOString()),
+    ]);
+    await database
+      .prepare(
+        `INSERT INTO campaign_test_deliveries (
+           execution_id, site_id, actor_id, request_id, campaign_id,
+           campaign_revision_id, binding_json, recipient_ids_json, state,
+           attempt_number, attempt_lease_until, provider_campaign_id,
+           foundry_send_proof, failure_code, evidence_json,
+           created_at, updated_at
+         ) VALUES (
+           'execution-send-fence', ?1, 'membership-owner',
+           'request-send-fence', 'campaign-send-fence',
+           'revision-send-fence', '{}', '["membership-owner"]',
+           'attempting', 1, '2026-07-27T04:01:00.000Z',
+           'brevo-transactional-execution-send-fence', ?2,
+           NULL, NULL, ?3, ?3
+         )`,
+      )
+      .bind(siteId, "a".repeat(64), now.toISOString())
+      .run();
+    let current = now;
+    const application = createHumanAccessApplication({
+      siteId,
+      store: createD1HumanAccessStore(
+        database as unknown as D1DatabaseBinding,
+      ),
+      eligibilitySynchronizer: {
+        async replaceExactEmailEligibility() {},
+      },
+      clock: () => current,
+      createId: (kind) => `${kind}-send-fence`,
+    });
+
+    await expect(
+      application.commands.changeStatus({
+        actor: owner,
+        membershipId: "membership-owner" as never,
+        status: "suspended",
+      }),
+    ).rejects.toEqual(
+      new AccessDeniedError("campaign_test_send_in_progress"),
+    );
+    await expect(
+      database
+        .prepare(
+          `SELECT status FROM human_memberships
+           WHERE id = 'membership-owner'`,
+        )
+        .first(),
+    ).resolves.toEqual({ status: "active" });
+
+    current = new Date("2026-07-27T04:01:01.000Z");
+    await expect(
+      application.commands.changeStatus({
+        actor: owner,
+        membershipId: "membership-owner" as never,
+        status: "suspended",
+      }),
+    ).resolves.toMatchObject({ status: "suspended" });
+  });
+
   it("replays a completed mutation receipt without executing twice", async () => {
     const request = new Request(
       "https://foundry.example/api/foundry-cms/members",

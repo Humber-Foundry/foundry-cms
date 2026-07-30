@@ -75,10 +75,40 @@ evidence.
   the exact approved artifacts and fingerprints.
 - Brevo templates may provide an optional delivery wrapper but never become the
   canonical campaign editor.
-- Before scheduling, the adapter verifies that the approved Foundry artifact
-  matches the Brevo draft fingerprint. Drift blocks the send.
-- A dedicated API test-send to explicit recipients, without making the campaign
-  live, is mandatory for the default adapter.
+- Before scheduling a bulk campaign, the adapter verifies that the approved
+  Foundry artifact matches the Brevo draft fingerprint. Drift blocks the send.
+- Test delivery uses Brevo's transactional-email endpoint with inline Foundry
+  HTML, the verified sender address and display name, the exact subject and
+  explicit recipients in one provider request. The delivery binding includes
+  the selected sender's exact ID, address and display name. It does not read
+  and then send a mutable provider draft.
+- Foundry persists a domain-separated, installation-keyed HMAC proof of the
+  exact test binding before the provider request. The transactional payload
+  carries the execution ID in Brevo's exact `Idempotency-Key` custom-header
+  field. Foundry accepts the direct result only when Brevo returns
+  HTTP 201 and a message ID; an uncertain response remains ambiguous.
+- Ambiguous transactional writes reconcile through Brevo's
+  authenticated
+  [transactional webhook](https://developers.brevo.com/docs/transactional-webhooks),
+  [tag-filtered event report](https://developers.brevo.com/reference/get-email-event-report),
+  [message lookup](https://developers.brevo.com/reference/get-transac-emails-list)
+  and
+  [sent-content lookup](https://developers.brevo.com/reference/get-transac-email-content).
+  The webhook must carry Brevo's configured bearer authorization, the exact
+  execution tag, pre-send proof, provider message ID and recipient. Foundry
+  stores only an installation-keyed recipient fingerprint. Polling cannot
+  authenticate Foundry origin by itself; it only enriches or contradicts the
+  durable webhook evidence. Acceptance requires exact sender, recipient-set,
+  subject and actual HTML agreement with that proof. Missing or partial
+  evidence remains ambiguous. A replacement request is permitted only after
+  tagged events prove
+  terminal non-delivery for every exact recipient and no delivery-derived
+  event such as delivery, open, click, complaint, proxy open, or unsubscribe.
+- The Brevo callback is exposed only at
+  `/api/integrations/brevo/webhooks/transactional`. It remains outside the
+  human Cloudflare Access application so Brevo can reach it, but exact bearer
+  verification happens before payload parsing or database access. The bearer
+  is not accepted by any human CMS route.
 - Scheduling, cancellation, and rescheduling use stored UTC intent, provider
   identifiers, and idempotency records. An accepted API response alone does not
   prove that a campaign was sent.
@@ -89,7 +119,13 @@ evidence.
   through verified webhooks and applied to local suppression before routine
   reconciliation.
 - Webhook processing verifies authenticity, acknowledges quickly, deduplicates,
-  and tolerates retry and out-of-order delivery.
+  and tolerates retry and out-of-order delivery. Brevo's integer `id` identifies
+  the webhook configuration, not an individual event, so Foundry does not use
+  it as event identity. The retry identity is a canonical fingerprint of the
+  site, provider, execution ID, pre-send proof, provider message ID,
+  installation-keyed recipient fingerprint, event type, and provider event
+  timestamp. Locally observed receipt time is evidence metadata and is never
+  part of retry identity.
 - Delivery, open, and click data may be ingested through webhooks or provider
   report polling. Polling is also a reconciliation backstop for campaign and
   subscriber state.

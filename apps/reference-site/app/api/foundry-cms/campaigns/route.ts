@@ -26,6 +26,15 @@ type CampaignCommand =
       campaignId: string;
       expectedVersion: number;
       input: CampaignEditableInput;
+    }>
+  | Readonly<{
+      action: "request_test";
+      campaignId: string;
+      testRecipientIds: ReadonlyArray<string>;
+    }>
+  | Readonly<{
+      action: "confirm_test_receipt";
+      executionId: string;
     }>;
 
 const maximumCampaignCommandBytes = 256 * 1024;
@@ -86,6 +95,40 @@ function command(value: unknown): CampaignCommand | null {
         }
       : null;
   }
+  if (value.action === "request_test") {
+    return Object.keys(value).length === 3 &&
+      Object.keys(value).every((key) =>
+        key === "action" ||
+        key === "campaignId" ||
+        key === "testRecipientIds"
+      ) &&
+      "campaignId" in value &&
+      typeof value.campaignId === "string" &&
+      "testRecipientIds" in value &&
+      Array.isArray(value.testRecipientIds) &&
+      value.testRecipientIds.every(
+        (recipientId) => typeof recipientId === "string",
+      )
+      ? {
+          action: value.action,
+          campaignId: value.campaignId,
+          testRecipientIds: value.testRecipientIds,
+        }
+      : null;
+  }
+  if (value.action === "confirm_test_receipt") {
+    return Object.keys(value).length === 2 &&
+      Object.keys(value).every(
+        (key) => key === "action" || key === "executionId",
+      ) &&
+      "executionId" in value &&
+      typeof value.executionId === "string"
+      ? {
+          action: value.action,
+          executionId: value.executionId,
+        }
+      : null;
+  }
   if (
     (value.action !== "create_standalone" && value.action !== "edit") ||
     !("input" in value) ||
@@ -136,7 +179,16 @@ export async function GET(request: Request) {
       actor: context.identity,
       campaignId,
     });
-    return Response.json({ rendered }, {
+    const testEvidence =
+      await context.testDelivery.queries.currentEvidence({
+        actor: context.identity,
+        campaignId,
+      });
+    const testReadiness = await context.testDelivery.queries.readiness({
+      actor: context.identity,
+      campaignId,
+    });
+    return Response.json({ rendered, testEvidence, testReadiness }, {
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
@@ -198,11 +250,48 @@ export async function POST(request: Request) {
     const rawCommand = body.value;
     const parsed = command(rawCommand);
     if (parsed === null) {
+      const rawRecord =
+        typeof rawCommand === "object" && rawCommand !== null
+          ? rawCommand as Record<string, unknown>
+          : null;
+      const malformedTest =
+        rawRecord !== null &&
+        (rawRecord.action === "request_test" ||
+          rawRecord.action === "confirm_test_receipt");
+      const malformedConfirmation =
+        malformedTest &&
+        rawRecord!.action === "confirm_test_receipt";
+      const malformedTarget =
+        malformedTest &&
+        (malformedConfirmation
+          ? typeof rawRecord!.executionId === "string"
+          : typeof rawRecord!.campaignId === "string")
+          ? malformedConfirmation
+            ? rawRecord!.executionId as string
+            : rawRecord!.campaignId as string
+          : "campaign:unknown";
       await context.application.commands.recordRejectedCommand({
         actor: context.identity,
         requestId,
         reason: "campaign_command_invalid",
         command: rawCommand ?? { invalidJson: body.receiptInput },
+        ...(malformedTest
+          ? {
+              action: "campaign.test" as const,
+              commandName: malformedConfirmation
+                ? "campaign.confirm_test_receipt" as const
+                : "campaign.request_test" as const,
+              targetId: malformedTarget,
+              beforeState: JSON.stringify({
+                current: { commandEnvelope: "invalid" },
+                required: {
+                  commandEnvelope: malformedConfirmation
+                    ? "valid_confirm_test_receipt"
+                    : "valid_request_test",
+                },
+              }),
+            }
+          : {}),
       });
       return Response.json(
         { error: "campaign_command_invalid" },
@@ -210,26 +299,49 @@ export async function POST(request: Request) {
       );
     }
     let editedCampaignId;
-    if (parsed.action === "edit") {
+    if (parsed.action === "edit" || parsed.action === "request_test") {
       try {
         editedCampaignId = createCampaignId(parsed.campaignId);
       } catch {
         await context.application.commands.recordRejectedCommand({
           actor: context.identity,
           requestId,
-          action: "campaign.edit",
+          action:
+            parsed.action === "edit"
+              ? "campaign.edit"
+              : "campaign.test",
           targetId: parsed.campaignId,
           reason: "campaign_id_invalid",
+          beforeState: JSON.stringify({
+            current: { campaignId: "invalid" },
+            required: { campaignId: "valid_uuid" },
+          }),
           command: rawCommand,
-          commandName: "campaign.edit",
+          commandName:
+            parsed.action === "edit"
+              ? "campaign.edit"
+              : "campaign.request_test",
         });
         return Response.json(
-          { error: "campaign_command_invalid" },
+          { error: "campaign_id_invalid" },
           { status: 400 },
         );
       }
     }
-    const result = parsed.action === "create_standalone"
+    const result = parsed.action === "request_test"
+      ? await context.testDelivery.commands.requestTest({
+          actor: context.identity,
+          requestId,
+          campaignId: editedCampaignId!,
+          testRecipientIds: parsed.testRecipientIds,
+        })
+      : parsed.action === "confirm_test_receipt"
+        ? await context.testDelivery.commands.confirmReceipt({
+            actor: context.identity,
+            requestId,
+            executionId: parsed.executionId,
+          })
+      : parsed.action === "create_standalone"
       ? await context.application.commands.createStandalone({
           actor: context.identity,
           requestId,
@@ -249,17 +361,48 @@ export async function POST(request: Request) {
             input: parsed.input,
           });
     return Response.json(result, {
-      status: parsed.action === "edit" || result.replayed ? 200 : 201,
+      status:
+        parsed.action === "edit" ||
+        parsed.action === "request_test" ||
+        parsed.action === "confirm_test_receipt" ||
+        ("replayed" in result && result.replayed)
+          ? 200
+          : 201,
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
     if (error instanceof AccessDeniedError) {
       return Response.json({ error: "not_authorized" }, { status: 403 });
     }
-    if (
-      error instanceof CampaignValidationError ||
-      error instanceof TypeError
-    ) {
+    if (error instanceof CampaignValidationError) {
+      const isTestDeliveryReason =
+        error.message === "provider_unhealthy" ||
+        error.message === "test_recipient_forbidden" ||
+        error.message.startsWith("test_delivery_") ||
+        error.message.startsWith("test_confirmation_") ||
+        error.message.startsWith("test_receipt_") ||
+        error.message.startsWith("test_execution_") ||
+        error.message.startsWith("provider_test_") ||
+        error.message.startsWith("provider_configuration_");
+      return Response.json(
+        {
+          error: isTestDeliveryReason
+            ? error.message
+            : "campaign_command_invalid",
+        },
+        {
+          status:
+            error.message === "provider_unhealthy"
+              ? 503
+              : error.message === "test_delivery_rate_limited"
+                ? 429
+                : error.message === "test_delivery_in_progress"
+                  ? 409
+                  : 400,
+        },
+      );
+    }
+    if (error instanceof TypeError) {
       return Response.json({ error: "campaign_command_invalid" }, { status: 400 });
     }
     if (error instanceof CampaignConflictError) {

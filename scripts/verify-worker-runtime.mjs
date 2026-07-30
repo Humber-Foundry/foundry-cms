@@ -109,8 +109,25 @@ try {
     );
   }
 
+  const integrationCallbackResponse = await fetch(
+    `${origin}/api/integrations/brevo/webhooks/transactional`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      redirect: "manual",
+    },
+  );
+  if (integrationCallbackResponse.status !== 401) {
+    throw new Error(
+      "Unauthenticated Brevo integration callback returned " +
+        `${integrationCallbackResponse.status}; expected 401.`,
+    );
+  }
+
   console.log(
-    "Verified the public page in workerd and fail-closed production dashboard access.",
+    "Verified the public page, fail-closed dashboard, and bearer-guarded " +
+      "public integration callback in workerd.",
   );
 } catch (error) {
   process.stderr.write(previewOutput);
