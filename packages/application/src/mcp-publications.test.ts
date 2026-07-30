@@ -19,6 +19,7 @@ import {
   mcpDesignDraftScope,
   mcpInitialScope,
   mcpPublicationPublishScope,
+  mcpPublicationScheduleScope,
   type ContentPublication,
   type McpConnectionGrant,
   type McpConnectionPrincipal,
@@ -80,15 +81,28 @@ function publication(
   };
 }
 
+/**
+ * Minimal stand-in for the blog operations application the scheduling command
+ * loads. Only the queries the command reaches before its artifact-kind check
+ * are needed; `activateSchedule` must never be entered for a rejected kind.
+ */
+type BlogOperationsStub = Parameters<
+  typeof createMcpPublicationApplication
+>[0]["runtime"] extends { loadBlogOperations(...args: never): infer Loaded }
+  ? Awaited<Loaded>
+  : never;
+
 async function fixture({
   connectionAt,
   seedEdits = [{
     path: "section_hero.title",
     value: "MCP approved publication",
   }],
+  blogOperations = null,
 }: {
   connectionAt?: (read: number) => McpConnectionGrant | null;
   seedEdits?: ReadonlyArray<{ path: string; value: string }>;
+  blogOperations?: BlogOperationsStub | null;
 } = {}) {
   const actorId = createContentActorId("mcp-agent-publication-56");
   const revisionApplication = createContentRevisionApplication({
@@ -188,7 +202,8 @@ async function fixture({
         >;
       },
       async loadBlogOperations() {
-        throw new Error("unused");
+        if (blogOperations === null) throw new Error("unused");
+        return blogOperations;
       },
       async recordInvocation(event) {
         publicationAudit.push(event);
@@ -451,6 +466,68 @@ describe("MCP publication orchestration", () => {
         operation: "foundry.publication.request",
         outcome: "denied",
         reason: "APPROVAL_REQUIRED",
+      }),
+    ]);
+  });
+
+  it("refuses to schedule an approval that is not a blog artifact", async () => {
+    // A campaign or other non-blog artifact must not reach the scheduler:
+    // "Campaign and email artifacts are rejected by the scheduling command."
+    const activateSchedule = vi.fn();
+    const schedulePrincipal: McpConnectionPrincipal = {
+      ...principal,
+      scopes: [
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpPublicationScheduleScope,
+      ],
+    };
+    const { application, publicationAudit } = await fixture({
+      connectionAt: () => ({ ...schedulePrincipal, status: "active" }),
+      blogOperations: {
+        commands: { activateSchedule },
+        queries: {
+          async findScheduleByWorkspaceRequest() {
+            return null;
+          },
+          async getApproval() {
+            return {
+              id: approvalId,
+              siteId: referenceSiteDefinition.site.id,
+              workspaceId,
+              contentRevision: 1,
+              invalidatedAt: null,
+            };
+          },
+          // The approved revision resolves to no schedulable blog post.
+          async findSchedulablePostForApproval() {
+            return null;
+          },
+        },
+      } as unknown as BlogOperationsStub,
+    });
+
+    await expect(
+      application.schedulePublication(
+        schedulePrincipal,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId,
+          publishAt: "2026-11-01T08:00:00.000Z",
+          reportingTimeZone: "America/Vancouver",
+          idempotencyKey: "99999999-9999-4999-8999-999999999999",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "WRONG_ARTIFACT_KIND" });
+    expect(activateSchedule).not.toHaveBeenCalled();
+    expect(publicationAudit).toEqual([
+      expect.objectContaining({
+        operation: "foundry.publication.schedule",
+        outcome: "denied",
+        reason: "WRONG_ARTIFACT_KIND",
+        scheduleId: null,
       }),
     ]);
   });
