@@ -5,6 +5,13 @@
 - **Amended:** 2026-07-26 by the
   [guided provisioning design](../architecture/guided-client-provisioning.md)
   for issue #20
+- **Amended:** 2026-07-30 by
+  [ADR-0006](ADR-0006-bulk-campaign-execution-boundary.md) for issue #52. Bulk
+  delivery uses Brevo's transactional batch endpoint with one message version
+  per recipient rather than a Brevo email campaign, so this ADR's
+  Brevo-campaign and provider-draft-fingerprint language no longer describes
+  bulk execution. Everything else here, including the whole test-delivery
+  contract, stands.
 
 ## Context
 

@@ -191,4 +191,47 @@ describe("Brevo test webhook runtime", () => {
       "opened",
     ]);
   });
+
+  it("routes authenticated proof-bound bulk facts without treating them as test evidence", async () => {
+    const { records, store } = memoryStore();
+    const bulkEvents: unknown[] = [];
+    const bulkOperationId = "60000000-0000-4000-8000-000000000052";
+    const bulkProof = "f".repeat(64);
+    const handler = createBrevoTestWebhookHandler({
+      authenticationToken,
+      installationProofKey,
+      store,
+      handleBulkEvent: async (bulkEvent) => {
+        bulkEvents.push(bulkEvent);
+      },
+      clock: () => new Date("2026-08-01T00:10:00.000Z"),
+    });
+
+    const response = await handler(
+      request({
+        event: "hardBounce",
+        email: "subscriber@example.test",
+        "message-id": "<bulk-message-52@brevo.test>",
+        "X-Mailin-custom":
+          `foundry_bulk_operation:${bulkOperationId}` +
+          `|foundry_bulk_proof:${bulkProof}`,
+        tags: [bulkOperationId],
+        ts_event: 1_785_347_200,
+      }),
+    );
+
+    expect(response.status).toBe(204);
+    expect(records.size).toBe(0);
+    expect(bulkEvents).toEqual([
+      {
+        operationId: bulkOperationId,
+        providerSendProof: bulkProof,
+        providerMessageId: "<bulk-message-52@brevo.test>",
+        recipient: "subscriber@example.test",
+        eventType: "hardBounce",
+        providerOccurredAt: "2026-07-29T17:46:40.000Z",
+        receivedAt: "2026-08-01T00:10:00.000Z",
+      },
+    ]);
+  });
 });

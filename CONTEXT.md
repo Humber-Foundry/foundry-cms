@@ -104,6 +104,24 @@ support an active campaign schedule or immediate bulk send.
 **Send operation** — One logical bulk delivery, identified independently of
 provider requests and retried without changing identity.
 
+**Stable send key** — The deterministic digest that names one send operation's
+logical delivery. It survives every retry, so an uncertain provider response can
+never become a second delivery.
+
+**Send artifact** — The provider-neutral record of exactly what one send
+operation dispatched: content, sender reference, compliance version,
+audience-definition version, approval fingerprint and non-identifying audience
+counts. It is committed to Git before the first provider call and contains no
+subscriber address.
+
+**Provider send proof** — An installation-keyed digest of one send operation's
+exact binding, written durably before the provider request and carried in it.
+A delivery event is authenticated evidence only when it presents this proof.
+
+**Execution lease** — A bounded, single-holder claim on one operation's
+execution. An expired lease may be reclaimed for the same operation; it never
+authorizes a second one.
+
 **Suppression** — A durable negative subscriber state that blocks delivery.
 Routine synchronization never reverses it.
 
@@ -181,4 +199,5 @@ The value is never part of the record.
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
 - [Draft, preview and publish pipeline](docs/decisions/ADR-0004-draft-preview-publish-pipeline.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
+- [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)

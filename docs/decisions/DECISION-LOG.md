@@ -10,3 +10,4 @@
 | [ADR-0003](ADR-0003-unified-privacy-first-analytics.md) | Unified privacy-first analytics architecture | Accepted | 2026-07-26 |
 | [ADR-0004](ADR-0004-draft-preview-publish-pipeline.md) | Draft, preview and publish pipeline | Accepted | 2026-07-26 |
 | [ADR-0005](ADR-0005-human-authentication-authorization-boundary.md) | Human authentication and authorization boundary | Accepted | 2026-07-26 |
+| [ADR-0006](ADR-0006-bulk-campaign-execution-boundary.md) | Bulk campaign execution boundary | Accepted | 2026-07-30 |

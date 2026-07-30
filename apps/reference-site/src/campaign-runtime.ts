@@ -5,15 +5,22 @@ import {
   canonicalJson,
   createBlogPostRevisionId,
   createCampaignApplication,
+  createCampaignBulkDeliveryApplication,
+  createCampaignRevisionId,
   createCampaignTestDeliveryApplication,
   createInMemoryCampaignTestDeliveryStore,
   CampaignValidationError,
+  createInMemoryCampaignBulkStateStore,
   createInMemoryCampaignStore,
   createInMemorySubscriberLedgerStore,
   createSubscriberLedgerAudienceResolver,
   sha256Text,
-  sha256CanonicalJson,
   type CampaignApplication,
+  type CampaignBulkArtifactPublisher,
+  type CampaignBulkDeliveryAdapter,
+  type CampaignBulkDeliveryApplication,
+  type CampaignBulkStateStore,
+  type SubscriberLedgerStore,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
   type CampaignChannelConfiguration,
@@ -28,6 +35,7 @@ import {
 } from "@foundry/site-definition";
 
 import { createD1CampaignStore } from "./d1-campaign-store";
+import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
@@ -38,6 +46,7 @@ import {
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import {
   readNewsletterDeliverySecret,
+  readSubscriberIdentityKeySecret,
 } from "./human-access-configuration";
 import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
@@ -48,6 +57,23 @@ import {
 import {
   createBrevoNewsletterDeliveryAdapter,
 } from "./brevo-newsletter-delivery-adapter";
+import {
+  brevoBulkRecipientLimit,
+  createBrevoCampaignBulkDeliveryAdapter,
+} from "./brevo-campaign-bulk-delivery-adapter";
+import {
+  readBrevoCampaignDeliveryConfiguration,
+} from "./brevo-campaign-delivery-configuration";
+import { createCampaignBulkAudience } from "./campaign-bulk-audience";
+import {
+  createActiveOwnerCheck,
+  createCampaignBulkSourceReader,
+  createProviderSuppressionRecorder,
+} from "./campaign-bulk-source";
+import {
+  createGitHubContentPublisher,
+  readGitHubContentPublisherConfiguration,
+} from "./github-content-publisher";
 
 const localCampaignTestDeliveryStore =
   createInMemoryCampaignTestDeliveryStore();
@@ -61,6 +87,20 @@ const localCampaignStore = createInMemoryCampaignStore({
   },
 });
 const localSubscriberStore = createInMemorySubscriberLedgerStore();
+const localBulkCurrentRevisions = new Map<string, string>();
+const localBulkActiveOwners = new Set(["membership-local-owner"]);
+const localBulkActiveSubscribers = new Set<string>();
+const localBulkStateStore = createInMemoryCampaignBulkStateStore({
+  currentRevision: (campaignId) => {
+    const revisionId = localBulkCurrentRevisions.get(campaignId);
+    if (revisionId === undefined) {
+      throw new Error("campaign_not_found");
+    }
+    return revisionId as ReturnType<typeof createCampaignRevisionId>;
+  },
+  activeOwners: localBulkActiveOwners,
+  activeSubscribers: localBulkActiveSubscribers,
+});
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
 const developmentProviderOwnershipEvidence:
   NewsletterProviderOwnershipEvidence = Object.freeze({
@@ -187,12 +227,15 @@ export async function loadCampaignRequestContext(
   >["identity"];
   application: CampaignApplication;
   testDelivery: CampaignTestDeliveryApplication;
+  bulkDelivery: CampaignBulkDeliveryApplication;
 }>> {
   const human = await loadHumanAccessRequestContext(requestHeaders);
   if (human.state !== "authorized") {
     throw new AccessDeniedError("capability_not_authorized");
   }
   let store: CampaignStore = localCampaignStore;
+  let subscriberStore: SubscriberLedgerStore = localSubscriberStore;
+  let bulkStateStore: CampaignBulkStateStore = localBulkStateStore;
   let resolveAudience = createSubscriberLedgerAudienceResolver({
     siteId: referenceSiteApplication.siteId,
     store: localSubscriberStore,
@@ -205,6 +248,37 @@ export async function loadCampaignRequestContext(
   let recipientFingerprintKey =
     "foundry-development-recipient-fingerprint-key-v1";
   let testRecipients: Readonly<Record<string, string>> = {};
+  let bulkFingerprintKey =
+    "foundry-development-campaign-bulk-fingerprint-key-v1";
+  let bulkProviderConfigurationFingerprint = "0".repeat(64);
+  let bulkSenderFingerprints: Readonly<Record<string, string>> = {};
+  let bulkSenders: Readonly<
+    Record<string, { id: number; email: string; name: string }>
+  > = {};
+  let bulkAdapter: CampaignBulkDeliveryAdapter = {
+    providerCampaignIdFor: (operationId) => `local-bulk-${operationId}`,
+    async sendBulk() {
+      return { outcome: "rejected", code: "provider_unavailable" };
+    },
+    async reconcileBulk() {
+      return {
+        outcome: "ambiguous",
+        providerCampaignId: null,
+        code: "provider_unavailable",
+      };
+    },
+  };
+  let bulkArtifactPublisher: CampaignBulkArtifactPublisher = {
+    async publish() {
+      return { outcome: "committed" as const, commitSha: "0".repeat(40) };
+    },
+    async reconcile() {
+      return { outcome: "not_found" as const };
+    },
+  };
+  let durableDatabase: D1DatabaseBinding | null = null;
+  let subscriberIdentityKeySecret =
+    "local-development-subscriber-identity-secret";
   let testAdapter: NewsletterDeliveryAdapter = {
     async capabilities() {
       return {
@@ -251,12 +325,16 @@ export async function loadCampaignRequestContext(
       deliveryAdapter.unsubscribePlaceholder,
     );
     store = createD1CampaignStore(environment.FOUNDRY_DB);
+    durableDatabase = environment.FOUNDRY_DB;
+    subscriberIdentityKeySecret = readSubscriberIdentityKeySecret(environment);
+    bulkStateStore = createD1CampaignBulkStateStore(environment.FOUNDRY_DB);
     testDeliveryStore = createD1CampaignTestDeliveryStore(
       environment.FOUNDRY_DB,
     );
+    subscriberStore = createD1SubscriberLedgerStore(environment.FOUNDRY_DB);
     resolveAudience = createSubscriberLedgerAudienceResolver({
       siteId: referenceSiteApplication.siteId,
-      store: createD1SubscriberLedgerStore(environment.FOUNDRY_DB),
+      store: subscriberStore,
     });
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
@@ -264,6 +342,7 @@ export async function loadCampaignRequestContext(
     const installationProofKey =
       environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";
     recipientFingerprintKey = installationProofKey;
+    bulkFingerprintKey = installationProofKey;
     const webhookAuthenticationToken =
       environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN?.trim() ?? "";
     const accountScopeFingerprint =
@@ -281,21 +360,20 @@ export async function loadCampaignRequestContext(
     const senders = JSON.parse(
       environment.FOUNDRY_BREVO_SENDERS_JSON ?? "{}",
     ) as Record<string, { id: number; email: string; name: string }>;
+    bulkSenders = senders;
     testRecipients = JSON.parse(
       environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
     ) as Record<string, string>;
-    const configurationFingerprint = await sha256CanonicalJson({
-      version: "foundry.brevo-test-configuration.v3",
-      accountScopeFingerprint,
+    const bulkConfiguration = await readBrevoCampaignDeliveryConfiguration(
+      environment,
       senders,
-      installationProofKeyFingerprint:
-        await sha256Text(installationProofKey),
-      adapterVersion: "brevo-transactional-test-v3",
-      webhookEvidenceVersion: "brevo-transactional-webhook-v1",
-    });
+    );
+    bulkProviderConfigurationFingerprint =
+      bulkConfiguration.providerConfigurationFingerprint;
+    bulkSenderFingerprints = bulkConfiguration.senderFingerprints;
     testAdapter = createBrevoNewsletterDeliveryAdapter({
       apiKey,
-      configurationFingerprint,
+      configurationFingerprint: bulkProviderConfigurationFingerprint,
       accountScopeFingerprint,
       installationProofKey,
       senders,
@@ -303,6 +381,14 @@ export async function loadCampaignRequestContext(
         database: environment.FOUNDRY_DB,
         siteId: referenceSiteApplication.siteId,
       }),
+    });
+    bulkAdapter = createBrevoCampaignBulkDeliveryAdapter({
+      apiKey,
+      providerConfigurationFingerprint: bulkProviderConfigurationFingerprint,
+      senders,
+    });
+    bulkArtifactPublisher = createGitHubContentPublisher({
+      configuration: readGitHubContentPublisherConfiguration(environment),
     });
   }
   const application = createCampaignApplication({
@@ -323,9 +409,66 @@ export async function loadCampaignRequestContext(
     rendererVersion: rendererCommit,
     schemaVersion: "1.3.0",
   });
+  const audience = createCampaignBulkAudience({
+    siteId: referenceSiteApplication.siteId,
+    store: subscriberStore,
+  });
+  const isActiveOwner = createActiveOwnerCheck({
+    siteId: referenceSiteApplication.siteId,
+    database: () => durableDatabase,
+  });
+  const loadBulkSource = createCampaignBulkSourceReader({
+    siteId: referenceSiteApplication.siteId,
+    campaignStore: store,
+    testStore: testDeliveryStore,
+    senders: () => bulkSenders,
+    senderFingerprints: () => bulkSenderFingerprints,
+    providerConfigurationFingerprint: () =>
+      bulkProviderConfigurationFingerprint,
+    onResolved: ({ campaignId, revisionId }) => {
+      if (durableDatabase === null) {
+        localBulkCurrentRevisions.set(campaignId, revisionId);
+      }
+    },
+  });
+  const bulkDelivery = createCampaignBulkDeliveryApplication({
+    siteId: referenceSiteApplication.siteId,
+    store: bulkStateStore,
+    loadSource: loadBulkSource,
+    authorizeOwner: (actor) =>
+      human.application.queries.requireCapability({
+        actor,
+        capability: "campaign.bulk.authorize",
+      }),
+    identifyActor: () => human.membership.id,
+    validateOwnerAuthority: async (ownerActorId) =>
+      (await isActiveOwner(ownerActorId)) ??
+      localBulkActiveOwners.has(ownerActorId),
+    resolveAudience: async (revision) => {
+      const recipients = await audience.resolve(revision);
+      if (durableDatabase === null) {
+        localBulkActiveSubscribers.clear();
+        for (const recipient of recipients) {
+          localBulkActiveSubscribers.add(recipient.subscriberId);
+        }
+      }
+      return recipients;
+    },
+    resolveAudienceByIds: audience.resolveByIds,
+    applyProviderSuppression: createProviderSuppressionRecorder({
+      siteId: referenceSiteApplication.siteId,
+      store: subscriberStore,
+      identityKeySecret: subscriberIdentityKeySecret,
+    }),
+    artifactPublisher: bulkArtifactPublisher,
+    adapter: bulkAdapter,
+    fingerprintKey: bulkFingerprintKey,
+    maximumAudienceRecipients: brevoBulkRecipientLimit,
+  });
   return {
     identity: human.identity,
     application,
+    bulkDelivery,
     testDelivery: createCampaignTestDeliveryApplication({
       siteId: referenceSiteApplication.siteId,
       campaignStore: store,

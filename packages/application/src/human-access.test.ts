@@ -520,6 +520,18 @@ describe("human access application", () => {
       }),
     ).resolves.toMatchObject({ role: "owner", status: "active" });
     await expect(
+      application.queries.requireCapability({
+        actor: editorIdentity,
+        capability: "campaign.bulk.authorize",
+      }),
+    ).rejects.toEqual(new AccessDeniedError("capability_not_authorized"));
+    await expect(
+      application.queries.requireCapability({
+        actor: ownerIdentity,
+        capability: "campaign.bulk.authorize",
+      }),
+    ).resolves.toMatchObject({ role: "owner", status: "active" });
+    await expect(
       application.queries.listActiveOwnerIdsForTestDelivery({
         actor: editorIdentity,
       }),

@@ -117,6 +117,23 @@ export interface SubscriberLedgerStore {
   recordSensitiveAccess(event: SensitiveSubscriberAccessEvent): Promise<void>;
 }
 
+/**
+ * Only the canonical consent-and-suppression ledger is implemented. Any other
+ * audience definition must be refused rather than silently resolved as if it
+ * were the canonical one, because an approval and a committed send artifact
+ * both record the definition they claim to have honoured.
+ */
+export function requireCanonicalAudienceDefinition(
+  definition: CampaignAudienceDefinition,
+) {
+  if (
+    definition.id !== "canonical-consent-and-suppression" ||
+    definition.version !== 1
+  ) {
+    throw new TypeError("campaign_audience_definition_invalid");
+  }
+}
+
 export function createSubscriberLedgerAudienceResolver({
   siteId,
   store,
@@ -127,12 +144,7 @@ export function createSubscriberLedgerAudienceResolver({
   return async (
     definition: CampaignAudienceDefinition,
   ): Promise<Readonly<{ eligibleSubscriberCount: number }>> => {
-    if (
-      definition.id !== "canonical-consent-and-suppression" ||
-      definition.version !== 1
-    ) {
-      throw new TypeError("campaign_audience_definition_invalid");
-    }
+    requireCanonicalAudienceDefinition(definition);
     const subscribers = await store.listSubscribers(siteId);
     return Object.freeze({
       eligibleSubscriberCount: subscribers.filter(

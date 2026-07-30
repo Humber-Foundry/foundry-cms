@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AccessDeniedError,
+  CampaignBulkDeliveryError,
   CampaignValidationError,
 } from "@foundry/application";
 
@@ -13,6 +15,12 @@ const mocks = vi.hoisted(() => ({
   readiness: vi.fn(),
   requestTest: vi.fn(),
   confirmReceipt: vi.fn(),
+  authorizeBulk: vi.fn(),
+  activateBulkSchedule: vi.fn(),
+  cancelBulkSchedule: vi.fn(),
+  sendBulkNow: vi.fn(),
+  retryBulkSend: vi.fn(),
+  executeBulk: vi.fn(),
   createStandalone: vi.fn(),
   createFromPost: vi.fn(),
   edit: vi.fn(),
@@ -46,6 +54,18 @@ const testDelivery = {
     confirmReceipt: mocks.confirmReceipt,
   },
 };
+const bulkDelivery = {
+  commands: {
+    authorize: mocks.authorizeBulk,
+    activateSchedule: mocks.activateBulkSchedule,
+    cancelSchedule: mocks.cancelBulkSchedule,
+    sendNow: mocks.sendBulkNow,
+    retrySend: mocks.retryBulkSend,
+  },
+  scheduler: {
+    execute: mocks.executeBulk,
+  },
+};
 
 vi.mock("../../../../src/campaign-runtime", () => ({
   loadCampaignRequestContext: mocks.loadContext,
@@ -68,6 +88,7 @@ describe("campaign endpoint", () => {
       identity,
       application,
       testDelivery,
+      bulkDelivery,
     });
     mocks.createStandalone.mockResolvedValue({
       campaign: { id: "20000000-0000-4000-8000-000000000001" },
@@ -84,6 +105,27 @@ describe("campaign endpoint", () => {
     mocks.confirmReceipt.mockResolvedValue({
       executionId: "40000000-0000-4000-8000-000000000001",
       ownerActorId: "membership-owner",
+    });
+    mocks.authorizeBulk.mockResolvedValue({
+      authorization: {
+        id: "50000000-0000-4000-8000-000000000001",
+      },
+      replayed: false,
+    });
+    mocks.sendBulkNow.mockResolvedValue({
+      operation: {
+        id: "60000000-0000-4000-8000-000000000001",
+        state: "preparing",
+      },
+      replayed: false,
+    });
+    mocks.executeBulk.mockResolvedValue({
+      id: "60000000-0000-4000-8000-000000000001",
+      state: "provider_queued",
+    });
+    mocks.retryBulkSend.mockResolvedValue({
+      id: "60000000-0000-4000-8000-000000000001",
+      state: "provider_queued",
     });
   });
 
@@ -227,6 +269,150 @@ describe("campaign endpoint", () => {
       actor: identity,
       requestId: "campaign-test-confirm-1",
       executionId: "40000000-0000-4000-8000-000000000001",
+    });
+  });
+
+  it("routes exact test evidence into Owner bulk authorization", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-bulk-authorize-1",
+        },
+        body: JSON.stringify({
+          action: "authorize_bulk",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          testExecutionId: "40000000-0000-4000-8000-000000000001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.authorizeBulk).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-bulk-authorize-1",
+      campaignId: "20000000-0000-4000-8000-000000000001",
+      testExecutionId: "40000000-0000-4000-8000-000000000001",
+    });
+  });
+
+  it("routes an Owner retry to the same send operation", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-bulk-retry-1",
+        },
+        body: JSON.stringify({
+          action: "retry_bulk_send",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          operationId: "60000000-0000-4000-8000-000000000001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.retryBulkSend).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-bulk-retry-1",
+      campaignId: "20000000-0000-4000-8000-000000000001",
+      operationId: "60000000-0000-4000-8000-000000000001",
+    });
+    // A retry never opens a second send: it goes through the same command.
+    expect(mocks.sendBulkNow).not.toHaveBeenCalled();
+  });
+
+  it("tells a non-Owner that bulk authority is what it lacks", async () => {
+    mocks.authorizeBulk.mockRejectedValue(
+      new AccessDeniedError("capability_not_authorized"),
+    );
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-bulk-editor-attempt-1",
+        },
+        body: JSON.stringify({
+          action: "authorize_bulk",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          testExecutionId: "40000000-0000-4000-8000-000000000001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "bulk_owner_required",
+    });
+  });
+
+  it("separates a moved-state bulk conflict from an unmet prerequisite", async () => {
+    for (const [code, status] of [
+      ["bulk_authorization_stale", 409],
+      ["bulk_suppression_changed", 409],
+      ["bulk_send_already_exists", 409],
+      ["bulk_test_stale", 409],
+      ["bulk_schedule_not_cancellable", 409],
+      ["bulk_execution_lease_lost", 409],
+      ["bulk_test_required", 400],
+      ["bulk_test_not_reviewed", 400],
+      ["bulk_audience_empty", 400],
+    ] as const) {
+      mocks.authorizeBulk.mockRejectedValue(
+        new CampaignBulkDeliveryError(code),
+      );
+      const response = await POST(
+        new Request("https://foundry.example/api/foundry-cms/campaigns", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": `campaign-bulk-status-${code}`,
+          },
+          body: JSON.stringify({
+            action: "authorize_bulk",
+            campaignId: "20000000-0000-4000-8000-000000000001",
+            testExecutionId: "40000000-0000-4000-8000-000000000001",
+          }),
+        }),
+      );
+
+      expect({ code, status: response.status }).toEqual({ code, status });
+      await expect(response.json()).resolves.toEqual({ error: code });
+    }
+  });
+
+  it("advances Owner send-now through the shared stable executor", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "campaign-bulk-send-now-1",
+        },
+        body: JSON.stringify({
+          action: "send_bulk_now",
+          campaignId: "20000000-0000-4000-8000-000000000001",
+          authorizationId: "50000000-0000-4000-8000-000000000001",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.sendBulkNow).toHaveBeenCalledWith({
+      actor: identity,
+      requestId: "campaign-bulk-send-now-1",
+      campaignId: "20000000-0000-4000-8000-000000000001",
+      authorizationId: "50000000-0000-4000-8000-000000000001",
+    });
+    expect(mocks.executeBulk).toHaveBeenCalledWith(
+      "60000000-0000-4000-8000-000000000001",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      operation: { state: "provider_queued" },
     });
   });
 

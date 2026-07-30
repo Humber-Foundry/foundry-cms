@@ -70,7 +70,8 @@ export type HumanCapability =
   | "forms.review"
   | "forms.delivery.manage"
   | "forms.data.manage"
-  | "campaign.test.confirm";
+  | "campaign.test.confirm"
+  | "campaign.bulk.authorize";
 
 export type ExternalIdentityBinding = Readonly<{
   issuer: string;
@@ -306,6 +307,7 @@ const roleCapabilities: Readonly<
     "forms.delivery.manage",
     "forms.data.manage",
     "campaign.test.confirm",
+    "campaign.bulk.authorize",
   ]),
   editor: new Set(["dashboard.view", "content.write", "forms.review"]),
 };

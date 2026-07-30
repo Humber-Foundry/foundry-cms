@@ -10,10 +10,23 @@ import {
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import { referenceSiteApplication } from "./reference-installation";
+import { createBrevoCampaignBulkWebhookIngestor } from "./brevo-campaign-bulk-webhook-runtime";
 
 const maximumWebhookBytes = 256 * 1024;
 const proofHeaderPattern =
   /^foundry_execution:([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\|foundry_proof:([0-9a-f]{64})$/u;
+const bulkProofHeaderPattern =
+  /^foundry_bulk_operation:([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\|foundry_bulk_proof:([0-9a-f]{64})$/u;
+
+export type AuthenticatedBrevoBulkWebhookEvent = Readonly<{
+  operationId: string;
+  providerSendProof: string;
+  providerMessageId: string;
+  recipient: string;
+  eventType: string;
+  providerOccurredAt: string | null;
+  receivedAt: string;
+}>;
 
 async function sameSecret(left: string, right: string) {
   const [leftHash, rightHash] = await Promise.all([
@@ -67,11 +80,15 @@ export function createBrevoTestWebhookHandler({
   authenticationToken,
   installationProofKey,
   store,
+  handleBulkEvent = async () => {},
   clock = () => new Date(),
 }: {
   authenticationToken: string;
   installationProofKey: string;
   store: BrevoTestWebhookEvidenceStore;
+  handleBulkEvent?: (
+    event: AuthenticatedBrevoBulkWebhookEvent,
+  ) => Promise<void>;
   clock?: () => Date;
 }) {
   if (
@@ -124,9 +141,30 @@ export function createBrevoTestWebhookHandler({
       const event = candidate as Record<string, unknown>;
       const proofHeader = string(event["X-Mailin-custom"], 512);
       const proofMatch = proofHeader?.match(proofHeaderPattern) ?? null;
+      const bulkProofMatch = proofHeader?.match(bulkProofHeaderPattern) ?? null;
       const providerMessageId = string(event["message-id"], 512);
       const recipient = string(event.email, 320);
       const eventType = string(event.event, 100);
+      const providerTimestamp = providerOccurredAt(event.ts_event);
+      const eventOccurredAt = providerTimestamp ?? receivedAt;
+      if (
+        bulkProofMatch !== null &&
+        providerMessageId !== null &&
+        recipient !== null &&
+        eventType !== null &&
+        tags(event).includes(bulkProofMatch[1]!)
+      ) {
+        await handleBulkEvent({
+          operationId: bulkProofMatch[1]!,
+          providerSendProof: bulkProofMatch[2]!,
+          providerMessageId,
+          recipient,
+          eventType,
+          providerOccurredAt: providerTimestamp,
+          receivedAt,
+        });
+        continue;
+      }
       if (
         proofMatch === null ||
         providerMessageId === null ||
@@ -142,8 +180,6 @@ export function createBrevoTestWebhookHandler({
         installationProofKey,
         recipient,
       );
-      const providerTimestamp = providerOccurredAt(event.ts_event);
-      const eventOccurredAt = providerTimestamp ?? receivedAt;
       const stablePayloadIdentity = {
         executionId,
         foundrySendProof,
@@ -202,6 +238,14 @@ export async function handleBrevoTestWebhook(request: Request) {
   if (environment.FOUNDRY_DB === undefined) {
     return new Response(null, { status: 503 });
   }
+  const bulkDatabase = environment.FOUNDRY_DB;
+  // Built on the first bulk event rather than for every callback. Bulk
+  // ingestion needs the whole durable delivery stack, and constructing it
+  // eagerly would let a bulk-side configuration problem take down test-delivery
+  // evidence, which this callback has carried since it was introduced.
+  let ingestBulkEvent: Awaited<
+    ReturnType<typeof createBrevoCampaignBulkWebhookIngestor>
+  > | null = null;
   return createBrevoTestWebhookHandler({
     authenticationToken,
     installationProofKey:
@@ -210,5 +254,12 @@ export async function handleBrevoTestWebhook(request: Request) {
       database: environment.FOUNDRY_DB,
       siteId: referenceSiteApplication.siteId,
     }),
+    handleBulkEvent: async (event) => {
+      ingestBulkEvent ??= await createBrevoCampaignBulkWebhookIngestor({
+        ...environment,
+        FOUNDRY_DB: bulkDatabase,
+      });
+      await ingestBulkEvent(event);
+    },
   })(request);
 }

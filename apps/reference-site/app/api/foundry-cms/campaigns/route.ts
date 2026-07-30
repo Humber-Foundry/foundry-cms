@@ -1,11 +1,15 @@
 import {
   AccessDeniedError,
+  CampaignBulkDeliveryError,
   CampaignConflictError,
   CampaignIdempotencyError,
   CampaignNotFoundError,
   CampaignValidationError,
   createCampaignId,
   isCampaignRequestId,
+  type CampaignActor,
+  type CampaignBulkDeliveryApplication,
+  type CampaignCommandName,
   type CampaignEditableInput,
 } from "@foundry/application";
 
@@ -35,9 +39,162 @@ type CampaignCommand =
   | Readonly<{
       action: "confirm_test_receipt";
       executionId: string;
+    }>
+  | Readonly<{
+      action: "authorize_bulk";
+      campaignId: string;
+      testExecutionId: string;
+    }>
+  | Readonly<{
+      action: "activate_bulk_schedule";
+      campaignId: string;
+      authorizationId: string;
+      resolvedTime: Readonly<{
+        localDateTime: string;
+        ianaTimeZone: string;
+        utcOffsetChoice: string;
+        executeAtUtc: string;
+        timeZoneDatabaseVersion: string;
+      }>;
+    }>
+  | Readonly<{
+      action: "cancel_bulk_schedule";
+      scheduleId: string;
+    }>
+  | Readonly<{
+      action: "send_bulk_now";
+      campaignId: string;
+      authorizationId: string;
+    }>
+  | Readonly<{
+      action: "retry_bulk_send";
+      campaignId: string;
+      operationId: string;
     }>;
 
 const maximumCampaignCommandBytes = 256 * 1024;
+
+const bulkActions = Object.freeze([
+  "authorize_bulk",
+  "activate_bulk_schedule",
+  "cancel_bulk_schedule",
+  "send_bulk_now",
+  "retry_bulk_send",
+] as const) satisfies ReadonlyArray<CampaignCommand["action"]>;
+
+/**
+ * A rejected bulk command answers whether durable state moved under the caller
+ * (409) or the request itself cannot be satisfied yet (400). The set is
+ * enumerated rather than matched on how a code happens to be spelled, so a new
+ * reason is reported as an unmet precondition until it is listed here
+ * deliberately.
+ */
+const bulkConflictReasons: ReadonlySet<string> = new Set([
+  "bulk_authorization_stale",
+  "bulk_authorization_exists",
+  "bulk_test_stale",
+  "bulk_send_already_exists",
+  "bulk_schedule_already_exists",
+  "bulk_schedule_state_changed",
+  "bulk_send_state_changed",
+  "bulk_idempotency_key_reused",
+  "bulk_suppression_changed",
+  "bulk_schedule_not_cancellable",
+  "bulk_execution_lease_lost",
+  "bulk_provider_correlation_conflict",
+  "bulk_delivery_event_identity_conflict",
+]);
+
+function bulkRejectionStatus(code: string) {
+  return bulkConflictReasons.has(code) ? 409 : 400;
+}
+
+type BulkAction = (typeof bulkActions)[number];
+type BulkCommand = Extract<CampaignCommand, { action: BulkAction }>;
+
+function isBulkCommand(command: CampaignCommand): command is BulkCommand {
+  return (bulkActions as ReadonlyArray<string>).includes(command.action);
+}
+
+/**
+ * Every bulk command except schedule cancellation names its campaign, and the
+ * caller validated it before dispatch. This turns that fact into a check rather
+ * than an assertion so a future action cannot dispatch without one.
+ */
+function requireCampaignId(
+  campaignId: ReturnType<typeof createCampaignId> | undefined,
+) {
+  if (campaignId === undefined) {
+    throw new CampaignValidationError("campaign_id_invalid");
+  }
+  return campaignId;
+}
+
+/**
+ * Dispatch one Owner bulk command. `send_bulk_now` and `retry_bulk_send` both
+ * end in the same shared executor, so an immediate send and a retry of a
+ * failed send follow exactly one execution path.
+ */
+async function runBulkCommand({
+  bulkDelivery,
+  actor,
+  requestId,
+  campaignId,
+  command,
+}: {
+  bulkDelivery: CampaignBulkDeliveryApplication;
+  actor: CampaignActor;
+  requestId: string;
+  campaignId: ReturnType<typeof createCampaignId> | undefined;
+  command: BulkCommand;
+}) {
+  switch (command.action) {
+    case "authorize_bulk":
+      return bulkDelivery.commands.authorize({
+        actor,
+        requestId,
+        campaignId: requireCampaignId(campaignId),
+        testExecutionId: command.testExecutionId,
+      });
+    case "activate_bulk_schedule":
+      return bulkDelivery.commands.activateSchedule({
+        actor,
+        requestId,
+        campaignId: requireCampaignId(campaignId),
+        authorizationId: command.authorizationId,
+        resolvedTime: command.resolvedTime,
+      });
+    case "cancel_bulk_schedule":
+      return bulkDelivery.commands.cancelSchedule({
+        actor,
+        requestId,
+        scheduleId: command.scheduleId,
+      });
+    case "retry_bulk_send":
+      return bulkDelivery.commands.retrySend({
+        actor,
+        requestId,
+        campaignId: requireCampaignId(campaignId),
+        operationId: command.operationId,
+      });
+    case "send_bulk_now": {
+      const requested = await bulkDelivery.commands.sendNow({
+        actor,
+        requestId,
+        campaignId: requireCampaignId(campaignId),
+        authorizationId: command.authorizationId,
+      });
+      return {
+        ...requested,
+        operation: await bulkDelivery.scheduler.execute(requested.operation.id),
+      };
+    }
+    default:
+      // A new bulk action must choose its dispatch here rather than inherit
+      // another action's behaviour.
+      return command satisfies never;
+  }
+}
 
 class CampaignCommandBodyError extends Error {
   constructor(readonly code: "campaign_command_invalid" | "campaign_command_too_large") {
@@ -129,6 +286,87 @@ function command(value: unknown): CampaignCommand | null {
         }
       : null;
   }
+  if (value.action === "authorize_bulk") {
+    return Object.keys(value).length === 3 &&
+      "campaignId" in value &&
+      typeof value.campaignId === "string" &&
+      "testExecutionId" in value &&
+      typeof value.testExecutionId === "string"
+      ? {
+          action: value.action,
+          campaignId: value.campaignId,
+          testExecutionId: value.testExecutionId,
+        }
+      : null;
+  }
+  if (
+    value.action === "activate_bulk_schedule" &&
+    Object.keys(value).length === 4 &&
+    "campaignId" in value &&
+    typeof value.campaignId === "string" &&
+    "authorizationId" in value &&
+    typeof value.authorizationId === "string" &&
+    "resolvedTime" in value &&
+    typeof value.resolvedTime === "object" &&
+    value.resolvedTime !== null
+  ) {
+    const resolved = value.resolvedTime as Record<string, unknown>;
+    return Object.keys(resolved).length === 5 &&
+      [
+        "localDateTime",
+        "ianaTimeZone",
+        "utcOffsetChoice",
+        "executeAtUtc",
+        "timeZoneDatabaseVersion",
+      ].every((key) => typeof resolved[key] === "string")
+      ? {
+          action: value.action,
+          campaignId: value.campaignId,
+          authorizationId: value.authorizationId,
+          resolvedTime: {
+            localDateTime: resolved.localDateTime as string,
+            ianaTimeZone: resolved.ianaTimeZone as string,
+            utcOffsetChoice: resolved.utcOffsetChoice as string,
+            executeAtUtc: resolved.executeAtUtc as string,
+            timeZoneDatabaseVersion:
+              resolved.timeZoneDatabaseVersion as string,
+          },
+        }
+      : null;
+  }
+  if (value.action === "cancel_bulk_schedule") {
+    return Object.keys(value).length === 2 &&
+      "scheduleId" in value &&
+      typeof value.scheduleId === "string"
+      ? { action: value.action, scheduleId: value.scheduleId }
+      : null;
+  }
+  if (value.action === "send_bulk_now") {
+    return Object.keys(value).length === 3 &&
+      "campaignId" in value &&
+      typeof value.campaignId === "string" &&
+      "authorizationId" in value &&
+      typeof value.authorizationId === "string"
+      ? {
+          action: value.action,
+          campaignId: value.campaignId,
+          authorizationId: value.authorizationId,
+        }
+      : null;
+  }
+  if (value.action === "retry_bulk_send") {
+    return Object.keys(value).length === 3 &&
+      "campaignId" in value &&
+      typeof value.campaignId === "string" &&
+      "operationId" in value &&
+      typeof value.operationId === "string"
+      ? {
+          action: value.action,
+          campaignId: value.campaignId,
+          operationId: value.operationId,
+        }
+      : null;
+  }
   if (
     (value.action !== "create_standalone" && value.action !== "edit") ||
     !("input" in value) ||
@@ -212,6 +450,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let rawAction: string | undefined;
   try {
     const context = await loadCampaignRequestContext(request.headers);
     await verifyHumanMutation(request, context.identity);
@@ -249,6 +488,7 @@ export async function POST(request: Request) {
     }
     const rawCommand = body.value;
     const parsed = command(rawCommand);
+    rawAction = parsed?.action;
     if (parsed === null) {
       const rawRecord =
         typeof rawCommand === "object" && rawCommand !== null
@@ -299,7 +539,14 @@ export async function POST(request: Request) {
       );
     }
     let editedCampaignId;
-    if (parsed.action === "edit" || parsed.action === "request_test") {
+    if (
+      parsed.action === "edit" ||
+      parsed.action === "request_test" ||
+      parsed.action === "authorize_bulk" ||
+      parsed.action === "activate_bulk_schedule" ||
+      parsed.action === "send_bulk_now" ||
+      parsed.action === "retry_bulk_send"
+    ) {
       try {
         editedCampaignId = createCampaignId(parsed.campaignId);
       } catch {
@@ -309,7 +556,9 @@ export async function POST(request: Request) {
           action:
             parsed.action === "edit"
               ? "campaign.edit"
-              : "campaign.test",
+              : parsed.action === "request_test"
+                ? "campaign.test"
+                : "campaign.bulk",
           targetId: parsed.campaignId,
           reason: "campaign_id_invalid",
           beforeState: JSON.stringify({
@@ -317,10 +566,10 @@ export async function POST(request: Request) {
             required: { campaignId: "valid_uuid" },
           }),
           command: rawCommand,
+          // Every campaign command's audited name is its action, so deriving
+          // it keeps a new action from silently inheriting another's name.
           commandName:
-            parsed.action === "edit"
-              ? "campaign.edit"
-              : "campaign.request_test",
+            `campaign.${parsed.action}` satisfies CampaignCommandName,
         });
         return Response.json(
           { error: "campaign_id_invalid" },
@@ -328,7 +577,15 @@ export async function POST(request: Request) {
         );
       }
     }
-    const result = parsed.action === "request_test"
+    const result = isBulkCommand(parsed)
+      ? await runBulkCommand({
+          bulkDelivery: context.bulkDelivery,
+          actor: context.identity,
+          requestId,
+          campaignId: editedCampaignId,
+          command: parsed,
+        })
+      : parsed.action === "request_test"
       ? await context.testDelivery.commands.requestTest({
           actor: context.identity,
           requestId,
@@ -372,7 +629,19 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof AccessDeniedError) {
-      return Response.json({ error: "not_authorized" }, { status: 403 });
+      // Only an Owner may originate bulk authority, so naming that requirement
+      // tells an Editor or agent what is missing rather than only that it was
+      // refused.
+      return Response.json(
+        {
+          error: (bulkActions as ReadonlyArray<string>).includes(
+            rawAction ?? "",
+          )
+            ? "bulk_owner_required"
+            : "not_authorized",
+        },
+        { status: 403 },
+      );
     }
     if (error instanceof CampaignValidationError) {
       const isTestDeliveryReason =
@@ -400,6 +669,12 @@ export async function POST(request: Request) {
                   ? 409
                   : 400,
         },
+      );
+    }
+    if (error instanceof CampaignBulkDeliveryError) {
+      return Response.json(
+        { error: error.code },
+        { status: bulkRejectionStatus(error.code) },
       );
     }
     if (error instanceof TypeError) {
