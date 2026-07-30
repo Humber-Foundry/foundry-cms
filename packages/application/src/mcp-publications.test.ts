@@ -26,6 +26,7 @@ import {
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
   type ContentPublication,
+  type ContentPublicationClaim,
   type McpConnectionGrant,
   type McpConnectionPrincipal,
   type McpPublicationAuditEvent,
@@ -176,12 +177,17 @@ async function fixture({
   let storedPublication: ContentPublication | null = null;
   const publish = vi.fn(async (input: {
     assertCurrentAuthority?: () => Promise<boolean>;
+    observeClaim?: (claim: ContentPublicationClaim) => void;
   }) => {
     storedPublication = publication(
       await input.assertCurrentAuthority?.() === false
         ? "blocked"
         : "requested",
     );
+    input.observeClaim?.({
+      state: "claimed",
+      publication: storedPublication,
+    });
     return storedPublication;
   });
   const application = createMcpPublicationApplication({
@@ -544,6 +550,52 @@ describe("MCP publication orchestration", () => {
         outcome: "denied",
         reason: "WRONG_ARTIFACT_KIND",
         scheduleId: null,
+      }),
+    ]);
+  });
+
+  it("reports a store-detected durable replay from the claim", async () => {
+    // A durable replay can be committed between the idempotency lookup and the
+    // claim. Only the claim reports that race, so the receipt and the audit row
+    // must both follow the claim's publication rather than the returned one.
+    const { application, publish, publicationAudit } = await fixture();
+    const replayedPublication = {
+      ...publication("committed"),
+      id: createContentPublicationId(
+        "publish_cccccccccccccccccccccccccccccccc",
+      ),
+    };
+    publish.mockImplementationOnce(async (input) => {
+      input.observeClaim?.({
+        state: "replayed",
+        publication: replayedPublication,
+      });
+      // The command returns the publication it built, not the durable one.
+      return publication("requested");
+    });
+
+    const response = await application.requestPublication(
+      principal,
+      {
+        workspaceId,
+        revision: 1,
+        approvalId,
+        idempotencyKey: "bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+      context,
+    );
+
+    expect(response).toMatchObject({
+      result: {
+        operationId: replayedPublication.id,
+        state: "committed",
+        replayed: true,
+      },
+    });
+    expect(publicationAudit).toEqual([
+      expect.objectContaining({
+        publicationId: replayedPublication.id,
+        replayed: true,
       }),
     ]);
   });
