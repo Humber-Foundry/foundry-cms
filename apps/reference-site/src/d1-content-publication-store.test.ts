@@ -424,6 +424,26 @@ describe("D1 content publication store", () => {
         actorId: "actor-stale",
         operation: "foundry.publication.request",
         requiredScopes: ["publication.publish", "content.draft"],
+        audit: {
+          invocationId: "invocation-stale-approval",
+          connectionId: "connection-stale",
+          actorId: "actor-stale",
+          siteId: referenceSiteDefinition.site.id,
+          operation: "foundry.publication.request",
+          inputHash: "3".repeat(64),
+          protocolVersion: "2025-11-25",
+          scopesEvaluated: ["publication.publish", "content.draft"],
+          outcome: "allowed",
+          reason: null,
+          occurredAt: "2026-07-27T10:06:00.000Z",
+          contractVersion: "foundry.mcp.v1",
+          idempotencyKey: "client-stale-approval",
+          workspaceId,
+          revision: 0,
+          approvalId: approval.id,
+          deriveResultHash: ({ operationId, state }) =>
+            Promise.resolve(`derived:${operationId}:${state}`),
+        },
       },
     );
 
@@ -436,6 +456,20 @@ describe("D1 content publication store", () => {
       humanClaim.publication.detail,
     );
     expect(mcpClaim.publication.detail).toBe("approval_stale");
+    // The blocked claim still commits its linked audit row, and that row's
+    // result hash covers the blocked state it actually recorded.
+    await expect(
+      database
+        .prepare(
+          `SELECT publication_id, result_hash
+           FROM mcp_audit_events
+           WHERE invocation_id = 'invocation-stale-approval'`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      publication_id: mcpClaim.publication.id,
+      result_hash: `derived:${mcpClaim.publication.id}:blocked`,
+    });
   });
 
   it("requires the publish scope for an immediate claim that lists none", async () => {

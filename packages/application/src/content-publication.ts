@@ -1119,17 +1119,16 @@ export function createContentPublicationApplication({
     );
   }
 
-  /**
-   * The approval check no longer receives the requester, so this keeps the
-   * blank-requester refusal the publish and retry commands have always made.
-   */
-  function requireNamedRequester(requestedBy: string) {
-    if (requestedBy.trim() === "") {
-      throw new ContentApprovalInvalidError("approval_not_found");
-    }
-  }
-
-  async function requireApproval(approvalId: ContentApprovalId) {
+  async function requireApproval(
+    approvalId: ContentApprovalId,
+    /**
+     * Optional so the lease guard, which revalidates an already-admitted
+     * publication, need not restate it. Checked last so a blank requester
+     * does not mask a staleness failure, matching the order this refusal
+     * has always had.
+     */
+    requestedBy?: string,
+  ) {
     const approval = await store.findApproval(approvalId);
     if (approval === null) {
       throw new ContentApprovalInvalidError("approval_not_found");
@@ -1180,6 +1179,9 @@ export function createContentPublicationApplication({
       if (fingerprint.value !== approval.fingerprint.value) {
         throw new ContentApprovalInvalidError("approval_stale");
       }
+    }
+    if (requestedBy !== undefined && requestedBy.trim() === "") {
+      throw new ContentApprovalInvalidError("approval_not_found");
     }
     return { approval, revision };
   }
@@ -1789,10 +1791,6 @@ export function createContentPublicationApplication({
             "idempotency_key_invalid",
           );
         }
-        // A requester naming nobody can never satisfy the membership or
-        // connection guard the claim applies, so refuse it here rather than
-        // letting it reach the store.
-        requireNamedRequester(input.requestedBy);
         const recordedApproval = await store.findApproval(input.approvalId);
         if (recordedApproval !== null) {
           if (recordedApproval.workspaceId !== input.workspaceId) {
@@ -1969,7 +1967,7 @@ export function createContentPublicationApplication({
           return blockForLostLease();
         }
         try {
-          await requireApproval(input.approvalId);
+          await requireApproval(input.approvalId, input.requestedBy);
         } catch (error) {
           if (error instanceof ContentApprovalInvalidError) {
             return store.updatePublication(
@@ -2055,7 +2053,6 @@ export function createContentPublicationApplication({
         reservationProof?: ContentPublicationReservationProof,
         assertCurrentAuthority?: () => Promise<boolean>,
       ) {
-        requireNamedRequester(requestedBy);
         const reservationFence =
           reservationProof === undefined
             ? {}
@@ -2474,7 +2471,7 @@ export function createContentPublicationApplication({
           return dispatching;
         }
         try {
-          await requireApproval(publication.approvalId);
+          await requireApproval(publication.approvalId, requestedBy);
         } catch {
           return store.updatePublication(
             nextPublication(dispatching, {
@@ -2564,7 +2561,7 @@ export function createContentPublicationApplication({
             return false;
           }
           try {
-            await requireApproval(publication.approvalId);
+            await requireApproval(publication.approvalId, requestedBy);
           } catch {
             return false;
           }
