@@ -284,9 +284,10 @@ describe("MCP publication orchestration", () => {
         replayed: false,
       }),
     ]);
-    // The audit result hash is the hash of the receipt the caller was given,
-    // so the row the store commits in the claim transaction and the row the
-    // application records for the same idempotency key agree by construction.
+    // The recorded hash is the hash of the receipt this invocation returned.
+    // It is deliberately not expected to equal the linked row the store commits
+    // inside the claim transaction, which hashes the outcome as admitted
+    // because the terminal state does not exist yet. See ADR-0006.
     expect(publicationAudit[0]?.resultHash).toBe(
       await sha256CanonicalJson({
         operationId: publicationId,
@@ -623,8 +624,10 @@ describe("MCP publication orchestration", () => {
 
   it("reports a store-detected durable replay from the claim", async () => {
     // A durable replay can be committed between the idempotency lookup and the
-    // claim. Only the claim reports that race, so the receipt and the audit row
-    // must both follow the claim's publication rather than the returned one.
+    // claim, and only the claim reports that race. The command returns the
+    // pre-existing publication in that case, so what this pins is the
+    // `replayed` flag the claim supplies — the receipt identity comes from the
+    // command's return value either way.
     const { application, publish, publicationAudit } = await fixture();
     const replayedPublication = {
       ...publication("committed"),

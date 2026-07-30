@@ -326,10 +326,10 @@ describe("D1 content publication store", () => {
   });
 
   it("admits a design-scoped MCP publication without a content draft grant", async () => {
-    // A revision that changes only Design-group fields requires design.draft.
-    // The store must enforce the scope set the application layer derived from
-    // the calling principal; it cannot assume a content.draft fallback, which
-    // would reject this legitimate publication outright.
+    // This claim publishes revision 0, which changes no editable field, so the
+    // application layer falls back to the calling principal's own draft scope —
+    // design.draft here. The store must enforce the set it was given; assuming a
+    // content.draft fallback would reject this legitimate publication outright.
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);
     await database.batch([

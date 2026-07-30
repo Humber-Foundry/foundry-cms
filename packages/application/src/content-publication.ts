@@ -1355,11 +1355,12 @@ export function createContentPublicationApplication({
       return publication;
     }
     // A scheduler refresh runs on behalf of one MCP connection and can reach
-    // the Git reconciliation and deployment boundaries below. Losing that
-    // grant must stop the refresh before any provider read or state advance,
-    // leaving the publication exactly as it was. Every durable write here also
-    // carries the reservation fence, so the grant is re-checked at the
-    // remaining provider crossings rather than only on entry.
+    // the Git reconciliation and deployment boundaries below. Losing that grant
+    // must stop the refresh before any provider read, so no external write can
+    // follow it; a bounded-deadline branch may still record a terminal state in
+    // D1, which is local evidence rather than a provider effect. Every durable
+    // write here also carries the reservation fence, so the grant is re-checked
+    // at the remaining provider crossings rather than only on entry.
     const authorityCurrent = async () =>
       assertCurrentAuthority === undefined ||
       (await assertCurrentAuthority());

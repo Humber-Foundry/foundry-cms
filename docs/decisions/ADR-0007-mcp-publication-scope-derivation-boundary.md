@@ -99,8 +99,20 @@ An adapter does not reproduce the MCP tool result envelope to compute an audit
 `result_hash`. The operation identity is only known once the claim is built, so
 a precomputed hash is impossible; instead the linked audit carries a
 caller-supplied deriver that the store invokes with the outcome it is about to
-commit. The recorded hash then matches the hash recorded for the same
-idempotency key by the application layer.
+commit.
+
+That hash covers the outcome as admitted, not the state the command finally
+reaches. `mcp_audit_events` rows are append-only, and the linked row commits
+inside the claim transaction — before the Git commit and release verification
+that produce the terminal state — so it cannot record a state that does not
+exist yet. The application layer records the same invocation afterwards and
+that insert no-ops on the existing row, which keeps the row committed with the
+claim authoritative. A replay of the same key is a distinct invocation and
+records its own row carrying the state it observed.
+
+An audit row therefore proves which operation was admitted, under which scopes,
+against which approval. It is not a receipt of the terminal publication state;
+the publication's own status and history carry that.
 
 ## Consequences
 

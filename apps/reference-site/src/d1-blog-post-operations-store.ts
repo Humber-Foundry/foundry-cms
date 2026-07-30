@@ -1187,6 +1187,9 @@ export function createD1BlogPostOperationsStore(
              )
              SELECT ?1, ?2, ?3, ?4, ?5, ?6
              FROM mcp_connections AS connection
+             JOIN mcp_connection_scopes AS schedule_scope
+               ON schedule_scope.connection_id = connection.id
+              AND schedule_scope.scope = 'publication.schedule'
              WHERE ?7 = 'mcp'
                AND connection.id = ?2
                AND connection.actor_id = ?3
