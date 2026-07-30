@@ -1672,6 +1672,25 @@ describe("content publication application", () => {
     expect(createCommit).not.toHaveBeenCalled();
   });
 
+  it("does not enter Git after MCP publication authority is revoked at the commit boundary", async () => {
+    const { app, approval } = await approve();
+    const assertCurrentAuthority = vi.fn().mockResolvedValue(false);
+
+    const publication = await app.commands.publish({
+      workspaceId,
+      revision: 1,
+      approvalId: approval.id,
+      requestedBy: createContentActorId("mcp-agent-56"),
+      idempotencyKey: "mcp-revoked-at-publication-boundary",
+      assertCurrentAuthority,
+    });
+
+    expect(assertCurrentAuthority).toHaveBeenCalled();
+    expect(publication.status).toBe("blocked");
+    expect(publication.detail).toBe("publication_lease_lost");
+    expect(createCommit).not.toHaveBeenCalled();
+  });
+
   it("keeps the lease valid across the bounded GitHub request sequence", async () => {
     let currentTime = "2026-07-27T10:01:00.000Z";
     createCommit.mockImplementation(async (input) => {
@@ -2177,6 +2196,70 @@ describe("content publication application", () => {
         commitSha: "c".repeat(40),
       }),
     );
+  });
+
+  it("does not advance a retained Git reference after MCP schedule authority is revoked", async () => {
+    let currentTime = "2026-07-27T10:01:00.000Z";
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: `git_reference_result_unknown:${"c".repeat(40)}`,
+    });
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-ref-retry-mcp-revoked",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+    await app.commands.refresh(publication.id);
+    let gitReferenceAdvanced = false;
+    vi.mocked(publisher.retryReference).mockImplementation(
+      async ({ assertLease }) => {
+        if (await assertLease()) {
+          gitReferenceAdvanced = true;
+          return {
+            state: "committed",
+            commitSha: "c".repeat(40),
+          };
+        }
+        return {
+          state: "blocked",
+          detail: "publication_lease_lost",
+        };
+      },
+    );
+    const assertCurrentAuthority = vi.fn().mockResolvedValue(false);
+
+    await expect(
+      app.commands.retryDeployment(
+        publication.id,
+        createContentActorId("mcp-scheduled-agent"),
+        undefined,
+        assertCurrentAuthority,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: `git_reference_not_advanced:${"c".repeat(40)}`,
+      }),
+    );
+    expect(assertCurrentAuthority).toHaveBeenCalled();
+    expect(gitReferenceAdvanced).toBe(false);
   });
 
   it("reconciles a retained candidate that reached production before retrying its deployment", async () => {
@@ -3040,6 +3123,56 @@ describe("content publication application", () => {
     ).rejects.toEqual(
       new ContentApprovalInvalidError("approval_invalidated"),
     );
+  });
+
+  it("does not dispatch Cloudflare after MCP schedule authority is revoked at the provider boundary", async () => {
+    const app = createContentPublicationApplication({
+      store: createInMemoryContentPublicationStore(),
+      revisions: repository,
+      publisher,
+      now: () => clock.shift() ?? "2026-07-27T10:05:00.000Z",
+    });
+    const { approval } = await approve(app);
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-retry-mcp-authority-race",
+    });
+    getDeploymentStatus.mockResolvedValue("failed");
+    await app.commands.refresh(publication.id);
+    isReleaseLive.mockResolvedValue(false);
+    vi.mocked(publisher.getProductionHead).mockResolvedValue("c".repeat(40));
+    let providerDispatched = false;
+    vi.mocked(publisher.retryDeployment).mockImplementation(
+      async ({ assertDispatch }) => {
+        if (await assertDispatch()) {
+          providerDispatched = true;
+          return { state: "requested", deploymentId: "build-raced" };
+        }
+        return {
+          state: "blocked",
+          detail: "deployment_retry_claim_lost",
+        };
+      },
+    );
+    const assertCurrentAuthority = vi.fn().mockResolvedValue(false);
+
+    await expect(
+      app.commands.retryDeployment(
+        publication.id,
+        createContentActorId("mcp-scheduled-agent"),
+        undefined,
+        assertCurrentAuthority,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "deployment_retry_claim_lost",
+      }),
+    );
+    expect(assertCurrentAuthority).toHaveBeenCalled();
+    expect(providerDispatched).toBe(false);
   });
 
   it("fails closed when approval becomes invalid at the provider boundary", async () => {

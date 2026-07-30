@@ -26,6 +26,7 @@ export * from "./media-assets";
 export * from "./in-memory-media-assets";
 export * from "./mcp-read";
 export * from "./mcp-drafts";
+export * from "./mcp-publications";
 
 export interface PublishedSiteRepository {
   findBySiteId(siteId: SiteId): Promise<PublishedSiteBundle | null>;

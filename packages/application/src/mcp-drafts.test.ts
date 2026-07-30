@@ -925,14 +925,12 @@ describe("MCP canonical draft application", () => {
         mcpDesignDraftScope,
       ],
     });
-    expect(fixtureValue.auditEvents).toContainEqual(
+    expect(fixtureValue.audit).toContain(
+      "foundry.preview.prepare:denied",
+    );
+    expect(fixtureValue.auditEvents).not.toContainEqual(
       expect.objectContaining({
         operation: "foundry.preview.prepare",
-        outcome: "denied",
-        scopesEvaluated: [
-          mcpContentDraftScope,
-          mcpDesignDraftScope,
-        ],
       }),
     );
     await expect(

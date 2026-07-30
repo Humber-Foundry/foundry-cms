@@ -7,6 +7,7 @@ import type {
 import type {
   ContentApprovalId,
 } from "./content-publication";
+import type { McpLinkedPublicationAudit } from "./mcp-read";
 
 export type BlogPostCollectionState = "active" | "archiving" | "archived";
 
@@ -117,6 +118,15 @@ export type BlogPostScheduleClaim = Readonly<{
   lease: BlogPostScheduleExecutionLease | null;
 }>;
 
+export type McpBlogScheduleAuthority = Readonly<{
+  kind: "mcp";
+  connectionId: string;
+  actorId: string;
+  operation: "foundry.publication.schedule";
+  requiredScopes: ReadonlyArray<string>;
+  audit?: McpLinkedPublicationAudit;
+}>;
+
 export type BlogPostArchiveResult = BlogPostOperationalState &
   Readonly<{
     selectedPostRevisionId: string;
@@ -188,16 +198,41 @@ export type BlogPostOperationsStore = Readonly<{
     postId: BlogPostId | string;
     actorId: ContentActorId;
   }): Promise<boolean>;
+  hasMcpScheduleAuthority(input: {
+    siteId: SiteId | string;
+    connectionId: string;
+    actorId: string;
+    requiredScopes: ReadonlyArray<string>;
+  }): Promise<boolean>;
+  findMcpScheduleAuthority(
+    scheduleId: string,
+  ): Promise<McpBlogScheduleAuthority | null>;
+  findSchedulablePostForApproval(input: {
+    siteId: SiteId | string;
+    workspaceId: ContentWorkspaceId;
+    contentRevision: number;
+    approvalId: ContentApprovalId;
+  }): Promise<BlogPostOperationalState | null>;
   saveSchedule(
     schedule: BlogPostSchedule,
     idempotencyKey: string,
+    authority?: McpBlogScheduleAuthority,
   ): Promise<BlogPostSchedule>;
   findScheduleByRequest(input: {
     siteId: SiteId | string;
     postId: BlogPostId | string;
     idempotencyKey: string;
   }): Promise<BlogPostSchedule | null>;
+  findScheduleByWorkspaceRequest(input: {
+    siteId: SiteId | string;
+    workspaceId: ContentWorkspaceId;
+    idempotencyKey: string;
+  }): Promise<BlogPostSchedule | null>;
   findSchedule(scheduleId: string): Promise<BlogPostSchedule | null>;
+  findScheduleCancellationByRequest(input: {
+    siteId: SiteId | string;
+    requestId: string;
+  }): Promise<BlogPostSchedule | null>;
   cancelSchedule(input: {
     siteId: SiteId | string;
     postId: BlogPostId | string;
@@ -205,6 +240,7 @@ export type BlogPostOperationsStore = Readonly<{
     actorId: ContentActorId;
     requestId: string;
     occurredAt: string;
+    authority?: McpBlogScheduleAuthority;
   }): Promise<BlogPostSchedule>;
   listDueSchedules(
     now: string,
@@ -391,6 +427,33 @@ function localDateTimeAt(instant: Date, timeZone: string): string {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
+export function resolvePostPublicationInstant(
+  publishAt: string,
+  reportingTimeZone: string,
+): Omit<ResolvedPostPublicationTime, "timeZoneDatabaseVersion"> {
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(
+      publishAt,
+    )
+  ) {
+    throw new BlogPostOperationError("schedule_instant_invalid");
+  }
+  const instant = new Date(publishAt);
+  if (!Number.isFinite(instant.getTime())) {
+    throw new BlogPostOperationError("schedule_instant_invalid");
+  }
+  try {
+    return {
+      localDateTime: localDateTimeAt(instant, reportingTimeZone),
+      ianaTimeZone: reportingTimeZone,
+      utcOffsetChoice: offsetAt(instant, reportingTimeZone),
+      executeAtUtc: instant.toISOString(),
+    };
+  } catch {
+    throw new BlogPostOperationError("iana_time_zone_invalid");
+  }
+}
+
 function nextValidCivilTimes(localDateTime: string, timeZone: string) {
   const approximate = Date.parse(`${localDateTime}Z`);
   const alternatives: Array<Readonly<{
@@ -541,6 +604,24 @@ export function createBlogPostOperationsApplication({
     }
   }
 
+  async function requireMcpScheduleAuthority(
+    siteId: SiteId | string,
+    authority: McpBlogScheduleAuthority,
+  ) {
+    if (
+      !(await store.hasMcpScheduleAuthority({
+        siteId,
+        connectionId: authority.connectionId,
+        actorId: authority.actorId,
+        requiredScopes: authority.requiredScopes,
+      }))
+    ) {
+      throw new BlogPostOperationError(
+        "mcp_schedule_authority_required",
+      );
+    }
+  }
+
   async function retryExecutionForActor(input: {
     siteId: SiteId | string;
     postId: BlogPostId | string;
@@ -620,6 +701,37 @@ export function createBlogPostOperationsApplication({
         }
         const schedule = await store.findSchedule(execution.scheduleId);
         return schedule?.siteId === siteId ? execution : null;
+      },
+      findSchedulablePostForApproval(input: {
+        siteId: SiteId | string;
+        workspaceId: ContentWorkspaceId;
+        contentRevision: number;
+        approvalId: ContentApprovalId;
+      }) {
+        return store.findSchedulablePostForApproval(input);
+      },
+      getApproval(approvalId: ContentApprovalId) {
+        return store.findApproval(approvalId);
+      },
+      findScheduleByRequest(input: {
+        siteId: SiteId | string;
+        postId: BlogPostId | string;
+        idempotencyKey: string;
+      }) {
+        return store.findScheduleByRequest(input);
+      },
+      findScheduleByWorkspaceRequest(input: {
+        siteId: SiteId | string;
+        workspaceId: ContentWorkspaceId;
+        idempotencyKey: string;
+      }) {
+        return store.findScheduleByWorkspaceRequest(input);
+      },
+      findScheduleCancellationByRequest(input: {
+        siteId: SiteId | string;
+        requestId: string;
+      }) {
+        return store.findScheduleCancellationByRequest(input);
       },
     }),
     commands: Object.freeze({
@@ -728,6 +840,7 @@ export function createBlogPostOperationsApplication({
           "timeZoneDatabaseVersion"
         >;
         idempotencyKey: string;
+        authority?: McpBlogScheduleAuthority;
       }) {
         return audited(
           {
@@ -738,7 +851,14 @@ export function createBlogPostOperationsApplication({
             requestId: input.idempotencyKey,
           },
           async () => {
-            await requireHumanContentAuthority(input);
+            if (input.authority === undefined) {
+              await requireHumanContentAuthority(input);
+            } else {
+              await requireMcpScheduleAuthority(
+                input.siteId,
+                input.authority,
+              );
+            }
             requireIdempotencyKey(input.idempotencyKey);
             const replay = await store.findScheduleByRequest({
               siteId: input.siteId,
@@ -835,6 +955,7 @@ export function createBlogPostOperationsApplication({
                 detail: null,
               }),
               input.idempotencyKey,
+              input.authority,
             );
           },
         );
@@ -854,6 +975,7 @@ export function createBlogPostOperationsApplication({
         postId: BlogPostId | string;
         scheduleId: string;
         idempotencyKey: string;
+        authority?: McpBlogScheduleAuthority;
       }) {
         return audited(
           {
@@ -864,12 +986,22 @@ export function createBlogPostOperationsApplication({
             requestId: input.idempotencyKey,
           },
           async () => {
-            await requireHumanContentAuthority(input);
+            if (input.authority === undefined) {
+              await requireHumanContentAuthority(input);
+            } else {
+              await requireMcpScheduleAuthority(
+                input.siteId,
+                input.authority,
+              );
+            }
             requireIdempotencyKey(input.idempotencyKey);
             return store.cancelSchedule({
               ...input,
               requestId: input.idempotencyKey,
               occurredAt: now(),
+              ...(input.authority === undefined
+                ? {}
+                : { authority: input.authority }),
             });
           },
         );
@@ -1189,6 +1321,11 @@ export function createInMemoryBlogPostOperationsStore(seed: {
     siteId: SiteId | string;
     postId: BlogPostId | string;
   }>;
+  mcpScheduleAccess?: ReadonlyArray<{
+    connectionId: string;
+    actorId: string;
+    siteId: SiteId | string;
+  }>;
 } = {}) {
   type StoredExecution = BlogPostScheduleExecution & {
     leaseToken: string;
@@ -1213,7 +1350,14 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         `${actorId}\0${siteId}\0${postId}`,
     ),
   );
+  const mcpScheduleAccess = new Set(
+    (seed.mcpScheduleAccess ?? []).map(
+      ({ connectionId, actorId, siteId }) =>
+        `${connectionId}\0${actorId}\0${siteId}`,
+    ),
+  );
   const schedules = new Map<string, BlogPostSchedule>();
+  const scheduleAuthorities = new Map<string, McpBlogScheduleAuthority>();
   const scheduleRequests = new Map<string, BlogPostSchedule>();
   const scheduleRequestKeys = new Map<string, string>();
   const scheduleProposals = new Map<string, BlogPostScheduleProposal>();
@@ -1372,7 +1516,50 @@ export function createInMemoryBlogPostOperationsStore(seed: {
           `${input.actorId}\0${input.siteId}\0${input.postId}`,
         );
     },
-    async saveSchedule(schedule, idempotencyKey) {
+    async hasMcpScheduleAuthority(input) {
+      return mcpScheduleAccess.has(
+        `${input.connectionId}\0${input.actorId}\0${input.siteId}`,
+      );
+    },
+    async findMcpScheduleAuthority(scheduleId) {
+      return scheduleAuthorities.get(scheduleId) ?? null;
+    },
+    async findSchedulablePostForApproval(input) {
+      const approval = approvals.get(input.approvalId);
+      if (
+        approval === undefined ||
+        approval.siteId !== input.siteId ||
+        approval.workspaceId !== input.workspaceId ||
+        approval.contentRevision !== input.contentRevision ||
+        approval.invalidatedAt !== null
+      ) {
+        return null;
+      }
+      const candidates = [...posts.values()].filter(
+        (post) =>
+          post.siteId === input.siteId &&
+          post.workspaceId === input.workspaceId &&
+          post.contentRevision === input.contentRevision &&
+          post.collectionState === "active" &&
+          approval.postArtifacts.some(
+            ({ postId, postRevisionId }) =>
+              postId === post.postId &&
+              postRevisionId === post.postRevisionId,
+          ),
+      );
+      return candidates.length === 1 ? candidates[0]! : null;
+    },
+    async saveSchedule(schedule, idempotencyKey, authority) {
+      if (
+        authority !== undefined &&
+        !mcpScheduleAccess.has(
+          `${authority.connectionId}\0${authority.actorId}\0${schedule.siteId}`,
+        )
+      ) {
+        throw new BlogPostOperationError(
+          "mcp_schedule_authority_required",
+        );
+      }
       const requestKey = `${schedule.workspaceId}\0${idempotencyKey}`;
       const replay = scheduleRequests.get(requestKey);
       if (replay !== undefined) {
@@ -1414,6 +1601,9 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         }
       }
       schedules.set(schedule.id, schedule);
+      if (authority !== undefined) {
+        scheduleAuthorities.set(schedule.id, authority);
+      }
       scheduleRequests.set(requestKey, schedule);
       scheduleRequestKeys.set(schedule.id, idempotencyKey);
       const key = postKey(schedule.siteId, schedule.postId);
@@ -1448,10 +1638,33 @@ export function createInMemoryBlogPostOperationsStore(seed: {
           scheduleRequestKeys.get(schedule.id) === input.idempotencyKey,
       ) ?? null;
     },
+    async findScheduleByWorkspaceRequest(input) {
+      return [...schedules.values()].find(
+        (schedule) =>
+          schedule.siteId === input.siteId &&
+          schedule.workspaceId === input.workspaceId &&
+          scheduleRequestKeys.get(schedule.id) === input.idempotencyKey,
+      ) ?? null;
+    },
     async findSchedule(scheduleId) {
       return schedules.get(scheduleId) ?? null;
     },
+    async findScheduleCancellationByRequest(input) {
+      return scheduleCancellationRequests.get(
+        `${input.siteId}\0${input.requestId}`,
+      )?.result ?? null;
+    },
     async cancelSchedule(input) {
+      if (
+        input.authority !== undefined &&
+        !mcpScheduleAccess.has(
+          `${input.authority.connectionId}\0${input.authority.actorId}\0${input.siteId}`,
+        )
+      ) {
+        throw new BlogPostOperationError(
+          "mcp_schedule_authority_required",
+        );
+      }
       const requestKey =
         `${input.siteId}\0${input.requestId}`;
       const replay = scheduleCancellationRequests.get(requestKey);

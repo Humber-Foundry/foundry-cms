@@ -75,6 +75,13 @@ function safeErrorMessage(code: McpReadError["code"]) {
     STALE_REVISION: "The workspace revision changed.",
     IDEMPOTENCY_KEY_REUSED:
       "The idempotency key was reused for different input.",
+    APPROVAL_REQUIRED: "Current human approval is required.",
+    APPROVAL_STALE: "The human approval is no longer current.",
+    WRONG_ARTIFACT_KIND:
+      "The revision does not contain the required artifact.",
+    PUBLICATION_BUSY: "Another publication operation is in progress.",
+    RESULT_UNKNOWN:
+      "The publication result could not be verified yet.",
     TEMPORARILY_UNAVAILABLE: "The service is temporarily unavailable.",
   } as const;
   return messages[code];

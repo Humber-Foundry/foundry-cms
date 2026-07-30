@@ -347,6 +347,58 @@ describe("site-scoped MCP read application", () => {
     );
   });
 
+  it("uses the joined mutation recorder when current scope is lost after admission", async () => {
+    const { application, audit } = fixture({
+      connection: activeConnection({
+        scopes: ["site.read", "content.draft", "publication.publish"],
+      }),
+    });
+    const recordJoinedFailure = vi.fn(async () => {});
+
+    await expect(
+      application.executeScoped({
+        principal: {
+          ...principal,
+          scopes: ["site.read", "content.draft", "publication.publish"],
+        },
+        operation: "foundry.publication.request",
+        auditInput: { idempotencyKey: "scope-loss-after-admission" },
+        requiredScopes: ["publication.publish"],
+        context: {
+          throwIfExpired() {},
+          run: (operation) => operation(),
+          finishDurably: (operation) => operation(),
+        },
+        joinedAudit: true,
+        recordJoinedFailure,
+        async run() {
+          throw new McpReadError(
+            "INSUFFICIENT_SCOPE",
+            "The current grant changed before the durable publication claim.",
+            {
+              requiredScopes: [
+                "publication.publish",
+                "content.draft",
+              ],
+            },
+          );
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: ["publication.publish", "content.draft"],
+      auditRecorded: true,
+    });
+    expect(recordJoinedFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "foundry.publication.request",
+        scopesEvaluated: ["publication.publish", "content.draft"],
+      }),
+      expect.objectContaining({ code: "INSUFFICIENT_SCOPE" }),
+    );
+    expect(audit).toEqual([]);
+  });
+
   it("maps a stale stored revision to a replayable terminal mutation error", async () => {
     const { application } = fixture();
     const recordJoinedFailure = vi.fn(async () => {});

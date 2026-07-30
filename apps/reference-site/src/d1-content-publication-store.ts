@@ -9,9 +9,9 @@ import type {
   ContentPublicationId,
   ContentPublicationStatus,
   ContentPublicationStore,
+  ContentPublicationMcpAuthority,
   ContentPublicationReservationProof,
   ContentWorkspaceId,
-  HumanMembershipId,
 } from "@foundry/application";
 import {
   assertContentPublicationIdempotency,
@@ -75,6 +75,10 @@ type PublicationRow = {
   updated_at: string;
   mutation_token: string;
   schedule_execution_id: string | null;
+  mcp_connection_id: string | null;
+  mcp_actor_id: string | null;
+  mcp_operation: string | null;
+  mcp_required_scopes_json: string | null;
 };
 
 type PublicationEventRow = {
@@ -133,7 +137,11 @@ const publicationProjection = `
     requested_at,
     updated_at,
     mutation_token,
-    schedule_execution_id
+    schedule_execution_id,
+    mcp_connection_id,
+    mcp_actor_id,
+    mcp_operation,
+    mcp_required_scopes_json
   FROM content_publications
 `;
 
@@ -189,7 +197,7 @@ function toPublication(row: PublicationRow): ContentPublication {
     approvalId: createContentApprovalId(row.approval_id),
     fingerprint: row.fingerprint,
     idempotencyKey: row.idempotency_key,
-    requestedBy: createHumanMembershipId(row.requested_by),
+    requestedBy: createContentActorId(row.requested_by),
     contributors: contributors.map(createContentActorId),
     expectedHead: row.expected_head,
     status: row.status,
@@ -278,20 +286,50 @@ export function createD1ContentPublicationStore(
     requireCurrentApproval: boolean,
     mutationToken: string,
     reservationProof?: ContentPublicationReservationProof,
+    authority?: ContentPublicationMcpAuthority,
   ) {
+    const currentMcpAuthorityGuard =
+      authority === undefined
+        ? ""
+        : `AND EXISTS (
+             SELECT 1
+             FROM content_workspaces AS mcp_workspace
+             JOIN mcp_connections AS mcp_connection
+               ON mcp_connection.site_id = mcp_workspace.site_id
+              AND mcp_connection.id = ?22
+              AND mcp_connection.actor_id = ?23
+              AND mcp_connection.status = 'active'
+             WHERE mcp_workspace.workspace_id = ?2
+               AND ?24 = CASE
+                 WHEN ?21 IS NULL THEN 'foundry.publication.request'
+                 ELSE 'foundry.publication.schedule'
+               END
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM json_each(?25) AS required_scope
+                 WHERE NOT EXISTS (
+                   SELECT 1
+                   FROM mcp_connection_scopes AS granted_scope
+                   WHERE granted_scope.connection_id = mcp_connection.id
+                     AND granted_scope.scope = required_scope.value
+                 )
+               )
+           )`;
     const reservationGuard =
       reservationProof === undefined
-        ? `AND EXISTS (
-             SELECT 1
-             FROM content_workspaces AS authority_workspace
-             JOIN human_memberships AS authority_membership
-               ON authority_membership.site_id =
-                 authority_workspace.site_id
-              AND authority_membership.id = ?8
-              AND authority_membership.status = 'active'
-              AND authority_membership.role IN ('owner', 'editor')
-             WHERE authority_workspace.workspace_id = ?2
-           )
+        ? `${authority === undefined
+            ? `AND EXISTS (
+                 SELECT 1
+                 FROM content_workspaces AS authority_workspace
+                 JOIN human_memberships AS authority_membership
+                   ON authority_membership.site_id =
+                     authority_workspace.site_id
+                  AND authority_membership.id = ?8
+                  AND authority_membership.status = 'active'
+                  AND authority_membership.role IN ('owner', 'editor')
+                 WHERE authority_workspace.workspace_id = ?2
+               )`
+            : currentMcpAuthorityGuard}
            AND NOT EXISTS (
              SELECT 1
              FROM blog_post_schedule_publication_reservations
@@ -304,14 +342,14 @@ export function createD1ContentPublicationStore(
                ON execution.execution_id = reservation.execution_id
              JOIN blog_post_schedules AS schedule
                ON schedule.id = execution.schedule_id
-             WHERE reservation.execution_id = ?22
-               AND reservation.attempt = ?23
-               AND reservation.lease_token = ?24
+             WHERE reservation.execution_id = ?26
+               AND reservation.attempt = ?27
+               AND reservation.lease_token = ?28
                AND reservation.state = 'reserved'
                AND reservation.publication_idempotency_key = ?6
-               AND execution.execution_id = ?22
-               AND execution.attempt = ?23
-               AND execution.lease_token = ?24
+               AND execution.execution_id = ?26
+               AND execution.attempt = ?27
+               AND execution.lease_token = ?28
                AND execution.state = 'claimed'
                AND execution.lease_expires_at > ?18
                AND schedule.workspace_id = ?2
@@ -323,18 +361,21 @@ export function createD1ContentPublicationStore(
                    THEN schedule.activated_by
                  ELSE execution.attempt_actor_id
                END
-           )`;
+           )
+           ${currentMcpAuthorityGuard}`;
     const statement = database.prepare(
       `INSERT INTO content_publications (
            id, workspace_id, revision, approval_id, fingerprint,
            idempotency_key, command_identity, requested_by, contributors_json,
            expected_head, status, commit_sha, deployment_id,
            deployment_requested_at, detail, lease_token, lease_expires_at,
-           requested_at, updated_at, mutation_token, schedule_execution_id
+           requested_at, updated_at, mutation_token, schedule_execution_id,
+           mcp_connection_id, mcp_actor_id, mcp_operation,
+           mcp_required_scopes_json
          )
          SELECT
            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-           ?15, ?16, ?17, ?18, ?19, ?20, ?21
+           ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
          ${requireCurrentApproval
            ? `WHERE EXISTS (
                 SELECT 1
@@ -377,6 +418,12 @@ export function createD1ContentPublicationStore(
         publication.updatedAt,
         mutationToken,
         reservationProof?.executionId ?? null,
+        authority?.connectionId ?? null,
+        authority?.actorId ?? null,
+        authority?.operation ?? null,
+        authority === undefined
+          ? null
+          : JSON.stringify([...authority.requiredScopes].sort()),
         ...(reservationProof === undefined
           ? []
           : [
@@ -431,21 +478,75 @@ export function createD1ContentPublicationStore(
       .bind(publication.id, mutationToken);
   }
 
+  function mcpAuditStatement(
+    publication: ContentPublication,
+    mutationToken: string,
+    authority?: ContentPublicationMcpAuthority,
+  ) {
+    const audit = authority?.audit;
+    if (audit === undefined) return null;
+    return database
+      .prepare(
+        `INSERT INTO mcp_audit_events (
+           invocation_id, connection_id, actor_id, site_id, operation,
+           input_hash, protocol_version, scopes_json, outcome, reason,
+           human_actor_id, revocation_reason, occurred_at, contract_version,
+           idempotency_key, result_hash, replayed, workspace_id, revision,
+           approval_id, publication_id, schedule_id
+         )
+         SELECT
+           ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'allowed', NULL,
+           NULL, NULL, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15, ?16, NULL
+         WHERE EXISTS (
+           SELECT 1 FROM content_publications
+           WHERE id = ?16 AND mutation_token = ?17
+         )
+         ON CONFLICT (invocation_id) DO NOTHING`,
+      )
+      .bind(
+        audit.invocationId,
+        audit.connectionId,
+        audit.actorId,
+        audit.siteId,
+        audit.operation,
+        audit.inputHash,
+        audit.protocolVersion,
+        JSON.stringify(audit.scopesEvaluated),
+        audit.occurredAt,
+        audit.contractVersion,
+        audit.idempotencyKey,
+        audit.resultHash,
+        audit.workspaceId,
+        audit.revision,
+        audit.approvalId,
+        publication.id,
+        mutationToken,
+      );
+  }
+
   async function insertPublication(
     publication: ContentPublication,
     requireCurrentApproval: boolean,
     reservationProof?: ContentPublicationReservationProof,
+    authority?: ContentPublicationMcpAuthority,
   ) {
     const mutationToken = crypto.randomUUID();
+    const linkedAudit = mcpAuditStatement(
+      publication,
+      mutationToken,
+      authority,
+    );
     const results = await database.batch([
       insertPublicationStatement(
         publication,
         requireCurrentApproval,
         mutationToken,
         reservationProof,
+        authority,
       ),
       auditStatement(publication, mutationToken),
       reconciliationOrderStatement(publication, mutationToken),
+      ...(linkedAudit === null ? [] : [linkedAudit]),
     ]);
     return results[0]?.meta.changes ?? 0;
   }
@@ -635,6 +736,7 @@ export function createD1ContentPublicationStore(
     async claimPublication(
       publication,
       reservationProof,
+      authority,
     ): Promise<ContentPublicationClaim> {
       const replayRow = await findPublicationRowByKey(
         publication.workspaceId,
@@ -689,7 +791,7 @@ export function createD1ContentPublicationStore(
             leaseToken: null,
             leaseExpiresAt: null,
           };
-          await insertPublication(blocked, false);
+          await insertPublication(blocked, false, undefined, authority);
           return { state: "blocked", publication: blocked };
         }
       }
@@ -706,6 +808,7 @@ export function createD1ContentPublicationStore(
           publication,
           true,
           reservationProof,
+          authority,
         );
         if (inserted < 1) {
           if (
@@ -717,6 +820,11 @@ export function createD1ContentPublicationStore(
           ) {
             throw new ContentPublicationValidationError(
               "publication_reservation_lost",
+            );
+          }
+          if (authority !== undefined) {
+            throw new ContentPublicationValidationError(
+              "publication_authority_not_current",
             );
           }
           if (reservationProof === undefined) {
@@ -749,7 +857,12 @@ export function createD1ContentPublicationStore(
             leaseToken: null,
             leaseExpiresAt: null,
           };
-          await insertPublication(blocked, false);
+          await insertPublication(
+            blocked,
+            false,
+            reservationProof,
+            authority,
+          );
           return { state: "blocked", publication: blocked };
         }
       } catch (error) {
@@ -779,7 +892,12 @@ export function createD1ContentPublicationStore(
             leaseToken: null,
             leaseExpiresAt: null,
           };
-          await insertPublication(blocked, false);
+          await insertPublication(
+            blocked,
+            false,
+            reservationProof,
+            authority,
+          );
           return { state: "blocked", publication: blocked };
         }
         if (
@@ -799,7 +917,12 @@ export function createD1ContentPublicationStore(
           leaseExpiresAt: null,
         };
         try {
-          await insertPublication(blocked, false);
+          await insertPublication(
+            blocked,
+            false,
+            reservationProof,
+            authority,
+          );
           return { state: "blocked", publication: blocked };
         } catch {
           throw error;
@@ -824,6 +947,40 @@ export function createD1ContentPublicationStore(
                SELECT 1 FROM content_workspaces
                WHERE workspace_id = content_publications.workspace_id
                  AND current_revision = content_publications.revision
+             )
+             AND (
+               mcp_connection_id IS NULL
+               OR EXISTS (
+                 SELECT 1
+                 FROM content_workspaces AS mcp_workspace
+                 JOIN mcp_connections AS mcp_connection
+                   ON mcp_connection.site_id = mcp_workspace.site_id
+                  AND mcp_connection.id =
+                        content_publications.mcp_connection_id
+                  AND mcp_connection.actor_id =
+                        content_publications.mcp_actor_id
+                  AND mcp_connection.status = 'active'
+                 WHERE mcp_workspace.workspace_id =
+                       content_publications.workspace_id
+                   AND content_publications.mcp_operation = CASE
+                     WHEN content_publications.schedule_execution_id IS NULL
+                       THEN 'foundry.publication.request'
+                     ELSE 'foundry.publication.schedule'
+                   END
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM json_each(
+                       content_publications.mcp_required_scopes_json
+                     ) AS required_scope
+                     WHERE NOT EXISTS (
+                       SELECT 1
+                       FROM mcp_connection_scopes AS granted_scope
+                       WHERE granted_scope.connection_id =
+                             mcp_connection.id
+                         AND granted_scope.scope = required_scope.value
+                     )
+                   )
+               )
              )`,
         )
         .bind(publicationId, leaseToken, now)
@@ -859,6 +1016,40 @@ export function createD1ContentPublicationStore(
                SELECT 1 FROM content_workspaces
                WHERE workspace_id = content_publications.workspace_id
                  AND current_revision = content_publications.revision
+             )
+             AND (
+               mcp_connection_id IS NULL
+               OR EXISTS (
+                 SELECT 1
+                 FROM content_workspaces AS mcp_workspace
+                 JOIN mcp_connections AS mcp_connection
+                   ON mcp_connection.site_id = mcp_workspace.site_id
+                  AND mcp_connection.id =
+                        content_publications.mcp_connection_id
+                  AND mcp_connection.actor_id =
+                        content_publications.mcp_actor_id
+                  AND mcp_connection.status = 'active'
+                 WHERE mcp_workspace.workspace_id =
+                       content_publications.workspace_id
+                   AND content_publications.mcp_operation = CASE
+                     WHEN content_publications.schedule_execution_id IS NULL
+                       THEN 'foundry.publication.request'
+                     ELSE 'foundry.publication.schedule'
+                   END
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM json_each(
+                       content_publications.mcp_required_scopes_json
+                     ) AS required_scope
+                     WHERE NOT EXISTS (
+                       SELECT 1
+                       FROM mcp_connection_scopes AS granted_scope
+                       WHERE granted_scope.connection_id =
+                             mcp_connection.id
+                         AND granted_scope.scope = required_scope.value
+                     )
+                   )
+               )
              )
              AND (
                NOT EXISTS (

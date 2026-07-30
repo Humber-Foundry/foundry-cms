@@ -52,7 +52,12 @@ describe("D1 content publication store", () => {
       "0013_blog_post_verified_state.sql",
       "0014_blog_post_artifact_fingerprints.sql",
       "0015_blog_post_render_artifacts.sql",
+      "0017_mcp_readonly_connections.sql",
+      "0018_mcp_draft_scopes.sql",
+      "0019_mcp_preview_artifacts.sql",
+      "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
+      "0023_mcp_publication_scopes.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -225,6 +230,149 @@ describe("D1 content publication store", () => {
           `SELECT COUNT(*) AS count
            FROM content_publications
            WHERE idempotency_key = 'revoked-before-publication-commit'`,
+        )
+        .first(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("admits an immediate MCP publication with the exact current D1 grant", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri, scopes_json,
+             status, created_by_membership_id, created_at, revoked_at
+           ) VALUES (
+             'connection-publish', 'actor-publish', ?1, 'client-publish',
+             'https://client.example/callback', '["site.read"]', 'active',
+             ?2, ?3, NULL
+           )`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          membershipId,
+          "2026-07-27T10:02:00.000Z",
+        ),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope) VALUES
+           ('connection-publish', 'site.read'),
+           ('connection-publish', 'content.draft'),
+           ('connection-publish', 'publication.publish')`,
+      ),
+    ]);
+    const requested = {
+      ...publication("1", "mcp-immediate-publication"),
+      requestedBy: createContentActorId("mcp-actor-publish"),
+    };
+
+    await expect(
+      store.claimPublication(requested, undefined, {
+        kind: "mcp",
+        connectionId: "connection-publish",
+        actorId: "actor-publish",
+        operation: "foundry.publication.request",
+        requiredScopes: ["publication.publish", "content.draft"],
+        audit: {
+          invocationId: "invocation-mcp-immediate-publication",
+          connectionId: "connection-publish",
+          actorId: "actor-publish",
+          siteId: referenceSiteDefinition.site.id,
+          operation: "foundry.publication.request",
+          inputHash: "1".repeat(64),
+          protocolVersion: "2025-11-25",
+          scopesEvaluated: ["publication.publish", "content.draft"],
+          outcome: "allowed",
+          reason: null,
+          occurredAt: "2026-07-27T10:02:00.000Z",
+          contractVersion: "foundry.mcp.v1",
+          idempotencyKey: "client-mcp-immediate-publication",
+          workspaceId,
+          revision: 0,
+          approvalId: approval.id,
+          resultHash: "2".repeat(64),
+        },
+      }),
+    ).resolves.toEqual({ state: "claimed", publication: requested });
+    await expect(store.findPublication(requested.id)).resolves.toEqual(
+      requested,
+    );
+    await expect(
+      database
+        .prepare(
+          `SELECT idempotency_key, workspace_id, revision, approval_id,
+                  publication_id, schedule_id, scopes_json
+           FROM mcp_audit_events
+           WHERE invocation_id = 'invocation-mcp-immediate-publication'`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      idempotency_key: "client-mcp-immediate-publication",
+      workspace_id: workspaceId,
+      revision: 0,
+      approval_id: approval.id,
+      publication_id: requested.id,
+      schedule_id: null,
+      scopes_json: JSON.stringify([
+        "publication.publish",
+        "content.draft",
+      ]),
+    });
+  });
+
+  it("rejects an immediate MCP publication revoked before the D1 claim", async () => {
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri, scopes_json,
+             status, created_by_membership_id, created_at, revoked_at
+           ) VALUES (
+             'connection-publish-revoked', 'actor-publish-revoked', ?1,
+             'client-publish-revoked', 'https://client.example/callback',
+             '["site.read"]', 'revoked', ?2, ?3, ?3
+           )`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          membershipId,
+          "2026-07-27T10:02:00.000Z",
+        ),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope) VALUES
+           ('connection-publish-revoked', 'site.read'),
+           ('connection-publish-revoked', 'content.draft'),
+           ('connection-publish-revoked', 'publication.publish')`,
+      ),
+    ]);
+
+    await expect(
+      store.claimPublication(
+        {
+          ...publication("1", "mcp-revoked-publication"),
+          requestedBy: createContentActorId("mcp-actor-publish-revoked"),
+        },
+        undefined,
+        {
+          kind: "mcp",
+          connectionId: "connection-publish-revoked",
+          actorId: "actor-publish-revoked",
+          operation: "foundry.publication.request",
+          requiredScopes: ["publication.publish", "content.draft"],
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "publication_authority_not_current",
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM content_publications
+           WHERE idempotency_key = 'mcp-revoked-publication'`,
         )
         .first(),
     ).toEqual({ count: 0 });

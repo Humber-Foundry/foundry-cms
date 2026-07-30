@@ -151,6 +151,25 @@ export async function advanceScheduledBlogPostExecution(
   let detail: string | null = null;
   let outcomeId: string | null = null;
   try {
+    const mcpAuthority = await store.findMcpScheduleAuthority(
+      schedule.id,
+    );
+    if (
+      schedule.activatedBy.startsWith("mcp-") &&
+      (
+        mcpAuthority === null ||
+        !(await store.hasMcpScheduleAuthority({
+          siteId: schedule.siteId,
+          connectionId: mcpAuthority.connectionId,
+          actorId: mcpAuthority.actorId,
+          requiredScopes: mcpAuthority.requiredScopes,
+        }))
+      )
+    ) {
+      throw new BlogPostOperationError(
+        "mcp_schedule_authority_required",
+      );
+    }
     const publicationActorId =
       execution.attemptActorId === "system:scheduler"
         ? schedule.activatedBy
@@ -168,12 +187,22 @@ export async function advanceScheduledBlogPostExecution(
       workspaceId: schedule.workspaceId,
       idempotencyKey: execution.publicationIdempotencyKey,
     });
-    const requestedBy = createHumanMembershipId(publicationActorId);
+    const requestedBy = createContentActorId(publicationActorId);
     const reservationProof = {
       executionId: execution.executionId,
       attempt: execution.attempt,
       leaseToken: lease.leaseToken,
     };
+    const assertCurrentAuthority =
+      mcpAuthority === null
+        ? undefined
+        : () =>
+            store.hasMcpScheduleAuthority({
+              siteId: schedule.siteId,
+              connectionId: mcpAuthority.connectionId,
+              actorId: mcpAuthority.actorId,
+              requiredScopes: mcpAuthority.requiredScopes,
+            });
     if (
       existing !== null &&
       !(await publicationStore.hasScheduledPublicationOwnership({
@@ -192,6 +221,12 @@ export async function advanceScheduledBlogPostExecution(
             approvalId: schedule.approvalId,
             requestedBy,
             idempotencyKey: execution.publicationIdempotencyKey,
+            ...(mcpAuthority === null
+              ? {}
+              : {
+                  authority: mcpAuthority,
+                  assertCurrentAuthority,
+                }),
             reservationProof,
           })
         : existing.status === "failed"
@@ -199,8 +234,13 @@ export async function advanceScheduledBlogPostExecution(
               existing.id,
               requestedBy,
               reservationProof,
+              assertCurrentAuthority,
             )
-          : await application.commands.refresh(existing.id, reservationProof);
+          : await application.commands.refresh(
+              existing.id,
+              reservationProof,
+              assertCurrentAuthority,
+            );
     if (publication === null) {
       throw new BlogPostOperationError("publication_missing");
     }

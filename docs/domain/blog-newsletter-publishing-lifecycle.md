@@ -250,8 +250,8 @@ The UI may summarize combinations as “Published with unpublished changes” or
 | Preview post | Persisted revision and compatible renderer/schema | Owner, Editor, scoped MCP agent | Create/read exact rendered artifact; no state authority granted | `RENDERER_MISMATCH`, `REFERENCE_INVALID` |
 | Approve post | Canonical artifact fingerprint equals current revision; human has inspected preview | Owner or Editor | Create approval; revision becomes `approved` | `PREVIEW_STALE`, `NON_HUMAN_APPROVAL_FORBIDDEN` |
 | Propose schedule | Current revision exists; civil time parses | Owner, Editor, MCP agent | Store non-executable proposal | `LOCAL_TIME_INVALID` |
-| Activate schedule | Valid approval for current fingerprint; resolved future instant | Owner or Editor | Replace/deactivate prior schedule; mark revision `scheduled` | `APPROVAL_REQUIRED`, `AMBIGUOUS_LOCAL_TIME` |
-| Publish now | Valid approval for current fingerprint | Owner or Editor | Create/return one publish operation and start Git pipeline | `APPROVAL_STALE`, `PUBLISH_IN_PROGRESS` |
+| Activate schedule | Valid approval for current fingerprint; resolved future instant | Owner, Editor or MCP connection with `publication.schedule` | Replace/deactivate prior schedule; mark revision `scheduled` | `APPROVAL_REQUIRED`, `AMBIGUOUS_LOCAL_TIME` |
+| Publish now | Valid approval for current fingerprint | Owner, Editor or MCP connection with `publication.publish` | Create/return one publish operation and start Git pipeline | `APPROVAL_STALE`, `PUBLISH_IN_PROGRESS` |
 | Claim due schedule | Active due schedule, valid approval/fingerprint, no competing production operation | System scheduler | Lease schedule and create/return its unique publish operation | `SCHEDULE_INACTIVE`, `APPROVAL_STALE` |
 | Git commit accepted | Expected production head and publish ID match | Git integration reporting to application layer | Store commit; operation `building`; never create another commit for retry | `PRODUCTION_HEAD_MOVED`, `GIT_RESULT_AMBIGUOUS` |
 | Deployment verified | Release marker equals commit/content hash | Deployment integration | Set `liveRevisionId`; operation `live`; consume schedule | `RELEASE_MARKER_MISMATCH` |
@@ -462,9 +462,10 @@ evidence checks. Adapter credentials cannot call human commands.
 | Create/edit post or campaign draft | Yes | Yes | Scoped | No | No |
 | Preview persisted revision | Yes | Yes | Scoped | No | No |
 | Approve post preview | Yes | Yes | No | No | No |
-| Publish/unpublish/archive/restore post | Yes | Yes | No | No | Execute active approved post schedule only |
+| Publish approved post | Yes | Yes | `publication.publish` | No | Execute active approved post schedule only |
+| Unpublish/archive/restore post | Yes | Yes | No | No | No |
 | Propose post/campaign schedule | Yes | Yes | Yes | No | No |
-| Activate/cancel post schedule | Yes | Yes | No | No | No |
+| Activate/cancel post schedule | Yes | Yes | `publication.schedule` | No | No |
 | Request campaign test | Yes | Yes | Yes | Perform requested provider operation only | No |
 | Read test recipients/receipt | Yes | Limited to own/authorized test | No addresses | Report normalized result | No |
 | Authorize bulk send | Yes | No | No | No | No |
@@ -583,8 +584,9 @@ authorization and schedule.
     an author edits a send-affecting field, then test and authorization are
     invalidated, local schedule is inactive and provider cancellation is
     tracked.
-13. **Agent cannot activate:** Given a valid MCP credential and valid Owner
-    authorization, when the agent requests activation or send-now, then
+13. **Agent cannot activate campaign delivery:** Given a valid MCP credential
+    and valid Owner authorization, when the agent requests campaign activation
+    or send-now, then
     authorization fails and no schedule/send operation/provider call exists.
 14. **Editor cannot authorize bulk:** Given a valid Editor membership and
     successful test, when bulk authorization is requested, then it fails with

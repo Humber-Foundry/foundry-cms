@@ -9,6 +9,8 @@ import {
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
+  mcpPublicationPublishScope,
+  mcpPublicationScheduleScope,
   type McpConnectionPrincipal,
   type McpReadAuditEvent,
 } from "@foundry/application";
@@ -32,6 +34,7 @@ function principal(scopes: ReadonlyArray<string>): McpConnectionPrincipal {
 function registry() {
   const application = {
     openWorkspace() {},
+    requestPublication() {},
   } as unknown as McpReadApplication;
   return createMcpToolRegistry(application);
 }
@@ -50,6 +53,72 @@ function schemaPropertyNames(value: unknown): string[] {
 }
 
 describe("MCP draft tool registry", () => {
+  it("advertises only the publication tools granted to the connection", () => {
+    expect(
+      names([mcpInitialScope, mcpPublicationPublishScope]),
+    ).toEqual([
+      "foundry.site.get",
+      "foundry.content.list",
+      "foundry.content.get",
+      "foundry.publication.request",
+      "foundry.publication.status",
+    ]);
+    expect(
+      names([mcpInitialScope, mcpPublicationScheduleScope]),
+    ).toEqual([
+      "foundry.site.get",
+      "foundry.content.list",
+      "foundry.content.get",
+      "foundry.publication.schedule",
+      "foundry.publication.status",
+      "foundry.publication.cancel",
+    ]);
+  });
+
+  it("publishes exact revision and approval inputs without a campaign scheduling path", () => {
+    const tools = registry().list(
+      principal([
+        mcpInitialScope,
+        mcpPublicationScheduleScope,
+        mcpPublicationPublishScope,
+      ]),
+    );
+    const publicationTools = tools.filter(({ name }) =>
+      name.startsWith("foundry.publication."));
+    const validator = new Ajv2020({
+      strict: false,
+      formats: {
+        uuid: true,
+        "date-time": true,
+        "uri-reference": true,
+      },
+    });
+    expect(publicationTools.map(({ name }) => name)).toEqual([
+      "foundry.publication.request",
+      "foundry.publication.schedule",
+      "foundry.publication.status",
+      "foundry.publication.cancel",
+    ]);
+    for (const tool of publicationTools) {
+      expect(() => validator.compile(tool.inputSchema)).not.toThrow();
+      expect(() => validator.compile(tool.outputSchema)).not.toThrow();
+      expect(schemaPropertyNames(tool.inputSchema)).not.toEqual(
+        expect.arrayContaining([
+          "campaignId",
+          "recipient",
+          "segment",
+          "postId",
+          "approved",
+        ]),
+      );
+    }
+    expect(
+      publicationTools
+        .filter(({ annotations }) => annotations.readOnlyHint === false)
+        .every(({ annotations }) => annotations.openWorldHint === true),
+    ).toBe(true);
+  });
+
   it("omits mutation tools until the matching Owner-granted scope exists", () => {
     expect(names([mcpInitialScope])).toEqual([
       "foundry.site.get",

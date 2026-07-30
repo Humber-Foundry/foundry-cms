@@ -82,6 +82,7 @@ describe("D1 blog post operations store", () => {
       "0019_mcp_preview_artifacts.sql",
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
+      "0023_mcp_publication_scopes.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -333,6 +334,119 @@ describe("D1 blog post operations store", () => {
         )
         .first(),
     ).toEqual({ count: 0 });
+  });
+
+  it("rejects MCP schedule activation when its publication grant is revoked before the D1 commit", async () => {
+    const approval = await approveCurrent();
+    const mcpActorId = createContentActorId("mcp-agent-56");
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-schedule-56', 'agent-56', ?1, 'client-56',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-schedule-56', 'site.read'),
+           ('connection-schedule-56', 'content.draft'),
+           ('connection-schedule-56', 'publication.schedule')`,
+      ),
+    ]);
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const authority = {
+      kind: "mcp" as const,
+      connectionId: "connection-schedule-56",
+      actorId: "agent-56",
+      operation: "foundry.publication.schedule" as const,
+      requiredScopes: ["publication.schedule"],
+    };
+    const durableApp = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const persisted = await durableApp.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "mcp-schedule-persisted-authority",
+      authority,
+    });
+    await expect(
+      durableStore.findMcpScheduleAuthority(persisted.id),
+    ).resolves.toEqual({
+      ...authority,
+      requiredScopes: [
+        "publication.schedule",
+        "content.draft",
+      ],
+    });
+    const app = createBlogPostOperationsApplication({
+      store: {
+        ...durableStore,
+        async saveSchedule(schedule, idempotencyKey, authority) {
+          await database
+            .prepare(
+              `UPDATE mcp_connections
+               SET status = 'revoked', revoked_at = ?1
+               WHERE id = 'connection-schedule-56'`,
+            )
+            .bind(now)
+            .run();
+          return durableStore.saveSchedule(
+            schedule,
+            idempotencyKey,
+            authority,
+          );
+        },
+      },
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+
+    await expect(
+      app.commands.activateSchedule({
+        actorId: mcpActorId,
+        siteId: referenceSiteDefinition.site.id,
+        postId,
+        approvalId: approval.id,
+        resolvedTime: {
+          localDateTime: "2026-11-01T01:00:00",
+          ianaTimeZone: "America/Vancouver",
+          utcOffsetChoice: "-07:00",
+          executeAtUtc: now,
+        },
+        idempotencyKey: "mcp-schedule-revoked-before-commit",
+        authority,
+      }),
+    ).rejects.toMatchObject({
+      code: "mcp_schedule_authority_required",
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM blog_post_schedules
+           WHERE idempotency_key =
+                 'mcp-schedule-revoked-before-commit'`,
+        )
+        .first(),
+    ).resolves.toEqual({ count: 0 });
   });
 
   it("rejects a schedule that is not strictly after its persisted activation timestamp", async () => {

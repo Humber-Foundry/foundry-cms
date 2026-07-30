@@ -87,6 +87,95 @@ describe("scheduled blog post execution runtime", () => {
     expect(readBlogPostTimeZoneDatabaseVersion({})).toBe("2026a");
   });
 
+  it("blocks a due MCP schedule when its originating grant is revoked", async () => {
+    const mcpActorId = createContentActorId("mcp-runtime-agent");
+    const store = createInMemoryBlogPostOperationsStore({
+      mcpScheduleAccess: [{
+        connectionId: "connection-runtime-agent",
+        actorId: "runtime-agent",
+        siteId,
+      }],
+      posts: [{
+        siteId,
+        postId,
+        workspaceId,
+        contentRevision: 1,
+        postRevision: 1,
+        postRevisionId: "post-revision-runtime-mcp",
+        collectionState: "active",
+        workflowState: "editing",
+        liveRevisionId: null,
+        version: 1,
+      }],
+      approvals: [{
+        id: approvalId,
+        siteId,
+        workspaceId,
+        contentRevision: 1,
+        fingerprint: "approved-runtime-mcp",
+        postArtifacts: [{
+          postId,
+          postRevisionId: "post-revision-runtime-mcp",
+        }],
+        invalidatedAt: null,
+      }],
+    });
+    const app = createBlogPostOperationsApplication({
+      store,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_runtime_mcp`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const schedule = await app.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId,
+      postId,
+      approvalId,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "activate-runtime-mcp",
+      authority: {
+        kind: "mcp",
+        connectionId: "connection-runtime-agent",
+        actorId: "runtime-agent",
+        operation: "foundry.publication.schedule",
+        requiredScopes: [
+          "publication.schedule",
+          "content.draft",
+        ],
+      },
+    });
+    operationTime = now;
+    const claim = await app.commands.claimDueSchedule(
+      schedule.siteId,
+      schedule.id,
+    );
+    const revokedStore = {
+      ...store,
+      async hasMcpScheduleAuthority() {
+        return false;
+      },
+    };
+
+    await advanceScheduledBlogPostExecution(
+      { FOUNDRY_DB: {} as never },
+      revokedStore,
+      claim.lease!,
+    );
+
+    expect(mocks.publish).not.toHaveBeenCalled();
+    await expect(
+      revokedStore.findExecution(claim.execution.executionId),
+    ).resolves.toMatchObject({
+      state: "blocked",
+      detail: "mcp_schedule_authority_required",
+    });
+  });
+
   it("re-dispatches a failed owned publication instead of only refreshing it", async () => {
     const store = createInMemoryBlogPostOperationsStore({
       humanActorIds: [actorId],
@@ -161,6 +250,7 @@ describe("scheduled blog post execution runtime", () => {
         attempt: claim.execution.attempt,
         leaseToken: claim.lease!.leaseToken,
       },
+      undefined,
     );
     expect(mocks.refresh).not.toHaveBeenCalled();
   });
@@ -238,6 +328,7 @@ describe("scheduled blog post execution runtime", () => {
         attempt: claim.execution.attempt,
         leaseToken: claim.lease!.leaseToken,
       },
+      undefined,
     );
     await expect(
       app.queries.getExecution(siteId, claim.execution.executionId),

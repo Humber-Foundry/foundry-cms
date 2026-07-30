@@ -15,7 +15,9 @@ provider credentials.
 Start with the smallest useful permission. Every connection starts with exactly
 **Read site** (`site.read`). A site Owner can later grant **Draft content**
 (`content.draft`) or **Draft design** (`design.draft`) to that same connection
-and site. Publication, scheduling and campaign permissions remain unavailable.
+and site. **Schedule publication** (`publication.schedule`) and **Publish**
+(`publication.publish`) are separate grants. Campaign permissions remain
+unavailable.
 
 ## Installation configuration
 
@@ -28,8 +30,10 @@ authorization-server metadata is at
 Before enabling connections, the installation operator must:
 
 - apply D1 migrations `0017_mcp_readonly_connections.sql`,
-  `0018_mcp_draft_scopes.sql`, `0019_mcp_preview_artifacts.sql` and
-  `0020_mcp_mutation_receipts.sql` in order;
+  `0018_mcp_draft_scopes.sql`, `0019_mcp_preview_artifacts.sql`,
+  `0020_mcp_mutation_receipts.sql`,
+  `0022_blog_post_scheduling_archive.sql` and
+  `0023_mcp_publication_scopes.sql` in order;
 - set `FOUNDRY_MCP_OAUTH_SIGNING_KEY` as a Worker secret with at least 32
   random characters;
 - set `FOUNDRY_MCP_CLIENTS` to a non-secret JSON object whose keys are
@@ -80,13 +84,12 @@ per-tool minute buckets return HTTP `429` with `Retry-After` when exhausted.
 The address is not a secret, and it does not contain a token. Do not paste access
 tokens into prompts or settings fields. Authentication happens in the browser.
 
-## Draft review and future safe publishing
+## Draft review and safe publishing
 
-The current server can create canonical drafts and prepare previews only after
-an Owner grants the matching draft scope. A connection with only `site.read`
-cannot create drafts or prepare previews. No agent connection can approve,
-schedule, publish or send campaign tests through the currently delivered
-surface.
+The server creates canonical drafts and previews after an Owner grants the
+matching draft scope. Scheduling also requires `publication.schedule`;
+immediate publication requires `publication.publish`. Both publication paths
+also require every draft scope changed by the exact revision.
 
 An agent can draft and prepare a canonical preview. It cannot approve that
 preview for itself.
@@ -98,13 +101,13 @@ When a draft is ready:
    revision shown.
 3. If anything is wrong, ask the agent to edit the draft and prepare a new
    exact revision.
-4. If it is correct, retain the exact revision for the future approval and
-   publication workflow. The current review link does not create an approval or
-   publish anything.
+4. If it is correct, approve that exact revision in Foundry.
+5. The agent may then request immediate publication or create a blog schedule
+   using the exact `workspaceId`, revision and `approvalId`.
 
-A future approval capability will make an approval stale whenever the draft,
-site renderer or live site advances. Campaign tests and bulk sends also remain
-future capabilities; the current MCP surface cannot perform either action.
+The approval becomes stale whenever the draft, renderer, publication channel or
+live production base advances. Campaign tests and bulk sends remain separate
+capabilities.
 
 ## Review or revoke
 
@@ -115,8 +118,9 @@ In **Agent connections**, you can:
 - retain attributable authorization, command, refresh-reuse and revocation
   audit history.
 
-Every new connection starts with `site.read`. An Owner can approve an additive
-`content.draft` or `design.draft` step-up for that exact connection and site.
+Every new connection starts with `site.read`. An Owner can approve additive
+`content.draft`, `design.draft`, `publication.schedule` and
+`publication.publish` step-ups for that exact connection and site.
 Step-up preserves the connection and actor identity so its audit history stays
 continuous. OAuth token responses include an opaque `connection_id` and a
 short-lived `step_up_token`. Clients submit both with the ordered additive
@@ -139,9 +143,8 @@ unexpectedly, or a permission was granted by mistake.
 
 ## Drafting and publishing example
 
-The drafting and preview steps below are delivered when the Owner grants the
-matching draft scope. Publication and scheduling remain unavailable until their
-separate capabilities are delivered and granted.
+The drafting, preview and publication steps below are available when the Owner
+grants the required draft and publication scopes.
 
 Owner request:
 
@@ -150,9 +153,6 @@ Owner request:
 > publish until I approve the preview.
 
 Expected agent workflow:
-
-Steps 1–5 are available now. Steps 6–7 describe the future approval and
-publication contract and cannot run on the currently delivered server.
 
 1. Read `foundry://site`, content schema and existing published content with
    `site.read`.
@@ -167,6 +167,9 @@ publication contract and cannot run on the currently delivered server.
    `America/Toronto` display zone and a stable idempotency key.
 7. Read `foundry.publication.status`. Report the durable schedule. At execution,
    report `Live` only after Foundry verifies the Git commit and release marker.
+8. Use `foundry.publication.cancel` with a new stable idempotency key when the
+   Owner cancels an active schedule. A late cancellation is rejected and must
+   not be reported as accepted.
 
 If another edit occurs after step 4, the scheduling call returns
 `APPROVAL_STALE`. The agent reads the latest revision, resolves the conflict,

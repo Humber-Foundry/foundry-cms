@@ -3,6 +3,8 @@ import {
   createBlogPostOperationsApplication,
   createContentApprovalId,
   createContentWorkspaceId,
+  mcpContentDraftScope,
+  mcpDefinitionScopes,
   type BlogPostApprovalEvidence,
   type BlogPostArchiveResult,
   type BlogPostOperationalState,
@@ -11,6 +13,7 @@ import {
   type BlogPostScheduleExecution,
   type BlogPostScheduleProposal,
   type ContentActorId,
+  type McpBlogScheduleAuthority,
   type RestoredBlogPostDraft,
 } from "@foundry/application";
 import type { BlogPostId, SiteId } from "@foundry/site-definition";
@@ -129,6 +132,64 @@ function scheduleFromRow(row: ScheduleRow): BlogPostSchedule {
     state: row.state,
     detail: row.detail,
   };
+}
+
+function prepareMcpScheduleAudit(
+  database: D1DatabaseBinding,
+  authority: McpBlogScheduleAuthority | undefined,
+  schedule: BlogPostSchedule,
+  command: "activate" | "cancel",
+  requestId: string,
+) {
+  const audit = authority?.audit;
+  if (audit === undefined) return null;
+  return database
+    .prepare(
+      `INSERT INTO mcp_audit_events (
+         invocation_id, connection_id, actor_id, site_id, operation,
+         input_hash, protocol_version, scopes_json, outcome, reason,
+         human_actor_id, revocation_reason, occurred_at, contract_version,
+         idempotency_key, result_hash, replayed, workspace_id, revision,
+         approval_id, publication_id, schedule_id
+       )
+       SELECT
+         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'allowed', NULL,
+         NULL, NULL, ?9, ?10, ?11, ?12, 0, ?13, ?14, ?15, NULL, ?16
+       WHERE (
+         ?17 = 'activate'
+         AND EXISTS (
+           SELECT 1 FROM blog_post_schedules
+           WHERE id = ?16 AND idempotency_key = ?18
+         )
+       ) OR (
+         ?17 = 'cancel'
+         AND EXISTS (
+           SELECT 1 FROM blog_post_schedule_cancellations
+           WHERE site_id = ?4 AND schedule_id = ?16 AND request_id = ?18
+         )
+       )
+       ON CONFLICT (invocation_id) DO NOTHING`,
+    )
+    .bind(
+      audit.invocationId,
+      audit.connectionId,
+      audit.actorId,
+      audit.siteId,
+      audit.operation,
+      audit.inputHash,
+      audit.protocolVersion,
+      JSON.stringify(audit.scopesEvaluated),
+      audit.occurredAt,
+      audit.contractVersion,
+      audit.idempotencyKey,
+      audit.resultHash,
+      audit.workspaceId,
+      audit.revision,
+      audit.approvalId,
+      schedule.id,
+      command,
+      requestId,
+    );
 }
 
 function scheduleProposalFromRow(
@@ -545,6 +606,127 @@ export function createD1BlogPostOperationsStore(
         .bind(input.siteId, input.actorId)
         .first<{ id: string }>()) !== null;
     },
+    async hasMcpScheduleAuthority(input) {
+      return (await database
+        .prepare(
+          `SELECT connection.id
+           FROM mcp_connections AS connection
+           JOIN mcp_connection_scopes AS scope
+             ON scope.connection_id = connection.id
+            AND scope.scope = 'publication.schedule'
+           WHERE connection.id = ?1
+             AND connection.actor_id = ?2
+             AND connection.site_id = ?3
+             AND connection.status = 'active'
+             AND NOT EXISTS (
+               SELECT 1
+               FROM json_each(?4) AS required
+               WHERE NOT EXISTS (
+                 SELECT 1
+                 FROM mcp_connection_scopes AS granted
+                 WHERE granted.connection_id = connection.id
+                   AND granted.scope = required.value
+               )
+             )
+           LIMIT 1`,
+        )
+        .bind(
+          input.connectionId,
+          input.actorId,
+          input.siteId,
+          JSON.stringify(input.requiredScopes),
+        )
+        .first<{ id: string }>()) !== null;
+    },
+    async findMcpScheduleAuthority(scheduleId) {
+      const row = await database
+        .prepare(
+          `SELECT connection_id, actor_id, operation, required_scopes_json
+           FROM mcp_blog_schedule_authorities
+           WHERE schedule_id = ?1`,
+        )
+        .bind(scheduleId)
+        .first<{
+          connection_id: string;
+          actor_id: string;
+          operation: "foundry.publication.schedule";
+          required_scopes_json: string;
+        }>();
+      if (row === null) return null;
+      const requiredScopes: unknown = JSON.parse(
+        row.required_scopes_json,
+      );
+      if (
+        !Array.isArray(requiredScopes) ||
+        requiredScopes.some((scope) => typeof scope !== "string")
+      ) {
+        throw new BlogPostOperationError(
+          "mcp_schedule_authority_invalid",
+        );
+      }
+      return {
+        kind: "mcp",
+        connectionId: row.connection_id,
+        actorId: row.actor_id,
+        operation: row.operation,
+        requiredScopes,
+      };
+    },
+    async findSchedulablePostForApproval(input) {
+      const candidates = await database
+        .prepare(
+          `SELECT post.post_id
+           FROM blog_posts AS post
+           JOIN blog_post_revisions AS revision
+             ON revision.revision_id = post.current_revision_id
+            AND revision.site_id = post.site_id
+            AND revision.post_id = post.post_id
+           JOIN content_workspaces AS workspace
+             ON workspace.workspace_id = ?2
+            AND workspace.site_id = post.site_id
+            AND workspace.current_revision = ?3
+           JOIN content_approvals AS approval
+             ON approval.id = ?4
+            AND approval.workspace_id = workspace.workspace_id
+            AND approval.revision = ?3
+           JOIN json_each(
+             COALESCE(approval.blog_post_artifacts_json, '[]')
+           ) AS artifact
+             ON json_extract(artifact.value, '$.postId') = post.post_id
+            AND json_extract(artifact.value, '$.postRevisionId') =
+                revision.revision_id
+            AND json_extract(artifact.value, '$.value') =
+                revision.artifact_fingerprint
+           LEFT JOIN blog_post_collection_states AS collection
+             ON collection.site_id = post.site_id
+            AND collection.post_id = post.post_id
+           WHERE post.site_id = ?1
+             AND revision.workspace_id = workspace.workspace_id
+             AND revision.content_revision = ?3
+             AND COALESCE(collection.collection_state, 'active') =
+                 'active'
+             AND NOT EXISTS (
+               SELECT 1 FROM content_approval_invalidations
+               WHERE approval_id = approval.id
+             )
+           ORDER BY post.post_id
+           LIMIT 2`,
+        )
+        .bind(
+          input.siteId,
+          input.workspaceId,
+          input.contentRevision,
+          input.approvalId,
+        )
+        .all<{ post_id: string }>();
+      if (candidates.results.length !== 1) {
+        return null;
+      }
+      return store.findPost(
+        input.siteId,
+        candidates.results[0]!.post_id,
+      );
+    },
     async saveScheduleProposal(proposal, idempotencyKey) {
       const replay = await database
         .prepare(
@@ -706,7 +888,46 @@ export function createD1BlogPostOperationsStore(
         .first<ScheduleProposalRow>();
       return row === null ? null : scheduleProposalFromRow(row);
     },
-    async saveSchedule(schedule, idempotencyKey) {
+    async saveSchedule(schedule, idempotencyKey, authority) {
+      let effectiveAuthority = authority;
+      if (authority !== undefined) {
+        const revisions = await database
+          .prepare(
+            `SELECT revision, definition_json
+             FROM content_revisions
+             WHERE workspace_id = ?1 AND revision IN (0, ?2)
+             ORDER BY revision`,
+          )
+          .bind(schedule.workspaceId, schedule.contentRevision)
+          .all<{ revision: number; definition_json: string }>();
+        const base = revisions.results.find(({ revision }) => revision === 0);
+        const current = revisions.results.find(
+          ({ revision }) => revision === schedule.contentRevision,
+        );
+        if (base === undefined || current === undefined) {
+          throw new BlogPostOperationError("approval_stale");
+        }
+        const requiredScopes = [
+          "publication.schedule",
+          ...mcpDefinitionScopes(
+            JSON.parse(base.definition_json) as SiteDefinition,
+            JSON.parse(current.definition_json) as SiteDefinition,
+            mcpContentDraftScope,
+          ),
+        ];
+        effectiveAuthority = {
+          ...authority,
+          requiredScopes,
+          ...(authority.audit === undefined
+            ? {}
+            : {
+                audit: {
+                  ...authority.audit,
+                  scopesEvaluated: requiredScopes,
+                },
+              }),
+        };
+      }
       const beforeState = await store.findPost(
         schedule.siteId,
         schedule.postId,
@@ -749,6 +970,13 @@ export function createD1BlogPostOperationsStore(
         }
         return scheduleFromRow(replay);
       }
+      const linkedScheduleAudit = prepareMcpScheduleAudit(
+        database,
+        effectiveAuthority,
+        schedule,
+        "activate",
+        idempotencyKey,
+      );
       const results = await withScheduleAuthorityErrors(
         () => database.batch([
         database
@@ -759,22 +987,78 @@ export function createD1BlogPostOperationsStore(
              )
              SELECT ?1, ?2, 'active', 'scheduled', 2, ?3
              WHERE ?5 > ?3
-             AND EXISTS (
-               SELECT 1 FROM human_memberships
-               WHERE site_id = ?1 AND id = ?4
-                 AND status = 'active'
-                 AND role IN ('owner', 'editor')
+             AND (
+               (
+                 ?6 IS NULL
+                 AND EXISTS (
+                   SELECT 1 FROM human_memberships
+                   WHERE site_id = ?1 AND id = ?4
+                     AND status = 'active'
+                     AND role IN ('owner', 'editor')
+                 )
+               )
+               OR (
+                 ?6 = 'mcp'
+                 AND ?4 = 'mcp-' || ?8
+                 AND EXISTS (
+                   SELECT 1
+                   FROM mcp_connections AS connection
+                   JOIN mcp_connection_scopes AS scope
+                     ON scope.connection_id = connection.id
+                    AND scope.scope = 'publication.schedule'
+                   WHERE connection.id = ?7
+                     AND connection.actor_id = ?8
+                     AND connection.site_id = ?1
+                     AND connection.status = 'active'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM json_each(?9) AS required
+                       WHERE NOT EXISTS (
+                         SELECT 1 FROM mcp_connection_scopes AS granted
+                         WHERE granted.connection_id = connection.id
+                           AND granted.scope = required.value
+                       )
+                     )
+                 )
+               )
              )
              ON CONFLICT (site_id, post_id) DO UPDATE SET
                workflow_state = 'scheduled',
                version = blog_post_collection_states.version + 1,
                updated_at = excluded.updated_at
              WHERE ?5 > ?3
-             AND EXISTS (
-               SELECT 1 FROM human_memberships
-               WHERE site_id = ?1 AND id = ?4
-                 AND status = 'active'
-                 AND role IN ('owner', 'editor')
+             AND (
+               (
+                 ?6 IS NULL
+                 AND EXISTS (
+                   SELECT 1 FROM human_memberships
+                   WHERE site_id = ?1 AND id = ?4
+                     AND status = 'active'
+                     AND role IN ('owner', 'editor')
+                 )
+               )
+               OR (
+                 ?6 = 'mcp'
+                 AND ?4 = 'mcp-' || ?8
+                 AND EXISTS (
+                   SELECT 1
+                   FROM mcp_connections AS connection
+                   JOIN mcp_connection_scopes AS scope
+                     ON scope.connection_id = connection.id
+                    AND scope.scope = 'publication.schedule'
+                   WHERE connection.id = ?7
+                     AND connection.actor_id = ?8
+                     AND connection.site_id = ?1
+                     AND connection.status = 'active'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM json_each(?9) AS required
+                       WHERE NOT EXISTS (
+                         SELECT 1 FROM mcp_connection_scopes AS granted
+                         WHERE granted.connection_id = connection.id
+                           AND granted.scope = required.value
+                       )
+                     )
+                 )
+               )
              )`,
           )
           .bind(
@@ -783,6 +1067,10 @@ export function createD1BlogPostOperationsStore(
             schedule.activatedAt,
             schedule.activatedBy,
             schedule.executeAtUtc,
+            effectiveAuthority?.kind ?? null,
+            effectiveAuthority?.connectionId ?? null,
+            effectiveAuthority?.actorId ?? null,
+            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
           ),
         database
           .prepare(
@@ -790,11 +1078,39 @@ export function createD1BlogPostOperationsStore(
              SET state = 'cancelled', detail = 'rescheduled'
              WHERE site_id = ?1 AND post_id = ?2 AND state = 'active'
                AND ?4 > ?5
-               AND EXISTS (
-                 SELECT 1 FROM human_memberships
-                 WHERE site_id = ?1 AND id = ?3
-                   AND status = 'active'
-                   AND role IN ('owner', 'editor')
+               AND (
+                 (
+                   ?6 IS NULL
+                   AND EXISTS (
+                     SELECT 1 FROM human_memberships
+                     WHERE site_id = ?1 AND id = ?3
+                       AND status = 'active'
+                       AND role IN ('owner', 'editor')
+                   )
+                 )
+                 OR (
+                   ?6 = 'mcp'
+                   AND ?3 = 'mcp-' || ?8
+                   AND EXISTS (
+                     SELECT 1
+                     FROM mcp_connections AS connection
+                     JOIN mcp_connection_scopes AS scope
+                       ON scope.connection_id = connection.id
+                      AND scope.scope = 'publication.schedule'
+                     WHERE connection.id = ?7
+                       AND connection.actor_id = ?8
+                       AND connection.site_id = ?1
+                       AND connection.status = 'active'
+                       AND NOT EXISTS (
+                         SELECT 1 FROM json_each(?9) AS required
+                         WHERE NOT EXISTS (
+                           SELECT 1 FROM mcp_connection_scopes AS granted
+                           WHERE granted.connection_id = connection.id
+                             AND granted.scope = required.value
+                         )
+                       )
+                   )
+                 )
                )`,
           )
           .bind(
@@ -803,6 +1119,10 @@ export function createD1BlogPostOperationsStore(
             schedule.activatedBy,
             schedule.executeAtUtc,
             schedule.activatedAt,
+            effectiveAuthority?.kind ?? null,
+            effectiveAuthority?.connectionId ?? null,
+            effectiveAuthority?.actorId ?? null,
+            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
           ),
         database
           .prepare(
@@ -819,11 +1139,39 @@ export function createD1BlogPostOperationsStore(
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
                'active', NULL, ?20
-             WHERE EXISTS (
-               SELECT 1 FROM human_memberships
-               WHERE site_id = ?2 AND id = ?17
-                 AND status = 'active'
-                 AND role IN ('owner', 'editor')
+             WHERE (
+               (
+                 ?21 IS NULL
+                 AND EXISTS (
+                   SELECT 1 FROM human_memberships
+                   WHERE site_id = ?2 AND id = ?17
+                     AND status = 'active'
+                     AND role IN ('owner', 'editor')
+                 )
+               )
+               OR (
+                 ?21 = 'mcp'
+                 AND ?17 = 'mcp-' || ?23
+                 AND EXISTS (
+                   SELECT 1
+                   FROM mcp_connections AS connection
+                   JOIN mcp_connection_scopes AS scope
+                     ON scope.connection_id = connection.id
+                    AND scope.scope = 'publication.schedule'
+                   WHERE connection.id = ?22
+                     AND connection.actor_id = ?23
+                     AND connection.site_id = ?2
+                     AND connection.status = 'active'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM json_each(?24) AS required
+                       WHERE NOT EXISTS (
+                         SELECT 1 FROM mcp_connection_scopes AS granted
+                         WHERE granted.connection_id = connection.id
+                           AND granted.scope = required.value
+                       )
+                     )
+                 )
+               )
              )
              AND ?14 > ?19`,
           )
@@ -848,6 +1196,10 @@ export function createD1BlogPostOperationsStore(
             schedule.activationAuditId,
             schedule.activatedAt,
             idempotencyKey,
+            effectiveAuthority?.kind ?? null,
+            effectiveAuthority?.connectionId ?? null,
+            effectiveAuthority?.actorId ?? null,
+            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
           ),
         database
           .prepare(
@@ -864,7 +1216,43 @@ export function createD1BlogPostOperationsStore(
             `scheduled-publication:${schedule.id}`,
             schedule.activatedAt,
           ),
-        prepareAcceptedBlogPostAudit(database,
+        database
+          .prepare(
+            `INSERT INTO mcp_blog_schedule_authorities (
+               schedule_id, connection_id, actor_id, operation,
+               required_scopes_json, created_at
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6
+             FROM mcp_connections AS connection
+             WHERE ?7 = 'mcp'
+               AND connection.id = ?2
+               AND connection.actor_id = ?3
+               AND connection.site_id = ?8
+               AND connection.status = 'active'
+               AND EXISTS (
+                 SELECT 1 FROM blog_post_schedules WHERE id = ?1
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM json_each(?5) AS required
+                 WHERE NOT EXISTS (
+                   SELECT 1 FROM mcp_connection_scopes AS granted
+                   WHERE granted.connection_id = connection.id
+                     AND granted.scope = required.value
+                 )
+               )`,
+          )
+          .bind(
+            schedule.id,
+            effectiveAuthority?.connectionId ?? null,
+            effectiveAuthority?.actorId ?? null,
+            effectiveAuthority?.operation ?? "foundry.publication.schedule",
+            JSON.stringify(effectiveAuthority?.requiredScopes ?? []),
+            schedule.activatedAt,
+            effectiveAuthority?.kind ?? null,
+            schedule.siteId,
+          ),
+        prepareAcceptedBlogPostAudit(
+          database,
           {
             siteId: schedule.siteId,
             postId: schedule.postId,
@@ -888,15 +1276,29 @@ export function createD1BlogPostOperationsStore(
            )`,
           [schedule.id, idempotencyKey],
         ),
+        ...(linkedScheduleAudit === null ? [] : [linkedScheduleAudit]),
         ]),
         undefined,
       );
       if ((results[2]?.meta.changes ?? 0) !== 1) {
-        if (!(await store.hasHumanContentAuthority({
-          siteId: schedule.siteId,
-          actorId: schedule.activatedBy,
-        }))) {
-          throw new BlogPostOperationError("human_authority_required");
+        const hasAuthority =
+          effectiveAuthority === undefined
+            ? await store.hasHumanContentAuthority({
+                siteId: schedule.siteId,
+                actorId: schedule.activatedBy,
+              })
+            : await store.hasMcpScheduleAuthority({
+                siteId: schedule.siteId,
+                connectionId: effectiveAuthority.connectionId,
+                actorId: effectiveAuthority.actorId,
+                requiredScopes: effectiveAuthority.requiredScopes,
+              });
+        if (!hasAuthority) {
+          throw new BlogPostOperationError(
+            effectiveAuthority === undefined
+              ? "human_authority_required"
+              : "mcp_schedule_authority_required",
+          );
         }
         throw new BlogPostOperationError("schedule_activation_failed");
       }
@@ -919,9 +1321,45 @@ export function createD1BlogPostOperationsStore(
         .first<ScheduleRow>();
       return row === null ? null : scheduleFromRow(row);
     },
+    async findScheduleByWorkspaceRequest(input) {
+      const row = await database
+        .prepare(
+          `SELECT id, site_id, post_id, workspace_id, content_revision,
+                  post_revision_id, approval_id, approval_fingerprint,
+                  authority_post_revision_id, authority_version,
+                  local_date_time, iana_time_zone, utc_offset_choice,
+                  execute_at_utc, time_zone_database_version, created_by,
+                  activated_by, activation_audit_id, activated_at, state, detail
+           FROM blog_post_schedules
+           WHERE site_id = ?1
+             AND workspace_id = ?2
+             AND idempotency_key = ?3
+           ORDER BY activated_at DESC LIMIT 1`,
+        )
+        .bind(
+          input.siteId,
+          input.workspaceId,
+          input.idempotencyKey,
+        )
+        .first<ScheduleRow>();
+      return row === null ? null : scheduleFromRow(row);
+    },
     async findSchedule(scheduleId) {
       const row = await findScheduleRow(scheduleId);
       return row === null ? null : scheduleFromRow(row);
+    },
+    async findScheduleCancellationByRequest(input) {
+      const row = await database
+        .prepare(
+          `SELECT schedule_id
+           FROM blog_post_schedule_cancellations
+           WHERE site_id = ?1 AND request_id = ?2`,
+        )
+        .bind(input.siteId, input.requestId)
+        .first<{ schedule_id: string }>();
+      if (row === null) return null;
+      const schedule = await findScheduleRow(row.schedule_id);
+      return schedule === null ? null : scheduleFromRow(schedule);
     },
     async cancelSchedule(input) {
       const findReplay = () =>
@@ -966,6 +1404,13 @@ export function createD1BlogPostOperationsStore(
         state: "cancelled",
         detail: "human_cancelled",
       };
+      const linkedCancellationAudit = prepareMcpScheduleAudit(
+        database,
+        input.authority,
+        cancelled,
+        "cancel",
+        input.requestId,
+      );
       const results = await database.batch([
         database
           .prepare(
@@ -979,11 +1424,31 @@ export function createD1BlogPostOperationsStore(
                WHERE id = ?4 AND site_id = ?1 AND post_id = ?2
                  AND state = 'active'
              )
-             AND EXISTS (
-               SELECT 1 FROM human_memberships
-               WHERE site_id = ?1 AND id = ?5
-                 AND status = 'active'
-                 AND role IN ('owner', 'editor')
+             AND (
+               (
+                 ?8 IS NULL
+                 AND EXISTS (
+                   SELECT 1 FROM human_memberships
+                   WHERE site_id = ?1 AND id = ?5
+                     AND status = 'active'
+                     AND role IN ('owner', 'editor')
+                 )
+               )
+               OR (
+                 ?8 = 'mcp'
+                 AND ?5 = 'mcp-' || ?10
+                 AND EXISTS (
+                   SELECT 1
+                   FROM mcp_connections AS connection
+                   JOIN mcp_connection_scopes AS scope
+                     ON scope.connection_id = connection.id
+                    AND scope.scope = 'publication.schedule'
+                   WHERE connection.id = ?9
+                     AND connection.actor_id = ?10
+                     AND connection.site_id = ?1
+                     AND connection.status = 'active'
+                 )
+               )
              )
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
@@ -1001,6 +1466,9 @@ export function createD1BlogPostOperationsStore(
             input.actorId,
             JSON.stringify(cancelled),
             input.occurredAt,
+            input.authority?.kind ?? null,
+            input.authority?.connectionId ?? null,
+            input.authority?.actorId ?? null,
           ),
         database
           .prepare(
@@ -1064,6 +1532,9 @@ export function createD1BlogPostOperationsStore(
             input.scheduleId,
           ],
         ),
+        ...(linkedCancellationAudit === null
+          ? []
+          : [linkedCancellationAudit]),
       ]);
       if ((results[0]?.meta.changes ?? 0) === 1) {
         return cancelled;
@@ -1081,11 +1552,24 @@ export function createD1BlogPostOperationsStore(
       if (concurrentReplay !== null) {
         throw new BlogPostOperationError("idempotency_key_conflict");
       }
-      if (!(await store.hasHumanContentAuthority({
-        siteId: input.siteId,
-        actorId: input.actorId,
-      }))) {
-        throw new BlogPostOperationError("human_authority_required");
+      const hasAuthority =
+        input.authority === undefined
+          ? await store.hasHumanContentAuthority({
+              siteId: input.siteId,
+              actorId: input.actorId,
+            })
+          : await store.hasMcpScheduleAuthority({
+              siteId: input.siteId,
+              connectionId: input.authority.connectionId,
+              actorId: input.authority.actorId,
+              requiredScopes: input.authority.requiredScopes,
+            });
+      if (!hasAuthority) {
+        throw new BlogPostOperationError(
+          input.authority === undefined
+            ? "human_authority_required"
+            : "mcp_schedule_authority_required",
+        );
       }
       throw new BlogPostOperationError("too_late_to_cancel");
     },

@@ -20,9 +20,9 @@ The server implements MCP's stable 2025-11-25 authorization profile:
   metadata.
 - Its unauthenticated `401` includes `WWW-Authenticate: Bearer` with
   `resource_metadata` and the initial `site.read` scope. An authenticated call
-  that lacks a draft scope returns `403` with
-  `error="insufficient_scope"` and a scope value containing `site.read` plus
-  exactly the required incremental draft scope.
+  that lacks a required grant returns `403` with
+  `error="insufficient_scope"` and the exact missing draft or publication
+  scope.
 - The authorization server publishes RFC 8414 or OIDC discovery metadata and
   supports authorization code with PKCE `S256`.
 - Clients include the exact `resource` in authorization and token requests.
@@ -42,7 +42,13 @@ Example protected resource metadata:
 {
   "resource": "https://cms.example.com/api/foundry-mcp",
   "authorization_servers": ["https://cms.example.com"],
-  "scopes_supported": ["site.read", "content.draft", "design.draft"],
+  "scopes_supported": [
+    "site.read",
+    "content.draft",
+    "design.draft",
+    "publication.schedule",
+    "publication.publish"
+  ],
   "bearer_methods_supported": ["header"],
   "resource_name": "Example Site — Foundry CMS"
 }
@@ -131,12 +137,12 @@ sequenceDiagram
     Human->>D1: approve preview fingerprint
     Agent->>MCP: publication.request(workspace, N, approvalId, key)
     MCP->>App: RequestPublish as MCP actor
-    App->>D1: verify scopes + exact human approval + live base
+    App->>D1: atomically claim exact grant + approval + revision + audit
     App->>Git: shared compare-and-swap publisher
     Git-->>App: commit SHA
     Git->>CF: production build
     App->>CF: verify release marker
-    App->>D1: live result + joined audit
+    App->>D1: live result
     App-->>Agent: operationId + status
 ```
 
@@ -159,10 +165,10 @@ workspaceId
 revision
 contentHash
 schemaVersion
-rendererCommit
+rendererVersion
 humanActorId
 approvedAt
-revokedAt?
+invalidatedAt?
 ```
 
 Any edit, rebase, conflict resolution, schema change, renderer change, base
@@ -170,11 +176,24 @@ branch advance, revocation or expiration invalidates it. `publication.request`
 cannot accept `approved: true`, reviewer identity or approval evidence supplied
 by the client.
 
-For scheduled site/blog publication, the schedule points to the same approval
-fingerprint. At execution the scheduler revalidates it and the production base.
-If stale, it transitions to `blocked_stale`; it never silently rebases or asks
-an agent to approve. Campaign/email artifacts are rejected by the scheduling
-command.
+`publication.publish` authorizes immediate publication.
+`publication.schedule` authorizes blog scheduling, status and cancellation.
+Both commands also require the exact draft scopes derived by the server from
+revision 0 and the approved revision. Caller-supplied scope lists are not the
+authority source.
+
+For scheduled blog publication, the schedule stores the approval fingerprint
+and originating MCP connection, actor and required scopes. At execution and at
+each Git-reference or deployment write boundary, the scheduler revalidates the
+current connection, scopes, approval, revision, reservation and production
+base. Loss of any fence blocks the execution before the provider write.
+Campaign and email artifacts are rejected by the scheduling command.
+
+Cancellation is accepted only when D1 commits a schedule-bound cancellation
+receipt. Repeating the same key and command returns that receipt with
+`replayed: true`; using the key for another command returns
+`IDEMPOTENCY_KEY_REUSED`. A cancellation arriving after the schedule leaves its
+active state is rejected.
 
 ## Idempotency and concurrency
 
@@ -217,8 +236,12 @@ preview_id -> approval_id -> human_actor_id
 publish_id -> git_commit_sha -> release_marker
 ```
 
-Audit records include timestamps, contract/protocol version, scopes evaluated,
-object IDs, policy decision, affected revision and safe error code. They exclude
+The linked MCP audit row commits in the same D1 transaction as an accepted
+publication claim, schedule or cancellation receipt, before any external
+provider continuation. Failures discovered after command admission use the
+same publication-specific recorder, including current-grant loss. Audit records
+include timestamps, contract/protocol version, scopes evaluated, object IDs,
+policy decision, affected revision and safe error code. They exclude
 tokens, authorization codes, PKCE values, prompts, model reasoning, raw content,
 subscriber data, secrets and full IP addresses. Denials are rate-limited and
 abuse-safe. An Owner can export the joined audit from the human dashboard; MCP

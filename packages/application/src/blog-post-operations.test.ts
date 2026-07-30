@@ -62,6 +62,11 @@ function application(
       siteId: post.siteId,
       postId: post.postId,
     }],
+    mcpScheduleAccess: [{
+      connectionId: "connection-56",
+      actorId: "agent-56",
+      siteId: post.siteId,
+    }],
     posts: [post],
     approvals: [
       {
@@ -95,6 +100,72 @@ function application(
 }
 
 describe("blog post operations", () => {
+  it("activates the canonical schedule for an exact current MCP grant", async () => {
+    const { app } = application();
+
+    const schedule = await app.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      approvalId,
+      resolvedTime: resolvedTime(
+        "2026-11-01T01:30:00",
+        "-07:00",
+        "2026-11-01T08:30:00.000Z",
+      ),
+      idempotencyKey: "mcp-activate-schedule-0001",
+      authority: {
+        kind: "mcp",
+        connectionId: "connection-56",
+        actorId: "agent-56",
+        operation: "foundry.publication.schedule",
+        requiredScopes: ["publication.schedule"],
+      },
+    });
+
+    expect(schedule).toMatchObject({
+      state: "active",
+      approvalId,
+      createdBy: mcpActorId,
+      activatedBy: mcpActorId,
+    });
+  });
+
+  it("rejects MCP scheduling without a current exact connection grant", async () => {
+    const { app, store } = application();
+
+    await expect(
+      app.commands.activateSchedule({
+        actorId: mcpActorId,
+        siteId: "foundry-site",
+        postId: "post-scheduled-release",
+        approvalId,
+        resolvedTime: resolvedTime(
+          "2026-11-01T01:30:00",
+          "-07:00",
+          "2026-11-01T08:30:00.000Z",
+        ),
+        idempotencyKey: "mcp-activate-without-grant",
+        authority: {
+          kind: "mcp",
+          connectionId: "connection-revoked",
+          actorId: "agent-56",
+          operation: "foundry.publication.schedule",
+          requiredScopes: ["publication.schedule"],
+        },
+      }),
+    ).rejects.toEqual(
+      new BlogPostOperationError("mcp_schedule_authority_required"),
+    );
+    await expect(
+      store.findScheduleByRequest({
+        siteId: "foundry-site",
+        postId: "post-scheduled-release",
+        idempotencyKey: "mcp-activate-without-grant",
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("stores an exact UTC instant and reporting zone bound to the approval", async () => {
     const { app } = application();
 

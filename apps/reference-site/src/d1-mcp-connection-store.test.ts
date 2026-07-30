@@ -46,6 +46,7 @@ describe("D1 MCP connection store", () => {
       "0019_mcp_preview_artifacts.sql",
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
+      "0023_mcp_publication_scopes.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -323,6 +324,82 @@ describe("D1 MCP connection store", () => {
           replayed: 0,
         },
       ],
+    });
+  });
+
+  it("persists publication grants in canonical order and joined publication audit evidence", async () => {
+    const store = createD1McpConnectionStore(database);
+    await store.createAuthorizationGrant({
+      connectionId: "connection-publication",
+      actorId: "agent-publication",
+      siteId: referenceSiteDefinition.site.id,
+      clientId: "https://client.example/metadata.json",
+      redirectUri: "https://client.example/callback",
+      ownerMembershipId: "membership-owner",
+      codeHash: "code-publication",
+      codeChallenge: "challenge-publication",
+      expiresAt: "2026-07-29T18:05:00.000Z",
+      now: "2026-07-29T18:00:00.000Z",
+      inputHash: "a".repeat(64),
+      scopes: [
+        "site.read",
+        "content.draft",
+        "publication.schedule",
+        "publication.publish",
+      ],
+    });
+
+    await expect(
+      store.findCurrentConnection({
+        connectionId: "connection-publication",
+        siteId: referenceSiteDefinition.site.id,
+      }),
+    ).resolves.toMatchObject({
+      scopes: [
+        "site.read",
+        "content.draft",
+        "publication.schedule",
+        "publication.publish",
+      ],
+    });
+
+    await store.recordPublicationInvocation({
+      invocationId: "invocation-publication",
+      connectionId: "connection-publication",
+      actorId: "agent-publication",
+      siteId: referenceSiteDefinition.site.id,
+      operation: "foundry.publication.request",
+      inputHash: "b".repeat(64),
+      protocolVersion: "2025-11-25",
+      scopesEvaluated: ["publication.publish", "content.draft"],
+      outcome: "allowed",
+      reason: null,
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      contractVersion: "foundry.mcp.v1",
+      idempotencyKey: "11111111-1111-4111-8111-111111111111",
+      workspaceId: createContentWorkspaceId(
+        "workspace_publication_audit",
+      ),
+      revision: 4,
+      approvalId: "approval_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      publicationId: "publish_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      scheduleId: null,
+      resultHash: "c".repeat(64),
+      replayed: false,
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT approval_id, publication_id, schedule_id, replayed
+           FROM mcp_audit_events
+           WHERE invocation_id = 'invocation-publication'`,
+        )
+        .first(),
+    ).resolves.toEqual({
+      approval_id: "approval_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      publication_id: "publish_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      schedule_id: null,
+      replayed: 0,
     });
   });
 
@@ -1775,6 +1852,7 @@ it("upgrades the exact pre-blog schema without rewriting applied migrations", as
     await applyMigration("0020_mcp_mutation_receipts.sql");
     await applyMigration("0021_campaign_test_delivery.sql");
     await applyMigration("0022_blog_post_scheduling_archive.sql");
+    await applyMigration("0023_mcp_publication_scopes.sql");
 
     await expect(
       upgradeDatabase
