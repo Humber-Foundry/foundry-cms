@@ -10,6 +10,7 @@ import {
   type BlogPostSchedule,
   type BlogPostScheduleExecution,
   type BlogPostScheduleProposal,
+  type ContentActorId,
   type RestoredBlogPostDraft,
 } from "@foundry/application";
 import type { BlogPostId, SiteId } from "@foundry/site-definition";
@@ -1479,6 +1480,15 @@ export function createD1BlogPostOperationsStore(
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_schedule_retry_receipts
                WHERE site_id = ?7 AND request_id = ?6
+             )
+             AND (
+               ?8 = 'scheduler'
+               OR EXISTS (
+                 SELECT 1 FROM human_memberships
+                 WHERE site_id = ?7 AND id = ?5
+                   AND status = 'active'
+                   AND role IN ('owner', 'editor')
+               )
              )`,
         ).bind(
           input.leaseToken,
@@ -1626,6 +1636,17 @@ export function createD1BlogPostOperationsStore(
             leaseToken: racedRetry.lease_token,
             replayed: true,
           };
+        }
+        if (
+          input.retryKind === "human" &&
+          !(await store.hasHumanContentAuthority({
+            siteId: schedule.site_id,
+            actorId: input.actorId as ContentActorId,
+          }))
+        ) {
+          throw new BlogPostOperationError(
+            "human_authority_required",
+          );
         }
         throw new BlogPostOperationError("execution_not_retryable");
       }
@@ -2968,6 +2989,12 @@ export function createD1BlogPostOperationsStore(
                  WHERE site_id = ?2
                    AND command_type = 'blog.post.restore'
                    AND request_id = ?4 AND outcome = 'accepted'
+               )
+               AND EXISTS (
+                 SELECT 1 FROM human_memberships
+                 WHERE site_id = ?2 AND id = ?6
+                   AND status = 'active'
+                   AND role IN ('owner', 'editor')
                )`,
           )
           .bind(
@@ -3065,6 +3092,14 @@ export function createD1BlogPostOperationsStore(
           return JSON.parse(
             concurrentReplay.response_json,
           ) as RestoredBlogPostDraft;
+        }
+        if (!(await store.hasHumanContentAuthority({
+          siteId: input.siteId,
+          actorId: input.actorId,
+        }))) {
+          throw new BlogPostOperationError(
+            "human_authority_required",
+          );
         }
         throw new BlogPostOperationError("post_restore_conflict");
       }

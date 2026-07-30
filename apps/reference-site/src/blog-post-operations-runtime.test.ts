@@ -14,6 +14,7 @@ import {
 } from "@foundry/site-definition";
 
 const mocks = vi.hoisted(() => ({
+  findApproval: vi.fn(),
   findPublicationByIdempotency: vi.fn(),
   hasScheduledPublicationOwnership: vi.fn(),
   publish: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("./d1-blog-post-operations-store", () => ({
 
 vi.mock("./d1-content-publication-store", () => ({
   createD1ContentPublicationStore: () => ({
+    findApproval: mocks.findApproval,
     findPublicationByIdempotency:
       mocks.findPublicationByIdempotency,
     hasScheduledPublicationOwnership:
@@ -70,6 +72,8 @@ describe("scheduled blog post execution runtime", () => {
     vi.clearAllMocks();
     operationTime = beforeNow;
     mocks.validateApprovalAuthority.mockResolvedValue(true);
+    mocks.findApproval.mockResolvedValue(null);
+    mocks.findPublicationByIdempotency.mockResolvedValue(null);
     mocks.hasScheduledPublicationOwnership.mockResolvedValue(true);
     mocks.operationsStore = createInMemoryBlogPostOperationsStore({
       humanActorIds: [actorId],
@@ -484,7 +488,12 @@ describe("scheduled blog post execution runtime", () => {
     });
     const publication = {
       id: `publish_${"8".repeat(32)}`,
+      workspaceId,
+      revision: 1,
       approvalId: withdrawalApprovalId,
+      fingerprint: "verified-withdrawal-fingerprint",
+      idempotencyKey: expect.any(String),
+      requestedBy: originalActorId,
       requestedAt: now,
       status: "verified-live",
     };
@@ -551,6 +560,150 @@ describe("scheduled blog post execution runtime", () => {
     ).resolves.toMatchObject({
       collectionState: "archived",
       liveRevisionId: null,
+    });
+  });
+
+  it("lets a replacement Owner adopt and retry the exact failed withdrawal publication", async () => {
+    const archiveRequestId = "archive-publication-created-before-binding";
+    const withdrawalApprovalId = `approval_${"6".repeat(32)}`;
+    const selectedPostRevisionId = "post-revision-failed-withdrawal";
+    const originalActorId = createContentActorId(
+      "membership-original-owner",
+    );
+    const archiveStore = createInMemoryBlogPostOperationsStore({
+      humanActorIds: [actorId, originalActorId],
+      posts: [{
+        siteId: createSiteId("site_foundry_reference"),
+        postId,
+        workspaceId,
+        contentRevision: 1,
+        postRevision: 1,
+        postRevisionId: selectedPostRevisionId,
+        collectionState: "active",
+        workflowState: "editing",
+        liveRevisionId: selectedPostRevisionId,
+        version: 1,
+      }],
+    });
+    mocks.operationsStore = archiveStore;
+    const archiveApplication = createBlogPostOperationsApplication({
+      store: archiveStore,
+      now: () => now,
+    });
+    await archiveApplication.commands.archive({
+      actorId: originalActorId,
+      siteId: "site_foundry_reference",
+      postId,
+      selectedPostRevisionId,
+      idempotencyKey: archiveRequestId,
+    });
+    await archiveApplication.commands.bindArchiveWithdrawalDraft({
+      siteId: "site_foundry_reference",
+      postId,
+      workspaceId,
+      contentRevision: 1,
+      createdBy: originalActorId,
+      requestId: archiveRequestId,
+      occurredAt: now,
+    });
+    const failedPublication = {
+      id: `publish_${"5".repeat(32)}`,
+      workspaceId,
+      revision: 1,
+      approvalId: withdrawalApprovalId,
+      fingerprint: "failed-withdrawal-fingerprint",
+      idempotencyKey: "archive-publication-key",
+      requestedBy: originalActorId,
+      requestedAt: now,
+      status: "failed",
+    };
+    const retriedPublication = {
+      ...failedPublication,
+      requestedBy: actorId,
+      status: "requested",
+    };
+    mocks.findPublicationByIdempotency.mockResolvedValue(
+      failedPublication,
+    );
+    mocks.findApproval.mockResolvedValue({
+      id: withdrawalApprovalId,
+      workspaceId,
+      revision: 1,
+      fingerprint: {
+        value: failedPublication.fingerprint,
+        postArtifacts: [{
+          postId,
+          postRevisionId: selectedPostRevisionId,
+        }],
+      },
+    });
+    mocks.retryDeployment.mockResolvedValue(retriedPublication);
+    const archiveRow = {
+      selected_post_revision_id: selectedPostRevisionId,
+      previous_live_revision_id: selectedPostRevisionId,
+      withdrawal_workspace_id: workspaceId,
+      withdrawal_content_revision: 1,
+      collection_state: "archiving",
+      archive_publication_id: null,
+    };
+    const database = {
+      prepare: vi.fn((query: string) => ({
+        bind: vi.fn(() => ({
+          first: vi.fn().mockResolvedValue(
+            query.includes("blog_post_operation_audit_events")
+              ? null
+              : query.includes("FROM content_revisions")
+                ? {
+                    workspace_id: workspaceId,
+                    revision: 1,
+                    definition_json: JSON.stringify({
+                      blog: {
+                        posts: [{
+                          id: postId,
+                          targetVisibility: "unpublished",
+                        }],
+                      },
+                    }),
+                    content_hash: "withdrawal-content",
+                    schema_version: "foundry.site-definition.v1",
+                    renderer_version: "renderer-v1",
+                    production_base:
+                      `git:${"a".repeat(40)}@content:${"b".repeat(64)}`,
+                    created_at: now,
+                    created_by: originalActorId,
+                  }
+                : archiveRow,
+          ),
+        })),
+      })),
+    };
+
+    await expect(continueArchiveBlogPostWithdrawal({
+      environment: { FOUNDRY_DB: database as never },
+      actorId,
+      postId,
+      archiveRequestId,
+      withdrawalApprovalId,
+      requestId: "replacement-owner-continues-withdrawal",
+    })).resolves.toMatchObject({
+      archiveRequestId,
+      publication: {
+        id: failedPublication.id,
+        status: "requested",
+        requestedBy: actorId,
+      },
+    });
+
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(mocks.retryDeployment).toHaveBeenCalledWith(
+      failedPublication.id,
+      actorId,
+    );
+    await expect(
+      archiveStore.findPost("site_foundry_reference", postId),
+    ).resolves.toMatchObject({
+      collectionState: "archiving",
+      liveRevisionId: selectedPostRevisionId,
     });
   });
 });

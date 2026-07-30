@@ -616,6 +616,21 @@ BEGIN
                 blog_post_schedules.post_id
             AND json(successor.value) <>
                 json(scheduled_revision.snapshot_json)
+            AND EXISTS (
+              SELECT 1
+              FROM content_revisions AS predecessor
+              JOIN json_each(
+                json_extract(
+                  predecessor.definition_json,
+                  '$.blog.posts'
+                )
+              ) AS previous
+              WHERE predecessor.workspace_id = NEW.workspace_id
+                AND predecessor.revision = NEW.revision - 1
+                AND json_extract(previous.value, '$.id') =
+                    blog_post_schedules.post_id
+                AND json(previous.value) <> json(successor.value)
+            )
         )
       )
     )
@@ -678,6 +693,21 @@ BEGIN
           WHERE json_extract(successor.value, '$.id') = schedule.post_id
             AND json(successor.value) <>
                 json(scheduled_revision.snapshot_json)
+            AND EXISTS (
+              SELECT 1
+              FROM content_revisions AS predecessor
+              JOIN json_each(
+                json_extract(
+                  predecessor.definition_json,
+                  '$.blog.posts'
+                )
+              ) AS previous
+              WHERE predecessor.workspace_id = NEW.workspace_id
+                AND predecessor.revision = NEW.revision - 1
+                AND json_extract(previous.value, '$.id') =
+                    schedule.post_id
+                AND json(previous.value) <> json(successor.value)
+            )
         )
       )
     )
@@ -715,6 +745,21 @@ BEGIN
                   schedule.post_id
               AND json(successor.value) <>
                   json(scheduled_revision.snapshot_json)
+              AND EXISTS (
+                SELECT 1
+                FROM content_revisions AS predecessor
+                JOIN json_each(
+                  json_extract(
+                    predecessor.definition_json,
+                    '$.blog.posts'
+                  )
+                ) AS previous
+                WHERE predecessor.workspace_id = NEW.workspace_id
+                  AND predecessor.revision = NEW.revision - 1
+                  AND json_extract(previous.value, '$.id') =
+                      schedule.post_id
+                  AND json(previous.value) <> json(successor.value)
+              )
           )
         )
       )
@@ -752,6 +797,21 @@ BEGIN
                   schedule.post_id
               AND json(successor.value) <>
                   json(scheduled_revision.snapshot_json)
+              AND EXISTS (
+                SELECT 1
+                FROM content_revisions AS predecessor
+                JOIN json_each(
+                  json_extract(
+                    predecessor.definition_json,
+                    '$.blog.posts'
+                  )
+                ) AS previous
+                WHERE predecessor.workspace_id = NEW.workspace_id
+                  AND predecessor.revision = NEW.revision - 1
+                  AND json_extract(previous.value, '$.id') =
+                      schedule.post_id
+                  AND json(previous.value) <> json(successor.value)
+              )
           )
         )
       )
@@ -791,6 +851,21 @@ BEGIN
                   schedule.post_id
               AND json(successor.value) <>
                   json(scheduled_revision.snapshot_json)
+              AND EXISTS (
+                SELECT 1
+                FROM content_revisions AS predecessor
+                JOIN json_each(
+                  json_extract(
+                    predecessor.definition_json,
+                    '$.blog.posts'
+                  )
+                ) AS previous
+                WHERE predecessor.workspace_id = NEW.workspace_id
+                  AND predecessor.revision = NEW.revision - 1
+                  AND json_extract(previous.value, '$.id') =
+                      schedule.post_id
+                  AND json(previous.value) <> json(successor.value)
+              )
           )
         )
       )
@@ -858,6 +933,21 @@ BEGIN
           WHERE json_extract(successor.value, '$.id') = schedule.post_id
             AND json(successor.value) <>
                 json(scheduled_revision.snapshot_json)
+            AND EXISTS (
+              SELECT 1
+              FROM content_revisions AS predecessor
+              JOIN json_each(
+                json_extract(
+                  predecessor.definition_json,
+                  '$.blog.posts'
+                )
+              ) AS previous
+              WHERE predecessor.workspace_id = NEW.workspace_id
+                AND predecessor.revision = NEW.revision - 1
+                AND json_extract(previous.value, '$.id') =
+                    schedule.post_id
+                AND json(previous.value) <> json(successor.value)
+            )
         )
       )
     )

@@ -64,6 +64,12 @@ export function createD1BlogPostRestoreInitializationExtension(input: {
                WHERE site_id = ?2 AND post_id = ?3
                  AND current_revision = ?7
                  AND current_revision_id = ?8
+             )
+             AND EXISTS (
+               SELECT 1 FROM human_memberships
+               WHERE site_id = ?2 AND id = ?6
+                 AND status = 'active'
+                 AND role IN ('owner', 'editor')
              )`,
         )
         .bind(

@@ -508,6 +508,12 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
       error instanceof Error &&
       error.message.includes("blog_post_restore_aggregate_not_advanced")
     ) {
+      if (!(await operationsStore.hasHumanContentAuthority({
+        siteId: referenceSiteDefinition.site.id,
+        actorId: input.actorId,
+      }))) {
+        throw new BlogPostOperationError("human_authority_required");
+      }
       throw new BlogPostOperationError("post_restore_conflict");
     }
     throw error;
@@ -780,17 +786,92 @@ async function prepareArchiveWithdrawal(input: {
       },
     };
   }
-  let publication = await publications.commands.publish({
-    workspaceId: withdrawalWorkspaceId,
-    approvalId: createContentApprovalId(input.withdrawalApprovalId),
-    requestedBy: createHumanMembershipId(
-      input.publicationActorId ?? input.actorId,
-    ),
-    idempotencyKey: await derivedKey(
-      "archive-publication",
-      input.archiveRequestId,
-    ),
-  });
+  if (withdrawalRevision === undefined) {
+    throw new BlogPostOperationError(
+      "archive_withdrawal_draft_conflict",
+    );
+  }
+  const withdrawalApprovalId = createContentApprovalId(
+    input.withdrawalApprovalId,
+  );
+  const requestedBy = createHumanMembershipId(
+    input.publicationActorId ?? input.actorId,
+  );
+  const publicationIdempotencyKey = await derivedKey(
+    "archive-publication",
+    input.archiveRequestId,
+  );
+  const publicationStore = createD1ContentPublicationStore(
+    input.environment.FOUNDRY_DB,
+  );
+  const adoptArchivePublication = async (
+    existing: NonNullable<
+      Awaited<
+        ReturnType<
+          typeof publicationStore.findPublicationByIdempotency
+        >
+      >
+    >,
+  ) => {
+    const approval = await publicationStore.findApproval(
+      withdrawalApprovalId,
+    );
+    if (
+      approval === null ||
+      approval.workspaceId !== withdrawalWorkspaceId ||
+      approval.revision !== withdrawalRevision ||
+      existing.workspaceId !== withdrawalWorkspaceId ||
+      existing.revision !== withdrawalRevision ||
+      existing.approvalId !== approval.id ||
+      existing.fingerprint !== approval.fingerprint.value ||
+      !approval.fingerprint.postArtifacts.some(
+        ({ postId }) => postId === archived.postId,
+      )
+    ) {
+      throw new BlogPostOperationError(
+        "archive_publication_mismatch",
+      );
+    }
+    if (existing.status === "failed") {
+      return publications.commands.retryDeployment(
+        existing.id,
+        requestedBy,
+      );
+    }
+    return await publications.commands.refresh(existing.id) ??
+      existing;
+  };
+  const findExistingArchivePublication = () =>
+    publicationStore.findPublicationByIdempotency({
+      workspaceId: withdrawalWorkspaceId,
+      idempotencyKey: publicationIdempotencyKey,
+    });
+  const existingArchivePublication =
+    await findExistingArchivePublication();
+  let publication;
+  if (existingArchivePublication !== null) {
+    publication = await adoptArchivePublication(
+      existingArchivePublication,
+    );
+  } else {
+    try {
+      publication = await publications.commands.publish({
+        workspaceId: withdrawalWorkspaceId,
+        approvalId: withdrawalApprovalId,
+        requestedBy,
+        idempotencyKey: publicationIdempotencyKey,
+      });
+    } catch (error) {
+      if (!(error instanceof ContentPublicationIdempotencyError)) {
+        throw error;
+      }
+      const racedPublication = await findExistingArchivePublication();
+      if (racedPublication === null) {
+        throw error;
+      }
+      publication = await adoptArchivePublication(racedPublication);
+    }
+  }
   if (publication.status === "verified-live") {
     publication =
       await publications.commands.refresh(publication.id) ??

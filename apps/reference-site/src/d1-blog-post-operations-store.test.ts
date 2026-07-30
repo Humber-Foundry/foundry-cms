@@ -2341,6 +2341,31 @@ describe("D1 blog post operations store", () => {
 
   it("replays append-only retry attribution after later attempts", async () => {
     const approval = await approveCurrent();
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO human_users (id, email, created_at)
+           VALUES ('user-editor-a', 'editor-a@example.com', ?1),
+                  ('user-editor-b', 'editor-b@example.com', ?1)`,
+        )
+        .bind(now),
+      database
+        .prepare(
+          `INSERT INTO human_memberships (
+             id, site_id, user_id, email, identity_issuer,
+             identity_subject, role, status, created_at, updated_at
+           ) VALUES (
+             'membership-editor-a', ?1, 'user-editor-a',
+             'editor-a@example.com', 'https://access.example.com',
+             'editor-a', 'editor', 'active', ?2, ?2
+           ), (
+             'membership-editor-b', ?1, 'user-editor-b',
+             'editor-b@example.com', 'https://access.example.com',
+             'editor-b', 'editor', 'active', ?2, ?2
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, now),
+    ]);
     const store = createD1BlogPostOperationsStore(database);
     const app = createBlogPostOperationsApplication({
       store,
@@ -2446,6 +2471,98 @@ describe("D1 blog post operations store", () => {
         )
         .first<{ count: number }>(),
     ).toEqual({ count: 1 });
+  });
+
+  it("rejects a human retry when role authority is revoked after preflight", async () => {
+    const approval = await approveCurrent();
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const setup = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_retry_role_race`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const schedule = await setup.commands.activateSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "activate-retry-role-race",
+    });
+    operationTime = now;
+    const claim = await setup.commands.claimDueSchedule(
+      schedule.siteId,
+      schedule.id,
+    );
+    await durableStore.recordExecutionOutcome({
+      executionId: claim.execution.executionId,
+      leaseToken: claim.lease!.leaseToken,
+      attempt: claim.execution.attempt,
+      outcomeId: "retry-role-race-failed",
+      outcome: "failed",
+      detail: "deployment_failed",
+      updatedAt: "2026-11-01T08:01:00.000Z",
+    });
+    let injectRace = true;
+    const racedStore = {
+      ...durableStore,
+      async retryExecution(
+        input: Parameters<typeof durableStore.retryExecution>[0],
+      ) {
+        if (injectRace) {
+          injectRace = false;
+          await database
+            .prepare(
+              `UPDATE human_memberships
+               SET status = 'suspended', updated_at = ?1
+               WHERE site_id = ?2 AND id = ?3`,
+            )
+            .bind(
+              "2026-11-01T08:02:00.000Z",
+              referenceSiteDefinition.site.id,
+              actorId,
+            )
+            .run();
+        }
+        return durableStore.retryExecution(input);
+      },
+    };
+    operationTime = "2026-11-01T08:02:00.000Z";
+    const racedApplication = createBlogPostOperationsApplication({
+      store: racedStore,
+      now: () => operationTime,
+      validateApprovalAuthority: async () => true,
+    });
+
+    await expect(racedApplication.commands.retryExecution(
+      schedule.siteId,
+      schedule.postId,
+      claim.execution.executionId,
+      actorId,
+      "retry-after-role-revocation",
+    )).rejects.toMatchObject({ code: "human_authority_required" });
+    await expect(
+      durableStore.findExecution(claim.execution.executionId),
+    ).resolves.toMatchObject({
+      attempt: 1,
+      state: "failed",
+      detail: "deployment_failed",
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM blog_post_schedule_retry_receipts
+           WHERE request_id = 'retry-after-role-revocation'`,
+        )
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
   });
 
   it("projects direct approval invalidation as editing with audit evidence", async () => {
@@ -2880,7 +2997,7 @@ describe("D1 blog post operations store", () => {
     });
   });
 
-  it("cancels a claimed schedule for an equal-number divergent workspace edit", async () => {
+  it("ignores unrelated parallel saves but cancels an equal-number post edit", async () => {
     const approval = await approveCurrent();
     const app = createBlogPostOperationsApplication({
       store: createD1BlogPostOperationsStore(database),
@@ -2901,11 +3018,6 @@ describe("D1 blog post operations store", () => {
       },
       idempotencyKey: "activate-before-cross-workspace-edit",
     });
-    operationTime = now;
-    const claim = await app.commands.claimDueSchedule(
-      schedule.siteId,
-      schedule.id,
-    );
     const sourceRevision = await database
       .prepare(
         `SELECT definition_json
@@ -2917,11 +3029,18 @@ describe("D1 blog post operations store", () => {
     const sourceDefinition = JSON.parse(
       sourceRevision!.definition_json,
     ) as typeof referenceSiteDefinition;
-    const successorDefinition = {
+    const unrelatedDefinition = {
       ...sourceDefinition,
+      site: {
+        ...sourceDefinition.site,
+        footer: "Unrelated parallel footer edit",
+      },
+    };
+    const successorDefinition = {
+      ...unrelatedDefinition,
       blog: {
-        ...sourceDefinition.blog,
-        posts: sourceDefinition.blog.posts.map(
+        ...unrelatedDefinition.blog,
+        posts: unrelatedDefinition.blog.posts.map(
           (post) => post.id === postId
             ? { ...post, title: "Equal-number divergent branch" }
             : post,
@@ -2972,7 +3091,7 @@ describe("D1 blog post operations store", () => {
         .prepare(
           `UPDATE content_workspaces
            SET current_revision = 1,
-               current_content_hash = 'cross-workspace-successor',
+               current_content_hash = 'cross-workspace-unrelated',
                updated_at = ?2
            WHERE workspace_id = ?1`,
         )
@@ -2985,16 +3104,60 @@ describe("D1 blog post operations store", () => {
              request_hash, created_at, created_by
            )
            SELECT
-             ?1, 1, ?2, 'cross-workspace-successor',
+             ?1, 1, ?2, 'cross-workspace-unrelated',
              schema_version, renderer_version, production_base,
-             'cross-workspace-edit', ?3, ?4
+             'cross-workspace-unrelated-edit', ?3, ?4
            FROM content_revisions
            WHERE workspace_id = ?1 AND revision = 0`,
         )
         .bind(
           successorWorkspaceId,
-          JSON.stringify(successorDefinition),
+          JSON.stringify(unrelatedDefinition),
           "2026-11-01T08:01:00.000Z",
+          actorId,
+        ),
+    ]);
+
+    await expect(app.queries.getSchedule(
+      referenceSiteDefinition.site.id,
+      schedule.id,
+    )).resolves.toMatchObject({
+      state: "active",
+      detail: null,
+    });
+    operationTime = now;
+    const claim = await app.commands.claimDueSchedule(
+      schedule.siteId,
+      schedule.id,
+    );
+    await database.batch([
+      database
+        .prepare(
+          `UPDATE content_workspaces
+           SET current_revision = 2,
+               current_content_hash = 'cross-workspace-successor',
+               updated_at = ?2
+           WHERE workspace_id = ?1`,
+        )
+        .bind(successorWorkspaceId, "2026-11-01T08:02:00.000Z"),
+      database
+        .prepare(
+          `INSERT INTO content_revisions (
+             workspace_id, revision, definition_json, content_hash,
+             schema_version, renderer_version, production_base,
+             request_hash, created_at, created_by
+           )
+           SELECT
+             ?1, 2, ?2, 'cross-workspace-successor',
+             schema_version, renderer_version, production_base,
+             'cross-workspace-post-edit', ?3, ?4
+           FROM content_revisions
+           WHERE workspace_id = ?1 AND revision = 1`,
+        )
+        .bind(
+          successorWorkspaceId,
+          JSON.stringify(successorDefinition),
+          "2026-11-01T08:02:00.000Z",
           actorId,
         ),
     ]);
@@ -3032,7 +3195,7 @@ describe("D1 blog post operations store", () => {
              AND request_id = ?1`,
         )
         .bind(
-          `${schedule.id}:${successorWorkspaceId}:1`,
+          `${schedule.id}:${successorWorkspaceId}:2`,
         )
         .first(),
     ).toEqual({
@@ -4052,6 +4215,80 @@ describe("D1 blog post operations store", () => {
       ).toEqual({ count: 0 });
     },
   );
+
+  it("rejects restore completion when role authority is revoked after preflight", async () => {
+    const store = createD1BlogPostOperationsStore(database);
+    const post = await store.findPost(
+      referenceSiteDefinition.site.id,
+      postId,
+    );
+    await store.archive({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      selectedPostRevisionId: post!.postRevisionId,
+      idempotencyKey: "archive-before-restore-role-race",
+      occurredAt: now,
+    });
+    let injectRace = true;
+    const racedDatabase = new Proxy(database, {
+      get(target, property) {
+        if (property === "batch") {
+          return async (
+            statements: Parameters<typeof database.batch>[0],
+          ) => {
+            if (injectRace) {
+              injectRace = false;
+              await database
+                .prepare(
+              `UPDATE human_memberships
+                   SET status = 'suspended', updated_at = ?1
+                   WHERE site_id = ?2 AND id = ?3`,
+                )
+                .bind(
+                  "2026-11-01T08:01:00.000Z",
+                  referenceSiteDefinition.site.id,
+                  actorId,
+                )
+                .run();
+            }
+            return database.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await expect(restoreArchivedBlogPostAsDraft({
+      environment: {
+        FOUNDRY_DB: racedDatabase,
+        FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+        FOUNDRY_RENDERER_VERSION: "renderer-v1",
+      },
+      actorId,
+      postId,
+      selectedPostRevisionId: post!.postRevisionId,
+      idempotencyKey: "restore-after-role-revocation",
+    })).rejects.toMatchObject({ code: "human_authority_required" });
+    await expect(
+      store.findPost(referenceSiteDefinition.site.id, postId),
+    ).resolves.toMatchObject({ collectionState: "archived" });
+    expect(
+      await database
+        .prepare("SELECT COUNT(*) AS count FROM content_workspaces")
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM blog_post_restore_records
+           WHERE request_id = 'restore-after-role-revocation'`,
+        )
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+  });
 
   it("serializes concurrent archive and restore requests without orphan state", async () => {
     const store = createD1BlogPostOperationsStore(database);
