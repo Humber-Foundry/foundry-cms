@@ -73,7 +73,6 @@ export type McpLinkedPublicationAudit = McpReadAuditEvent &
     workspaceId: string;
     revision: number;
     approvalId: string | null;
-    resultHash: string;
   }>;
 
 export type McpConnectionStore = Readonly<{

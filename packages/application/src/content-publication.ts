@@ -1751,6 +1751,7 @@ export function createContentPublicationApplication({
         assertCurrentAuthority?: () => Promise<boolean>;
         authority?: ContentPublicationMcpAuthority;
         reservationProof?: ContentPublicationReservationProof;
+        onClaimed?: (claim: ContentPublicationClaim) => void;
       }) {
         if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
           throw new ContentPublicationValidationError(
@@ -1892,6 +1893,7 @@ export function createContentPublicationApplication({
           input.reservationProof,
           input.authority,
         );
+        input.onClaimed?.(claim);
         if (claim.state !== "claimed") {
           return claim.publication;
         }

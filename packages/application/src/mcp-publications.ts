@@ -12,6 +12,7 @@ import {
   createContentApprovalId,
   createContentPublicationApplication,
   createContentPublicationId,
+  type ContentPublicationClaim,
 } from "./content-publication";
 import {
   createContentWorkspaceId,
@@ -226,17 +227,30 @@ function publicationError(error: unknown): McpReadError {
   );
 }
 
-function publicationResult(
+export type McpPublicationResult = Readonly<{
+  operationId: string;
+  state: string;
+  statusResource: string;
+  replayed: boolean;
+}>;
+
+export function createMcpPublicationResult(
   operationId: string,
   state: string,
   replayed: boolean,
-) {
+): McpPublicationResult {
   return {
     operationId,
     state,
     statusResource: `foundry://publications/${operationId}`,
     replayed,
   };
+}
+
+export function hashMcpPublicationResult(
+  result: McpPublicationResult,
+) {
+  return sha256CanonicalJson(result);
 }
 
 export function createMcpPublicationApplication({
@@ -514,6 +528,7 @@ export function createMcpPublicationApplication({
                 "The idempotency key was already used for different input.",
               );
             }
+            let transactionClaim: ContentPublicationClaim | null = null;
             const publication = await execution.run(async () =>
               prior ?? application.commands.publish({
                   workspaceId,
@@ -521,6 +536,9 @@ export function createMcpPublicationApplication({
                   approvalId,
                   requestedBy: createMcpContentActorId(principal),
                   idempotencyKey: durableKey,
+                  onClaimed(claim) {
+                    transactionClaim = claim;
+                  },
                   assertCurrentAuthority: assertCurrentAuthority(
                     principal,
                     scopesEvaluated,
@@ -539,21 +557,17 @@ export function createMcpPublicationApplication({
                       workspaceId,
                       revision: input.revision,
                       approvalId,
-                      resultHash: await sha256CanonicalJson({
-                        command: "foundry.publication.request",
-                        workspaceId,
-                        revision: input.revision,
-                        approvalId,
-                        idempotencyKey: input.idempotencyKey,
-                      }),
                     },
                   },
                 }),
             );
-            const replayed = prior !== null;
-            const result = publicationResult(
-              publication.id,
-              publication.status,
+            const receiptPublication =
+              transactionClaim?.publication ?? publication;
+            const replayed =
+              prior !== null || transactionClaim?.state === "replayed";
+            const result = createMcpPublicationResult(
+              receiptPublication.id,
+              receiptPublication.status,
               replayed,
             );
             await record(execution, {
@@ -566,7 +580,7 @@ export function createMcpPublicationApplication({
               approvalId,
               publicationId: publication.id,
               scheduleId: null,
-              resultHash: await sha256CanonicalJson(result),
+              resultHash: await hashMcpPublicationResult(result),
               replayed,
             });
             return result;
@@ -667,7 +681,7 @@ export function createMcpPublicationApplication({
                   "The idempotency key was already used for different input.",
                 );
               }
-              const result = publicationResult(
+              const result = createMcpPublicationResult(
                 prior.id,
                 prior.state,
                 true,
@@ -682,7 +696,7 @@ export function createMcpPublicationApplication({
                 approvalId,
                 publicationId: null,
                 scheduleId: prior.id,
-                resultHash: await sha256CanonicalJson(result),
+                resultHash: await hashMcpPublicationResult(result),
                 replayed: true,
               });
               return result;
@@ -755,19 +769,12 @@ export function createMcpPublicationApplication({
                     workspaceId,
                     revision: input.revision,
                     approvalId,
-                    resultHash: await sha256CanonicalJson({
-                      command: "foundry.publication.schedule",
-                      workspaceId,
-                      revision: input.revision,
-                      approvalId,
-                      idempotencyKey: input.idempotencyKey,
-                    }),
                   },
                 },
               }),
             );
             const replayed = false;
-            const result = publicationResult(
+            const result = createMcpPublicationResult(
               schedule.id,
               schedule.state,
               replayed,
@@ -782,7 +789,7 @@ export function createMcpPublicationApplication({
               approvalId,
               publicationId: null,
               scheduleId: schedule.id,
-              resultHash: await sha256CanonicalJson(result),
+              resultHash: await hashMcpPublicationResult(result),
               replayed,
             });
             return result;
@@ -842,7 +849,7 @@ export function createMcpPublicationApplication({
                 "The requested object was not found.",
               );
             }
-            return publicationResult(
+            return createMcpPublicationResult(
               publication.id,
               publication.status,
               false,
@@ -867,7 +874,7 @@ export function createMcpPublicationApplication({
               "The requested object was not found.",
             );
           }
-          return publicationResult(
+          return createMcpPublicationResult(
             schedule.id,
             schedule.state,
             false,
@@ -982,19 +989,12 @@ export function createMcpPublicationApplication({
                       workspaceId,
                       revision: input.revision,
                       approvalId: schedule.approvalId,
-                      resultHash: await sha256CanonicalJson({
-                        command: "foundry.publication.cancel",
-                        workspaceId,
-                        revision: input.revision,
-                        scheduleId: schedule.id,
-                        idempotencyKey: input.idempotencyKey,
-                      }),
-                    },
                   },
-                }),
+                },
+              }),
               ));
             const replayed = prior !== null;
-            const result = publicationResult(
+            const result = createMcpPublicationResult(
               cancelled.id,
               cancelled.state,
               replayed,
@@ -1009,7 +1009,7 @@ export function createMcpPublicationApplication({
               approvalId: cancelled.approvalId,
               publicationId: null,
               scheduleId: cancelled.id,
-              resultHash: await sha256CanonicalJson(result),
+              resultHash: await hashMcpPublicationResult(result),
               replayed,
             });
             return result;
