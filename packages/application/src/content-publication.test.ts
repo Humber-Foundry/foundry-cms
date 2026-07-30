@@ -1753,6 +1753,9 @@ describe("content publication application", () => {
     );
 
     expect(assertCurrentAuthority.mock.calls.length).toBeGreaterThan(1);
+    // No Git reconciliation either: the fence is re-checked at every provider
+    // crossing this refresh can reach, not only the deployment ones.
+    expect(publisher.reconcileCommit).not.toHaveBeenCalled();
     expect(getDeploymentStatus).not.toHaveBeenCalled();
     expect(isReleaseLive).not.toHaveBeenCalled();
     expect(refreshed).toEqual(inFlight);

@@ -1487,6 +1487,9 @@ export function createContentPublicationApplication({
       if (boundRevision === null) {
         return publication;
       }
+      if (!(await authorityCurrent())) {
+        return publication;
+      }
       const reconciled = await publisher.reconcileCommit({
         ...commitReconciliationInput(
           publication,
