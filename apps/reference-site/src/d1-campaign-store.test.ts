@@ -64,7 +64,7 @@ beforeEach(async () => {
   for (const name of [
     "0001_human_access.sql",
     "0016_campaign_authoring.sql",
-    "0018_campaign_test_delivery.sql",
+    "0021_campaign_test_delivery.sql",
   ]) {
     const migration = await readFile(
       new URL(`../migrations/${name}`, import.meta.url),
