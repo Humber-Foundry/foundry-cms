@@ -555,6 +555,98 @@ describe("D1 blog post operations store", () => {
     });
   });
 
+  it("rejects MCP schedule cancellation revoked before the D1 commit", async () => {
+    // The grant is live when the command admits the cancellation and gone by
+    // the time the statement runs. That statement revalidates the connection
+    // in the same write, so the schedule stays active.
+    const approval = await approveCurrent();
+    const mcpActorId = createContentActorId("mcp-agent-cancel");
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-cancel', 'agent-cancel', ?1, 'client-cancel',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-cancel', 'site.read'),
+           ('connection-cancel', 'content.draft'),
+           ('connection-cancel', 'publication.schedule')`,
+      ),
+    ]);
+    const authority = {
+      kind: "mcp" as const,
+      connectionId: "connection-cancel",
+      actorId: "agent-cancel",
+      operation: "foundry.publication.schedule" as const,
+      requiredScopes: ["publication.schedule", "content.draft"],
+    };
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const setup = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_mcp_cancel`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const schedule = await setup.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "activation-before-mcp-cancel-revocation",
+      authority,
+    });
+    const app = createBlogPostOperationsApplication({
+      store: {
+        ...durableStore,
+        async cancelSchedule(input) {
+          await database
+            .prepare(
+              `UPDATE mcp_connections
+               SET status = 'revoked', revoked_at = ?1
+               WHERE id = 'connection-cancel'`,
+            )
+            .bind(now)
+            .run();
+          return durableStore.cancelSchedule(input);
+        },
+      },
+      now: () => operationTime,
+      createId: (kind) => `${kind}_mcp_cancel`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+
+    await expect(app.commands.cancelSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      scheduleId: schedule.id,
+      idempotencyKey: "mcp-cancellation-revoked-before-commit",
+      authority,
+    })).rejects.toMatchObject({
+      // The cancellation statement matched no row, and re-reading the grant
+      // names the lost connection rather than blaming the schedule's state.
+      code: "mcp_schedule_authority_required",
+    });
+    await expect(
+      durableStore.findSchedule(schedule.id),
+    ).resolves.toMatchObject({ state: "active" });
+  });
+
   it("rejects archive when human authority is revoked before the D1 commit", async () => {
     const durableStore = createD1BlogPostOperationsStore(database);
     const post = await durableStore.findPost(
