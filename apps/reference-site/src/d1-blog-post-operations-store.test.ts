@@ -1752,6 +1752,118 @@ describe("D1 blog post operations store", () => {
     });
   });
 
+  it("claims a scheduled publication under the schedule scope alone", async () => {
+    // A scheduled publication claim carries a reservation proof and the
+    // schedule operation, so the publication scope the claim statement demands
+    // follows that operation. This connection was never granted
+    // publication.publish; requiring it here would block every scheduled
+    // publication an MCP connection originated.
+    const approval = await approveCurrent();
+    const mcpActorId = createContentActorId("mcp-agent-scheduled");
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-scheduled-claim', 'agent-scheduled', ?1,
+             'client-scheduled', 'https://client.example/callback',
+             '["site.read"]', 'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-scheduled-claim', 'site.read'),
+           ('connection-scheduled-claim', 'content.draft'),
+           ('connection-scheduled-claim', 'publication.schedule')`,
+      ),
+    ]);
+    const authority = {
+      kind: "mcp" as const,
+      connectionId: "connection-scheduled-claim",
+      actorId: "agent-scheduled",
+      operation: "foundry.publication.schedule" as const,
+      requiredScopes: ["publication.schedule", "content.draft"],
+    };
+    const scheduleStore = createD1BlogPostOperationsStore(database);
+    const scheduleApp = createBlogPostOperationsApplication({
+      store: scheduleStore,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_scheduled_claim`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const schedule = await scheduleApp.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "activate-scheduled-claim",
+      authority,
+    });
+    operationTime = now;
+    const claim = await scheduleApp.commands.claimDueSchedule(
+      schedule.siteId,
+      schedule.id,
+    );
+    const scheduledPublication = {
+      id: createContentPublicationId(`publish_${"7".repeat(32)}`),
+      workspaceId,
+      revision: approval.revision,
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+      idempotencyKey: claim.execution.publicationIdempotencyKey,
+      requestedBy: mcpActorId,
+      contributors: [actorId],
+      expectedHead: "a".repeat(40),
+      status: "requested" as const,
+      commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
+      detail: null,
+      leaseToken: "scheduled-claim-lease",
+      leaseExpiresAt: "2026-11-01T08:10:00.000Z",
+      requestedAt: now,
+      updatedAt: now,
+    };
+
+    await expect(
+      createD1ContentPublicationStore(database).claimPublication(
+        scheduledPublication,
+        {
+          executionId: claim.execution.executionId,
+          attempt: claim.execution.attempt,
+          leaseToken: claim.lease!.leaseToken,
+        },
+        authority,
+      ),
+    ).resolves.toMatchObject({ state: "claimed" });
+    await expect(
+      database
+        .prepare(
+          `SELECT mcp_operation, mcp_required_scopes_json
+           FROM content_publications
+           WHERE idempotency_key = ?1`,
+        )
+        .bind(scheduledPublication.idempotencyKey)
+        .first(),
+    ).resolves.toEqual({
+      mcp_operation: "foundry.publication.schedule",
+      mcp_required_scopes_json: JSON.stringify([
+        "content.draft",
+        "publication.schedule",
+      ]),
+    });
+  });
+
   it("rejects stale publication reservation proof without consuming the stable key", async () => {
     const approval = await approveCurrent();
     const store = createD1BlogPostOperationsStore(database);
