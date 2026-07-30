@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
+  ContentApprovalInvalidError,
   createContentActorId,
   createContentApprovalId,
   createContentPublicationId,
@@ -15,6 +16,7 @@ import {
   createPublishedSiteBundle,
   createSiteApplication,
   mcpContentDraftScope,
+  mcpDesignDraftScope,
   mcpInitialScope,
   mcpPublicationPublishScope,
   type ContentPublication,
@@ -80,8 +82,13 @@ function publication(
 
 async function fixture({
   connectionAt,
+  seedEdits = [{
+    path: "section_hero.title",
+    value: "MCP approved publication",
+  }],
 }: {
   connectionAt?: (read: number) => McpConnectionGrant | null;
+  seedEdits?: ReadonlyArray<{ path: string; value: string }>;
 } = {}) {
   const actorId = createContentActorId("mcp-agent-publication-56");
   const revisionApplication = createContentRevisionApplication({
@@ -103,10 +110,7 @@ async function fixture({
     workspaceId,
     schemaVersion: referenceSiteDefinition.schemaVersion,
     baseRevision: 0,
-    edits: [{
-      path: "section_hero.title",
-      value: "MCP approved publication",
-    }],
+    edits: seedEdits,
     idempotencyKey: "save-mcp-publication-workspace",
   });
 
@@ -339,6 +343,114 @@ describe("MCP publication orchestration", () => {
         operation: "foundry.publication.request",
         outcome: "denied",
         reason: "STALE_REVISION",
+      }),
+    ]);
+  });
+
+  it("derives the design draft scope from the approved revision", async () => {
+    const designPrincipal: McpConnectionPrincipal = {
+      ...principal,
+      scopes: [
+        mcpInitialScope,
+        mcpDesignDraftScope,
+        mcpPublicationPublishScope,
+      ],
+    };
+    // The approved revision changes only a Design-group field relative to
+    // revision 0, so the required draft scope is design.draft. A fixed
+    // content.draft fallback would demand a scope this connection has no
+    // reason to hold and would reject a legitimate design publication.
+    const { application, publish, publicationAudit } = await fixture({
+      connectionAt: () => ({ ...designPrincipal, status: "active" }),
+      seedEdits: [{ path: "design.colour.accent", value: "clay" }],
+    });
+
+    await application.requestPublication(
+      designPrincipal,
+      {
+        workspaceId,
+        revision: 1,
+        approvalId,
+        idempotencyKey: "66666666-6666-4666-8666-666666666666",
+      },
+      context,
+    );
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publicationAudit).toEqual([
+      expect.objectContaining({
+        operation: "foundry.publication.request",
+        outcome: "allowed",
+        scopesEvaluated: [
+          mcpPublicationPublishScope,
+          mcpDesignDraftScope,
+        ],
+      }),
+    ]);
+    expect(
+      publicationAudit[0]?.scopesEvaluated,
+    ).not.toContain(mcpContentDraftScope);
+  });
+
+  it("forwards the caller's exact approval reference as evidence only", async () => {
+    const { application, publish } = await fixture();
+
+    await application.requestPublication(
+      principal,
+      {
+        workspaceId,
+        revision: 1,
+        approvalId,
+        idempotencyKey: "77777777-7777-4777-8777-777777777777",
+      },
+      context,
+    );
+
+    // The adapter passes the reference through unchanged and adds no approval
+    // evidence of its own: no approved flag, no reviewer identity, and no
+    // pre-approved fingerprint that could stand in for the human record.
+    // `content-publication.test.ts` proves the shared command rejects an
+    // approval bound to another workspace, revision or fingerprint.
+    const [published] = publish.mock.calls[0] ?? [];
+    expect(published).toMatchObject({ workspaceId, revision: 1, approvalId });
+    expect(Object.keys(published ?? {})).toEqual(
+      expect.not.arrayContaining([
+        "approved",
+        "approvedBy",
+        "reviewer",
+        "fingerprint",
+        "previewConfirmed",
+      ]),
+    );
+  });
+
+  it("denies a substituted approval without entering publication", async () => {
+    const { application, publish, publicationAudit } = await fixture();
+    // The shared command is the only authority on whether the approval is
+    // bound to this exact workspace, revision and fingerprint. When it
+    // refuses, the adapter must surface an approval error and leave no
+    // successful receipt behind.
+    publish.mockImplementationOnce(() => {
+      throw new ContentApprovalInvalidError("approval_not_found");
+    });
+
+    await expect(
+      application.requestPublication(
+        principal,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId,
+          idempotencyKey: "88888888-8888-4888-8888-888888888888",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+    expect(publicationAudit).toEqual([
+      expect.objectContaining({
+        operation: "foundry.publication.request",
+        outcome: "denied",
+        reason: "APPROVAL_REQUIRED",
       }),
     ]);
   });

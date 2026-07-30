@@ -325,6 +325,109 @@ describe("D1 content publication store", () => {
     });
   });
 
+  it("admits a design-scoped MCP publication without a content draft grant", async () => {
+    // A revision that changes only Design-group fields requires design.draft.
+    // The store must enforce the scope set the application layer derived from
+    // the calling principal; it cannot assume a content.draft fallback, which
+    // would reject this legitimate publication outright.
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri, scopes_json,
+             status, created_by_membership_id, created_at, revoked_at
+           ) VALUES (
+             'connection-design', 'actor-design', ?1, 'client-design',
+             'https://client.example/callback', '["site.read"]', 'active',
+             ?2, ?3, NULL
+           )`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          membershipId,
+          "2026-07-27T10:02:00.000Z",
+        ),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope) VALUES
+           ('connection-design', 'site.read'),
+           ('connection-design', 'design.draft'),
+           ('connection-design', 'publication.publish')`,
+      ),
+    ]);
+    const requested = {
+      ...publication("1", "mcp-design-publication"),
+      requestedBy: createContentActorId("mcp-actor-design"),
+    };
+
+    await expect(
+      store.claimPublication(requested, undefined, {
+        kind: "mcp",
+        connectionId: "connection-design",
+        actorId: "actor-design",
+        operation: "foundry.publication.request",
+        requiredScopes: ["publication.publish", "design.draft"],
+      }),
+    ).resolves.toEqual({ state: "claimed", publication: requested });
+  });
+
+  it("requires the publish scope for an immediate claim that lists none", async () => {
+    // The publication scope implied by the operation kind is enforced by the
+    // claim statement itself, so a caller cannot omit it from requiredScopes
+    // to admit a connection that was never granted publication authority.
+    const store = createD1ContentPublicationStore(database);
+    await store.saveApproval(approval);
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri, scopes_json,
+             status, created_by_membership_id, created_at, revoked_at
+           ) VALUES (
+             'connection-draft-only', 'actor-draft-only', ?1,
+             'client-draft-only', 'https://client.example/callback',
+             '["site.read"]', 'active', ?2, ?3, NULL
+           )`,
+        )
+        .bind(
+          referenceSiteDefinition.site.id,
+          membershipId,
+          "2026-07-27T10:02:00.000Z",
+        ),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope) VALUES
+           ('connection-draft-only', 'site.read'),
+           ('connection-draft-only', 'content.draft')`,
+      ),
+    ]);
+    const requested = {
+      ...publication("1", "mcp-publish-scope-omitted"),
+      requestedBy: createContentActorId("mcp-actor-draft-only"),
+    };
+
+    await expect(
+      store.claimPublication(requested, undefined, {
+        kind: "mcp",
+        connectionId: "connection-draft-only",
+        actorId: "actor-draft-only",
+        operation: "foundry.publication.request",
+        requiredScopes: ["content.draft"],
+      }),
+    ).rejects.toMatchObject({
+      code: "publication_authority_not_current",
+    });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM content_publications
+           WHERE idempotency_key = 'mcp-publish-scope-omitted'`,
+        )
+        .first(),
+    ).toEqual({ count: 0 });
+  });
+
   it("rejects an immediate MCP publication revoked before the D1 claim", async () => {
     const store = createD1ContentPublicationStore(database);
     await store.saveApproval(approval);

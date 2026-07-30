@@ -1691,6 +1691,88 @@ describe("content publication application", () => {
     expect(createCommit).not.toHaveBeenCalled();
   });
 
+  it("commits identical bytes, paths and release evidence for human and MCP requests", async () => {
+    async function publishOnce(
+      requestedBy: Parameters<
+        ReturnType<typeof application>["commands"]["publish"]
+      >[0]["requestedBy"],
+      idempotencyKey: string,
+      assertCurrentAuthority?: () => Promise<boolean>,
+    ) {
+      clock = [
+        "2026-07-27T10:01:00.000Z",
+        "2026-07-27T10:02:00.000Z",
+        "2026-07-27T10:03:00.000Z",
+        "2026-07-27T10:04:00.000Z",
+      ];
+      createCommit.mockClear();
+      isReleaseLive.mockClear();
+      const { app, approval } = await approve();
+      const publication = await app.commands.publish({
+        workspaceId,
+        revision: 1,
+        approvalId: approval.id,
+        requestedBy,
+        idempotencyKey,
+        assertCurrentAuthority,
+      });
+      const [commitInput] = createCommit.mock.calls[0] ?? [];
+      if (commitInput === undefined) {
+        throw new Error("expected the shared publisher to be entered");
+      }
+      // `publishId` is a fresh identity per logical request and
+      // `assertLease` is a bound fence, so neither can be equal by value.
+      // The commit message carries that same identity as a trailer, so
+      // normalize exactly it — nothing else about the message may differ.
+      const {
+        publishId,
+        assertLease: _assertLease,
+        message,
+        ...rest
+      } = commitInput;
+      return {
+        approval,
+        publication,
+        publishId,
+        committed: {
+          ...rest,
+          message: message.replaceAll(publishId, "<publish-id>"),
+        },
+        releaseChecks: isReleaseLive.mock.calls,
+      };
+    }
+
+    const human = await publishOnce(
+      membershipId,
+      "publish-parity-human",
+    );
+    const agent = await publishOnce(
+      createContentActorId("mcp-agent-56"),
+      "publish-parity-mcp",
+      vi.fn().mockResolvedValue(true),
+    );
+
+    // Byte-identical serialization, identical Git paths and artifact hash.
+    expect(agent.committed).toEqual(human.committed);
+    // The normalized trailer really did carry each request's own identity.
+    expect(agent.committed.message).toContain("<publish-id>");
+    expect(agent.publishId).toBe(agent.publication.id);
+    expect(agent.publishId).not.toBe(human.publishId);
+    // The commit is attributed to the approving human in both cases, so an
+    // agent request cannot present itself as the publication's authority.
+    expect(agent.committed.approvedBy).toBe(membershipId);
+    // Identical release verification and terminal publication state.
+    expect(agent.releaseChecks).toEqual(human.releaseChecks);
+    expect(agent.publication.status).toBe(human.publication.status);
+    expect(agent.publication.commitSha).toBe(human.publication.commitSha);
+    // The approved fingerprint each request published against is the same.
+    expect(agent.approval.fingerprint).toEqual(human.approval.fingerprint);
+    // Audit evidence still distinguishes who requested the publication.
+    expect(agent.publication.requestedBy).not.toBe(
+      human.publication.requestedBy,
+    );
+  });
+
   it("keeps the lease valid across the bounded GitHub request sequence", async () => {
     let currentTime = "2026-07-27T10:01:00.000Z";
     createCommit.mockImplementation(async (input) => {
