@@ -118,6 +118,30 @@ describe("MCP draft tool registry", () => {
     ]) {
       expect(status({ workspaceId, revision: 1, operationId })).toBe(false);
     }
+    // A publication instant must be the UTC form the scheduler resolves, so a
+    // schema-valid offset form cannot pass here and be refused deeper.
+    const schedule = schemaFor("foundry.publication.schedule");
+    const scheduleInput = {
+      workspaceId,
+      revision: 1,
+      approvalId: `approval_${"b".repeat(32)}`,
+      reportingTimeZone: "America/Vancouver",
+      idempotencyKey,
+    };
+    expect(
+      schedule({ ...scheduleInput, publishAt: "2026-11-01T08:00:00Z" }),
+    ).toBe(true);
+    expect(
+      schedule({ ...scheduleInput, publishAt: "2026-11-01T08:00:00.000Z" }),
+    ).toBe(true);
+    for (const publishAt of [
+      "2026-11-01T08:00:00+00:00",
+      "2026-11-01T08:00:00",
+      "2026-11-01T08:00:00.1Z",
+      "2026-11-01 08:00:00Z",
+    ]) {
+      expect(schedule({ ...scheduleInput, publishAt })).toBe(false);
+    }
     // Cancellation names a schedule, never a publication.
     expect(
       cancel({ workspaceId, revision: 1, scheduleId, idempotencyKey }),

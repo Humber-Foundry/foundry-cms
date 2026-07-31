@@ -154,6 +154,17 @@ const approvalIdSchema = {
   pattern: "^approval_[a-f0-9]{32}$",
 } as const;
 
+// The scheduler resolves a publication instant only from a UTC instant with
+// optional milliseconds. `format: date-time` also admits offset forms such as
+// `+00:00`, which would pass validation and then be refused deeper as an
+// invalid instant, so constrain the shape the resolver actually accepts.
+const publishAtSchema = {
+  type: "string",
+  format: "date-time",
+  pattern:
+    "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$",
+} as const;
+
 const scheduleIdPattern =
   "schedule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
@@ -994,7 +1005,7 @@ const descriptors = {
         workspaceId: workspaceIdSchema,
         revision: { type: "integer", minimum: 0 },
         approvalId: approvalIdSchema,
-        publishAt: { type: "string", format: "date-time" },
+        publishAt: publishAtSchema,
         reportingTimeZone: {
           type: "string",
           minLength: 1,
