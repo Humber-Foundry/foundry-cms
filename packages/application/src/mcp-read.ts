@@ -19,10 +19,14 @@ export const mcpContractVersion = "foundry.mcp.v1" as const;
 export const mcpInitialScope = "site.read" as const;
 export const mcpContentDraftScope = "content.draft" as const;
 export const mcpDesignDraftScope = "design.draft" as const;
+export const mcpPublicationScheduleScope = "publication.schedule" as const;
+export const mcpPublicationPublishScope = "publication.publish" as const;
 export const mcpSupportedScopes = Object.freeze([
   mcpInitialScope,
   mcpContentDraftScope,
   mcpDesignDraftScope,
+  mcpPublicationScheduleScope,
+  mcpPublicationPublishScope,
 ] as const);
 export const mcpProtocolVersion = "2025-11-25" as const;
 
@@ -63,6 +67,23 @@ export type McpReadAuditEvent = Readonly<{
   contractVersion: typeof mcpContractVersion;
 }>;
 
+export type McpLinkedPublicationAudit = McpReadAuditEvent &
+  Readonly<{
+    idempotencyKey: string;
+    workspaceId: string;
+    revision: number;
+    approvalId: string | null;
+    /**
+     * Derives the audit `result_hash` from the outcome the store is about to
+     * commit. The caller owns the tool result envelope, so a store never has
+     * to reproduce its shape; passing a precomputed hash is not possible
+     * because the operation identity is only known once the claim is built.
+     */
+    deriveResultHash(
+      outcome: Readonly<{ operationId: string; state: string }>,
+    ): Promise<string>;
+  }>;
+
 export type McpConnectionStore = Readonly<{
   findCurrentConnection(input: {
     connectionId: string;
@@ -97,6 +118,11 @@ export type McpReadErrorCode =
   | "VALIDATION_FAILED"
   | "STALE_REVISION"
   | "IDEMPOTENCY_KEY_REUSED"
+  | "APPROVAL_REQUIRED"
+  | "APPROVAL_STALE"
+  | "WRONG_ARTIFACT_KIND"
+  | "PUBLICATION_BUSY"
+  | "RESULT_UNKNOWN"
   | "TEMPORARILY_UNAVAILABLE";
 
 export class McpReadError extends Error {
@@ -476,21 +502,21 @@ export function createMcpReadApplication({
           auditRecorded: safeError.auditRecorded,
         },
       );
-      const terminalBusinessError =
-        safeError.code === "OBJECT_NOT_FOUND" ||
-        safeError.code === "VALIDATION_FAILED" ||
-        safeError.code === "STALE_REVISION";
       let reportedError = contextualError;
       let joinedFailureRecorded = safeError.auditRecorded;
       if (
         !joinedFailureRecorded &&
         allowedAudit !== null &&
-        recordJoinedFailure !== undefined &&
-        terminalBusinessError
+        recordJoinedFailure !== undefined
       ) {
+        // The admitted audit is the base, but this is a denial: record the
+        // policy decision and safe error code rather than inheriting the
+        // "allowed" outcome the admission check produced.
         const joinedFailureAudit = {
           ...allowedAudit,
           scopesEvaluated,
+          outcome: "denied" as const,
+          reason: safeError.code,
         };
         try {
           const authoritativeError = await context.finishDurably(() =>
@@ -531,7 +557,11 @@ export function createMcpReadApplication({
             reportedError.observedAt ??
             contextualError.observedAt ??
             undefined,
-          requiredScopes: reportedError.requiredScopes,
+          requiredScopes:
+            reportedError.code === "INSUFFICIENT_SCOPE" &&
+            reportedError.requiredScopes.length === 0
+              ? scopesEvaluated
+              : reportedError.requiredScopes,
           latestRevision:
             reportedError.latestRevision ?? undefined,
           conflictResource:

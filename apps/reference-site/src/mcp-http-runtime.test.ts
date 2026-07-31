@@ -594,7 +594,13 @@ describe("production MCP HTTP runtime", () => {
     await expect(protectedMetadata.json()).resolves.toEqual({
       resource: resourceUri,
       authorization_servers: [canonicalOrigin],
-      scopes_supported: ["site.read", "content.draft", "design.draft"],
+      scopes_supported: [
+        "site.read",
+        "content.draft",
+        "design.draft",
+        "publication.schedule",
+        "publication.publish",
+      ],
       bearer_methods_supported: ["header"],
       resource_name: `${referenceSiteDefinition.site.name} — Foundry CMS`,
     });
@@ -611,7 +617,13 @@ describe("production MCP HTTP runtime", () => {
         token_endpoint: `${resourceUri}/oauth/token`,
         code_challenge_methods_supported: ["S256"],
         grant_types_supported: ["authorization_code", "refresh_token"],
-        scopes_supported: ["site.read", "content.draft", "design.draft"],
+        scopes_supported: [
+          "site.read",
+          "content.draft",
+          "design.draft",
+          "publication.schedule",
+          "publication.publish",
+        ],
       }),
     );
   });

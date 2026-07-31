@@ -51,6 +51,10 @@ function fixture(scopes: ReadonlyArray<string>) {
   const workspaceByKey = new Map<string, ContentWorkspaceId>();
   const audit: string[] = [];
   const auditEvents: McpReadAuditEvent[] = [];
+  // Failures discovered after a command is admitted go to the joined mutation
+  // recorder rather than the read-audit list, so their evidence is captured
+  // here to keep it assertable.
+  const failureEvents: McpReadAuditEvent[] = [];
   const previewScopesEvaluated: string[][] = [];
   const previews = new Map<
     string,
@@ -152,6 +156,7 @@ function fixture(scopes: ReadonlyArray<string>) {
           error,
         });
         audit.push(`${event.operation}:denied`);
+        failureEvents.push(event);
         return {
           error,
           observedAt: event.occurredAt,
@@ -238,6 +243,7 @@ function fixture(scopes: ReadonlyArray<string>) {
     activePrincipal,
     audit,
     auditEvents,
+    failureEvents,
     driftDeployment() {
       deploymentCurrent = false;
     },
@@ -925,10 +931,18 @@ describe("MCP canonical draft application", () => {
         mcpDesignDraftScope,
       ],
     });
-    expect(fixtureValue.auditEvents).toContainEqual(
+    // The denial is recorded through the joined mutation recorder, not the
+    // read-audit list, and it still carries the exact scopes evaluated.
+    expect(fixtureValue.auditEvents).not.toContainEqual(
+      expect.objectContaining({
+        operation: "foundry.preview.prepare",
+      }),
+    );
+    expect(fixtureValue.failureEvents).toContainEqual(
       expect.objectContaining({
         operation: "foundry.preview.prepare",
         outcome: "denied",
+        reason: "INSUFFICIENT_SCOPE",
         scopesEvaluated: [
           mcpContentDraftScope,
           mcpDesignDraftScope,

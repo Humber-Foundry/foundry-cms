@@ -9,6 +9,8 @@ import {
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
+  mcpPublicationPublishScope,
+  mcpPublicationScheduleScope,
   type McpConnectionPrincipal,
   type McpReadAuditEvent,
 } from "@foundry/application";
@@ -32,6 +34,7 @@ function principal(scopes: ReadonlyArray<string>): McpConnectionPrincipal {
 function registry() {
   const application = {
     openWorkspace() {},
+    requestPublication() {},
   } as unknown as McpReadApplication;
   return createMcpToolRegistry(application);
 }
@@ -50,6 +53,153 @@ function schemaPropertyNames(value: unknown): string[] {
 }
 
 describe("MCP draft tool registry", () => {
+  it("advertises only the publication tools granted to the connection", () => {
+    expect(
+      names([mcpInitialScope, mcpPublicationPublishScope]),
+    ).toEqual([
+      "foundry.site.get",
+      "foundry.content.list",
+      "foundry.content.get",
+      "foundry.publication.request",
+      "foundry.publication.status",
+    ]);
+    expect(
+      names([mcpInitialScope, mcpPublicationScheduleScope]),
+    ).toEqual([
+      "foundry.site.get",
+      "foundry.content.list",
+      "foundry.content.get",
+      "foundry.publication.schedule",
+      "foundry.publication.status",
+      "foundry.publication.cancel",
+    ]);
+  });
+
+  it("rejects a malformed publication or schedule identifier at the schema", () => {
+    const tools = registry().list(
+      principal([
+        mcpInitialScope,
+        mcpPublicationScheduleScope,
+        mcpPublicationPublishScope,
+      ]),
+    );
+    const validator = new Ajv2020({
+      strict: false,
+      formats: { uuid: true, "date-time": true, "uri-reference": true },
+    });
+    const schemaFor = (name: string) => {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (tool === undefined) throw new Error(`missing tool ${name}`);
+      return validator.compile(tool.inputSchema);
+    };
+    const status = schemaFor("foundry.publication.status");
+    const cancel = schemaFor("foundry.publication.cancel");
+    const workspaceId = "workspace_registry";
+    const scheduleId = "schedule_0123abcd-4567-89ab-cdef-0123456789ab";
+    const publicationId = `publish_${"a".repeat(32)}`;
+    const idempotencyKey = "11111111-1111-4111-8111-111111111111";
+
+    // Well-formed identifiers of either kind are accepted.
+    expect(
+      status({ workspaceId, revision: 1, operationId: publicationId }),
+    ).toBe(true);
+    expect(
+      status({ workspaceId, revision: 1, operationId: scheduleId }),
+    ).toBe(true);
+    // A malformed identifier is a terminal schema rejection, so it never
+    // reaches an identifier constructor whose failure would surface as a
+    // retryable error.
+    for (const operationId of [
+      "publish_!",
+      "publish_short",
+      `publish_${"A".repeat(32)}`,
+      "schedule_not-a-uuid",
+      "../publish_etc",
+    ]) {
+      expect(status({ workspaceId, revision: 1, operationId })).toBe(false);
+    }
+    // A publication instant must be the UTC form the scheduler resolves, so a
+    // schema-valid offset form cannot pass here and be refused deeper.
+    const schedule = schemaFor("foundry.publication.schedule");
+    const scheduleInput = {
+      workspaceId,
+      revision: 1,
+      approvalId: `approval_${"b".repeat(32)}`,
+      reportingTimeZone: "America/Vancouver",
+      idempotencyKey,
+    };
+    expect(
+      schedule({ ...scheduleInput, publishAt: "2026-11-01T08:00:00Z" }),
+    ).toBe(true);
+    expect(
+      schedule({ ...scheduleInput, publishAt: "2026-11-01T08:00:00.000Z" }),
+    ).toBe(true);
+    for (const publishAt of [
+      "2026-11-01T08:00:00+00:00",
+      "2026-11-01T08:00:00",
+      "2026-11-01T08:00:00.1Z",
+      "2026-11-01 08:00:00Z",
+    ]) {
+      expect(schedule({ ...scheduleInput, publishAt })).toBe(false);
+    }
+    // Cancellation names a schedule, never a publication.
+    expect(
+      cancel({ workspaceId, revision: 1, scheduleId, idempotencyKey }),
+    ).toBe(true);
+    expect(
+      cancel({
+        workspaceId,
+        revision: 1,
+        scheduleId: publicationId,
+        idempotencyKey,
+      }),
+    ).toBe(false);
+  });
+
+  it("publishes exact revision and approval inputs without a campaign scheduling path", () => {
+    const tools = registry().list(
+      principal([
+        mcpInitialScope,
+        mcpPublicationScheduleScope,
+        mcpPublicationPublishScope,
+      ]),
+    );
+    const publicationTools = tools.filter(({ name }) =>
+      name.startsWith("foundry.publication."));
+    const validator = new Ajv2020({
+      strict: false,
+      formats: {
+        uuid: true,
+        "date-time": true,
+        "uri-reference": true,
+      },
+    });
+    expect(publicationTools.map(({ name }) => name)).toEqual([
+      "foundry.publication.request",
+      "foundry.publication.schedule",
+      "foundry.publication.status",
+      "foundry.publication.cancel",
+    ]);
+    for (const tool of publicationTools) {
+      expect(() => validator.compile(tool.inputSchema)).not.toThrow();
+      expect(() => validator.compile(tool.outputSchema)).not.toThrow();
+      expect(schemaPropertyNames(tool.inputSchema)).not.toEqual(
+        expect.arrayContaining([
+          "campaignId",
+          "recipient",
+          "segment",
+          "postId",
+          "approved",
+        ]),
+      );
+    }
+    expect(
+      publicationTools
+        .filter(({ annotations }) => annotations.readOnlyHint === false)
+        .every(({ annotations }) => annotations.openWorldHint === true),
+    ).toBe(true);
+  });
+
   it("omits mutation tools until the matching Owner-granted scope exists", () => {
     expect(names([mcpInitialScope])).toEqual([
       "foundry.site.get",

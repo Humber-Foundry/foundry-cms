@@ -143,7 +143,9 @@ type McpDraftApplicationBase = Readonly<{
   }): Promise<unknown>;
 }>;
 
-function actorId(principal: McpConnectionPrincipal) {
+export function createMcpContentActorId(
+  principal: McpConnectionPrincipal,
+) {
   return createContentActorId(`mcp-${principal.actorId}`);
 }
 
@@ -207,20 +209,28 @@ function workspaceResource(
   };
 }
 
-function revisionScopes(
+export function mcpRevisionScopes(
   base: ContentRevision,
   revision: ContentRevision,
   fallback: typeof mcpContentDraftScope | typeof mcpDesignDraftScope,
 ) {
+  return mcpDefinitionScopes(base.definition, revision.definition, fallback);
+}
+
+function mcpDefinitionScopes(
+  base: SiteDefinition,
+  revision: SiteDefinition,
+  fallback: typeof mcpContentDraftScope | typeof mcpDesignDraftScope,
+) {
   const baseFields = new Map(
-    listEditableSiteFields(base.definition).map(({ path, value }) => [
+    listEditableSiteFields(base).map(({ path, value }) => [
       path,
       JSON.stringify(value),
     ]),
   );
   let contentChanged = false;
   let designChanged = false;
-  for (const field of listEditableSiteFields(revision.definition)) {
+  for (const field of listEditableSiteFields(revision)) {
     if (baseFields.get(field.path) === JSON.stringify(field.value)) continue;
     if (field.group === "Design") designChanged = true;
     else contentChanged = true;
@@ -232,7 +242,7 @@ function revisionScopes(
   return scopes.length === 0 ? [fallback] : scopes;
 }
 
-function requireRevisionScopes(
+export function requireMcpRevisionScopes(
   principal: McpConnectionPrincipal,
   requiredScopes: ReadonlyArray<string>,
 ) {
@@ -351,7 +361,7 @@ export function createMcpDraftApplication({
   ) {
     return runtime.load({
       principal,
-      actorId: actorId(principal),
+      actorId: createMcpContentActorId(principal),
       workspaceId,
     });
   }
@@ -444,13 +454,13 @@ export function createMcpDraftApplication({
           const application = await execution.run(() =>
             runtime.open({
               principal,
-              actorId: actorId(principal),
+              actorId: createMcpContentActorId(principal),
               idempotencyKey: input.idempotencyKey,
             }),
           );
           const created = await execution.run(() =>
             application.commands.createWithReplay({
-              actorId: actorId(principal),
+              actorId: createMcpContentActorId(principal),
               workspaceId: application.workspaceId,
               idempotencyKey: input.idempotencyKey,
               joinedAudit,
@@ -499,12 +509,12 @@ export function createMcpDraftApplication({
             );
           }
           assertSite(baseRevision, principal.siteId);
-          const requiredScopes = revisionScopes(
+          const requiredScopes = mcpRevisionScopes(
             baseRevision,
             currentRevision,
             draftScope,
           );
-          requireRevisionScopes(principal, requiredScopes);
+          requireMcpRevisionScopes(principal, requiredScopes);
           successfulScopesEvaluated = requiredScopes;
           return workspaceResource(baseRevision, currentRevision);
         },
@@ -551,12 +561,12 @@ export function createMcpDraftApplication({
             );
           }
           assertSite(baseRevision, principal.siteId);
-          const requiredScopes = revisionScopes(
+          const requiredScopes = mcpRevisionScopes(
             baseRevision,
             revision,
             draftScope,
           );
-          requireRevisionScopes(principal, requiredScopes);
+          requireMcpRevisionScopes(principal, requiredScopes);
           successfulScopesEvaluated = requiredScopes;
           return canonicalRevisionResource(revision);
         },
@@ -632,7 +642,7 @@ export function createMcpDraftApplication({
           try {
             mutation = await execution.run(() =>
               application.commands.saveWithReplay({
-                actorId: actorId(principal),
+                actorId: createMcpContentActorId(principal),
                 workspaceId: input.workspaceId,
                 schemaVersion: current.definition.schemaVersion,
                 baseRevision: input.expectedRevision,
@@ -739,7 +749,7 @@ export function createMcpDraftApplication({
           try {
             mutation = await execution.run(() =>
               application.commands.saveWithReplay({
-                actorId: actorId(principal),
+                actorId: createMcpContentActorId(principal),
                 workspaceId: input.workspaceId,
                 schemaVersion: current.definition.schemaVersion,
                 baseRevision: input.expectedRevision,
@@ -831,12 +841,12 @@ export function createMcpDraftApplication({
               "The preview base is unavailable.",
             );
           }
-          const requiredScopes = revisionScopes(
+          const requiredScopes = mcpRevisionScopes(
             baseRevision,
             revision,
             draftScope,
           );
-          requireRevisionScopes(principal, requiredScopes);
+          requireMcpRevisionScopes(principal, requiredScopes);
           const previewAudit = {
             ...joinedAudit,
             scopesEvaluated: requiredScopes,

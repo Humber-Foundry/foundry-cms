@@ -8,12 +8,14 @@ documented in
 
 ## Authority boundary
 
-Only the protected human dashboard endpoint
-`/api/foundry-cms/publications` creates approvals or starts publication.
-Requests must pass Cloudflare Access identity verification, resolve to an
-active Owner or Editor membership, pass the human mutation check, and carry a
-stable idempotency key. MCP identities and integrations have no route or
-application capability that can create approval.
+Only the protected human dashboard creates approvals. Human publication
+requests pass Cloudflare Access identity verification, resolve to an active
+Owner or Editor membership, pass the human mutation check, and carry a stable
+idempotency key. An Owner-granted MCP connection may request publication with
+`publication.publish` or schedule an approved blog revision with
+`publication.schedule`. Both paths require the same exact current human
+approval, revision fingerprint, production base, serializer, publisher and
+verification pipeline.
 
 The dashboard enables approval only after the human opens the canonical
 preview for the current saved revision. The approval fingerprint binds:

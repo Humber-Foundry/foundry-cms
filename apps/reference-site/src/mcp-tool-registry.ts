@@ -3,10 +3,13 @@ import {
   mcpContentDraftScope,
   mcpContractVersion,
   mcpDesignDraftScope,
+  mcpPublicationPublishScope,
+  mcpPublicationScheduleScope,
   type McpContentPatchOperation,
   type McpConnectionPrincipal,
   type McpExecutionContext,
   type createMcpDraftApplication,
+  type createMcpPublicationApplication,
   type createMcpReadApplication,
 } from "@foundry/application";
 import {
@@ -21,7 +24,9 @@ import { hasExactKeys, isRecord } from "./mcp-http-support";
 
 export type McpReadApplication = ReturnType<
   typeof createMcpReadApplication
-> & Partial<ReturnType<typeof createMcpDraftApplication>>;
+> &
+  Partial<ReturnType<typeof createMcpDraftApplication>> &
+  Partial<ReturnType<typeof createMcpPublicationApplication>>;
 
 function toolOutputSchema(result: unknown) {
   const meta = {
@@ -66,6 +71,11 @@ function toolOutputSchema(result: unknown) {
                   "VALIDATION_FAILED",
                   "STALE_REVISION",
                   "IDEMPOTENCY_KEY_REUSED",
+                  "APPROVAL_REQUIRED",
+                  "APPROVAL_STALE",
+                  "WRONG_ARTIFACT_KIND",
+                  "PUBLICATION_BUSY",
+                  "RESULT_UNKNOWN",
                   "TEMPORARILY_UNAVAILABLE",
                 ],
               },
@@ -122,6 +132,13 @@ const nonDestructiveMutationAnnotations = {
   destructiveHint: false,
 } as const;
 
+const publicationMutationAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
 const idempotencyKeySchema = {
   type: "string",
   format: "uuid",
@@ -130,6 +147,50 @@ const idempotencyKeySchema = {
 const workspaceIdSchema = {
   type: "string",
   pattern: "^workspace_[a-z0-9_]+$",
+} as const;
+
+const approvalIdSchema = {
+  type: "string",
+  pattern: "^approval_[a-f0-9]{32}$",
+} as const;
+
+// The scheduler resolves a publication instant only from a UTC instant with
+// optional milliseconds. `format: date-time` also admits offset forms such as
+// `+00:00`, which would pass validation and then be refused deeper as an
+// invalid instant, so constrain the shape the resolver actually accepts.
+const publishAtSchema = {
+  type: "string",
+  format: "date-time",
+  pattern:
+    "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$",
+} as const;
+
+const scheduleIdPattern =
+  "schedule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+const scheduleIdSchema = {
+  type: "string",
+  pattern: `^${scheduleIdPattern}$`,
+} as const;
+
+// A status read names either a publication or a blog schedule. Constraining
+// the shape here keeps a malformed identifier a terminal validation failure
+// rather than a retryable error raised from an identifier constructor deeper
+// in the application layer.
+const operationIdSchema = {
+  type: "string",
+  pattern: `^(publish_[a-f0-9]{32}|${scheduleIdPattern})$`,
+} as const;
+
+const publicationOperationResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    operationId: { type: "string", minLength: 1, maxLength: 200 },
+    state: { type: "string", minLength: 1, maxLength: 100 },
+    replayed: { type: "boolean" },
+  },
+  required: ["operationId", "state", "replayed"],
 } as const;
 
 const contentFields = listEditableSiteFields(referenceSiteDefinition)
@@ -419,6 +480,109 @@ function parseDesignPatchInput(input: unknown) {
   return operations.length === input.operations.length
     ? { ...common, operations }
     : null;
+}
+
+function parsePublicationInput(
+  input: unknown,
+  mode: "request" | "schedule",
+) {
+  const required = [
+    "workspaceId",
+    "revision",
+    "approvalId",
+    "idempotencyKey",
+    ...(mode === "schedule"
+      ? ["publishAt", "reportingTimeZone"]
+      : []),
+  ];
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, required) ||
+    typeof input.workspaceId !== "string" ||
+    !Number.isSafeInteger(input.revision) ||
+    (input.revision as number) < 0 ||
+    typeof input.approvalId !== "string" ||
+    !/^approval_[a-f0-9]{32}$/u.test(input.approvalId) ||
+    !validIdempotencyKey(input.idempotencyKey) ||
+    (mode === "schedule" &&
+      (
+        typeof input.publishAt !== "string" ||
+        typeof input.reportingTimeZone !== "string" ||
+        input.reportingTimeZone.length < 1 ||
+        input.reportingTimeZone.length > 100
+      ))
+  ) {
+    return null;
+  }
+  try {
+    return {
+      workspaceId: createContentWorkspaceId(input.workspaceId),
+      revision: input.revision as number,
+      approvalId: input.approvalId,
+      idempotencyKey: input.idempotencyKey,
+      ...(mode === "schedule"
+        ? {
+            publishAt: input.publishAt as string,
+            reportingTimeZone: input.reportingTimeZone as string,
+          }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePublicationStatus(input: unknown) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, ["workspaceId", "revision", "operationId"]) ||
+    typeof input.workspaceId !== "string" ||
+    !Number.isSafeInteger(input.revision) ||
+    (input.revision as number) < 0 ||
+    typeof input.operationId !== "string" ||
+    input.operationId.length < 1 ||
+    input.operationId.length > 200
+  ) {
+    return null;
+  }
+  try {
+    return {
+      workspaceId: createContentWorkspaceId(input.workspaceId),
+      revision: input.revision as number,
+      operationId: input.operationId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePublicationCancel(input: unknown) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(
+      input,
+      ["workspaceId", "revision", "scheduleId", "idempotencyKey"],
+    ) ||
+    typeof input.workspaceId !== "string" ||
+    !Number.isSafeInteger(input.revision) ||
+    (input.revision as number) < 0 ||
+    typeof input.scheduleId !== "string" ||
+    input.scheduleId.length < 1 ||
+    input.scheduleId.length > 200 ||
+    !validIdempotencyKey(input.idempotencyKey)
+  ) {
+    return null;
+  }
+  try {
+    return {
+      workspaceId: createContentWorkspaceId(input.workspaceId),
+      revision: input.revision as number,
+      scheduleId: input.scheduleId,
+      idempotencyKey: input.idempotencyKey,
+    };
+  } catch {
+    return null;
+  }
 }
 
 const descriptors = {
@@ -806,6 +970,103 @@ const descriptors = {
     annotations: nonDestructiveMutationAnnotations,
     execution: taskExecution,
   },
+  "foundry.publication.request": {
+    name: "foundry.publication.request",
+    description:
+      "Publish one exact approved workspace revision through the canonical publication pipeline.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        revision: { type: "integer", minimum: 0 },
+        approvalId: approvalIdSchema,
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: [
+        "workspaceId",
+        "revision",
+        "approvalId",
+        "idempotencyKey",
+      ],
+    },
+    outputSchema: toolOutputSchema(publicationOperationResult),
+    annotations: publicationMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.publication.schedule": {
+    name: "foundry.publication.schedule",
+    description:
+      "Schedule one exact approved blog revision through the canonical scheduler.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        revision: { type: "integer", minimum: 0 },
+        approvalId: approvalIdSchema,
+        publishAt: publishAtSchema,
+        reportingTimeZone: {
+          type: "string",
+          minLength: 1,
+          maxLength: 100,
+        },
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: [
+        "workspaceId",
+        "revision",
+        "approvalId",
+        "publishAt",
+        "reportingTimeZone",
+        "idempotencyKey",
+      ],
+    },
+    outputSchema: toolOutputSchema(publicationOperationResult),
+    annotations: publicationMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.publication.status": {
+    name: "foundry.publication.status",
+    description:
+      "Read the current state of a publication or publication schedule.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        revision: { type: "integer", minimum: 0 },
+        operationId: operationIdSchema,
+      },
+      required: ["workspaceId", "revision", "operationId"],
+    },
+    outputSchema: toolOutputSchema(publicationOperationResult),
+    annotations,
+    execution: taskExecution,
+  },
+  "foundry.publication.cancel": {
+    name: "foundry.publication.cancel",
+    description: "Cancel one active publication schedule.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        revision: { type: "integer", minimum: 0 },
+        scheduleId: scheduleIdSchema,
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: [
+        "workspaceId",
+        "revision",
+        "scheduleId",
+        "idempotencyKey",
+      ],
+    },
+    outputSchema: toolOutputSchema(publicationOperationResult),
+    annotations: publicationMutationAnnotations,
+    execution: taskExecution,
+  },
 } as const;
 
 export function createMcpToolRegistry(application: McpReadApplication) {
@@ -980,6 +1241,105 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       }
       return application.preparePreview!(principal, parsed, context);
     },
+    "foundry.publication.request": async (
+      principal,
+      input,
+      context,
+    ) => {
+      const parsed = parsePublicationInput(input, "request");
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.publication.request",
+          input,
+          context,
+          [mcpPublicationPublishScope],
+        );
+      }
+      return application.requestPublication!(
+        principal,
+        parsed,
+        context,
+      );
+    },
+    "foundry.publication.schedule": async (
+      principal,
+      input,
+      context,
+    ) => {
+      const parsed = parsePublicationInput(input, "schedule");
+      if (
+        parsed === null ||
+        !("publishAt" in parsed) ||
+        !("reportingTimeZone" in parsed)
+      ) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.publication.schedule",
+          input,
+          context,
+          [mcpPublicationScheduleScope],
+        );
+      }
+      return application.schedulePublication!(
+        principal,
+        {
+          workspaceId: parsed.workspaceId,
+          revision: parsed.revision,
+          approvalId: parsed.approvalId,
+          publishAt: parsed.publishAt!,
+          reportingTimeZone: parsed.reportingTimeZone!,
+          idempotencyKey: parsed.idempotencyKey,
+        },
+        context,
+      );
+    },
+    "foundry.publication.status": async (
+      principal,
+      input,
+      context,
+    ) => {
+      const parsed = parsePublicationStatus(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.publication.status",
+          input,
+          context,
+          [
+            principal.scopes.includes(mcpPublicationPublishScope)
+              ? mcpPublicationPublishScope
+              : mcpPublicationScheduleScope,
+          ],
+        );
+      }
+      return application.publicationStatus!(
+        principal,
+        parsed,
+        context,
+      );
+    },
+    "foundry.publication.cancel": async (
+      principal,
+      input,
+      context,
+    ) => {
+      const parsed = parsePublicationCancel(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.publication.cancel",
+          input,
+          context,
+          [mcpPublicationScheduleScope],
+        );
+      }
+      return application.cancelPublicationSchedule!(
+        principal,
+        parsed,
+        context,
+      );
+    },
   } satisfies Record<
     keyof typeof descriptors,
     (
@@ -992,6 +1352,8 @@ export function createMcpToolRegistry(application: McpReadApplication) {
   return {
     list(principal: McpConnectionPrincipal) {
       const supportsDrafts = application.openWorkspace !== undefined;
+      const supportsPublication =
+        application.requestPublication !== undefined;
       return Object.entries(descriptors)
         .filter(([name]) => {
           if (
@@ -1001,6 +1363,26 @@ export function createMcpToolRegistry(application: McpReadApplication) {
             name === "foundry.preview.prepare"
           ) {
             if (!supportsDrafts) return false;
+          }
+          if (name.startsWith("foundry.publication.")) {
+            if (!supportsPublication) return false;
+            if (name === "foundry.publication.request") {
+              return principal.scopes.includes(
+                mcpPublicationPublishScope,
+              );
+            }
+            if (
+              name === "foundry.publication.schedule" ||
+              name === "foundry.publication.cancel"
+            ) {
+              return principal.scopes.includes(
+                mcpPublicationScheduleScope,
+              );
+            }
+            return (
+              principal.scopes.includes(mcpPublicationPublishScope) ||
+              principal.scopes.includes(mcpPublicationScheduleScope)
+            );
           }
           if (
             name === "foundry.workspace.open" ||
@@ -1032,6 +1414,12 @@ export function createMcpToolRegistry(application: McpReadApplication) {
           name === "foundry.design.patch" ||
           name === "foundry.preview.prepare"
         )
+      ) {
+        return null;
+      }
+      if (
+        application.requestPublication === undefined &&
+        name.startsWith("foundry.publication.")
       ) {
         return null;
       }

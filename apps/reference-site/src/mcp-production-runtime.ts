@@ -1,6 +1,8 @@
 import {
   createInMemoryPublishedSiteRepository,
+  createMcpContentActorId,
   createMcpDraftApplication,
+  createMcpPublicationApplication,
   createMcpReadApplication,
   createPublishedSiteBundle,
   createSiteApplication,
@@ -11,6 +13,8 @@ import { authenticateCloudflareAccessIdentity } from "./access-authentication";
 import { createD1HumanAccessStore } from "./d1-human-access-store";
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
 import { createD1McpPreviewStore } from "./d1-mcp-preview-store";
+import { loadBlogPostOperationsApplication } from "./blog-post-operations-runtime";
+import { createContentPublicationApplicationForEnvironment } from "./content-publication-environment-runtime";
 import {
   mcpPreviewReviewUrl,
   revisionPreviewGatewayUrl,
@@ -188,10 +192,41 @@ export function createProductionMcpRuntime(
       async load({ actorId, workspaceId }) {
         const { loadContentRevisionApplication } =
           await import("./content-revision-runtime");
-        return loadContentRevisionApplication(workspaceId, actorId);
+        return loadContentRevisionApplication(
+          workspaceId,
+          actorId,
+          environment,
+        );
       },
       humanReviewUrl: (previewId) =>
         mcpPreviewReviewUrl(canonicalOrigin, previewId),
+    },
+  });
+  const publicationApplication = createMcpPublicationApplication({
+    base: readApplication,
+    runtime: {
+      async loadRevision({ principal, workspaceId }) {
+        const { loadContentRevisionApplication } =
+          await import("./content-revision-runtime");
+        return loadContentRevisionApplication(
+          workspaceId,
+          createMcpContentActorId(principal),
+          environment,
+        );
+      },
+      loadPublication({ principal, workspaceId }) {
+        return createContentPublicationApplicationForEnvironment(
+          environment,
+          workspaceId,
+          createMcpContentActorId(principal),
+        );
+      },
+      loadBlogOperations() {
+        return loadBlogPostOperationsApplication(environment);
+      },
+      recordInvocation(event) {
+        return store.recordPublicationInvocation(event);
+      },
     },
   });
   const humanStore = createD1HumanAccessStore(database);
@@ -203,7 +238,11 @@ export function createProductionMcpRuntime(
     siteId: referenceSiteDefinition.site.id,
     siteName: referenceSiteDefinition.site.name,
     store,
-    readApplication: Object.assign(readApplication, draftApplication),
+    readApplication: Object.assign(
+      readApplication,
+      draftApplication,
+      publicationApplication,
+    ),
     cursors,
     registeredClients: readMcpRegisteredClients(
       environment.FOUNDRY_MCP_CLIENTS,

@@ -17,6 +17,7 @@ import {
 } from "./blog-artifacts";
 import { canonicalJson, sha256Text } from "./deterministic-hash";
 import type { HumanMembershipId } from "./human-access";
+import type { McpLinkedPublicationAudit } from "./mcp-read";
 
 export const publishedSiteDefinitionPath =
   "packages/site-definition/src/published-site.json";
@@ -92,6 +93,10 @@ export type ContentApproval = Readonly<{
   invalidatedAt: string | null;
 }>;
 
+export type ContentPublicationRequesterId =
+  | HumanMembershipId
+  | ContentActorId;
+
 export const contentPublicationStatuses = [
   "requested",
   "committed",
@@ -113,7 +118,7 @@ export type ContentPublication = Readonly<{
   approvalId: ContentApprovalId;
   fingerprint: string;
   idempotencyKey: string;
-  requestedBy: HumanMembershipId;
+  requestedBy: ContentPublicationRequesterId;
   contributors: ReadonlyArray<ContentActorId>;
   expectedHead: string;
   status: ContentPublicationStatus;
@@ -225,6 +230,17 @@ export type ContentPublicationReservationProof = Readonly<{
   leaseToken: string;
 }>;
 
+export type ContentPublicationMcpAuthority = Readonly<{
+  kind: "mcp";
+  connectionId: string;
+  actorId: string;
+  operation:
+    | "foundry.publication.request"
+    | "foundry.publication.schedule";
+  requiredScopes: ReadonlyArray<string>;
+  audit?: McpLinkedPublicationAudit;
+}>;
+
 export type ContentPublicationStore = Readonly<{
   saveApproval(approval: ContentApproval): Promise<ContentApproval>;
   findApproval(id: ContentApprovalId): Promise<ContentApproval | null>;
@@ -236,6 +252,7 @@ export type ContentPublicationStore = Readonly<{
   claimPublication(
     publication: ContentPublication,
     reservationProof?: ContentPublicationReservationProof,
+    authority?: ContentPublicationMcpAuthority,
   ): Promise<ContentPublicationClaim>;
   hasPublicationLease(input: {
     publicationId: ContentPublicationId;
@@ -437,6 +454,7 @@ export class ContentPublicationValidationError extends Error {
     | "publication_no_changes"
     | "publication_reservation_lost"
     | "publication_requester_not_active"
+    | "publication_authority_not_current"
     | "deployment_retry_not_available"
     | "deployment_retry_head_moved"
     | "deployment_retry_release_marker_mismatch"
@@ -1103,7 +1121,13 @@ export function createContentPublicationApplication({
 
   async function requireApproval(
     approvalId: ContentApprovalId,
-    actorId: HumanMembershipId,
+    /**
+     * Optional so the lease guard, which revalidates an already-admitted
+     * publication, need not restate it. Checked last so a blank requester
+     * does not mask a staleness failure, matching the order this refusal
+     * has always had.
+     */
+    requestedBy?: string,
   ) {
     const approval = await store.findApproval(approvalId);
     if (approval === null) {
@@ -1156,7 +1180,7 @@ export function createContentPublicationApplication({
         throw new ContentApprovalInvalidError("approval_stale");
       }
     }
-    if (actorId.trim() === "") {
+    if (requestedBy !== undefined && requestedBy.trim() === "") {
       throw new ContentApprovalInvalidError("approval_not_found");
     }
     return { approval, revision };
@@ -1205,15 +1229,20 @@ export function createContentPublicationApplication({
   function createPublicationCommitLeaseGuard(input: {
     publication: ContentPublication;
     leaseToken: string;
-    requestedBy: HumanMembershipId;
+    assertCurrentAuthority?: () => Promise<boolean>;
     reservationProof?: ContentPublicationReservationProof;
   }) {
     return async () => {
+      if (
+        input.assertCurrentAuthority !== undefined &&
+        !(await input.assertCurrentAuthority())
+      ) {
+        return false;
+      }
       let currentApproval: ContentApproval;
       try {
         ({ approval: currentApproval } = await requireApproval(
           input.publication.approvalId,
-          input.requestedBy,
         ));
       } catch (error) {
         if (error instanceof ContentApprovalInvalidError) {
@@ -1323,6 +1352,7 @@ export function createContentPublicationApplication({
   async function refreshPublication(
     publicationId: ContentPublicationId,
     reservationProof?: ContentPublicationReservationProof,
+    assertCurrentAuthority?: () => Promise<boolean>,
   ) {
     const reservationFence =
       reservationProof === undefined ? {} : { reservationProof };
@@ -1331,15 +1361,28 @@ export function createContentPublicationApplication({
       return null;
     }
     if (
-      publication.status === "verified-live"
-    ) {
-      await reconcileVerifiedPublication(publication);
-      return publication;
-    }
-    if (
       publication.status === "failed" ||
       publication.status === "blocked"
     ) {
+      return publication;
+    }
+    // A scheduler refresh runs on behalf of one MCP connection and can reach
+    // the Git reconciliation and deployment boundaries below. Losing that grant
+    // must stop the refresh before any provider read, so no external write can
+    // follow it; a bounded-deadline branch may still record a terminal state in
+    // D1, which is local evidence rather than a provider effect. Every durable
+    // write here also carries the reservation fence, so the grant is re-checked
+    // at the remaining provider crossings rather than only on entry.
+    const authorityCurrent = async () =>
+      assertCurrentAuthority === undefined ||
+      (await assertCurrentAuthority());
+    if (!(await authorityCurrent())) {
+      return publication;
+    }
+    if (
+      publication.status === "verified-live"
+    ) {
+      await reconcileVerifiedPublication(publication);
       return publication;
     }
     const boundApproval = await store.findApproval(publication.approvalId);
@@ -1444,6 +1487,9 @@ export function createContentPublicationApplication({
       if (boundRevision === null) {
         return publication;
       }
+      if (!(await authorityCurrent())) {
+        return publication;
+      }
       const reconciled = await publisher.reconcileCommit({
         ...commitReconciliationInput(
           publication,
@@ -1536,6 +1582,7 @@ export function createContentPublicationApplication({
       if (approval !== null) {
         try {
           if (
+            (await authorityCurrent()) &&
             await publisher.isReleaseLive({
               commitSha,
               contentHash: approval.fingerprint.contentHash,
@@ -1575,6 +1622,9 @@ export function createContentPublicationApplication({
             },
           )
         : currentPublication;
+    }
+    if (!(await authorityCurrent())) {
+      return currentPublication;
     }
     const deployment = await publisher.getDeploymentStatus(
       commitSha,
@@ -1725,10 +1775,19 @@ export function createContentPublicationApplication({
       },
       async publish(input: {
         workspaceId: ContentWorkspaceId;
+        revision?: number;
         approvalId: ContentApprovalId;
-        requestedBy: HumanMembershipId;
+        requestedBy: ContentPublicationRequesterId;
         idempotencyKey: string;
+        assertCurrentAuthority?: () => Promise<boolean>;
+        authority?: ContentPublicationMcpAuthority;
         reservationProof?: ContentPublicationReservationProof;
+        /**
+         * Observes the store's claim outcome. The returned publication alone
+         * cannot distinguish a fresh claim from a durable replay, which an
+         * MCP receipt has to report accurately.
+         */
+        observeClaim?: (claim: ContentPublicationClaim) => void;
       }) {
         if (!isValidContentMutationIdempotencyKey(input.idempotencyKey)) {
           throw new ContentPublicationValidationError(
@@ -1739,6 +1798,14 @@ export function createContentPublicationApplication({
         if (recordedApproval !== null) {
           if (recordedApproval.workspaceId !== input.workspaceId) {
             throw new ContentApprovalInvalidError("approval_not_found");
+          }
+          if (
+            input.revision !== undefined &&
+            recordedApproval.revision !== input.revision
+          ) {
+            throw new ContentApprovalInvalidError(
+              "revision_not_current",
+            );
           }
           const replay = await store.findPublicationByIdempotency({
             workspaceId: recordedApproval.workspaceId,
@@ -1760,10 +1827,15 @@ export function createContentPublicationApplication({
         }
         const { approval, revision } = await requireApproval(
           input.approvalId,
-          input.requestedBy,
         );
         if (approval.workspaceId !== input.workspaceId) {
           throw new ContentApprovalInvalidError("approval_not_found");
+        }
+        if (
+          input.revision !== undefined &&
+          approval.revision !== input.revision
+        ) {
+          throw new ContentApprovalInvalidError("revision_not_current");
         }
         const recoverableCandidate =
           input.reservationProof === undefined
@@ -1855,7 +1927,9 @@ export function createContentPublicationApplication({
         const claim = await store.claimPublication(
           publication,
           input.reservationProof,
+          input.authority,
         );
+        input.observeClaim?.(claim);
         if (claim.state !== "claimed") {
           return claim.publication;
         }
@@ -1884,7 +1958,12 @@ export function createContentPublicationApplication({
         const renewLease = createPublicationCommitLeaseGuard({
           publication,
           leaseToken,
-          requestedBy: input.requestedBy,
+          ...(input.assertCurrentAuthority === undefined
+            ? {}
+            : {
+                assertCurrentAuthority:
+                  input.assertCurrentAuthority,
+              }),
           ...reservationFence,
         });
         if (!(await renewLease())) {
@@ -1963,13 +2042,19 @@ export function createContentPublicationApplication({
       async refresh(
         publicationId: ContentPublicationId,
         reservationProof?: ContentPublicationReservationProof,
+        assertCurrentAuthority?: () => Promise<boolean>,
       ) {
-        return refreshPublication(publicationId, reservationProof);
+        return refreshPublication(
+          publicationId,
+          reservationProof,
+          assertCurrentAuthority,
+        );
       },
       async retryDeployment(
         publicationId: ContentPublicationId,
-        requestedBy: HumanMembershipId,
+        requestedBy: ContentPublicationRequesterId,
         reservationProof?: ContentPublicationReservationProof,
+        assertCurrentAuthority?: () => Promise<boolean>,
       ) {
         const reservationFence =
           reservationProof === undefined
@@ -2001,7 +2086,6 @@ export function createContentPublicationApplication({
         }
         const { approval, revision } = await requireApproval(
           publication.approvalId,
-          requestedBy,
         );
         if (
           approval.fingerprint.value !== publication.fingerprint
@@ -2078,7 +2162,7 @@ export function createContentPublicationApplication({
               const assertLease = createPublicationCommitLeaseGuard({
                 publication: retryPublication,
                 leaseToken,
-                requestedBy,
+                assertCurrentAuthority,
                 reservationProof,
               });
               let result = await attemptAtomicPublicationCommit({
@@ -2208,7 +2292,7 @@ export function createContentPublicationApplication({
           const assertLease = createPublicationCommitLeaseGuard({
             publication,
             leaseToken,
-            requestedBy,
+            assertCurrentAuthority,
             reservationProof,
           });
           const result = await publisher.retryReference({
@@ -2470,6 +2554,12 @@ export function createContentPublicationApplication({
           });
         };
         const assertDispatch = async () => {
+          if (
+            assertCurrentAuthority !== undefined &&
+            !(await assertCurrentAuthority())
+          ) {
+            return false;
+          }
           if (!(await renewDeploymentRetryClaim())) {
             return false;
           }
@@ -2714,6 +2804,18 @@ export function createContentPublicationApplication({
       },
     }),
     queries: Object.freeze({
+      getApproval(approvalId: ContentApprovalId) {
+        return store.findApproval(approvalId);
+      },
+      findByIdempotency(
+        workspaceId: ContentWorkspaceId,
+        idempotencyKey: string,
+      ) {
+        return store.findPublicationByIdempotency({
+          workspaceId,
+          idempotencyKey,
+        });
+      },
       getLatest(workspaceId: ContentWorkspaceId) {
         return store.findLatestPublication(workspaceId);
       },

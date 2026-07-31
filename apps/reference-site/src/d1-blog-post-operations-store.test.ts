@@ -82,6 +82,7 @@ describe("D1 blog post operations store", () => {
       "0019_mcp_preview_artifacts.sql",
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
+      "0024_mcp_publication_scopes.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),
@@ -335,6 +336,118 @@ describe("D1 blog post operations store", () => {
     ).toEqual({ count: 0 });
   });
 
+  it("rejects MCP schedule activation when its publication grant is revoked before the D1 commit", async () => {
+    const approval = await approveCurrent();
+    const mcpActorId = createContentActorId("mcp-agent-56");
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-schedule-56', 'agent-56', ?1, 'client-56',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-schedule-56', 'site.read'),
+           ('connection-schedule-56', 'content.draft'),
+           ('connection-schedule-56', 'publication.schedule')`,
+      ),
+    ]);
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const authority = {
+      kind: "mcp" as const,
+      connectionId: "connection-schedule-56",
+      actorId: "agent-56",
+      operation: "foundry.publication.schedule" as const,
+      // The MCP application layer derives the complete scope set from
+      // revision 0 and the approved revision before the command reaches the
+      // store. `mcp-publications.test.ts` proves that derivation; here the
+      // store must persist the given set verbatim so execution-time
+      // revalidation re-checks every scope the operation actually needed.
+      requiredScopes: ["publication.schedule", "content.draft"],
+    };
+    const durableApp = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const persisted = await durableApp.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "mcp-schedule-persisted-authority",
+      authority,
+    });
+    await expect(
+      durableStore.findMcpScheduleAuthority(persisted.id),
+    ).resolves.toEqual(authority);
+    const app = createBlogPostOperationsApplication({
+      store: {
+        ...durableStore,
+        async saveSchedule(schedule, idempotencyKey, authority) {
+          await database
+            .prepare(
+              `UPDATE mcp_connections
+               SET status = 'revoked', revoked_at = ?1
+               WHERE id = 'connection-schedule-56'`,
+            )
+            .bind(now)
+            .run();
+          return durableStore.saveSchedule(
+            schedule,
+            idempotencyKey,
+            authority,
+          );
+        },
+      },
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+
+    await expect(
+      app.commands.activateSchedule({
+        actorId: mcpActorId,
+        siteId: referenceSiteDefinition.site.id,
+        postId,
+        approvalId: approval.id,
+        resolvedTime: {
+          localDateTime: "2026-11-01T01:00:00",
+          ianaTimeZone: "America/Vancouver",
+          utcOffsetChoice: "-07:00",
+          executeAtUtc: now,
+        },
+        idempotencyKey: "mcp-schedule-revoked-before-commit",
+        authority,
+      }),
+    ).rejects.toMatchObject({
+      code: "mcp_schedule_authority_required",
+    });
+    await expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM blog_post_schedules
+           WHERE idempotency_key =
+                 'mcp-schedule-revoked-before-commit'`,
+        )
+        .first(),
+    ).resolves.toEqual({ count: 0 });
+  });
+
   it("rejects a schedule that is not strictly after its persisted activation timestamp", async () => {
     const approval = await approveCurrent();
     const store = createD1BlogPostOperationsStore(database);
@@ -440,6 +553,98 @@ describe("D1 blog post operations store", () => {
     await expect(durableStore.findSchedule(schedule.id)).resolves.toMatchObject({
       state: "active",
     });
+  });
+
+  it("rejects MCP schedule cancellation revoked before the D1 commit", async () => {
+    // The grant is live when the command admits the cancellation and gone by
+    // the time the statement runs. That statement revalidates the connection
+    // in the same write, so the schedule stays active.
+    const approval = await approveCurrent();
+    const mcpActorId = createContentActorId("mcp-agent-cancel");
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-cancel', 'agent-cancel', ?1, 'client-cancel',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-cancel', 'site.read'),
+           ('connection-cancel', 'content.draft'),
+           ('connection-cancel', 'publication.schedule')`,
+      ),
+    ]);
+    const authority = {
+      kind: "mcp" as const,
+      connectionId: "connection-cancel",
+      actorId: "agent-cancel",
+      operation: "foundry.publication.schedule" as const,
+      requiredScopes: ["publication.schedule", "content.draft"],
+    };
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const setup = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_mcp_cancel`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const schedule = await setup.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "activation-before-mcp-cancel-revocation",
+      authority,
+    });
+    const app = createBlogPostOperationsApplication({
+      store: {
+        ...durableStore,
+        async cancelSchedule(input) {
+          await database
+            .prepare(
+              `UPDATE mcp_connections
+               SET status = 'revoked', revoked_at = ?1
+               WHERE id = 'connection-cancel'`,
+            )
+            .bind(now)
+            .run();
+          return durableStore.cancelSchedule(input);
+        },
+      },
+      now: () => operationTime,
+      createId: (kind) => `${kind}_mcp_cancel`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+
+    await expect(app.commands.cancelSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      scheduleId: schedule.id,
+      idempotencyKey: "mcp-cancellation-revoked-before-commit",
+      authority,
+    })).rejects.toMatchObject({
+      // The cancellation statement matched no row, and re-reading the grant
+      // names the lost connection rather than blaming the schedule's state.
+      code: "mcp_schedule_authority_required",
+    });
+    await expect(
+      durableStore.findSchedule(schedule.id),
+    ).resolves.toMatchObject({ state: "active" });
   });
 
   it("rejects archive when human authority is revoked before the D1 commit", async () => {
@@ -1636,6 +1841,118 @@ describe("D1 blog post operations store", () => {
         attempt: 2,
         state: "claimed",
       },
+    });
+  });
+
+  it("claims a scheduled publication under the schedule scope alone", async () => {
+    // A scheduled publication claim carries a reservation proof and the
+    // schedule operation, so the publication scope the claim statement demands
+    // follows that operation. This connection was never granted
+    // publication.publish; requiring it here would block every scheduled
+    // publication an MCP connection originated.
+    const approval = await approveCurrent();
+    const mcpActorId = createContentActorId("mcp-agent-scheduled");
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-scheduled-claim', 'agent-scheduled', ?1,
+             'client-scheduled', 'https://client.example/callback',
+             '["site.read"]', 'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-scheduled-claim', 'site.read'),
+           ('connection-scheduled-claim', 'content.draft'),
+           ('connection-scheduled-claim', 'publication.schedule')`,
+      ),
+    ]);
+    const authority = {
+      kind: "mcp" as const,
+      connectionId: "connection-scheduled-claim",
+      actorId: "agent-scheduled",
+      operation: "foundry.publication.schedule" as const,
+      requiredScopes: ["publication.schedule", "content.draft"],
+    };
+    const scheduleStore = createD1BlogPostOperationsStore(database);
+    const scheduleApp = createBlogPostOperationsApplication({
+      store: scheduleStore,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_scheduled_claim`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const schedule = await scheduleApp.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "activate-scheduled-claim",
+      authority,
+    });
+    operationTime = now;
+    const claim = await scheduleApp.commands.claimDueSchedule(
+      schedule.siteId,
+      schedule.id,
+    );
+    const scheduledPublication = {
+      id: createContentPublicationId(`publish_${"7".repeat(32)}`),
+      workspaceId,
+      revision: approval.revision,
+      approvalId: approval.id,
+      fingerprint: approval.fingerprint.value,
+      idempotencyKey: claim.execution.publicationIdempotencyKey,
+      requestedBy: mcpActorId,
+      contributors: [actorId],
+      expectedHead: "a".repeat(40),
+      status: "requested" as const,
+      commitSha: null,
+      deploymentId: null,
+      deploymentRequestedAt: null,
+      detail: null,
+      leaseToken: "scheduled-claim-lease",
+      leaseExpiresAt: "2026-11-01T08:10:00.000Z",
+      requestedAt: now,
+      updatedAt: now,
+    };
+
+    await expect(
+      createD1ContentPublicationStore(database).claimPublication(
+        scheduledPublication,
+        {
+          executionId: claim.execution.executionId,
+          attempt: claim.execution.attempt,
+          leaseToken: claim.lease!.leaseToken,
+        },
+        authority,
+      ),
+    ).resolves.toMatchObject({ state: "claimed" });
+    await expect(
+      database
+        .prepare(
+          `SELECT mcp_operation, mcp_required_scopes_json
+           FROM content_publications
+           WHERE idempotency_key = ?1`,
+        )
+        .bind(scheduledPublication.idempotencyKey)
+        .first(),
+    ).resolves.toEqual({
+      mcp_operation: "foundry.publication.schedule",
+      mcp_required_scopes_json: JSON.stringify([
+        "content.draft",
+        "publication.schedule",
+      ]),
     });
   });
 

@@ -62,6 +62,11 @@ function application(
       siteId: post.siteId,
       postId: post.postId,
     }],
+    mcpScheduleAccess: [{
+      connectionId: "connection-56",
+      actorId: "agent-56",
+      siteId: post.siteId,
+    }],
     posts: [post],
     approvals: [
       {
@@ -95,6 +100,182 @@ function application(
 }
 
 describe("blog post operations", () => {
+  it("activates the canonical schedule for an exact current MCP grant", async () => {
+    const { app } = application();
+
+    const schedule = await app.commands.activateSchedule({
+      actorId: mcpActorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      approvalId,
+      resolvedTime: resolvedTime(
+        "2026-11-01T01:30:00",
+        "-07:00",
+        "2026-11-01T08:30:00.000Z",
+      ),
+      idempotencyKey: "mcp-activate-schedule-0001",
+      authority: {
+        kind: "mcp",
+        connectionId: "connection-56",
+        actorId: "agent-56",
+        operation: "foundry.publication.schedule",
+        requiredScopes: ["publication.schedule"],
+      },
+    });
+
+    expect(schedule).toMatchObject({
+      state: "active",
+      approvalId,
+      createdBy: mcpActorId,
+      activatedBy: mcpActorId,
+    });
+  });
+
+  it("rejects MCP scheduling when the connection lacks a required scope", async () => {
+    // The connection is the right one, but it was never granted the draft
+    // scope the approved revision needs, so activation must be refused
+    // rather than admitted on connection identity alone.
+    const post = activePost();
+    const store = createInMemoryBlogPostOperationsStore({
+      humanActorIds: [actorId],
+      mcpScheduleAccess: [{
+        connectionId: "connection-56",
+        actorId: "agent-56",
+        siteId: post.siteId,
+        scopes: ["publication.schedule"],
+      }],
+      posts: [post],
+      approvals: [
+        {
+          id: approvalId,
+          siteId: post.siteId,
+          workspaceId,
+          contentRevision: 7,
+          fingerprint: "approved-fingerprint-7",
+          postArtifacts: [
+            {
+              postId: post.postId,
+              postRevisionId: post.postRevisionId,
+            },
+          ],
+          invalidatedAt: null,
+        },
+      ],
+    });
+    const app = createBlogPostOperationsApplication({
+      store,
+      now: () => beforeNow,
+      createId: (kind) => `${kind}_deterministic`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+
+    await expect(
+      app.commands.activateSchedule({
+        actorId: mcpActorId,
+        siteId: "foundry-site",
+        postId: "post-scheduled-release",
+        approvalId,
+        resolvedTime: resolvedTime(
+          "2026-11-01T01:30:00",
+          "-07:00",
+          "2026-11-01T08:30:00.000Z",
+        ),
+        idempotencyKey: "mcp-activate-missing-draft-scope",
+        authority: {
+          kind: "mcp",
+          connectionId: "connection-56",
+          actorId: "agent-56",
+          operation: "foundry.publication.schedule",
+          requiredScopes: ["publication.schedule", "content.draft"],
+        },
+      }),
+    ).rejects.toEqual(
+      new BlogPostOperationError("mcp_schedule_authority_required"),
+    );
+    await expect(
+      store.findScheduleByRequest({
+        siteId: "foundry-site",
+        postId: "post-scheduled-release",
+        idempotencyKey: "mcp-activate-missing-draft-scope",
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("rejects a cancellation after the schedule leaves its active state", async () => {
+    const { app } = application();
+    const activated = await app.commands.activateSchedule({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      approvalId,
+      resolvedTime: resolvedTime(
+        "2026-11-01T01:30:00",
+        "-07:00",
+        "2026-11-01T08:30:00.000Z",
+      ),
+      idempotencyKey: "cancel-after-inactive-activate",
+    });
+    await app.commands.cancelSchedule({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      scheduleId: activated.id,
+      idempotencyKey: "cancel-after-inactive-first",
+    });
+
+    // The schedule is already cancelled, so a second cancellation is a
+    // terminal rejection and changes nothing.
+    await expect(
+      app.commands.cancelSchedule({
+        actorId,
+        siteId: "foundry-site",
+        postId: "post-scheduled-release",
+        scheduleId: activated.id,
+        idempotencyKey: "cancel-after-inactive-second",
+      }),
+    ).rejects.toEqual(
+      new BlogPostOperationError("too_late_to_cancel"),
+    );
+    await expect(
+      app.queries.getSchedule("foundry-site", activated.id),
+    ).resolves.toMatchObject({ state: "cancelled" });
+  });
+
+  it("rejects MCP scheduling without a current exact connection grant", async () => {
+    const { app, store } = application();
+
+    await expect(
+      app.commands.activateSchedule({
+        actorId: mcpActorId,
+        siteId: "foundry-site",
+        postId: "post-scheduled-release",
+        approvalId,
+        resolvedTime: resolvedTime(
+          "2026-11-01T01:30:00",
+          "-07:00",
+          "2026-11-01T08:30:00.000Z",
+        ),
+        idempotencyKey: "mcp-activate-without-grant",
+        authority: {
+          kind: "mcp",
+          connectionId: "connection-revoked",
+          actorId: "agent-56",
+          operation: "foundry.publication.schedule",
+          requiredScopes: ["publication.schedule"],
+        },
+      }),
+    ).rejects.toEqual(
+      new BlogPostOperationError("mcp_schedule_authority_required"),
+    );
+    await expect(
+      store.findScheduleByRequest({
+        siteId: "foundry-site",
+        postId: "post-scheduled-release",
+        idempotencyKey: "mcp-activate-without-grant",
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("stores an exact UTC instant and reporting zone bound to the approval", async () => {
     const { app } = application();
 

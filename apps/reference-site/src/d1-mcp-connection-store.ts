@@ -6,6 +6,7 @@ import {
   type McpConnectionGrant,
   type McpConnectionSummary,
   type McpConnectionStore,
+  type McpPublicationAuditEvent,
   type McpReadAuditEvent,
 } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
@@ -79,6 +80,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
               WHEN 'site.read' THEN 0
               WHEN 'content.draft' THEN 1
               WHEN 'design.draft' THEN 2
+              WHEN 'publication.schedule' THEN 3
+              WHEN 'publication.publish' THEN 4
               ELSE 99
             END
           )
@@ -145,6 +148,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       releaseId: string;
       observedAt: string;
     } | null>;
+    recordPublicationInvocation(
+      event: McpPublicationAuditEvent,
+    ): Promise<void>;
   } = {
     async createAuthorizationGrant(input) {
       const scopes = input.scopes ?? [mcpInitialScope];
@@ -512,6 +518,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                             WHEN 'site.read' THEN 0
                             WHEN 'content.draft' THEN 1
                             WHEN 'design.draft' THEN 2
+                            WHEN 'publication.schedule' THEN 3
+                            WHEN 'publication.publish' THEN 4
                             ELSE 99
                           END
                         )
@@ -568,6 +576,46 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
           event.reason,
           event.occurredAt,
           event.contractVersion,
+        )
+        .run();
+    },
+    async recordPublicationInvocation(event: McpPublicationAuditEvent) {
+      await database
+        .prepare(
+          `INSERT INTO mcp_audit_events (
+             invocation_id, connection_id, actor_id, site_id, operation,
+             input_hash, protocol_version, scopes_json, outcome, reason,
+             human_actor_id, revocation_reason, occurred_at, contract_version,
+             idempotency_key, result_hash, replayed, workspace_id, revision,
+             approval_id, publication_id, schedule_id
+           ) VALUES (
+             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+             NULL, NULL, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+             ?18, ?19, ?20
+           )
+           ON CONFLICT (invocation_id) DO NOTHING`,
+        )
+        .bind(
+          event.invocationId,
+          event.connectionId,
+          event.actorId,
+          event.siteId,
+          event.operation,
+          event.inputHash,
+          event.protocolVersion,
+          JSON.stringify(event.scopesEvaluated),
+          event.outcome,
+          event.reason,
+          event.occurredAt,
+          event.contractVersion,
+          event.idempotencyKey,
+          event.resultHash,
+          event.replayed ? 1 : 0,
+          event.workspaceId,
+          event.revision,
+          event.approvalId,
+          event.publicationId,
+          event.scheduleId,
         )
         .run();
     },
@@ -762,6 +810,8 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                      WHEN 'site.read' THEN 0
                      WHEN 'content.draft' THEN 1
                      WHEN 'design.draft' THEN 2
+                     WHEN 'publication.schedule' THEN 3
+                     WHEN 'publication.publish' THEN 4
                      ELSE 99
                    END
                  )
