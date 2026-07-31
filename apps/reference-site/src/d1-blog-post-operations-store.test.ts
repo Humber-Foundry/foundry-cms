@@ -82,7 +82,7 @@ describe("D1 blog post operations store", () => {
       "0019_mcp_preview_artifacts.sql",
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
-      "0023_mcp_publication_scopes.sql",
+      "0024_mcp_publication_scopes.sql",
     ]) {
       const migration = await readFile(
         new URL(`../migrations/${name}`, import.meta.url),

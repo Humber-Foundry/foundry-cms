@@ -291,7 +291,7 @@ describe("MCP publication orchestration", () => {
     // The recorded hash is the hash of the receipt this invocation returned.
     // It is deliberately not expected to equal the linked row the store commits
     // inside the claim transaction, which hashes the outcome as admitted
-    // because the terminal state does not exist yet. See ADR-0006.
+    // because the terminal state does not exist yet. See ADR-0007.
     expect(publicationAudit[0]?.resultHash).toBe(
       await sha256CanonicalJson({
         operationId: publicationId,
