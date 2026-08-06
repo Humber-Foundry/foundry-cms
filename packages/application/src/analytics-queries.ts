@@ -538,6 +538,25 @@ export const analyticsCacheSeconds = Object.freeze({
 /** Bounds the cache so a long-lived isolate cannot grow one without limit. */
 const analyticsCacheMaximumEntries = 200;
 
+export type AnalyticsQueryCacheEntry = Readonly<{
+  expiresAt: number;
+  value: unknown;
+}>;
+
+/**
+ * The store behind the query cache.
+ *
+ * It is created separately from the application because a request handler
+ * builds a fresh application every time it runs. A cache owned by the
+ * application would be discarded before it was ever read, so the process that
+ * serves the requests holds the cache and passes it in.
+ */
+export type AnalyticsQueryCache = Map<string, AnalyticsQueryCacheEntry>;
+
+export function createAnalyticsQueryCache(): AnalyticsQueryCache {
+  return new Map();
+}
+
 /**
  * A short, stable digest of the metric registry's definition versions. It goes
  * in every cache key, so redefining a metric cannot serve an answer computed
@@ -560,6 +579,7 @@ export function createAnalyticsQueryApplication<Actor>({
   reportingTimeZone,
   now = () => new Date().toISOString(),
   authorize,
+  cache = createAnalyticsQueryCache(),
 }: {
   siteId: SiteId;
   store: AnalyticsReadStore;
@@ -569,9 +589,13 @@ export function createAnalyticsQueryApplication<Actor>({
     actor: Actor,
     capability: typeof analyticsReadCapability,
   ): Promise<unknown>;
+  /**
+   * Held by the caller so answers survive between requests. Omitting it gives
+   * this application its own cache, which is what a test wants.
+   */
+  cache?: AnalyticsQueryCache;
 }) {
   const registryDigest = metricRegistryDigest();
-  const cache = new Map<string, { expiresAt: number; value: unknown }>();
 
   /**
    * Wraps one query in the private, per-site cache ADR-0003 asks for.

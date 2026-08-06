@@ -10,6 +10,7 @@ import type { StoredAnalyticsFact } from "./analytics-projection";
 import {
   AnalyticsRangeError,
   createAnalyticsQueryApplication,
+  createAnalyticsQueryCache,
   resolveReportingRange,
   type AnalyticsReadStore,
 } from "./analytics-queries";
@@ -907,6 +908,65 @@ describe("query caching", () => {
 
     expect(readsAfterFirst).toBeGreaterThan(0);
     expect(reads).toBe(readsAfterFirst);
+  });
+
+  it("keeps an answer across the applications a request handler builds", async () => {
+    facts = [fact({ metricKey: "web.page_views", value: 40 })];
+    let reads = 0;
+    const countingStore: AnalyticsReadStore = {
+      ...store,
+      async listFacts(query) {
+        reads += 1;
+        return store.listFacts(query);
+      },
+    };
+    // `/dash` is dynamic, so it builds a fresh application per request. The
+    // cache belongs to the process, so it has to outlive them.
+    const shared = createAnalyticsQueryCache();
+    const perRequest = () =>
+      createAnalyticsQueryApplication({
+        siteId,
+        store: countingStore,
+        reportingTimeZone: timeZone,
+        now: () => "2026-07-03T00:00:00.000Z",
+        cache: shared,
+        authorize: async (_actor, capability) => {
+          authorized.push(capability);
+        },
+      });
+
+    await perRequest().queries.overview({ actor, range: july });
+    const readsAfterFirstRequest = reads;
+    await perRequest().queries.overview({ actor, range: july });
+
+    expect(readsAfterFirstRequest).toBeGreaterThan(0);
+    expect(reads).toBe(readsAfterFirstRequest);
+  });
+
+  it("gives an application its own cache when none is passed in", async () => {
+    facts = [fact({ metricKey: "web.page_views", value: 40 })];
+    let reads = 0;
+    const countingStore: AnalyticsReadStore = {
+      ...store,
+      async listFacts(query) {
+        reads += 1;
+        return store.listFacts(query);
+      },
+    };
+    const perRequest = () =>
+      createAnalyticsQueryApplication({
+        siteId,
+        store: countingStore,
+        reportingTimeZone: timeZone,
+        now: () => "2026-07-03T00:00:00.000Z",
+        authorize: async () => undefined,
+      });
+
+    await perRequest().queries.overview({ actor, range: july });
+    const readsAfterFirstRequest = reads;
+    await perRequest().queries.overview({ actor, range: july });
+
+    expect(reads).toBeGreaterThan(readsAfterFirstRequest);
   });
 
   it("checks the capability on every call, cached or not", async () => {

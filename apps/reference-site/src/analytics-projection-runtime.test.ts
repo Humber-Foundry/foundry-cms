@@ -298,7 +298,7 @@ describe("provider polling bands", () => {
         lastSuccessAt: null,
         now: "2026-08-05T09:00:00.000Z",
       }),
-    ).toBe(90);
+    ).toBe(97);
   });
 
   it("keeps to the 72-hour band between runs on the same day", () => {
@@ -319,14 +319,36 @@ describe("provider polling bands", () => {
     ).toBe(30);
   });
 
-  it("widens to 90 days on the first run of a new week", () => {
+  it("reaches past 90 days on the first run of a new week", () => {
     // 2026-08-02 is a Sunday, 2026-08-03 the Monday that starts a new week.
+    // The window is 97 rather than 90 so a campaign that turns 90 days old
+    // between two weekly sweeps still gets its final poll.
     expect(
       providerPollWindowDays({
         lastSuccessAt: "2026-08-02T23:00:00.000Z",
         now: "2026-08-03T00:30:00.000Z",
       }),
-    ).toBe(90);
+    ).toBe(97);
+  });
+
+  it("never asks for a campaign older than the widest window", () => {
+    const windows = [
+      providerPollWindowDays({ lastSuccessAt: null, now: "2026-08-05T09:00:00.000Z" }),
+      providerPollWindowDays({
+        lastSuccessAt: "2026-08-02T23:00:00.000Z",
+        now: "2026-08-03T00:30:00.000Z",
+      }),
+      providerPollWindowDays({
+        lastSuccessAt: "2026-08-04T23:00:00.000Z",
+        now: "2026-08-05T00:30:00.000Z",
+      }),
+      providerPollWindowDays({
+        lastSuccessAt: "2026-08-05T08:00:00.000Z",
+        now: "2026-08-05T09:00:00.000Z",
+      }),
+    ];
+
+    expect(Math.max(...windows)).toBe(97);
   });
 });
 

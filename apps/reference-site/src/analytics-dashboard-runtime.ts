@@ -2,6 +2,8 @@ import "server-only";
 
 import {
   createAnalyticsQueryApplication,
+  createAnalyticsQueryCache,
+  type AnalyticsQueryCache,
   type AnalyticsAudienceView,
   type AnalyticsCampaignsView,
   type AnalyticsContentView,
@@ -75,6 +77,23 @@ export function defaultReportingRange(
   return { fromLocalDate, toLocalDate: localToday };
 }
 
+/**
+ * The query cache lives here rather than inside the application, because
+ * `/dash` is dynamic and builds a fresh application on every request. A cache
+ * owned by the application would be thrown away before it was read. This one
+ * belongs to the Worker isolate, so an answer survives between requests for
+ * as long as ADR-0003 allows.
+ */
+const queryCachesBySite = new Map<string, AnalyticsQueryCache>();
+
+function queryCacheFor(siteId: string): AnalyticsQueryCache {
+  const existing = queryCachesBySite.get(siteId);
+  if (existing !== undefined) return existing;
+  const created = createAnalyticsQueryCache();
+  queryCachesBySite.set(siteId, created);
+  return created;
+}
+
 export async function createAnalyticsDashboardContext(
   humanContext: HumanAccessRequestContext,
   now: () => string = () => new Date().toISOString(),
@@ -93,6 +112,7 @@ export async function createAnalyticsDashboardContext(
     store: createD1AnalyticsStore(database, siteId),
     reportingTimeZone: defaultReportingTimeZone,
     now,
+    cache: queryCacheFor(siteId),
     authorize: (actor, capability) =>
       humanContext.application.queries.requireCapability({
         actor,

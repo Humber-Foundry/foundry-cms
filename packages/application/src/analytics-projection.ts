@@ -206,6 +206,8 @@ export type AnalyticsProjectionRun = AnalyticsMeasuredRun | AnalyticsDegradedRun
 export type AnalyticsCompactionOutcome = Readonly<{
   dailyFactsWritten: number;
   hourlyFactsRemoved: number;
+  /** Days whose source already wrote the daily fact, so only hours were removed. */
+  daysAlreadyDaily: number;
   daysSkippedForComparability: number;
   daysSkippedForMixedAvailability: number;
 }>;
@@ -530,7 +532,9 @@ export function createAnalyticsProjection({
       const removedFacts: StoredAnalyticsFact[] = [];
       let daysSkippedForComparability = 0;
       let daysSkippedForMixedAvailability = 0;
+      let daysAlreadyDaily = 0;
 
+      const mergeable: Array<ReadonlyArray<StoredAnalyticsFact>> = [];
       for (const group of days.values()) {
         const signatures = new Set(
           group.map((fact) => comparabilitySignature(fact)),
@@ -544,8 +548,41 @@ export function createAnalyticsProjection({
           daysSkippedForMixedAvailability += 1;
           continue;
         }
+        mergeable.push(group);
+      }
+
+      // A source that reports both hours and days already wrote the day, and
+      // its own total is the authoritative one. Recomputing the day from its
+      // hours could disagree with it, and the revision guard would drop the
+      // rewrite anyway while the hours were deleted. So the hours are removed
+      // and the source's daily fact is left alone.
+      const existingDaily = new Set(
+        (
+          await store.findFacts(
+            mergeable.map((group) =>
+              factIdentity({
+                ...group[0],
+                granularity: "day",
+                bucketStartUtc: utcDayStart(group[0].bucketStartUtc),
+              }),
+            ),
+          )
+        ).map((fact) => analyticsFactKey(fact)),
+      );
+
+      for (const group of mergeable) {
         const first = group[0];
         const dayStart = utcDayStart(first.bucketStartUtc);
+        const dayKey = analyticsFactKey({
+          ...first,
+          granularity: "day",
+          bucketStartUtc: dayStart,
+        });
+        removedFacts.push(...group);
+        if (existingDaily.has(dayKey)) {
+          daysAlreadyDaily += 1;
+          continue;
+        }
         const measured = first.availability === "available";
         dailyFacts.push({
           ...first,
@@ -561,7 +598,6 @@ export function createAnalyticsProjection({
           ),
           revision: Math.max(...group.map((fact) => fact.revision)),
         });
-        removedFacts.push(...group);
       }
 
       if (dailyFacts.length > 0 || removedFacts.length > 0) {
@@ -571,6 +607,7 @@ export function createAnalyticsProjection({
       return {
         dailyFactsWritten: dailyFacts.length,
         hourlyFactsRemoved: removedFacts.length,
+        daysAlreadyDaily,
         daysSkippedForComparability,
         daysSkippedForMixedAvailability,
       };

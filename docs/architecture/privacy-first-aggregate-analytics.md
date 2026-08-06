@@ -80,9 +80,13 @@ future projector cannot widen the model without changing the schema:
   web sources reporting one referrer.
 - **An empty selection returns `null`, not `0`**, so the caller has to decide
   how to report the absence.
-- **One granularity per interval.** A whole-day range reads daily facts. An
-  explicit intraday request reads hourly facts, and is refused once those have
-  been compacted. Compaction and reads therefore cannot double-count.
+- **One granularity per interval.** A whole-day range reads daily facts. A
+  request that asks for `granularity: "hour"` reads hourly facts, and is
+  refused once those have been compacted. Compaction and reads therefore
+  cannot double-count. `/dash` does not yet offer a control for the hourly
+  range; the query API accepts it, and the MCP tools in
+  [issue #57](https://github.com/Humber-Foundry/foundry-cms/issues/57) are its
+  first caller.
 - **Point-in-time metrics are not summed.** `subscriber.active` and the Web
   Vitals percentiles are marked `aggregation: "latest"`.
 - **Breakdown rows below five are suppressed** and reported as "fewer than 5".
@@ -99,6 +103,11 @@ still filling, one hour for a range that has closed. The cache key is the site,
 the `analytics.read` capability, a digest of the metric registry's definition
 versions, the query name, the reporting time zone, the resolved range, the
 granularity and the query's own options.
+
+The cache belongs to the Worker isolate, not to the query application.
+`/dash` is dynamic and builds a fresh application on every request, so a cache
+owned by the application would be discarded before it was ever read.
+`analytics-dashboard-runtime.ts` holds one cache per site and passes it in.
 
 The capability is checked on every call, before the cache is read, so a caller
 without `analytics.read` is refused and never served a stored answer. Every
@@ -129,9 +138,12 @@ and appends to `analytics_fact_revisions`, exactly as the ADR describes.
   platforms keep revising a day until it closes. Each run re-reads the previous
   seven days, since sampling and late aggregation revise recent buckets.
 - **The provider is polled in three bands**, matching the ADR: campaigns sent
-  within 72 hours on every run, within 30 days once a day, within 90 days once
+  within 72 hours on every run, within 30 days once a day, within 97 days once
   a week. The band is chosen from the last successful run, so the projector
-  needs no extra state to keep its place. Each band pages through the
+  needs no extra state to keep its place. The widest band is 97 days rather
+  than 90 because a weekly sweep bounded at exactly 90 would last see a
+  campaign at about day 83 and never at 90; the extra week guarantees the
+  day-90 reconciliation the ADR asks for. Each band pages through the
   provider's changed-campaign cursor, fifty campaigns a request, rather than
   asking once per campaign. A run that hits the page cap says so in the log.
 - A degraded run records the outage and leaves the projected facts and
@@ -150,10 +162,13 @@ and appends to `analytics_fact_revisions`, exactly as the ADR describes.
   with per-event timestamps, and Cloudflare keeps its points for three months.
   The hourly facts serve an intraday range for 90 days and then compact away;
   the daily facts carry the history past Analytics Engine's own retention.
-- Compaction rolls closed hourly facts into daily facts after 90 days. A day
-  whose hours span a definition change, or that mixes measured and unavailable
-  hours, is **not** merged. Its hourly facts stay and the skip is logged,
-  because either merge would invent a number.
+- Compaction rolls closed hourly facts into daily facts after 90 days. Where
+  the source already wrote that day's fact — which Analytics Engine does on
+  every run — compaction removes the hours and leaves the source's own total
+  alone, because recomputing the day from sampled hours could disagree with
+  it. A day whose hours span a definition change, or that mixes measured and
+  unavailable hours, is **not** merged. Its hourly facts stay and the skip is
+  logged, because either merge would invent a number.
 
 ## Retention
 
@@ -164,10 +179,13 @@ and appends to `analytics_fact_revisions`, exactly as the ADR describes.
 | Cloudflare Web Analytics (at source) | 6 months |
 | Analytics Engine (at source) | 3 months |
 
-Every scheduled run deletes facts whose bucket closed before the 25-month floor,
-along with their revision audit rows. The dashboard states these windows beside
-the numbers, and a range reaching past them is marked as clamped with its
-readings `outside_retention`.
+Every scheduled run deletes facts whose bucket **starts** before the 25-month
+floor, along with their revision audit rows. Both use the same test on the same
+column, so a fact and its audit history always go together. The read side
+clamps its own start to the same floor, so a deleted fact is one no query could
+have returned. The dashboard states these windows beside the numbers, and a
+range reaching past them is marked as clamped with its readings
+`outside_retention`.
 
 ## Collection
 

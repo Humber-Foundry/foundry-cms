@@ -398,13 +398,17 @@ export function createD1AnalyticsStore(
      * Deletes facts and their revision audit rows once they pass the retention
      * floor. Without this the read side clamps a range it can no longer honour
      * while the rows stay in D1, and the revision table grows without limit.
+     *
+     * Both statements test `bucket_start_utc`, so a fact and its audit rows
+     * always go together. The read side clamps its own start to the same
+     * floor, so a fact deleted here is one no query could have returned.
      */
     async purgeExpiredFacts({ before }) {
       const [factResult, revisionResult] = await database.batch([
         database
           .prepare(
             `DELETE FROM analytics_facts
-             WHERE site_id = ?1 AND bucket_end_utc <= ?2`,
+             WHERE site_id = ?1 AND bucket_start_utc < ?2`,
           )
           .bind(siteId, before),
         database

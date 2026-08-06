@@ -592,3 +592,45 @@ describe("retention purge", () => {
     expect(after?.total).toBe(0);
   });
 });
+
+describe("compaction against a source that reports hours and days", () => {
+  it("removes the hours and leaves the source's own daily fact alone", async () => {
+    await projectWeb({
+      completeThrough: "2026-05-02T00:00:00.000Z",
+      facts: [
+        // The source's own daily total, which is the authoritative one.
+        measurement({
+          bucketStartUtc: "2026-05-01T00:00:00.000Z",
+          bucketEndUtc: "2026-05-02T00:00:00.000Z",
+          value: 11,
+        }),
+        measurement({
+          granularity: "hour",
+          bucketStartUtc: "2026-05-01T00:00:00.000Z",
+          bucketEndUtc: "2026-05-01T01:00:00.000Z",
+          value: 5,
+        }),
+        measurement({
+          granularity: "hour",
+          bucketStartUtc: "2026-05-01T01:00:00.000Z",
+          bucketEndUtc: "2026-05-01T02:00:00.000Z",
+          value: 7,
+        }),
+      ],
+    });
+
+    const outcome = await projection("2026-08-02T00:00:00.000Z").compact({
+      hourlyRetentionDays: 90,
+    });
+
+    expect(outcome).toMatchObject({
+      dailyFactsWritten: 0,
+      daysAlreadyDaily: 1,
+      hourlyFactsRemoved: 2,
+    });
+    const rows = await factRows();
+    expect(rows).toHaveLength(1);
+    // The source's 11, not the hours' 12: recomputing would have disagreed.
+    expect(rows[0]).toMatchObject({ granularity: "day", value: 11 });
+  });
+});

@@ -74,6 +74,9 @@ const hourlyRetentionDays = 90;
 /** Fifty campaigns a page, so one run reads at most a thousand campaigns. */
 const providerMaximumPagesPerRun = 20;
 
+/** 90 days plus one week of slack, so the day-90 poll always happens. */
+const widestProviderPollDays = 97;
+
 /** Our own contract failures are bugs, not source outages. */
 const contractErrorNames = new Set([
   "AnalyticsProjectionError",
@@ -107,12 +110,6 @@ export function isSourceDue({
 }
 
 /**
- * The published paths each content item owned over time. Route history is not
- * yet persisted, so the current published definition is treated as having
- * always owned its paths; a later route change will need a recorded history to
- * keep two content items' traffic apart.
- */
-/**
  * How far back a provider run asks for changed campaigns.
  *
  * ADR-0003 asks for three bands: poll recently sent campaigns often for 72
@@ -120,12 +117,15 @@ export function isSourceDue({
  * from the last successful run rather than from a stored schedule, so the
  * projector needs no extra state to keep its place:
  *
- * - a different UTC week from the last success — the 90-day sweep
+ * - a different UTC week from the last success — the widest sweep
  * - a different UTC day — the 30-day sweep
  * - otherwise — the 72-hour band every scheduled run covers
  *
- * A campaign older than 90 days is never asked for again. Its facts are
- * already projected and the provider no longer revises them.
+ * The widest sweep asks for 97 days rather than 90. A weekly sweep bounded at
+ * exactly 90 would last see a campaign at about day 83 and never at 90, so the
+ * window carries one week of slack to guarantee the day-90 reconciliation the
+ * ADR asks for. Past that a campaign is never asked for again: its facts are
+ * projected and the provider no longer revises them.
  */
 export function providerPollWindowDays({
   lastSuccessAt,
@@ -134,8 +134,10 @@ export function providerPollWindowDays({
   lastSuccessAt: string | null;
   now: string;
 }): number {
-  if (lastSuccessAt === null) return 90;
-  if (utcWeekKey(lastSuccessAt) !== utcWeekKey(now)) return 90;
+  if (lastSuccessAt === null) return widestProviderPollDays;
+  if (utcWeekKey(lastSuccessAt) !== utcWeekKey(now)) {
+    return widestProviderPollDays;
+  }
   if (lastSuccessAt.slice(0, 10) !== now.slice(0, 10)) return 30;
   return 3;
 }
@@ -200,6 +202,12 @@ async function listChangedCampaignSnapshots({
   return snapshots;
 }
 
+/**
+ * The published paths each content item owned over time. Route history is not
+ * stored yet, so the current published definition is treated as having always
+ * owned its paths. A later route change will need a stored history to keep two
+ * content items' traffic apart.
+ */
 export function currentRouteHistory(): ReadonlyArray<PublishedRouteHistoryEntry> {
   return [
     {
@@ -247,7 +255,9 @@ export async function runScheduledAnalyticsProjection(
     sourceName: string;
     definitionVersion: number;
     sourceMetric: string;
-    collect: () => Promise<ReadonlyArray<AnalyticsFactMeasurement>>;
+    collect: (
+      state: AnalyticsSourceState | null,
+    ) => Promise<ReadonlyArray<AnalyticsFactMeasurement>>;
     /** How far this source can honestly claim to have reported. */
     completeThrough: string;
     configured: boolean;
@@ -267,7 +277,7 @@ export async function runScheduledAnalyticsProjection(
       return;
     }
     try {
-      const facts = await collect();
+      const facts = await collect(state);
       await projection.project({
         source,
         sourceName,
@@ -394,7 +404,7 @@ export async function runScheduledAnalyticsProjection(
     sourceMetric: "campaign_report",
     completeThrough: observedAt,
     configured: brevoApiKey !== "",
-    collect: async () => {
+    collect: async (providerState) => {
       const campaignIdByProvider = await ownedProviderCampaigns(
         database,
         siteId,
@@ -404,10 +414,6 @@ export async function runScheduledAnalyticsProjection(
         campaignIdForProviderCampaign: (providerCampaignId) =>
           campaignIdByProvider.get(providerCampaignId) ?? null,
         now,
-      });
-      const providerState = await store.findCurrentSourceState({
-        source: "provider",
-        sourceName: brevoAnalyticsSourceName,
       });
       const windowDays = providerPollWindowDays({
         lastSuccessAt: providerState?.lastSuccessAt ?? null,

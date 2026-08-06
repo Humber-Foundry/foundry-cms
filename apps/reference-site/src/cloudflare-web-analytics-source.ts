@@ -1,6 +1,10 @@
 import "server-only";
 
-import type { AnalyticsFactMeasurement } from "@foundry/application";
+import {
+  analyticsCompositeKey,
+  splitAnalyticsCompositeKey,
+  type AnalyticsFactMeasurement,
+} from "@foundry/application";
 
 /**
  * Cloudflare Web Analytics is the traffic authority. Foundry imports only the
@@ -215,12 +219,17 @@ export function normalizeCloudflareWebAnalytics({
     const { bucketStartUtc } = utcDayBucket(date);
     const contentId = contentIdForPath(path, bucketStartUtc, routeHistory);
     if (contentId !== null) {
-      add(contentViews, `${date} ${contentId}`, group.count, sampleInterval);
+      add(
+        contentViews,
+        analyticsCompositeKey([date, contentId]),
+        group.count,
+        sampleInterval,
+      );
     }
     const referrer = normalizeReferrer(group.dimensions.refererHost);
     add(
       referrerViews,
-      `${date} ${referrer.key} ${referrer.value}`,
+      analyticsCompositeKey([date, referrer.key, referrer.value]),
       group.count,
       sampleInterval,
     );
@@ -266,7 +275,7 @@ export function normalizeCloudflareWebAnalytics({
   }
 
   for (const [key, total] of contentViews) {
-    const [date, contentId] = key.split(" ");
+    const [date, contentId] = splitAnalyticsCompositeKey(key);
     measurements.push({
       metricKey: "content.page_views",
       ...utcDayBucket(date),
@@ -283,7 +292,8 @@ export function normalizeCloudflareWebAnalytics({
   }
 
   for (const [key, total] of referrerViews) {
-    const [date, dimensionKey, dimensionValue] = key.split(" ");
+    const [date, dimensionKey, dimensionValue] =
+      splitAnalyticsCompositeKey(key);
     measurements.push({
       metricKey: "web.page_views",
       ...utcDayBucket(date),
