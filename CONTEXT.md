@@ -160,14 +160,18 @@ never a provider message or a credential.
 "fewer than 5". A business object's own total is still reported exactly.
 
 **Compaction** — Rolling closed hourly facts into one daily fact after 90 days.
-A day whose hours span a definition change, or that mixes measured and
-unavailable hours, is left alone and the skip is logged.
+Where the source already wrote that day's fact, compaction removes the hours
+and keeps the source's own total. A day whose hours span a definition change,
+or that mixes measured and unavailable hours, is left alone and the skip is
+logged.
 
 **Retention floor** — The instant, 25 months back, before which aggregate facts
 and their revision audit rows are deleted on each scheduled run.
 
 **Poll band** — How far back a provider run asks for changed campaigns: 72
-hours on every run, 30 days once a day, 90 days once a week.
+hours on every run, 30 days once a day, 97 days once a week. The widest band
+carries a week of slack past 90 days so a campaign's final reconciliation
+lands at or after day 90.
 
 ## Actors
 

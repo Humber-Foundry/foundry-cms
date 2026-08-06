@@ -634,3 +634,50 @@ describe("compaction against a source that reports hours and days", () => {
     expect(rows[0]).toMatchObject({ granularity: "day", value: 11 });
   });
 });
+
+describe("the retention boundary", () => {
+  /**
+   * A floor lands at an instant, not at midnight, so it can fall inside a
+   * bucket. That is where the two DELETE statements used to disagree: the
+   * fact was kept because its bucket had not closed, while its audit rows
+   * were deleted because the bucket had started. Both now test the same
+   * column, so the fact and its audit always share one fate.
+   */
+  async function revisionCount() {
+    const row = await database
+      .prepare("SELECT COUNT(*) AS total FROM analytics_fact_revisions")
+      .first<{ total: number }>();
+    return row?.total ?? 0;
+  }
+
+  beforeEach(async () => {
+    // Two runs against one fact, so a revision audit row exists for it.
+    await projectWeb();
+    await projectWeb({ revision: 2, facts: [measurement({ value: 240 })] });
+    expect(await revisionCount()).toBe(1);
+  });
+
+  it("removes a fact and its audit together when the floor is inside its bucket", async () => {
+    // 25 months before this instant is 2026-08-01T12:30Z, which falls inside
+    // the fact's 2026-08-01 bucket.
+    const outcome = await projection("2028-09-01T12:30:00.000Z").purge({
+      aggregateFactMonths: 25,
+    });
+
+    expect(outcome).toMatchObject({ factsRemoved: 1, revisionsRemoved: 1 });
+    expect(await factRows()).toHaveLength(0);
+    expect(await revisionCount()).toBe(0);
+  });
+
+  it("keeps a fact and its audit together when the floor is just before it", async () => {
+    // 25 months before this instant is 2026-07-31T12:30Z, just before the
+    // fact's bucket starts.
+    const outcome = await projection("2028-08-31T12:30:00.000Z").purge({
+      aggregateFactMonths: 25,
+    });
+
+    expect(outcome).toMatchObject({ factsRemoved: 0, revisionsRemoved: 0 });
+    expect(await factRows()).toHaveLength(1);
+    expect(await revisionCount()).toBe(1);
+  });
+});

@@ -1,8 +1,9 @@
 import "server-only";
 
-import type {
-  AnalyticsFactMeasurement,
-  AnalyticsMetricKey,
+import {
+  analyticsCompositeKey,
+  type AnalyticsFactMeasurement,
+  type AnalyticsMetricKey,
 } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
 
@@ -222,7 +223,12 @@ export function createD1OperationalAnalyticsSource(
       ]);
 
       const lookup = (rows: ReadonlyArray<CountRow>) =>
-        new Map(rows.map((row) => [`${row.day} ${row.subject}`, row.total]));
+        new Map(
+          rows.map((row) => [
+            analyticsCompositeKey([row.day, row.subject]),
+            row.total,
+          ]),
+        );
       const acceptedByKey = lookup(accepted);
       const blockedByKey = lookup(blocked);
       const deliveredByKey = lookup(delivered);
@@ -232,7 +238,7 @@ export function createD1OperationalAnalyticsSource(
 
       for (const day of days) {
         for (const formId of formIds) {
-          const key = `${day} ${formId}`;
+          const key = analyticsCompositeKey([day, formId]);
           measurements.push(
             countMeasurement({
               metricKey: "form.submissions_accepted",

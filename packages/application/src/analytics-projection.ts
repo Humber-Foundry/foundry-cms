@@ -614,10 +614,10 @@ export function createAnalyticsProjection({
     },
 
     /**
-     * Removes facts whose bucket closed before the retention floor, along with
-     * their revision audit rows. ADR-0003 keeps aggregate facts for 25 months;
-     * the read side clamps a range beyond that, and this is what makes the
-     * clamp true of the stored data as well.
+     * Removes facts whose bucket starts before the retention floor, along with
+     * their revision audit rows. ADR-0003 keeps aggregate facts for 25 months.
+     * The read side clamps its own start to the same floor, so this deletes
+     * only what no query could have returned.
      */
     async purge({
       aggregateFactMonths,

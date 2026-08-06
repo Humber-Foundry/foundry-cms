@@ -83,16 +83,11 @@ export function defaultReportingRange(
  * owned by the application would be thrown away before it was read. This one
  * belongs to the Worker isolate, so an answer survives between requests for
  * as long as ADR-0003 allows.
+ *
+ * One cache is enough: this app serves one site definition, and the site ID is
+ * part of every cache key regardless.
  */
-const queryCachesBySite = new Map<string, AnalyticsQueryCache>();
-
-function queryCacheFor(siteId: string): AnalyticsQueryCache {
-  const existing = queryCachesBySite.get(siteId);
-  if (existing !== undefined) return existing;
-  const created = createAnalyticsQueryCache();
-  queryCachesBySite.set(siteId, created);
-  return created;
-}
+const queryCache: AnalyticsQueryCache = createAnalyticsQueryCache();
 
 export async function createAnalyticsDashboardContext(
   humanContext: HumanAccessRequestContext,
@@ -112,7 +107,7 @@ export async function createAnalyticsDashboardContext(
     store: createD1AnalyticsStore(database, siteId),
     reportingTimeZone: defaultReportingTimeZone,
     now,
-    cache: queryCacheFor(siteId),
+    cache: queryCache,
     authorize: (actor, capability) =>
       humanContext.application.queries.requireCapability({
         actor,
