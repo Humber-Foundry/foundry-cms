@@ -71,7 +71,8 @@ export type HumanCapability =
   | "forms.delivery.manage"
   | "forms.data.manage"
   | "campaign.test.confirm"
-  | "campaign.bulk.authorize";
+  | "campaign.bulk.authorize"
+  | "analytics.read";
 
 export type ExternalIdentityBinding = Readonly<{
   issuer: string;
@@ -308,8 +309,14 @@ const roleCapabilities: Readonly<
     "forms.data.manage",
     "campaign.test.confirm",
     "campaign.bulk.authorize",
+    "analytics.read",
   ]),
-  editor: new Set(["dashboard.view", "content.write", "forms.review"]),
+  editor: new Set([
+    "dashboard.view",
+    "content.write",
+    "forms.review",
+    "analytics.read",
+  ]),
 };
 const invitationLifetimeMs = 7 * 24 * 60 * 60 * 1_000;
 const maximumEligibilitySyncAttempts = 3;

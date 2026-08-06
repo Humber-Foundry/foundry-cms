@@ -125,6 +125,40 @@ authorizes a second one.
 **Suppression** — A durable negative subscriber state that blocks delivery.
 Routine synchronization never reverses it.
 
+## Analytics
+
+**Analytics fact** — One aggregate measurement of a product object over one
+time bucket, from one source. It describes a page, form, campaign or the site
+itself; it never describes a person, a session or a request.
+
+**Metric key** — The stable product name of a measurement, such as
+`form.submissions_accepted`. Provider and platform field names are stored as
+source metadata rather than leaking into a query.
+
+**Quality** — What kind of number this is: `exact` when the CMS transaction
+recorded it, through `estimated`, `best_effort` and `provider_reported`, to
+`unreliable` for a signal like a reported open. Quality travels with every
+value.
+
+**Availability** — Whether a measurement exists. An absent measurement is
+`unavailable` with a reason, never a zero, so a source outage cannot read as a
+drop in traffic.
+
+**Comparability signature** — Everything that must match before two numbers
+mean the same thing: metric, source, source name, provider metric and
+definition version. Values that do not share one are shown side by side and
+never added.
+
+**Complete through** — The instant a source has fully reported. A bucket
+extending past it is in progress, not low.
+
+**Source state** — One source's status, last attempt, last success,
+completeness and retry time. It carries a stable, non-secret error code and
+never a provider message or credential.
+
+**Small-cell suppression** — Secondary breakdown rows below five are reported
+as "fewer than 5". A business object's own total is still reported exactly.
+
 ## Actors
 
 **Owner** — A human who may authorize bulk sending and perform all Editor
@@ -203,3 +237,4 @@ The value is never part of the record.
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)
+- [Privacy-first aggregate analytics](docs/architecture/privacy-first-aggregate-analytics.md)

@@ -11,8 +11,10 @@ import type {
   SuspectedSpamSubmission,
 } from "@foundry/application";
 import type { SiteDefinition } from "@foundry/site-definition";
+import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime";
 import type { StaleRecoveryEdit } from "../src/content-editor-recovery";
 
+import { AnalyticsDashboard } from "./analytics-dashboard";
 import { ContentWorkspaceStarter } from "./content-workspace-starter";
 import { DashboardControls } from "./dashboard-controls";
 import { MemberAccessControls } from "./member-access-controls";
@@ -57,6 +59,7 @@ export function DashboardShell({
   campaignPostArtifacts,
   campaigns,
   mcpConnections,
+  analytics,
 }: {
   definition: SiteDefinition;
   currentMembership: HumanMembership;
@@ -82,6 +85,7 @@ export function DashboardShell({
     Readonly<{ campaign: Campaign; revision: CampaignRevision }>
   >;
   mcpConnections: ReadonlyArray<McpConnectionSummary>;
+  analytics: AnalyticsDashboardData | null;
 }) {
   const activeWorkspaceUrl =
     contentRevision === undefined
@@ -115,7 +119,7 @@ export function DashboardShell({
           <a href="#media-heading">Media</a>
           <p className="nav-label">Operate</p>
           <span aria-disabled="true">Forms</span>
-          <span aria-disabled="true">Analytics</span>
+          <a href="#analytics-heading">Analytics</a>
         </nav>
         <main className="dashboard-main">
           <div className="notice" role="status">
@@ -209,6 +213,7 @@ export function DashboardShell({
               suspectedSpam={suspectedSpam}
             />
           </section>
+          <AnalyticsDashboard analytics={analytics} />
           <section aria-labelledby="form-delivery-health">
             <div className="dashboard-section-heading">
               <div>

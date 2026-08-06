@@ -39,6 +39,12 @@
       }
     }
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "FOUNDRY_INTERACTIONS",
+      "dataset": "foundry_reference_interactions"
+    }
+  ],
   "version_metadata": {
     "binding": "CF_VERSION_METADATA"
   },
@@ -62,7 +68,12 @@
     "FOUNDRY_CAMPAIGN_LEGAL_NAME": "Humber Foundry",
     "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS": "123 Harbour Street, Victoria, BC",
     "FOUNDRY_CAMPAIGN_CONTACT_URL": "https://foundry.tinyskiff.xyz/contact",
-    "FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL": "https://foundry.tinyskiff.xyz/newsletter/unsubscribe"
+    "FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL": "https://foundry.tinyskiff.xyz/newsletter/unsubscribe",
+    "FOUNDRY_ANALYTICS_ENGINE_DATASET": "foundry_reference_interactions",
+    // Set during guided provisioning. Until both this and the
+    // FOUNDRY_ANALYTICS_API_TOKEN secret exist, the Cloudflare sources report
+    // themselves as not configured rather than as zero traffic.
+    "FOUNDRY_CLOUDFLARE_WEB_ANALYTICS_SITE_TAG": ""
   },
   "observability": {
     "enabled": true
