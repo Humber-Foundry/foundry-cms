@@ -65,7 +65,7 @@ describe("loading the dashboard", () => {
     expect(data).toBeNull();
   });
 
-  it("lets a privacy breach reach the error boundary instead of hiding it", async () => {
+  it("lets a privacy breach reach the error boundary", async () => {
     await expect(
       loadAnalyticsDashboard(
         authorizedContext(),

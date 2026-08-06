@@ -630,18 +630,19 @@ describe("compaction against a source that reports hours and days", () => {
     });
     const rows = await factRows();
     expect(rows).toHaveLength(1);
-    // The source's 11, not the hours' 12: recomputing would have disagreed.
+    // The stored value stays 11, the source's own daily total. Recomputing
+    // it from the hours would have given 12.
     expect(rows[0]).toMatchObject({ granularity: "day", value: 11 });
   });
 });
 
 describe("the retention boundary", () => {
   /**
-   * A floor lands at an instant, not at midnight, so it can fall inside a
-   * bucket. That is where the two DELETE statements used to disagree: the
-   * fact was kept because its bucket had not closed, while its audit rows
-   * were deleted because the bucket had started. Both now test the same
-   * column, so the fact and its audit always share one fate.
+   * The retention floor is an instant, so it can fall inside a bucket. That
+   * is where the two DELETE statements used to disagree: the fact was kept
+   * because its bucket had not closed, while its audit rows were deleted
+   * because the bucket had started. Both now test `bucket_start_utc`, so a
+   * fact and its audit rows are always kept together or deleted together.
    */
   async function revisionCount() {
     const row = await database

@@ -273,7 +273,7 @@ describe("every reading carries its interpretation", () => {
   });
 });
 
-describe("missing measurements are unavailable, never zero", () => {
+describe("missing measurements report an unavailable state", () => {
   it("reports an unmeasured metric as unavailable", async () => {
     const overview = await application().queries.overview({
       actor,
@@ -286,7 +286,7 @@ describe("missing measurements are unavailable, never zero", () => {
     ).toEqual({ state: "unavailable", reason: "not_measured" });
   });
 
-  it("blames an unavailable source rather than the measurement", async () => {
+  it("attributes the gap to the unavailable source", async () => {
     sourceStates = [
       sourceState({ status: "unavailable", errorCode: "token_revoked" }),
     ];
@@ -500,7 +500,7 @@ describe("forms", () => {
 });
 
 describe("audience", () => {
-  it("reports the latest active snapshot rather than adding daily snapshots", async () => {
+  it("reports the latest active snapshot and adds no daily snapshots", async () => {
     facts = [
       fact({
         metricKey: "subscriber.active",

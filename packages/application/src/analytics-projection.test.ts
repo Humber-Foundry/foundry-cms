@@ -256,7 +256,7 @@ describe("boundary guards", () => {
 });
 
 describe("missing measurements", () => {
-  it("stores an omitted provider metric as unavailable, never as zero", async () => {
+  it("stores an omitted provider metric with an unavailable state", async () => {
     await projection().project(
       runInput({
         source: "provider",
@@ -320,7 +320,7 @@ describe("revisions and late data", () => {
     expect(harness.revisions).toHaveLength(0);
   });
 
-  it("ignores a stale revision rather than resurrecting an old value", async () => {
+  it("ignores a stale revision and keeps the newer value", async () => {
     await projection().project(runInput({ revision: 4 }));
     await projection().project(
       runInput({ revision: 3, facts: [webFact({ value: 9 })] }),

@@ -187,7 +187,7 @@ describe("projecting committed operational records", () => {
     expect(days.every((entry) => entry.unavailableReason === null)).toBe(true);
   });
 
-  it("counts consent and suppression transitions, not contact records", async () => {
+  it("counts consent and suppression transitions", async () => {
     await recordLedgerEvent("consent_recorded", "2026-08-01T09:00:00.000Z");
     await recordLedgerEvent("unsubscribed", "2026-08-01T10:00:00.000Z");
     await recordLedgerEvent("complained", "2026-08-02T10:00:00.000Z");

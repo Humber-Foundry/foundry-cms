@@ -63,7 +63,7 @@ describe("canonical analytics vocabulary", () => {
     });
   });
 
-  it("measures Web Vitals in their own units rather than as counts", () => {
+  it("measures Web Vitals in milliseconds and score", () => {
     expect(analyticsMetricDefinition("web.vitals.lcp_p75").unit).toBe(
       "milliseconds",
     );
@@ -208,7 +208,7 @@ describe("small-cell suppression", () => {
     expect(presentSecondaryCell(5)).toEqual({ state: "available", value: 5 });
   });
 
-  it("keeps a genuinely absent measurement unavailable rather than zero", () => {
+  it("keeps an absent measurement unavailable", () => {
     expect(presentSecondaryCell(null)).toEqual({
       state: "unavailable",
       reason: "not_measured",
@@ -258,7 +258,7 @@ describe("comparability", () => {
     ).toThrow(AnalyticsComparabilityError);
   });
 
-  it("reports an empty selection as absent rather than as zero", () => {
+  it("reports an empty selection as absent", () => {
     expect(summableSeries([])).toBeNull();
   });
 

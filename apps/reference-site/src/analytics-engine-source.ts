@@ -3,10 +3,12 @@ import "server-only";
 import type { AnalyticsFactMeasurement } from "@foundry/application";
 
 /**
- * Workers Analytics Engine fills the one gap Web Analytics cannot: anonymous
- * counts of interactions the CMS defines. It is deliberately best-effort and
- * never authoritative — losing it costs an estimate, not an accepted form, a
- * consent record or a send.
+ * Workers Analytics Engine supplies the one thing Web Analytics cannot:
+ * anonymous counts of the interactions the CMS defines.
+ *
+ * It is best-effort. A dropped event costs an estimate. It cannot cost an
+ * accepted form, a consent record or a send, because none of those depends on
+ * it.
  *
  * Contract: https://developers.cloudflare.com/analytics/analytics-engine/sql-api/
  */
@@ -144,9 +146,9 @@ const instantPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
 
 /**
- * The Analytics Engine SQL API takes a statement rather than bound
- * parameters, so every interpolated value is validated against a strict shape
- * first and the statement is refused otherwise.
+ * The Analytics Engine SQL API takes a statement, and offers no bound
+ * parameters. Every interpolated value is therefore checked against a strict
+ * pattern first, and the statement is refused when one fails.
  */
 export function interactionRollupSql({
   dataset,

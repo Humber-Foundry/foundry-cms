@@ -171,9 +171,9 @@ function add(
 /**
  * Normalizes one Web Analytics response into canonical measurements.
  *
- * Sampling is carried rather than hidden: a sampled response stays `estimated`
- * and keeps the interval the platform reported, so a later reader can tell an
- * estimate from an exact count.
+ * A sampled response keeps the quality `estimated` and the sampling interval
+ * the platform reported. Both travel with the value, so a later reader can
+ * tell an estimate from an exact count.
  */
 export function normalizeCloudflareWebAnalytics({
   response,

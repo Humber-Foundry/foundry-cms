@@ -72,7 +72,7 @@
     "FOUNDRY_ANALYTICS_ENGINE_DATASET": "foundry_reference_interactions",
     // Set during guided provisioning. Until both this and the
     // FOUNDRY_ANALYTICS_API_TOKEN secret exist, the Cloudflare sources report
-    // themselves as not configured rather than as zero traffic.
+    // themselves as not configured, and no source reports zero traffic.
     "FOUNDRY_CLOUDFLARE_WEB_ANALYTICS_SITE_TAG": ""
   },
   "observability": {

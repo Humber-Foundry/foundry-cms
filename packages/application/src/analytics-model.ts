@@ -1,11 +1,12 @@
 /**
- * The canonical aggregate vocabulary shared by the analytics projectors, the
- * `/dash` query service and every later analytics surface.
+ * The aggregate vocabulary shared by the analytics projectors, the `/dash`
+ * query service and every later analytics surface.
  *
- * ADR-0003 makes one rule structural rather than advisory: an analytics fact
- * describes a product object over a time bucket, never a person. The guards in
- * this module are the boundary that keeps that true, so a projector cannot
- * quietly widen the read model by writing a field nobody reviewed.
+ * ADR-0003 states one rule that this module enforces at runtime: an analytics
+ * fact describes a product object over a time bucket. It never describes a
+ * person. `assertAggregateAnalyticsPayload` checks every payload against that
+ * rule before it is written, so a projector cannot add an unreviewed field to
+ * the read model.
  */
 
 export const analyticsSchemaVersion = "foundry.analytics.v1" as const;
@@ -86,7 +87,7 @@ export type AnalyticsMetricDefinition = Readonly<{
    * instead.
    */
   aggregation: "sum" | "latest";
-  /** Campaign measurements are bucketed per send, not per clock interval. */
+  /** Each send defines one campaign measurement bucket. */
   bucketGranularity: "range" | "campaign";
   /**
    * Whether the measurement can legitimately fall below zero. Net growth can;
@@ -98,8 +99,9 @@ export type AnalyticsMetricDefinition = Readonly<{
 }>;
 
 /**
- * How long after a bucket closes each source is normally expected to have
- * reported it. Exceeding this is visible as delay rather than as a low number.
+ * How long after a bucket closes each source is expected to have reported it.
+ * A source that exceeds this is labelled `delayed`, so the reader sees the
+ * delay beside the number.
  */
 export const analyticsSourceExpectedLagSeconds: Readonly<
   Record<AnalyticsSource, number>
@@ -113,9 +115,9 @@ export const analyticsSourceExpectedLagSeconds: Readonly<
 export const analyticsDaySeconds = 86_400;
 
 /**
- * Joins parts into one Map key. The separator is the ASCII unit separator,
- * which no metric key, subject ID, referrer host or instant may contain, so a
- * value can never split a key open.
+ * Joins parts into one Map key. The separator is the ASCII unit separator. No
+ * metric key, subject ID, referrer host or instant may contain that character,
+ * so a value cannot split a key.
  */
 const compositeKeySeparator = "\u001f";
 
@@ -153,9 +155,9 @@ export function earliestInstant(instants: ReadonlyArray<string>): string {
 }
 
 /**
- * Steps back whole calendar months, clamping a day the shorter month does not
- * have. Retention floors are stated in months, so they cannot use a fixed
- * number of days.
+ * Steps back whole calendar months. A day the shorter month lacks is clamped
+ * to that month's last day. Retention floors are stated in months, so a fixed
+ * number of days would not answer them.
  */
 export function subtractUtcMonths(instant: string, months: number): string {
   const date = new Date(Date.parse(instant));
@@ -599,10 +601,11 @@ function prohibitedValue(value: string): boolean {
 }
 
 /**
- * Fails closed on anything that would turn an aggregate into a person-level
- * record. Projectors call this on the whole normalized payload before it
- * reaches the store, and provider adapters call it on the snapshot they
- * return, so a leak is refused at the boundary rather than reviewed later.
+ * Throws on anything that would turn an aggregate into a person-level record.
+ *
+ * Projectors call this on the whole normalized payload before it reaches the
+ * store, and provider adapters call it on the snapshot they return. A leak
+ * therefore fails at the point it enters the system.
  */
 export function assertAggregateAnalyticsPayload(
   payload: unknown,
@@ -679,11 +682,11 @@ export type AnalyticsUnavailableReason =
   | "not_supported";
 
 /**
- * The reasons that mean the source failed to deliver something it was asked
- * for. The other reasons are normal: `not_measured` is what a browser that
- * reports no Web Vitals looks like, and `not_supported` is a capability the
- * provider never claimed. Treating those as gaps would leave a healthy source
- * reporting `partial` forever.
+ * The reasons that mean the source failed to deliver a measurement it was
+ * asked for. The remaining reasons are expected: a browser that reports no Web
+ * Vitals gives `not_measured`, and a capability the provider never claimed
+ * gives `not_supported`. Counting those as failures would leave a healthy
+ * source reporting `partial` for ever.
  */
 const sourceGapReasons: ReadonlySet<AnalyticsUnavailableReason> = new Set([
   "provider_omitted",
@@ -768,8 +771,8 @@ export function comparabilitySignature(
 
 /**
  * Adds a series only when every reading shares one measurement definition.
- * Returns `null` for an empty selection so the caller reports it as
- * unavailable rather than as a measured zero.
+ * An empty selection returns `null`, which the caller reports as unavailable.
+ * Returning `0` would present an absence as a measured value.
  */
 export function summableSeries(
   readings: ReadonlyArray<AnalyticsMeasurementIdentity & { value: number }>,
@@ -794,8 +797,8 @@ const staleFloorSeconds = 24 * 60 * 60;
 
 /**
  * Describes how much a reading can be trusted right now. A bucket that has not
- * closed is "in progress" rather than low; a source that missed its expected
- * lag is visibly behind rather than silently old.
+ * closed is labelled `in_progress`. A source that has exceeded its expected
+ * lag is labelled `delayed`. Both labels reach the reader with the number.
  */
 export function readingFreshness({
   completeThrough,

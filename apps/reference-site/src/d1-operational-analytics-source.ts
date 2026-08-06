@@ -120,8 +120,9 @@ export function createD1OperationalAnalyticsSource(
 
     /**
      * Every D1 metric is zero-filled across the window. A day with no
-     * submissions is a measured zero, not missing data, and saying so is what
-     * lets the dashboard treat a genuinely absent source differently.
+     * submissions therefore records a measured zero, which the dashboard
+     * shows as the real count it is. A source that reported nothing at all
+     * records `unavailable`, and the dashboard shows that differently.
      */
     async measurements({
       startUtc,

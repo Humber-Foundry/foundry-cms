@@ -187,7 +187,7 @@ export function createD1AnalyticsStore(
     async findFacts(identities) {
       if (identities.length === 0) return [];
       // SQLite row values let one indexed statement fetch the exact identity
-      // tuples a projector run touches, rather than scanning the site.
+      // tuples a projector run touches. The alternative is a site-wide scan.
       const chunks: Array<typeof identities> = [];
       for (
         let start = 0;

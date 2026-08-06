@@ -1,10 +1,11 @@
 /**
- * The provider-neutral analytics boundary for newsletter delivery.
+ * The provider-neutral analytics contract for newsletter delivery.
  *
- * Delivery adapters already carry person-level data for compliance work. This
- * boundary is deliberately separate: an analytics snapshot declares what each
- * provider metric means, and it may not carry an address, contact, message or
- * raw event. Leakage is refused here rather than filtered downstream.
+ * Delivery adapters carry person-level data for compliance work. This contract
+ * is separate from those adapters. An analytics snapshot states what each
+ * provider metric means, and it may hold no address, contact, message or raw
+ * event. `assertAggregateAnalyticsPayload` checks the snapshot here, so a leak
+ * fails at the adapter and never reaches a downstream filter.
  */
 
 import {
@@ -44,7 +45,7 @@ export type AnalyticsCapabilities = Readonly<{
 }>;
 
 export type CampaignAnalyticsSnapshot = Readonly<{
-  /** The stable Foundry campaign identity, never a provider contact record. */
+  /** The Foundry campaign identity. No provider contact record appears here. */
   campaignId: string;
   providerCampaignId: string;
   observedAt: string;
@@ -116,9 +117,9 @@ export class AnalyticsProviderContractError extends Error {
 /**
  * Turns one provider snapshot into canonical measurements.
  *
- * A metric the provider does not support becomes an explicit `unavailable`
- * measurement so the dashboard can say so, rather than an absent row that
- * would read as a zero once totals are summed.
+ * A metric the provider does not support becomes an `unavailable` measurement
+ * with a reason, which the dashboard shows as such. An absent row would
+ * instead be summed into a total as a zero.
  */
 export function campaignAnalyticsMeasurements({
   snapshot,

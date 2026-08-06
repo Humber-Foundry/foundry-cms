@@ -39,7 +39,7 @@ export type AnalyticsEngineDataset = Readonly<{
 
 /**
  * Validates one reported interaction against the public objects this site
- * actually publishes. An unknown subject is refused rather than counted, which
+ * actually publishes. An unknown subject is refused and not counted, which
  * keeps the dataset's cardinality bounded to real CMS objects.
  */
 export function collectInteraction({
@@ -58,7 +58,7 @@ export function collectInteraction({
   if (typeof kind !== "string" || typeof subjectId !== "string") {
     return { outcome: "rejected", code: "payload_invalid" };
   }
-  // Everything except these two fields is discarded rather than stored.
+  // These two fields are read. Everything else about the request is dropped.
   if (!isInteractionKind(kind)) {
     return { outcome: "rejected", code: "event_kind_not_allowed" };
   }

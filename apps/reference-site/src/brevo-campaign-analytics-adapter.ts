@@ -170,8 +170,8 @@ export function brevoCampaignSnapshot({
       "campaign.unique_opens_reported": metricValue(statistics.uniqueViews),
     },
   };
-  // Fail closed at the boundary rather than filtering downstream: an adapter
-  // that starts returning contact rows must break here, loudly.
+  // Check the snapshot here, where it is built. An adapter that starts
+  // returning contact rows then throws at this line.
   assertAggregateAnalyticsPayload(snapshot);
   return snapshot;
 }

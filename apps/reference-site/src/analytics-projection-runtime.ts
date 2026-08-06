@@ -65,8 +65,8 @@ const refreshIntervalSeconds: Readonly<Record<AnalyticsSource, number>> =
   });
 
 /**
- * Web Analytics and Analytics Engine revise recent buckets as late data lands,
- * so every run re-reads the previous week rather than only the newest day.
+ * Web Analytics and Analytics Engine revise recent buckets when late data
+ * arrives, so every run re-reads the previous seven days.
  */
 const externalRefreshDays = 7;
 const hourlyRetentionDays = 90;
@@ -77,7 +77,7 @@ const providerMaximumPagesPerRun = 20;
 /** 90 days plus one week of slack, so the day-90 poll always happens. */
 const widestProviderPollDays = 97;
 
-/** Our own contract failures are bugs, not source outages. */
+/** These errors mean a normalizer broke its own contract. They are our bugs. */
 const contractErrorNames = new Set([
   "AnalyticsProjectionError",
   "AnalyticsPrivacyViolationError",
@@ -114,18 +114,18 @@ export function isSourceDue({
  *
  * ADR-0003 asks for three bands: poll recently sent campaigns often for 72
  * hours, daily through 30 days, and once more at 90 days. The band is chosen
- * from the last successful run rather than from a stored schedule, so the
- * projector needs no extra state to keep its place:
+ * from the last successful run, so the projector keeps its place without any
+ * extra stored state:
  *
  * - a different UTC week from the last success — the widest sweep
  * - a different UTC day — the 30-day sweep
  * - otherwise — the 72-hour band every scheduled run covers
  *
- * The widest sweep asks for 97 days rather than 90. A weekly sweep bounded at
- * exactly 90 would last see a campaign at about day 83 and never at 90, so the
- * window carries one week of slack to guarantee the day-90 reconciliation the
- * ADR asks for. Past that a campaign is never asked for again: its facts are
- * projected and the provider no longer revises them.
+ * The widest sweep asks for 97 days. A weekly sweep bounded at exactly 90
+ * would last see a campaign at about day 83, so the extra week guarantees the
+ * day-90 reconciliation the ADR asks for. Past 97 days a campaign is dropped
+ * from the sweep: its facts are projected and the provider stops revising
+ * them.
  */
 export function providerPollWindowDays({
   lastSuccessAt,
@@ -196,8 +196,8 @@ async function listChangedCampaignSnapshots({
     cursor = result.nextCursor;
     if (cursor === null) return snapshots;
   }
-  // A run that stops early is said out loud, so a truncated sweep is never
-  // read as a complete one.
+  // A sweep that stops at the page cap is logged, so its result is not taken
+  // for a complete one.
   console.warn("analytics_provider_pages_capped", { maximumPages, since });
   return snapshots;
 }
@@ -258,7 +258,7 @@ export async function runScheduledAnalyticsProjection(
     collect: (
       state: AnalyticsSourceState | null,
     ) => Promise<ReadonlyArray<AnalyticsFactMeasurement>>;
-    /** How far this source can honestly claim to have reported. */
+    /** The latest instant through which this source has complete data. */
     completeThrough: string;
     configured: boolean;
   }) {
@@ -315,9 +315,9 @@ export async function runScheduledAnalyticsProjection(
     }
   }
 
-  // D1 is the exact source and it is local, so it reports through the current
-  // instant rather than through the last closed day. Today's bucket ends after
-  // that, which is what marks the range "in progress" instead of hiding it.
+  // D1 is exact and local, so it reports through the current instant. Today's
+  // bucket ends after that instant, which is what marks the range in
+  // progress.
   const operational = createD1OperationalAnalyticsSource(database, siteId);
   await projectSource({
     source: "d1",
@@ -355,10 +355,10 @@ export async function runScheduledAnalyticsProjection(
             since: externalWindowStart,
             until: lastClosedDay,
           }),
-          // Web Vitals collection is not shipped; see the "deliberately not
-          // here" section of docs/architecture/privacy-first-aggregate-
-          // analytics.md. The normalizer below handles them once the query
-          // lands, and no metric is invented in the meantime.
+          // Web Vitals collection is not shipped. See "What this does not
+          // do" in docs/architecture/privacy-first-aggregate-analytics.md.
+          // The normalizer below handles them once the query is confirmed.
+          // Until then the three metrics read as unavailable.
           webVitals: [],
         },
         siteId,
@@ -437,8 +437,8 @@ export async function runScheduledAnalyticsProjection(
     compaction.daysSkippedForComparability > 0 ||
     compaction.daysSkippedForMixedAvailability > 0
   ) {
-    // Not silent: a day that could not be merged keeps its hourly facts, and
-    // saying so is what stops "compacted" from implying "complete".
+    // A day that could not be merged keeps its hourly facts. Logging the skip
+    // is what stops "compacted" from being read as "complete".
     console.warn("analytics_compaction_skipped_days", compaction);
   }
 

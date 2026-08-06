@@ -92,7 +92,7 @@ function dashboard(
 }
 
 describe("the analytics panel", () => {
-  it("says the read model is unavailable rather than showing zeros", () => {
+  it("states that the read model is unavailable and shows no numbers", () => {
     const markup = renderToStaticMarkup(
       <AnalyticsDashboard analytics={null} />,
     );
@@ -112,7 +112,7 @@ describe("the analytics panel", () => {
     expect(markup).toContain("Estimated");
   });
 
-  it("names the reason a measurement is missing instead of printing zero", () => {
+  it("names the reason a measurement is missing", () => {
     const markup = renderToStaticMarkup(
       <AnalyticsDashboard
         analytics={dashboard({
@@ -136,7 +136,7 @@ describe("the analytics panel", () => {
     expect(markup).toContain("Source unavailable");
   });
 
-  it("suppresses a small referrer row rather than printing its count", () => {
+  it("suppresses a small referrer row", () => {
     const markup = renderToStaticMarkup(
       <AnalyticsDashboard
         analytics={dashboard({

@@ -133,7 +133,7 @@ describe("Analytics Engine rollups", () => {
     ).toThrow(AnalyticsEngineSourceError);
   });
 
-  it("treats an unavailable query as a failure, not as no interactions", async () => {
+  it("reports an unavailable query as a failure", async () => {
     const fetchImplementation = (async () =>
       new Response("", { status: 503 })) as unknown as typeof fetch;
 

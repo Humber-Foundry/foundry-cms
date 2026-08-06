@@ -79,7 +79,7 @@ describe("normalizing a provider snapshot", () => {
     });
   });
 
-  it("reports an unsupported metric as unavailable rather than absent", () => {
+  it("reports an unsupported metric as an unavailable measurement", () => {
     const measurements = campaignAnalyticsMeasurements({
       snapshot,
       capabilities,

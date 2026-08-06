@@ -1,9 +1,11 @@
 /**
  * The read side of the aggregate projection. `/dash` asks these queries for
- * every number it shows, so the rules that stop a number from being read
- * wrongly — one granularity per interval, unlike measurements never summed,
- * absent data reported as unavailable, small breakdown rows suppressed — live
- * here rather than in a view.
+ * every number it shows.
+ *
+ * Four rules keep a number from being read wrongly, and all four are applied
+ * here so no view has to repeat them: one granularity per interval; unlike
+ * measurements are never added; a missing measurement is reported as
+ * unavailable; breakdown rows below five are suppressed.
  */
 
 import type { SiteId } from "@foundry/site-definition";
@@ -91,8 +93,9 @@ function zoneOffsetMs(instantMs: number, timeZone: string): number {
 }
 
 /**
- * The UTC instant of local midnight. Solved by fixed point rather than by a
- * fixed offset so a daylight-saving day is a real 23- or 25-hour day.
+ * The UTC instant of local midnight, found by fixed-point solve. A fixed
+ * offset would shift a daylight-saving day; this gives its true length of 23
+ * or 25 hours.
  */
 function zonedMidnight(localDate: string, timeZone: string): string {
   if (!localDatePattern.test(localDate)) {
@@ -212,8 +215,9 @@ export type AnalyticsReferrerRow = Readonly<{
   source: AnalyticsSource;
   sourceName: string;
   /**
-   * Present so two web sources reporting the same referrer stay two rows. The
-   * dashboard labels the source only when a referrer appears more than once.
+   * Keeps two web sources reporting the same referrer as two rows. The
+   * dashboard shows the source name only when a referrer appears more than
+   * once.
    */
   comparabilitySignature: string;
 }>;
@@ -423,9 +427,9 @@ function readingValueOrNull(reading: AnalyticsReading): number | null {
 }
 
 /**
- * Page views broken down by referrer. Rows are grouped by referrer *and* by
- * measurement definition, so two web sources reporting the same referrer stay
- * two rows instead of being added into one number that means neither.
+ * Page views broken down by referrer. Rows are grouped by referrer and by
+ * measurement definition. Two web sources reporting the same referrer
+ * therefore produce two rows, each with its own source label.
  */
 function readReferrers(
   scope: ReadingScope,
@@ -449,8 +453,8 @@ function readReferrers(
   return [...groups.values()]
     .map((group) => {
       const first = group[0];
-      // Every fact in the group already shares one signature, so this adds
-      // like with like by construction; `summableSeries` is what proves it.
+      // Every fact in this group shares one comparability signature.
+      // `summableSeries` checks that again before adding the values.
       const total = summableSeries(
         group.map((fact) => ({ ...fact, value: fact.value ?? 0 })),
       );
@@ -527,8 +531,8 @@ const contentVitalMetrics: ReadonlyArray<AnalyticsMetricKey> = Object.freeze([
 
 /**
  * How long a query answer may be reused. A range that is still filling changes
- * as the projector runs, so it is held briefly; a range that has closed cannot
- * change except through a revision, so it is held for an hour.
+ * each time the projector runs, so it is held for five minutes. A range that
+ * has closed changes only through a revision, so it is held for an hour.
  */
 export const analyticsCacheSeconds = Object.freeze({
   currentRange: 300,
@@ -546,10 +550,9 @@ export type AnalyticsQueryCacheEntry = Readonly<{
 /**
  * The store behind the query cache.
  *
- * It is created separately from the application because a request handler
- * builds a fresh application every time it runs. A cache owned by the
- * application would be discarded before it was ever read, so the process that
- * serves the requests holds the cache and passes it in.
+ * A request handler builds a fresh application on every request. A cache owned
+ * by the application would therefore be discarded before it was read. The
+ * process that serves the requests holds this cache and passes it in.
  */
 export type AnalyticsQueryCache = Map<string, AnalyticsQueryCacheEntry>;
 
@@ -558,9 +561,9 @@ export function createAnalyticsQueryCache(): AnalyticsQueryCache {
 }
 
 /**
- * A short, stable digest of the metric registry's definition versions. It goes
- * in every cache key, so redefining a metric cannot serve an answer computed
- * under the old definition.
+ * A short, stable digest of the metric registry's definition versions. Every
+ * cache key includes it, so redefining a metric invalidates the answers
+ * computed under the old definition.
  */
 function metricRegistryDigest(): string {
   let hash = 2_166_136_261;
@@ -590,21 +593,21 @@ export function createAnalyticsQueryApplication<Actor>({
     capability: typeof analyticsReadCapability,
   ): Promise<unknown>;
   /**
-   * Held by the caller so answers survive between requests. Omitting it gives
-   * this application its own cache, which is what a test wants.
+   * Held by the caller so answers persist between requests. When it is
+   * omitted this application creates its own, which suits a test.
    */
   cache?: AnalyticsQueryCache;
 }) {
   const registryDigest = metricRegistryDigest();
 
   /**
-   * Wraps one query in the private, per-site cache ADR-0003 asks for.
+   * Wraps one query in the private, per-site cache ADR-0003 requires.
    *
    * Authorization runs on every call before the cache is read, so a caller
-   * without `analytics.read` is refused and never served a stored answer.
-   * Every reader holding that capability sees the same rows — the queries do
-   * no per-actor filtering — so the capability name is the whole authorization
-   * scope the key needs.
+   * without `analytics.read` is refused and is never served a stored answer.
+   * The queries do no per-actor filtering, so every reader holding that
+   * capability sees the same rows. The capability name is therefore the whole
+   * authorization scope the key needs.
    */
   function withCache<
     Input extends { actor: Actor; range?: AnalyticsRangeRequest },
@@ -616,8 +619,8 @@ export function createAnalyticsQueryApplication<Actor>({
     return async (input: Input) => {
       await authorize(input.actor, analyticsReadCapability);
       const observedNow = now();
-      // A query called without a range answers as of now, so it is held for
-      // the short window rather than the closed-range one.
+      // A query called without a range answers as of now, so it takes the
+      // five-minute window.
       const resolved =
         input.range === undefined
           ? null
@@ -653,7 +656,7 @@ export function createAnalyticsQueryApplication<Actor>({
         : analyticsCacheSeconds.closedRange;
       cache.delete(key);
       cache.set(key, { expiresAt: nowMs + ttlSeconds * 1_000, value });
-      // Insertion order is eviction order: the oldest entry goes first.
+      // A Map iterates in insertion order, so the first key is the oldest.
       while (cache.size > analyticsCacheMaximumEntries) {
         const oldest = cache.keys().next();
         if (oldest.done === true) break;

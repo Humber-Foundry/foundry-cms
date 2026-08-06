@@ -917,7 +917,7 @@
 }
 
 /*
- * A list rather than a grid: the number of measured metrics varies by source
+ * A list, because the number of measured metrics varies by source
  * health, so a grid would leave a ragged final row.
  */
 .analytics-grid {

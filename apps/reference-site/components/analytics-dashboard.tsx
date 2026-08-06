@@ -9,9 +9,11 @@ import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime"
 
 /**
  * Presents the aggregate projection. Every number arrives with its source,
- * definition and completeness, and the view never invents one: an absent
- * measurement reads as unavailable, a small breakdown row reads as suppressed,
- * and two providers' counts are shown side by side rather than added.
+ * definition and completeness.
+ *
+ * This view computes no measurement of its own. An absent measurement shows as
+ * unavailable, a small breakdown row shows as suppressed, and two providers'
+ * counts appear side by side, each with its own label.
  */
 
 const qualityLabels: Readonly<Record<string, string>> = {
@@ -144,8 +146,7 @@ function SourceHealthTable({
   if (sources.length === 0) {
     return (
       <p className="analytics-empty">
-        No source has reported yet, so every measurement below is unavailable
-        rather than zero.
+        No source has reported yet. Every measurement below is unavailable.
       </p>
     );
   }
@@ -194,7 +195,7 @@ export function AnalyticsDashboard({
             <h2 id="analytics-heading">Analytics</h2>
             <p>
               The aggregate read model is unavailable, so no measurement is
-              shown. Nothing here is being reported as zero.
+              shown here.
             </p>
           </div>
         </div>
@@ -203,8 +204,8 @@ export function AnalyticsDashboard({
   }
 
   const { overview, content, forms, audience, campaigns, health } = analytics;
-  // Two web sources reporting one referrer arrive as two rows. Naming the
-  // source keeps them apart; with one source the label would be noise.
+  // Two web sources reporting one referrer arrive as two rows. The source
+  // name tells them apart, and is shown only when there is more than one.
   const referrerSourceNames = new Set(
     overview.referrers.map((row) => row.sourceName),
   );

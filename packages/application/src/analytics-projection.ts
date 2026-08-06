@@ -1,10 +1,10 @@
 /**
- * Normalizes one source run into the canonical D1 aggregate projection.
+ * Normalizes one source run into the D1 aggregate projection.
  *
- * Every declared source — Cloudflare Web Analytics, Workers Analytics Engine,
- * D1 operational tables and the newsletter provider — reaches the read model
- * through this seam, so the vocabulary, privacy and comparability rules are
- * enforced once instead of once per adapter.
+ * This module is the only writer. Cloudflare Web Analytics, Workers Analytics
+ * Engine, the D1 operational tables and the newsletter provider all reach the
+ * read model through it, so the vocabulary, privacy and comparability rules
+ * are applied in one place and each adapter cannot apply its own.
  */
 
 import type { SiteId } from "@foundry/site-definition";
@@ -501,9 +501,12 @@ export function createAnalyticsProjection({
 
     /**
      * Rolls closed hourly facts into daily facts once they leave the hourly
-     * retention window. A day whose hours do not share one measurement
-     * definition, or that mixes measured and unavailable hours, is reported
-     * rather than merged, because either merge would invent a number.
+     * retention window.
+     *
+     * Two kinds of day are left alone and counted in the outcome: one whose
+     * hours do not share a measurement definition, and one that mixes measured
+     * and unavailable hours. Merging either would produce a number the source
+     * never reported.
      */
     async compact({
       hourlyRetentionDays,

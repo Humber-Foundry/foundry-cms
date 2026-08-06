@@ -78,14 +78,14 @@ export function defaultReportingRange(
 }
 
 /**
- * The query cache lives here rather than inside the application, because
- * `/dash` is dynamic and builds a fresh application on every request. A cache
- * owned by the application would be thrown away before it was read. This one
- * belongs to the Worker isolate, so an answer survives between requests for
- * as long as ADR-0003 allows.
+ * The query cache belongs to this module, and therefore to the Worker isolate.
  *
- * One cache is enough: this app serves one site definition, and the site ID is
- * part of every cache key regardless.
+ * `/dash` is dynamic and builds a fresh query application on every request, so
+ * a cache owned by the application would be discarded before it was read.
+ * Holding it here keeps an answer for as long as ADR-0003 allows.
+ *
+ * One cache is enough. This app serves one site definition, and every cache
+ * key already includes the site ID.
  */
 const queryCache: AnalyticsQueryCache = createAnalyticsQueryCache();
 
@@ -147,9 +147,9 @@ export async function loadAnalyticsDashboard(
     return { overview, content, forms, audience, campaigns, health };
   } catch (error) {
     if (isContractFailure(error)) throw error;
-    // A site without the analytics tables yet renders the rest of the
-    // dashboard; the analytics section says the read model is unavailable
-    // rather than showing zeros.
+    // A site that has no analytics tables yet still renders the rest of the
+    // dashboard. Its analytics section states that the read model is
+    // unavailable, and shows no numbers.
     console.error("analytics_dashboard_unavailable", {
       failure: error instanceof Error ? error.name : "unknown",
     });

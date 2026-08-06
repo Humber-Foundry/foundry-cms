@@ -157,12 +157,12 @@ describe("running the scheduled projection", () => {
       sourceName: "foundry",
       status: "healthy",
       // D1 is exact and local, so it reports through the current instant
-      // rather than through the last closed day.
+      // The last closed day would hide today.
       completeThrough: "2026-08-03T00:30:00.000Z",
     });
   });
 
-  it("projects today, so the current day is not read as absent", async () => {
+  it("projects today, so the current day has measured facts", async () => {
     await runScheduledAnalyticsProjection(
       environment(),
       () => "2026-08-03T00:30:00.000Z",
@@ -177,7 +177,7 @@ describe("running the scheduled projection", () => {
     expect(results[0]?.total).toBeGreaterThan(0);
   });
 
-  it("marks today's bucket as still filling rather than complete", async () => {
+  it("marks today's bucket as still filling", async () => {
     await runScheduledAnalyticsProjection(
       environment(),
       () => "2026-08-03T00:30:00.000Z",
@@ -197,7 +197,7 @@ describe("running the scheduled projection", () => {
     );
   });
 
-  it("reports an unconfigured source as unavailable, not as zero traffic", async () => {
+  it("records source_not_configured for an unconfigured source", async () => {
     await runScheduledAnalyticsProjection(
       environment(),
       () => "2026-08-03T00:30:00.000Z",
@@ -321,8 +321,8 @@ describe("provider polling bands", () => {
 
   it("reaches past 90 days on the first run of a new week", () => {
     // 2026-08-02 is a Sunday, 2026-08-03 the Monday that starts a new week.
-    // The window is 97 rather than 90 so a campaign that turns 90 days old
-    // between two weekly sweeps still gets its final poll.
+    // The window is 97 days, so a campaign that turns 90 days old between
+    // two weekly sweeps still gets its final poll.
     expect(
       providerPollWindowDays({
         lastSuccessAt: "2026-08-02T23:00:00.000Z",

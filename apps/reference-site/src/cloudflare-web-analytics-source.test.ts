@@ -264,7 +264,7 @@ describe("querying the GraphQL analytics API", () => {
     );
   });
 
-  it("treats a GraphQL error as a failed query rather than empty traffic", async () => {
+  it("treats a GraphQL error as a failed query", async () => {
     const fetchImplementation = (async () =>
       new Response(JSON.stringify({ errors: [{ message: "denied" }] }), {
         status: 200,
