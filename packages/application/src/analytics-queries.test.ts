@@ -122,7 +122,7 @@ describe("reporting range", () => {
     });
   });
 
-  it("treats a daylight-saving end as a real 25-hour local day", () => {
+  it("treats a daylight-saving end as a 25-hour local day", () => {
     const range = resolveReportingRange({
       fromLocalDate: "2026-11-01",
       toLocalDate: "2026-11-01",
@@ -133,7 +133,7 @@ describe("reporting range", () => {
     expect(range.endUtc).toBe("2026-11-02T08:00:00.000Z");
   });
 
-  it("treats a daylight-saving start as a real 23-hour local day", () => {
+  it("treats a daylight-saving start as a 23-hour local day", () => {
     const range = resolveReportingRange({
       fromLocalDate: "2026-03-08",
       toLocalDate: "2026-03-08",
@@ -537,7 +537,7 @@ describe("audience", () => {
     });
   });
 
-  it("adds the transition counts that genuinely accumulate", async () => {
+  it("adds the transition counts across daily buckets", async () => {
     facts = [
       fact({
         metricKey: "subscriber.confirmed",

@@ -121,8 +121,8 @@ export function createD1OperationalAnalyticsSource(
     /**
      * Every D1 metric is zero-filled across the window. A day with no
      * submissions therefore records a measured zero, which the dashboard
-     * shows as the real count it is. A source that reported nothing at all
-     * records `unavailable`, and the dashboard shows that differently.
+     * shows as the count it is. A source that reported nothing at all records
+     * `unavailable`, which the dashboard labels differently.
      */
     async measurements({
       startUtc,
@@ -304,7 +304,7 @@ export function createD1OperationalAnalyticsSource(
             day,
             subjectType: "site",
             subjectId: siteId,
-            // A shrinking list reports a real negative. Net growth is the one
+            // A shrinking list reports a negative value. Net growth is the one
             // canonical metric whose declared domain is signed.
             value: confirmed - exits,
             quality: "derived_exact",

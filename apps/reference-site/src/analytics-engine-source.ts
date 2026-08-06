@@ -101,9 +101,9 @@ function bucketInstants(
 }
 
 /**
- * Turns weighted Analytics Engine rows into best-effort measurements. The
- * weighting is applied in SQL, and the interval travels with the value so a
- * heavily sampled estimate is legible as one.
+ * Turns weighted Analytics Engine rows into best-effort measurements. The SQL
+ * applies the weighting, and each measurement includes its sampling interval,
+ * so a reader can see how heavily an estimate was sampled.
  */
 export function normalizeAnalyticsEngineRows(
   rows: ReadonlyArray<AnalyticsEngineRow>,

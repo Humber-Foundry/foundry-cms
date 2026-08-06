@@ -39,8 +39,8 @@ export type AnalyticsEngineDataset = Readonly<{
 
 /**
  * Validates one reported interaction against the public objects this site
- * actually publishes. An unknown subject is refused and not counted, which
- * keeps the dataset's cardinality bounded to real CMS objects.
+ * publishes. An unknown subject is refused, which bounds the dataset's
+ * cardinality to the site's published object IDs.
  */
 export function collectInteraction({
   payload,

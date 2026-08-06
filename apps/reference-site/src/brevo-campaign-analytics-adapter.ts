@@ -10,9 +10,11 @@ import {
 } from "@foundry/application";
 
 /**
- * Brevo's analytics boundary. Campaign reporting and compliance webhooks are
- * separate paths on purpose: subscriber-level webhook data updates the
- * operational ledger, and only these aggregate reports feed analytics.
+ * The Brevo analytics adapter. It reads aggregate campaign reports.
+ *
+ * Compliance webhooks take a separate path: subscriber-level webhook data
+ * updates the operational ledger through its own adapter. Only the aggregate
+ * reports read here become analytics facts.
  *
  * Contract: https://developers.brevo.com/reference/get-email-campaign
  */
@@ -135,8 +137,8 @@ function metricValue(value: number | undefined) {
 
 /**
  * Maps one Brevo report to a canonical snapshot. Only aggregate counts and the
- * metadata needed to interpret them cross this boundary; the campaign identity
- * is Foundry's, so replacing the provider never rewrites campaign history.
+ * metadata needed to interpret them are copied across. The campaign identity
+ * is Foundry's, so replacing the provider leaves campaign history intact.
  */
 export function brevoCampaignSnapshot({
   campaignId,

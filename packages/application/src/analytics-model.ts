@@ -39,9 +39,10 @@ export type AnalyticsQuality =
 export type AnalyticsUnit = "count" | "ratio" | "milliseconds" | "score";
 
 /**
- * How prominently a metric may be presented. Delivery outcomes decide things;
- * reported engagement signals are kept out of the primary reading order so a
- * provider's inflated open count cannot look like an operational fact.
+ * How prominently a metric may be presented. Delivery outcomes tell an owner
+ * whether a send worked, so they lead. Reported engagement signals are kept
+ * out of the primary reading order, so a provider's inflated open count cannot
+ * read as an operational fact.
  */
 export type AnalyticsProminence = "primary" | "secondary" | "collapsed";
 
@@ -156,8 +157,8 @@ export function earliestInstant(instants: ReadonlyArray<string>): string {
 
 /**
  * Steps back whole calendar months. A day the shorter month lacks is clamped
- * to that month's last day. Retention floors are stated in months, so a fixed
- * number of days would not answer them.
+ * to that month's last day. Retention is stated in calendar months, and a
+ * fixed day count would give a different date.
  */
 export function subtractUtcMonths(instant: string, months: number): string {
   const date = new Date(Date.parse(instant));

@@ -42,8 +42,9 @@ See "What this does not do" below.
 
 ## Rules the database enforces
 
-Migration `0025_analytics_projection.sql` makes these impossible to break, so a
-future projector cannot widen the model without changing the schema:
+Migration `0025_analytics_projection.sql` adds the constraints and triggers
+that reject these violations. A future projector has to change the schema
+before it can add a metric, a dimension or a value the model does not allow:
 
 - **A fact must name a declared metric, from that metric's declared source, in
   that metric's declared unit.** Enforced by a foreign key and a trigger.
@@ -140,15 +141,15 @@ and appends to `analytics_fact_revisions`, exactly as the ADR describes.
 - **The provider is polled in three bands**, matching the ADR: campaigns sent
   within 72 hours on every run, within 30 days once a day, within 97 days once
   a week. The band is chosen from the last successful run, so the projector
-  needs no extra state to keep its place. The widest band is 97 days rather
-  than 90 because a weekly sweep bounded at exactly 90 would last see a
-  campaign at about day 83 and never at 90; the extra week guarantees the
-  day-90 reconciliation the ADR asks for. Each band pages through the
-  provider's changed-campaign cursor, fifty campaigns a request, rather than
-  asking once per campaign. A run that hits the page cap says so in the log.
+  needs no extra state to keep its place. The widest band covers 97 days. A
+  weekly band bounded at exactly 90 days would last request a campaign at
+  about day 83, so the extra week puts the final reconciliation at or after
+  day 90. Each band pages through the provider's changed-campaign cursor,
+  fifty campaigns a request. Asking once per campaign would spend one request
+  each. A run that stops at the page cap records that in the log.
 - A degraded run records the outage and leaves the projected facts and
-  completeness untouched. A source outage therefore shows as an outage, and
-  the last measured values stay on screen.
+  completeness untouched. The dashboard names the outage and keeps showing the
+  last measured values.
 - An unconfigured source records `source_not_configured`. No source reports
   zero traffic to mean it was never asked.
 - A source is marked `partial` when it failed to return a measurement it was

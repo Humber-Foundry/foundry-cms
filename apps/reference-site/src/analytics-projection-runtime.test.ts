@@ -331,7 +331,7 @@ describe("provider polling bands", () => {
     ).toBe(97);
   });
 
-  it("never asks for a campaign older than the widest window", () => {
+  it("asks for no campaign older than the 97-day band", () => {
     const windows = [
       providerPollWindowDays({ lastSuccessAt: null, now: "2026-08-05T09:00:00.000Z" }),
       providerPollWindowDays({

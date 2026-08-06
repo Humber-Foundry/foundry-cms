@@ -117,15 +117,14 @@ export function isSourceDue({
  * from the last successful run, so the projector keeps its place without any
  * extra stored state:
  *
- * - a different UTC week from the last success — the widest sweep
- * - a different UTC day — the 30-day sweep
+ * - a different UTC week from the last success — the 97-day band
+ * - a different UTC day — the 30-day band
  * - otherwise — the 72-hour band every scheduled run covers
  *
- * The widest sweep asks for 97 days. A weekly sweep bounded at exactly 90
- * would last see a campaign at about day 83, so the extra week guarantees the
- * day-90 reconciliation the ADR asks for. Past 97 days a campaign is dropped
- * from the sweep: its facts are projected and the provider stops revising
- * them.
+ * The widest band covers 97 days. A weekly band bounded at exactly 90 days
+ * would last request a campaign at about day 83, so the extra week puts the
+ * final reconciliation at or after day 90. Past 97 days a campaign is left
+ * out: its facts are projected and the provider stops revising them.
  */
 export function providerPollWindowDays({
   lastSuccessAt,
@@ -196,8 +195,8 @@ async function listChangedCampaignSnapshots({
     cursor = result.nextCursor;
     if (cursor === null) return snapshots;
   }
-  // A sweep that stops at the page cap is logged, so its result is not taken
-  // for a complete one.
+  // Records that this run stopped at the page cap and read only part of the
+  // provider's changed-campaign list.
   console.warn("analytics_provider_pages_capped", { maximumPages, since });
   return snapshots;
 }
@@ -437,8 +436,8 @@ export async function runScheduledAnalyticsProjection(
     compaction.daysSkippedForComparability > 0 ||
     compaction.daysSkippedForMixedAvailability > 0
   ) {
-    // A day that could not be merged keeps its hourly facts. Logging the skip
-    // is what stops "compacted" from being read as "complete".
+    // Records which days compaction skipped and therefore still hold their
+    // hourly facts.
     console.warn("analytics_compaction_skipped_days", compaction);
   }
 

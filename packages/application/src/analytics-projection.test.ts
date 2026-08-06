@@ -176,7 +176,7 @@ describe("normalizing a source run into the projection", () => {
   });
 });
 
-describe("boundary guards", () => {
+describe("the guards on a projection run", () => {
   it("refuses a payload carrying a person-level field", async () => {
     await expect(
       projection().project(

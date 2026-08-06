@@ -150,7 +150,7 @@ describe("Analytics Engine rollups", () => {
   });
 });
 
-describe("the Brevo analytics boundary", () => {
+describe("the Brevo campaign analytics adapter", () => {
   const report = {
     id: 9931,
     sentDate: "2026-07-01T16:00:00.000Z",

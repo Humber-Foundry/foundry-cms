@@ -42,10 +42,10 @@ export class AnalyticsDashboardError extends Error {
 }
 
 /**
- * Our own contract failures are bugs and must reach the error boundary. Only a
- * site that has no analytics tables yet gets the empty panel; a privacy or
- * vocabulary breach rendering as "no data" would hide the thing the guard
- * exists to catch.
+ * These errors mean one of our own guards refused a payload. They must reach
+ * the Next.js error boundary. Only a site that has no analytics tables yet
+ * gets the empty panel. Rendering a privacy or vocabulary breach as "no data"
+ * would hide the breach the guard exists to catch.
  */
 const contractErrorNames: ReadonlySet<string> = new Set([
   "AnalyticsPrivacyViolationError",

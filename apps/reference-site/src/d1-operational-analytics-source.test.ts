@@ -216,7 +216,7 @@ describe("projecting committed operational records", () => {
     ).toBe(false);
   });
 
-  it("reports a shrinking list as real negative net growth", async () => {
+  it("reports a shrinking list as negative net growth", async () => {
     await recordLedgerEvent("unsubscribed", "2026-08-01T10:00:00.000Z");
     await recordLedgerEvent("hard_bounced", "2026-08-01T11:00:00.000Z");
 

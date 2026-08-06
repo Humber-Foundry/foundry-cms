@@ -636,7 +636,7 @@ describe("compaction against a source that reports hours and days", () => {
   });
 });
 
-describe("the retention boundary", () => {
+describe("the retention floor", () => {
   /**
    * The retention floor is an instant, so it can fall inside a bucket. That
    * is where the two DELETE statements used to disagree: the fact was kept

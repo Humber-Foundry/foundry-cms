@@ -172,7 +172,7 @@ function add(
  * Normalizes one Web Analytics response into canonical measurements.
  *
  * A sampled response keeps the quality `estimated` and the sampling interval
- * the platform reported. Both travel with the value, so a later reader can
+ * the platform reported. Each measurement includes both, so a later reader can
  * tell an estimate from an exact count.
  */
 export function normalizeCloudflareWebAnalytics({
@@ -236,8 +236,8 @@ export function normalizeCloudflareWebAnalytics({
   }
 
   // Referral-based visits, platform bot filtering and query sampling all make
-  // these estimates. The sampling interval travels with the value so a reader
-  // can see how heavily it was sampled.
+  // these estimates. Each measurement includes its sampling interval, so a
+  // reader can see how heavily it was sampled.
   const quality = "estimated" as const;
 
   const measurements: AnalyticsFactMeasurement[] = [];

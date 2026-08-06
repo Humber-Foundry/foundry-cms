@@ -137,12 +137,12 @@ source metadata, so a query names only the metric key.
 
 **Quality** — What kind of number this is: `exact` when the CMS transaction
 recorded it, through `estimated`, `best_effort` and `provider_reported`, to
-`unreliable` for a signal such as a reported open. Quality travels with every
-value.
+`unreliable` for a signal such as a reported open. Every reading carries its
+quality.
 
 **Availability** — Whether a measurement exists. A measurement that is missing
-has state `unavailable` and carries a reason, so a source outage shows as an
-outage.
+has state `unavailable` and a reason. A source outage therefore produces
+`source_unavailable` measurements, and the dashboard names that reason.
 
 **Comparability signature** — Everything that must match before two numbers
 mean the same thing: metric, source, source name, provider metric and
@@ -170,8 +170,8 @@ and their revision audit rows are deleted on each scheduled run.
 
 **Poll band** — How far back a provider run asks for changed campaigns: 72
 hours on every run, 30 days once a day, 97 days once a week. The widest band
-carries a week of slack past 90 days so a campaign's final reconciliation
-lands at or after day 90.
+covers 97 days, which puts a campaign's final reconciliation at or after day
+90.
 
 ## Actors
 
