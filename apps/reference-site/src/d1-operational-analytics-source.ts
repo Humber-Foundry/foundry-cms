@@ -1,6 +1,9 @@
 import "server-only";
 
-import type { AnalyticsFactMeasurement } from "@foundry/application";
+import type {
+  AnalyticsFactMeasurement,
+  AnalyticsMetricKey,
+} from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
@@ -49,7 +52,7 @@ function countMeasurement({
   value,
   quality = "exact",
 }: {
-  metricKey: string;
+  metricKey: AnalyticsMetricKey;
   day: string;
   subjectType: AnalyticsFactMeasurement["subjectType"];
   subjectId: string;
@@ -71,19 +74,20 @@ function countMeasurement({
   };
 }
 
-const ledgerMetricByEvent: Readonly<Record<string, string>> = Object.freeze({
-  consent_recorded: "subscriber.confirmed",
-  resubscribed: "subscriber.confirmed",
-  unsubscribed: "subscriber.unsubscribed",
-  hard_bounced: "subscriber.hard_bounced",
-  complained: "subscriber.complained",
-});
+const ledgerMetricByEvent: Readonly<Record<string, AnalyticsMetricKey>> =
+  Object.freeze({
+    consent_recorded: "subscriber.confirmed",
+    resubscribed: "subscriber.confirmed",
+    unsubscribed: "subscriber.unsubscribed",
+    hard_bounced: "subscriber.hard_bounced",
+    complained: "subscriber.complained",
+  });
 
-const suppressingMetrics = [
+const suppressingMetrics: ReadonlyArray<AnalyticsMetricKey> = Object.freeze([
   "subscriber.unsubscribed",
   "subscriber.hard_bounced",
   "subscriber.complained",
-];
+]);
 
 export function createD1OperationalAnalyticsSource(
   database: D1DatabaseBinding,

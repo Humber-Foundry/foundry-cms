@@ -110,6 +110,65 @@ export const analyticsSourceExpectedLagSeconds: Readonly<
   provider: 21_600,
 });
 
+export const analyticsDaySeconds = 86_400;
+
+/**
+ * Joins parts into one Map key. The separator is the ASCII unit separator,
+ * which no metric key, subject ID, referrer host or instant may contain, so a
+ * value can never split a key open.
+ */
+const compositeKeySeparator = "\u001f";
+
+export function analyticsCompositeKey(
+  parts: ReadonlyArray<string | number>,
+): string {
+  return parts.join(compositeKeySeparator);
+}
+
+export function splitAnalyticsCompositeKey(
+  key: string,
+): ReadonlyArray<string> {
+  return key.split(compositeKeySeparator);
+}
+
+/** The UTC midnight that starts the day containing `instant`. */
+export function utcDayStart(instant: string): string {
+  return `${instant.slice(0, 10)}T00:00:00.000Z`;
+}
+
+export function addUtcDays(instant: string, days: number): string {
+  return new Date(
+    Date.parse(instant) + days * analyticsDaySeconds * 1_000,
+  ).toISOString();
+}
+
+export function addUtcSeconds(instant: string, seconds: number): string {
+  return new Date(Date.parse(instant) + seconds * 1_000).toISOString();
+}
+
+export function earliestInstant(instants: ReadonlyArray<string>): string {
+  return instants.reduce((lowest, candidate) =>
+    Date.parse(candidate) < Date.parse(lowest) ? candidate : lowest,
+  );
+}
+
+/**
+ * Steps back whole calendar months, clamping a day the shorter month does not
+ * have. Retention floors are stated in months, so they cannot use a fixed
+ * number of days.
+ */
+export function subtractUtcMonths(instant: string, months: number): string {
+  const date = new Date(Date.parse(instant));
+  const targetDay = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() - months);
+  const daysInTargetMonth = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  date.setUTCDate(Math.min(targetDay, daysInTargetMonth));
+  return date.toISOString();
+}
+
 export class AnalyticsVocabularyError extends Error {
   readonly metricKey: string;
 
@@ -618,6 +677,24 @@ export type AnalyticsUnavailableReason =
   | "source_unavailable"
   | "outside_retention"
   | "not_supported";
+
+/**
+ * The reasons that mean the source failed to deliver something it was asked
+ * for. The other reasons are normal: `not_measured` is what a browser that
+ * reports no Web Vitals looks like, and `not_supported` is a capability the
+ * provider never claimed. Treating those as gaps would leave a healthy source
+ * reporting `partial` forever.
+ */
+const sourceGapReasons: ReadonlySet<AnalyticsUnavailableReason> = new Set([
+  "provider_omitted",
+  "source_unavailable",
+]);
+
+export function isSourceGapReason(
+  reason: AnalyticsUnavailableReason | null,
+): boolean {
+  return reason !== null && sourceGapReasons.has(reason);
+}
 
 export type AnalyticsValue =
   | Readonly<{ state: "available"; value: number }>

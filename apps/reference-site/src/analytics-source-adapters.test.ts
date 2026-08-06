@@ -18,7 +18,7 @@ import {
 
 describe("Analytics Engine rollups", () => {
   const row = {
-    day: "2026-08-01",
+    bucket_start: "2026-08-01",
     event_kind: "form_impression",
     subject_id: "form_contact",
     weighted_count: 240,
@@ -67,6 +67,37 @@ describe("Analytics Engine rollups", () => {
         { ...row, subject_id: "person@example.com" },
       ]),
     ).toThrow(AnalyticsEngineSourceError);
+  });
+
+  it("reports an hour bucket when asked for one", () => {
+    expect(
+      normalizeAnalyticsEngineRows(
+        [{ ...row, bucket_start: "2026-08-01 13:00:00" }],
+        "hour",
+      )[0],
+    ).toMatchObject({
+      bucketStartUtc: "2026-08-01T13:00:00.000Z",
+      bucketEndUtc: "2026-08-01T14:00:00.000Z",
+      granularity: "hour",
+    });
+  });
+
+  it("refuses a day bucket where an hour bucket was asked for", () => {
+    expect(() =>
+      normalizeAnalyticsEngineRows([row], "hour"),
+    ).toThrow(AnalyticsEngineSourceError);
+  });
+
+  it("groups by the hour when the hourly statement is built", () => {
+    const sql = interactionRollupSql({
+      dataset: "foundry_interactions",
+      since: "2026-08-01T00:00:00.000Z",
+      until: "2026-08-02T00:00:00.000Z",
+      granularity: "hour",
+    });
+
+    expect(sql).toMatch(/toStartOfHour\(timestamp\)/u);
+    expect(sql).toMatch(/GROUP BY bucket_start, event_kind, subject_id/u);
   });
 
   it("selects only the two blobs the collector writes", () => {

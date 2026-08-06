@@ -45,8 +45,19 @@ export class AnalyticsEngineSourceError extends Error {
   }
 }
 
+/**
+ * Analytics Engine is the only source with per-event timestamps, so it is the
+ * one that can report hours. It is also the shortest-lived: Cloudflare keeps
+ * its points for three months, which is why each run projects hourly facts as
+ * well as daily ones. The hourly facts hold intraday detail for the 90 days
+ * ADR-0003 allows, then compaction rolls them away and the daily facts carry
+ * the history past Analytics Engine's own retention.
+ */
+export type AnalyticsEngineBucketGranularity = "hour" | "day";
+
 export type AnalyticsEngineRow = Readonly<{
-  day: string;
+  /** `YYYY-MM-DD` for a day bucket, `YYYY-MM-DD HH:00:00` for an hour. */
+  bucket_start: string;
   event_kind: string;
   subject_id: string;
   /** Already multiplied by `_sample_interval` in the SQL projection. */
@@ -58,6 +69,35 @@ export function isInteractionKind(value: string): value is InteractionKind {
   return Object.hasOwn(allowedInteractionKinds, value);
 }
 
+const dayBucketPattern = /^\d{4}-\d{2}-\d{2}$/u;
+const hourBucketPattern = /^\d{4}-\d{2}-\d{2} \d{2}:00:00$/u;
+
+function bucketInstants(
+  bucketStart: string,
+  granularity: AnalyticsEngineBucketGranularity,
+): Readonly<{ bucketStartUtc: string; bucketEndUtc: string }> {
+  const spanMs = granularity === "hour" ? 3_600_000 : 86_400_000;
+  const matchesShape =
+    granularity === "hour"
+      ? hourBucketPattern.test(bucketStart)
+      : dayBucketPattern.test(bucketStart);
+  if (!matchesShape) {
+    throw new AnalyticsEngineSourceError("row_invalid");
+  }
+  const bucketStartUtc =
+    granularity === "hour"
+      ? `${bucketStart.replace(" ", "T")}.000Z`
+      : `${bucketStart}T00:00:00.000Z`;
+  const parsed = Date.parse(bucketStartUtc);
+  if (Number.isNaN(parsed)) {
+    throw new AnalyticsEngineSourceError("row_invalid");
+  }
+  return {
+    bucketStartUtc,
+    bucketEndUtc: new Date(parsed + spanMs).toISOString(),
+  };
+}
+
 /**
  * Turns weighted Analytics Engine rows into best-effort measurements. The
  * weighting is applied in SQL, and the interval travels with the value so a
@@ -65,6 +105,7 @@ export function isInteractionKind(value: string): value is InteractionKind {
  */
 export function normalizeAnalyticsEngineRows(
   rows: ReadonlyArray<AnalyticsEngineRow>,
+  granularity: AnalyticsEngineBucketGranularity = "day",
 ): ReadonlyArray<AnalyticsFactMeasurement> {
   return rows.map((row) => {
     if (!isInteractionKind(row.event_kind)) {
@@ -81,18 +122,11 @@ export function normalizeAnalyticsEngineRows(
     ) {
       throw new AnalyticsEngineSourceError("row_invalid");
     }
-    const bucketStartUtc = `${row.day}T00:00:00.000Z`;
-    if (Number.isNaN(Date.parse(bucketStartUtc))) {
-      throw new AnalyticsEngineSourceError("row_invalid");
-    }
     const declared = allowedInteractionKinds[row.event_kind];
     return {
       metricKey: declared.metricKey,
-      bucketStartUtc,
-      bucketEndUtc: new Date(
-        Date.parse(bucketStartUtc) + 86_400_000,
-      ).toISOString(),
-      granularity: "day" as const,
+      ...bucketInstants(row.bucket_start, granularity),
+      granularity,
       subjectType: declared.subjectType,
       subjectId: row.subject_id,
       dimension: { key: "", value: "" },
@@ -118,10 +152,12 @@ export function interactionRollupSql({
   dataset,
   since,
   until,
+  granularity = "day",
 }: {
   dataset: string;
   since: string;
   until: string;
+  granularity?: AnalyticsEngineBucketGranularity;
 }): string {
   if (
     !datasetPattern.test(dataset) ||
@@ -133,10 +169,14 @@ export function interactionRollupSql({
   }
   const clickhouseInstant = (instant: string) =>
     instant.slice(0, 19).replace("T", " ");
+  const bucketExpression =
+    granularity === "hour"
+      ? "formatDateTime(toStartOfHour(timestamp), '%Y-%m-%d %H:00:00')"
+      : "formatDateTime(toDate(timestamp), '%Y-%m-%d')";
   // blob1 is the event kind and blob2 the public CMS object ID. No other
   // column is written, so no other column can be selected.
   return `SELECT
-  formatDateTime(toDate(timestamp), '%Y-%m-%d') AS day,
+  ${bucketExpression} AS bucket_start,
   blob1 AS event_kind,
   blob2 AS subject_id,
   SUM(_sample_interval) AS weighted_count,
@@ -144,7 +184,7 @@ export function interactionRollupSql({
 FROM ${dataset}
 WHERE timestamp >= toDateTime('${clickhouseInstant(since)}')
   AND timestamp < toDateTime('${clickhouseInstant(until)}')
-GROUP BY day, event_kind, subject_id
+GROUP BY bucket_start, event_kind, subject_id
 FORMAT JSON`;
 }
 
@@ -154,6 +194,7 @@ export async function queryAnalyticsEngine({
   dataset,
   since,
   until,
+  granularity = "day",
   fetchImplementation = fetch,
 }: {
   accountId: string;
@@ -161,9 +202,10 @@ export async function queryAnalyticsEngine({
   dataset: string;
   since: string;
   until: string;
+  granularity?: AnalyticsEngineBucketGranularity;
   fetchImplementation?: typeof fetch;
 }): Promise<ReadonlyArray<AnalyticsEngineRow>> {
-  const sql = interactionRollupSql({ dataset, since, until });
+  const sql = interactionRollupSql({ dataset, since, until, granularity });
   const response = await fetchImplementation(
     `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
       accountId,

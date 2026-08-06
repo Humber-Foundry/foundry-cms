@@ -392,7 +392,13 @@ describe("small-cell suppression", () => {
       range: july,
     });
 
-    expect(overview.referrers).toEqual([
+    expect(
+      overview.referrers.map((row) => ({
+        dimensionKey: row.dimensionKey,
+        dimensionValue: row.dimensionValue,
+        value: row.value,
+      })),
+    ).toEqual([
       {
         dimensionKey: "referrer_host",
         dimensionValue: "news.example.org",
@@ -803,5 +809,148 @@ describe("content", () => {
       { state: "available", value: 90 },
       { state: "available", value: 5 },
     ]);
+  });
+});
+
+describe("unlike referrer series", () => {
+  it("keeps two web sources' rows for one referrer apart", async () => {
+    facts = [
+      fact({
+        metricKey: "web.page_views",
+        dimensionKey: "referrer_host",
+        dimensionValue: "example.com",
+        value: 12,
+      }),
+      fact({
+        metricKey: "web.page_views",
+        dimensionKey: "referrer_host",
+        dimensionValue: "example.com",
+        sourceName: "other_web",
+        value: 30,
+      }),
+    ];
+
+    const overview = await application().queries.overview({
+      actor,
+      range: july,
+    });
+
+    expect(overview.referrers).toHaveLength(2);
+    expect(
+      new Set(overview.referrers.map((row) => row.comparabilitySignature)).size,
+    ).toBe(2);
+    expect(
+      overview.referrers.map((row) => row.value),
+    ).toEqual(
+      expect.arrayContaining([
+        { state: "available", value: 12 },
+        { state: "available", value: 30 },
+      ]),
+    );
+  });
+
+  it("adds a referrer's own buckets within one measurement definition", async () => {
+    facts = [
+      fact({
+        metricKey: "web.page_views",
+        dimensionKey: "referrer_host",
+        dimensionValue: "example.com",
+        bucketStartUtc: "2026-07-01T07:00:00.000Z",
+        value: 8,
+      }),
+      fact({
+        metricKey: "web.page_views",
+        dimensionKey: "referrer_host",
+        dimensionValue: "example.com",
+        bucketStartUtc: "2026-07-01T08:00:00.000Z",
+        value: 5,
+      }),
+    ];
+
+    const overview = await application().queries.overview({
+      actor,
+      range: july,
+    });
+
+    expect(overview.referrers).toHaveLength(1);
+    expect(overview.referrers[0].value).toEqual({
+      state: "available",
+      value: 13,
+    });
+  });
+});
+
+describe("query caching", () => {
+  it("answers a repeated question without reading the store again", async () => {
+    facts = [fact({ metricKey: "web.page_views", value: 40 })];
+    let reads = 0;
+    const countingStore: AnalyticsReadStore = {
+      ...store,
+      async listFacts(query) {
+        reads += 1;
+        return store.listFacts(query);
+      },
+    };
+    const cached = createAnalyticsQueryApplication({
+      siteId,
+      store: countingStore,
+      reportingTimeZone: timeZone,
+      now: () => "2026-07-03T00:00:00.000Z",
+      authorize: async (_actor, capability) => {
+        authorized.push(capability);
+      },
+    });
+
+    await cached.queries.overview({ actor, range: july });
+    const readsAfterFirst = reads;
+    await cached.queries.overview({ actor, range: july });
+
+    expect(readsAfterFirst).toBeGreaterThan(0);
+    expect(reads).toBe(readsAfterFirst);
+  });
+
+  it("checks the capability on every call, cached or not", async () => {
+    const application_ = application();
+
+    await application_.queries.overview({ actor, range: july });
+    await application_.queries.overview({ actor, range: july });
+
+    expect(authorized.filter((entry) => entry === "analytics.read")).toHaveLength(
+      2,
+    );
+  });
+
+  it("refuses a caller without the capability before reading the cache", async () => {
+    facts = [fact({ metricKey: "web.page_views", value: 40 })];
+    let allow = true;
+    const guarded = createAnalyticsQueryApplication({
+      siteId,
+      store,
+      reportingTimeZone: timeZone,
+      now: () => "2026-07-03T00:00:00.000Z",
+      authorize: async () => {
+        if (!allow) throw new Error("not_permitted");
+      },
+    });
+
+    await guarded.queries.overview({ actor, range: july });
+    allow = false;
+
+    await expect(
+      guarded.queries.overview({ actor, range: july }),
+    ).rejects.toThrow("not_permitted");
+  });
+
+  it("does not serve one range's answer for another", async () => {
+    facts = [fact({ metricKey: "web.page_views", value: 40 })];
+    const application_ = application();
+
+    const first = await application_.queries.overview({ actor, range: july });
+    const second = await application_.queries.overview({
+      actor,
+      range: { fromLocalDate: "2026-06-01", toLocalDate: "2026-06-01" },
+    });
+
+    expect(first.range.startUtc).not.toBe(second.range.startUtc);
   });
 });

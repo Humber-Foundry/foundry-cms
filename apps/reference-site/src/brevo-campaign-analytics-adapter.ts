@@ -4,6 +4,7 @@ import {
   assertAggregateAnalyticsPayload,
   type AnalyticsCapabilities,
   type CampaignAnalyticsSnapshot,
+  type ProviderMetricCapability,
   type NewsletterAnalyticsAdapter,
   type ProviderAnalyticsHealth,
 } from "@foundry/application";
@@ -21,16 +22,17 @@ export const brevoAnalyticsDefinitionVersion = 1;
 
 const hourSeconds = 3_600;
 
+/**
+ * Builds one metric capability from Brevo's defaults. The provider's own
+ * metric name and its plain-language meaning are required, so a metric cannot
+ * ship with an empty definition beside its number on `/dash`.
+ */
 function capability(
-  overrides: Partial<
-    AnalyticsCapabilities["metrics"][keyof AnalyticsCapabilities["metrics"]] &
-      object
-  >,
-) {
-  return {
+  entry: Pick<ProviderMetricCapability, "providerMetric" | "definition"> &
+    Partial<ProviderMetricCapability>,
+): ProviderMetricCapability {
+  return Object.freeze({
     supported: true,
-    providerMetric: "",
-    definition: "",
     definitionVersion: brevoAnalyticsDefinitionVersion,
     countingMode: "total" as const,
     denominator: null,
@@ -38,8 +40,8 @@ function capability(
     privacyProxyFiltering: "unavailable" as const,
     expectedLagSeconds: hourSeconds,
     mutableForSeconds: 72 * hourSeconds,
-    ...overrides,
-  };
+    ...entry,
+  });
 }
 
 export const brevoAnalyticsCapabilities: AnalyticsCapabilities = Object.freeze({

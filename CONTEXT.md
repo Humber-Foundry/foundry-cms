@@ -129,35 +129,45 @@ Routine synchronization never reverses it.
 
 **Analytics fact** — One aggregate measurement of a product object over one
 time bucket, from one source. It describes a page, form, campaign or the site
-itself; it never describes a person, a session or a request.
+itself. It never describes a person, a session or a request.
 
 **Metric key** — The stable product name of a measurement, such as
-`form.submissions_accepted`. Provider and platform field names are stored as
-source metadata rather than leaking into a query.
+`form.submissions_accepted`. Provider and platform field names are kept as
+source metadata so they stay out of a query.
 
 **Quality** — What kind of number this is: `exact` when the CMS transaction
 recorded it, through `estimated`, `best_effort` and `provider_reported`, to
-`unreliable` for a signal like a reported open. Quality travels with every
+`unreliable` for a signal such as a reported open. Quality travels with every
 value.
 
-**Availability** — Whether a measurement exists. An absent measurement is
-`unavailable` with a reason, never a zero, so a source outage cannot read as a
-drop in traffic.
+**Availability** — Whether a measurement exists. A measurement that is missing
+is `unavailable` with a reason. A source outage therefore reads as an outage
+rather than as a drop in traffic.
 
 **Comparability signature** — Everything that must match before two numbers
 mean the same thing: metric, source, source name, provider metric and
-definition version. Values that do not share one are shown side by side and
-never added.
+definition version. Values that do not share one are shown side by side, and
+never added together.
 
-**Complete through** — The instant a source has fully reported. A bucket
-extending past it is in progress, not low.
+**Complete through** — The instant a source has fully reported. A bucket that
+extends past it is marked in progress.
 
 **Source state** — One source's status, last attempt, last success,
-completeness and retry time. It carries a stable, non-secret error code and
-never a provider message or credential.
+completeness and retry time. It carries a stable, non-secret error code, and
+never a provider message or a credential.
 
-**Small-cell suppression** — Secondary breakdown rows below five are reported
-as "fewer than 5". A business object's own total is still reported exactly.
+**Small-cell suppression** — Breakdown rows below five are reported as
+"fewer than 5". A business object's own total is still reported exactly.
+
+**Compaction** — Rolling closed hourly facts into one daily fact after 90 days.
+A day whose hours span a definition change, or that mixes measured and
+unavailable hours, is left alone and the skip is logged.
+
+**Retention floor** — The instant, 25 months back, before which aggregate facts
+and their revision audit rows are deleted on each scheduled run.
+
+**Poll band** — How far back a provider run asks for changed campaigns: 72
+hours on every run, 30 days once a day, 90 days once a week.
 
 ## Actors
 

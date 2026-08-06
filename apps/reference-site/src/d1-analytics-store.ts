@@ -393,5 +393,31 @@ export function createD1AnalyticsStore(
         .first<{ earliest: string | null }>();
       return row?.earliest ?? null;
     },
+
+    /**
+     * Deletes facts and their revision audit rows once they pass the retention
+     * floor. Without this the read side clamps a range it can no longer honour
+     * while the rows stay in D1, and the revision table grows without limit.
+     */
+    async purgeExpiredFacts({ before }) {
+      const [factResult, revisionResult] = await database.batch([
+        database
+          .prepare(
+            `DELETE FROM analytics_facts
+             WHERE site_id = ?1 AND bucket_end_utc <= ?2`,
+          )
+          .bind(siteId, before),
+        database
+          .prepare(
+            `DELETE FROM analytics_fact_revisions
+             WHERE site_id = ?1 AND bucket_start_utc < ?2`,
+          )
+          .bind(siteId, before),
+      ]);
+      return {
+        factsRemoved: factResult?.meta.changes ?? 0,
+        revisionsRemoved: revisionResult?.meta.changes ?? 0,
+      };
+    },
   };
 }

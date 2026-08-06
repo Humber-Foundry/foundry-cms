@@ -9,14 +9,18 @@
 import type { SiteId } from "@foundry/site-definition";
 
 import {
+  addUtcDays,
+  analyticsCompositeKey,
   analyticsMetricDefinition,
   analyticsMetrics,
   analyticsSchemaVersion,
   analyticsSourceExpectedLagSeconds,
   availableValue,
   comparabilitySignature,
+  earliestInstant,
   presentSecondaryCell,
   readingFreshness,
+  subtractUtcMonths,
   summableSeries,
   unavailableValue,
   type AnalyticsFreshness,
@@ -108,16 +112,6 @@ function zonedMidnight(localDate: string, timeZone: string): string {
     instant = next;
   }
   return new Date(instant).toISOString();
-}
-
-function addUtcDays(instant: string, days: number): string {
-  return new Date(Date.parse(instant) + days * 86_400_000).toISOString();
-}
-
-function subtractMonths(instant: string, months: number): string {
-  const date = new Date(Date.parse(instant));
-  date.setUTCMonth(date.getUTCMonth() - months);
-  return date.toISOString();
 }
 
 export type AnalyticsRangeRequest = Readonly<{
@@ -215,6 +209,13 @@ export type AnalyticsReferrerRow = Readonly<{
   dimensionKey: string;
   dimensionValue: string;
   value: AnalyticsValue;
+  source: AnalyticsSource;
+  sourceName: string;
+  /**
+   * Present so two web sources reporting the same referrer stay two rows. The
+   * dashboard labels the source only when a referrer appears more than once.
+   */
+  comparabilitySignature: string;
 }>;
 
 export type AnalyticsSourceHealth = AnalyticsSourceState &
@@ -260,12 +261,6 @@ function groupBySignature(
 function latestInstant(instants: ReadonlyArray<string>): string {
   return instants.reduce((highest, candidate) =>
     Date.parse(candidate) > Date.parse(highest) ? candidate : highest,
-  );
-}
-
-function earliestInstant(instants: ReadonlyArray<string>): string {
-  return instants.reduce((lowest, candidate) =>
-    Date.parse(candidate) < Date.parse(lowest) ? candidate : lowest,
   );
 }
 
@@ -427,6 +422,54 @@ function readingValueOrNull(reading: AnalyticsReading): number | null {
   return reading.value.state === "available" ? reading.value.value : null;
 }
 
+/**
+ * Page views broken down by referrer. Rows are grouped by referrer *and* by
+ * measurement definition, so two web sources reporting the same referrer stay
+ * two rows instead of being added into one number that means neither.
+ */
+function readReferrers(
+  scope: ReadingScope,
+): ReadonlyArray<AnalyticsReferrerRow> {
+  const groups = new Map<string, StoredAnalyticsFact[]>();
+  for (const fact of scope.facts) {
+    if (fact.metricKey !== "web.page_views" || fact.dimensionKey === "") {
+      continue;
+    }
+    if (fact.value === null) continue;
+    const key = analyticsCompositeKey([
+      fact.dimensionKey,
+      fact.dimensionValue,
+      comparabilitySignature(fact),
+    ]);
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [fact]);
+    else group.push(fact);
+  }
+
+  return [...groups.values()]
+    .map((group) => {
+      const first = group[0];
+      // Every fact in the group already shares one signature, so this adds
+      // like with like by construction; `summableSeries` is what proves it.
+      const total = summableSeries(
+        group.map((fact) => ({ ...fact, value: fact.value ?? 0 })),
+      );
+      return Object.freeze({
+        dimensionKey: first.dimensionKey,
+        dimensionValue: first.dimensionValue,
+        value: presentSecondaryCell(total),
+        source: first.source,
+        sourceName: first.sourceName,
+        comparabilitySignature: comparabilitySignature(first),
+      });
+    })
+    .sort((left, right) => referrerOrder(right) - referrerOrder(left));
+}
+
+function referrerOrder(row: AnalyticsReferrerRow): number {
+  return row.value.state === "available" ? row.value.value : -1;
+}
+
 const crossSourceOutcomes: ReadonlyArray<
   Readonly<{ outcome: string; metricKeys: ReadonlyArray<AnalyticsMetricKey> }>
 > = Object.freeze([
@@ -482,6 +525,35 @@ const contentVitalMetrics: ReadonlyArray<AnalyticsMetricKey> = Object.freeze([
   "web.vitals.cls_p75",
 ]);
 
+/**
+ * How long a query answer may be reused. A range that is still filling changes
+ * as the projector runs, so it is held briefly; a range that has closed cannot
+ * change except through a revision, so it is held for an hour.
+ */
+export const analyticsCacheSeconds = Object.freeze({
+  currentRange: 300,
+  closedRange: 3_600,
+});
+
+/** Bounds the cache so a long-lived isolate cannot grow one without limit. */
+const analyticsCacheMaximumEntries = 200;
+
+/**
+ * A short, stable digest of the metric registry's definition versions. It goes
+ * in every cache key, so redefining a metric cannot serve an answer computed
+ * under the old definition.
+ */
+function metricRegistryDigest(): string {
+  let hash = 2_166_136_261;
+  for (const entry of analyticsMetrics) {
+    for (const character of `${entry.metricKey}@${entry.definitionVersion}`) {
+      hash ^= character.charCodeAt(0);
+      hash = Math.imul(hash, 16_777_619) >>> 0;
+    }
+  }
+  return hash.toString(36);
+}
+
 export function createAnalyticsQueryApplication<Actor>({
   siteId,
   store,
@@ -498,19 +570,88 @@ export function createAnalyticsQueryApplication<Actor>({
     capability: typeof analyticsReadCapability,
   ): Promise<unknown>;
 }) {
+  const registryDigest = metricRegistryDigest();
+  const cache = new Map<string, { expiresAt: number; value: unknown }>();
+
+  /**
+   * Wraps one query in the private, per-site cache ADR-0003 asks for.
+   *
+   * Authorization runs on every call before the cache is read, so a caller
+   * without `analytics.read` is refused and never served a stored answer.
+   * Every reader holding that capability sees the same rows — the queries do
+   * no per-actor filtering — so the capability name is the whole authorization
+   * scope the key needs.
+   */
+  function withCache<
+    Input extends { actor: Actor; range?: AnalyticsRangeRequest },
+    Result,
+  >(
+    queryName: string,
+    run: (input: Input) => Promise<Result>,
+  ): (input: Input) => Promise<Result> {
+    return async (input: Input) => {
+      await authorize(input.actor, analyticsReadCapability);
+      const observedNow = now();
+      // A query called without a range answers as of now, so it is held for
+      // the short window rather than the closed-range one.
+      const resolved =
+        input.range === undefined
+          ? null
+          : resolveReportingRange({
+              ...input.range,
+              timeZone: reportingTimeZone,
+              now: observedNow,
+            });
+      const { actor: _actor, range: _range, ...options } = input;
+      const key = analyticsCompositeKey([
+        siteId,
+        analyticsReadCapability,
+        registryDigest,
+        queryName,
+        reportingTimeZone,
+        resolved?.startUtc ?? "current",
+        resolved?.endUtc ?? "current",
+        resolved?.granularity ?? "current",
+        JSON.stringify(options),
+      ]);
+
+      const nowMs = Date.parse(observedNow);
+      const cached = cache.get(key);
+      if (cached !== undefined && cached.expiresAt > nowMs) {
+        return cached.value as Result;
+      }
+
+      const value = await run(input);
+      const stillFilling =
+        resolved === null || Date.parse(resolved.endUtc) > nowMs;
+      const ttlSeconds = stillFilling
+        ? analyticsCacheSeconds.currentRange
+        : analyticsCacheSeconds.closedRange;
+      cache.delete(key);
+      cache.set(key, { expiresAt: nowMs + ttlSeconds * 1_000, value });
+      // Insertion order is eviction order: the oldest entry goes first.
+      while (cache.size > analyticsCacheMaximumEntries) {
+        const oldest = cache.keys().next();
+        if (oldest.done === true) break;
+        cache.delete(oldest.value);
+      }
+      return value;
+    };
+  }
+
   async function openScope(
     actor: Actor,
     request: AnalyticsRangeRequest,
     metricKeys: ReadonlyArray<AnalyticsMetricKey>,
   ) {
-    await authorize(actor, analyticsReadCapability);
+    // `withCache` has already checked the capability for this call.
     const observedNow = now();
     const resolved = resolveReportingRange({
       ...request,
       timeZone: reportingTimeZone,
       now: observedNow,
     });
-    const retentionFloor = subtractMonths(
+    const retentionFloor = subtractUtcMonths(
       observedNow,
       analyticsRetention.aggregateFactMonths,
     );
@@ -614,9 +755,9 @@ export function createAnalyticsQueryApplication<Actor>({
     };
   }
 
-  return {
+  return Object.freeze({
     queries: Object.freeze({
-      async overview({
+      overview: withCache("overview", async ({
         actor,
         range: request,
         comparison,
@@ -624,7 +765,7 @@ export function createAnalyticsQueryApplication<Actor>({
         actor: Actor;
         range: AnalyticsRangeRequest;
         comparison?: "previous_period";
-      }) {
+      }) => {
         const { scope, range, sourceStates, observedNow } = await openScope(
           actor,
           request,
@@ -633,29 +774,7 @@ export function createAnalyticsQueryApplication<Actor>({
         const metrics = overviewMetrics.flatMap((metricKey) =>
           readAggregate(metricKey, scope),
         );
-        const referrerFacts = scope.facts.filter(
-          (fact) =>
-            fact.metricKey === "web.page_views" &&
-            fact.dimensionKey !== "",
-        );
-        const referrerTotals = new Map<string, number>();
-        for (const fact of referrerFacts) {
-          if (fact.value === null) continue;
-          const key = `${fact.dimensionKey} ${fact.dimensionValue}`;
-          referrerTotals.set(key, (referrerTotals.get(key) ?? 0) + fact.value);
-        }
-        const referrers: ReadonlyArray<AnalyticsReferrerRow> = [
-          ...referrerTotals.entries(),
-        ]
-          .sort(([, left], [, right]) => right - left)
-          .map(([key, total]) => {
-            const [dimensionKey, dimensionValue] = key.split(" ");
-            return Object.freeze({
-              dimensionKey,
-              dimensionValue,
-              value: presentSecondaryCell(total),
-            });
-          });
+        const referrers = readReferrers(scope);
 
         let comparisonView = null;
         if (comparison === "previous_period") {
@@ -697,9 +816,9 @@ export function createAnalyticsQueryApplication<Actor>({
           comparison: comparisonView,
           sources: sourceHealth(sourceStates, observedNow),
         };
-      },
+      }),
 
-      async content({
+      content: withCache("content", async ({
         actor,
         range: request,
         limit = maximumPageSize,
@@ -707,7 +826,7 @@ export function createAnalyticsQueryApplication<Actor>({
         actor: Actor;
         range: AnalyticsRangeRequest;
         limit?: number;
-      }) {
+      }) => {
         const { scope, range, sourceStates, observedNow } = await openScope(
           actor,
           request,
@@ -767,15 +886,15 @@ export function createAnalyticsQueryApplication<Actor>({
           limit: appliedLimit,
           sources: sourceHealth(sourceStates, observedNow),
         };
-      },
+      }),
 
-      async forms({
+      forms: withCache("forms", async ({
         actor,
         range: request,
       }: {
         actor: Actor;
         range: AnalyticsRangeRequest;
-      }) {
+      }) => {
         const { scope, range, sourceStates, observedNow } = await openScope(
           actor,
           request,
@@ -821,15 +940,15 @@ export function createAnalyticsQueryApplication<Actor>({
           items,
           sources: sourceHealth(sourceStates, observedNow),
         };
-      },
+      }),
 
-      async audience({
+      audience: withCache("audience", async ({
         actor,
         range: request,
       }: {
         actor: Actor;
         range: AnalyticsRangeRequest;
-      }) {
+      }) => {
         const { scope, range, sourceStates, observedNow } = await openScope(
           actor,
           request,
@@ -842,9 +961,9 @@ export function createAnalyticsQueryApplication<Actor>({
           ),
           sources: sourceHealth(sourceStates, observedNow),
         };
-      },
+      }),
 
-      async campaigns({
+      campaigns: withCache("campaigns", async ({
         actor,
         range: request,
         limit = maximumPageSize,
@@ -852,7 +971,7 @@ export function createAnalyticsQueryApplication<Actor>({
         actor: Actor;
         range: AnalyticsRangeRequest;
         limit?: number;
-      }) {
+      }) => {
         const { scope, range, sourceStates, observedNow } = await openScope(
           actor,
           request,
@@ -892,17 +1011,16 @@ export function createAnalyticsQueryApplication<Actor>({
           limit: appliedLimit,
           sources: sourceHealth(sourceStates, observedNow),
         };
-      },
+      }),
 
-      async health({
+      health: withCache("health", async ({
         actor,
         range: request,
       }: {
         actor: Actor;
         range?: AnalyticsRangeRequest;
-      }) {
+      }) => {
         if (request === undefined) {
-          await authorize(actor, analyticsReadCapability);
           const observedNow = now();
           const states = await store.listSourceStates();
           return {
@@ -951,9 +1069,9 @@ export function createAnalyticsQueryApplication<Actor>({
           earliestFactInstant: await store.earliestFactInstant(),
           disagreements,
         };
-      },
+      }),
     }),
-  };
+  });
 }
 
 export type AnalyticsQueryApplication<Actor = unknown> = ReturnType<

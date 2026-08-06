@@ -36,6 +36,13 @@ export type CloudflareWebVitalsGroup = Readonly<{
   }>;
 }>;
 
+/** One Web Vital's canonical metric, its unit, and how to read it. */
+type WebVitalMapping = Readonly<{
+  metricKey: AnalyticsFactMeasurement["metricKey"];
+  unit: AnalyticsFactMeasurement["unit"];
+  read(group: CloudflareWebVitalsGroup): number | null;
+}>;
+
 export type CloudflareWebAnalyticsResponse = Readonly<{
   pageloads: ReadonlyArray<CloudflareWebAnalyticsGroup>;
   webVitals: ReadonlyArray<CloudflareWebVitalsGroup>;
@@ -292,9 +299,7 @@ export function normalizeCloudflareWebAnalytics({
     });
   }
 
-  const vitals: ReadonlyArray<
-    Readonly<{ metricKey: AnalyticsFactMeasurement["metricKey"]; unit: AnalyticsFactMeasurement["unit"]; read: (group: CloudflareWebVitalsGroup) => number | null }>
-  > = [
+  const vitals: ReadonlyArray<WebVitalMapping> = [
     {
       metricKey: "web.vitals.lcp_p75",
       unit: "milliseconds",

@@ -1,11 +1,17 @@
 import "server-only";
 
 import {
+  addUtcDays,
+  addUtcSeconds,
+  analyticsRetention,
   campaignAnalyticsMeasurements,
   createAnalyticsProjection,
+  utcDayStart,
   type AnalyticsFactMeasurement,
   type AnalyticsSource,
   type AnalyticsSourceState,
+  type CampaignAnalyticsSnapshot,
+  type NewsletterAnalyticsAdapter,
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
@@ -65,17 +71,8 @@ const refreshIntervalSeconds: Readonly<Record<AnalyticsSource, number>> =
 const externalRefreshDays = 7;
 const hourlyRetentionDays = 90;
 
-function utcDayStart(instant: string): string {
-  return `${instant.slice(0, 10)}T00:00:00.000Z`;
-}
-
-function addDays(instant: string, days: number): string {
-  return new Date(Date.parse(instant) + days * 86_400_000).toISOString();
-}
-
-function addSeconds(instant: string, seconds: number): string {
-  return new Date(Date.parse(instant) + seconds * 1_000).toISOString();
-}
+/** Fifty campaigns a page, so one run reads at most a thousand campaigns. */
+const providerMaximumPagesPerRun = 20;
 
 /** Our own contract failures are bugs, not source outages. */
 const contractErrorNames = new Set([
@@ -115,6 +112,94 @@ export function isSourceDue({
  * always owned its paths; a later route change will need a recorded history to
  * keep two content items' traffic apart.
  */
+/**
+ * How far back a provider run asks for changed campaigns.
+ *
+ * ADR-0003 asks for three bands: poll recently sent campaigns often for 72
+ * hours, daily through 30 days, and once more at 90 days. The band is chosen
+ * from the last successful run rather than from a stored schedule, so the
+ * projector needs no extra state to keep its place:
+ *
+ * - a different UTC week from the last success — the 90-day sweep
+ * - a different UTC day — the 30-day sweep
+ * - otherwise — the 72-hour band every scheduled run covers
+ *
+ * A campaign older than 90 days is never asked for again. Its facts are
+ * already projected and the provider no longer revises them.
+ */
+export function providerPollWindowDays({
+  lastSuccessAt,
+  now,
+}: {
+  lastSuccessAt: string | null;
+  now: string;
+}): number {
+  if (lastSuccessAt === null) return 90;
+  if (utcWeekKey(lastSuccessAt) !== utcWeekKey(now)) return 90;
+  if (lastSuccessAt.slice(0, 10) !== now.slice(0, 10)) return 30;
+  return 3;
+}
+
+/** The ISO week an instant falls in, as a sortable `YYYY-Www` key. */
+function utcWeekKey(instant: string): string {
+  const date = new Date(Date.parse(instant));
+  date.setUTCHours(0, 0, 0, 0);
+  // Thursday decides the ISO week-numbering year.
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((date.getTime() - yearStart) / 86_400_000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+/** The provider campaigns this site owns, keyed by the provider's own ID. */
+async function ownedProviderCampaigns(
+  database: NonNullable<AnalyticsProjectionEnvironment["FOUNDRY_DB"]>,
+  siteId: string,
+): Promise<Map<string, string>> {
+  const { results } = await database
+    .prepare(
+      `SELECT campaign_id, provider_campaign_id
+       FROM campaign_bulk_send_operations
+       WHERE site_id = ?1 AND provider_campaign_id IS NOT NULL`,
+    )
+    .bind(siteId)
+    .all<{ campaign_id: string; provider_campaign_id: string }>();
+  return new Map(
+    results.map((row) => [row.provider_campaign_id, row.campaign_id]),
+  );
+}
+
+/**
+ * Pages through the provider's changed-campaign list with its cursor. One
+ * request covers up to fifty campaigns, where asking per campaign would spend
+ * one request each and exhaust a free-tier quota on a site with any history.
+ */
+async function listChangedCampaignSnapshots({
+  adapter,
+  since,
+  maximumPages = providerMaximumPagesPerRun,
+}: {
+  adapter: NewsletterAnalyticsAdapter;
+  since: string;
+  maximumPages?: number;
+}): Promise<ReadonlyArray<CampaignAnalyticsSnapshot>> {
+  const snapshots: CampaignAnalyticsSnapshot[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < maximumPages; page += 1) {
+    const result = await adapter.listChangedCampaignAnalytics({
+      cursor,
+      since,
+    });
+    snapshots.push(...result.snapshots);
+    cursor = result.nextCursor;
+    if (cursor === null) return snapshots;
+  }
+  // A run that stops early is said out loud, so a truncated sweep is never
+  // read as a complete one.
+  console.warn("analytics_provider_pages_capped", { maximumPages, since });
+  return snapshots;
+}
+
 export function currentRouteHistory(): ReadonlyArray<PublishedRouteHistoryEntry> {
   return [
     {
@@ -144,20 +229,32 @@ export async function runScheduledAnalyticsProjection(
   const projection = createAnalyticsProjection({ siteId, store, now });
   const observedAt = now();
   const revision = revisionFor(observedAt);
-  const completeThrough = utcDayStart(observedAt);
-  const externalWindowStart = addDays(completeThrough, -externalRefreshDays);
+  // External platforms revise a day until it closes, so they may only
+  // claim completeness through the last closed UTC day.
+  const lastClosedDay = utcDayStart(observedAt);
+  const externalWindowStart = addUtcDays(lastClosedDay, -externalRefreshDays);
 
-  async function projectSource(
-    source: AnalyticsSource,
-    sourceName: string,
-    definitionVersion: number,
-    collect: () => Promise<ReadonlyArray<AnalyticsFactMeasurement>>,
-    sourceMetric: string,
-    notConfigured = false,
-  ) {
+  async function projectSource({
+    source,
+    sourceName,
+    definitionVersion,
+    sourceMetric,
+    collect,
+    completeThrough,
+    configured,
+  }: {
+    source: AnalyticsSource;
+    sourceName: string;
+    definitionVersion: number;
+    sourceMetric: string;
+    collect: () => Promise<ReadonlyArray<AnalyticsFactMeasurement>>;
+    /** How far this source can honestly claim to have reported. */
+    completeThrough: string;
+    configured: boolean;
+  }) {
     const state = await store.findCurrentSourceState({ source, sourceName });
     if (!isSourceDue({ state, source, now: observedAt })) return;
-    if (notConfigured) {
+    if (!configured) {
       await projection.project({
         outcome: "unavailable",
         source,
@@ -196,10 +293,10 @@ export async function runScheduledAnalyticsProjection(
         // source state, because `/dash` shows it.
         errorCode: "source_query_failed",
         attemptedAt: observedAt,
-        nextRetryAt: addSeconds(observedAt, refreshIntervalSeconds[source]),
+        nextRetryAt: addUtcSeconds(observedAt, refreshIntervalSeconds[source]),
       });
-            // The failure class only; a provider message could carry request
-      // detail we have no business writing to logs.
+      // The failure class only; a provider message could carry request detail
+      // we have no business writing to logs.
       console.error("analytics_source_failed", {
         source,
         sourceName,
@@ -208,29 +305,37 @@ export async function runScheduledAnalyticsProjection(
     }
   }
 
+  // D1 is the exact source and it is local, so it reports through the current
+  // instant rather than through the last closed day. Today's bucket ends after
+  // that, which is what marks the range "in progress" instead of hiding it.
   const operational = createD1OperationalAnalyticsSource(database, siteId);
-  await projectSource(
-    "d1",
-    operationalAnalyticsSourceName,
-    operationalAnalyticsDefinitionVersion,
-    async () =>
+  await projectSource({
+    source: "d1",
+    sourceName: operationalAnalyticsSourceName,
+    definitionVersion: operationalAnalyticsDefinitionVersion,
+    sourceMetric: "operational_records",
+    completeThrough: observedAt,
+    configured: true,
+    collect: async () =>
       operational.measurements({
-        startUtc: addDays(completeThrough, -2),
-        endUtc: completeThrough,
+        startUtc: addUtcDays(utcDayStart(observedAt), -2),
+        endUtc: observedAt,
         formIds: await operational.listFormIds(),
       }),
-    "operational_records",
-  );
+  });
 
   const accountId = environment.FOUNDRY_CLOUDFLARE_ACCOUNT_ID?.trim() ?? "";
   const analyticsToken = environment.FOUNDRY_ANALYTICS_API_TOKEN?.trim() ?? "";
   const siteTag =
     environment.FOUNDRY_CLOUDFLARE_WEB_ANALYTICS_SITE_TAG?.trim() ?? "";
-  await projectSource(
-    "cloudflare_web",
-    cloudflareWebAnalyticsSourceName,
-    cloudflareWebAnalyticsDefinitionVersion,
-    async () =>
+  await projectSource({
+    source: "cloudflare_web",
+    sourceName: cloudflareWebAnalyticsSourceName,
+    definitionVersion: cloudflareWebAnalyticsDefinitionVersion,
+    sourceMetric: "pageViews",
+    completeThrough: lastClosedDay,
+    configured: accountId !== "" && analyticsToken !== "" && siteTag !== "",
+    collect: async () =>
       normalizeCloudflareWebAnalytics({
         response: {
           pageloads: await fetchCloudflareWebAnalytics({
@@ -238,52 +343,61 @@ export async function runScheduledAnalyticsProjection(
             siteTag,
             apiToken: analyticsToken,
             since: externalWindowStart,
-            until: completeThrough,
+            until: lastClosedDay,
           }),
+          // Web Vitals collection is not shipped; see the "deliberately not
+          // here" section of docs/architecture/privacy-first-aggregate-
+          // analytics.md. The normalizer below handles them once the query
+          // lands, and no metric is invented in the meantime.
           webVitals: [],
         },
         siteId,
         routeHistory: currentRouteHistory(),
       }),
-    "pageViews",
-    accountId === "" || analyticsToken === "" || siteTag === "",
-  );
+  });
 
+  // Analytics Engine reports hours as well as days. The hourly facts serve an
+  // intraday range for 90 days and then compact away; the daily facts carry
+  // the history past Analytics Engine's own three-month retention.
   const dataset = environment.FOUNDRY_ANALYTICS_ENGINE_DATASET?.trim() ?? "";
-  await projectSource(
-    "analytics_engine",
-    analyticsEngineSourceName,
-    analyticsEngineDefinitionVersion,
-    async () =>
-      normalizeAnalyticsEngineRows(
-        await queryAnalyticsEngine({
-          accountId,
-          apiToken: analyticsToken,
-          dataset,
-          since: externalWindowStart,
-          until: completeThrough,
-        }),
-      ),
-    "interaction_points",
-    accountId === "" || analyticsToken === "" || dataset === "",
-  );
+  await projectSource({
+    source: "analytics_engine",
+    sourceName: analyticsEngineSourceName,
+    definitionVersion: analyticsEngineDefinitionVersion,
+    sourceMetric: "interaction_points",
+    completeThrough: lastClosedDay,
+    configured: accountId !== "" && analyticsToken !== "" && dataset !== "",
+    collect: async () => {
+      const engineQuery = {
+        accountId,
+        apiToken: analyticsToken,
+        dataset,
+        since: externalWindowStart,
+        until: lastClosedDay,
+      };
+      const [daily, hourly] = await Promise.all([
+        queryAnalyticsEngine({ ...engineQuery, granularity: "day" }),
+        queryAnalyticsEngine({ ...engineQuery, granularity: "hour" }),
+      ]);
+      return [
+        ...normalizeAnalyticsEngineRows(daily, "day"),
+        ...normalizeAnalyticsEngineRows(hourly, "hour"),
+      ];
+    },
+  });
 
   const brevoApiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
-  await projectSource(
-    "provider",
-    brevoAnalyticsSourceName,
-    brevoAnalyticsDefinitionVersion,
-    async () => {
-      const { results } = await database
-        .prepare(
-          `SELECT campaign_id, provider_campaign_id
-           FROM campaign_bulk_send_operations
-           WHERE site_id = ?1 AND provider_campaign_id IS NOT NULL`,
-        )
-        .bind(siteId)
-        .all<{ campaign_id: string; provider_campaign_id: string }>();
-      const campaignIdByProvider = new Map(
-        results.map((row) => [row.provider_campaign_id, row.campaign_id]),
+  await projectSource({
+    source: "provider",
+    sourceName: brevoAnalyticsSourceName,
+    definitionVersion: brevoAnalyticsDefinitionVersion,
+    sourceMetric: "campaign_report",
+    completeThrough: observedAt,
+    configured: brevoApiKey !== "",
+    collect: async () => {
+      const campaignIdByProvider = await ownedProviderCampaigns(
+        database,
+        siteId,
       );
       const adapter = createBrevoCampaignAnalyticsAdapter({
         apiKey: brevoApiKey,
@@ -291,24 +405,26 @@ export async function runScheduledAnalyticsProjection(
           campaignIdByProvider.get(providerCampaignId) ?? null,
         now,
       });
-      const measurements: AnalyticsFactMeasurement[] = [];
-      for (const [providerCampaignId, campaignId] of campaignIdByProvider) {
-        const snapshot = await adapter.getCampaignAnalytics({
-          campaignId,
-          providerCampaignId,
-        });
-        measurements.push(
-          ...campaignAnalyticsMeasurements({
-            snapshot,
-            capabilities: brevoAnalyticsCapabilities,
-          }),
-        );
-      }
-      return measurements;
+      const providerState = await store.findCurrentSourceState({
+        source: "provider",
+        sourceName: brevoAnalyticsSourceName,
+      });
+      const windowDays = providerPollWindowDays({
+        lastSuccessAt: providerState?.lastSuccessAt ?? null,
+        now: observedAt,
+      });
+      const snapshots = await listChangedCampaignSnapshots({
+        adapter,
+        since: addUtcDays(observedAt, -windowDays),
+      });
+      return snapshots.flatMap((snapshot) =>
+        campaignAnalyticsMeasurements({
+          snapshot,
+          capabilities: brevoAnalyticsCapabilities,
+        }),
+      );
     },
-    "campaign_report",
-    brevoApiKey === "",
-  );
+  });
 
   const compaction = await projection.compact({ hourlyRetentionDays });
   if (
@@ -319,4 +435,8 @@ export async function runScheduledAnalyticsProjection(
     // saying so is what stops "compacted" from implying "complete".
     console.warn("analytics_compaction_skipped_days", compaction);
   }
+
+  await projection.purge({
+    aggregateFactMonths: analyticsRetention.aggregateFactMonths,
+  });
 }

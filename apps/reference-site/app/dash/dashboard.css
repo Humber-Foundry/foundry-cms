@@ -993,6 +993,12 @@
   font-size: 0.85rem;
 }
 
+/* Names the reporting source when one referrer arrives from two of them. */
+.analytics-note {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
 .analytics-warning {
   margin: 1rem 0;
   border: 1px solid var(--sand);

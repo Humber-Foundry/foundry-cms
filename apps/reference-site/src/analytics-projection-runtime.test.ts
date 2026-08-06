@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { createSiteId } from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
   currentRouteHistory,
   isSourceDue,
+  providerPollWindowDays,
   runScheduledAnalyticsProjection,
   type AnalyticsProjectionEnvironment,
 } from "./analytics-projection-runtime";
@@ -18,7 +19,7 @@ import type { D1DatabaseBinding } from "./d1-human-access-store";
 
 let runtime: Miniflare;
 let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
-const siteId = createSiteId("site_reference");
+const siteId = referenceSiteDefinition.site.id;
 
 function migrationStatements(migration: string): string[] {
   const statements: string[] = [];
@@ -155,8 +156,45 @@ describe("running the scheduled projection", () => {
     ).toMatchObject({
       sourceName: "foundry",
       status: "healthy",
-      completeThrough: "2026-08-03T00:00:00.000Z",
+      // D1 is exact and local, so it reports through the current instant
+      // rather than through the last closed day.
+      completeThrough: "2026-08-03T00:30:00.000Z",
     });
+  });
+
+  it("projects today, so the current day is not read as absent", async () => {
+    await runScheduledAnalyticsProjection(
+      environment(),
+      () => "2026-08-03T00:30:00.000Z",
+    );
+
+    const { results } = await database
+      .prepare(
+        `SELECT COUNT(*) AS total FROM analytics_facts
+         WHERE source = 'd1' AND bucket_start_utc = '2026-08-03T00:00:00.000Z'`,
+      )
+      .all<{ total: number }>();
+    expect(results[0]?.total).toBeGreaterThan(0);
+  });
+
+  it("marks today's bucket as still filling rather than complete", async () => {
+    await runScheduledAnalyticsProjection(
+      environment(),
+      () => "2026-08-03T00:30:00.000Z",
+    );
+
+    const { results } = await database
+      .prepare(
+        `SELECT bucket_end_utc, complete_through FROM analytics_facts
+         WHERE source = 'd1' AND bucket_start_utc = '2026-08-03T00:00:00.000Z'
+         LIMIT 1`,
+      )
+      .all<{ bucket_end_utc: string; complete_through: string }>();
+    const row = results[0];
+    expect(row).toBeDefined();
+    expect(Date.parse(row!.bucket_end_utc)).toBeGreaterThan(
+      Date.parse(row!.complete_through),
+    );
   });
 
   it("reports an unconfigured source as unavailable, not as zero traffic", async () => {
@@ -250,5 +288,80 @@ describe("running the scheduled projection", () => {
     expect(
       currentRouteHistory().every((entry) => entry.contentId.length > 0),
     ).toBe(true);
+  });
+});
+
+describe("provider polling bands", () => {
+  it("asks for everything on a source that has never reported", () => {
+    expect(
+      providerPollWindowDays({
+        lastSuccessAt: null,
+        now: "2026-08-05T09:00:00.000Z",
+      }),
+    ).toBe(90);
+  });
+
+  it("keeps to the 72-hour band between runs on the same day", () => {
+    expect(
+      providerPollWindowDays({
+        lastSuccessAt: "2026-08-05T08:00:00.000Z",
+        now: "2026-08-05T09:00:00.000Z",
+      }),
+    ).toBe(3);
+  });
+
+  it("widens to 30 days on the first run of a new day", () => {
+    expect(
+      providerPollWindowDays({
+        lastSuccessAt: "2026-08-04T23:00:00.000Z",
+        now: "2026-08-05T00:30:00.000Z",
+      }),
+    ).toBe(30);
+  });
+
+  it("widens to 90 days on the first run of a new week", () => {
+    // 2026-08-02 is a Sunday, 2026-08-03 the Monday that starts a new week.
+    expect(
+      providerPollWindowDays({
+        lastSuccessAt: "2026-08-02T23:00:00.000Z",
+        now: "2026-08-03T00:30:00.000Z",
+      }),
+    ).toBe(90);
+  });
+});
+
+describe("retention", () => {
+  it("removes facts past the retention floor on each scheduled run", async () => {
+    await database
+      .prepare(
+        `INSERT INTO analytics_facts (
+           site_id, schema_version, metric_key, bucket_start_utc,
+           bucket_end_utc, granularity, subject_type, subject_id,
+           dimension_key, dimension_value, source, source_name, source_metric,
+           definition_version, unit, quality, sample_interval, availability,
+           value, unavailable_reason, observed_at, complete_through, revision
+         ) VALUES (
+           ?1, 'foundry.analytics.v1', 'web.page_views',
+           '2023-01-01T00:00:00.000Z', '2023-01-02T00:00:00.000Z', 'day',
+           'site', 'site_reference', '', '', 'cloudflare_web', 'cloudflare',
+           'pageViews', 1, 'count', 'estimated', 1, 'available', 10, NULL,
+           '2023-01-02T01:00:00.000Z', '2023-01-02T00:00:00.000Z', 1
+         )`,
+      )
+      .bind(siteId)
+      .run();
+
+    await runScheduledAnalyticsProjection(
+      environment(),
+      () => "2026-08-03T00:30:00.000Z",
+    );
+
+    const { results } = await database
+      .prepare(
+        `SELECT COUNT(*) AS total FROM analytics_facts
+         WHERE bucket_start_utc = '2023-01-01T00:00:00.000Z'`,
+      )
+      .all<{ total: number }>();
+    expect(results[0]?.total).toBe(0);
   });
 });

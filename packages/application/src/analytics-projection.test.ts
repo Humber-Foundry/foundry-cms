@@ -64,6 +64,21 @@ function createStore() {
         facts.set(analyticsFactKey(fact), fact);
       }
     },
+    async purgeExpiredFacts({ before }) {
+      let factsRemoved = 0;
+      for (const [key, fact] of facts) {
+        if (Date.parse(fact.bucketEndUtc) <= Date.parse(before)) {
+          facts.delete(key);
+          factsRemoved += 1;
+        }
+      }
+      const remaining = revisions.filter(
+        (entry) => Date.parse(entry.bucketStartUtc) >= Date.parse(before),
+      );
+      const revisionsRemoved = revisions.length - remaining.length;
+      revisions.splice(0, revisions.length, ...remaining);
+      return { factsRemoved, revisionsRemoved };
+    },
   };
 
   return {
@@ -482,5 +497,89 @@ describe("compaction", () => {
       observedAt: "2026-08-02T01:00:00.000Z",
       completeThrough: "2026-05-02T00:00:00.000Z",
     });
+  });
+});
+
+describe("source status after a run", () => {
+  it("stays healthy when a measurement is legitimately not measured", async () => {
+    await projection().project(
+      runInput({
+        facts: [
+          webFact({
+            metricKey: "web.vitals.lcp_p75",
+            subjectType: "content",
+            subjectId: "content_home",
+            unit: "milliseconds",
+            quality: "partial_population",
+            value: null,
+            unavailableReason: "not_measured",
+          }),
+        ],
+      }),
+    );
+
+    expect(
+      harness.sourceStates.get("cloudflare_web|cloudflare"),
+    ).toMatchObject({ status: "healthy" });
+  });
+
+  it("reports partial when the source omitted something it was asked for", async () => {
+    await projection().project(
+      runInput({
+        source: "provider",
+        sourceName: "brevo",
+        sourceMetric: "uniqueClicks",
+        facts: [
+          webFact({
+            metricKey: "campaign.unique_clicks_reported",
+            subjectType: "campaign",
+            subjectId: "campaign_1",
+            granularity: "campaign",
+            quality: "directional",
+            value: null,
+            unavailableReason: "provider_omitted",
+          }),
+        ],
+      }),
+    );
+
+    expect(harness.sourceStates.get("provider|brevo")).toMatchObject({
+      status: "partial",
+    });
+  });
+});
+
+describe("retention", () => {
+  it("removes facts whose bucket closed before the retention floor", async () => {
+    await projection().project(
+      runInput({
+        facts: [
+          webFact({
+            bucketStartUtc: "2024-01-01T00:00:00.000Z",
+            bucketEndUtc: "2024-01-02T00:00:00.000Z",
+          }),
+        ],
+      }),
+    );
+    await projection().project(
+      runInput({ revision: 2, facts: [webFact({ value: 7 })] }),
+    );
+    expect(harness.facts.size).toBe(2);
+
+    const outcome = await projection().purge({ aggregateFactMonths: 25 });
+
+    expect(outcome.factsRemoved).toBe(1);
+    expect([...harness.facts.values()]).toEqual([
+      expect.objectContaining({ bucketStartUtc: "2026-08-01T00:00:00.000Z" }),
+    ]);
+  });
+
+  it("keeps a fact that is still inside the retained window", async () => {
+    await projection().project(runInput());
+
+    const outcome = await projection().purge({ aggregateFactMonths: 25 });
+
+    expect(outcome.factsRemoved).toBe(0);
+    expect(harness.facts.size).toBe(1);
   });
 });

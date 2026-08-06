@@ -528,3 +528,67 @@ describe("reading the projection back", () => {
     ]);
   });
 });
+
+describe("retention purge", () => {
+  it("deletes facts past the retention floor and keeps the rest", async () => {
+    await projectWeb({
+      completeThrough: "2024-01-02T00:00:00.000Z",
+      facts: [
+        measurement({
+          bucketStartUtc: "2024-01-01T00:00:00.000Z",
+          bucketEndUtc: "2024-01-02T00:00:00.000Z",
+        }),
+      ],
+    });
+    await projectWeb({ revision: 2 });
+    expect(await factRows()).toHaveLength(2);
+
+    const outcome = await projection("2026-08-02T00:00:00.000Z").purge({
+      aggregateFactMonths: 25,
+    });
+
+    expect(outcome.factsRemoved).toBe(1);
+    const rows = await factRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      bucket_start_utc: "2026-08-01T00:00:00.000Z",
+    });
+  });
+
+  it("removes the revision audit rows the purged facts left behind", async () => {
+    await projectWeb({
+      completeThrough: "2024-01-02T00:00:00.000Z",
+      facts: [
+        measurement({
+          bucketStartUtc: "2024-01-01T00:00:00.000Z",
+          bucketEndUtc: "2024-01-02T00:00:00.000Z",
+        }),
+      ],
+    });
+    await projectWeb({
+      revision: 2,
+      completeThrough: "2024-01-02T00:00:00.000Z",
+      facts: [
+        measurement({
+          bucketStartUtc: "2024-01-01T00:00:00.000Z",
+          bucketEndUtc: "2024-01-02T00:00:00.000Z",
+          value: 999,
+        }),
+      ],
+    });
+    const before = await database
+      .prepare("SELECT COUNT(*) AS total FROM analytics_fact_revisions")
+      .first<{ total: number }>();
+    expect(before?.total).toBe(1);
+
+    const outcome = await projection("2026-08-02T00:00:00.000Z").purge({
+      aggregateFactMonths: 25,
+    });
+
+    expect(outcome.revisionsRemoved).toBe(1);
+    const after = await database
+      .prepare("SELECT COUNT(*) AS total FROM analytics_fact_revisions")
+      .first<{ total: number }>();
+    expect(after?.total).toBe(0);
+  });
+});

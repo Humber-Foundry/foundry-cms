@@ -203,6 +203,11 @@ export function AnalyticsDashboard({
   }
 
   const { overview, content, forms, audience, campaigns, health } = analytics;
+  // Two web sources reporting one referrer arrive as two rows. Naming the
+  // source keeps them apart; with one source the label would be noise.
+  const referrerSourceNames = new Set(
+    overview.referrers.map((row) => row.sourceName),
+  );
 
   return (
     <section aria-labelledby="analytics-heading" className="analytics">
@@ -250,9 +255,14 @@ export function AnalyticsDashboard({
               <div
                 className="inventory-row"
                 role="row"
-                key={`${row.dimensionKey}:${row.dimensionValue}`}
+                key={`${row.dimensionKey}:${row.dimensionValue}:${row.comparabilitySignature}`}
               >
-                <strong role="cell">{row.dimensionValue}</strong>
+                <strong role="cell">
+                  {row.dimensionValue}
+                  {referrerSourceNames.size > 1 ? (
+                    <span className="analytics-note"> {row.sourceName}</span>
+                  ) : null}
+                </strong>
                 <span role="cell">{formatValue(row.value, "count")}</span>
               </div>
             ))}
