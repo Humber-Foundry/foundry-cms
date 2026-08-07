@@ -194,8 +194,8 @@ range reaching past them is marked as clamped with its readings
 `/api/analytics/interactions` accepts one enumerated event kind and one public
 CMS object ID, and discards everything else about the request — headers, query
 string, and the rest of the body. It always answers `204`. A dropped
-interaction costs an estimate, and it must never change the outcome of a form,
-publish, consent or send operation.
+interaction can leave an estimated count incomplete, and it must never change
+the outcome of a form, publish, consent or send operation.
 
 ## What this does not do
 
@@ -207,10 +207,10 @@ publish, consent or send operation.
   field names were not confirmed against the live schema. A guessed query
   would pass review and fail in production. Until the field names are
   confirmed, the three metrics have state `unavailable`.
-- **MCP access.** The read-only analytics tools are
+- **MCP access.** The read-only analytics tools are tracked in
   [issue #57](https://github.com/Humber-Foundry/foundry-cms/issues/57). The
   query service they will use is the one `/dash` already reads.
-- **Installation capacity and quota diagnostics** are
+- **Installation capacity and quota diagnostics** are tracked in
   [issue #61](https://github.com/Humber-Foundry/foundry-cms/issues/61).
 - **A recorded route history.** Content attribution maps a published path to
   the content item that owned it in each bucket, but the site does not yet

@@ -305,7 +305,7 @@ describe("freshness", () => {
     ).toBe("fresh");
   });
 
-  it("marks a source that missed its expected lag delayed", () => {
+  it("marks a source delayed once its expected reporting lag has elapsed", () => {
     expect(
       readingFreshness({
         completeThrough: "2026-08-02T00:00:00.000Z",

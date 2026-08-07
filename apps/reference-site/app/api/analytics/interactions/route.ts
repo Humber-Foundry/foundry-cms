@@ -60,7 +60,8 @@ export async function POST(request: Request): Promise<Response> {
       writeInteractionPoint(dataset, result.point);
     }
   } catch {
-    // Best effort by design: a dropped interaction costs an estimate.
+    // Best effort by design: a dropped interaction can leave an estimated
+    // count incomplete.
   }
   return noContent();
 }

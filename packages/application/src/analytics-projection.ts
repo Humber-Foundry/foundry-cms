@@ -3,8 +3,8 @@
  *
  * This module is the only writer. Cloudflare Web Analytics, Workers Analytics
  * Engine, the D1 operational tables and the newsletter provider all reach the
- * read model through it, so the vocabulary, privacy and comparability rules
- * are applied in one place and each adapter cannot apply its own.
+ * read model through it, so it enforces the vocabulary, privacy and
+ * comparability rules for every source.
  */
 
 import type { SiteId } from "@foundry/site-definition";
@@ -425,10 +425,10 @@ export function createAnalyticsProjection({
       previousState?.completeThrough != null &&
       Date.parse(run.completeThrough) <
         Date.parse(previousState.completeThrough);
-    // A measurement the source was asked for and could not give back is a
-    // gap. A measurement that is legitimately absent — a browser reporting no
-    // Web Vitals, a capability the provider never claimed — is not, or a
-    // healthy source would report `partial` for ever.
+    // A gap is a measurement the source was asked for and could not return.
+    // An expected absence leaves the source healthy: a browser reporting no
+    // Web Vitals, or a capability the provider never claimed. Counting those
+    // as gaps would leave a healthy source `partial` indefinitely.
     const anyGap = candidates.some(
       (fact) =>
         fact.availability === "unavailable" &&

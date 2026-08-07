@@ -292,7 +292,7 @@ describe("running the scheduled projection", () => {
 });
 
 describe("provider polling bands", () => {
-  it("asks for everything on a source that has never reported", () => {
+  it("uses the 97-day band for a source that has never reported", () => {
     expect(
       providerPollWindowDays({
         lastSuccessAt: null,

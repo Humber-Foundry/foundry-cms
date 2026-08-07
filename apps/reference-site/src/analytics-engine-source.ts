@@ -6,9 +6,9 @@ import type { AnalyticsFactMeasurement } from "@foundry/application";
  * Workers Analytics Engine supplies the one thing Web Analytics cannot:
  * anonymous counts of the interactions the CMS defines.
  *
- * It is best-effort. A dropped event costs an estimate. It cannot cost an
- * accepted form, a consent record or a send, because none of those depends on
- * it.
+ * It is best-effort. A dropped event can leave an aggregate interaction count
+ * incomplete. It cannot affect an accepted form, a consent record or a send,
+ * because none of those depends on Analytics Engine.
  *
  * Contract: https://developers.cloudflare.com/analytics/analytics-engine/sql-api/
  */
