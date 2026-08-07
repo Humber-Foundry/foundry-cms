@@ -397,6 +397,20 @@ function runIndexAsync(repository, arguments_, options) {
 }
 
 describe("commit-pinned Graphify index", () => {
+  it("excludes the data-only MCP evidence manifest from code extraction", () => {
+    const ignoredPaths = readFileSync(
+      join(repositoryRoot, ".graphifyignore"),
+      "utf8",
+    )
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"));
+
+    expect(ignoredPaths).toContain(
+      "/docs/mcp/evidence/conformance-manifest.json",
+    );
+  });
+
   it("publishes an immutable snapshot for the exact current main commit", () => {
     const { root, main } = createRepository();
     const result = runIndex(root, ["refresh"]);
