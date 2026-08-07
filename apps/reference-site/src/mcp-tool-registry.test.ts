@@ -6,6 +6,9 @@ import {
   createMcpReadApplication,
   createPublishedSiteBundle,
   createSiteApplication,
+  mcpAnalyticsReadScope,
+  mcpCampaignDraftScope,
+  mcpCampaignTestScope,
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
@@ -468,5 +471,232 @@ describe("MCP draft tool registry", () => {
         ),
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
     expect(openWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("MCP campaign and analytics tool registry", () => {
+  function fullRegistry() {
+    const application = {
+      openWorkspace() {},
+      requestPublication() {},
+      createCampaign() {},
+      editCampaign() {},
+      getCampaign() {},
+      requestTest() {},
+      testReadiness() {},
+      readAnalytics() {},
+    } as unknown as McpReadApplication;
+    return createMcpToolRegistry(application);
+  }
+
+  function fullNames(scopes: ReadonlyArray<string>) {
+    return fullRegistry()
+      .list(principal(scopes))
+      .map(({ name }) => name);
+  }
+
+  it("advertises campaign drafting tools only under the draft scope", () => {
+    const drafting = fullNames([mcpInitialScope, mcpCampaignDraftScope]);
+    expect(drafting).toEqual(
+      expect.arrayContaining([
+        "foundry.campaign.create",
+        "foundry.campaign.edit",
+        "foundry.campaign.get",
+      ]),
+    );
+    expect(drafting).not.toEqual(
+      expect.arrayContaining([
+        "foundry.campaign.request_test",
+        "foundry.campaign.test_readiness",
+        "foundry.analytics.read",
+      ]),
+    );
+  });
+
+  it("advertises test tools only under the test scope", () => {
+    const testing = fullNames([mcpInitialScope, mcpCampaignTestScope]);
+    expect(testing).toEqual(
+      expect.arrayContaining([
+        "foundry.campaign.request_test",
+        "foundry.campaign.test_readiness",
+      ]),
+    );
+    expect(testing).not.toEqual(
+      expect.arrayContaining([
+        "foundry.campaign.create",
+        "foundry.campaign.edit",
+        "foundry.campaign.get",
+      ]),
+    );
+  });
+
+  it("advertises the analytics view only under the analytics scope", () => {
+    expect(fullNames([mcpInitialScope])).not.toContain(
+      "foundry.analytics.read",
+    );
+    expect(
+      fullNames([mcpInitialScope, mcpAnalyticsReadScope]),
+    ).toContain("foundry.analytics.read");
+  });
+
+  it("exposes no bulk-send, role, credential, or recipient-selection tool", () => {
+    const everyName = fullNames([
+      mcpInitialScope,
+      mcpContentDraftScope,
+      mcpDesignDraftScope,
+      mcpPublicationPublishScope,
+      mcpPublicationScheduleScope,
+      mcpCampaignDraftScope,
+      mcpCampaignTestScope,
+      mcpAnalyticsReadScope,
+    ]);
+    for (const name of everyName) {
+      expect(name).not.toMatch(
+        /bulk|subscriber|recipient|role|member|credential|secret|token|password|export/iu,
+      );
+    }
+    // No campaign scheduling or bulk authorization path exists at all.
+    expect(everyName).not.toEqual(
+      expect.arrayContaining([
+        "foundry.campaign.schedule",
+        "foundry.campaign.authorize_bulk",
+        "foundry.campaign.send_bulk",
+      ]),
+    );
+  });
+
+  it("takes no recipient selection on a test and no raw query on analytics", () => {
+    const tools = fullRegistry().list(
+      principal([
+        mcpInitialScope,
+        mcpCampaignTestScope,
+        mcpAnalyticsReadScope,
+      ]),
+    );
+    const requestTest = tools.find(
+      ({ name }) => name === "foundry.campaign.request_test",
+    )!;
+    const requestTestProperties = schemaPropertyNames(requestTest.inputSchema);
+    for (const forbidden of [
+      "recipient",
+      "recipients",
+      "recipientIds",
+      "segment",
+      "audience",
+      "to",
+      "email",
+      "address",
+    ]) {
+      expect(requestTestProperties).not.toContain(forbidden);
+    }
+
+    const analytics = tools.find(
+      ({ name }) => name === "foundry.analytics.read",
+    )!;
+    const analyticsProperties = schemaPropertyNames(analytics.inputSchema);
+    for (const forbidden of [
+      "sql",
+      "query",
+      "filter",
+      "expression",
+      "metricKey",
+      "subjectId",
+      "dimension",
+      "select",
+    ]) {
+      expect(analyticsProperties).not.toContain(forbidden);
+    }
+    // The only view selector is a fixed enumeration.
+    const validator = new Ajv2020({ strict: false, validateFormats: false });
+    const validate = validator.compile(analytics.inputSchema);
+    const range = { fromLocalDate: "2026-07-10", toLocalDate: "2026-08-06" };
+    expect(validate({ view: "overview", range, limit: null })).toBe(true);
+    expect(validate({ view: "raw_events", range, limit: null })).toBe(false);
+    expect(validate({ view: "overview", range, limit: 500 })).toBe(false);
+  });
+
+  it("publishes compilable closed schemas for every campaign and analytics tool", () => {
+    const tools = fullRegistry().list(
+      principal([
+        mcpInitialScope,
+        mcpCampaignDraftScope,
+        mcpCampaignTestScope,
+        mcpAnalyticsReadScope,
+      ]),
+    );
+    const validator = new Ajv2020({
+      strict: false,
+      formats: { uuid: true, "date-time": true, "uri-reference": true },
+    });
+    const newTools = tools.filter(
+      ({ name }) =>
+        name.startsWith("foundry.campaign.") ||
+        name === "foundry.analytics.read",
+    );
+    expect(newTools.length).toBe(6);
+    for (const tool of newTools) {
+      expect(() => validator.compile(tool.inputSchema)).not.toThrow();
+      expect(() => validator.compile(tool.outputSchema)).not.toThrow();
+      expect(tool.inputSchema).toMatchObject({
+        type: "object",
+        additionalProperties: false,
+      });
+      if (tool.annotations.readOnlyHint === false) {
+        expect(schemaPropertyNames(tool.inputSchema)).toContain(
+          "idempotencyKey",
+        );
+      }
+    }
+    // The create tool accepts the exact campaign editable fields and nothing
+    // that would let an agent set an audience, sender, or recipient.
+    const create = newTools.find(
+      ({ name }) => name === "foundry.campaign.create",
+    )!;
+    const createInput = new Ajv2020({
+      strict: false,
+      formats: { uuid: true },
+    }).compile(create.inputSchema);
+    const validCreate = {
+      idempotencyKey: "11111111-1111-4111-8111-111111111111",
+      subject: "August news",
+      previewText: "What changed",
+      callToAction: { label: "Read", href: "https://example.test/post" },
+      emailContent: {
+        version: "1.0.0",
+        type: "document",
+        children: [],
+      },
+    };
+    expect(createInput(validCreate)).toBe(true);
+    expect(
+      createInput({ ...validCreate, senderIdentityId: "sender_primary" }),
+    ).toBe(false);
+    expect(
+      createInput({ ...validCreate, audienceDefinition: { id: "x" } }),
+    ).toBe(false);
+  });
+
+  it("hides campaign and analytics tools when the application omits them", () => {
+    const readOnly = {
+      openWorkspace() {},
+      requestPublication() {},
+    } as unknown as McpReadApplication;
+    const registryValue = createMcpToolRegistry(readOnly);
+    const listed = registryValue
+      .list(
+        principal([
+          mcpInitialScope,
+          mcpCampaignDraftScope,
+          mcpCampaignTestScope,
+          mcpAnalyticsReadScope,
+        ]),
+      )
+      .map(({ name }) => name);
+    expect(listed.some((name) => name.startsWith("foundry.campaign."))).toBe(
+      false,
+    );
+    expect(listed).not.toContain("foundry.analytics.read");
+    expect(registryValue.get("foundry.campaign.create")).toBeNull();
+    expect(registryValue.get("foundry.analytics.read")).toBeNull();
   });
 });

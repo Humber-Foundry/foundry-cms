@@ -1,13 +1,22 @@
 import {
+  createCampaignId,
   createContentWorkspaceId,
+  mcpAnalyticsReadScope,
+  mcpAnalyticsViews,
+  mcpCampaignDraftScope,
+  mcpCampaignTestScope,
   mcpContentDraftScope,
   mcpContractVersion,
   mcpDesignDraftScope,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
+  type CampaignId,
+  type McpAnalyticsView,
   type McpContentPatchOperation,
   type McpConnectionPrincipal,
   type McpExecutionContext,
+  type createMcpAnalyticsApplication,
+  type createMcpCampaignApplication,
   type createMcpDraftApplication,
   type createMcpPublicationApplication,
   type createMcpReadApplication,
@@ -26,7 +35,9 @@ export type McpReadApplication = ReturnType<
   typeof createMcpReadApplication
 > &
   Partial<ReturnType<typeof createMcpDraftApplication>> &
-  Partial<ReturnType<typeof createMcpPublicationApplication>>;
+  Partial<ReturnType<typeof createMcpPublicationApplication>> &
+  Partial<ReturnType<typeof createMcpCampaignApplication>> &
+  Partial<ReturnType<typeof createMcpAnalyticsApplication>>;
 
 function toolOutputSchema(result: unknown) {
   const meta = {
@@ -135,6 +146,15 @@ const nonDestructiveMutationAnnotations = {
 const publicationMutationAnnotations = {
   readOnlyHint: false,
   destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
+// A test send reaches an external provider but adds no bulk audience effect and
+// deletes nothing, so it is a non-destructive open-world mutation.
+const campaignTestAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
   idempotentHint: true,
   openWorldHint: true,
 } as const;
@@ -583,6 +603,260 @@ function parsePublicationCancel(input: unknown) {
   } catch {
     return null;
   }
+}
+
+const campaignIdSchema = {
+  type: "string",
+  format: "uuid",
+} as const;
+
+const campaignCallToActionSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    label: { type: "string", minLength: 1, maxLength: 200 },
+    href: { type: "string", minLength: 1, maxLength: 2_000 },
+  },
+  required: ["label", "href"],
+} as const;
+
+const campaignEditableProperties = {
+  subject: { type: "string", minLength: 1, maxLength: 200 },
+  previewText: { type: "string", minLength: 1, maxLength: 1_000 },
+  callToAction: campaignCallToActionSchema,
+  emailContent: { $ref: "#/$defs/richTextDocument" },
+} as const;
+
+const campaignRevisionResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    campaignId: campaignIdSchema,
+    version: { type: "integer", minimum: 1 },
+    lifecycleState: { const: "draft" },
+    revisionNumber: { type: "integer", minimum: 1 },
+    provenance: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        kind: { enum: ["standalone", "post_revision"] },
+      },
+      required: ["kind"],
+    },
+    replayed: { type: "boolean" },
+  },
+  required: [
+    "campaignId",
+    "version",
+    "lifecycleState",
+    "revisionNumber",
+    "provenance",
+    "replayed",
+  ],
+} as const;
+
+const campaignDocumentResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    campaignId: campaignIdSchema,
+    version: { type: "integer", minimum: 1 },
+    lifecycleState: { const: "draft" },
+    revisionNumber: { type: "integer", minimum: 1 },
+    provenance: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        kind: { enum: ["standalone", "post_revision"] },
+      },
+      required: ["kind"],
+    },
+    subject: { type: "string", minLength: 1, maxLength: 200 },
+    previewText: { type: "string", minLength: 1, maxLength: 1_000 },
+    callToAction: campaignCallToActionSchema,
+    emailContent: { $ref: "#/$defs/richTextDocument" },
+    schemaVersion: { type: "string" },
+    rendererVersion: { type: "string", minLength: 1 },
+    createdAt: { type: "string", format: "date-time" },
+  },
+  required: [
+    "campaignId",
+    "version",
+    "lifecycleState",
+    "revisionNumber",
+    "provenance",
+    "subject",
+    "previewText",
+    "callToAction",
+    "emailContent",
+    "schemaVersion",
+    "rendererVersion",
+    "createdAt",
+  ],
+} as const;
+
+const campaignTestResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    executionId: { type: "string", format: "uuid" },
+    state: {
+      enum: [
+        "pending",
+        "attempting",
+        "ambiguous",
+        "accepted",
+        "failed",
+        "cancelled",
+      ],
+    },
+    replayed: { type: "boolean" },
+  },
+  required: ["executionId", "state", "replayed"],
+} as const;
+
+const campaignTestReadinessResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    state: {
+      enum: [
+        "evaluation_only",
+        "provider_unhealthy",
+        "live_test_required",
+        "owner_confirmation_required",
+        "ready",
+      ],
+    },
+    testDeliveryReady: { type: "boolean" },
+    provider: { type: "string", minLength: 1 },
+    configurationFingerprint: {
+      type: "string",
+      pattern: "^[0-9a-f]{64}$",
+    },
+    ownershipEvidenceId: { type: "string", minLength: 1 },
+    acceptedAt: { type: "string", format: "date-time" },
+  },
+  required: [
+    "state",
+    "testDeliveryReady",
+    "provider",
+    "configurationFingerprint",
+    "ownershipEvidenceId",
+  ],
+} as const;
+
+const localDateSchema = {
+  type: "string",
+  pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+} as const;
+
+const analyticsRangeSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    fromLocalDate: localDateSchema,
+    toLocalDate: localDateSchema,
+  },
+  required: ["fromLocalDate", "toLocalDate"],
+} as const;
+
+const analyticsResult = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    view: { enum: [...mcpAnalyticsViews] },
+    // The bounded view always carries the aggregate envelope. Its body differs
+    // by view and is already privacy-guarded and small-cell suppressed by the
+    // projection, so it is admitted as an aggregate object rather than
+    // re-described field by field here.
+    data: {
+      type: "object",
+      properties: {
+        schemaVersion: { type: "string" },
+        siteId: { type: "string" },
+      },
+      required: ["schemaVersion", "siteId"],
+    },
+  },
+  required: ["view", "data"],
+} as const;
+
+const localDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+
+function parseCampaignEditable(input: unknown): Readonly<{
+  subject: string;
+  previewText: string;
+  callToAction: { label: string; href: string };
+  emailContent: RichTextDocument;
+}> | null {
+  if (
+    !isRecord(input) ||
+    typeof input.subject !== "string" ||
+    typeof input.previewText !== "string" ||
+    !isRecord(input.callToAction) ||
+    !hasExactKeys(input.callToAction, ["label", "href"]) ||
+    typeof input.callToAction.label !== "string" ||
+    typeof input.callToAction.href !== "string" ||
+    !isRecord(input.emailContent)
+  ) {
+    return null;
+  }
+  return {
+    subject: input.subject,
+    previewText: input.previewText,
+    callToAction: {
+      label: input.callToAction.label,
+      href: input.callToAction.href,
+    },
+    // The application layer re-validates the document with the canonical
+    // rich-text validator before it becomes a revision, exactly as the
+    // content patch tool does for its rich-text values.
+    emailContent: input.emailContent as RichTextDocument,
+  };
+}
+
+function parseCampaignId(value: unknown): CampaignId | null {
+  if (typeof value !== "string") return null;
+  try {
+    return createCampaignId(value);
+  } catch {
+    return null;
+  }
+}
+
+function parseAnalyticsInput(input: unknown): Readonly<{
+  view: McpAnalyticsView;
+  range: { fromLocalDate: string; toLocalDate: string };
+  limit: number | null;
+}> | null {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, ["view", "range", "limit"]) ||
+    typeof input.view !== "string" ||
+    !mcpAnalyticsViews.includes(input.view as McpAnalyticsView) ||
+    !isRecord(input.range) ||
+    !hasExactKeys(input.range, ["fromLocalDate", "toLocalDate"]) ||
+    typeof input.range.fromLocalDate !== "string" ||
+    typeof input.range.toLocalDate !== "string" ||
+    !localDatePattern.test(input.range.fromLocalDate) ||
+    !localDatePattern.test(input.range.toLocalDate) ||
+    (input.limit !== null &&
+      (typeof input.limit !== "number" ||
+        !Number.isInteger(input.limit) ||
+        input.limit < 1 ||
+        input.limit > 100))
+  ) {
+    return null;
+  }
+  return {
+    view: input.view as McpAnalyticsView,
+    range: {
+      fromLocalDate: input.range.fromLocalDate,
+      toLocalDate: input.range.toLocalDate,
+    },
+    limit: input.limit as number | null,
+  };
 }
 
 const descriptors = {
@@ -1067,6 +1341,130 @@ const descriptors = {
     annotations: publicationMutationAnnotations,
     execution: taskExecution,
   },
+  "foundry.campaign.create": {
+    name: "foundry.campaign.create",
+    description:
+      "Prepare a new standalone campaign as an independent draft revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        idempotencyKey: idempotencyKeySchema,
+        ...campaignEditableProperties,
+      },
+      required: [
+        "idempotencyKey",
+        "subject",
+        "previewText",
+        "callToAction",
+        "emailContent",
+      ],
+      $defs: siteDefinitionSchema.$defs,
+    },
+    outputSchema: toolOutputSchema(campaignRevisionResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.campaign.edit": {
+    name: "foundry.campaign.edit",
+    description:
+      "Edit a campaign into a new immutable revision under optimistic concurrency.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        campaignId: campaignIdSchema,
+        expectedVersion: { type: "integer", minimum: 1 },
+        idempotencyKey: idempotencyKeySchema,
+        ...campaignEditableProperties,
+      },
+      required: [
+        "campaignId",
+        "expectedVersion",
+        "idempotencyKey",
+        "subject",
+        "previewText",
+        "callToAction",
+        "emailContent",
+      ],
+      $defs: siteDefinitionSchema.$defs,
+    },
+    outputSchema: toolOutputSchema(campaignRevisionResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.campaign.get": {
+    name: "foundry.campaign.get",
+    description:
+      "Read a campaign's editable content and metadata, without audience or recipient data.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        campaignId: campaignIdSchema,
+      },
+      required: ["campaignId"],
+    },
+    outputSchema: toolOutputSchema(campaignDocumentResult),
+    annotations,
+    execution: taskExecution,
+  },
+  "foundry.campaign.request_test": {
+    name: "foundry.campaign.request_test",
+    description:
+      "Request a test delivery to the Owner-configured verified recipients. The agent selects no recipients.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        campaignId: campaignIdSchema,
+        idempotencyKey: idempotencyKeySchema,
+      },
+      required: ["campaignId", "idempotencyKey"],
+    },
+    outputSchema: toolOutputSchema(campaignTestResult),
+    annotations: campaignTestAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.campaign.test_readiness": {
+    name: "foundry.campaign.test_readiness",
+    description:
+      "Read whether a campaign's test delivery and Owner confirmation are current.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        campaignId: campaignIdSchema,
+      },
+      required: ["campaignId"],
+    },
+    outputSchema: toolOutputSchema(campaignTestReadinessResult),
+    annotations,
+    execution: taskExecution,
+  },
+  "foundry.analytics.read": {
+    name: "foundry.analytics.read",
+    description:
+      "Read one fixed bounded aggregate analytics view with metric metadata and small-cell suppression.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        view: { enum: [...mcpAnalyticsViews] },
+        range: analyticsRangeSchema,
+        limit: {
+          anyOf: [
+            { type: "integer", minimum: 1, maximum: 100 },
+            { type: "null" },
+          ],
+        },
+      },
+      required: ["view", "range", "limit"],
+    },
+    outputSchema: toolOutputSchema(analyticsResult),
+    annotations,
+    execution: taskExecution,
+  },
 } as const;
 
 export function createMcpToolRegistry(application: McpReadApplication) {
@@ -1340,6 +1738,147 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         context,
       );
     },
+    "foundry.campaign.create": async (principal, input, context) => {
+      const editable =
+        isRecord(input) &&
+        hasExactKeys(input, [
+          "idempotencyKey",
+          "subject",
+          "previewText",
+          "callToAction",
+          "emailContent",
+        ]) &&
+        validIdempotencyKey(input.idempotencyKey)
+          ? parseCampaignEditable(input)
+          : null;
+      if (editable === null || !isRecord(input)) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.create",
+          input,
+          context,
+          [mcpCampaignDraftScope],
+        );
+      }
+      return application.createCampaign!(
+        principal,
+        {
+          idempotencyKey: input.idempotencyKey as string,
+          ...editable,
+        },
+        context,
+      );
+    },
+    "foundry.campaign.edit": async (principal, input, context) => {
+      const editable =
+        isRecord(input) &&
+        hasExactKeys(input, [
+          "campaignId",
+          "expectedVersion",
+          "idempotencyKey",
+          "subject",
+          "previewText",
+          "callToAction",
+          "emailContent",
+        ]) &&
+        validIdempotencyKey(input.idempotencyKey) &&
+        Number.isSafeInteger(input.expectedVersion) &&
+        (input.expectedVersion as number) >= 1
+          ? parseCampaignEditable(input)
+          : null;
+      const campaignId = isRecord(input)
+        ? parseCampaignId(input.campaignId)
+        : null;
+      if (editable === null || campaignId === null || !isRecord(input)) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.edit",
+          input,
+          context,
+          [mcpCampaignDraftScope],
+        );
+      }
+      return application.editCampaign!(
+        principal,
+        {
+          campaignId,
+          expectedVersion: input.expectedVersion as number,
+          idempotencyKey: input.idempotencyKey as string,
+          ...editable,
+        },
+        context,
+      );
+    },
+    "foundry.campaign.get": async (principal, input, context) => {
+      const campaignId =
+        isRecord(input) && hasExactKeys(input, ["campaignId"])
+          ? parseCampaignId(input.campaignId)
+          : null;
+      if (campaignId === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.get",
+          input,
+          context,
+          [mcpCampaignDraftScope],
+        );
+      }
+      return application.getCampaign!(principal, { campaignId }, context);
+    },
+    "foundry.campaign.request_test": async (principal, input, context) => {
+      const campaignId =
+        isRecord(input) &&
+        hasExactKeys(input, ["campaignId", "idempotencyKey"]) &&
+        validIdempotencyKey(input.idempotencyKey)
+          ? parseCampaignId(input.campaignId)
+          : null;
+      if (campaignId === null || !isRecord(input)) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.request_test",
+          input,
+          context,
+          [mcpCampaignTestScope],
+        );
+      }
+      return application.requestTest!(
+        principal,
+        {
+          campaignId,
+          idempotencyKey: input.idempotencyKey as string,
+        },
+        context,
+      );
+    },
+    "foundry.campaign.test_readiness": async (principal, input, context) => {
+      const campaignId =
+        isRecord(input) && hasExactKeys(input, ["campaignId"])
+          ? parseCampaignId(input.campaignId)
+          : null;
+      if (campaignId === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.campaign.test_readiness",
+          input,
+          context,
+          [mcpCampaignTestScope],
+        );
+      }
+      return application.testReadiness!(principal, { campaignId }, context);
+    },
+    "foundry.analytics.read": async (principal, input, context) => {
+      const parsed = parseAnalyticsInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.analytics.read",
+          input,
+          context,
+          [mcpAnalyticsReadScope],
+        );
+      }
+      return application.readAnalytics!(principal, parsed, context);
+    },
   } satisfies Record<
     keyof typeof descriptors,
     (
@@ -1354,6 +1893,10 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       const supportsDrafts = application.openWorkspace !== undefined;
       const supportsPublication =
         application.requestPublication !== undefined;
+      const supportsCampaigns =
+        application.createCampaign !== undefined;
+      const supportsAnalytics =
+        application.readAnalytics !== undefined;
       return Object.entries(descriptors)
         .filter(([name]) => {
           if (
@@ -1363,6 +1906,22 @@ export function createMcpToolRegistry(application: McpReadApplication) {
             name === "foundry.preview.prepare"
           ) {
             if (!supportsDrafts) return false;
+          }
+          if (name.startsWith("foundry.campaign.")) {
+            if (!supportsCampaigns) return false;
+            if (
+              name === "foundry.campaign.request_test" ||
+              name === "foundry.campaign.test_readiness"
+            ) {
+              return principal.scopes.includes(mcpCampaignTestScope);
+            }
+            return principal.scopes.includes(mcpCampaignDraftScope);
+          }
+          if (name === "foundry.analytics.read") {
+            return (
+              supportsAnalytics &&
+              principal.scopes.includes(mcpAnalyticsReadScope)
+            );
           }
           if (name.startsWith("foundry.publication.")) {
             if (!supportsPublication) return false;
@@ -1420,6 +1979,18 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       if (
         application.requestPublication === undefined &&
         name.startsWith("foundry.publication.")
+      ) {
+        return null;
+      }
+      if (
+        application.createCampaign === undefined &&
+        name.startsWith("foundry.campaign.")
+      ) {
+        return null;
+      }
+      if (
+        application.readAnalytics === undefined &&
+        name === "foundry.analytics.read"
       ) {
         return null;
       }
