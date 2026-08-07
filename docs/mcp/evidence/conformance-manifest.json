@@ -22,13 +22,13 @@
       "apps/reference-site/src/mcp-http-runtime.test.ts::negotiates initialize by returning the server-supported protocol version",
       "apps/reference-site/src/mcp-http-runtime.test.ts::matches the reviewed sanitized protocol transcript snapshot",
       "apps/reference-site/src/mcp-http-runtime.test.ts::validates advertised success and error structuredContent with an independent JSON Schema validator",
-      "apps/reference-site/src/mcp-protocol-conformance.test.ts::independently validates real success and business-error emissions for all 18 tools",
+      "apps/reference-site/src/mcp-protocol-conformance.test.ts::independently validates protocol-wrapper success and business-error emissions for all 18 descriptors",
       "apps/reference-site/src/mcp-tool-registry.test.ts::independently validates all advertised schemas with success and error examples",
       "apps/reference-site/src/mcp-tool-registry.test.ts::matches the reviewed complete MCP tool-schema snapshot"
     ],
     "authorizationAndParity": [
       "packages/application/src/mcp-read.test.ts::conceals cross-site reads and records a safe denial",
-      "packages/application/src/mcp-read.test.ts::generates pairwise actor, site, client, scope, revocation, and cursor isolation cases",
+      "packages/application/src/mcp-read.test.ts::generates every non-empty identity and grant mismatch combination across read commands",
       "packages/application/src/mcp-read.test.ts::resolves overlapping two-site content and cursors without cross-site canary leakage",
       "packages/application/src/mcp-drafts.test.ts::uses revision CAS and actor-bound idempotency for every draft mutation",
       "packages/application/src/mcp-drafts.test.ts::generates isolated workspace and preview sequences with CAS and actor-bound replay",
@@ -48,7 +48,7 @@
       ],
       "injection": [
         "packages/application/src/mcp-drafts.test.ts::accepts canonical rich-text data and rejects malformed nodes as validation errors",
-        "packages/application/src/mcp-campaign.test.ts::treats adversarial campaign copy and URL fields as data without adapter egress",
+        "packages/application/src/mcp-campaign.test.ts::treats adversarial campaign copy and URL fields as data without application egress",
         "packages/application/src/mcp-analytics.test.ts::keeps adversarial projection labels as data without changing query authority"
       ],
       "replay": "packages/application/src/mcp-drafts.test.ts::uses revision CAS and actor-bound idempotency for every draft mutation",
@@ -57,13 +57,11 @@
       "exfiltration": [
         "packages/application/src/mcp-campaign.test.ts::keeps seeded identity and provider canaries out of success and error outputs",
         "packages/application/src/mcp-analytics.test.ts::fails every analytics view closed without exposing projection canaries",
-        "apps/reference-site/src/mcp-protocol-conformance.test.ts::independently validates real success and business-error emissions for all 18 tools",
         "apps/reference-site/src/mcp-tool-registry.test.ts::exposes no bulk-send, role, credential, or recipient-selection tool"
       ],
       "ssrf": [
         "apps/reference-site/src/mcp-http-runtime.test.ts::treats URL-shaped prompt injection as inert text without a server fetch",
-        "packages/application/src/mcp-campaign.test.ts::treats adversarial campaign copy and URL fields as data without adapter egress",
-        "packages/application/src/mcp-analytics.test.ts::keeps adversarial projection labels as data without changing query authority"
+        "apps/reference-site/src/analytics-source-adapters.test.ts::keeps adversarial provider identifiers on the fixed Brevo endpoint"
       ],
       "exhaustion": "apps/reference-site/src/mcp-http-runtime.test.ts::bounds request size, nesting, and durable request budgets",
       "repudiation": "packages/application/src/content-publication.test.ts::joins one MCP actor and approval through audit identity to attributed Git trailers",

@@ -123,24 +123,24 @@ Annotations are shown as
 
 | Tool | Annotation hints | Purpose |
 |---|---|---|
-| `foundry.site.get` | `T / - / - / F` | Read site and release metadata |
-| `foundry.content.list` | `T / - / - / F` | Bounded published-content query |
-| `foundry.content.get` | `T / - / - / F` | Read published content or an authorized immutable draft revision |
-| `foundry.workspace.open` | `F / F / T / F` | Create/resume a workspace anchored to live Git |
-| `foundry.workspace.get` | `T / - / - / F` | Read workspace state |
-| `foundry.content.patch` | `F / T / T / F` | Apply typed content commands to a new revision |
-| `foundry.design.patch` | `F / T / T / F` | Apply allowlisted design commands to a new revision |
-| `foundry.preview.prepare` | `F / F / T / F` | Persist a canonical preview fingerprint |
-| `foundry.publication.request` | `F / T / T / T` | Start shared Git/build publication |
-| `foundry.publication.schedule` | `F / T / T / T` | Schedule exact approved site/blog revision |
-| `foundry.publication.status` | `T / - / - / F` | Read durable publish/schedule state |
-| `foundry.publication.cancel` | `F / T / T / T` | Cancel an unclaimed site/blog schedule |
-| `foundry.campaign.create` | `F / F / T / F` | Create a standalone campaign draft revision |
-| `foundry.campaign.edit` | `F / F / T / F` | Edit a campaign under optimistic concurrency |
-| `foundry.campaign.get` | `T / - / - / F` | Read campaign copy without audience or recipient data |
-| `foundry.campaign.request_test` | `F / F / T / T` | Request one test to Owner-configured verified recipients |
-| `foundry.campaign.test_readiness` | `T / - / - / F` | Read current test-delivery readiness |
-| `foundry.analytics.read` | `T / - / - / F` | Read one bounded aggregate view |
+| `foundry.site.get` | `T / - / - / F` | Read this connection's site metadata. |
+| `foundry.content.list` | `T / - / - / F` | List published page and post documents with bounded pagination. |
+| `foundry.content.get` | `T / - / - / F` | Read one published page or post document. |
+| `foundry.workspace.open` | `F / F / T / F` | Open one site-scoped canonical draft workspace at revision zero. |
+| `foundry.workspace.get` | `T / - / - / F` | Read an authorized site-scoped draft workspace. |
+| `foundry.content.patch` | `F / T / T / F` | Apply allowlisted content field edits to a new immutable revision. |
+| `foundry.design.patch` | `F / T / T / F` | Apply registered design tokens or component variants to a new immutable revision. |
+| `foundry.preview.prepare` | `F / F / T / F` | Prepare an immutable canonical preview and a human review URL without creating approval. |
+| `foundry.publication.request` | `F / T / T / T` | Publish one exact approved workspace revision through the canonical publication pipeline. |
+| `foundry.publication.schedule` | `F / T / T / T` | Schedule one exact approved blog revision through the canonical scheduler. |
+| `foundry.publication.status` | `T / - / - / F` | Read the current state of a publication or publication schedule. |
+| `foundry.publication.cancel` | `F / T / T / T` | Cancel one active publication schedule. |
+| `foundry.campaign.create` | `F / F / T / F` | Prepare a new standalone campaign as an independent draft revision. |
+| `foundry.campaign.edit` | `F / F / T / F` | Edit a campaign into a new immutable revision under optimistic concurrency. |
+| `foundry.campaign.get` | `T / - / - / F` | Read a campaign's editable content and metadata, without audience or recipient data. |
+| `foundry.campaign.request_test` | `F / F / T / T` | Request a test delivery to the Owner-configured verified recipients. The agent selects no recipients. |
+| `foundry.campaign.test_readiness` | `T / - / - / F` | Read whether a campaign's test delivery and Owner confirmation are current. |
+| `foundry.analytics.read` | `T / - / - / F` | Read one fixed bounded aggregate analytics view with metric metadata and small-cell suppression. |
 
 `openWorldHint` is true only where the operation can change public site state or
 coordinate Git/Cloudflare. Analytics reads query Foundry's bounded D1 projection,

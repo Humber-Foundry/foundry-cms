@@ -364,13 +364,25 @@ describe("MCP publication orchestration", () => {
   });
 
   it("generates approval and current-scope substitution cases before publication", async () => {
-    const deniedPrincipals: McpConnectionPrincipal[] = [
-      { ...principal, actorId: "agent-substituted" },
-      { ...principal, connectionId: "connection-substituted" },
-      { ...principal, clientId: "https://substituted.example/client.json" },
-      { ...principal, scopes: [mcpInitialScope, mcpContentDraftScope] },
-      { ...principal, scopes: [mcpInitialScope, mcpPublicationPublishScope] },
+    const dimensions: ReadonlyArray<Partial<McpConnectionPrincipal>> = [
+      { actorId: "agent-substituted" },
+      { connectionId: "connection-substituted" },
+      { clientId: "https://substituted.example/client.json" },
+      { siteId: createSiteId("site_substituted") },
+      { scopes: [mcpInitialScope, mcpContentDraftScope] },
+      { scopes: [mcpInitialScope, mcpPublicationPublishScope] },
     ];
+    const deniedPrincipals = Array.from(
+      { length: 2 ** dimensions.length - 1 },
+      (_, index) => index + 1,
+    ).map((mask) => ({
+      ...principal,
+      ...Object.assign(
+        {},
+        ...dimensions.filter((_, index) => (mask & (1 << index)) !== 0),
+      ),
+    }));
+    expect(deniedPrincipals).toHaveLength(63);
     for (const deniedPrincipal of deniedPrincipals) {
       const { application, publish } = await fixture();
       await expect(
@@ -413,14 +425,27 @@ describe("MCP publication orchestration", () => {
   });
 
   it("conceals foreign-site publication IDs before publisher or state mutation", async () => {
+    const scheduleId = "schedule_0123abcd-4567-89ab-cdef-0123456789ab";
+    const activateSchedule = vi.fn();
+    const cancelSchedule = vi.fn();
+    const blogOperations = {
+      queries: {
+        async findScheduleByWorkspaceRequest() {
+          return null;
+        },
+      },
+      commands: { activateSchedule, cancelSchedule },
+    } as unknown as BlogOperationsStub;
     const foreign: McpConnectionPrincipal = {
       ...principal,
       connectionId: "connection-publication-foreign",
       actorId: "agent-publication-foreign",
       siteId: createSiteId("site_publication_foreign"),
+      scopes: [...principal.scopes, mcpPublicationScheduleScope],
     };
     const { application, publish, publicationAudit } = await fixture({
       connectionAt: () => ({ ...foreign, status: "active" }),
+      blogOperations,
     });
     await expect(
       application.requestPublication(
@@ -441,7 +466,42 @@ describe("MCP publication orchestration", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.schedulePublication(
+        foreign,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId,
+          publishAt: "2026-08-08T20:00:00.000Z",
+          reportingTimeZone: "America/Vancouver",
+          idempotencyKey: "56565656-5656-4656-8656-565656565656",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.publicationStatus(
+        foreign,
+        { workspaceId, revision: 1, operationId: scheduleId },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.cancelPublicationSchedule(
+        foreign,
+        {
+          workspaceId,
+          revision: 1,
+          scheduleId,
+          idempotencyKey: "67676767-6767-4676-8676-676767676767",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
     expect(publish).not.toHaveBeenCalled();
+    expect(activateSchedule).not.toHaveBeenCalled();
+    expect(cancelSchedule).not.toHaveBeenCalled();
     expect(publicationAudit).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

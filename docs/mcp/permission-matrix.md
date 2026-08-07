@@ -69,7 +69,7 @@ human authorization decision remains authoritative where it is stricter.
 |---|---|---|---|
 | `foundry.site.get` | `site.read` | None | None |
 | `foundry.content.list` | `site.read` | None | None |
-| `foundry.content.get` | `site.read` or `content.draft` for draft revision | None | None |
+| `foundry.content.get` | `site.read` | None | None |
 | `foundry.workspace.open` | `content.draft` or `design.draft` | None | Creates/resumes workspace |
 | `foundry.workspace.get` | matching draft scope | None | None |
 | `foundry.content.patch` | `content.draft` | None | New immutable revision |

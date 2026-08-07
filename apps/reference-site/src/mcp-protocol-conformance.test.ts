@@ -272,8 +272,8 @@ const inputs: Record<string, unknown> = {
   },
 };
 
-describe("MCP real emission conformance", () => {
-  it("independently validates real success and business-error emissions for all 18 tools", async () => {
+describe("MCP protocol-wrapper emission conformance", () => {
+  it("independently validates protocol-wrapper success and business-error emissions for all 18 descriptors", async () => {
     let failingTool: string | null = null;
     const emit = (name: string) => async () => {
       if (failingTool === name) {
@@ -305,9 +305,9 @@ describe("MCP real emission conformance", () => {
       readAnalytics: emit("foundry.analytics.read"),
     } as unknown as McpReadApplication;
     const principal: McpConnectionPrincipal = {
-      connectionId: "connection-real-emission",
-      actorId: "actor-real-emission",
-      clientId: "https://client.example/real-emission.json",
+      connectionId: "connection-protocol-conformance",
+      actorId: "actor-protocol-conformance",
+      clientId: "https://client.example/protocol-conformance.json",
       siteId: referenceSiteDefinition.site.id,
       scopes: [
         mcpInitialScope,
@@ -351,7 +351,7 @@ describe("MCP real emission conformance", () => {
               accept: "application/json, text/event-stream",
               "content-type": "application/json",
               "mcp-protocol-version": "2025-11-25",
-              "mcp-session-id": "session-real-emission",
+              "mcp-session-id": "session-protocol-conformance",
             },
             body: JSON.stringify({
               jsonrpc: "2.0",

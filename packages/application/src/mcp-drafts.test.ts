@@ -569,14 +569,22 @@ describe("MCP canonical draft application", () => {
   });
 
   it("generates isolated workspace and preview sequences with CAS and actor-bound replay", async () => {
-    for (const index of [1, 2, 3, 4]) {
+    const generatedCases = ["name", "description"].flatMap((field) =>
+      [false, true].map((previewReplayAfterActorDenials, offset) => ({
+        field,
+        previewReplayAfterActorDenials,
+        suffix: `${field}-${offset}`,
+      })),
+    );
+    expect(generatedCases).toHaveLength(4);
+    for (const generated of generatedCases) {
       const value = fixture([mcpInitialScope, mcpContentDraftScope]);
       const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
         await value.application.openWorkspace(
           value.activePrincipal,
           {
             expectedRevision: 0,
-            idempotencyKey: `generated-open-${index}`,
+            idempotencyKey: `generated-open-${generated.suffix}`,
           },
           context,
         ),
@@ -584,12 +592,12 @@ describe("MCP canonical draft application", () => {
       const input = {
         workspaceId: opened.workspaceId,
         expectedRevision: 0,
-        idempotencyKey: `generated-patch-${index}`,
+        idempotencyKey: `generated-patch-${generated.suffix}`,
         operations: [
           {
             op: "set" as const,
-            field: `${referenceSiteDefinition.site.id}.description`,
-            value: `Generated canonical value ${index}`,
+            field: `${referenceSiteDefinition.site.id}.${generated.field}`,
+            value: `Generated canonical value ${generated.suffix}`,
           },
         ],
       };
@@ -617,7 +625,10 @@ describe("MCP canonical draft application", () => {
       await expect(
         value.application.patchContent(
           value.activePrincipal,
-          { ...input, idempotencyKey: `generated-stale-${index}` },
+          {
+            ...input,
+            idempotencyKey: `generated-stale-${generated.suffix}`,
+          },
           context,
         ),
       ).rejects.toMatchObject({ code: "STALE_REVISION", latestRevision: 1 });
@@ -625,14 +636,14 @@ describe("MCP canonical draft application", () => {
       const preview = {
         workspaceId: opened.workspaceId,
         expectedRevision: 1,
-        idempotencyKey: `generated-preview-${index}`,
+        idempotencyKey: `generated-preview-${generated.suffix}`,
       };
       await value.application.preparePreview(
         value.activePrincipal,
         preview,
         context,
       );
-      await expect(
+      const assertPreviewReplay = () => expect(
         value.application.preparePreview(
           value.activePrincipal,
           preview,
@@ -642,9 +653,12 @@ describe("MCP canonical draft application", () => {
         result: { replayed: true },
         meta: { replayed: true },
       });
+      if (!generated.previewReplayAfterActorDenials) {
+        await assertPreviewReplay();
+      }
       for (const actorId of [
-        `agent-substituted-${index}`,
-        `agent-replay-${index}`,
+        `agent-substituted-${generated.suffix}`,
+        `agent-replay-${generated.suffix}`,
       ]) {
         const substituted = { ...value.activePrincipal, actorId };
         await expect(
@@ -657,6 +671,9 @@ describe("MCP canonical draft application", () => {
         await expect(
           value.application.preparePreview(substituted, preview, context),
         ).rejects.toBeInstanceOf(McpReadError);
+      }
+      if (generated.previewReplayAfterActorDenials) {
+        await assertPreviewReplay();
       }
     }
   });

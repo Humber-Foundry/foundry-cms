@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { runTestsWithEvidence } from "./run-tests-with-evidence.mjs";
 
 const root = process.cwd();
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "foundry-mcp-conformance-"));
 const reportPath = join(temporaryDirectory, "vitest.json");
 const testFiles = [
+  "apps/reference-site/src/analytics-source-adapters.test.ts",
   "apps/reference-site/src/mcp-http-runtime.test.ts",
   "apps/reference-site/src/mcp-protocol-conformance.test.ts",
   "apps/reference-site/src/mcp-tool-registry.test.ts",
@@ -21,46 +24,19 @@ const testFiles = [
 ];
 
 try {
-  const tests = spawnSync(
-    process.execPath,
-    [
-      join(root, "node_modules/vitest/vitest.mjs"),
-      "run",
-      ...testFiles,
-      "--reporter=default",
-      "--reporter=json",
-      `--outputFile.json=${reportPath}`,
-    ],
-    { cwd: root, encoding: "utf8" },
-  );
-  if (tests.status !== 0) {
-    process.stdout.write(tests.stdout ?? "");
-    process.stderr.write(tests.stderr ?? "");
-    try {
-      const report = JSON.parse(readFileSync(reportPath, "utf8"));
-      for (const file of report.testResults ?? []) {
-        for (const assertion of file.assertionResults ?? []) {
-          if (assertion.status === "failed") {
-            console.error(`FAILED ${assertion.fullName}`);
-            for (const message of assertion.failureMessages ?? []) {
-              console.error(message);
-            }
-          }
-        }
-      }
-    } catch {
-      console.error("MCP conformance tests failed without a readable report.");
-    }
-    process.exit(tests.status ?? 1);
+  const testsPassed = await runTestsWithEvidence({ reportPath, testFiles });
+  if (!testsPassed) {
+    process.exitCode = 1;
+  } else {
+    const verification = spawnSync(
+      process.execPath,
+      [join(root, "scripts/verify-mcp-conformance.mjs"), reportPath],
+      { cwd: root, encoding: "utf8" },
+    );
+    process.stdout.write(verification.stdout ?? "");
+    process.stderr.write(verification.stderr ?? "");
+    process.exitCode = verification.status ?? 1;
   }
-  const verification = spawnSync(
-    process.execPath,
-    [join(root, "scripts/verify-mcp-conformance.mjs"), reportPath],
-    { cwd: root, encoding: "utf8" },
-  );
-  process.stdout.write(verification.stdout ?? "");
-  process.stderr.write(verification.stderr ?? "");
-  process.exitCode = verification.status ?? 1;
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }

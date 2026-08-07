@@ -772,9 +772,15 @@ describe("MCP campaign and analytics tool registry", () => {
     const toolTable = catalog
       .split("## Tool catalog")[1]!
       .split("## Representative schemas")[0]!;
-    const documented = [...toolTable.matchAll(/`(foundry\.[a-z_.]+)`/gu)].map(
-      ([, name]) => name,
-    );
+    const documented = toolTable
+      .split("\n")
+      .flatMap((line) => {
+        const cells = line.split("|").map((cell) => cell.trim());
+        const name = cells[1]?.match(/^`(foundry\.[a-z_.]+)`$/u)?.[1];
+        return name === undefined
+          ? []
+          : [{ name, description: cells[3] }];
+      });
     const runtime = fullRegistry()
       .list(
         principal([
@@ -788,7 +794,7 @@ describe("MCP campaign and analytics tool registry", () => {
           mcpAnalyticsReadScope,
         ]),
       )
-      .map(({ name }) => name);
+      .map(({ name, description }) => ({ name, description }));
     expect(documented).toEqual(runtime);
   });
 
@@ -800,9 +806,15 @@ describe("MCP campaign and analytics tool registry", () => {
     const toolTable = matrix
       .split("## Tool-to-scope matrix")[1]!
       .split("## Data classification and output")[0]!;
-    const documented = [...toolTable.matchAll(/`(foundry\.[a-z_.]+)`/gu)].map(
-      ([, name]) => name,
-    );
+    const documented = toolTable
+      .split("\n")
+      .flatMap((line) => {
+        const cells = line.split("|").map((cell) => cell.trim());
+        const name = cells[1]?.match(/^`(foundry\.[a-z_.]+)`$/u)?.[1];
+        return name === undefined
+          ? []
+          : [{ name, scopes: cells[2]?.replaceAll("`", "") }];
+      });
     const runtime = fullRegistry()
       .list(
         principal([
@@ -817,7 +829,34 @@ describe("MCP campaign and analytics tool registry", () => {
         ]),
       )
       .map(({ name }) => name);
-    expect(documented.sort()).toEqual(runtime.sort());
+    expect(documented.map(({ name }) => name).sort()).toEqual(runtime.sort());
+    expect(
+      Object.fromEntries(
+        documented.map(({ name, scopes }) => [name, scopes]),
+      ),
+    ).toEqual({
+        "foundry.site.get": "site.read",
+        "foundry.content.list": "site.read",
+        "foundry.content.get": "site.read",
+        "foundry.workspace.open": "content.draft or design.draft",
+        "foundry.workspace.get": "matching draft scope",
+        "foundry.content.patch": "content.draft",
+        "foundry.design.patch": "design.draft",
+        "foundry.preview.prepare": "matching draft scopes",
+        "foundry.campaign.create": "campaign.draft",
+        "foundry.campaign.edit": "campaign.draft",
+        "foundry.campaign.get": "campaign.draft",
+        "foundry.campaign.request_test": "campaign.test",
+        "foundry.campaign.test_readiness": "campaign.test",
+        "foundry.publication.schedule":
+          "publication.schedule + matching draft scopes",
+        "foundry.publication.cancel": "publication.schedule",
+        "foundry.publication.request":
+          "publication.publish + matching draft scopes",
+        "foundry.publication.status":
+          "publication.publish or publication.schedule",
+        "foundry.analytics.read": "analytics.read",
+      });
   });
 
   it("independently validates all advertised schemas with success and error examples", async () => {

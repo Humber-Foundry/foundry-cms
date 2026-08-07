@@ -52,7 +52,6 @@ const secondSiteDefinition = {
   },
   home: {
     ...definitionWithPost.home,
-    id: "page_pairwise_second",
     seo: {
       ...definitionWithPost.home.seo,
       title: "SECOND-SITE-PRIVATE-CANARY",
@@ -60,7 +59,13 @@ const secondSiteDefinition = {
   },
   blog: {
     ...definitionWithPost.blog,
-    posts: [],
+    posts: definitionWithPost.blog.posts.map((post) => ({
+      ...post,
+      title: "SECOND-SITE-PRIVATE-CANARY",
+      body: createRichTextDocumentFromPlainText(
+        "SECOND-SITE-PRIVATE-CANARY",
+      ),
+    })),
   },
 } satisfies SiteDefinition;
 const principal = Object.freeze({
@@ -252,7 +257,7 @@ describe("site-scoped MCP read application", () => {
     expect(calls).toBe(2);
   });
 
-  it("generates pairwise actor, site, client, scope, revocation, and cursor isolation cases", async () => {
+  it("generates every non-empty identity and grant mismatch combination across read commands", async () => {
     type ReadApplication = ReturnType<typeof fixture>["application"];
     const commands = [
       (app: ReadApplication, actor = principal) => app.getSite(actor),
@@ -268,7 +273,7 @@ describe("site-scoped MCP read application", () => {
           contentId: referenceSiteDefinition.home.id,
         }),
     ];
-    const mismatches: ReadonlyArray<Partial<McpConnectionGrant>> = [
+    const dimensions: ReadonlyArray<Partial<McpConnectionGrant>> = [
       { actorId: "actor-pairwise-other" },
       { connectionId: "connection-pairwise-other" },
       { clientId: "https://other.example/client.json" },
@@ -276,6 +281,16 @@ describe("site-scoped MCP read application", () => {
       { scopes: [] },
       { status: "revoked" },
     ];
+    const mismatches = Array.from(
+      { length: 2 ** dimensions.length - 1 },
+      (_, index) => index + 1,
+    ).map((mask) =>
+      Object.assign(
+        {},
+        ...dimensions.filter((_, index) => (mask & (1 << index)) !== 0),
+      ) as Partial<McpConnectionGrant>,
+    );
+    expect(mismatches).toHaveLength(63);
     for (const mismatch of mismatches) {
       for (const command of commands) {
         const { application, audit } = fixture({
@@ -385,18 +400,30 @@ describe("site-scoped MCP read application", () => {
       secondActor,
       secondAudit,
     );
-    const own = await second.getContent(secondActor, {
+    const secondPage = await second.getContent(secondActor, {
       kind: "page",
       contentId: secondSiteDefinition.home.id,
     });
-    expect(JSON.stringify(own)).toContain("SECOND-SITE-PRIVATE-CANARY");
-
-    await expect(
-      second.getContent(secondActor, {
-        kind: "page",
-        contentId: definitionWithPost.home.id,
-      }),
-    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    const firstPageById = await first.getContent(firstActor, {
+      kind: "page",
+      contentId: definitionWithPost.home.id,
+    });
+    expect(secondPage.result.contentId).toBe(firstPageById.result.contentId);
+    expect(JSON.stringify(secondPage)).toContain("SECOND-SITE-PRIVATE-CANARY");
+    expect(JSON.stringify(firstPageById)).not.toContain(
+      "SECOND-SITE-PRIVATE-CANARY",
+    );
+    const sharedPostId = definitionWithPost.blog.posts[0]!.id;
+    const [firstPost, secondPost] = await Promise.all([
+      first.getContent(firstActor, { kind: "post", contentId: sharedPostId }),
+      second.getContent(secondActor, { kind: "post", contentId: sharedPostId }),
+    ]);
+    expect(JSON.stringify(firstPost)).not.toContain(
+      "SECOND-SITE-PRIVATE-CANARY",
+    );
+    expect(JSON.stringify(secondPost)).toContain(
+      "SECOND-SITE-PRIVATE-CANARY",
+    );
     const firstPage = await first.listContent(firstActor, {
       kind: null,
       limit: 1,
