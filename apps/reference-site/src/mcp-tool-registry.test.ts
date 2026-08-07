@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
+import { createHash } from "node:crypto";
 
 import {
   createInMemoryPublishedSiteRepository,
@@ -43,7 +44,9 @@ function registry() {
 }
 
 function names(scopes: ReadonlyArray<string>) {
-  return registry().list(principal(scopes)).map(({ name }) => name);
+  return registry()
+    .list(principal(scopes))
+    .map(({ name }) => name);
 }
 
 function schemaPropertyNames(value: unknown): string[] {
@@ -57,18 +60,14 @@ function schemaPropertyNames(value: unknown): string[] {
 
 describe("MCP draft tool registry", () => {
   it("advertises only the publication tools granted to the connection", () => {
-    expect(
-      names([mcpInitialScope, mcpPublicationPublishScope]),
-    ).toEqual([
+    expect(names([mcpInitialScope, mcpPublicationPublishScope])).toEqual([
       "foundry.site.get",
       "foundry.content.list",
       "foundry.content.get",
       "foundry.publication.request",
       "foundry.publication.status",
     ]);
-    expect(
-      names([mcpInitialScope, mcpPublicationScheduleScope]),
-    ).toEqual([
+    expect(names([mcpInitialScope, mcpPublicationScheduleScope])).toEqual([
       "foundry.site.get",
       "foundry.content.list",
       "foundry.content.get",
@@ -106,9 +105,9 @@ describe("MCP draft tool registry", () => {
     expect(
       status({ workspaceId, revision: 1, operationId: publicationId }),
     ).toBe(true);
-    expect(
-      status({ workspaceId, revision: 1, operationId: scheduleId }),
-    ).toBe(true);
+    expect(status({ workspaceId, revision: 1, operationId: scheduleId })).toBe(
+      true,
+    );
     // A malformed identifier is a terminal schema rejection, so it never
     // reaches an identifier constructor whose failure would surface as a
     // retryable error.
@@ -168,7 +167,8 @@ describe("MCP draft tool registry", () => {
       ]),
     );
     const publicationTools = tools.filter(({ name }) =>
-      name.startsWith("foundry.publication."));
+      name.startsWith("foundry.publication."),
+    );
     const validator = new Ajv2020({
       strict: false,
       formats: {
@@ -231,11 +231,7 @@ describe("MCP draft tool registry", () => {
 
   it("publishes closed typed schemas without site, file, code or approval-creation inputs", () => {
     const tools = registry().list(
-      principal([
-        mcpInitialScope,
-        mcpContentDraftScope,
-        mcpDesignDraftScope,
-      ]),
+      principal([mcpInitialScope, mcpContentDraftScope, mcpDesignDraftScope]),
     );
     const mutationTools = tools.filter(
       ({ annotations }) => annotations.readOnlyHint === false,
@@ -326,8 +322,7 @@ describe("MCP draft tool registry", () => {
           retryable: false,
           requiredScopes: [],
           latestRevision: 4,
-          conflictResource:
-            "foundry://workspaces/workspace_replay/revisions/4",
+          conflictResource: "foundry://workspaces/workspace_replay/revisions/4",
         },
         meta: {
           replayed: false,
@@ -349,42 +344,45 @@ describe("MCP draft tool registry", () => {
       workspaceId: "workspace_design_contract",
       expectedRevision: 0,
       idempotencyKey: "11111111-1111-4111-8111-111111111111",
-      operations: [{
-        op: "set_token",
-        token: "typography.heading",
-        value: "editorial",
-      }],
+      operations: [
+        {
+          op: "set_token",
+          token: "typography.heading",
+          value: "editorial",
+        },
+      ],
     };
 
     expect(validate(input)).toBe(true);
     expect(
       validate({
         ...input,
-        operations: [{
-          op: "set_token",
-          token: "typography.heading",
-          value: "moss",
-        }],
+        operations: [
+          {
+            op: "set_token",
+            token: "typography.heading",
+            value: "moss",
+          },
+        ],
       }),
     ).toBe(false);
     expect(
       validate({
         ...input,
-        operations: [{
-          op: "set_variant",
-          componentId: "section_hero",
-          value: "cards",
-        }],
+        operations: [
+          {
+            op: "set_variant",
+            componentId: "section_hero",
+            value: "cards",
+          },
+        ],
       }),
     ).toBe(false);
   });
 
   it("authorizes hidden draft tools before reporting malformed arguments", async () => {
     const readOnlyPrincipal = principal([mcpInitialScope]);
-    const activePrincipal = principal([
-      mcpInitialScope,
-      mcpContentDraftScope,
-    ]);
+    const activePrincipal = principal([mcpInitialScope, mcpContentDraftScope]);
     const audit: McpReadAuditEvent[] = [];
     const read = createMcpReadApplication({
       site: createSiteApplication({
@@ -421,7 +419,7 @@ describe("MCP draft tool registry", () => {
       now: () => "2026-07-29T20:00:00.000Z",
     });
     const openWorkspace = vi.fn(async () => {
-        throw new Error("must_not_run");
+      throw new Error("must_not_run");
     });
     const draftCapable = Object.assign(read, {
       openWorkspace,
@@ -534,9 +532,9 @@ describe("MCP campaign and analytics tool registry", () => {
     expect(fullNames([mcpInitialScope])).not.toContain(
       "foundry.analytics.read",
     );
-    expect(
-      fullNames([mcpInitialScope, mcpAnalyticsReadScope]),
-    ).toContain("foundry.analytics.read");
+    expect(fullNames([mcpInitialScope, mcpAnalyticsReadScope])).toContain(
+      "foundry.analytics.read",
+    );
   });
 
   it("exposes no bulk-send, role, credential, or recipient-selection tool", () => {
@@ -567,11 +565,7 @@ describe("MCP campaign and analytics tool registry", () => {
 
   it("takes no recipient selection on a test and no raw query on analytics", () => {
     const tools = fullRegistry().list(
-      principal([
-        mcpInitialScope,
-        mcpCampaignTestScope,
-        mcpAnalyticsReadScope,
-      ]),
+      principal([mcpInitialScope, mcpCampaignTestScope, mcpAnalyticsReadScope]),
     );
     const requestTest = tools.find(
       ({ name }) => name === "foundry.campaign.request_test",
@@ -674,6 +668,36 @@ describe("MCP campaign and analytics tool registry", () => {
     expect(
       createInput({ ...validCreate, audienceDefinition: { id: "x" } }),
     ).toBe(false);
+  });
+
+  it("matches the reviewed complete MCP tool-schema snapshot", () => {
+    const tools = fullRegistry().list(
+      principal([
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpDesignDraftScope,
+        mcpPublicationPublishScope,
+        mcpPublicationScheduleScope,
+        mcpCampaignDraftScope,
+        mcpCampaignTestScope,
+        mcpAnalyticsReadScope,
+      ]),
+    );
+
+    expect(
+      tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchemaSha256: createHash("sha256")
+          .update(JSON.stringify(tool.inputSchema))
+          .digest("hex"),
+        outputSchemaSha256: createHash("sha256")
+          .update(JSON.stringify(tool.outputSchema))
+          .digest("hex"),
+        annotations: tool.annotations,
+        execution: tool.execution,
+      })),
+    ).toMatchSnapshot();
   });
 
   it("hides campaign and analytics tools when the application omits them", () => {

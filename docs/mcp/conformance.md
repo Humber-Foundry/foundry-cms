@@ -9,30 +9,30 @@ account.
 
 ## Acceptance traceability
 
-| Fixed product behavior | Protocol/application mechanism | Required evidence |
-|---|---|---|
-| Independently revocable, site-scoped identity | One D1 MCP actor/grant; exact resource audience; per-command grant lookup | Cross-site suite and next-call revocation test |
-| Human and agent use one application/Git path | Thin adapters dispatch shared commands and publisher | Human/MCP byte, hash, commit and release-marker parity |
-| Read/edit content and controlled design | Typed resources plus schema-bound patch tools | Schema, authorization and injection suites |
-| Publication requires approved preview | Human-only immutable approval fingerprint; execution-time revalidation | Approval substitution and every-field invalidation tests |
-| Aggregate analytics is read-only | One fixed-view read tool over D1 projection | Schema scan, suppression, quality and no-write tests |
-| Subscriber-level data unavailable | No identity-bearing schema; projection allowlist; output canaries | Forbidden-output scan across success/error/export paths |
-| Bulk-email sending unavailable | Only controlled test delivery; no bulk tool/parameter/application capability; campaign kind rejected by publisher/scheduler | Catalog scan, bounded test proof, direct bulk-command denial and zero bulk provider calls |
-| Replayed and stale mutations are safe | Actor/site/tool-bound idempotency plus revision CAS | Retry, concurrent mutation and ambiguous-outcome fault tests |
-| Publishing remains attributable | Joined actor/invocation/revision/approval/publish IDs and Git trailers | End-to-end audit-to-Git reconciliation |
+| Fixed product behavior                        | Protocol/application mechanism                                                                                              | Required evidence                                                                         |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Independently revocable, site-scoped identity | One D1 MCP actor/grant; exact resource audience; per-command grant lookup                                                   | Cross-site suite and next-call revocation test                                            |
+| Human and agent use one application/Git path  | Thin adapters dispatch shared commands and publisher                                                                        | Human/MCP byte, hash, commit and release-marker parity                                    |
+| Read/edit content and controlled design       | Typed resources plus schema-bound patch tools                                                                               | Schema, authorization and injection suites                                                |
+| Publication requires approved preview         | Human-only immutable approval fingerprint; execution-time revalidation                                                      | Approval substitution and every-field invalidation tests                                  |
+| Aggregate analytics is read-only              | One fixed-view read tool over D1 projection                                                                                 | Schema scan, suppression, quality and no-write tests                                      |
+| Subscriber-level data unavailable             | No identity-bearing schema; projection allowlist; output canaries                                                           | Forbidden-output scan across success/error/export paths                                   |
+| Bulk-email sending unavailable                | Only controlled test delivery; no bulk tool/parameter/application capability; campaign kind rejected by publisher/scheduler | Catalog scan, bounded test proof, direct bulk-command denial and zero bulk provider calls |
+| Replayed and stale mutations are safe         | Actor/site/tool-bound idempotency plus revision CAS                                                                         | Retry, concurrent mutation and ambiguous-outcome fault tests                              |
+| Publishing remains attributable               | Joined actor/invocation/revision/approval/publish IDs and Git trailers                                                      | End-to-end audit-to-Git reconciliation                                                    |
 
 ## Test layers
 
-| Layer | Evidence |
-|---|---|
-| Schema contract | Snapshots of MCP initialization, catalogs, JSON Schemas, annotations and representative results |
-| Application parity | Human and MCP adapters dispatch identical command types and policy checks |
-| Domain property tests | Revision, idempotency, approval and isolation invariants over generated command sequences |
-| Protocol conformance | MCP Inspector plus raw JSON-RPC transport/auth cases |
-| Security tests | OAuth, tenant isolation, injection, privacy, replay, stale-write and rate-limit suites |
-| Adapter fault injection | D1, GitHub, Cloudflare and analytics delays, timeouts and ambiguous outcomes |
-| Client compatibility | Current stable versions of major MCP clients using standard discovery, auth and tools |
-| End-to-end acceptance | Draft → human preview/approval → Git commit → verified live release |
+| Layer                   | Evidence                                                                                        |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
+| Schema contract         | Snapshots of MCP initialization, catalogs, JSON Schemas, annotations and representative results |
+| Application parity      | Human and MCP adapters dispatch identical command types and policy checks                       |
+| Domain property tests   | Revision, idempotency, approval and isolation invariants over generated command sequences       |
+| Protocol conformance    | MCP Inspector plus raw JSON-RPC transport/auth cases                                            |
+| Security tests          | OAuth, tenant isolation, injection, privacy, replay, stale-write and rate-limit suites          |
+| Adapter fault injection | D1, GitHub, Cloudflare and analytics delays, timeouts and ambiguous outcomes                    |
+| Client compatibility    | Current stable versions of major MCP clients using standard discovery, auth and tools           |
+| End-to-end acceptance   | Draft → human preview/approval → Git commit → verified live release                             |
 
 ## Protocol and schema suite
 
@@ -214,6 +214,29 @@ as unsupported for mutation, though read-only compatibility may be offered with
 a separately reviewed grant.
 
 ## Release gates
+
+### Executable repository evidence
+
+Issue #58 adds a deterministic repository gate for the portions of this plan
+that do not require an external account or interactive client:
+
+```sh
+npm run verify:mcp:conformance
+npm run verify:mcp:inspector
+```
+
+The first command runs the production HTTP and shared-application seams,
+independent JSON Schema validation, reviewed schema/protocol snapshots, the
+authorization and adversarial suites, and the evidence sanitizer. The second
+uses the pinned official Inspector CLI to initialize the production Streamable
+HTTP runtime through a loopback-only fixture and perform discovery with a bound
+session. [The sanitized manifest](evidence/conformance-manifest.json) maps each
+ticket criterion and threat class to an executable test.
+
+This deterministic evidence is not a claim that Claude, ChatGPT, VS Code,
+Cursor, a client-owned Cloudflare/GitHub installation, or another external
+account was exercised. The major-client matrix and real release-marker gate
+below remain separately authorized release evidence.
 
 V1 cannot ship until:
 

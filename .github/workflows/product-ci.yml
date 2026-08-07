@@ -38,6 +38,12 @@ jobs:
       - name: Run application-seam tests
         run: npm test
 
+      - name: Verify MCP conformance evidence
+        run: npm run verify:mcp:conformance
+
+      - name: Verify official MCP Inspector compatibility
+        run: npm run verify:mcp:inspector
+
       - name: Install browser acceptance runtime
         run: npx playwright install --with-deps chromium
 
