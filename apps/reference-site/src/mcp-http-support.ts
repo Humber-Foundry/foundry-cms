@@ -1,7 +1,4 @@
-import type {
-  McpCursorBinding,
-  McpCursorCodec,
-} from "@foundry/application";
+import type { McpCursorBinding, McpCursorCodec } from "@foundry/application";
 import type { SiteId } from "@foundry/site-definition";
 
 const cursorLifetimeSeconds = 15 * 60;
@@ -67,8 +64,16 @@ export class RequestDeadlineExceededError extends Error {
   }
 }
 
+export class RequestCancelledError extends Error {
+  constructor() {
+    super("mcp_request_cancelled");
+    this.name = "RequestCancelledError";
+  }
+}
+
 export type RequestExecutionContext = Readonly<{
   signal: AbortSignal;
+  cancel(): void;
   throwIfExpired(): void;
   run<Result>(operation: () => Promise<Result>): Promise<Result>;
   finishDurably<Result>(operation: () => Promise<Result>): Promise<Result>;
@@ -79,17 +84,21 @@ export function createRequestExecutionContext(
   defer: (promise: Promise<unknown>) => void = () => {},
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), milliseconds);
+  const timeout = setTimeout(() => controller.abort("deadline"), milliseconds);
+  const interrupted = () =>
+    controller.signal.reason === "cancelled"
+      ? new RequestCancelledError()
+      : new RequestDeadlineExceededError();
   const throwIfExpired = () => {
     if (controller.signal.aborted) {
-      throw new RequestDeadlineExceededError();
+      throw interrupted();
     }
   };
   function waitForStarted<Result>(operation: Promise<Result>) {
     return new Promise<Result>((resolve, reject) => {
       const expired = () => {
         cleanup();
-        reject(new RequestDeadlineExceededError());
+        reject(interrupted());
       };
       const cleanup = () => {
         controller.signal.removeEventListener("abort", expired);
@@ -114,6 +123,9 @@ export function createRequestExecutionContext(
   }
   const context: RequestExecutionContext = {
     signal: controller.signal,
+    cancel() {
+      controller.abort("cancelled");
+    },
     throwIfExpired,
     run<Result>(operation: () => Promise<Result>) {
       throwIfExpired();
@@ -125,8 +137,16 @@ export function createRequestExecutionContext(
       try {
         return await waitForStarted(started);
       } catch (error) {
-        if (error instanceof RequestDeadlineExceededError) {
-          defer(started.then(() => undefined, () => undefined));
+        if (
+          error instanceof RequestDeadlineExceededError ||
+          error instanceof RequestCancelledError
+        ) {
+          defer(
+            started.then(
+              () => undefined,
+              () => undefined,
+            ),
+          );
         }
         throw error;
       }
@@ -184,10 +204,7 @@ export async function readBoundedText(
   return new TextDecoder().decode(joined);
 }
 
-export function valueDepth(
-  value: unknown,
-  maximumDepth: number,
-): number {
+export function valueDepth(value: unknown, maximumDepth: number): number {
   const pending: Array<{ value: unknown; depth: number }> = [
     { value, depth: 0 },
   ];

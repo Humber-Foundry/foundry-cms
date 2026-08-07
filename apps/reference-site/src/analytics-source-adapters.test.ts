@@ -258,6 +258,35 @@ describe("the Brevo campaign analytics adapter", () => {
     });
   });
 
+  it("keeps adversarial provider identifiers on the fixed Brevo endpoint", async () => {
+    const requests: string[] = [];
+    const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
+      requests.push(String(input));
+      return new Response(JSON.stringify(report), { status: 200 });
+    });
+    const adapter = createBrevoCampaignAnalyticsAdapter({
+      apiKey: "key",
+      campaignIdForProviderCampaign: () => "campaign_1",
+      fetchImplementation,
+      now: () => "2026-07-02T09:00:00.000Z",
+    });
+    const adversarial =
+      "http://169.254.169.254/latest/meta-data/?token=${env.PROVIDER_KEY}";
+
+    await adapter.getCampaignAnalytics({
+      campaignId: "campaign_1",
+      providerCampaignId: adversarial,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    const outgoing = new URL(requests[0]!);
+    expect(outgoing.origin).toBe("https://api.brevo.com");
+    expect(outgoing.pathname).toBe(
+      `/v3/emailCampaigns/${encodeURIComponent(adversarial)}`,
+    );
+    expect(outgoing.search).toBe("?statistics=globalStats");
+  });
+
   it("ignores a provider campaign Foundry does not own", async () => {
     const fetchImplementation = (async () =>
       new Response(JSON.stringify({ campaigns: [report], count: 1 }), {

@@ -42,6 +42,32 @@ const definitionWithPost = {
     ],
   },
 } satisfies SiteDefinition;
+const secondSiteId = createSiteId("site_pairwise_second");
+const secondSiteDefinition = {
+  ...definitionWithPost,
+  site: {
+    ...definitionWithPost.site,
+    id: secondSiteId,
+    name: "SECOND-SITE-PRIVATE-CANARY",
+  },
+  home: {
+    ...definitionWithPost.home,
+    seo: {
+      ...definitionWithPost.home.seo,
+      title: "SECOND-SITE-PRIVATE-CANARY",
+    },
+  },
+  blog: {
+    ...definitionWithPost.blog,
+    posts: definitionWithPost.blog.posts.map((post) => ({
+      ...post,
+      title: "SECOND-SITE-PRIVATE-CANARY",
+      body: createRichTextDocumentFromPlainText(
+        "SECOND-SITE-PRIVATE-CANARY",
+      ),
+    })),
+  },
+} satisfies SiteDefinition;
 const principal = Object.freeze({
   connectionId: "connection-1",
   actorId: "mcp-actor-1",
@@ -229,6 +255,190 @@ describe("site-scoped MCP read application", () => {
       McpReadError,
     );
     expect(calls).toBe(2);
+  });
+
+  it("generates every non-empty identity and grant mismatch combination across read commands", async () => {
+    type ReadApplication = ReturnType<typeof fixture>["application"];
+    const commands = [
+      (app: ReadApplication, actor = principal) => app.getSite(actor),
+      (app: ReadApplication, actor = principal) =>
+        app.getContentSchema(actor),
+      (app: ReadApplication, actor = principal) =>
+        app.getDesignSchema(actor),
+      (app: ReadApplication, actor = principal) =>
+        app.listContent(actor, { kind: null, limit: 1, cursor: null }),
+      (app: ReadApplication, actor = principal) =>
+        app.getContent(actor, {
+          kind: "page",
+          contentId: referenceSiteDefinition.home.id,
+        }),
+    ];
+    const dimensions: ReadonlyArray<Partial<McpConnectionGrant>> = [
+      { actorId: "actor-pairwise-other" },
+      { connectionId: "connection-pairwise-other" },
+      { clientId: "https://other.example/client.json" },
+      { siteId: createSiteId("site_pairwise_other") },
+      { scopes: [] },
+      { status: "revoked" },
+    ];
+    const mismatches = Array.from(
+      { length: 2 ** dimensions.length - 1 },
+      (_, index) => index + 1,
+    ).map((mask) =>
+      Object.assign(
+        {},
+        ...dimensions.filter((_, index) => (mask & (1 << index)) !== 0),
+      ) as Partial<McpConnectionGrant>,
+    );
+    expect(mismatches).toHaveLength(63);
+    for (const mismatch of mismatches) {
+      for (const command of commands) {
+        const { application, audit } = fixture({
+          connection: activeConnection(mismatch),
+        });
+        await expect(command(application)).rejects.toBeInstanceOf(McpReadError);
+        expect(JSON.stringify(audit)).not.toContain("pairwise_other");
+      }
+    }
+
+    const { application: ownerApplication } = fixture();
+    const page = await ownerApplication.listContent(principal, {
+      kind: null,
+      limit: 1,
+      cursor: null,
+    });
+    const otherActor = {
+      ...principal,
+      connectionId: "connection-pairwise-other",
+      actorId: "actor-pairwise-other",
+    };
+    const { application: otherApplication } = fixture({
+      connection: activeConnection(otherActor),
+    });
+    await expect(
+      otherApplication.listContent(otherActor, {
+        kind: null,
+        limit: 1,
+        cursor: page.result.nextCursor,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+
+    for (const revokeAt of commands.keys()) {
+      let call = 0;
+      const { application } = fixture({
+        resolveConnection: () =>
+          activeConnection({
+            status: call++ < revokeAt ? "active" : "revoked",
+          }),
+      });
+      for (const [index, command] of commands.entries()) {
+        if (index < revokeAt) {
+          await expect(command(application)).resolves.toBeDefined();
+        } else {
+          await expect(command(application)).rejects.toBeInstanceOf(
+            McpReadError,
+          );
+        }
+      }
+    }
+  });
+
+  it("resolves overlapping two-site content and cursors without cross-site canary leakage", async () => {
+    function twoSiteApplication(
+      definition: SiteDefinition,
+      actor: McpConnectionGrant,
+      audit: McpReadAuditEvent[],
+    ) {
+      return createMcpReadApplication({
+        site: createSiteApplication({
+          siteId: definition.site.id,
+          publishedSites: createInMemoryPublishedSiteRepository([
+            createPublishedSiteBundle(definitionWithPost),
+            createPublishedSiteBundle(secondSiteDefinition),
+          ]),
+        }),
+        siteMetadata: {
+          canonicalUrl: `https://${definition.site.id}.example`,
+          locale: "en-CA",
+          timeZone: "America/Vancouver",
+          async getLiveRelease() {
+            return null;
+          },
+        },
+        connections: {
+          async findCurrentConnection() {
+            return actor;
+          },
+          async recordInvocation(event) {
+            audit.push(event);
+          },
+        },
+        cursors: {
+          async encode(binding) {
+            return btoa(JSON.stringify(binding));
+          },
+          async decode(cursor) {
+            return JSON.parse(atob(cursor));
+          },
+        },
+        createInvocationId: () => `invocation-${definition.site.id}`,
+        now: () => "2026-07-29T18:00:00.000Z",
+      });
+    }
+
+    const firstActor = activeConnection();
+    const secondActor = activeConnection({
+      connectionId: "connection-pairwise-second",
+      actorId: "actor-pairwise-second",
+      siteId: secondSiteId,
+    });
+    const firstAudit: McpReadAuditEvent[] = [];
+    const secondAudit: McpReadAuditEvent[] = [];
+    const first = twoSiteApplication(definitionWithPost, firstActor, firstAudit);
+    const second = twoSiteApplication(
+      secondSiteDefinition,
+      secondActor,
+      secondAudit,
+    );
+    const secondPage = await second.getContent(secondActor, {
+      kind: "page",
+      contentId: secondSiteDefinition.home.id,
+    });
+    const firstPageById = await first.getContent(firstActor, {
+      kind: "page",
+      contentId: definitionWithPost.home.id,
+    });
+    expect(secondPage.result.contentId).toBe(firstPageById.result.contentId);
+    expect(JSON.stringify(secondPage)).toContain("SECOND-SITE-PRIVATE-CANARY");
+    expect(JSON.stringify(firstPageById)).not.toContain(
+      "SECOND-SITE-PRIVATE-CANARY",
+    );
+    const sharedPostId = definitionWithPost.blog.posts[0]!.id;
+    const [firstPost, secondPost] = await Promise.all([
+      first.getContent(firstActor, { kind: "post", contentId: sharedPostId }),
+      second.getContent(secondActor, { kind: "post", contentId: sharedPostId }),
+    ]);
+    expect(JSON.stringify(firstPost)).not.toContain(
+      "SECOND-SITE-PRIVATE-CANARY",
+    );
+    expect(JSON.stringify(secondPost)).toContain(
+      "SECOND-SITE-PRIVATE-CANARY",
+    );
+    const firstPage = await first.listContent(firstActor, {
+      kind: null,
+      limit: 1,
+      cursor: null,
+    });
+    await expect(
+      second.listContent(secondActor, {
+        kind: null,
+        limit: 1,
+        cursor: firstPage.result.nextCursor,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    expect(JSON.stringify(secondAudit)).not.toMatch(
+      /page_home|SECOND-SITE-PRIVATE-CANARY/iu,
+    );
   });
 
   it.each([

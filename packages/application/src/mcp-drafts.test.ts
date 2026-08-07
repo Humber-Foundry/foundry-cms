@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createRichTextDocumentFromPlainText,
+  createSiteId,
   listEditableSiteFields,
   referenceSiteDefinition,
 } from "@foundry/site-definition";
@@ -46,7 +47,7 @@ function principal(
 }
 
 function fixture(scopes: ReadonlyArray<string>) {
-  const activePrincipal = principal(scopes);
+  let activePrincipal = principal(scopes);
   const workspaces = new Map<ContentWorkspaceId, ContentRevisionApplication>();
   const workspaceByKey = new Map<string, ContentWorkspaceId>();
   const audit: string[] = [];
@@ -248,6 +249,9 @@ function fixture(scopes: ReadonlyArray<string>) {
       deploymentCurrent = false;
     },
     previewScopesEvaluated,
+    setActivePrincipal(next: McpConnectionPrincipal) {
+      activePrincipal = next;
+    },
     workspaces,
   };
 }
@@ -562,6 +566,163 @@ describe("MCP canonical draft application", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+  });
+
+  it("generates isolated workspace and preview sequences with CAS and actor-bound replay", async () => {
+    const generatedCases = ["name", "description"].flatMap((field) =>
+      [false, true].map((previewReplayAfterActorDenials, offset) => ({
+        field,
+        previewReplayAfterActorDenials,
+        suffix: `${field}-${offset}`,
+      })),
+    );
+    expect(generatedCases).toHaveLength(4);
+    for (const generated of generatedCases) {
+      const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+      const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+        await value.application.openWorkspace(
+          value.activePrincipal,
+          {
+            expectedRevision: 0,
+            idempotencyKey: `generated-open-${generated.suffix}`,
+          },
+          context,
+        ),
+      );
+      const input = {
+        workspaceId: opened.workspaceId,
+        expectedRevision: 0,
+        idempotencyKey: `generated-patch-${generated.suffix}`,
+        operations: [
+          {
+            op: "set" as const,
+            field: `${referenceSiteDefinition.site.id}.${generated.field}`,
+            value: `Generated canonical value ${generated.suffix}`,
+          },
+        ],
+      };
+      await value.application.patchContent(
+        value.activePrincipal,
+        input,
+        context,
+      );
+      await expect(
+        value.application.patchContent(value.activePrincipal, input, context),
+      ).resolves.toMatchObject({
+        result: { revision: 1, replayed: true },
+        meta: { replayed: true },
+      });
+      await expect(
+        value.application.patchContent(
+          value.activePrincipal,
+          {
+            ...input,
+            operations: [{ ...input.operations[0], value: "substituted" }],
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+      await expect(
+        value.application.patchContent(
+          value.activePrincipal,
+          {
+            ...input,
+            idempotencyKey: `generated-stale-${generated.suffix}`,
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "STALE_REVISION", latestRevision: 1 });
+
+      const preview = {
+        workspaceId: opened.workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: `generated-preview-${generated.suffix}`,
+      };
+      await value.application.preparePreview(
+        value.activePrincipal,
+        preview,
+        context,
+      );
+      const assertPreviewReplay = () => expect(
+        value.application.preparePreview(
+          value.activePrincipal,
+          preview,
+          context,
+        ),
+      ).resolves.toMatchObject({
+        result: { replayed: true },
+        meta: { replayed: true },
+      });
+      if (!generated.previewReplayAfterActorDenials) {
+        await assertPreviewReplay();
+      }
+      for (const actorId of [
+        `agent-substituted-${generated.suffix}`,
+        `agent-replay-${generated.suffix}`,
+      ]) {
+        const substituted = { ...value.activePrincipal, actorId };
+        await expect(
+          value.application.getWorkspace(
+            substituted,
+            opened.workspaceId,
+            context,
+          ),
+        ).rejects.toBeInstanceOf(McpReadError);
+        await expect(
+          value.application.preparePreview(substituted, preview, context),
+        ).rejects.toBeInstanceOf(McpReadError);
+      }
+      if (generated.previewReplayAfterActorDenials) {
+        await assertPreviewReplay();
+      }
+    }
+  });
+
+  it("conceals a real foreign-site workspace and preview without changing state", async () => {
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await value.application.openWorkspace(
+        value.activePrincipal,
+        {
+          expectedRevision: 0,
+          idempotencyKey: "pairwise-site-workspace-open",
+        },
+        context,
+      ),
+    );
+    const foreign = principal(
+      [mcpInitialScope, mcpContentDraftScope],
+      createSiteId("site_pairwise_foreign"),
+    );
+    value.setActivePrincipal(foreign);
+    const beforeRevision = await value.workspaces
+      .get(opened.workspaceId)!
+      .queries.getCurrent();
+    await expect(
+      value.application.getWorkspace(foreign, opened.workspaceId, context),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      value.application.preparePreview(
+        foreign,
+        {
+          workspaceId: opened.workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "pairwise-site-preview",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      value.workspaces.get(opened.workspaceId)!.queries.getCurrent(),
+    ).resolves.toEqual(beforeRevision);
+    expect(value.auditEvents).toEqual([
+      expect.objectContaining({
+        siteId: foreign.siteId,
+        outcome: "denied",
+        reason: "OBJECT_NOT_FOUND",
+      }),
+    ]);
+    expect(JSON.stringify(value.auditEvents)).not.toContain(opened.workspaceId);
   });
 
   it("accepts canonical rich-text data and rejects malformed nodes as validation errors", async () => {

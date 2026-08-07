@@ -23,15 +23,19 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project apps/reference-site/tsconfig.json",
     "verify:integrity": "node scripts/verify-repository-integrity.mjs",
+    "verify:mcp:conformance": "node scripts/run-mcp-conformance.mjs",
+    "verify:mcp:inspector": "RUN_MCP_INSPECTOR=1 vitest run apps/reference-site/src/mcp-http-runtime.test.ts -t 'pinned official MCP Inspector'",
     "verify:site-validator": "npm run generate:validator --workspace @foundry/site-definition -- --check",
     "verify:bundle": "node scripts/verify-public-bundle.mjs",
     "verify:worker": "node scripts/verify-worker-runtime.mjs"
   },
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": ">=22.19.0"
   },
   "packageManager": "npm@11.12.1",
   "devDependencies": {
+    "@hyperjump/json-schema": "1.17.8",
+    "@modelcontextprotocol/inspector": "2.1.0",
     "@types/commonmark": "0.27.10",
     "@types/node": "26.1.1",
     "@types/react": "19.2.17",

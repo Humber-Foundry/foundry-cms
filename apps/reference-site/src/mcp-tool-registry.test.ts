@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import {
+  registerSchema,
+  unregisterSchema,
+  validate as validateIndependentSchema,
+  type SchemaObject,
+} from "@hyperjump/json-schema/draft-2020-12";
 
 import {
   createInMemoryPublishedSiteRepository,
@@ -43,7 +51,9 @@ function registry() {
 }
 
 function names(scopes: ReadonlyArray<string>) {
-  return registry().list(principal(scopes)).map(({ name }) => name);
+  return registry()
+    .list(principal(scopes))
+    .map(({ name }) => name);
 }
 
 function schemaPropertyNames(value: unknown): string[] {
@@ -55,20 +65,73 @@ function schemaPropertyNames(value: unknown): string[] {
   ]);
 }
 
+type JsonSchema = Readonly<Record<string, unknown>>;
+
+function schemaExample(schema: JsonSchema): unknown {
+  if (Object.hasOwn(schema, "const")) return schema.const;
+  if (Array.isArray(schema.enum)) return schema.enum[0];
+  if (Array.isArray(schema.oneOf))
+    return schemaExample(schema.oneOf[0] as JsonSchema);
+  if (Array.isArray(schema.anyOf))
+    return schemaExample(schema.anyOf[0] as JsonSchema);
+  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  if (type === "null") return null;
+  if (type === "boolean") return true;
+  if (type === "integer" || type === "number")
+    return typeof schema.minimum === "number" ? schema.minimum : 0;
+  if (type === "array") {
+    const minimum = typeof schema.minItems === "number" ? schema.minItems : 0;
+    return Array.from({ length: minimum }, () =>
+      schemaExample((schema.items ?? {}) as JsonSchema),
+    );
+  }
+  if (type === "object" || schema.properties !== undefined) {
+    const properties = (schema.properties ?? {}) as Record<string, JsonSchema>;
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    return Object.fromEntries(
+      required.map((key) => [key, schemaExample(properties[String(key)] ?? {})]),
+    );
+  }
+  if (type === "string") {
+    const pattern = typeof schema.pattern === "string" ? schema.pattern : "";
+    if (pattern.includes("git:"))
+      return `git:${"a".repeat(40)}@content:${"b".repeat(64)}`;
+    if (pattern.includes("schedule_"))
+      return "schedule_0123abcd-4567-89ab-cdef-0123456789ab";
+    if (pattern.includes("publish_")) return `publish_${"a".repeat(32)}`;
+    if (pattern.includes("approval_")) return `approval_${"a".repeat(32)}`;
+    if (pattern.includes("workspace_")) return "workspace_conformance";
+    if (pattern.includes("site_")) return "site_conformance";
+    if (pattern.includes("campaign_")) return `campaign_${"a".repeat(32)}`;
+    if (pattern.includes("[0-9a-f]{8}") && pattern.includes("[0-9a-f]{12}"))
+      return "11111111-1111-4111-8111-111111111111";
+    if (pattern.includes("[0-9a-f]{64}")) return "a".repeat(64);
+    if (pattern.includes("[0-9a-f]{40}")) return "a".repeat(40);
+    if (pattern.includes("\\d{4}-\\d{2}-\\d{2}T"))
+      return "2026-08-07T12:00:00Z";
+    if (pattern.includes("\\d{4}-\\d{2}-\\d{2}")) return "2026-08-07";
+    if (schema.format === "date-time") return "2026-08-07T12:00:00.000Z";
+    if (schema.format === "uri" || schema.format === "uri-reference")
+      return "https://example.invalid/resource";
+    if (schema.format === "uuid")
+      return "11111111-1111-4111-8111-111111111111";
+    return "x".repeat(
+      Math.max(1, typeof schema.minLength === "number" ? schema.minLength : 1),
+    );
+  }
+  return null;
+}
+
 describe("MCP draft tool registry", () => {
   it("advertises only the publication tools granted to the connection", () => {
-    expect(
-      names([mcpInitialScope, mcpPublicationPublishScope]),
-    ).toEqual([
+    expect(names([mcpInitialScope, mcpPublicationPublishScope])).toEqual([
       "foundry.site.get",
       "foundry.content.list",
       "foundry.content.get",
       "foundry.publication.request",
       "foundry.publication.status",
     ]);
-    expect(
-      names([mcpInitialScope, mcpPublicationScheduleScope]),
-    ).toEqual([
+    expect(names([mcpInitialScope, mcpPublicationScheduleScope])).toEqual([
       "foundry.site.get",
       "foundry.content.list",
       "foundry.content.get",
@@ -106,9 +169,9 @@ describe("MCP draft tool registry", () => {
     expect(
       status({ workspaceId, revision: 1, operationId: publicationId }),
     ).toBe(true);
-    expect(
-      status({ workspaceId, revision: 1, operationId: scheduleId }),
-    ).toBe(true);
+    expect(status({ workspaceId, revision: 1, operationId: scheduleId })).toBe(
+      true,
+    );
     // A malformed identifier is a terminal schema rejection, so it never
     // reaches an identifier constructor whose failure would surface as a
     // retryable error.
@@ -168,7 +231,8 @@ describe("MCP draft tool registry", () => {
       ]),
     );
     const publicationTools = tools.filter(({ name }) =>
-      name.startsWith("foundry.publication."));
+      name.startsWith("foundry.publication."),
+    );
     const validator = new Ajv2020({
       strict: false,
       formats: {
@@ -231,11 +295,7 @@ describe("MCP draft tool registry", () => {
 
   it("publishes closed typed schemas without site, file, code or approval-creation inputs", () => {
     const tools = registry().list(
-      principal([
-        mcpInitialScope,
-        mcpContentDraftScope,
-        mcpDesignDraftScope,
-      ]),
+      principal([mcpInitialScope, mcpContentDraftScope, mcpDesignDraftScope]),
     );
     const mutationTools = tools.filter(
       ({ annotations }) => annotations.readOnlyHint === false,
@@ -326,8 +386,7 @@ describe("MCP draft tool registry", () => {
           retryable: false,
           requiredScopes: [],
           latestRevision: 4,
-          conflictResource:
-            "foundry://workspaces/workspace_replay/revisions/4",
+          conflictResource: "foundry://workspaces/workspace_replay/revisions/4",
         },
         meta: {
           replayed: false,
@@ -349,42 +408,45 @@ describe("MCP draft tool registry", () => {
       workspaceId: "workspace_design_contract",
       expectedRevision: 0,
       idempotencyKey: "11111111-1111-4111-8111-111111111111",
-      operations: [{
-        op: "set_token",
-        token: "typography.heading",
-        value: "editorial",
-      }],
+      operations: [
+        {
+          op: "set_token",
+          token: "typography.heading",
+          value: "editorial",
+        },
+      ],
     };
 
     expect(validate(input)).toBe(true);
     expect(
       validate({
         ...input,
-        operations: [{
-          op: "set_token",
-          token: "typography.heading",
-          value: "moss",
-        }],
+        operations: [
+          {
+            op: "set_token",
+            token: "typography.heading",
+            value: "moss",
+          },
+        ],
       }),
     ).toBe(false);
     expect(
       validate({
         ...input,
-        operations: [{
-          op: "set_variant",
-          componentId: "section_hero",
-          value: "cards",
-        }],
+        operations: [
+          {
+            op: "set_variant",
+            componentId: "section_hero",
+            value: "cards",
+          },
+        ],
       }),
     ).toBe(false);
   });
 
   it("authorizes hidden draft tools before reporting malformed arguments", async () => {
     const readOnlyPrincipal = principal([mcpInitialScope]);
-    const activePrincipal = principal([
-      mcpInitialScope,
-      mcpContentDraftScope,
-    ]);
+    const activePrincipal = principal([mcpInitialScope, mcpContentDraftScope]);
     const audit: McpReadAuditEvent[] = [];
     const read = createMcpReadApplication({
       site: createSiteApplication({
@@ -421,7 +483,7 @@ describe("MCP draft tool registry", () => {
       now: () => "2026-07-29T20:00:00.000Z",
     });
     const openWorkspace = vi.fn(async () => {
-        throw new Error("must_not_run");
+      throw new Error("must_not_run");
     });
     const draftCapable = Object.assign(read, {
       openWorkspace,
@@ -534,9 +596,9 @@ describe("MCP campaign and analytics tool registry", () => {
     expect(fullNames([mcpInitialScope])).not.toContain(
       "foundry.analytics.read",
     );
-    expect(
-      fullNames([mcpInitialScope, mcpAnalyticsReadScope]),
-    ).toContain("foundry.analytics.read");
+    expect(fullNames([mcpInitialScope, mcpAnalyticsReadScope])).toContain(
+      "foundry.analytics.read",
+    );
   });
 
   it("exposes no bulk-send, role, credential, or recipient-selection tool", () => {
@@ -567,11 +629,7 @@ describe("MCP campaign and analytics tool registry", () => {
 
   it("takes no recipient selection on a test and no raw query on analytics", () => {
     const tools = fullRegistry().list(
-      principal([
-        mcpInitialScope,
-        mcpCampaignTestScope,
-        mcpAnalyticsReadScope,
-      ]),
+      principal([mcpInitialScope, mcpCampaignTestScope, mcpAnalyticsReadScope]),
     );
     const requestTest = tools.find(
       ({ name }) => name === "foundry.campaign.request_test",
@@ -674,6 +732,238 @@ describe("MCP campaign and analytics tool registry", () => {
     expect(
       createInput({ ...validCreate, audienceDefinition: { id: "x" } }),
     ).toBe(false);
+  });
+
+  it("matches the reviewed complete MCP tool-schema snapshot", () => {
+    const tools = fullRegistry().list(
+      principal([
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpDesignDraftScope,
+        mcpPublicationPublishScope,
+        mcpPublicationScheduleScope,
+        mcpCampaignDraftScope,
+        mcpCampaignTestScope,
+        mcpAnalyticsReadScope,
+      ]),
+    );
+
+    expect(
+      tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchemaSha256: createHash("sha256")
+          .update(JSON.stringify(tool.inputSchema))
+          .digest("hex"),
+        outputSchemaSha256: createHash("sha256")
+          .update(JSON.stringify(tool.outputSchema))
+          .digest("hex"),
+        annotations: tool.annotations,
+        execution: tool.execution,
+      })),
+    ).toMatchSnapshot();
+  });
+
+  it("keeps the normative tool catalog synchronized with every runtime descriptor", () => {
+    const catalog = readFileSync(
+      new URL("../../../docs/mcp/catalog.md", import.meta.url),
+      "utf8",
+    );
+    const toolTable = catalog
+      .split("## Tool catalog")[1]!
+      .split("## Representative schemas")[0]!;
+    const documented = toolTable
+      .split("\n")
+      .flatMap((line) => {
+        const cells = line.split("|").map((cell) => cell.trim());
+        const name = cells[1]?.match(/^`(foundry\.[a-z_.]+)`$/u)?.[1];
+        return name === undefined
+          ? []
+          : [{ name, description: cells[3] }];
+      });
+    const runtime = fullRegistry()
+      .list(
+        principal([
+          mcpInitialScope,
+          mcpContentDraftScope,
+          mcpDesignDraftScope,
+          mcpPublicationPublishScope,
+          mcpPublicationScheduleScope,
+          mcpCampaignDraftScope,
+          mcpCampaignTestScope,
+          mcpAnalyticsReadScope,
+        ]),
+      )
+      .map(({ name, description }) => ({ name, description }));
+    expect(documented).toEqual(runtime);
+  });
+
+  it("keeps the normative permission matrix synchronized with every runtime descriptor", () => {
+    const matrix = readFileSync(
+      new URL("../../../docs/mcp/permission-matrix.md", import.meta.url),
+      "utf8",
+    );
+    const toolTable = matrix
+      .split("## Tool-to-scope matrix")[1]!
+      .split("## Data classification and output")[0]!;
+    const documented = toolTable
+      .split("\n")
+      .flatMap((line) => {
+        const cells = line.split("|").map((cell) => cell.trim());
+        const name = cells[1]?.match(/^`(foundry\.[a-z_.]+)`$/u)?.[1];
+        return name === undefined
+          ? []
+          : [{ name, scopes: cells[2]?.replaceAll("`", "") }];
+      });
+    const runtime = fullRegistry()
+      .list(
+        principal([
+          mcpInitialScope,
+          mcpContentDraftScope,
+          mcpDesignDraftScope,
+          mcpPublicationPublishScope,
+          mcpPublicationScheduleScope,
+          mcpCampaignDraftScope,
+          mcpCampaignTestScope,
+          mcpAnalyticsReadScope,
+        ]),
+      )
+      .map(({ name }) => name);
+    expect(documented.map(({ name }) => name).sort()).toEqual(runtime.sort());
+    expect(
+      Object.fromEntries(
+        documented.map(({ name, scopes }) => [name, scopes]),
+      ),
+    ).toEqual({
+        "foundry.site.get": "site.read",
+        "foundry.content.list": "site.read",
+        "foundry.content.get": "site.read",
+        "foundry.workspace.open": "content.draft or design.draft",
+        "foundry.workspace.get": "matching draft scope",
+        "foundry.content.patch": "content.draft",
+        "foundry.design.patch": "design.draft",
+        "foundry.preview.prepare": "matching draft scopes",
+        "foundry.campaign.create": "campaign.draft",
+        "foundry.campaign.edit": "campaign.draft",
+        "foundry.campaign.get": "campaign.draft",
+        "foundry.campaign.request_test": "campaign.test",
+        "foundry.campaign.test_readiness": "campaign.test",
+        "foundry.publication.schedule":
+          "publication.schedule + matching draft scopes",
+        "foundry.publication.cancel": "publication.schedule",
+        "foundry.publication.request":
+          "publication.publish + matching draft scopes",
+        "foundry.publication.status":
+          "publication.publish or publication.schedule",
+        "foundry.analytics.read": "analytics.read",
+      });
+  });
+
+  it("independently validates all advertised schemas with success and error examples", async () => {
+    const tools = fullRegistry().list(
+      principal([
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpDesignDraftScope,
+        mcpPublicationPublishScope,
+        mcpPublicationScheduleScope,
+        mcpCampaignDraftScope,
+        mcpCampaignTestScope,
+        mcpAnalyticsReadScope,
+      ]),
+    );
+    expect(tools).toHaveLength(18);
+
+    for (const tool of tools) {
+      const inputSchema = JSON.parse(
+        JSON.stringify(tool.inputSchema),
+      ) as SchemaObject;
+      const outputSchema = JSON.parse(
+        JSON.stringify(tool.outputSchema),
+      ) as SchemaObject;
+      const inputUri = `https://conformance.foundry.invalid/all/${tool.name}/input`;
+      const outputUri = `https://conformance.foundry.invalid/all/${tool.name}/output`;
+      registerSchema(
+        inputSchema,
+        inputUri,
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+      registerSchema(
+        outputSchema,
+        outputUri,
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+      try {
+        const input = schemaExample(inputSchema as JsonSchema) as Record<
+          string,
+          unknown
+        >;
+        if (
+          tool.name === "foundry.campaign.create" ||
+          tool.name === "foundry.campaign.edit"
+        ) {
+          input.emailContent = {
+            version: "1.0.0",
+            type: "document",
+            children: [],
+          };
+        }
+        expect(
+          (await validateIndependentSchema(inputUri, input as never)).valid,
+          `${tool.name} input`,
+        ).toBe(true);
+        expect(
+          (
+            await validateIndependentSchema(inputUri, {
+              ...(input as Record<string, unknown>),
+              unexpectedConformanceField: true,
+            } as never)
+          ).valid,
+          `${tool.name} closed input`,
+        ).toBe(false);
+
+        const variants = (outputSchema as JsonSchema)
+          .oneOf as ReadonlyArray<JsonSchema>;
+        expect(variants).toHaveLength(2);
+        for (const [kind, variant] of [
+          ["success", variants[0]],
+          ["error", variants[1]],
+        ] as const) {
+          const example = schemaExample(variant) as Record<string, unknown>;
+          if (kind === "success" && tool.name === "foundry.content.get") {
+            (example.result as Record<string, unknown>).document =
+              referenceSiteDefinition.home;
+          }
+          if (kind === "success" && tool.name === "foundry.workspace.get") {
+            const result = example.result as Record<string, unknown>;
+            for (const revisionName of ["base", "current"]) {
+              (result[revisionName] as Record<string, unknown>).definition =
+                referenceSiteDefinition;
+            }
+          }
+          if (kind === "success" && tool.name === "foundry.campaign.get") {
+            (example.result as Record<string, unknown>).emailContent = {
+              version: "1.0.0",
+              type: "document",
+              children: [],
+            };
+          }
+          expect(
+            (
+              await validateIndependentSchema(
+                outputUri,
+                example as never,
+                "BASIC",
+              )
+            ).valid,
+            `${tool.name} ${kind} output`,
+          ).toBe(true);
+        }
+      } finally {
+        unregisterSchema(inputUri);
+        unregisterSchema(outputUri);
+      }
+    }
   });
 
   it("hides campaign and analytics tools when the application omits them", () => {

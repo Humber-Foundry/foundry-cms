@@ -13,6 +13,22 @@ import {
   createContentWorkspaceId,
   createInMemoryContentRevisionStore,
 } from "./content-revisions";
+import {
+  createInMemoryPublishedSiteRepository,
+  createPublishedSiteBundle,
+  createSiteApplication,
+} from "./index";
+import {
+  createMcpPublicationApplication,
+  type McpPublicationAuditEvent,
+} from "./mcp-publications";
+import {
+  createMcpReadApplication,
+  mcpContentDraftScope,
+  mcpInitialScope,
+  mcpPublicationPublishScope,
+  type McpConnectionPrincipal,
+} from "./mcp-read";
 import { createHumanMembershipId } from "./human-access";
 import {
   ContentApprovalInvalidError,
@@ -1132,6 +1148,115 @@ describe("content publication application", () => {
     });
     expect(replay).toEqual(publication);
     expect(createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("joins one MCP actor and approval through audit identity to attributed Git trailers", async () => {
+    const { app, approval } = await approve();
+    const actor: McpConnectionPrincipal = {
+      connectionId: "connection-trace",
+      actorId: "agent-trace",
+      clientId: "https://client.example/trace.json",
+      siteId: referenceSiteDefinition.site.id,
+      scopes: [
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpPublicationPublishScope,
+      ],
+    };
+    const mcpAudit: McpPublicationAuditEvent[] = [];
+    const read = createMcpReadApplication({
+      site: createSiteApplication({
+        siteId: referenceSiteDefinition.site.id,
+        publishedSites: createInMemoryPublishedSiteRepository([
+          createPublishedSiteBundle(referenceSiteDefinition),
+        ]),
+      }),
+      siteMetadata: {
+        canonicalUrl: "https://foundry.example",
+        locale: "en-CA",
+        timeZone: "America/Vancouver",
+        async getLiveRelease() {
+          return null;
+        },
+      },
+      connections: {
+        async findCurrentConnection() {
+          return { ...actor, status: "active" };
+        },
+        async recordInvocation() {},
+      },
+      cursors: {
+        async encode() {
+          return "unused";
+        },
+        async decode() {
+          throw new Error("unused");
+        },
+      },
+      createInvocationId: () => "invocation-trace",
+      now: () => "2026-07-27T10:01:00.000Z",
+    });
+    const mcp = createMcpPublicationApplication({
+      base: read,
+      runtime: {
+        async loadRevision() {
+          return revisionApplication.application;
+        },
+        async loadPublication() {
+          return app;
+        },
+        async loadBlogOperations() {
+          throw new Error("unused");
+        },
+        async recordInvocation(event) {
+          mcpAudit.push(event);
+        },
+      },
+      now: () => "2026-07-27T10:01:00.000Z",
+    });
+    const context = {
+      throwIfExpired() {},
+      run: <Result>(operation: () => Promise<Result>) => operation(),
+      finishDurably: <Result>(operation: () => Promise<Result>) => operation(),
+    };
+
+    const response = (await mcp.requestPublication(
+      actor,
+      {
+        workspaceId,
+        revision: 1,
+        approvalId: approval.id,
+        idempotencyKey: "56565656-5656-4656-8656-565656565656",
+      },
+      context,
+    )) as {
+      invocationId: string;
+      result: { operationId: string; state: string; replayed: boolean };
+    };
+    const commit = createCommit.mock.calls[0]![0];
+    expect(mcpAudit).toEqual([
+      expect.objectContaining({
+        invocationId: response.invocationId,
+        actorId: actor.actorId,
+        connectionId: actor.connectionId,
+        workspaceId,
+        revision: 1,
+        approvalId: approval.id,
+        publicationId: response.result.operationId,
+      }),
+    ]);
+    for (const trailer of [
+      `Foundry-Publish-Id: ${response.result.operationId}`,
+      `Foundry-Workspace: ${workspaceId}`,
+      "Foundry-Revision: 1",
+      `Foundry-Approved-By: ${membershipId}`,
+      `Foundry-Content-Hash: ${revisionApplication.saved.inputs.contentHash}`,
+    ]) {
+      expect(commit.message).toContain(trailer);
+    }
+    expect(JSON.stringify({ audit: mcpAudit, commit })).not.toMatch(
+      /authorization|bearer|access[_-]?token|refresh[_-]?token|secret-canary/iu,
+    );
   });
 
   it("exposes release history with immutable approval and state evidence", async () => {

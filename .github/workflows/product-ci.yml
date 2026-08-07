@@ -35,8 +35,14 @@ jobs:
       - name: Verify generated Site Definition validator
         run: npm run verify:site-validator
 
-      - name: Run application-seam tests
-        run: npm test
+      - name: Run application-seam tests with structured evidence
+        run: node scripts/run-tests-with-evidence.mjs /tmp/foundry-vitest.json
+
+      - name: Verify MCP conformance evidence from the test run
+        run: node scripts/verify-mcp-conformance.mjs /tmp/foundry-vitest.json
+
+      - name: Verify official MCP Inspector compatibility
+        run: npm run verify:mcp:inspector
 
       - name: Install browser acceptance runtime
         run: npx playwright install --with-deps chromium

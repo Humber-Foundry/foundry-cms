@@ -19,13 +19,13 @@ on the next call. Historical attribution remains.
 | Scope | Grants | Does not grant |
 |---|---|---|
 | `site.read` | Site metadata, schemas, published content and design resources | Drafts, analytics, subscriber data |
-| `content.draft` | Open/read workspaces; create immutable content and campaign-draft revisions | Design changes, approval, publish |
+| `content.draft` | Open/read workspaces and create immutable content revisions | Design changes, campaign drafts, approval, publish |
 | `design.draft` | Read controlled design primitives and create design revisions within schema | Raw CSS/code, component registration |
+| `campaign.draft` | Create, edit and read campaign copy revisions | Audience access, test delivery, bulk send/schedule/authorization |
 | `campaign.test` | Request one test of an exact campaign revision to Owner-configured verified test recipients | Recipient selection/read, audience access, bulk send/schedule/authorization |
 | `publication.schedule` | Create, replace or cancel site/blog publication schedules for approved revisions | Campaign/email scheduling, approval |
 | `publication.publish` | Request the shared publisher for an already human-approved exact revision; read operation status | Self-approval, bypassing stale checks |
 | `analytics.read` | Bounded aggregate analytics views with suppression and quality metadata | Raw events, arbitrary dimensions/SQL, identities |
-| `connection.admin` | Read this connection's grant and revoke this connection | Other connections, human users, role or secret management |
 
 `site.read` is the only scope in the initial unauthenticated
 `WWW-Authenticate` challenge. An authenticated direct call to an omitted draft
@@ -48,16 +48,16 @@ Legend: **A** allowed by application authorization, **H** human-only,
 | Read own authorized workspaces | A | A | `content.draft` or `design.draft` | — |
 | Create/edit content draft | A | A | `content.draft` | — |
 | Edit controlled design state | A | A | `design.draft` | — |
-| Prepare campaign artifact | A | A | `content.draft` | — |
+| Prepare campaign artifact | A | A | `campaign.draft` | — |
 | Read aggregate analytics | A | A | `analytics.read` | — |
 | Read subscriber identity/list | A | H, if separately authorized | — | — |
 | Create canonical preview | A | A | draft scope matching changed state | — |
 | Approve rendered revision | A | A | — | — |
 | Request immediate site/blog publish | A | A | `publication.publish` + valid human approval | — |
 | Schedule site/blog publish | A | A | `publication.schedule` + valid human approval | Executes exact authorization |
-| Request controlled campaign test | A | A | `campaign.test` + `content.draft` | Executes exact test request |
+| Request controlled campaign test | A | A | `campaign.test` | Executes exact test request |
 | Authorize/schedule/send bulk email | H | — | — | Executes separately authorized send only |
-| Manage humans, MCP grants or integrations | H | — | self-read/revoke only with `connection.admin` | — |
+| Manage humans, MCP grants or integrations | H | — | — | — |
 | Modify arbitrary code/repository files | — | — | — | — |
 
 Human columns summarize the boundary required by the product contract; the
@@ -69,20 +69,22 @@ human authorization decision remains authoritative where it is stricter.
 |---|---|---|---|
 | `foundry.site.get` | `site.read` | None | None |
 | `foundry.content.list` | `site.read` | None | None |
-| `foundry.content.get` | `site.read` or `content.draft` for draft revision | None | None |
+| `foundry.content.get` | `site.read` | None | None |
 | `foundry.workspace.open` | `content.draft` or `design.draft` | None | Creates/resumes workspace |
 | `foundry.workspace.get` | matching draft scope | None | None |
 | `foundry.content.patch` | `content.draft` | None | New immutable revision |
 | `foundry.design.patch` | `design.draft` | None | New immutable revision |
 | `foundry.preview.prepare` | matching draft scopes | None | Canonical preview artifact |
-| `foundry.campaign.test.request` | `campaign.test` + `content.draft` | Exact persisted campaign revision; client confirmation recommended | Test to configured verified recipients |
+| `foundry.campaign.create` | `campaign.draft` | None | Standalone campaign revision |
+| `foundry.campaign.edit` | `campaign.draft` | None | New campaign revision |
+| `foundry.campaign.get` | `campaign.draft` | None | None |
+| `foundry.campaign.request_test` | `campaign.test` | Exact persisted campaign revision; client confirmation recommended | Test to configured verified recipients |
+| `foundry.campaign.test_readiness` | `campaign.test` | None | None |
 | `foundry.publication.schedule` | `publication.schedule` + matching draft scopes | Existing human approval | Scheduled operation |
 | `foundry.publication.cancel` | `publication.schedule` | None; only before claim | Cancels site/blog schedule |
 | `foundry.publication.request` | `publication.publish` + matching draft scopes | Existing human approval | Git/build operation |
 | `foundry.publication.status` | `publication.publish` or `publication.schedule` | None | None |
 | `foundry.analytics.read` | `analytics.read` | None | None |
-| `foundry.connection.get` | `connection.admin` | None | None |
-| `foundry.connection.revoke` | `connection.admin` | Explicit client confirmation recommended | Revokes caller |
 
 Authorization is the intersection of token scopes, current D1 grant, site
 binding, tool policy and object-level access. Possessing a scope never bypasses

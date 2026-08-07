@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  createSiteId,
+  referenceSiteDefinition,
+} from "@foundry/site-definition";
 
 // Imported from its own module rather than the package barrel: the barrel
 // re-exports this file's subject, so going through it can leave the hash
@@ -301,6 +304,39 @@ describe("MCP publication orchestration", () => {
     );
   });
 
+  it("captures a sanitized actor approval publication trace without bearer passthrough", async () => {
+    const { application, publish, publicationAudit } = await fixture();
+    await application.requestPublication(
+      principal,
+      {
+        workspaceId,
+        revision: 1,
+        approvalId,
+        idempotencyKey: "12121212-1212-4212-8212-121212121212",
+      },
+      context,
+    );
+    const [publisherCommand] = publish.mock.calls[0] ?? [];
+    expect(publisherCommand).toMatchObject({
+      workspaceId,
+      revision: 1,
+      approvalId,
+      requestedBy: createContentActorId("mcp-agent-publication-56"),
+    });
+    expect(publicationAudit[0]).toMatchObject({
+      actorId: principal.actorId,
+      connectionId: principal.connectionId,
+      workspaceId,
+      revision: 1,
+      approvalId,
+      publicationId,
+    });
+    const serialized = JSON.stringify({ publisherCommand, publicationAudit });
+    expect(serialized).not.toMatch(
+      /authorization|bearer|accessToken|refreshToken|providerPayload/iu,
+    );
+  });
+
   it("passes a current-grant fence to the shared publisher", async () => {
     const { application, publish } = await fixture({
       connectionAt: (read) =>
@@ -325,6 +361,217 @@ describe("MCP publication orchestration", () => {
       code: "INSUFFICIENT_SCOPE",
     });
     expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("generates approval and current-scope substitution cases before publication", async () => {
+    const identityDimensions: ReadonlyArray<
+      Partial<McpConnectionPrincipal>
+    > = [
+      { actorId: "agent-substituted" },
+      { connectionId: "connection-substituted" },
+      { clientId: "https://substituted.example/client.json" },
+      { siteId: createSiteId("site_substituted") },
+    ];
+    const scopeStates = [
+      {
+        name: "valid",
+        scopes: principal.scopes,
+        requiredScopes: [] as ReadonlyArray<string>,
+      },
+      {
+        name: "missing-publication",
+        scopes: [mcpInitialScope, mcpContentDraftScope],
+        requiredScopes: [mcpPublicationPublishScope],
+      },
+      {
+        name: "missing-draft",
+        scopes: [mcpInitialScope, mcpPublicationPublishScope],
+        requiredScopes: [mcpContentDraftScope],
+      },
+      {
+        name: "missing-publication-and-draft",
+        scopes: [mcpInitialScope],
+        requiredScopes: [mcpPublicationPublishScope],
+      },
+    ] as const;
+    const deniedCases = scopeStates.flatMap((scopeState) =>
+      Array.from(
+        { length: 2 ** identityDimensions.length },
+        (_, identityMask) => {
+          if (identityMask === 0 && scopeState.name === "valid") {
+            return null;
+          }
+          const identitySubstitutions = Object.assign(
+            {},
+            ...identityDimensions.filter(
+              (_, index) => (identityMask & (1 << index)) !== 0,
+            ),
+          );
+          return {
+            name: `${identityMask}:${scopeState.name}`,
+            principal: {
+              ...principal,
+              ...identitySubstitutions,
+              scopes: scopeState.scopes,
+            },
+            expectedCode:
+              identityMask === 0
+                ? "INSUFFICIENT_SCOPE"
+                : "AUTHENTICATION_REQUIRED",
+            expectedRequiredScopes:
+              identityMask === 0 ? scopeState.requiredScopes : [],
+          };
+        },
+      ).filter((testCase) => testCase !== null),
+    );
+    expect(deniedCases).toHaveLength(63);
+    expect(
+      new Set(
+        deniedCases.map(({ principal: deniedPrincipal }) =>
+          JSON.stringify(deniedPrincipal),
+        ),
+      ).size,
+    ).toBe(63);
+    expect(deniedCases).toContainEqual(
+      expect.objectContaining({
+        name: "0:missing-publication-and-draft",
+        principal: expect.objectContaining({ scopes: [mcpInitialScope] }),
+      }),
+    );
+    for (const deniedCase of deniedCases) {
+      const { application, publish } = await fixture();
+      await expect(
+        application.requestPublication(
+          deniedCase.principal,
+          {
+            workspaceId,
+            revision: 1,
+            approvalId,
+            idempotencyKey: "34343434-3434-4434-8434-343434343434",
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({
+        code: deniedCase.expectedCode,
+        requiredScopes: deniedCase.expectedRequiredScopes,
+      });
+      expect(publish).not.toHaveBeenCalled();
+    }
+    for (const suffix of ["1", "2", "3", "4"]) {
+      const { application, publish } = await fixture();
+      publish.mockImplementationOnce(() => {
+        throw new ContentApprovalInvalidError("approval_not_found");
+      });
+      await expect(
+        application.requestPublication(
+          principal,
+          {
+            workspaceId,
+            revision: 1,
+            approvalId: createContentApprovalId(
+              `approval_${suffix.repeat(32)}`,
+            ),
+            idempotencyKey:
+              `${suffix.repeat(8)}-${suffix.repeat(4)}-` +
+              `4${suffix.repeat(3)}-8${suffix.repeat(3)}-${suffix.repeat(12)}`,
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+      expect(publish).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("conceals foreign-site publication IDs before publisher or state mutation", async () => {
+    const scheduleId = "schedule_0123abcd-4567-89ab-cdef-0123456789ab";
+    const activateSchedule = vi.fn();
+    const cancelSchedule = vi.fn();
+    const blogOperations = {
+      queries: {
+        async findScheduleByWorkspaceRequest() {
+          return null;
+        },
+      },
+      commands: { activateSchedule, cancelSchedule },
+    } as unknown as BlogOperationsStub;
+    const foreign: McpConnectionPrincipal = {
+      ...principal,
+      connectionId: "connection-publication-foreign",
+      actorId: "agent-publication-foreign",
+      siteId: createSiteId("site_publication_foreign"),
+      scopes: [...principal.scopes, mcpPublicationScheduleScope],
+    };
+    const { application, publish, publicationAudit } = await fixture({
+      connectionAt: () => ({ ...foreign, status: "active" }),
+      blogOperations,
+    });
+    await expect(
+      application.requestPublication(
+        foreign,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId,
+          idempotencyKey: "45454545-4545-4454-8454-454545454545",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.publicationStatus(
+        foreign,
+        { workspaceId, revision: 1, operationId: publicationId },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.schedulePublication(
+        foreign,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId,
+          publishAt: "2026-08-08T20:00:00.000Z",
+          reportingTimeZone: "America/Vancouver",
+          idempotencyKey: "56565656-5656-4656-8656-565656565656",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.publicationStatus(
+        foreign,
+        { workspaceId, revision: 1, operationId: scheduleId },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.cancelPublicationSchedule(
+        foreign,
+        {
+          workspaceId,
+          revision: 1,
+          scheduleId,
+          idempotencyKey: "67676767-6767-4676-8676-676767676767",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    expect(publish).not.toHaveBeenCalled();
+    expect(activateSchedule).not.toHaveBeenCalled();
+    expect(cancelSchedule).not.toHaveBeenCalled();
+    expect(publicationAudit).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          siteId: foreign.siteId,
+          outcome: "denied",
+          reason: "OBJECT_NOT_FOUND",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(publicationAudit)).not.toContain(
+      "MCP approved publication",
+    );
   });
 
   it("intersects dynamic draft scopes with the current grant", async () => {
