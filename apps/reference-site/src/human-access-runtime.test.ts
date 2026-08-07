@@ -32,6 +32,15 @@ const identity = {
   nonce: "editor-nonce",
 };
 
+/**
+ * An invitation is claimable only while `expiresAt` is in the future, and the
+ * runtime reads the real clock. A fixed date would therefore pass until it
+ * arrived and fail every run after it, so the fixture stays ahead of now.
+ */
+function claimableExpiry(): string {
+  return new Date(Date.now() + 7 * 24 * 60 * 60 * 1_000).toISOString();
+}
+
 describe("protected human request boundary", () => {
   it("requires the production dashboard worker verification marker", async () => {
     await expect(
@@ -56,7 +65,7 @@ describe("protected human request boundary", () => {
       email: identity.email,
       role: "editor",
       status: "pending_acceptance",
-      expiresAt: "2026-08-01T00:00:00.000Z",
+      expiresAt: claimableExpiry(),
       invitedByMembershipId: createHumanMembershipId("membership-owner"),
     };
     const validateAssertion = vi.fn().mockResolvedValue(identity);
@@ -97,7 +106,7 @@ describe("protected human request boundary", () => {
       email: identity.email,
       role: "editor",
       status: "pending_acceptance",
-      expiresAt: "2026-08-01T00:00:00.000Z",
+      expiresAt: claimableExpiry(),
       invitedByMembershipId: createHumanMembershipId("membership-owner"),
     };
     const context = await authenticateHumanAccessRequest({
