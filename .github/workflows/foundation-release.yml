@@ -21,6 +21,7 @@ on:
           - bootstrap
 
 permissions:
+  actions: read
   contents: write
   deployments: read
   id-token: write

@@ -1,7 +1,7 @@
 {
   "name": "@foundry/reference-site",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -39,8 +39,5 @@
     "@types/commonmark": "0.27.10",
     "esbuild": "0.28.1",
     "wrangler": "4.114.0"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

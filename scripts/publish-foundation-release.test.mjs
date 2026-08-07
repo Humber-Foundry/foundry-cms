@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -12,6 +13,21 @@ import {
 } from "./publish-foundation-release.mjs";
 
 describe("foundation release publication boundary", () => {
+  it("keeps source workspaces unpublishable outside staging", async () => {
+    for (const path of [
+      "../packages/application/package.json",
+      "../packages/operator/package.json",
+      "../packages/site-definition/package.json",
+      "../apps/reference-site/package.json",
+    ]) {
+      const manifest = JSON.parse(
+        await readFile(resolve(import.meta.dirname, path), "utf8"),
+      );
+      expect(manifest.private).toBe(true);
+      expect(manifest.publishConfig).toBeUndefined();
+    }
+  });
+
   it("cannot publish outside the approved protected workflow", () => {
     const env = { ...process.env };
     delete env.GITHUB_ACTIONS;
