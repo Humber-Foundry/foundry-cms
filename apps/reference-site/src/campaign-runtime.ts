@@ -34,6 +34,7 @@ import {
   type SiteId,
 } from "@foundry/site-definition";
 
+import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
@@ -125,50 +126,6 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
     version: 1 as const,
   }),
 });
-
-function readProviderOwnershipEvidence(
-  value: string | undefined,
-  accountScopeFingerprint: string,
-): NewsletterProviderOwnershipEvidence {
-  if (value === undefined || value.trim() === "") {
-    return Object.freeze({
-      classification: "evaluation",
-      evidenceId: "brevo-evaluation-unverified",
-      accountScopeFingerprint,
-      verifiedAt: "1970-01-01T00:00:00.000Z",
-    });
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error("brevo_provisioning_evidence_invalid");
-  }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    Object.keys(parsed).length !== 4 ||
-    !("classification" in parsed) ||
-    (parsed.classification !== "evaluation" &&
-      parsed.classification !== "client_owned") ||
-    !("evidenceId" in parsed) ||
-    typeof parsed.evidenceId !== "string" ||
-    !/^[A-Za-z0-9:._-]{1,200}$/u.test(parsed.evidenceId) ||
-    !("accountScopeFingerprint" in parsed) ||
-    parsed.accountScopeFingerprint !== accountScopeFingerprint ||
-    !("verifiedAt" in parsed) ||
-    typeof parsed.verifiedAt !== "string" ||
-    Number.isNaN(Date.parse(parsed.verifiedAt))
-  ) {
-    throw new Error("brevo_provisioning_evidence_invalid");
-  }
-  return Object.freeze({
-    classification: parsed.classification,
-    evidenceId: parsed.evidenceId,
-    accountScopeFingerprint,
-    verifiedAt: parsed.verifiedAt,
-  });
-}
 
 async function localPostRevision(
   siteId: SiteId,

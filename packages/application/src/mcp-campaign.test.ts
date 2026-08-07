@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import {
+  AccessDeniedError,
   CampaignConflictError,
   CampaignIdempotencyError,
   CampaignNotFoundError,
@@ -400,6 +401,25 @@ describe("mcp campaign assistance", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
+  it("reports the test scope, not the draft scope, on a denied test", async () => {
+    const harness = fixture({
+      async requestTest() {
+        throw new AccessDeniedError("capability_not_authorized");
+      },
+    });
+    harness.activeGrant([mcpCampaignTestScope]);
+    await expect(
+      harness.application.requestTest(
+        principal([mcpCampaignTestScope]),
+        { campaignId, idempotencyKey },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpCampaignTestScope],
+    });
   });
 
   it("reports test readiness without recipient identities", async () => {

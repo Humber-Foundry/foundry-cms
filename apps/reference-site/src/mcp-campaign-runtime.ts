@@ -19,6 +19,7 @@ import {
 import { referenceSiteDefinition, type SiteId } from "@foundry/site-definition";
 
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
+import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
 import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
@@ -57,57 +58,13 @@ function mcpCampaignActorId(principal: McpConnectionPrincipal): string {
 }
 
 /**
- * The command layer is human-actor-typed, but the MCP shims below read only the
- * captured actor id, never the actor value. The connection principal is passed
- * through as that value so nothing synthesises a human identity.
+ * The campaign command layer is human-actor-typed, but the `authorize` and
+ * `identifyActor` shims this module installs read only the actor id captured in
+ * their closure — never the actor value the command is called with. One unused
+ * sentinel makes that explicit rather than dressing a connection principal up
+ * as a human identity that no code reads.
  */
-function actorFor(principal: McpConnectionPrincipal): CampaignActor {
-  return principal as unknown as CampaignActor;
-}
-
-function readProviderOwnershipEvidence(
-  value: string | undefined,
-  accountScopeFingerprint: string,
-): NewsletterProviderOwnershipEvidence {
-  if (value === undefined || value.trim() === "") {
-    return Object.freeze({
-      classification: "evaluation",
-      evidenceId: "brevo-evaluation-unverified",
-      accountScopeFingerprint,
-      verifiedAt: "1970-01-01T00:00:00.000Z",
-    });
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error("brevo_provisioning_evidence_invalid");
-  }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    Object.keys(parsed).length !== 4 ||
-    !("classification" in parsed) ||
-    (parsed.classification !== "evaluation" &&
-      parsed.classification !== "client_owned") ||
-    !("evidenceId" in parsed) ||
-    typeof parsed.evidenceId !== "string" ||
-    !/^[A-Za-z0-9:._-]{1,200}$/u.test(parsed.evidenceId) ||
-    !("accountScopeFingerprint" in parsed) ||
-    parsed.accountScopeFingerprint !== accountScopeFingerprint ||
-    !("verifiedAt" in parsed) ||
-    typeof parsed.verifiedAt !== "string" ||
-    Number.isNaN(Date.parse(parsed.verifiedAt))
-  ) {
-    throw new Error("brevo_provisioning_evidence_invalid");
-  }
-  return Object.freeze({
-    classification: parsed.classification,
-    evidenceId: parsed.evidenceId,
-    accountScopeFingerprint,
-    verifiedAt: parsed.verifiedAt,
-  });
-}
+const mcpUnusedCampaignActor = Object.freeze({}) as unknown as CampaignActor;
 
 /**
  * The expensive, actor-independent pieces of one installation: the stores,
@@ -331,7 +288,7 @@ export function createMcpCampaignRuntime({
         mcpCampaignActorId(principal),
       );
       return application.commands.createStandalone({
-        actor: actorFor(principal),
+        actor: mcpUnusedCampaignActor,
         requestId,
         input: editable,
       });
@@ -343,7 +300,7 @@ export function createMcpCampaignRuntime({
         mcpCampaignActorId(principal),
       );
       return application.commands.edit({
-        actor: actorFor(principal),
+        actor: mcpUnusedCampaignActor,
         requestId,
         campaignId,
         expectedVersion,
@@ -356,13 +313,12 @@ export function createMcpCampaignRuntime({
         installation,
         mcpCampaignActorId(principal),
       );
-      const actor = actorFor(principal);
       const campaign = await application.queries.getCampaign({
-        actor,
+        actor: mcpUnusedCampaignActor,
         campaignId,
       });
       const revision = await application.queries.getRevision({
-        actor,
+        actor: mcpUnusedCampaignActor,
         campaignId,
         revisionNumber: campaign.version,
       });
@@ -382,7 +338,7 @@ export function createMcpCampaignRuntime({
         requestId,
       });
       const operation = await testDelivery.commands.requestTest({
-        actor: actorFor(principal),
+        actor: mcpUnusedCampaignActor,
         requestId,
         campaignId,
         testRecipientIds,
@@ -396,7 +352,7 @@ export function createMcpCampaignRuntime({
         mcpCampaignActorId(principal),
       );
       return testDelivery.queries.readiness({
-        actor: actorFor(principal),
+        actor: mcpUnusedCampaignActor,
         campaignId,
       });
     },

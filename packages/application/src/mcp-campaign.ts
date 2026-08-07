@@ -103,9 +103,13 @@ type McpCampaignApplicationBase = Readonly<{
  * Maps a domain rejection onto the stable MCP error contract. Campaign
  * commands report every rejection through a small set of typed errors, so the
  * agent sees the same code for the same policy decision no matter which
- * command raised it.
+ * command raised it. `requiredScope` is the scope the calling tool gates on,
+ * so a denial reports the scope that operation needs rather than a fixed one.
  */
-function campaignError(error: unknown): McpReadError {
+function campaignError(
+  error: unknown,
+  requiredScope: typeof mcpCampaignDraftScope | typeof mcpCampaignTestScope,
+): McpReadError {
   if (error instanceof McpReadError) return error;
   if (error instanceof CampaignConflictError) {
     return new McpReadError(
@@ -140,7 +144,7 @@ function campaignError(error: unknown): McpReadError {
     return new McpReadError(
       "INSUFFICIENT_SCOPE",
       "The connection does not grant the required campaign scope.",
-      { requiredScopes: [mcpCampaignDraftScope] },
+      { requiredScopes: [requiredScope] },
     );
   }
   return new McpReadError(
@@ -224,7 +228,7 @@ export function createMcpCampaignApplication({
             );
             return revisionResult(outcome);
           } catch (error) {
-            throw campaignError(error);
+            throw campaignError(error, mcpCampaignDraftScope);
           }
         },
       });
@@ -266,7 +270,7 @@ export function createMcpCampaignApplication({
             );
             return revisionResult(outcome);
           } catch (error) {
-            throw campaignError(error);
+            throw campaignError(error, mcpCampaignDraftScope);
           }
         },
       });
@@ -289,7 +293,7 @@ export function createMcpCampaignApplication({
             );
             return campaignDocument(campaign, revision);
           } catch (error) {
-            throw campaignError(error);
+            throw campaignError(error, mcpCampaignDraftScope);
           }
         },
       });
@@ -320,7 +324,7 @@ export function createMcpCampaignApplication({
               replayed,
             };
           } catch (error) {
-            throw campaignError(error);
+            throw campaignError(error, mcpCampaignTestScope);
           }
         },
       });
@@ -355,7 +359,7 @@ export function createMcpCampaignApplication({
                 : { acceptedAt: readiness.acceptedAt }),
             };
           } catch (error) {
-            throw campaignError(error);
+            throw campaignError(error, mcpCampaignTestScope);
           }
         },
       });
