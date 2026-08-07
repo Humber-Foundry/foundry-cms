@@ -564,6 +564,99 @@ describe("MCP canonical draft application", () => {
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
   });
 
+  it("generates isolated workspace and preview sequences with CAS and actor-bound replay", async () => {
+    for (const index of [1, 2, 3, 4]) {
+      const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+      const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+        await value.application.openWorkspace(
+          value.activePrincipal,
+          {
+            expectedRevision: 0,
+            idempotencyKey: `generated-open-${index}`,
+          },
+          context,
+        ),
+      );
+      const input = {
+        workspaceId: opened.workspaceId,
+        expectedRevision: 0,
+        idempotencyKey: `generated-patch-${index}`,
+        operations: [
+          {
+            op: "set" as const,
+            field: `${referenceSiteDefinition.site.id}.description`,
+            value: `Generated canonical value ${index}`,
+          },
+        ],
+      };
+      await value.application.patchContent(
+        value.activePrincipal,
+        input,
+        context,
+      );
+      await expect(
+        value.application.patchContent(value.activePrincipal, input, context),
+      ).resolves.toMatchObject({
+        result: { revision: 1, replayed: true },
+        meta: { replayed: true },
+      });
+      await expect(
+        value.application.patchContent(
+          value.activePrincipal,
+          {
+            ...input,
+            operations: [{ ...input.operations[0], value: "substituted" }],
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+      await expect(
+        value.application.patchContent(
+          value.activePrincipal,
+          { ...input, idempotencyKey: `generated-stale-${index}` },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "STALE_REVISION", latestRevision: 1 });
+
+      const preview = {
+        workspaceId: opened.workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: `generated-preview-${index}`,
+      };
+      await value.application.preparePreview(
+        value.activePrincipal,
+        preview,
+        context,
+      );
+      await expect(
+        value.application.preparePreview(
+          value.activePrincipal,
+          preview,
+          context,
+        ),
+      ).resolves.toMatchObject({
+        result: { replayed: true },
+        meta: { replayed: true },
+      });
+      for (const actorId of [
+        `agent-substituted-${index}`,
+        `agent-replay-${index}`,
+      ]) {
+        const substituted = { ...value.activePrincipal, actorId };
+        await expect(
+          value.application.getWorkspace(
+            substituted,
+            opened.workspaceId,
+            context,
+          ),
+        ).rejects.toBeInstanceOf(McpReadError);
+        await expect(
+          value.application.preparePreview(substituted, preview, context),
+        ).rejects.toBeInstanceOf(McpReadError);
+      }
+    }
+  });
+
   it("accepts canonical rich-text data and rejects malformed nodes as validation errors", async () => {
     const fixtureValue = fixture([
       mcpInitialScope,

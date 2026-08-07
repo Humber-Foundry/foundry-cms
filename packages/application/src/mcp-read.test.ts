@@ -231,6 +231,82 @@ describe("site-scoped MCP read application", () => {
     expect(calls).toBe(2);
   });
 
+  it("generates pairwise actor, site, client, scope, revocation, and cursor isolation cases", async () => {
+    type ReadApplication = ReturnType<typeof fixture>["application"];
+    const commands = [
+      (app: ReadApplication, actor = principal) => app.getSite(actor),
+      (app: ReadApplication, actor = principal) =>
+        app.getContentSchema(actor),
+      (app: ReadApplication, actor = principal) =>
+        app.getDesignSchema(actor),
+      (app: ReadApplication, actor = principal) =>
+        app.listContent(actor, { kind: null, limit: 1, cursor: null }),
+      (app: ReadApplication, actor = principal) =>
+        app.getContent(actor, {
+          kind: "page",
+          contentId: referenceSiteDefinition.home.id,
+        }),
+    ];
+    const mismatches: ReadonlyArray<Partial<McpConnectionGrant>> = [
+      { actorId: "actor-pairwise-other" },
+      { connectionId: "connection-pairwise-other" },
+      { clientId: "https://other.example/client.json" },
+      { siteId: createSiteId("site_pairwise_other") },
+      { scopes: [] },
+      { status: "revoked" },
+    ];
+    for (const mismatch of mismatches) {
+      for (const command of commands) {
+        const { application, audit } = fixture({
+          connection: activeConnection(mismatch),
+        });
+        await expect(command(application)).rejects.toBeInstanceOf(McpReadError);
+        expect(JSON.stringify(audit)).not.toContain("pairwise_other");
+      }
+    }
+
+    const { application: ownerApplication } = fixture();
+    const page = await ownerApplication.listContent(principal, {
+      kind: null,
+      limit: 1,
+      cursor: null,
+    });
+    const otherActor = {
+      ...principal,
+      connectionId: "connection-pairwise-other",
+      actorId: "actor-pairwise-other",
+    };
+    const { application: otherApplication } = fixture({
+      connection: activeConnection(otherActor),
+    });
+    await expect(
+      otherApplication.listContent(otherActor, {
+        kind: null,
+        limit: 1,
+        cursor: page.result.nextCursor,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+
+    for (const revokeAt of commands.keys()) {
+      let call = 0;
+      const { application } = fixture({
+        resolveConnection: () =>
+          activeConnection({
+            status: call++ < revokeAt ? "active" : "revoked",
+          }),
+      });
+      for (const [index, command] of commands.entries()) {
+        if (index < revokeAt) {
+          await expect(command(application)).resolves.toBeDefined();
+        } else {
+          await expect(command(application)).rejects.toBeInstanceOf(
+            McpReadError,
+          );
+        }
+      }
+    }
+  });
+
   it.each([
     ["wildcard scope", activeConnection({ scopes: ["*"] })],
     ["human role confusion", activeConnection({ actorId: "membership-owner" })],

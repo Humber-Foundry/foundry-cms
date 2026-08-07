@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
 import { createHash } from "node:crypto";
+import {
+  registerSchema,
+  unregisterSchema,
+  validate as validateIndependentSchema,
+  type SchemaObject,
+} from "@hyperjump/json-schema/draft-2020-12";
 
 import {
   createInMemoryPublishedSiteRepository,
@@ -56,6 +62,63 @@ function schemaPropertyNames(value: unknown): string[] {
     key,
     ...schemaPropertyNames(child),
   ]);
+}
+
+type JsonSchema = Readonly<Record<string, unknown>>;
+
+function schemaExample(schema: JsonSchema): unknown {
+  if (Object.hasOwn(schema, "const")) return schema.const;
+  if (Array.isArray(schema.enum)) return schema.enum[0];
+  if (Array.isArray(schema.oneOf))
+    return schemaExample(schema.oneOf[0] as JsonSchema);
+  if (Array.isArray(schema.anyOf))
+    return schemaExample(schema.anyOf[0] as JsonSchema);
+  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  if (type === "null") return null;
+  if (type === "boolean") return true;
+  if (type === "integer" || type === "number")
+    return typeof schema.minimum === "number" ? schema.minimum : 0;
+  if (type === "array") {
+    const minimum = typeof schema.minItems === "number" ? schema.minItems : 0;
+    return Array.from({ length: minimum }, () =>
+      schemaExample((schema.items ?? {}) as JsonSchema),
+    );
+  }
+  if (type === "object" || schema.properties !== undefined) {
+    const properties = (schema.properties ?? {}) as Record<string, JsonSchema>;
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    return Object.fromEntries(
+      required.map((key) => [key, schemaExample(properties[String(key)] ?? {})]),
+    );
+  }
+  if (type === "string") {
+    const pattern = typeof schema.pattern === "string" ? schema.pattern : "";
+    if (pattern.includes("git:"))
+      return `git:${"a".repeat(40)}@content:${"b".repeat(64)}`;
+    if (pattern.includes("schedule_"))
+      return "schedule_0123abcd-4567-89ab-cdef-0123456789ab";
+    if (pattern.includes("publish_")) return `publish_${"a".repeat(32)}`;
+    if (pattern.includes("approval_")) return `approval_${"a".repeat(32)}`;
+    if (pattern.includes("workspace_")) return "workspace_conformance";
+    if (pattern.includes("site_")) return "site_conformance";
+    if (pattern.includes("campaign_")) return `campaign_${"a".repeat(32)}`;
+    if (pattern.includes("[0-9a-f]{8}") && pattern.includes("[0-9a-f]{12}"))
+      return "11111111-1111-4111-8111-111111111111";
+    if (pattern.includes("[0-9a-f]{64}")) return "a".repeat(64);
+    if (pattern.includes("[0-9a-f]{40}")) return "a".repeat(40);
+    if (pattern.includes("\\d{4}-\\d{2}-\\d{2}T"))
+      return "2026-08-07T12:00:00Z";
+    if (pattern.includes("\\d{4}-\\d{2}-\\d{2}")) return "2026-08-07";
+    if (schema.format === "date-time") return "2026-08-07T12:00:00.000Z";
+    if (schema.format === "uri" || schema.format === "uri-reference")
+      return "https://example.invalid/resource";
+    if (schema.format === "uuid")
+      return "11111111-1111-4111-8111-111111111111";
+    return "x".repeat(
+      Math.max(1, typeof schema.minLength === "number" ? schema.minLength : 1),
+    );
+  }
+  return null;
 }
 
 describe("MCP draft tool registry", () => {
@@ -698,6 +761,113 @@ describe("MCP campaign and analytics tool registry", () => {
         execution: tool.execution,
       })),
     ).toMatchSnapshot();
+  });
+
+  it("independently validates all advertised schemas with success and error examples", async () => {
+    const tools = fullRegistry().list(
+      principal([
+        mcpInitialScope,
+        mcpContentDraftScope,
+        mcpDesignDraftScope,
+        mcpPublicationPublishScope,
+        mcpPublicationScheduleScope,
+        mcpCampaignDraftScope,
+        mcpCampaignTestScope,
+        mcpAnalyticsReadScope,
+      ]),
+    );
+    expect(tools).toHaveLength(18);
+
+    for (const tool of tools) {
+      const inputSchema = JSON.parse(
+        JSON.stringify(tool.inputSchema),
+      ) as SchemaObject;
+      const outputSchema = JSON.parse(
+        JSON.stringify(tool.outputSchema),
+      ) as SchemaObject;
+      const inputUri = `https://conformance.foundry.invalid/all/${tool.name}/input`;
+      const outputUri = `https://conformance.foundry.invalid/all/${tool.name}/output`;
+      registerSchema(
+        inputSchema,
+        inputUri,
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+      registerSchema(
+        outputSchema,
+        outputUri,
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+      try {
+        const input = schemaExample(inputSchema as JsonSchema) as Record<
+          string,
+          unknown
+        >;
+        if (
+          tool.name === "foundry.campaign.create" ||
+          tool.name === "foundry.campaign.edit"
+        ) {
+          input.emailContent = {
+            version: "1.0.0",
+            type: "document",
+            children: [],
+          };
+        }
+        expect(
+          (await validateIndependentSchema(inputUri, input as never)).valid,
+          `${tool.name} input`,
+        ).toBe(true);
+        expect(
+          (
+            await validateIndependentSchema(inputUri, {
+              ...(input as Record<string, unknown>),
+              unexpectedConformanceField: true,
+            } as never)
+          ).valid,
+          `${tool.name} closed input`,
+        ).toBe(false);
+
+        const variants = (outputSchema as JsonSchema)
+          .oneOf as ReadonlyArray<JsonSchema>;
+        expect(variants).toHaveLength(2);
+        for (const [kind, variant] of [
+          ["success", variants[0]],
+          ["error", variants[1]],
+        ] as const) {
+          const example = schemaExample(variant) as Record<string, unknown>;
+          if (kind === "success" && tool.name === "foundry.content.get") {
+            (example.result as Record<string, unknown>).document =
+              referenceSiteDefinition.home;
+          }
+          if (kind === "success" && tool.name === "foundry.workspace.get") {
+            const result = example.result as Record<string, unknown>;
+            for (const revisionName of ["base", "current"]) {
+              (result[revisionName] as Record<string, unknown>).definition =
+                referenceSiteDefinition;
+            }
+          }
+          if (kind === "success" && tool.name === "foundry.campaign.get") {
+            (example.result as Record<string, unknown>).emailContent = {
+              version: "1.0.0",
+              type: "document",
+              children: [],
+            };
+          }
+          expect(
+            (
+              await validateIndependentSchema(
+                outputUri,
+                example as never,
+                "BASIC",
+              )
+            ).valid,
+            `${tool.name} ${kind} output`,
+          ).toBe(true);
+        }
+      } finally {
+        unregisterSchema(inputUri);
+        unregisterSchema(outputUri);
+      }
+    }
   });
 
   it("hides campaign and analytics tools when the application omits them", () => {

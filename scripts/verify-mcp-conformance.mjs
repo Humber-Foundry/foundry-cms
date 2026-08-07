@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
 import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 const root = process.cwd();
 const manifestPath = "docs/mcp/evidence/conformance-manifest.json";
 const manifestText = readFileSync(resolve(root, manifestPath), "utf8");
 const manifest = JSON.parse(manifestText);
+const reportPath = process.argv[2];
 const packageJson = JSON.parse(
   readFileSync(resolve(root, "package.json"), "utf8"),
 );
@@ -25,7 +26,7 @@ function references(value) {
   return [];
 }
 
-if (manifest.artifactVersion !== 1) fail("unsupported artifact version");
+if (manifest.artifactVersion !== 2) fail("unsupported artifact version");
 if (manifest.contractVersion !== "foundry.mcp.v1")
   fail("unexpected MCP contract version");
 if (manifest.protocolVersion !== "2025-11-25")
@@ -59,28 +60,34 @@ for (const threat of [
   "repudiation",
   "schemaDrift",
 ]) {
-  if (typeof manifest.criteria?.adversarial?.[threat] !== "string") {
+  if (references(manifest.criteria?.adversarial?.[threat]).length === 0) {
     fail(`missing adversarial evidence for ${threat}`);
   }
 }
 
-for (const reference of references(manifest.criteria)) {
-  const separator = reference.indexOf("::");
-  if (separator < 1) {
-    fail(`invalid evidence reference ${reference}`);
-    continue;
-  }
-  const path = reference.slice(0, separator);
-  const needle = reference.slice(separator + 2);
-  let source;
+const passedTests = new Set();
+if (typeof reportPath !== "string") {
+  fail("a structured Vitest JSON report is required");
+} else {
   try {
-    source = readFileSync(resolve(root, path), "utf8");
+    const report = JSON.parse(readFileSync(reportPath, "utf8"));
+    for (const file of report.testResults ?? []) {
+      const path = relative(root, file.name).replaceAll("\\", "/");
+      for (const assertion of file.assertionResults ?? []) {
+        if (assertion.status === "passed") {
+          passedTests.add(`${path}::${assertion.title}`);
+        }
+      }
+    }
   } catch {
-    fail(`missing evidence source ${path}`);
-    continue;
+    fail("the structured Vitest JSON report could not be read");
   }
-  if (!source.includes(needle))
-    fail(`evidence source ${path} does not contain ${needle}`);
+}
+
+for (const reference of references(manifest.criteria)) {
+  if (!passedTests.has(reference)) {
+    fail(`evidence test did not execute and pass: ${reference}`);
+  }
 }
 
 const evidenceTexts = [manifestText];

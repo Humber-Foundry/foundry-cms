@@ -7,6 +7,13 @@ sanitization gates. Run `npm run verify:mcp:inspector` to add the pinned officia
 Inspector CLI check against the real production HTTP runtime through a
 loopback-only fixture.
 
+The local conformance command runs the focused MCP suites and checks manifest
+test IDs against an ephemeral structured Vitest report. Product CI instead
+feeds the manifest gate the structured report from its single complete Vitest
+run. Only exact tests reported as passed count as evidence. Temporary reports
+are removed after verification; tracked evidence remains limited to this
+manifest and sanitized snapshots.
+
 The Inspector check proves initialization, session handling and discovery with
 the pinned CLI version in `package.json`. It is not evidence from Claude,
 ChatGPT, VS Code, Cursor, a live external account or a production installation.

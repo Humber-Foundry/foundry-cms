@@ -375,6 +375,65 @@ describe("mcp campaign assistance", () => {
     expect(JSON.stringify(success.result)).not.toContain("owner-secret");
   });
 
+  it("keeps seeded identity and provider canaries out of success and error outputs", async () => {
+    const identity = "identity-canary-private";
+    const provider = "provider-payload-canary-private";
+    const successHarness = fixture({
+      async getCampaign() {
+        return {
+          campaign: sampleCampaign(),
+          revision: {
+            ...sampleRevision(),
+            senderIdentityId: identity,
+            complianceFooter: {
+              ...sampleRevision().complianceFooter,
+              content: identity,
+            },
+          },
+        };
+      },
+      async requestTest() {
+        return {
+          operation: {
+            ...testOperation("accepted"),
+            recipientIds: [identity],
+            providerMessageId: provider,
+          },
+          replayed: false,
+        };
+      },
+    });
+    successHarness.activeGrant([mcpCampaignDraftScope, mcpCampaignTestScope]);
+    const actor = principal([mcpCampaignDraftScope, mcpCampaignTestScope]);
+    const campaign = await successHarness.application.getCampaign(
+      actor,
+      { campaignId },
+      context,
+    );
+    const test = await successHarness.application.requestTest(
+      actor,
+      { campaignId, idempotencyKey },
+      context,
+    );
+    expect(JSON.stringify({ campaign, test })).not.toMatch(/canary-private/iu);
+
+    const errorHarness = fixture({
+      async getCampaign() {
+        throw new Error(`${identity}:${provider}`);
+      },
+    });
+    errorHarness.activeGrant([mcpCampaignDraftScope]);
+    const failure = await errorHarness.application
+      .getCampaign(
+        principal([mcpCampaignDraftScope]),
+        { campaignId },
+        context,
+      )
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(McpReadError);
+    expect((failure as Error).message).not.toMatch(/canary-private/iu);
+  });
+
   it("refuses a test request without the test scope", async () => {
     const harness = fixture();
     harness.activeGrant([mcpCampaignDraftScope]);

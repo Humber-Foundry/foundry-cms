@@ -301,6 +301,39 @@ describe("MCP publication orchestration", () => {
     );
   });
 
+  it("captures a sanitized actor approval publication trace without bearer passthrough", async () => {
+    const { application, publish, publicationAudit } = await fixture();
+    await application.requestPublication(
+      principal,
+      {
+        workspaceId,
+        revision: 1,
+        approvalId,
+        idempotencyKey: "12121212-1212-4212-8212-121212121212",
+      },
+      context,
+    );
+    const [publisherCommand] = publish.mock.calls[0] ?? [];
+    expect(publisherCommand).toMatchObject({
+      workspaceId,
+      revision: 1,
+      approvalId,
+      requestedBy: createContentActorId("mcp-agent-publication-56"),
+    });
+    expect(publicationAudit[0]).toMatchObject({
+      actorId: principal.actorId,
+      connectionId: principal.connectionId,
+      workspaceId,
+      revision: 1,
+      approvalId,
+      publicationId,
+    });
+    const serialized = JSON.stringify({ publisherCommand, publicationAudit });
+    expect(serialized).not.toMatch(
+      /authorization|bearer|accessToken|refreshToken|providerPayload/iu,
+    );
+  });
+
   it("passes a current-grant fence to the shared publisher", async () => {
     const { application, publish } = await fixture({
       connectionAt: (read) =>
@@ -325,6 +358,55 @@ describe("MCP publication orchestration", () => {
       code: "INSUFFICIENT_SCOPE",
     });
     expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("generates approval and current-scope substitution cases before publication", async () => {
+    const deniedPrincipals: McpConnectionPrincipal[] = [
+      { ...principal, actorId: "agent-substituted" },
+      { ...principal, connectionId: "connection-substituted" },
+      { ...principal, clientId: "https://substituted.example/client.json" },
+      { ...principal, scopes: [mcpInitialScope, mcpContentDraftScope] },
+      { ...principal, scopes: [mcpInitialScope, mcpPublicationPublishScope] },
+    ];
+    for (const deniedPrincipal of deniedPrincipals) {
+      const { application, publish } = await fixture();
+      await expect(
+        application.requestPublication(
+          deniedPrincipal,
+          {
+            workspaceId,
+            revision: 1,
+            approvalId,
+            idempotencyKey: "34343434-3434-4434-8434-343434343434",
+          },
+          context,
+        ),
+      ).rejects.toBeInstanceOf(Error);
+      expect(publish).not.toHaveBeenCalled();
+    }
+    for (const suffix of ["1", "2", "3", "4"]) {
+      const { application, publish } = await fixture();
+      publish.mockImplementationOnce(() => {
+        throw new ContentApprovalInvalidError("approval_not_found");
+      });
+      await expect(
+        application.requestPublication(
+          principal,
+          {
+            workspaceId,
+            revision: 1,
+            approvalId: createContentApprovalId(
+              `approval_${suffix.repeat(32)}`,
+            ),
+            idempotencyKey:
+              `${suffix.repeat(8)}-${suffix.repeat(4)}-` +
+              `4${suffix.repeat(3)}-8${suffix.repeat(3)}-${suffix.repeat(12)}`,
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+      expect(publish).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("intersects dynamic draft scopes with the current grant", async () => {

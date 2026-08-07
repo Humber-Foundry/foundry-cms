@@ -225,9 +225,13 @@ npm run verify:mcp:conformance
 npm run verify:mcp:inspector
 ```
 
-The first command runs the production HTTP and shared-application seams,
-independent JSON Schema validation, reviewed schema/protocol snapshots, the
-authorization and adversarial suites, and the evidence sanitizer. The second
+The first command runs the focused MCP conformance suites, validates all 18
+advertised input and output schemas with Hyperjump independently of production Ajv,
+validator, checks reviewed schema/protocol snapshots, runs the authorization
+and adversarial suites, and applies the evidence sanitizer. Its manifest gate
+consumes the ephemeral structured Vitest report and accepts only exact test IDs
+whose reported status is `passed`; source comments and skipped tests cannot
+satisfy evidence. The second
 uses the pinned official Inspector CLI to initialize the production Streamable
 HTTP runtime through a loopback-only fixture and perform discovery with a bound
 session. [The sanitized manifest](evidence/conformance-manifest.json) maps each
@@ -253,6 +257,11 @@ V1 cannot ship until:
   and
 - threat-model controls have named test evidence and an owner.
 
-CI stores sanitized protocol transcripts, schema snapshots, Git SHAs and test
-IDs. It never stores tokens, authorization codes, PKCE verifiers, draft bodies,
+CI stores sanitized protocol transcripts, schema snapshots and Git SHAs; the
+structured test report is temporary and removed after verification. CI never
+stores tokens, authorization codes, PKCE verifiers, draft bodies,
 subscriber fixtures resembling real data or provider credentials.
+
+Product CI runs the complete Vitest suite once with the structured reporter and
+feeds that same report to the manifest gate, so conformance evidence does not
+rerun test files already covered by the main suite.

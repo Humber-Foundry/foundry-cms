@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { SignJWT } from "jose";
 import Ajv2020 from "ajv/dist/2020.js";
+import {
+  registerSchema,
+  unregisterSchema,
+  validate as validateIndependentSchema,
+  type SchemaObject,
+} from "@hyperjump/json-schema/draft-2020-12";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -237,6 +243,7 @@ function fixture(
     requestTimeoutMs?: number;
     draftResources?: boolean;
     connectionIds?: ReadonlyArray<string>;
+    actorIds?: ReadonlyArray<string>;
     registeredRedirectUris?: ReadonlyArray<string>;
     beforeFindCurrentConnection?: (call: number) => Promise<void>;
     beforeConsumeRateLimit?: (call: number) => Promise<void>;
@@ -391,6 +398,7 @@ function fixture(
       : observedReadApplication;
   const deferredWork: Array<Promise<unknown>> = [];
   let connectionSequence = 0;
+  let actorSequence = 0;
   const runtime = createMcpHttpRuntime({
     resourceUri,
     authorizationIssuer: canonicalOrigin,
@@ -415,7 +423,9 @@ function fixture(
     createConnectionId: () =>
       options.connectionIds?.[connectionSequence++] ??
       "11111111-1111-4111-8111-111111111111",
-    createActorId: () => "22222222-2222-4222-8222-222222222222",
+    createActorId: () =>
+      options.actorIds?.[actorSequence++] ??
+      "22222222-2222-4222-8222-222222222222",
     createTokenId: () => "33333333-3333-4333-8333-333333333333",
     createRefreshToken: (() => {
       let refresh = 0;
@@ -1638,6 +1648,22 @@ describe("production MCP HTTP runtime", () => {
     });
     expect(body).toContain("Improve the public introduction.");
     expect(body).toContain("page_home");
+    const campaign = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "prompt-campaign",
+        method: "prompts/get",
+        params: {
+          name: "foundry.prepare-campaign",
+          arguments: { goal: "Draft the public monthly update." },
+        },
+      }),
+    );
+    const campaignBody = await campaign.text();
+    expect(campaignBody).toContain("do not request a test");
+    expect(campaignBody).toContain(
+      "do not request a test, authorize, schedule, or send email",
+    );
     expect(audit).toHaveLength(beforeGet);
   });
 
@@ -1712,6 +1738,14 @@ describe("production MCP HTTP runtime", () => {
       releaseRead = resolve;
     });
     const { runtime } = fixture({
+      connectionIds: [
+        "11111111-1111-4111-8111-111111111111",
+        "55555555-5555-4555-8555-555555555555",
+      ],
+      actorIds: [
+        "22222222-2222-4222-8222-222222222222",
+        "66666666-6666-4666-8666-666666666666",
+      ],
       async beforeGetLiveRelease() {
         releaseStarted();
         await blocked;
@@ -1719,6 +1753,8 @@ describe("production MCP HTTP runtime", () => {
     });
     const { accessToken } = await authorizeAndExchange(runtime);
     await initializeMcpSession(runtime, accessToken);
+    const other = await authorizeAndExchange(runtime);
+    await initializeMcpSession(runtime, other.accessToken);
 
     const inFlight = runtime.fetch(
       rpcRequest(accessToken, {
@@ -1729,6 +1765,14 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     await started;
+    const foreignCancellation = await runtime.fetch(
+      rpcRequest(other.accessToken, {
+        jsonrpc: "2.0",
+        method: "notifications/cancelled",
+        params: { requestId: "cancel-target", reason: "Foreign actor." },
+      }),
+    );
+    expect(foreignCancellation.status).toBe(202);
     const cancelled = await runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
@@ -2015,8 +2059,8 @@ describe("production MCP HTTP runtime", () => {
       result: {
         tools: Array<{
           name: string;
-          inputSchema: object;
-          outputSchema: object;
+          inputSchema: SchemaObject;
+          outputSchema: SchemaObject;
         }>;
         nextCursor: string;
       };
@@ -2033,8 +2077,8 @@ describe("production MCP HTTP runtime", () => {
       result: {
         tools: Array<{
           name: string;
-          inputSchema: object;
-          outputSchema: object;
+          inputSchema: SchemaObject;
+          outputSchema: SchemaObject;
         }>;
       };
     };
@@ -2042,13 +2086,6 @@ describe("production MCP HTTP runtime", () => {
       ...listedBody.result.tools,
       ...remainingBody.result.tools,
     ];
-    const ajv = new Ajv2020({
-      strict: false,
-      formats: {
-        "date-time": true,
-        uri: true,
-      },
-    });
     const validInputs = {
       "foundry.site.get": {},
       "foundry.content.list": { kind: null, limit: 10, cursor: null },
@@ -2059,10 +2096,32 @@ describe("production MCP HTTP runtime", () => {
     } as const;
     for (const descriptor of descriptors) {
       const input = validInputs[descriptor.name as keyof typeof validInputs];
-      const validateInput = ajv.compile(descriptor.inputSchema);
-      expect(validateInput(input), descriptor.name).toBe(true);
+      const inputSchemaUri =
+        `https://conformance.foundry.invalid/${descriptor.name}/input`;
+      const outputSchemaUri =
+        `https://conformance.foundry.invalid/${descriptor.name}/output`;
+      registerSchema(
+        descriptor.inputSchema,
+        inputSchemaUri,
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+      registerSchema(
+        descriptor.outputSchema,
+        outputSchemaUri,
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+      const inputResult = await validateIndependentSchema(
+        inputSchemaUri,
+        input,
+      );
+      expect(inputResult.valid, descriptor.name).toBe(true);
       expect(
-        validateInput({ ...input, unexpected: true }),
+        (
+          await validateIndependentSchema(inputSchemaUri, {
+            ...input,
+            unexpected: true,
+          })
+        ).valid,
         descriptor.name,
       ).toBe(false);
 
@@ -2077,12 +2136,14 @@ describe("production MCP HTTP runtime", () => {
       const body = (await response.json()) as {
         result: { structuredContent: unknown };
       };
-      const validateOutput = ajv.compile(descriptor.outputSchema);
-      const validOutput = validateOutput(body.result.structuredContent);
-      expect(
-        validOutput,
-        `${descriptor.name}: ${JSON.stringify(validateOutput.errors)}`,
-      ).toBe(true);
+      const validOutput = await validateIndependentSchema(
+        outputSchemaUri,
+        body.result.structuredContent as never,
+        "BASIC",
+      );
+      expect(validOutput.valid, JSON.stringify(validOutput)).toBe(true);
+      unregisterSchema(inputSchemaUri);
+      unregisterSchema(outputSchemaUri);
     }
 
     const contentDescriptor = descriptors.find(
@@ -2105,11 +2166,22 @@ describe("production MCP HTTP runtime", () => {
     const invalidBody = (await invalidResponse.json()) as {
       result: { structuredContent: unknown };
     };
+    const errorSchemaUri =
+      "https://conformance.foundry.invalid/content-get/error";
+    registerSchema(
+      contentDescriptor.outputSchema,
+      errorSchemaUri,
+      "https://json-schema.org/draft/2020-12/schema",
+    );
     expect(
-      ajv.compile(contentDescriptor.outputSchema)(
-        invalidBody.result.structuredContent,
-      ),
+      (
+        await validateIndependentSchema(
+          errorSchemaUri,
+          invalidBody.result.structuredContent as never,
+        )
+      ).valid,
     ).toBe(true);
+    unregisterSchema(errorSchemaUri);
   });
 
   it("publishes honest lastModified annotations on every discovered resource", async () => {
