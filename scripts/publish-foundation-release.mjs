@@ -52,6 +52,21 @@ async function main() {
     }
   }
 
+  for (const artifact of Object.values(descriptor.artifacts)) {
+    if (registryIntegrity(artifact.name, artifact.version) === null) {
+      command("npm", [
+        "publish",
+        join(releaseDirectory, "artifacts", artifact.filename),
+        "--access",
+        "public",
+        "--provenance",
+      ]);
+    }
+    if (registryIntegrity(artifact.name, artifact.version) !== artifact.integrity) {
+      throw new Error(`foundation_release_registry_verification_failed:${artifact.name}`);
+    }
+  }
+
   const provenanceDirectory = await mkdtemp(
     join(tmpdir(), "foundry-published-provenance-"),
   );
@@ -88,20 +103,6 @@ async function main() {
   } finally {
     await rm(provenanceDirectory, { recursive: true, force: true });
   }
-  for (const artifact of Object.values(descriptor.artifacts)) {
-    if (registryIntegrity(artifact.name, artifact.version) === null) {
-      command("npm", [
-        "publish",
-        join(releaseDirectory, "artifacts", artifact.filename),
-        "--access",
-        "public",
-        "--provenance",
-      ]);
-    }
-    if (registryIntegrity(artifact.name, artifact.version) !== artifact.integrity) {
-      throw new Error(`foundation_release_registry_verification_failed:${artifact.name}`);
-    }
-  }
 
   const tag = `foundation-v${descriptor.version}`;
   const assets = [
@@ -120,8 +121,9 @@ async function main() {
     ),
   );
   let releaseExists = false;
+  let current = null;
   try {
-    const current = JSON.parse(
+    current = JSON.parse(
       command("gh", [
         "release",
         "view",
@@ -130,6 +132,13 @@ async function main() {
         "assets,tagName,targetCommitish",
       ]),
     );
+  } catch (error) {
+    const stderr = String(error?.stderr ?? "");
+    if (!/(?:release not found|not found)/iu.test(stderr)) {
+      throw new Error("foundation_release_github_release_lookup_failed");
+    }
+  }
+  if (current !== null) {
     releaseExists = true;
     if (
       current.tagName !== tag ||
@@ -153,10 +162,6 @@ async function main() {
       }
     } finally {
       await rm(downloaded, { recursive: true, force: true });
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message === "foundation_release_github_release_conflict") {
-      throw error;
     }
   }
   if (!releaseExists) {
