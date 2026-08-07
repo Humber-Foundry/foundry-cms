@@ -11,9 +11,18 @@ on:
         description: Type publish after reviewing the protected environment approval
         required: true
         type: string
+      authentication:
+        description: Use bootstrap only for the first package registration, then trusted publishing
+        required: true
+        default: trusted
+        type: choice
+        options:
+          - trusted
+          - bootstrap
 
 permissions:
   contents: write
+  deployments: read
   id-token: write
 
 concurrency:
@@ -54,6 +63,8 @@ jobs:
       - name: Publish and verify the synchronized release
         env:
           FOUNDRY_RELEASE_APPROVED: ${{ inputs.approval }}
+          FOUNDRY_RELEASE_AUTHENTICATION: ${{ inputs.authentication }}
           FOUNDRY_RELEASE_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ inputs.authentication == 'bootstrap' && secrets.NPM_BOOTSTRAP_TOKEN || '' }}
         run: node scripts/publish-foundation-release.mjs

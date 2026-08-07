@@ -174,6 +174,10 @@ async function main() {
       version,
       description: `Foundry CMS synchronized foundation package (${name})`,
       license: "UNLICENSED",
+      repository: {
+        type: "git",
+        url: "https://github.com/Humber-Foundry/foundry-cms.git",
+      },
       type: "module",
       engines: { node: rootPackage.engines.node },
       publishConfig: { access: "public" },

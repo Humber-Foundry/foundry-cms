@@ -35,7 +35,7 @@ Publication is intentionally unavailable through an ordinary local command.
 An owner dispatches the **Foundation release** workflow from `main`, supplies
 the exact version, types `publish`, and approves the protected
 `foundation-release` environment. That workflow repeats preparation and the
-clean external verification before using npm trusted publishing. The workflow
+clean external verification before publishing. The workflow
 publishes missing artifacts, verifies registry integrity after each package,
 installs the published packages in an isolated directory, and has the published
 operator verify npm's cryptographically checked Sigstore/SLSA attestations
@@ -46,9 +46,20 @@ accept it. A retry may resume a partial registry publication only when every
 already-published tarball has the descriptor's exact integrity; any conflict
 fails closed.
 
-The repository environment must require an owner reviewer. The npm `@foundry`
-scope must configure this repository and `foundation-release.yml` as its trusted
-publisher. No long-lived npm token belongs in repository secrets.
+The workflow itself queries the GitHub API and fails unless the repository
+environment requires at least one reviewer, prevents self-review, and disables
+administrator bypass. The live environment permits only `main`. The first
+registration of these package names is a one-time exception because npm cannot
+configure a trusted publisher until a package already exists. For that first
+run only, an owner creates a short-lived granular npm token with publish access
+to the `@foundry` scope, stores it as the `NPM_BOOTSTRAP_TOKEN` secret on the
+protected environment, and selects `bootstrap`. The workflow refuses bootstrap
+after all four package names exist. Immediately after that run, the owner
+configures this repository and `foundation-release.yml` as the trusted
+publisher on each npm package, deletes the environment secret, and revokes the
+token. Every later run selects `trusted`; the workflow refuses that mode until
+all package names exist and refuses it if any npm token is present. No npm token
+belongs in repository secrets or remains after bootstrap.
 
 ## Verify a published release
 
@@ -58,7 +69,8 @@ the descriptor bytes first, then each artifact:
 ```sh
 node -e "const fs=require('node:fs'),c=require('node:crypto');const s=fs.readFileSync('foundation-release.json');const got='sha256:'+c.createHash('sha256').update(s).digest('hex');const want=fs.readFileSync('foundation-release.sha256','utf8').trim();if(got!==want)process.exit(1)"
 node -e "const fs=require('node:fs'),c=require('node:crypto'),d=require('./foundation-release.json');for(const a of Object.values(d.artifacts)){const b=fs.readFileSync(a.filename),i='sha512-'+c.createHash('sha512').update(b).digest('base64');if(i!==a.integrity||b.length!==a.size)process.exit(1)}"
-npm install ./foundry-application-*.tgz ./foundry-operator-*.tgz ./foundry-reference-site-*.tgz ./foundry-site-definition-*.tgz
+VERSION="$(node -p "require('./foundation-release.json').version")"
+npm install "@foundry/application@$VERSION" "@foundry/operator@$VERSION" "@foundry/reference-site@$VERSION" "@foundry/site-definition@$VERSION"
 npm audit signatures --json --include-attestations > npm-provenance.json
 node -e "Promise.all([import('@foundry/operator'),require('node:fs').promises.readFile('foundation-release.json','utf8'),require('node:fs').promises.readFile('npm-provenance.json','utf8')]).then(([o,d,a])=>o.assertFoundationReleaseNpmProvenance({descriptor:JSON.parse(d),auditSource:a}))"
 ```
