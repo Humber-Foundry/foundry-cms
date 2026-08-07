@@ -120,7 +120,7 @@ async function stageReferenceSite(version) {
 
 async function main() {
   const allowDirty = process.argv.includes("--allow-dirty");
-  const status = command("git", ["status", "--porcelain", "--untracked-files=no"]);
+  const status = command("git", ["status", "--porcelain", "--untracked-files=all"]);
   if (!allowDirty && status !== "") {
     throw new Error("foundation_release_requires_clean_source_commit");
   }

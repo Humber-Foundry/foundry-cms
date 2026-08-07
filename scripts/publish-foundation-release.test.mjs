@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -13,6 +13,27 @@ import {
 } from "./publish-foundation-release.mjs";
 
 describe("foundation release publication boundary", () => {
+  it("refuses an untracked source that could enter a public artifact", async () => {
+    const source = resolve(
+      import.meta.dirname,
+      "../packages/operator/src/untracked-release-source.ts",
+    );
+    await writeFile(source, "export const untrackedReleaseSource = true;\n");
+    try {
+      const preparation = spawnSync(
+        process.execPath,
+        [resolve(import.meta.dirname, "prepare-foundation-release.mjs")],
+        { encoding: "utf8" },
+      );
+      expect(preparation.status).toBe(1);
+      expect(preparation.stderr).toContain(
+        "foundation_release_requires_clean_source_commit",
+      );
+    } finally {
+      await rm(source);
+    }
+  });
+
   it("packs the MIT notice into every public artifact", async () => {
     const preparation = spawnSync(
       process.execPath,
