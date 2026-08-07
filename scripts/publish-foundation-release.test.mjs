@@ -13,6 +13,41 @@ import {
 } from "./publish-foundation-release.mjs";
 
 describe("foundation release publication boundary", () => {
+  it("packs the MIT notice into every public artifact", async () => {
+    const preparation = spawnSync(
+      process.execPath,
+      [resolve(import.meta.dirname, "prepare-foundation-release.mjs"), "--allow-dirty"],
+      { encoding: "utf8" },
+    );
+    expect(preparation.status).toBe(0);
+    const descriptor = JSON.parse(
+      await readFile(
+        resolve(import.meta.dirname, "../foundation-release/foundation-release.json"),
+        "utf8",
+      ),
+    );
+    expect(Object.keys(descriptor.artifacts)).toHaveLength(4);
+    for (const { filename } of Object.values(descriptor.artifacts)) {
+      const archive = resolve(
+        import.meta.dirname,
+        "../foundation-release/artifacts",
+        filename,
+      );
+      const entries = spawnSync("tar", ["-tzf", archive], {
+        encoding: "utf8",
+      });
+      expect(entries.status).toBe(0);
+      expect(entries.stdout.split("\n")).toContain("package/LICENSE");
+      const manifest = spawnSync(
+        "tar",
+        ["-xOzf", archive, "package/package.json"],
+        { encoding: "utf8" },
+      );
+      expect(manifest.status).toBe(0);
+      expect(JSON.parse(manifest.stdout).license).toBe("MIT");
+    }
+  });
+
   it("keeps source workspaces unpublishable outside staging", async () => {
     for (const path of [
       "../packages/application/package.json",

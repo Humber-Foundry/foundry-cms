@@ -173,7 +173,7 @@ async function main() {
       name,
       version,
       description: `Foundry CMS synchronized foundation package (${name})`,
-      license: "UNLICENSED",
+      license: "MIT",
       repository: {
         type: "git",
         url: "https://github.com/Humber-Foundry/foundry-cms.git",
@@ -190,6 +190,7 @@ async function main() {
             },
           }),
     };
+    await cp(join(root, "LICENSE"), join(stage.target, "LICENSE"));
     await writeFile(join(stage.target, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
     const pack = JSON.parse(
       command("npm", ["pack", stage.target, "--pack-destination", artifactsDirectory, "--json"]),
