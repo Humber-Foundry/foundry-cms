@@ -122,26 +122,107 @@ describe("reporting range", () => {
     });
   });
 
-  it("treats a daylight-saving end as a 25-hour local day", () => {
-    const range = resolveReportingRange({
-      fromLocalDate: "2026-11-01",
-      toLocalDate: "2026-11-01",
+  /**
+   * The local date and clock time a UTC instant reads as in the reporting
+   * zone. The tests below compare against this rather than against a
+   * hard-coded UTC instant, because the offset for a given date comes from the
+   * runtime's IANA database. Asserting a fixed offset would test that database
+   * instead of this code.
+   */
+  function readBackInZone(instant: string) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone,
-    });
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(new Date(Date.parse(instant)));
+    const part = (type: string) =>
+      parts.find((entry) => entry.type === type)?.value ?? "";
+    return {
+      localDate: `${part("year")}-${part("month")}-${part("day")}`,
+      localTime: `${part("hour")}:${part("minute")}:${part("second")}`,
+    };
+  }
 
-    expect(range.startUtc).toBe("2026-11-01T07:00:00.000Z");
-    expect(range.endUtc).toBe("2026-11-02T08:00:00.000Z");
+  /** The local dates in a year that are not 24 hours long in this zone. */
+  function transitionDates(year: number): ReadonlyArray<string> {
+    const dates: string[] = [];
+    for (
+      let instant = Date.UTC(year, 0, 2);
+      instant < Date.UTC(year + 1, 0, 1);
+      instant += 86_400_000
+    ) {
+      const localDate = new Date(instant).toISOString().slice(0, 10);
+      const range = resolveReportingRange({
+        fromLocalDate: localDate,
+        toLocalDate: localDate,
+        timeZone,
+      });
+      const hours =
+        (Date.parse(range.endUtc) - Date.parse(range.startUtc)) / 3_600_000;
+      if (hours !== 24) dates.push(localDate);
+    }
+    return dates;
+  }
+
+  it("starts and ends a local day at local midnight", () => {
+    for (const localDate of ["2026-03-08", "2026-07-01", "2026-11-01"]) {
+      const range = resolveReportingRange({
+        fromLocalDate: localDate,
+        toLocalDate: localDate,
+        timeZone,
+      });
+
+      expect(readBackInZone(range.startUtc)).toEqual({
+        localDate,
+        localTime: "00:00:00",
+      });
+      expect(readBackInZone(range.endUtc).localTime).toBe("00:00:00");
+    }
   });
 
-  it("treats a daylight-saving start as a 23-hour local day", () => {
-    const range = resolveReportingRange({
-      fromLocalDate: "2026-03-08",
-      toLocalDate: "2026-03-08",
-      timeZone,
-    });
+  it("gives a daylight-saving day its true length of 23 or 25 hours", () => {
+    const transitions = transitionDates(2026);
 
-    expect(range.startUtc).toBe("2026-03-08T08:00:00.000Z");
-    expect(range.endUtc).toBe("2026-03-09T07:00:00.000Z");
+    // The zone has to change offset at some point in the year, or there is
+    // nothing here to test.
+    expect(transitions.length).toBeGreaterThan(0);
+    for (const localDate of transitions) {
+      const range = resolveReportingRange({
+        fromLocalDate: localDate,
+        toLocalDate: localDate,
+        timeZone,
+      });
+      const hours =
+        (Date.parse(range.endUtc) - Date.parse(range.startUtc)) / 3_600_000;
+
+      expect([23, 25]).toContain(hours);
+      expect(readBackInZone(range.startUtc)).toEqual({
+        localDate,
+        localTime: "00:00:00",
+      });
+    }
+  });
+
+  it("gives every other day exactly 24 hours", () => {
+    const transitions = new Set(transitionDates(2026));
+
+    for (const localDate of ["2026-01-15", "2026-07-01", "2026-09-30"]) {
+      expect(transitions.has(localDate)).toBe(false);
+      const range = resolveReportingRange({
+        fromLocalDate: localDate,
+        toLocalDate: localDate,
+        timeZone,
+      });
+
+      expect(
+        (Date.parse(range.endUtc) - Date.parse(range.startUtc)) / 3_600_000,
+      ).toBe(24);
+    }
   });
 
   it("refuses a range that ends before it starts", () => {
