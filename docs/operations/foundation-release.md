@@ -37,8 +37,12 @@ the exact version, types `publish`, and approves the protected
 `foundation-release` environment. That workflow repeats preparation and the
 clean external verification before using npm trusted publishing. The workflow
 publishes missing artifacts, verifies registry integrity after each package,
-and creates a GitHub release containing the descriptor, checksum and exact
-tarballs. A retry may resume a partial registry publication only when every
+installs the published packages in an isolated directory, and has the published
+operator verify npm's cryptographically checked Sigstore/SLSA attestations
+against the exact repository, workflow, commit and tarball digests. It then
+creates a GitHub release containing the descriptor, checksum and exact tarballs.
+An existing release is downloaded and compared byte-for-byte before a retry may
+accept it. A retry may resume a partial registry publication only when every
 already-published tarball has the descriptor's exact integrity; any conflict
 fails closed.
 
@@ -54,6 +58,9 @@ the descriptor bytes first, then each artifact:
 ```sh
 node -e "const fs=require('node:fs'),c=require('node:crypto');const s=fs.readFileSync('foundation-release.json');const got='sha256:'+c.createHash('sha256').update(s).digest('hex');const want=fs.readFileSync('foundation-release.sha256','utf8').trim();if(got!==want)process.exit(1)"
 node -e "const fs=require('node:fs'),c=require('node:crypto'),d=require('./foundation-release.json');for(const a of Object.values(d.artifacts)){const b=fs.readFileSync(a.filename),i='sha512-'+c.createHash('sha512').update(b).digest('base64');if(i!==a.integrity||b.length!==a.size)process.exit(1)}"
+npm install ./foundry-application-*.tgz ./foundry-operator-*.tgz ./foundry-reference-site-*.tgz ./foundry-site-definition-*.tgz
+npm audit signatures --json --include-attestations > npm-provenance.json
+node -e "Promise.all([import('@foundry/operator'),require('node:fs').promises.readFile('foundation-release.json','utf8'),require('node:fs').promises.readFile('npm-provenance.json','utf8')]).then(([o,d,a])=>o.assertFoundationReleaseNpmProvenance({descriptor:JSON.parse(d),auditSource:a}))"
 ```
 
 The #59 operator flow must pin the descriptor digest in its reviewed plan and

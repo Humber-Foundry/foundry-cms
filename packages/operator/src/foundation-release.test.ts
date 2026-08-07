@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertFoundationReleaseDescriptorDigest,
+  assertFoundationReleaseNpmProvenance,
   computeFoundationReleaseDescriptorDigest,
   foundationPackageNames,
   parseFoundationReleaseDescriptor,
@@ -131,5 +132,73 @@ describe("foundation release descriptor", () => {
         expectedDigest: digest,
       }),
     ).toThrow(/foundation_release_descriptor_digest_mismatch/u);
+  });
+
+  it("accepts only npm-verified SLSA provenance for the exact workflow and bytes", () => {
+    const { descriptor, source } = fixture();
+    const parsed = parseFoundationReleaseDescriptor(source);
+    const verified = foundationPackageNames.map((name) => {
+      const artifact = descriptor.artifacts[name];
+      const statement = {
+        subject: [
+          {
+            name: `pkg:npm/${name.replace("@", "%40")}@${descriptor.version}`,
+            digest: {
+              sha512: Buffer.from(
+                artifact.integrity.slice("sha512-".length),
+                "base64",
+              ).toString("hex"),
+            },
+          },
+        ],
+        predicate: {
+          buildDefinition: {
+            externalParameters: {
+              workflow: {
+                repository: descriptor.source.repository,
+                path: ".github/workflows/foundation-release.yml",
+                ref: "refs/heads/main",
+              },
+            },
+            resolvedDependencies: [
+              { digest: { gitCommit: descriptor.source.revision } },
+            ],
+          },
+        },
+      };
+      return {
+        name,
+        version: descriptor.version,
+        registry: "https://registry.npmjs.org/",
+        attestations: {
+          provenance: { predicateType: "https://slsa.dev/provenance/v1" },
+        },
+        attestationBundles: [
+          {
+            predicateType: "https://slsa.dev/provenance/v1",
+            bundle: {
+              dsseEnvelope: {
+                payload: Buffer.from(JSON.stringify(statement)).toString("base64"),
+              },
+            },
+          },
+        ],
+      };
+    });
+    expect(() =>
+      assertFoundationReleaseNpmProvenance({
+        descriptor: parsed,
+        auditSource: JSON.stringify({ invalid: [], missing: [], verified }),
+      }),
+    ).not.toThrow();
+    verified[0].attestationBundles[0].bundle.dsseEnvelope.payload = Buffer.from(
+      JSON.stringify({ subject: [], predicate: {} }),
+    ).toString("base64");
+    expect(() =>
+      assertFoundationReleaseNpmProvenance({
+        descriptor: parsed,
+        auditSource: JSON.stringify({ invalid: [], missing: [], verified }),
+      }),
+    ).toThrow(/foundation_release_provenance_identity_mismatch/u);
   });
 });

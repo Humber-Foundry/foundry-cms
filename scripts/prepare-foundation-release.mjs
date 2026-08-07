@@ -106,10 +106,6 @@ async function stageReferenceSite(version) {
     target,
     dependencies: {
       ...source.dependencies,
-      "@tiptap/core": "3.29.1",
-      "@tiptap/extension-bubble-menu": "3.29.1",
-      "@tiptap/extension-floating-menu": "3.29.1",
-      "@tiptap/pm": "3.29.1",
       "@foundry/application": version,
       "@foundry/operator": version,
       "@foundry/site-definition": version,

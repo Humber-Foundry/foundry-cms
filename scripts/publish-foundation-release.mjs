@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..");
 const releaseDirectory = join(root, "foundation-release");
@@ -48,6 +50,43 @@ async function main() {
     if (existing !== null && existing !== artifact.integrity) {
       throw new Error(`foundation_release_registry_conflict:${artifact.name}`);
     }
+  }
+
+  const provenanceDirectory = await mkdtemp(
+    join(tmpdir(), "foundry-published-provenance-"),
+  );
+  try {
+    await writeFile(
+      join(provenanceDirectory, "package.json"),
+      `${JSON.stringify({
+        name: "foundry-published-provenance-verification",
+        version: "0.0.0",
+        private: true,
+        dependencies: Object.fromEntries(
+          Object.values(descriptor.artifacts).map((artifact) => [
+            artifact.name,
+            artifact.version,
+          ]),
+        ),
+      })}\n`,
+    );
+    command("npm", ["install", "--ignore-scripts"], { cwd: provenanceDirectory });
+    const auditSource = command(
+      "npm",
+      ["audit", "signatures", "--json", "--include-attestations"],
+      { cwd: provenanceDirectory, maxBuffer: 20 * 1024 * 1024 },
+    );
+    const operator = await import(
+      pathToFileURL(
+        join(
+          provenanceDirectory,
+          "node_modules/@foundry/operator/dist/index.js",
+        ),
+      ).href
+    );
+    operator.assertFoundationReleaseNpmProvenance({ descriptor, auditSource });
+  } finally {
+    await rm(provenanceDirectory, { recursive: true, force: true });
   }
   for (const artifact of Object.values(descriptor.artifacts)) {
     if (registryIntegrity(artifact.name, artifact.version) === null) {
@@ -101,6 +140,19 @@ async function main() {
       )
     ) {
       throw new Error("foundation_release_github_release_conflict");
+    }
+    const downloaded = await mkdtemp(join(tmpdir(), "foundry-release-assets-"));
+    try {
+      command("gh", ["release", "download", tag, "--dir", downloaded]);
+      for (const local of assets) {
+        const expected = await readFile(local);
+        const actual = await readFile(join(downloaded, local.split("/").at(-1)));
+        if (!expected.equals(actual)) {
+          throw new Error("foundation_release_github_release_conflict");
+        }
+      }
+    } finally {
+      await rm(downloaded, { recursive: true, force: true });
     }
   } catch (error) {
     if (error instanceof Error && error.message === "foundation_release_github_release_conflict") {
