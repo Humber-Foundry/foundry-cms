@@ -71,6 +71,12 @@ export function createMcpAnalyticsRuntime({
           });
         case "health":
           return application.queries.health({ actor, range });
+        default: {
+          // The view is a fixed enum validated at the tool boundary. A new
+          // view must add a case here rather than fall through to undefined.
+          const unreachable: never = view;
+          throw new Error(`unsupported_analytics_view:${String(unreachable)}`);
+        }
       }
     },
   };
