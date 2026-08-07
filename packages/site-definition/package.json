@@ -1,7 +1,7 @@
 {
   "name": "@foundry/site-definition",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -12,5 +12,8 @@
   "devDependencies": {
     "ajv": "8.20.0",
     "vite": "8.1.5"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

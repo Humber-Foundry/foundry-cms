@@ -32,6 +32,12 @@ jobs:
       - name: Install pinned dependencies
         run: npm ci
 
+      - name: Prepare synchronized foundation artifacts
+        run: npm run release:prepare
+
+      - name: Verify external foundation installation
+        run: npm run release:verify
+
       - name: Verify generated Site Definition validator
         run: npm run verify:site-validator
 
