@@ -34,6 +34,7 @@ import { durableSchemaRecoveryEdits } from "@/src/content-schema-recovery";
 import type { StaleRecoveryEdit } from "@/src/content-editor-recovery";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
 import { loadMcpConnectionsForDashboard } from "@/src/mcp-dashboard-runtime";
+import { loadAnalyticsDashboard } from "@/src/analytics-dashboard-runtime";
 
 import "./dashboard.css";
 import "../public.css";
@@ -129,6 +130,7 @@ export default async function DashboardPage({
       ? await loadMcpConnectionsForDashboard()
       : [];
   const formOperations = await loadPublicFormOperationsDashboard(access);
+  const analytics = await loadAnalyticsDashboard(access);
   let workspaceId;
   const requestedWorkspace =
     typeof requested.workspace === "string" ? requested.workspace : undefined;
@@ -224,6 +226,7 @@ export default async function DashboardPage({
       }
       campaigns={campaigns}
       mcpConnections={mcpConnections}
+      analytics={analytics}
     />
   );
 }

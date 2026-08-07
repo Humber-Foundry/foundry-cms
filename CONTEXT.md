@@ -125,6 +125,54 @@ authorizes a second one.
 **Suppression** — A durable negative subscriber state that blocks delivery.
 Routine synchronization never reverses it.
 
+## Analytics
+
+**Analytics fact** — One aggregate measurement of a product object over one
+time bucket, from one source. It describes a page, form, campaign or the site
+itself. No fact describes a person, a session or a request.
+
+**Metric key** — The stable product name of a measurement, such as
+`form.submissions_accepted`. Provider and platform field names are kept as
+source metadata, so a query names only the metric key.
+
+**Quality** — What kind of number this is: `exact` when the CMS transaction
+recorded it, through `estimated`, `best_effort` and `provider_reported`, to
+`unreliable` for a signal such as a reported open. Every reading carries its
+quality.
+
+**Availability** — Whether a measurement exists. A measurement that is missing
+has state `unavailable` and a reason. A source outage therefore produces
+`source_unavailable` measurements, and the dashboard names that reason.
+
+**Comparability signature** — Everything that must match before two numbers
+mean the same thing: metric, source, source name, provider metric and
+definition version. Values that do not share one signature are shown side by
+side, each with its own label.
+
+**Complete through** — The instant a source has fully reported. A bucket that
+extends past it is marked in progress.
+
+**Source state** — One source's status, last attempt, last success,
+completeness and retry time. Its error code is a stable, non-secret value. No
+provider message or credential is stored in it.
+
+**Small-cell suppression** — Breakdown rows below five are reported as
+"fewer than 5". A business object's own total is still reported exactly.
+
+**Compaction** — Rolling closed hourly facts into one daily fact after 90 days.
+Where the source already wrote that day's fact, compaction removes the hours
+and keeps the source's own total. A day whose hours span a definition change,
+or that mixes measured and unavailable hours, is left alone and the skip is
+logged.
+
+**Retention floor** — The instant, 25 months back, before which aggregate facts
+and their revision audit rows are deleted on each scheduled run.
+
+**Poll band** — How far back a provider run asks for changed campaigns: 72
+hours on every run, 30 days once a day, 97 days once a week. The widest band
+covers 97 days, which puts a campaign's final reconciliation at or after day
+90.
+
 ## Actors
 
 **Owner** — A human who may authorize bulk sending and perform all Editor
@@ -203,3 +251,4 @@ The value is never part of the record.
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)
+- [Privacy-first aggregate analytics](docs/architecture/privacy-first-aggregate-analytics.md)

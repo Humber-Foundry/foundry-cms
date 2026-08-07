@@ -33,6 +33,10 @@ import {
 import {
   runScheduledCampaignBulkDeliveries,
 } from "./src/campaign-bulk-scheduler-runtime";
+import {
+  runScheduledAnalyticsProjection,
+  type AnalyticsProjectionEnvironment,
+} from "./src/analytics-projection-runtime";
 
 type ExecutionContext = Readonly<{
   waitUntil(promise: Promise<unknown>): void;
@@ -59,7 +63,8 @@ async function reconcileHumanAccessEligibilityIfDue(
 async function runScheduledWork(
   environment: HumanAccessEnvironment &
     PublicFormNotificationEnvironment &
-    PublicFormPrivacyEnvironment,
+    PublicFormPrivacyEnvironment &
+    AnalyticsProjectionEnvironment,
 ) {
   await Promise.all([
     reconcileHumanAccessEligibilityIfDue(environment),
@@ -68,6 +73,11 @@ async function runScheduledWork(
     }),
     runScheduledCampaignBulkDeliveries(environment).catch(() => {
       console.error("scheduled_campaign_delivery_failed");
+    }),
+    runScheduledAnalyticsProjection(environment).catch(() => {
+      // Analytics is never authoritative for an operation, so a failed
+      // projection degrades reporting and nothing else.
+      console.error("scheduled_analytics_projection_failed");
     }),
     (async () => {
       try {
@@ -127,7 +137,8 @@ export default {
     _event: unknown,
     environment: HumanAccessEnvironment &
       PublicFormNotificationEnvironment &
-      PublicFormPrivacyEnvironment,
+      PublicFormPrivacyEnvironment &
+      AnalyticsProjectionEnvironment,
     context: ExecutionContext,
   ) {
     context.waitUntil(runScheduledWork(environment));
