@@ -39,10 +39,10 @@ export type AnalyticsQuality =
 export type AnalyticsUnit = "count" | "ratio" | "milliseconds" | "score";
 
 /**
- * How prominently a metric may be presented. Delivery outcomes tell an owner
- * whether a send worked, so they lead. Reported engagement signals are kept
- * out of the primary reading order, so a provider's inflated open count cannot
- * read as an operational fact.
+ * How prominently a metric may be presented. Delivery outcomes state whether
+ * a send worked, so they come first. Reported engagement signals are kept out
+ * of the primary reading order, so an owner does not take a provider's
+ * inflated open count for an operational fact.
  */
 export type AnalyticsProminence = "primary" | "secondary" | "collapsed";
 
@@ -605,8 +605,8 @@ function prohibitedValue(value: string): boolean {
  * Throws on anything that would turn an aggregate into a person-level record.
  *
  * Projectors call this on the whole normalized payload before it reaches the
- * store, and provider adapters call it on the snapshot they return. A leak
- * therefore fails at the point it enters the system.
+ * store, and provider adapters call it on the snapshot they return. It
+ * therefore throws when prohibited data first enters the analytics path.
  */
 export function assertAggregateAnalyticsPayload(
   payload: unknown,

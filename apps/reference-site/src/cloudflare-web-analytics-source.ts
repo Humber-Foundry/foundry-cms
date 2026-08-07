@@ -10,7 +10,7 @@ import {
  * Cloudflare Web Analytics is the traffic authority. Foundry imports only the
  * host, published path, normalized referrer host and Web Vitals aggregates it
  * declares; query strings, geography, device and browser breakdowns are never
- * requested and are refused here if a response volunteers them.
+ * requested, and a response containing one is refused here.
  *
  * Contract: https://developers.cloudflare.com/analytics/graphql-api/
  */

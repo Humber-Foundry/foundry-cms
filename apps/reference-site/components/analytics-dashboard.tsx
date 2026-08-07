@@ -11,9 +11,9 @@ import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime"
  * Presents the aggregate projection. Every number arrives with its source,
  * definition and completeness.
  *
- * This view computes no measurement of its own. An absent measurement shows as
- * unavailable, a small breakdown row shows as suppressed, and two providers'
- * counts appear side by side, each with its own label.
+ * This view computes no measurement of its own. It renders an absent
+ * measurement as unavailable, a small breakdown row as suppressed, and two
+ * providers' counts side by side, each with its own label.
  */
 
 const qualityLabels: Readonly<Record<string, string>> = {

@@ -172,8 +172,8 @@ async function ownedProviderCampaigns(
 
 /**
  * Pages through the provider's changed-campaign list with its cursor. One
- * request covers up to fifty campaigns, where asking per campaign would spend
- * one request each and exhaust a free-tier quota on a site with any history.
+ * request returns up to fifty campaigns. Requesting each campaign separately
+ * would cost one request per campaign, which a free-tier quota cannot cover.
  */
 async function listChangedCampaignSnapshots({
   adapter,
@@ -288,8 +288,8 @@ export async function runScheduledAnalyticsProjection(
         facts,
       });
     } catch (error) {
-      // A normalizer that broke its own contract must not be reported as a
-      // provider outage; that would hide our bug behind their name.
+      // A normalizer that broke its own contract is an internal error.
+      // Recording it as a provider outage would misattribute it.
       if (error instanceof Error && contractErrorNames.has(error.name)) {
         throw error;
       }
@@ -357,7 +357,7 @@ export async function runScheduledAnalyticsProjection(
           // Web Vitals collection is not shipped. See "What this does not
           // do" in docs/architecture/privacy-first-aggregate-analytics.md.
           // The normalizer below handles them once the query is confirmed.
-          // Until then the three metrics read as unavailable.
+          // Until then the three metrics have state `unavailable`.
           webVitals: [],
         },
         siteId,

@@ -65,7 +65,7 @@ describe("loading the dashboard", () => {
     expect(data).toBeNull();
   });
 
-  it("lets a privacy breach reach the Next.js error boundary", async () => {
+  it("propagates AnalyticsPrivacyViolationError to the Next.js error boundary", async () => {
     await expect(
       loadAnalyticsDashboard(
         authorizedContext(),
@@ -77,7 +77,7 @@ describe("loading the dashboard", () => {
     ).rejects.toThrow(AnalyticsPrivacyViolationError);
   });
 
-  it("lets a vocabulary breach reach the Next.js error boundary too", async () => {
+  it("propagates AnalyticsVocabularyError to the Next.js error boundary", async () => {
     const vocabularyFailure = new Error("unknown metric");
     vocabularyFailure.name = "AnalyticsVocabularyError";
 

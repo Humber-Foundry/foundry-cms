@@ -4,8 +4,8 @@
  * Delivery adapters carry person-level data for compliance work. This contract
  * is separate from those adapters. An analytics snapshot states what each
  * provider metric means, and it may hold no address, contact, message or raw
- * event. `assertAggregateAnalyticsPayload` checks the snapshot here, so a leak
- * fails at the adapter and never reaches a downstream filter.
+ * event. `assertAggregateAnalyticsPayload` checks the snapshot here, so the
+ * adapter throws before returning prohibited data.
  */
 
 import {
@@ -118,8 +118,8 @@ export class AnalyticsProviderContractError extends Error {
  * Turns one provider snapshot into canonical measurements.
  *
  * A metric the provider does not support becomes an `unavailable` measurement
- * with a reason, which the dashboard shows as such. An absent row would
- * instead be summed into a total as a zero.
+ * with a reason, which the dashboard names. An absent row would instead be
+ * added into a total as a zero.
  */
 export function campaignAnalyticsMeasurements({
   snapshot,

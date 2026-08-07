@@ -486,9 +486,9 @@ export function createAnalyticsProjection({
 
   return Object.freeze({
     /**
-     * Applies one source run. A degraded run records the outage and leaves the
-     * previously projected facts and completeness untouched, so a temporary
-     * source failure never reads as a drop to zero.
+     * Applies one source run. A degraded run records the outage and leaves
+     * the projected facts and completeness untouched, so a temporary source
+     * failure leaves the last measured values in place.
      */
     async project(run: AnalyticsProjectionRun): Promise<void> {
       assertAggregateAnalyticsPayload(run);

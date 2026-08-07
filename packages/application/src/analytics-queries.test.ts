@@ -670,7 +670,7 @@ describe("data health", () => {
     });
   });
 
-  it("states the retention windows behind the numbers", async () => {
+  it("returns the analytics retention windows", async () => {
     const health = await application().queries.health({ actor });
 
     expect(health.retention).toMatchObject({

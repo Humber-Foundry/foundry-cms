@@ -193,7 +193,7 @@ BEGIN
 END;
 
 -- A projector may only move a fact forward. A replayed or late source run can
--- never resurrect an older value over a newer one.
+-- never replace a newer value with an older one.
 CREATE TRIGGER analytics_facts_revision_moves_forward
 BEFORE UPDATE ON analytics_facts
 WHEN NEW.revision <= OLD.revision

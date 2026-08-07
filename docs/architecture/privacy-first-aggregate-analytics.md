@@ -73,7 +73,7 @@ before it can add a metric, a dimension or a value the model does not allow:
   coordinate, referrer path, query string or free-form property bag; and any
   *value* shaped like an email address, an IP address or a URL, whatever the
   field is called. Provider adapters run the same check on the snapshot they
-  return, so a leak fails at the adapter that produced it.
+  return, so the adapter throws before returning prohibited data.
 - **Unlike measurements are never added together.** `comparabilitySignature`
   combines metric, source, source name, provider metric name and definition
   version. `summableSeries` rejects a series that spans more than one
@@ -145,8 +145,9 @@ and appends to `analytics_fact_revisions`, exactly as the ADR describes.
   weekly band bounded at exactly 90 days would last request a campaign at
   about day 83, so the extra week puts the final reconciliation at or after
   day 90. Each band pages through the provider's changed-campaign cursor,
-  fifty campaigns a request. Asking once per campaign would spend one request
-  each. A run that stops at the page cap records that in the log.
+  fifty campaigns a request. Requesting each campaign separately would cost
+  one request per campaign. A run that stops at the page cap records that in
+  the log.
 - A degraded run records the outage and leaves the projected facts and
   completeness untouched. The dashboard names the outage and keeps showing the
   last measured values.
@@ -205,7 +206,7 @@ publish, consent or send operation.
   `rumWebVitalsEventsAdaptiveGroups`, but its exact quantile and dimension
   field names were not confirmed against the live schema. A guessed query
   would pass review and fail in production. Until the field names are
-  confirmed, the three metrics read as unavailable.
+  confirmed, the three metrics have state `unavailable`.
 - **MCP access.** The read-only analytics tools are
   [issue #57](https://github.com/Humber-Foundry/foundry-cms/issues/57). The
   query service they will use is the one `/dash` already reads.

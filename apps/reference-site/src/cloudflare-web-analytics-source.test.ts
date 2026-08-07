@@ -179,7 +179,7 @@ describe("normalizing a response", () => {
     ).toMatchObject({ sampleInterval: 10, quality: "estimated" });
   });
 
-  it("refuses a response that volunteers an unrequested dimension", () => {
+  it("refuses a response containing an unrequested dimension", () => {
     expect(() =>
       normalize({
         pageloads: [

@@ -130,7 +130,7 @@ describe("prohibited analytics fields", () => {
     }
   });
 
-  it("rejects a personal value even under an innocent key name", () => {
+  it("rejects a personal value under a field name that is not prohibited", () => {
     expect(() =>
       assertAggregateAnalyticsPayload({ label: "person@example.com" }),
     ).toThrow(AnalyticsPrivacyViolationError);
@@ -225,7 +225,7 @@ describe("small-cell suppression", () => {
 });
 
 describe("comparability", () => {
-  it("signs a reading with everything that defines its measurement", () => {
+  it("builds the comparability signature from every defining field", () => {
     expect(comparabilitySignature(reading())).toBe(
       "campaign.delivered|provider|brevo|delivered|1",
     );

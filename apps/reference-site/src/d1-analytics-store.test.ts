@@ -555,7 +555,7 @@ describe("retention purge", () => {
     });
   });
 
-  it("removes the revision audit rows the purged facts left behind", async () => {
+  it("removes the analytics_fact_revisions rows for purged facts", async () => {
     await projectWeb({
       completeThrough: "2024-01-02T00:00:00.000Z",
       facts: [
