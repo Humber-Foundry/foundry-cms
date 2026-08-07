@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -22,6 +19,7 @@ import {
   HumanMutationExecutionNotStartedError,
   HumanMutationExecutionResumableError,
 } from "./human-mutation-runtime";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 const siteId = createSiteId("site_reference");
 const owner: ExternalHumanIdentity = {
@@ -42,56 +40,13 @@ const editor: ExternalHumanIdentity = {
 };
 const now = new Date("2026-07-27T04:00:00.000Z");
 
-let runtime: Miniflare;
-let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
-
-function migrationStatements(migration: string): string[] {
-  const statements: string[] = [];
-  let current = "";
-  let inTrigger = false;
-
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") {
-      continue;
-    }
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) {
-      inTrigger = true;
-    }
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      statements.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-
-  return statements;
-}
+const { database } = useMigratedTestDatabase([
+  "0001_human_access.sql",
+  "0016_campaign_authoring.sql",
+  "0021_campaign_test_delivery.sql",
+]);
 
 beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB"],
-  });
-  database = await runtime.getD1Database("FOUNDRY_DB");
-  for (const name of [
-    "0001_human_access.sql",
-    "0016_campaign_authoring.sql",
-    "0021_campaign_test_delivery.sql",
-  ]) {
-    const migration = await readFile(
-      new URL(`../migrations/${name}`, import.meta.url),
-      "utf8",
-    );
-    for (const statement of migrationStatements(migration)) {
-      await database.exec(statement);
-    }
-  }
   await database.batch([
     database
       .prepare(
@@ -128,10 +83,6 @@ beforeEach(async () => {
         now.toISOString(),
       ),
   ]);
-});
-
-afterEach(async () => {
-  await runtime.dispose();
 });
 
 describe("D1 human access store", () => {

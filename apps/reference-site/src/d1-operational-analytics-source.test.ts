@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -9,57 +6,14 @@ import { createSiteId } from "@foundry/site-definition";
 
 import { createD1OperationalAnalyticsSource } from "./d1-operational-analytics-source";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let runtime: Miniflare;
-let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
 const siteId = createSiteId("site_reference");
-
-function migrationStatements(migration: string): string[] {
-  const statements: string[] = [];
-  let current = "";
-  let inTrigger = false;
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("--")) continue;
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) inTrigger = true;
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      statements.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-  return statements;
-}
-
-beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB"],
-  });
-  database = await runtime.getD1Database("FOUNDRY_DB");
-  for (const name of [
-    "0002_subscriber_ledger.sql",
-    "0003_public_forms.sql",
-    "0004_public_form_notifications.sql",
-  ]) {
-    const migration = await readFile(
-      new URL(`../migrations/${name}`, import.meta.url),
-      "utf8",
-    );
-    for (const statement of migrationStatements(migration)) {
-      await database.prepare(statement).run();
-    }
-  }
-});
-
-afterEach(async () => {
-  await runtime.dispose();
-});
+const { database } = useMigratedTestDatabase([
+  "0002_subscriber_ledger.sql",
+  "0003_public_forms.sql",
+  "0004_public_form_notifications.sql",
+]);
 
 async function acceptSubmission({
   submissionId,

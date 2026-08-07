@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -23,57 +20,21 @@ import {
 
 import { createD1CampaignStore } from "./d1-campaign-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let runtime: Miniflare;
-let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
 const siteId = createSiteId("site_reference");
+const { database } = useMigratedTestDatabase([
+  "0001_human_access.sql",
+  "0016_campaign_authoring.sql",
+  "0021_campaign_test_delivery.sql",
+]);
 const actor: ExternalHumanIdentity = {
   binding: { issuer: "https://access.example", subject: "editor" },
   email: "editor@example.com",
   nonce: "nonce",
 };
 
-function migrationStatements(migration: string): string[] {
-  const statements: string[] = [];
-  let current = "";
-  let inTrigger = false;
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) inTrigger = true;
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      statements.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-  return statements;
-}
-
 beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB"],
-  });
-  database = await runtime.getD1Database("FOUNDRY_DB");
-  for (const name of [
-    "0001_human_access.sql",
-    "0016_campaign_authoring.sql",
-    "0021_campaign_test_delivery.sql",
-  ]) {
-    const migration = await readFile(
-      new URL(`../migrations/${name}`, import.meta.url),
-      "utf8",
-    );
-    for (const statement of migrationStatements(migration)) {
-      await database.exec(statement);
-    }
-  }
   await database
     .prepare(
       `INSERT INTO human_users (id, email, created_at)
@@ -100,8 +61,6 @@ beforeEach(async () => {
     )
     .run();
 });
-
-afterEach(async () => runtime.dispose());
 
 describe("D1 campaign store", () => {
   it("atomically persists immutable revisions with linked audit evidence", async () => {

@@ -1,7 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   campaignDeliveryAttemptedEventTypes,
@@ -15,59 +14,26 @@ import { createSiteId } from "@foundry/site-definition";
 
 import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+import {
+  migrationStatements,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
-let runtime: Miniflare;
-let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
 const siteId = createSiteId("site_reference");
 const campaignId = createCampaignId("20000000-0000-4000-8000-000000000052");
 const revisionId = createCampaignRevisionId(
   "30000000-0000-4000-8000-000000000052",
 );
 const testExecutionId = "40000000-0000-4000-8000-000000000052";
-
-function migrationStatements(migration: string) {
-  const statements: string[] = [];
-  let current = "";
-  let inTrigger = false;
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) inTrigger = true;
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      statements.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-  return statements;
-}
+const { database } = useMigratedTestDatabase([
+  "0001_human_access.sql",
+  "0002_subscriber_ledger.sql",
+  "0016_campaign_authoring.sql",
+  "0021_campaign_test_delivery.sql",
+  "0023_campaign_bulk_delivery.sql",
+]);
 
 beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB"],
-  });
-  database = await runtime.getD1Database("FOUNDRY_DB");
-  for (const name of [
-    "0001_human_access.sql",
-    "0002_subscriber_ledger.sql",
-    "0016_campaign_authoring.sql",
-    "0021_campaign_test_delivery.sql",
-    "0023_campaign_bulk_delivery.sql",
-  ]) {
-    const migration = await readFile(
-      new URL(`../migrations/${name}`, import.meta.url),
-      "utf8",
-    );
-    for (const statement of migrationStatements(migration)) {
-      await database.exec(statement);
-    }
-  }
   const seed = `
     INSERT INTO human_users (id, email, created_at)
     VALUES
@@ -143,8 +109,6 @@ beforeEach(async () => {
     await database.exec(statement);
   }
 });
-
-afterEach(async () => runtime.dispose());
 
 function authorization(
   ownerActorId = "membership-owner",

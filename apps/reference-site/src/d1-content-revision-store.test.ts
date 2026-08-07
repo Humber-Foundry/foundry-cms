@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Miniflare } from "miniflare";
+import { describe, expect, it } from "vitest";
 
 import {
   ContentRevisionConflictError,
@@ -26,6 +23,7 @@ import {
   hydrateManagedBlogPosts,
   reconcileVerifiedBlogPostPublication,
 } from "./d1-content-revision-store";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 describe("D1 content revision store", () => {
   const editorActorId = createContentActorId("membership-editor");
@@ -34,18 +32,8 @@ describe("D1 content revision store", () => {
   );
   const outsiderActorId = createContentActorId("membership-outsider");
   const workspaceId = createContentWorkspaceId("workspace_home");
-  let miniflare: Miniflare;
-  let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
-
-  beforeEach(async () => {
-    miniflare = new Miniflare({
-      compatibilityDate: "2026-07-26",
-      modules: true,
-      script: "export default { fetch() { return new Response('ok') } }",
-      d1Databases: ["FOUNDRY_DB"],
-    });
-    database = await miniflare.getD1Database("FOUNDRY_DB");
-    for (const name of [
+  const { database } = useMigratedTestDatabase(
+    [
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
       "0008_media_assets.sql",
@@ -54,20 +42,9 @@ describe("D1 content revision store", () => {
       "0014_blog_post_artifact_fingerprints.sql",
       "0015_blog_post_render_artifacts.sql",
       "0022_blog_post_scheduling_archive.sql",
-    ]) {
-      const migration = await readFile(
-        new URL(`../migrations/${name}`, import.meta.url),
-        "utf8",
-      );
-      for (const statement of migration.trim().split(/\n\n+/)) {
-        await database.prepare(statement).run();
-      }
-    }
-  });
-
-  afterEach(async () => {
-    await miniflare.dispose();
-  });
+    ],
+    { compatibilityDate: "2026-07-26" },
+  );
 
   function createApplication(
     actorId = editorActorId,

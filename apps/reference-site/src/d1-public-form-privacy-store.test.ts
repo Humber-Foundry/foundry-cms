@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -23,30 +20,21 @@ import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1PublicFormPrivacyStore } from "./d1-public-form-privacy-store";
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
+import {
+  migrateTestDatabase,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
-let runtime: Miniflare;
-let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
-
-function statements(migration: string) {
-  const result: string[] = [];
-  let current = "";
-  let inTrigger = false;
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) inTrigger = true;
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      result.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-  return result;
-}
+const privacyMigrations = [
+  "0003_public_forms.sql",
+  "0004_public_form_notifications.sql",
+  "0006_public_form_privacy.sql",
+] as const;
+const testDatabase = useMigratedTestDatabase({
+  FOUNDRY_DB: privacyMigrations,
+  RECOVERY_DB: [],
+});
+const { database } = testDatabase;
 
 const siteId = createSiteId("site_reference");
 const accepted: PublicFormAcceptance = {
@@ -87,32 +75,8 @@ function restoreInput(
 }
 
 async function migrate(target = database) {
-  for (const name of [
-    "0003_public_forms.sql",
-    "0004_public_form_notifications.sql",
-    "0006_public_form_privacy.sql",
-  ]) {
-    const migration = await readFile(
-      new URL(`../migrations/${name}`, import.meta.url),
-      "utf8",
-    );
-    for (const statement of statements(migration)) {
-      await target.exec(statement);
-    }
-  }
+  await migrateTestDatabase(target, privacyMigrations);
 }
-
-beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB", "RECOVERY_DB"],
-  });
-  database = await runtime.getD1Database("FOUNDRY_DB");
-  await migrate();
-});
-
-afterEach(() => runtime.dispose());
 
 describe("D1 public form privacy store", () => {
   it("audits export and erasure without copying payload into audit facts", async () => {
@@ -698,7 +662,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       now: "2026-07-27T00:00:00.000Z",
     });
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     const target = createD1PublicFormPrivacyStore(
       recovery as unknown as D1DatabaseBinding,
@@ -775,7 +739,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       now: "2026-07-27T00:00:00.000Z",
     });
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     const target = createD1PublicFormPrivacyStore(
       recovery as unknown as D1DatabaseBinding,
@@ -860,7 +824,7 @@ describe("D1 public form privacy store", () => {
         subject_id: `submission-${suffix}`,
       })),
     };
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     const binding = recovery as unknown as D1DatabaseBinding;
     let queryCount = 0;
@@ -889,7 +853,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       now: "2026-07-27T00:00:00.000Z",
     });
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     await recovery
       .prepare(
@@ -991,7 +955,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       now: "2026-07-27T00:00:00.000Z",
     });
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     await recovery
       .prepare(
@@ -1034,7 +998,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       now: "2026-07-27T00:00:00.000Z",
     });
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     const binding = recovery as unknown as D1DatabaseBinding;
     let batchCalls = 0;
@@ -1076,7 +1040,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       now: "2026-07-27T00:00:00.000Z",
     });
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     const binding = recovery as unknown as D1DatabaseBinding;
     let batchCalls = 0;
@@ -1123,7 +1087,7 @@ describe("D1 public form privacy store", () => {
       siteId,
       now: "2026-07-27T00:00:00.000Z",
     });
-    const recovery = await runtime.getD1Database("RECOVERY_DB");
+    const recovery = testDatabase.getDatabase("RECOVERY_DB");
     await migrate(recovery);
     const binding = recovery as unknown as D1DatabaseBinding;
     let batchCalls = 0;

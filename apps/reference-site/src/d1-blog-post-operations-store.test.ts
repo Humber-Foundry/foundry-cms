@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Miniflare } from "miniflare";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createBlogPostOperationsApplication,
@@ -37,6 +34,7 @@ import {
   findContentRevision,
   hydrateManagedBlogPosts,
 } from "./d1-content-revision-store";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 vi.mock("server-only", () => ({}));
 
@@ -50,22 +48,12 @@ describe("D1 blog post operations store", () => {
   const now = "2026-11-01T08:00:00.000Z";
   const beforeNow = "2026-11-01T07:59:59.000Z";
   let operationTime = beforeNow;
-  let miniflare: Miniflare;
-  let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
   let revisionApplication: ReturnType<
     typeof createContentRevisionApplication
   >;
 
-  beforeEach(async () => {
-    operationTime = beforeNow;
-    miniflare = new Miniflare({
-      compatibilityDate: "2026-07-26",
-      modules: true,
-      script: "export default { fetch() { return new Response('ok') } }",
-      d1Databases: ["FOUNDRY_DB"],
-    });
-    database = await miniflare.getD1Database("FOUNDRY_DB");
-    for (const name of [
+  const { database } = useMigratedTestDatabase(
+    [
       "0001_human_access.sql",
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
@@ -83,15 +71,12 @@ describe("D1 blog post operations store", () => {
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
       "0024_mcp_publication_scopes.sql",
-    ]) {
-      const migration = await readFile(
-        new URL(`../migrations/${name}`, import.meta.url),
-        "utf8",
-      );
-      for (const statement of migration.trim().split(/\n\n+/u)) {
-        await database.prepare(statement).run();
-      }
-    }
+    ],
+    { compatibilityDate: "2026-07-26" },
+  );
+
+  beforeEach(async () => {
+    operationTime = beforeNow;
     await database.batch([
       database
         .prepare(
@@ -158,10 +143,6 @@ describe("D1 blog post operations store", () => {
       },
       idempotencyKey: "create-scheduled-blog-post",
     });
-  });
-
-  afterEach(async () => {
-    await miniflare.dispose();
   });
 
   async function approveCurrent() {
