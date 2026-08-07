@@ -1,5 +1,3 @@
-import "server-only";
-
 import {
   addUtcDays,
   addUtcSeconds,
@@ -44,8 +42,13 @@ import type { HumanAccessEnvironment } from "./human-access-configuration";
 
 /**
  * The scheduled projector. Each source runs on its own cadence and reports its
- * own health, so one degraded source never blocks another and never advances
+ * own health, so one degraded source never blocks another, and none advances
  * completeness it did not earn.
+ *
+ * `custom-worker.ts` imports this module and the source adapters it reaches,
+ * so none of them may import `server-only`. That package throws when it is
+ * loaded outside a React Server Component, which stops the Worker starting.
+ * Every other runtime the Worker entry imports follows the same rule.
  */
 
 export type AnalyticsProjectionEnvironment = HumanAccessEnvironment &

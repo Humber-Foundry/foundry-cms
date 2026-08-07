@@ -1,5 +1,3 @@
-import "server-only";
-
 import type { AnalyticsFactMeasurement } from "@foundry/application";
 
 /**
