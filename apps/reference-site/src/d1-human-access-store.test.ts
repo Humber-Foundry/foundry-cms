@@ -19,10 +19,7 @@ import {
   HumanMutationExecutionNotStartedError,
   HumanMutationExecutionResumableError,
 } from "./human-mutation-runtime";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 const siteId = createSiteId("site_reference");
 const owner: ExternalHumanIdentity = {
@@ -43,15 +40,13 @@ const editor: ExternalHumanIdentity = {
 };
 const now = new Date("2026-07-27T04:00:00.000Z");
 
-let database: TestD1Database;
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0001_human_access.sql",
   "0016_campaign_authoring.sql",
   "0021_campaign_test_delivery.sql",
 ]);
 
 beforeEach(async () => {
-  database = testDatabase.database;
   await database.batch([
     database
       .prepare(

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -23,13 +23,8 @@ import {
   type R2BackupBucket,
 } from "./encrypted-r2-form-backup-vault";
 import { runPublicFormRecoveryOperator } from "./public-form-recovery-operator";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let primary: TestD1Database;
-let recovery: TestD1Database;
 const testDatabase = useMigratedTestDatabase({
   PRIMARY: [
     "0001_human_access.sql",
@@ -43,6 +38,8 @@ const testDatabase = useMigratedTestDatabase({
     "0006_public_form_privacy.sql",
   ],
 });
+const primary = testDatabase.databaseFor("PRIMARY");
+const recovery = testDatabase.databaseFor("RECOVERY");
 
 function memoryBucket(): R2BackupBucket {
   const objects = new Map<
@@ -74,11 +71,6 @@ function memoryBucket(): R2BackupBucket {
     },
   };
 }
-
-beforeEach(async () => {
-  primary = testDatabase.getDatabase("PRIMARY");
-  recovery = testDatabase.getDatabase("RECOVERY");
-});
 
 describe("public form recovery operator", () => {
   it("uses the client key, verifies an active Owner, mirrors evidence, and clears recovery data", async () => {

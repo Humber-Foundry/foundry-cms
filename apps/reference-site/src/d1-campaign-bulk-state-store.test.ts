@@ -16,18 +16,16 @@ import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import {
   migrationStatements,
-  type TestD1Database,
   useMigratedTestDatabase,
 } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
 const siteId = createSiteId("site_reference");
 const campaignId = createCampaignId("20000000-0000-4000-8000-000000000052");
 const revisionId = createCampaignRevisionId(
   "30000000-0000-4000-8000-000000000052",
 );
 const testExecutionId = "40000000-0000-4000-8000-000000000052";
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0001_human_access.sql",
   "0002_subscriber_ledger.sql",
   "0016_campaign_authoring.sql",
@@ -36,7 +34,6 @@ const testDatabase = useMigratedTestDatabase([
 ]);
 
 beforeEach(async () => {
-  database = testDatabase.database;
   const seed = `
     INSERT INTO human_users (id, email, created_at)
     VALUES

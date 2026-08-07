@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -6,22 +6,14 @@ import { createSiteId } from "@foundry/site-definition";
 
 import { createD1OperationalAnalyticsSource } from "./d1-operational-analytics-source";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
 const siteId = createSiteId("site_reference");
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0002_subscriber_ledger.sql",
   "0003_public_forms.sql",
   "0004_public_form_notifications.sql",
 ]);
-
-beforeEach(async () => {
-  database = testDatabase.database;
-});
 
 async function acceptSubmission({
   submissionId,

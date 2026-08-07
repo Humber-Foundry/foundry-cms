@@ -17,22 +17,18 @@ import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 describe("D1 content publication store", () => {
   const workspaceId = createContentWorkspaceId("workspace_publish");
   const actorId = createContentActorId("membership-editor");
   const membershipId = createHumanMembershipId("membership-editor");
-  let database: TestD1Database;
   let approval: ContentApproval;
   let revisionApplication: ReturnType<
     typeof createContentRevisionApplication
   >;
 
-  const testDatabase = useMigratedTestDatabase(
+  const { database } = useMigratedTestDatabase(
     [
       "0001_human_access.sql",
       "0005_content_revisions.sql",
@@ -56,7 +52,6 @@ describe("D1 content publication store", () => {
   );
 
   beforeEach(async () => {
-    database = testDatabase.database;
     await database.batch([
       database
         .prepare(

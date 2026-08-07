@@ -202,8 +202,13 @@ async function resetDatabase(
     )
     .all<{ name: string }>();
   const extraTables: TableSnapshot[] = [];
+  let hasExtraSequenceTable = false;
   for (const { name } of currentTableRows) {
     if (baselineNames.has(name)) continue;
+    if (name === "sqlite_sequence") {
+      hasExtraSequenceTable = true;
+      continue;
+    }
     const { results: foreignKeys } = await database
       .prepare(`PRAGMA foreign_key_list(${quoteIdentifier(name)})`)
       .all<{ table: string }>();
@@ -218,6 +223,9 @@ async function resetDatabase(
   }
   for (const table of [...orderTablesByDependencies(extraTables)].reverse()) {
     await database.exec(`DROP TABLE ${quoteIdentifier(table.name)}`);
+  }
+  if (hasExtraSequenceTable) {
+    await database.exec("DELETE FROM sqlite_sequence");
   }
 
   for (const table of [...snapshot.tablesInDependencyOrder].reverse()) {
@@ -292,10 +300,19 @@ export function useMigratedTestDatabase(
     return database;
   }
 
+  function databaseFor(name: string): TestD1Database {
+    return new Proxy({} as TestD1Database, {
+      get(_target, property) {
+        const database = getDatabase(name);
+        const value = Reflect.get(database, property, database) as unknown;
+        return typeof value === "function" ? value.bind(database) : value;
+      },
+    });
+  }
+
   return {
-    get database() {
-      return getDatabase("FOUNDRY_DB");
-    },
+    database: databaseFor("FOUNDRY_DB"),
+    databaseFor,
     getDatabase,
   };
 }

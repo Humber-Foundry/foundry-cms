@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -13,23 +13,15 @@ import {
 } from "./analytics-projection-runtime";
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
 const siteId = referenceSiteDefinition.site.id;
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0002_subscriber_ledger.sql",
   "0003_public_forms.sql",
   "0004_public_form_notifications.sql",
   "0025_analytics_projection.sql",
 ]);
-
-beforeEach(async () => {
-  database = testDatabase.database;
-});
 
 function environment(
   overrides: Partial<AnalyticsProjectionEnvironment> = {},

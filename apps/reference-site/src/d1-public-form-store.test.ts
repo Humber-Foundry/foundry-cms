@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -16,13 +16,9 @@ import {
 import { createSiteId } from "@foundry/site-definition";
 
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0003_public_forms.sql",
   "0004_public_form_notifications.sql",
 ]);
@@ -57,10 +53,6 @@ const acceptance: PublicFormAcceptance = {
   ),
   acceptedAt: "2026-07-27T20:00:00.000Z",
 };
-
-beforeEach(async () => {
-  database = testDatabase.database;
-});
 
 describe("D1 public form acceptance store", () => {
   it("atomically persists the complete acceptance and replays without duplicates", async () => {

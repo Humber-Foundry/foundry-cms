@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   MediaAssetReferencedError,
@@ -13,10 +13,7 @@ import {
 import { createSiteId } from "@foundry/site-definition";
 
 import { createD1MediaAssetStore } from "./d1-media-asset-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 describe("D1 media asset store", () => {
   const siteId = createSiteId("site_reference");
@@ -25,15 +22,10 @@ describe("D1 media asset store", () => {
   const assetId = createMediaAssetId("asset_hero");
   const replacementId = createMediaAssetId("asset_replacement");
   const occurrenceId = createMediaOccurrenceId("occurrence_home_hero");
-  let database: TestD1Database;
-  const testDatabase = useMigratedTestDatabase(
+  const { database } = useMigratedTestDatabase(
     ["0008_media_assets.sql"],
     { compatibilityDate: "2026-07-26" },
   );
-
-  beforeEach(async () => {
-    database = testDatabase.database;
-  });
 
   function application() {
     return createMediaAssetApplication({

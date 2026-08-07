@@ -20,14 +20,10 @@ import {
 
 import { createD1CampaignStore } from "./d1-campaign-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
 const siteId = createSiteId("site_reference");
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0001_human_access.sql",
   "0016_campaign_authoring.sql",
   "0021_campaign_test_delivery.sql",
@@ -39,7 +35,6 @@ const actor: ExternalHumanIdentity = {
 };
 
 beforeEach(async () => {
-  database = testDatabase.database;
   await database
     .prepare(
       `INSERT INTO human_users (id, email, created_at)

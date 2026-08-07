@@ -10,19 +10,14 @@ import { createSiteId } from "@foundry/site-definition";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0016_campaign_authoring.sql",
   "0021_campaign_test_delivery.sql",
 ]);
 
 beforeEach(async () => {
-  database = testDatabase.database;
   await database
     .prepare(
       `INSERT INTO campaigns (

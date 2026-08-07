@@ -15,14 +15,11 @@ import { createD1ContentRevisionStore } from "./d1-content-revision-store";
 import {
   createTestDatabaseRuntime,
   migrateTestDatabase,
-  type TestD1Database,
   useMigratedTestDatabase,
 } from "./test-support/migrated-test-database";
 
 describe("D1 MCP connection store", () => {
-  let database: TestD1Database;
-
-  const testDatabase = useMigratedTestDatabase(
+  const { database } = useMigratedTestDatabase(
     [
       "0001_human_access.sql",
       "0005_content_revisions.sql",
@@ -46,7 +43,6 @@ describe("D1 MCP connection store", () => {
   );
 
   beforeEach(async () => {
-    database = testDatabase.database;
     await database
       .prepare(
         `INSERT INTO human_users (id, email, created_at)

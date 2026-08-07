@@ -13,14 +13,10 @@ import { createSiteId } from "@foundry/site-definition";
 
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
 const siteId = createSiteId("site_reference");
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0025_analytics_projection.sql",
 ]);
 
@@ -32,10 +28,6 @@ type MetricDefinitionRow = {
   bucket_granularity: string;
   value_domain: string;
 };
-
-beforeEach(async () => {
-  database = testDatabase.database;
-});
 
 function store() {
   return createD1AnalyticsStore(

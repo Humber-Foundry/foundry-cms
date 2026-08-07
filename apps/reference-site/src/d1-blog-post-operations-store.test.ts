@@ -34,10 +34,7 @@ import {
   findContentRevision,
   hydrateManagedBlogPosts,
 } from "./d1-content-revision-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 vi.mock("server-only", () => ({}));
 
@@ -51,12 +48,11 @@ describe("D1 blog post operations store", () => {
   const now = "2026-11-01T08:00:00.000Z";
   const beforeNow = "2026-11-01T07:59:59.000Z";
   let operationTime = beforeNow;
-  let database: TestD1Database;
   let revisionApplication: ReturnType<
     typeof createContentRevisionApplication
   >;
 
-  const testDatabase = useMigratedTestDatabase(
+  const { database } = useMigratedTestDatabase(
     [
       "0001_human_access.sql",
       "0005_content_revisions.sql",
@@ -81,7 +77,6 @@ describe("D1 blog post operations store", () => {
 
   beforeEach(async () => {
     operationTime = beforeNow;
-    database = testDatabase.database;
     await database.batch([
       database
         .prepare(

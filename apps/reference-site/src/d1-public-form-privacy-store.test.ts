@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -22,11 +22,9 @@ import { createD1PublicFormNotificationStore } from "./d1-public-form-notificati
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
 import {
   migrateTestDatabase,
-  type TestD1Database,
   useMigratedTestDatabase,
 } from "./test-support/migrated-test-database";
 
-let database: TestD1Database;
 const privacyMigrations = [
   "0003_public_forms.sql",
   "0004_public_form_notifications.sql",
@@ -36,6 +34,7 @@ const testDatabase = useMigratedTestDatabase({
   FOUNDRY_DB: privacyMigrations,
   RECOVERY_DB: [],
 });
+const { database } = testDatabase;
 
 const siteId = createSiteId("site_reference");
 const accepted: PublicFormAcceptance = {
@@ -78,10 +77,6 @@ function restoreInput(
 async function migrate(target = database) {
   await migrateTestDatabase(target, privacyMigrations);
 }
-
-beforeEach(async () => {
-  database = testDatabase.database;
-});
 
 describe("D1 public form privacy store", () => {
   it("audits export and erasure without copying payload into audit facts", async () => {

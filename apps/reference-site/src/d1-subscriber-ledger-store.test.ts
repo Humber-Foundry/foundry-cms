@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -14,23 +14,15 @@ import { createSiteId } from "@foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 const siteId = createSiteId("site_reference");
 const now = "2026-07-27T18:00:00.000Z";
 const identitySecret = "test-subscriber-identity-secret-value";
-let database: TestD1Database;
-const testDatabase = useMigratedTestDatabase([
+const { database } = useMigratedTestDatabase([
   "0001_human_access.sql",
   "0002_subscriber_ledger.sql",
 ]);
-
-beforeEach(async () => {
-  database = testDatabase.database;
-});
 
 async function fixture() {
   const identityKey = await createSubscriberIdentityKey(

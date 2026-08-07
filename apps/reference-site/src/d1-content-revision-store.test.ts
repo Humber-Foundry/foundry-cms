@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   ContentRevisionConflictError,
@@ -23,10 +23,7 @@ import {
   hydrateManagedBlogPosts,
   reconcileVerifiedBlogPostPublication,
 } from "./d1-content-revision-store";
-import {
-  type TestD1Database,
-  useMigratedTestDatabase,
-} from "./test-support/migrated-test-database";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 describe("D1 content revision store", () => {
   const editorActorId = createContentActorId("membership-editor");
@@ -35,9 +32,7 @@ describe("D1 content revision store", () => {
   );
   const outsiderActorId = createContentActorId("membership-outsider");
   const workspaceId = createContentWorkspaceId("workspace_home");
-  let database: TestD1Database;
-
-  const testDatabase = useMigratedTestDatabase(
+  const { database } = useMigratedTestDatabase(
     [
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
@@ -50,10 +45,6 @@ describe("D1 content revision store", () => {
     ],
     { compatibilityDate: "2026-07-26" },
   );
-
-  beforeEach(async () => {
-    database = testDatabase.database;
-  });
 
   function createApplication(
     actorId = editorActorId,
