@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -16,10 +13,16 @@ import { createSiteId } from "@foundry/site-definition";
 
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+import {
+  type TestD1Database,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
-let runtime: Miniflare;
-let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
+let database: TestD1Database;
 const siteId = createSiteId("site_reference");
+const testDatabase = useMigratedTestDatabase([
+  "0025_analytics_projection.sql",
+]);
 
 type MetricDefinitionRow = {
   metric_key: string;
@@ -30,45 +33,8 @@ type MetricDefinitionRow = {
   value_domain: string;
 };
 
-function migrationStatements(migration: string): string[] {
-  const statements: string[] = [];
-  let current = "";
-  let inTrigger = false;
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("--")) continue;
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) inTrigger = true;
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      statements.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-  return statements;
-}
-
 beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB"],
-  });
-  database = await runtime.getD1Database("FOUNDRY_DB");
-  const migration = await readFile(
-    new URL("../migrations/0025_analytics_projection.sql", import.meta.url),
-    "utf8",
-  );
-  for (const statement of migrationStatements(migration)) {
-    await database.prepare(statement).run();
-  }
-});
-
-afterEach(async () => {
-  await runtime.dispose();
+  database = testDatabase.database;
 });
 
 function store() {

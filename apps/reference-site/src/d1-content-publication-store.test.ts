@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Miniflare } from "miniflare";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createContentActorId,
@@ -20,27 +17,23 @@ import { referenceSiteDefinition } from "@foundry/site-definition";
 
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";
+import {
+  type TestD1Database,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
 describe("D1 content publication store", () => {
   const workspaceId = createContentWorkspaceId("workspace_publish");
   const actorId = createContentActorId("membership-editor");
   const membershipId = createHumanMembershipId("membership-editor");
-  let miniflare: Miniflare;
-  let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
+  let database: TestD1Database;
   let approval: ContentApproval;
   let revisionApplication: ReturnType<
     typeof createContentRevisionApplication
   >;
 
-  beforeEach(async () => {
-    miniflare = new Miniflare({
-      compatibilityDate: "2026-07-26",
-      modules: true,
-      script: "export default { fetch() { return new Response('ok') } }",
-      d1Databases: ["FOUNDRY_DB"],
-    });
-    database = await miniflare.getD1Database("FOUNDRY_DB");
-    for (const migrationName of [
+  const testDatabase = useMigratedTestDatabase(
+    [
       "0001_human_access.sql",
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
@@ -58,15 +51,12 @@ describe("D1 content publication store", () => {
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
       "0024_mcp_publication_scopes.sql",
-    ]) {
-      const migration = await readFile(
-        new URL(`../migrations/${migrationName}`, import.meta.url),
-        "utf8",
-      );
-      for (const statement of migration.trim().split(/\n\n+/)) {
-        await database.prepare(statement).run();
-      }
-    }
+    ],
+    { compatibilityDate: "2026-07-26" },
+  );
+
+  beforeEach(async () => {
+    database = testDatabase.database;
     await database.batch([
       database
         .prepare(
@@ -122,10 +112,6 @@ describe("D1 content publication store", () => {
       approvedAt: "2026-07-27T10:01:00.000Z",
       invalidatedAt: null,
     };
-  });
-
-  afterEach(async () => {
-    await miniflare.dispose();
   });
 
   function publication(

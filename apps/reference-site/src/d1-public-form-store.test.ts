@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -19,34 +16,16 @@ import {
 import { createSiteId } from "@foundry/site-definition";
 
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
+import {
+  type TestD1Database,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
-let runtime: Miniflare;
-let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
-
-function migrationStatements(migration: string): string[] {
-  const statements: string[] = [];
-  let current = "";
-  let inTrigger = false;
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") {
-      continue;
-    }
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) {
-      inTrigger = true;
-    }
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      statements.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-  return statements;
-}
+let database: TestD1Database;
+const testDatabase = useMigratedTestDatabase([
+  "0003_public_forms.sql",
+  "0004_public_form_notifications.sql",
+]);
 
 const acceptance: PublicFormAcceptance = {
   identity: {
@@ -80,28 +59,7 @@ const acceptance: PublicFormAcceptance = {
 };
 
 beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB"],
-  });
-  database = await runtime.getD1Database("FOUNDRY_DB");
-  for (const migrationName of [
-    "0003_public_forms.sql",
-    "0004_public_form_notifications.sql",
-  ]) {
-    const migration = await readFile(
-      new URL(`../migrations/${migrationName}`, import.meta.url),
-      "utf8",
-    );
-    for (const statement of migrationStatements(migration)) {
-      await database.exec(statement);
-    }
-  }
-});
-
-afterEach(async () => {
-  await runtime.dispose();
+  database = testDatabase.database;
 });
 
 describe("D1 public form acceptance store", () => {

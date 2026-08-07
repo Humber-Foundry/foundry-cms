@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Miniflare } from "miniflare";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   MediaAssetReferencedError,
@@ -16,6 +13,10 @@ import {
 import { createSiteId } from "@foundry/site-definition";
 
 import { createD1MediaAssetStore } from "./d1-media-asset-store";
+import {
+  type TestD1Database,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
 describe("D1 media asset store", () => {
   const siteId = createSiteId("site_reference");
@@ -24,28 +25,14 @@ describe("D1 media asset store", () => {
   const assetId = createMediaAssetId("asset_hero");
   const replacementId = createMediaAssetId("asset_replacement");
   const occurrenceId = createMediaOccurrenceId("occurrence_home_hero");
-  let miniflare: Miniflare;
-  let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
+  let database: TestD1Database;
+  const testDatabase = useMigratedTestDatabase(
+    ["0008_media_assets.sql"],
+    { compatibilityDate: "2026-07-26" },
+  );
 
   beforeEach(async () => {
-    miniflare = new Miniflare({
-      compatibilityDate: "2026-07-26",
-      modules: true,
-      script: "export default { fetch() { return new Response('ok') } }",
-      d1Databases: ["FOUNDRY_DB"],
-    });
-    database = await miniflare.getD1Database("FOUNDRY_DB");
-    const migration = await readFile(
-      new URL("../migrations/0008_media_assets.sql", import.meta.url),
-      "utf8",
-    );
-    for (const statement of migration.trim().split(/\n\n+/u)) {
-      await database.prepare(statement).run();
-    }
-  });
-
-  afterEach(async () => {
-    await miniflare.dispose();
+    database = testDatabase.database;
   });
 
   function application() {

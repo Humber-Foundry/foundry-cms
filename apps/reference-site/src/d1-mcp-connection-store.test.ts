@@ -1,8 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Miniflare } from "miniflare";
-
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   createContentActorId,
   createContentRevisionApplication,
@@ -16,20 +12,18 @@ import { referenceSiteDefinition } from "@foundry/site-definition";
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
 import { createD1McpPreviewStore } from "./d1-mcp-preview-store";
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";
+import {
+  createTestDatabaseRuntime,
+  migrateTestDatabase,
+  type TestD1Database,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
 describe("D1 MCP connection store", () => {
-  let miniflare: Miniflare;
-  let database: Awaited<ReturnType<Miniflare["getD1Database"]>>;
+  let database: TestD1Database;
 
-  beforeEach(async () => {
-    miniflare = new Miniflare({
-      compatibilityDate: "2026-07-26",
-      modules: true,
-      script: "export default { fetch() { return new Response('ok') } }",
-      d1Databases: ["FOUNDRY_DB"],
-    });
-    database = await miniflare.getD1Database("FOUNDRY_DB");
-    for (const migrationName of [
+  const testDatabase = useMigratedTestDatabase(
+    [
       "0001_human_access.sql",
       "0005_content_revisions.sql",
       "0007_content_publication.sql",
@@ -47,15 +41,12 @@ describe("D1 MCP connection store", () => {
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
       "0024_mcp_publication_scopes.sql",
-    ]) {
-      const migration = await readFile(
-        new URL(`../migrations/${migrationName}`, import.meta.url),
-        "utf8",
-      );
-      for (const statement of migration.trim().split(/\n\n+/)) {
-        await database.prepare(statement).run();
-      }
-    }
+    ],
+    { compatibilityDate: "2026-07-26" },
+  );
+
+  beforeEach(async () => {
+    database = testDatabase.database;
     await database
       .prepare(
         `INSERT INTO human_users (id, email, created_at)
@@ -1283,10 +1274,6 @@ describe("D1 MCP connection store", () => {
     });
   });
 
-  afterEach(async () => {
-    await miniflare.dispose();
-  });
-
   it("atomically creates an immutable site.read connection and one-time PKCE code", async () => {
     const store = createD1McpConnectionStore(database);
     await store.createAuthorizationGrant({
@@ -1747,23 +1734,14 @@ describe("D1 MCP connection store", () => {
 });
 
 it("upgrades the exact pre-blog schema without rewriting applied migrations", async () => {
-  const upgradeMiniflare = new Miniflare({
-    compatibilityDate: "2026-07-26",
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["FOUNDRY_DB"],
-  });
+  const upgradeMiniflare = createTestDatabaseRuntime(
+    ["FOUNDRY_DB"],
+    { compatibilityDate: "2026-07-26" },
+  );
   try {
-    const upgradeDatabase =
-      await upgradeMiniflare.getD1Database("FOUNDRY_DB");
+    const upgradeDatabase = await upgradeMiniflare.getDatabase("FOUNDRY_DB");
     const applyMigration = async (migrationName: string) => {
-      const migration = await readFile(
-        new URL(`../migrations/${migrationName}`, import.meta.url),
-        "utf8",
-      );
-      for (const statement of migration.trim().split(/\n\n+/u)) {
-        await upgradeDatabase.prepare(statement).run();
-      }
+      await migrateTestDatabase(upgradeDatabase, [migrationName]);
     };
     for (const migrationName of [
       "0001_human_access.sql",

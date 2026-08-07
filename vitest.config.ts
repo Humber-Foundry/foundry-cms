@@ -13,6 +13,10 @@ export default defineConfig({
     },
   },
   test: {
+    // Integration suites launch workerd and Git subprocesses. Keep file-level
+    // concurrency fixed so a larger host cannot turn resource contention into
+    // a different test result.
+    maxWorkers: 2,
     include: [
       "packages/**/*.test.ts",
       "apps/**/*.test.ts",

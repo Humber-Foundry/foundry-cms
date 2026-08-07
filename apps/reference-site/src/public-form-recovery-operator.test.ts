@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { Miniflare } from "miniflare";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -26,50 +23,26 @@ import {
   type R2BackupBucket,
 } from "./encrypted-r2-form-backup-vault";
 import { runPublicFormRecoveryOperator } from "./public-form-recovery-operator";
+import {
+  type TestD1Database,
+  useMigratedTestDatabase,
+} from "./test-support/migrated-test-database";
 
-let runtime: Miniflare;
-let primary: Awaited<ReturnType<Miniflare["getD1Database"]>>;
-let recovery: Awaited<ReturnType<Miniflare["getD1Database"]>>;
-
-function statements(migration: string) {
-  const result: string[] = [];
-  let current = "";
-  let inTrigger = false;
-  for (const line of migration.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
-    current += ` ${trimmed}`;
-    if (trimmed.startsWith("CREATE TRIGGER")) inTrigger = true;
-    if (
-      (!inTrigger && trimmed.endsWith(";")) ||
-      (inTrigger && trimmed === "END;")
-    ) {
-      result.push(current.trim());
-      current = "";
-      inTrigger = false;
-    }
-  }
-  return result;
-}
-
-async function migrate(
-  target: Awaited<ReturnType<Miniflare["getD1Database"]>>,
-  includeAccess: boolean,
-) {
-  const names = [
-    ...(includeAccess ? ["0001_human_access.sql"] : []),
+let primary: TestD1Database;
+let recovery: TestD1Database;
+const testDatabase = useMigratedTestDatabase({
+  PRIMARY: [
+    "0001_human_access.sql",
     "0003_public_forms.sql",
     "0004_public_form_notifications.sql",
     "0006_public_form_privacy.sql",
-  ];
-  for (const name of names) {
-    const migration = await readFile(
-      new URL(`../migrations/${name}`, import.meta.url),
-      "utf8",
-    );
-    for (const statement of statements(migration)) await target.exec(statement);
-  }
-}
+  ],
+  RECOVERY: [
+    "0003_public_forms.sql",
+    "0004_public_form_notifications.sql",
+    "0006_public_form_privacy.sql",
+  ],
+});
 
 function memoryBucket(): R2BackupBucket {
   const objects = new Map<
@@ -103,18 +76,9 @@ function memoryBucket(): R2BackupBucket {
 }
 
 beforeEach(async () => {
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response('ok') } }",
-    d1Databases: ["PRIMARY", "RECOVERY"],
-  });
-  primary = await runtime.getD1Database("PRIMARY");
-  recovery = await runtime.getD1Database("RECOVERY");
-  await migrate(primary, true);
-  await migrate(recovery, false);
+  primary = testDatabase.getDatabase("PRIMARY");
+  recovery = testDatabase.getDatabase("RECOVERY");
 });
-
-afterEach(() => runtime.dispose());
 
 describe("public form recovery operator", () => {
   it("uses the client key, verifies an active Owner, mirrors evidence, and clears recovery data", async () => {
