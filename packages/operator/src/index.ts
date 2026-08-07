@@ -1,4 +1,5 @@
 export * from "./operator-errors";
+export * from "./foundation-release";
 export * from "./secret-material";
 export * from "./installation-identity";
 export * from "./configuration-fingerprint";

@@ -21,8 +21,14 @@
     "@foundry/site-definition": "0.1.0",
     "@opennextjs/cloudflare": "1.20.2",
     "@puckeditor/core": "0.22.2",
+    "@tiptap/core": "3.29.1",
+    "@tiptap/extension-bubble-menu": "3.29.1",
+    "@tiptap/extension-floating-menu": "3.29.1",
+    "@tiptap/pm": "3.29.1",
     "@tiptap/react": "3.29.1",
     "@tiptap/starter-kit": "3.29.1",
+    "ajv": "8.20.0",
+    "commonmark": "0.31.2",
     "jose": "6.2.4",
     "next": "16.2.12",
     "react": "19.2.8",
@@ -30,6 +36,7 @@
     "server-only": "0.0.1"
   },
   "devDependencies": {
+    "@types/commonmark": "0.27.10",
     "esbuild": "0.28.1",
     "wrangler": "4.114.0"
   }

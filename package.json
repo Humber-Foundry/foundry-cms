@@ -13,6 +13,10 @@
     "deploy": "npm run deploy --workspace @foundry/reference-site",
     "dev": "npm run dev --workspace @foundry/reference-site",
     "preview": "npm run preview --workspace @foundry/reference-site",
+    "release:prepare": "node scripts/prepare-foundation-release.mjs",
+    "release:prepare:local": "node scripts/prepare-foundation-release.mjs --allow-dirty",
+    "release:publish": "node scripts/publish-foundation-release.mjs",
+    "release:verify": "node scripts/verify-foundation-release.mjs",
     "provision:deployment-baseline": "npm run provision:deployment-baseline --workspace @foundry/reference-site",
     "generate:site-validator": "npm run generate:validator --workspace @foundry/site-definition",
     "graphify:query": "node scripts/graphify-index.mjs query",
@@ -35,6 +39,7 @@
   "packageManager": "npm@11.12.1",
   "devDependencies": {
     "@hyperjump/json-schema": "1.17.8",
+    "esbuild": "0.28.1",
     "@modelcontextprotocol/inspector": "2.1.0",
     "@types/commonmark": "0.27.10",
     "@types/node": "26.1.1",
