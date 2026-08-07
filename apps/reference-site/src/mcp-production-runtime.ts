@@ -1,5 +1,7 @@
 import {
   createInMemoryPublishedSiteRepository,
+  createMcpAnalyticsApplication,
+  createMcpCampaignApplication,
   createMcpContentActorId,
   createMcpDraftApplication,
   createMcpPublicationApplication,
@@ -8,6 +10,9 @@ import {
   createSiteApplication,
 } from "@foundry/application";
 import { referenceSiteDefinition } from "@foundry/site-definition";
+
+import { createMcpAnalyticsRuntime } from "./mcp-analytics-runtime";
+import { createMcpCampaignRuntime } from "./mcp-campaign-runtime";
 
 import { authenticateCloudflareAccessIdentity } from "./access-authentication";
 import { createD1HumanAccessStore } from "./d1-human-access-store";
@@ -230,6 +235,18 @@ export function createProductionMcpRuntime(
     },
   });
   const humanStore = createD1HumanAccessStore(database);
+  const campaignApplication = createMcpCampaignApplication({
+    base: readApplication,
+    runtime: createMcpCampaignRuntime({ environment, humanStore }),
+  });
+  const analyticsApplication = createMcpAnalyticsApplication({
+    base: readApplication,
+    runtime: createMcpAnalyticsRuntime({
+      environment,
+      reportingTimeZone:
+        environment.FOUNDRY_SITE_TIME_ZONE ?? "America/Vancouver",
+    }),
+  });
   return createMcpHttpRuntime({
     resourceUri: `${canonicalOrigin}${resourcePath}`,
     authorizationIssuer: canonicalOrigin,
@@ -242,6 +259,8 @@ export function createProductionMcpRuntime(
       readApplication,
       draftApplication,
       publicationApplication,
+      campaignApplication,
+      analyticsApplication,
     ),
     cursors,
     registeredClients: readMcpRegisteredClients(

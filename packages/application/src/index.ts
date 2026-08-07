@@ -31,6 +31,8 @@ export * from "./analytics-queries";
 export * from "./mcp-read";
 export * from "./mcp-drafts";
 export * from "./mcp-publications";
+export * from "./mcp-campaign";
+export * from "./mcp-analytics";
 
 export interface PublishedSiteRepository {
   findBySiteId(siteId: SiteId): Promise<PublishedSiteBundle | null>;

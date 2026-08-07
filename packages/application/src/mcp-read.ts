@@ -21,12 +21,18 @@ export const mcpContentDraftScope = "content.draft" as const;
 export const mcpDesignDraftScope = "design.draft" as const;
 export const mcpPublicationScheduleScope = "publication.schedule" as const;
 export const mcpPublicationPublishScope = "publication.publish" as const;
+export const mcpCampaignDraftScope = "campaign.draft" as const;
+export const mcpCampaignTestScope = "campaign.test" as const;
+export const mcpAnalyticsReadScope = "analytics.read" as const;
 export const mcpSupportedScopes = Object.freeze([
   mcpInitialScope,
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpPublicationScheduleScope,
   mcpPublicationPublishScope,
+  mcpCampaignDraftScope,
+  mcpCampaignTestScope,
+  mcpAnalyticsReadScope,
 ] as const);
 export const mcpProtocolVersion = "2025-11-25" as const;
 
