@@ -364,30 +364,85 @@ describe("MCP publication orchestration", () => {
   });
 
   it("generates approval and current-scope substitution cases before publication", async () => {
-    const dimensions: ReadonlyArray<Partial<McpConnectionPrincipal>> = [
+    const identityDimensions: ReadonlyArray<
+      Partial<McpConnectionPrincipal>
+    > = [
       { actorId: "agent-substituted" },
       { connectionId: "connection-substituted" },
       { clientId: "https://substituted.example/client.json" },
       { siteId: createSiteId("site_substituted") },
-      { scopes: [mcpInitialScope, mcpContentDraftScope] },
-      { scopes: [mcpInitialScope, mcpPublicationPublishScope] },
     ];
-    const deniedPrincipals = Array.from(
-      { length: 2 ** dimensions.length - 1 },
-      (_, index) => index + 1,
-    ).map((mask) => ({
-      ...principal,
-      ...Object.assign(
-        {},
-        ...dimensions.filter((_, index) => (mask & (1 << index)) !== 0),
-      ),
-    }));
-    expect(deniedPrincipals).toHaveLength(63);
-    for (const deniedPrincipal of deniedPrincipals) {
+    const scopeStates = [
+      {
+        name: "valid",
+        scopes: principal.scopes,
+        requiredScopes: [] as ReadonlyArray<string>,
+      },
+      {
+        name: "missing-publication",
+        scopes: [mcpInitialScope, mcpContentDraftScope],
+        requiredScopes: [mcpPublicationPublishScope],
+      },
+      {
+        name: "missing-draft",
+        scopes: [mcpInitialScope, mcpPublicationPublishScope],
+        requiredScopes: [mcpContentDraftScope],
+      },
+      {
+        name: "missing-publication-and-draft",
+        scopes: [mcpInitialScope],
+        requiredScopes: [mcpPublicationPublishScope],
+      },
+    ] as const;
+    const deniedCases = scopeStates.flatMap((scopeState) =>
+      Array.from(
+        { length: 2 ** identityDimensions.length },
+        (_, identityMask) => {
+          if (identityMask === 0 && scopeState.name === "valid") {
+            return null;
+          }
+          const identitySubstitutions = Object.assign(
+            {},
+            ...identityDimensions.filter(
+              (_, index) => (identityMask & (1 << index)) !== 0,
+            ),
+          );
+          return {
+            name: `${identityMask}:${scopeState.name}`,
+            principal: {
+              ...principal,
+              ...identitySubstitutions,
+              scopes: scopeState.scopes,
+            },
+            expectedCode:
+              identityMask === 0
+                ? "INSUFFICIENT_SCOPE"
+                : "AUTHENTICATION_REQUIRED",
+            expectedRequiredScopes:
+              identityMask === 0 ? scopeState.requiredScopes : [],
+          };
+        },
+      ).filter((testCase) => testCase !== null),
+    );
+    expect(deniedCases).toHaveLength(63);
+    expect(
+      new Set(
+        deniedCases.map(({ principal: deniedPrincipal }) =>
+          JSON.stringify(deniedPrincipal),
+        ),
+      ).size,
+    ).toBe(63);
+    expect(deniedCases).toContainEqual(
+      expect.objectContaining({
+        name: "0:missing-publication-and-draft",
+        principal: expect.objectContaining({ scopes: [mcpInitialScope] }),
+      }),
+    );
+    for (const deniedCase of deniedCases) {
       const { application, publish } = await fixture();
       await expect(
         application.requestPublication(
-          deniedPrincipal,
+          deniedCase.principal,
           {
             workspaceId,
             revision: 1,
@@ -396,7 +451,10 @@ describe("MCP publication orchestration", () => {
           },
           context,
         ),
-      ).rejects.toBeInstanceOf(Error);
+      ).rejects.toMatchObject({
+        code: deniedCase.expectedCode,
+        requiredScopes: deniedCase.expectedRequiredScopes,
+      });
       expect(publish).not.toHaveBeenCalled();
     }
     for (const suffix of ["1", "2", "3", "4"]) {
