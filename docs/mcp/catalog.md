@@ -33,9 +33,6 @@ resolved object; guessing an ID never expands access.
 | `foundry://content/{kind}/{contentId}` | `application/json` | `site.read` | Published canonical document and live Git SHA |
 | `foundry://workspaces/{workspaceId}` | `application/json` | matching draft scope | Workspace manifest, base, current revision and state |
 | `foundry://workspaces/{workspaceId}/revisions/{revision}` | `application/json` | matching draft scope | Immutable canonical revision |
-| `foundry://publications/{operationId}` | `application/json` | publish/schedule scope | Durable state, safe failure and Git/release result |
-| `foundry://analytics/definitions` | `application/json` | `analytics.read` | Metric definitions, quality meanings, retention and freshness |
-| `foundry://connections/self` | `application/json` | `connection.admin` | Caller connection, site, client, scopes and state |
 
 Resources carry `audience: ["user", "assistant"]`, an honest `lastModified`, and
 ETag-equivalent revision/hash data inside their JSON. Draft resources are never
@@ -50,7 +47,7 @@ does not execute tools or alter authorization.
 |---|---|---|
 | `foundry.draft-page` | `goal`, optional `contentId` | Plan to inspect schema, open workspace, patch content and prepare preview |
 | `foundry.prepare-post` | `topic`, optional `publishAt` | Plan to draft a blog post and, if requested, prepare a site/blog schedule after human approval |
-| `foundry.prepare-campaign` | `goal`, optional `sourcePostId` | Plan to create campaign copy as a draft; explicitly states that MCP cannot test, schedule or send email |
+| `foundry.prepare-campaign` | `goal`, optional `sourcePostId` | Inert draft-planning template; it cannot itself request a test, schedule or send email |
 | `foundry.review-analytics` | `view`, `range` | Plan to read one aggregate view and propose draft improvements |
 
 Stored site content is interpolated only as quoted data sections with explicit
@@ -134,14 +131,16 @@ Annotations are shown as
 | `foundry.content.patch` | `F / T / T / F` | Apply typed content commands to a new revision |
 | `foundry.design.patch` | `F / T / T / F` | Apply allowlisted design commands to a new revision |
 | `foundry.preview.prepare` | `F / F / T / F` | Persist a canonical preview fingerprint |
-| `foundry.campaign.test.request` | `F / T / T / T` | Send one exact revision to configured verified test recipients |
-| `foundry.publication.schedule` | `F / T / T / T` | Schedule exact approved site/blog revision |
-| `foundry.publication.cancel` | `F / T / T / T` | Cancel an unclaimed site/blog schedule |
 | `foundry.publication.request` | `F / T / T / T` | Start shared Git/build publication |
+| `foundry.publication.schedule` | `F / T / T / T` | Schedule exact approved site/blog revision |
 | `foundry.publication.status` | `T / - / - / F` | Read durable publish/schedule state |
+| `foundry.publication.cancel` | `F / T / T / T` | Cancel an unclaimed site/blog schedule |
+| `foundry.campaign.create` | `F / F / T / F` | Create a standalone campaign draft revision |
+| `foundry.campaign.edit` | `F / F / T / F` | Edit a campaign under optimistic concurrency |
+| `foundry.campaign.get` | `T / - / - / F` | Read campaign copy without audience or recipient data |
+| `foundry.campaign.request_test` | `F / F / T / T` | Request one test to Owner-configured verified recipients |
+| `foundry.campaign.test_readiness` | `T / - / - / F` | Read current test-delivery readiness |
 | `foundry.analytics.read` | `T / - / - / F` | Read one bounded aggregate view |
-| `foundry.connection.get` | `T / - / - / F` | Read caller's connection grant |
-| `foundry.connection.revoke` | `F / T / T / F` | Revoke caller's connection |
 
 `openWorldHint` is true only where the operation can change public site state or
 coordinate Git/Cloudflare. Analytics reads query Foundry's bounded D1 projection,

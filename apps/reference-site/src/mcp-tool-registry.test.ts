@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   registerSchema,
   unregisterSchema,
@@ -761,6 +762,62 @@ describe("MCP campaign and analytics tool registry", () => {
         execution: tool.execution,
       })),
     ).toMatchSnapshot();
+  });
+
+  it("keeps the normative tool catalog synchronized with every runtime descriptor", () => {
+    const catalog = readFileSync(
+      new URL("../../../docs/mcp/catalog.md", import.meta.url),
+      "utf8",
+    );
+    const toolTable = catalog
+      .split("## Tool catalog")[1]!
+      .split("## Representative schemas")[0]!;
+    const documented = [...toolTable.matchAll(/`(foundry\.[a-z_.]+)`/gu)].map(
+      ([, name]) => name,
+    );
+    const runtime = fullRegistry()
+      .list(
+        principal([
+          mcpInitialScope,
+          mcpContentDraftScope,
+          mcpDesignDraftScope,
+          mcpPublicationPublishScope,
+          mcpPublicationScheduleScope,
+          mcpCampaignDraftScope,
+          mcpCampaignTestScope,
+          mcpAnalyticsReadScope,
+        ]),
+      )
+      .map(({ name }) => name);
+    expect(documented).toEqual(runtime);
+  });
+
+  it("keeps the normative permission matrix synchronized with every runtime descriptor", () => {
+    const matrix = readFileSync(
+      new URL("../../../docs/mcp/permission-matrix.md", import.meta.url),
+      "utf8",
+    );
+    const toolTable = matrix
+      .split("## Tool-to-scope matrix")[1]!
+      .split("## Data classification and output")[0]!;
+    const documented = [...toolTable.matchAll(/`(foundry\.[a-z_.]+)`/gu)].map(
+      ([, name]) => name,
+    );
+    const runtime = fullRegistry()
+      .list(
+        principal([
+          mcpInitialScope,
+          mcpContentDraftScope,
+          mcpDesignDraftScope,
+          mcpPublicationPublishScope,
+          mcpPublicationScheduleScope,
+          mcpCampaignDraftScope,
+          mcpCampaignTestScope,
+          mcpAnalyticsReadScope,
+        ]),
+      )
+      .map(({ name }) => name);
+    expect(documented.sort()).toEqual(runtime.sort());
   });
 
   it("independently validates all advertised schemas with success and error examples", async () => {

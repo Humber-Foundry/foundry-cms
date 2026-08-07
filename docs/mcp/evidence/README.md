@@ -7,6 +7,9 @@ sanitization gates. Run `npm run verify:mcp:inspector` to add the pinned officia
 Inspector CLI check against the real production HTTP runtime through a
 loopback-only fixture.
 
+The pinned Inspector 2.1.0 requires Node 22.19 or newer; the repository engine
+range is aligned with that conformance dependency and product CI runs Node 24.
+
 The local conformance command runs the focused MCP suites and checks manifest
 test IDs against an ephemeral structured Vitest report. Product CI instead
 feeds the manifest gate the structured report from its single complete Vitest

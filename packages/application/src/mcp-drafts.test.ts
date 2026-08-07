@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createRichTextDocumentFromPlainText,
+  createSiteId,
   listEditableSiteFields,
   referenceSiteDefinition,
 } from "@foundry/site-definition";
@@ -46,7 +47,7 @@ function principal(
 }
 
 function fixture(scopes: ReadonlyArray<string>) {
-  const activePrincipal = principal(scopes);
+  let activePrincipal = principal(scopes);
   const workspaces = new Map<ContentWorkspaceId, ContentRevisionApplication>();
   const workspaceByKey = new Map<string, ContentWorkspaceId>();
   const audit: string[] = [];
@@ -248,6 +249,9 @@ function fixture(scopes: ReadonlyArray<string>) {
       deploymentCurrent = false;
     },
     previewScopesEvaluated,
+    setActivePrincipal(next: McpConnectionPrincipal) {
+      activePrincipal = next;
+    },
     workspaces,
   };
 }
@@ -655,6 +659,53 @@ describe("MCP canonical draft application", () => {
         ).rejects.toBeInstanceOf(McpReadError);
       }
     }
+  });
+
+  it("conceals a real foreign-site workspace and preview without changing state", async () => {
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await value.application.openWorkspace(
+        value.activePrincipal,
+        {
+          expectedRevision: 0,
+          idempotencyKey: "pairwise-site-workspace-open",
+        },
+        context,
+      ),
+    );
+    const foreign = principal(
+      [mcpInitialScope, mcpContentDraftScope],
+      createSiteId("site_pairwise_foreign"),
+    );
+    value.setActivePrincipal(foreign);
+    const beforeRevision = await value.workspaces
+      .get(opened.workspaceId)!
+      .queries.getCurrent();
+    await expect(
+      value.application.getWorkspace(foreign, opened.workspaceId, context),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      value.application.preparePreview(
+        foreign,
+        {
+          workspaceId: opened.workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "pairwise-site-preview",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      value.workspaces.get(opened.workspaceId)!.queries.getCurrent(),
+    ).resolves.toEqual(beforeRevision);
+    expect(value.auditEvents).toEqual([
+      expect.objectContaining({
+        siteId: foreign.siteId,
+        outcome: "denied",
+        reason: "OBJECT_NOT_FOUND",
+      }),
+    ]);
+    expect(JSON.stringify(value.auditEvents)).not.toContain(opened.workspaceId);
   });
 
   it("accepts canonical rich-text data and rejects malformed nodes as validation errors", async () => {

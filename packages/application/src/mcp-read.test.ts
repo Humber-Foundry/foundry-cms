@@ -42,6 +42,27 @@ const definitionWithPost = {
     ],
   },
 } satisfies SiteDefinition;
+const secondSiteId = createSiteId("site_pairwise_second");
+const secondSiteDefinition = {
+  ...definitionWithPost,
+  site: {
+    ...definitionWithPost.site,
+    id: secondSiteId,
+    name: "SECOND-SITE-PRIVATE-CANARY",
+  },
+  home: {
+    ...definitionWithPost.home,
+    id: "page_pairwise_second",
+    seo: {
+      ...definitionWithPost.home.seo,
+      title: "SECOND-SITE-PRIVATE-CANARY",
+    },
+  },
+  blog: {
+    ...definitionWithPost.blog,
+    posts: [],
+  },
+} satisfies SiteDefinition;
 const principal = Object.freeze({
   connectionId: "connection-1",
   actorId: "mcp-actor-1",
@@ -305,6 +326,92 @@ describe("site-scoped MCP read application", () => {
         }
       }
     }
+  });
+
+  it("resolves overlapping two-site content and cursors without cross-site canary leakage", async () => {
+    function twoSiteApplication(
+      definition: SiteDefinition,
+      actor: McpConnectionGrant,
+      audit: McpReadAuditEvent[],
+    ) {
+      return createMcpReadApplication({
+        site: createSiteApplication({
+          siteId: definition.site.id,
+          publishedSites: createInMemoryPublishedSiteRepository([
+            createPublishedSiteBundle(definitionWithPost),
+            createPublishedSiteBundle(secondSiteDefinition),
+          ]),
+        }),
+        siteMetadata: {
+          canonicalUrl: `https://${definition.site.id}.example`,
+          locale: "en-CA",
+          timeZone: "America/Vancouver",
+          async getLiveRelease() {
+            return null;
+          },
+        },
+        connections: {
+          async findCurrentConnection() {
+            return actor;
+          },
+          async recordInvocation(event) {
+            audit.push(event);
+          },
+        },
+        cursors: {
+          async encode(binding) {
+            return btoa(JSON.stringify(binding));
+          },
+          async decode(cursor) {
+            return JSON.parse(atob(cursor));
+          },
+        },
+        createInvocationId: () => `invocation-${definition.site.id}`,
+        now: () => "2026-07-29T18:00:00.000Z",
+      });
+    }
+
+    const firstActor = activeConnection();
+    const secondActor = activeConnection({
+      connectionId: "connection-pairwise-second",
+      actorId: "actor-pairwise-second",
+      siteId: secondSiteId,
+    });
+    const firstAudit: McpReadAuditEvent[] = [];
+    const secondAudit: McpReadAuditEvent[] = [];
+    const first = twoSiteApplication(definitionWithPost, firstActor, firstAudit);
+    const second = twoSiteApplication(
+      secondSiteDefinition,
+      secondActor,
+      secondAudit,
+    );
+    const own = await second.getContent(secondActor, {
+      kind: "page",
+      contentId: secondSiteDefinition.home.id,
+    });
+    expect(JSON.stringify(own)).toContain("SECOND-SITE-PRIVATE-CANARY");
+
+    await expect(
+      second.getContent(secondActor, {
+        kind: "page",
+        contentId: definitionWithPost.home.id,
+      }),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    const firstPage = await first.listContent(firstActor, {
+      kind: null,
+      limit: 1,
+      cursor: null,
+    });
+    await expect(
+      second.listContent(secondActor, {
+        kind: null,
+        limit: 1,
+        cursor: firstPage.result.nextCursor,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    expect(JSON.stringify(secondAudit)).not.toMatch(
+      /page_home|SECOND-SITE-PRIVATE-CANARY/iu,
+    );
   });
 
   it.each([

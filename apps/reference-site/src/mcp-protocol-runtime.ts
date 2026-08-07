@@ -90,7 +90,7 @@ const promptCatalog = [
   {
     name: "foundry.prepare-campaign",
     description:
-      "Plan campaign copy without testing, authorizing, scheduling, or sending email.",
+      "Plan campaign copy without executing a test, schedule, or email send.",
     arguments: [
       {
         name: "goal",
@@ -104,7 +104,7 @@ const promptCatalog = [
       },
     ],
     instructions:
-      "Prepare campaign copy as a draft. Do not select or reveal recipients and do not request a test, authorize, schedule, or send email.",
+      "Prepare campaign copy as a draft. This inert prompt cannot execute tools: any controlled test is a separate user-requested, scoped tool call. Do not select or reveal recipients, authorize bulk delivery, schedule, or send email.",
   },
   {
     name: "foundry.review-analytics",
@@ -282,9 +282,13 @@ export function createMcpProtocolRuntime({
 
   function activeRequestKey(
     principal: McpConnectionPrincipal,
+    sessionId: string,
     requestId: string | number,
   ) {
-    return `${principal.actorId}:${typeof requestId}:${String(requestId)}`;
+    return (
+      `${principal.actorId}:${sessionId}:` +
+      `${typeof requestId}:${String(requestId)}`
+    );
   }
 
   function toolInputIsValid(name: string, schema: object, input: unknown) {
@@ -648,14 +652,14 @@ export function createMcpProtocolRuntime({
           ["protocolVersion", "capabilities", "clientInfo"],
           ["_meta"],
         ) ||
-        rpc.params.protocolVersion !== mcpProtocolVersion ||
+        typeof rpc.params.protocolVersion !== "string" ||
         !isRecord(rpc.params.capabilities) ||
         !isRecord(rpc.params.clientInfo) ||
         typeof rpc.params.clientInfo.name !== "string" ||
         typeof rpc.params.clientInfo.version !== "string" ||
         (rpc.params._meta !== undefined && !isRecord(rpc.params._meta))
       ) {
-        return rpcError(rpc.id, -32602, "Unsupported MCP protocol version");
+        return rpcError(rpc.id, -32602, "Invalid initialize parameters");
       }
       return rpcResult(rpc.id, {
         protocolVersion: mcpProtocolVersion,
@@ -913,6 +917,8 @@ export function createMcpProtocolRuntime({
       }
       if (authenticated instanceof Response) return authenticated;
       const principal = authenticated.principal;
+      const requestSessionId =
+        request.headers.get("mcp-session-id") ?? principal.connectionId;
       let value: unknown;
       let bodyFailure: Response | null = null;
       try {
@@ -1043,7 +1049,11 @@ export function createMcpProtocolRuntime({
           return new Response(null, { status: 202 });
         }
         activeRequests.get(
-          activeRequestKey(principal, value.params.requestId),
+          activeRequestKey(
+            principal,
+            requestSessionId,
+            value.params.requestId,
+          ),
         )?.();
         return new Response(null, { status: 202 });
       }
@@ -1074,7 +1084,11 @@ export function createMcpProtocolRuntime({
           400,
         );
       }
-      const requestKey = activeRequestKey(principal, value.id);
+      const requestKey = activeRequestKey(
+        principal,
+        requestSessionId,
+        value.id,
+      );
       activeRequests.set(requestKey, context.cancel);
       try {
         const response = await dispatch(

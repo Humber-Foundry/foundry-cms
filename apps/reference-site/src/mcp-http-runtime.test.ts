@@ -9,6 +9,7 @@ import {
 } from "@hyperjump/json-schema/draft-2020-12";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -1169,6 +1170,75 @@ describe("production MCP HTTP runtime", () => {
     expect(secondBody.result).not.toHaveProperty("nextCursor");
   });
 
+  it("keeps the normative resource catalog synchronized with runtime discovery", async () => {
+    const catalog = readFileSync(
+      new URL("../../../docs/mcp/catalog.md", import.meta.url),
+      "utf8",
+    );
+    const resourceTable = catalog
+      .split("## Resources")[1]!
+      .split("## Prompts")[0]!;
+    const documented = [
+      ...resourceTable.matchAll(/`(foundry:\/\/[^`]+)`/gu),
+    ].map(([, uri]) => uri);
+
+    const { runtime } = fixture({ draftResources: true });
+    const initial = await authorizeAndExchange(runtime);
+    const steppedUp = await authorizeAndExchange(
+      runtime,
+      "site.read content.draft",
+      initial,
+    );
+    await initializeMcpSession(runtime, steppedUp.accessToken);
+    const resources = await runtime.fetch(
+      rpcRequest(steppedUp.accessToken, {
+        jsonrpc: "2.0",
+        id: "catalog-resources",
+        method: "resources/list",
+        params: {},
+      }),
+    );
+    const resourceBody = (await resources.json()) as {
+      result: { resources: Array<{ uri: string }> };
+    };
+    const templates = await runtime.fetch(
+      rpcRequest(steppedUp.accessToken, {
+        jsonrpc: "2.0",
+        id: "catalog-templates",
+        method: "resources/templates/list",
+        params: {},
+      }),
+    );
+    const templateBody = (await templates.json()) as {
+      result: {
+        resourceTemplates: Array<{ uriTemplate: string }>;
+        nextCursor?: string;
+      };
+    };
+    const templateUris = [...templateBody.result.resourceTemplates];
+    if (templateBody.result.nextCursor !== undefined) {
+      const remaining = await runtime.fetch(
+        rpcRequest(steppedUp.accessToken, {
+          jsonrpc: "2.0",
+          id: "catalog-templates-remaining",
+          method: "resources/templates/list",
+          params: { cursor: templateBody.result.nextCursor },
+        }),
+      );
+      const remainingBody = (await remaining.json()) as {
+        result: { resourceTemplates: Array<{ uriTemplate: string }> };
+      };
+      templateUris.push(...remainingBody.result.resourceTemplates);
+    }
+    const discovered = [
+      ...resourceBody.result.resources
+        .map(({ uri }) => uri)
+        .filter((uri) => !uri.startsWith("foundry://content/")),
+      ...templateUris.map(({ uriTemplate }) => uriTemplate),
+    ];
+    expect(documented).toEqual(discovered);
+  });
+
   it("resolves actionable workspace and stale-revision resource URIs", async () => {
     const { runtime } = fixture({ draftResources: true });
     const initial = await authorizeAndExchange(runtime);
@@ -1572,6 +1642,28 @@ describe("production MCP HTTP runtime", () => {
     });
   });
 
+  it("negotiates initialize by returning the server-supported protocol version", async () => {
+    const { runtime } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+    const response = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "initialize-version-negotiation",
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "older-client", version: "1" },
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-session-id")).toEqual(expect.any(String));
+    await expect(response.json()).resolves.toMatchObject({
+      result: { protocolVersion: "2025-11-25" },
+    });
+  });
+
   it("publishes inert prompts and resolves them without executing a tool", async () => {
     const { runtime, audit } = fixture();
     const { accessToken } = await authorizeAndExchange(runtime);
@@ -1660,10 +1752,10 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     const campaignBody = await campaign.text();
-    expect(campaignBody).toContain("do not request a test");
     expect(campaignBody).toContain(
-      "do not request a test, authorize, schedule, or send email",
+      "controlled test is a separate user-requested, scoped tool call",
     );
+    expect(campaignBody).toContain("cannot execute tools");
     expect(audit).toHaveLength(beforeGet);
   });
 
@@ -1793,6 +1885,83 @@ describe("production MCP HTTP runtime", () => {
       },
     );
     releaseRead();
+  });
+
+  it("isolates equal request IDs between concurrent sessions for the same actor", async () => {
+    let startedCount = 0;
+    let releaseBothStarted!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseBothStarted = resolve;
+    });
+    const releases: Array<() => void> = [];
+    const { runtime } = fixture({
+      connectionIds: [
+        "11111111-1111-4111-8111-111111111111",
+        "55555555-5555-4555-8555-555555555555",
+      ],
+      actorIds: [
+        "22222222-2222-4222-8222-222222222222",
+        "22222222-2222-4222-8222-222222222222",
+      ],
+      async beforeGetLiveRelease() {
+        startedCount += 1;
+        if (startedCount === 2) releaseBothStarted();
+        await new Promise<void>((resolve) => releases.push(resolve));
+      },
+    });
+    const first = await authorizeAndExchange(runtime);
+    const firstSession = await initializeMcpSession(runtime, first.accessToken);
+    const second = await authorizeAndExchange(runtime);
+    const secondSession = await initializeMcpSession(runtime, second.accessToken);
+    const call = (accessToken: string, sessionId: string) =>
+      runtime.fetch(
+        rpcRequest(
+          accessToken,
+          {
+            jsonrpc: "2.0",
+            id: "same-session-local-id",
+            method: "tools/call",
+            params: { name: "foundry.site.get", arguments: {} },
+          },
+          sessionId,
+        ),
+      );
+    const firstRequest = call(first.accessToken, firstSession);
+    let secondSettled = false;
+    const secondRequest = call(second.accessToken, secondSession).finally(() => {
+      secondSettled = true;
+    });
+    await bothStarted;
+
+    await runtime.fetch(
+      rpcRequest(
+        first.accessToken,
+        {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId: "same-session-local-id" },
+        },
+        firstSession,
+      ),
+    );
+    await expect(firstRequest.then((response) => response.json())).resolves
+      .toMatchObject({ error: { code: -32800 } });
+    expect(secondSettled).toBe(false);
+
+    await runtime.fetch(
+      rpcRequest(
+        second.accessToken,
+        {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { requestId: "same-session-local-id" },
+        },
+        secondSession,
+      ),
+    );
+    await expect(secondRequest.then((response) => response.json())).resolves
+      .toMatchObject({ error: { code: -32800 } });
+    for (const release of releases) release();
   });
 
   it.runIf(process.env.RUN_MCP_INSPECTOR === "1")(

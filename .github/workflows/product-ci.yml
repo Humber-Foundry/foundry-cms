@@ -36,7 +36,7 @@ jobs:
         run: npm run verify:site-validator
 
       - name: Run application-seam tests with structured evidence
-        run: npm test -- --reporter=json --outputFile=/tmp/foundry-vitest.json
+        run: npm test -- --reporter=default --reporter=json --outputFile.json=/tmp/foundry-vitest.json
 
       - name: Verify MCP conformance evidence from the test run
         run: node scripts/verify-mcp-conformance.mjs /tmp/foundry-vitest.json

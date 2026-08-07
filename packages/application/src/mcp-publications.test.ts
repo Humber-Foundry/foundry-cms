@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import {
+  createSiteId,
+  referenceSiteDefinition,
+} from "@foundry/site-definition";
 
 // Imported from its own module rather than the package barrel: the barrel
 // re-exports this file's subject, so going through it can leave the hash
@@ -407,6 +410,50 @@ describe("MCP publication orchestration", () => {
       ).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
       expect(publish).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("conceals foreign-site publication IDs before publisher or state mutation", async () => {
+    const foreign: McpConnectionPrincipal = {
+      ...principal,
+      connectionId: "connection-publication-foreign",
+      actorId: "agent-publication-foreign",
+      siteId: createSiteId("site_publication_foreign"),
+    };
+    const { application, publish, publicationAudit } = await fixture({
+      connectionAt: () => ({ ...foreign, status: "active" }),
+    });
+    await expect(
+      application.requestPublication(
+        foreign,
+        {
+          workspaceId,
+          revision: 1,
+          approvalId,
+          idempotencyKey: "45454545-4545-4454-8454-454545454545",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    await expect(
+      application.publicationStatus(
+        foreign,
+        { workspaceId, revision: 1, operationId: publicationId },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "OBJECT_NOT_FOUND" });
+    expect(publish).not.toHaveBeenCalled();
+    expect(publicationAudit).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          siteId: foreign.siteId,
+          outcome: "denied",
+          reason: "OBJECT_NOT_FOUND",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(publicationAudit)).not.toContain(
+      "MCP approved publication",
+    );
   });
 
   it("intersects dynamic draft scopes with the current grant", async () => {
