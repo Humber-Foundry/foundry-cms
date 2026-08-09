@@ -151,10 +151,12 @@ function toApproval(row: ApprovalRow): ContentApproval {
       : JSON.parse(row.blog_post_artifacts_json);
   if (
     !Array.isArray(postArtifacts) ||
-    !postArtifacts.every(isBlogPostArtifactFingerprint) ||
-    !isContentSerializationVersion(row.serialization_version)
+    !postArtifacts.every(isBlogPostArtifactFingerprint)
   ) {
     throw new Error("content_approval_blog_post_artifacts_invalid");
+  }
+  if (!isContentSerializationVersion(row.serialization_version)) {
+    throw new Error("content_approval_serialization_version_invalid");
   }
   const fingerprint: ContentApprovalFingerprint = {
     value: row.fingerprint,
