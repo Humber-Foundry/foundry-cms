@@ -202,7 +202,7 @@ async function main() {
           pathToFileURL(
             join(
               provenanceDirectory,
-              "node_modules/@foundry/operator/dist/index.js",
+              "node_modules/@humber-foundry/operator/dist/index.js",
             ),
           ).href
         );

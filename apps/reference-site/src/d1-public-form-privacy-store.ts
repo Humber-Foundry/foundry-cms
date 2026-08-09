@@ -11,7 +11,7 @@ import {
   type PublicFormBackupSnapshot,
   type PublicFormBackupSubmissionRow,
   type PublicFormPrivacyStore,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 

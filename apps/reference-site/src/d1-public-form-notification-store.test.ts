@@ -12,8 +12,8 @@ import {
   createPublicFormRequestHash,
   createPublicFormSubmissionId,
   type PublicFormAcceptance,
-} from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";

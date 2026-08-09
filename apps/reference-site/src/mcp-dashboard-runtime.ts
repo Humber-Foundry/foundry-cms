@@ -1,6 +1,6 @@
 import "server-only";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";

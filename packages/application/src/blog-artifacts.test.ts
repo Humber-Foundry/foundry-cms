@@ -4,7 +4,7 @@ import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { createBlogPostArtifactFingerprint } from "./blog-artifacts";
 

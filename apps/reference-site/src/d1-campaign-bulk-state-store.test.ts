@@ -9,8 +9,8 @@ import {
   type CampaignBulkAuthorization,
   type CampaignBulkSendArtifact,
   type CampaignBulkSendOperation,
-} from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";

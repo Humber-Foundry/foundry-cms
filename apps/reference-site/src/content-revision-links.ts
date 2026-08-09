@@ -1,4 +1,4 @@
-import type { ContentWorkspaceId } from "@foundry/application";
+import type { ContentWorkspaceId } from "@humber-foundry/application";
 
 export function revisionPreviewGatewayUrl(
   workspaceId: ContentWorkspaceId,

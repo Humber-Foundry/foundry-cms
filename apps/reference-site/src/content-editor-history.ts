@@ -5,7 +5,7 @@ import {
   updateEditableSiteField,
   type SiteDefinition,
   type SiteDefinitionEdit,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 function compositionIdentity(definition: SiteDefinition): string {
   return JSON.stringify(toPageCompositionIdentity(definition));

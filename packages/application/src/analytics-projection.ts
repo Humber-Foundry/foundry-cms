@@ -7,7 +7,7 @@
  * comparability rules for every source.
  */
 
-import type { SiteId } from "@foundry/site-definition";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 import {
   addUtcDays,

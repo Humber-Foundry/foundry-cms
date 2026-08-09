@@ -23,7 +23,7 @@ import {
   type ProofSection,
   type ServicesSection,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   definitionToPuckData,

@@ -6,7 +6,7 @@ import {
   type RichTextLinkMark,
   type RichTextParagraph,
   type RichTextText,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   lengthDelimitedText,

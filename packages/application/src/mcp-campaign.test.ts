@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   AccessDeniedError,

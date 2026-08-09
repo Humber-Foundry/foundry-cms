@@ -88,7 +88,7 @@ async function main() {
     const lockPath = join(target, "package-lock.json");
     const originalLock = await readFile(lockPath, "utf8");
     const mismatchedLock = JSON.parse(originalLock);
-    mismatchedLock.packages["node_modules/@foundry/reference-site"].integrity =
+    mismatchedLock.packages["node_modules/@humber-foundry/reference-site"].integrity =
       `sha512-${Buffer.alloc(64).toString("base64")}`;
     await writeFile(lockPath, `${JSON.stringify(mismatchedLock, null, 2)}\n`);
     expectCommandFailure(
@@ -96,7 +96,7 @@ async function main() {
       scaffoldArguments,
       target,
       env,
-      "foundation_scaffold_executable_not_locked:@foundry/reference-site",
+      "foundation_scaffold_executable_not_locked:@humber-foundry/reference-site",
     );
     await writeFile(lockPath, originalLock);
     command(scaffoldCommand, scaffoldArguments, target, env);
@@ -115,7 +115,7 @@ async function main() {
     const lockSource = JSON.stringify(lock);
     if (
       lockSource.includes("workspace:") ||
-      (lockSource.includes("node_modules/@foundry/") &&
+      (lockSource.includes("node_modules/@humber-foundry/") &&
         lockSource.includes("\"link\":true"))
     ) {
       throw new Error("foundation_release_workspace_link_detected");

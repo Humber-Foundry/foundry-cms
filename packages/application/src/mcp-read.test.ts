@@ -6,7 +6,7 @@ import {
   createSiteId,
   referenceSiteDefinition,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   ContentRevisionStaleError,

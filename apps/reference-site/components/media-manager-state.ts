@@ -1,4 +1,4 @@
-import type { MediaCrop } from "@foundry/application";
+import type { MediaCrop } from "@humber-foundry/application";
 
 export type MediaOccurrenceState = Readonly<{
   occurrenceId: string;

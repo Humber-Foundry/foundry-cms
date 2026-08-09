@@ -57,13 +57,13 @@ Apply the checked-in D1 migrations to both the primary and isolated recovery
 databases locally with:
 
 ```sh
-npm run db:migrate:local --workspace @foundry/reference-site
+npm run db:migrate:local --workspace @humber-foundry/reference-site
 ```
 
 Before deployment, apply the same migrations to both remote databases:
 
 ```sh
-npm run db:migrate:remote --workspace @foundry/reference-site
+npm run db:migrate:remote --workspace @humber-foundry/reference-site
 ```
 
 Foundry stores no password or login session. Owners can invite Editors or other
@@ -267,7 +267,7 @@ machine, not the Worker. Set a short-lived `CLOUDFLARE_API_TOKEN` with D1
 read/write and R2 object-read access, then run:
 
 ```sh
-npm run forms:restore --workspace @foundry/reference-site -- \
+npm run forms:restore --workspace @humber-foundry/reference-site -- \
   --account-id <cloudflare-account-id> \
   --primary-database-id <primary-d1-id> \
   --recovery-database-id <isolated-recovery-d1-id> \

@@ -123,8 +123,8 @@ describe("foundation release publication boundary", () => {
 
   it("allows a token only for first package registration", async () => {
     const artifacts = [
-      { name: "@foundry/application" },
-      { name: "@foundry/operator" },
+      { name: "@humber-foundry/application" },
+      { name: "@humber-foundry/operator" },
     ];
     await expect(
       assertPublicationAuthentication({
@@ -132,7 +132,7 @@ describe("foundation release publication boundary", () => {
         mode: "bootstrap",
         bootstrapToken: "short-lived",
         packageExists: async (artifact) =>
-          artifact.name === "@foundry/application",
+          artifact.name === "@humber-foundry/application",
       }),
     ).resolves.toBeUndefined();
     await expect(
@@ -163,10 +163,10 @@ describe("foundation release publication boundary", () => {
 
   it("publishes a fresh or partial release before provenance verification", async () => {
     const artifacts = [
-      { name: "@foundry/application", integrity: "sha512-a" },
-      { name: "@foundry/operator", integrity: "sha512-b" },
+      { name: "@humber-foundry/application", integrity: "sha512-a" },
+      { name: "@humber-foundry/operator", integrity: "sha512-b" },
     ];
-    const registry = new Map([["@foundry/application", "sha512-a"]]);
+    const registry = new Map([["@humber-foundry/application", "sha512-a"]]);
     const events = [];
     await publishRegistryArtifacts({
       artifacts,
@@ -177,13 +177,13 @@ describe("foundation release publication boundary", () => {
       },
       verifyProvenance: async () => events.push("provenance"),
     });
-    expect(events).toEqual(["publish:@foundry/operator", "provenance"]);
+    expect(events).toEqual(["publish:@humber-foundry/operator", "provenance"]);
   });
 
   it("fails before publication on conflicting registry integrity", async () => {
     await expect(
       publishRegistryArtifacts({
-        artifacts: [{ name: "@foundry/operator", integrity: "sha512-good" }],
+        artifacts: [{ name: "@humber-foundry/operator", integrity: "sha512-good" }],
         getIntegrity: async () => "sha512-conflict",
         publish: async () => undefined,
         verifyProvenance: async () => undefined,

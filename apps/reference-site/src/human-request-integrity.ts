@@ -1,4 +1,4 @@
-import type { ExternalHumanIdentity } from "@foundry/application";
+import type { ExternalHumanIdentity } from "@humber-foundry/application";
 
 export const humanTokenLifetimeSeconds = 5 * 60;
 

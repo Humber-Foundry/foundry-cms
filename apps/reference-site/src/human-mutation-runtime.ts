@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { ExternalHumanIdentity } from "@foundry/application";
+import type { ExternalHumanIdentity } from "@humber-foundry/application";
 
 import {
   HumanAccessConfigurationError,

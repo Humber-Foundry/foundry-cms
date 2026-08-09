@@ -1,4 +1,4 @@
-import type { NewsletterProviderOwnershipEvidence } from "@foundry/application";
+import type { NewsletterProviderOwnershipEvidence } from "@humber-foundry/application";
 
 /**
  * Parses the installation's Brevo provisioning evidence from configuration.

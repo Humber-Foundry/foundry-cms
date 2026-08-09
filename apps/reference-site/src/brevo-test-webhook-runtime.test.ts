@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { hmacSha256CanonicalJson } from "@foundry/application";
+import { hmacSha256CanonicalJson } from "@humber-foundry/application";
 
 import { createBrevoTestWebhookHandler } from "./brevo-test-webhook-runtime";
 import type {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   currentRouteHistory,

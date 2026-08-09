@@ -7,11 +7,11 @@ import {
   createContentWorkspaceId,
   createInMemoryBlogPostOperationsStore,
   ContentPublicationValidationError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createBlogPostId,
   createSiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 const mocks = vi.hoisted(() => ({
   findApproval: vi.fn(),

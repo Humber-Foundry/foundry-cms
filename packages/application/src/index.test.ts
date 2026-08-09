@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createSiteId,
   referenceSiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   SiteNotFoundError,

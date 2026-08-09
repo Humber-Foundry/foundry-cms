@@ -9,9 +9,9 @@ import {
   createInMemoryContentRevisionStore,
   createMediaOccurrenceId,
   type ContentWorkspaceId,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
-import type { SiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import type { SiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   createD1ContentRevisionStore,

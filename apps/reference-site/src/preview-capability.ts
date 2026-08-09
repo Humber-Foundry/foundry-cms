@@ -1,7 +1,7 @@
 import type {
   ContentWorkspaceId,
   ExternalHumanIdentity,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 const capabilityLifetimeSeconds = 5 * 60;
 

@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { campaignSuppressionReason } from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+import { campaignSuppressionReason } from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import { normalizeAuthenticatedBrevoBulkWebhookEvent } from "./brevo-campaign-bulk-webhook-runtime";
 

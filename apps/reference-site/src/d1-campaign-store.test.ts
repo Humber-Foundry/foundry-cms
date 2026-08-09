@@ -12,11 +12,11 @@ import {
   createHumanMembershipId,
   createHumanUserId,
   type ExternalHumanIdentity,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   createSiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { createD1CampaignStore } from "./d1-campaign-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";

@@ -8,8 +8,8 @@ import {
   type McpConnectionPrincipal,
   type McpConnectionStore,
   type McpCursorCodec,
-} from "@foundry/application";
-import type { SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 import {
   base64UrlEncode,

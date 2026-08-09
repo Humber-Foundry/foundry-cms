@@ -5,7 +5,7 @@ import {
   InvalidHumanEmailError,
   isMembershipStatus,
   LastOwnerError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   AccessIdentityError,

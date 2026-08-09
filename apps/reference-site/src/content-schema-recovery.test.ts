@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { canonicalJson } from "@foundry/application";
+import { canonicalJson } from "@humber-foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeRichTextDocument,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   durableSchemaRecoveryEdits,

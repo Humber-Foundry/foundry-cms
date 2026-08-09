@@ -20,14 +20,14 @@ import {
   type createMcpDraftApplication,
   type createMcpPublicationApplication,
   type createMcpReadApplication,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   designContract,
   listEditableSiteFields,
   referenceSiteDefinition,
   siteDefinitionSchema,
   type RichTextDocument,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { hasExactKeys, isRecord } from "./mcp-http-support";
 

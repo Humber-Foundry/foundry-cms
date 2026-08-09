@@ -6,7 +6,7 @@ import type {
   ContentWorkspaceId,
   JoinedMcpMutationAudit,
   JoinedMcpMutationResult,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   ContentRevisionConfigurationError,
   ContentRevisionBookmarkError,
@@ -20,14 +20,14 @@ import {
   assertContentRevisionBase,
   assertContentRevisionIdempotency,
   withContentRevisionBookmark,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   isSiteDefinition,
   type BlogPost,
   type SiteDefinition,
   type SiteId,
   type StoredSiteDefinitionSchemaVersion,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import type {
   D1DatabaseBinding,

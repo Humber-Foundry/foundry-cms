@@ -4,7 +4,7 @@ import {
   AccessDeniedError,
   InvalidHumanEmailError,
   LastOwnerError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import { AccessIdentityError } from "../../../../src/access-identity";
 import { HumanAccessConfigurationError } from "../../../../src/human-access-configuration";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";

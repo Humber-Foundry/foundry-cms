@@ -3,7 +3,7 @@ import type {
   AnalyticsReading,
   AnalyticsSourceHealth,
   AnalyticsValue,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime";
 

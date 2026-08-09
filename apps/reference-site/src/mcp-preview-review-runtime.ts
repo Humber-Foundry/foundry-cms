@@ -4,11 +4,11 @@ import {
   createCanonicalPreviewArtifactHash,
   createContentActorId,
   createContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   listEditableSiteFields,
   type SiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { loadContentRevisionApplication } from "./content-revision-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";

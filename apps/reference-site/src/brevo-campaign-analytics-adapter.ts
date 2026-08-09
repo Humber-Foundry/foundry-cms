@@ -5,7 +5,7 @@ import {
   type ProviderMetricCapability,
   type NewsletterAnalyticsAdapter,
   type ProviderAnalyticsHealth,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 /**
  * The Brevo analytics adapter. It reads aggregate campaign reports.

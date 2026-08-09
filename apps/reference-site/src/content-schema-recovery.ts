@@ -1,6 +1,6 @@
 import {
   canonicalJson,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   designContract,
@@ -10,7 +10,7 @@ import {
   upgradeSiteDefinition,
   type PageSection,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   excludeCompositionOwnedEdits,

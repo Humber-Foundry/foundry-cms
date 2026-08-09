@@ -14,10 +14,10 @@ export const foundationReleaseSchemaVersion =
   "foundry.foundation-release/v1";
 
 export const foundationPackageNames = Object.freeze([
-  "@foundry/application",
-  "@foundry/operator",
-  "@foundry/reference-site",
-  "@foundry/site-definition",
+  "@humber-foundry/application",
+  "@humber-foundry/operator",
+  "@humber-foundry/reference-site",
+  "@humber-foundry/site-definition",
 ] as const);
 
 export type FoundationPackageName = (typeof foundationPackageNames)[number];

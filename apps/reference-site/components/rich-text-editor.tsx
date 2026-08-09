@@ -15,7 +15,7 @@ import {
   parseSerializedRichTextDocument,
   toTipTapDocument,
   type SerializedRichTextDocument,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   serializeSupportedTipTapDocument,

@@ -5,12 +5,12 @@ import { useRef, useState } from "react";
 import {
   canonicalJson,
   type ContentRevision,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   isSiteDefinition,
   pageCompositionContract,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import { restorePreservedMedia } from "../src/content-media-recovery";

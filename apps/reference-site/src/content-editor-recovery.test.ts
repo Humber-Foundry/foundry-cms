@@ -8,7 +8,7 @@ import {
   toPageComposition,
   toPageCompositionIdentity,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   applyStructuralRecovery,

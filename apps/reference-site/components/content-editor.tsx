@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 
-import type { ContentRevision } from "@foundry/application";
+import type { ContentRevision } from "@humber-foundry/application";
 import {
   listEditableSiteFields,
   pageCompositionContract,
@@ -18,7 +18,7 @@ import {
   updateEditableSiteField,
   type EditableSiteField,
   type SiteDefinitionEdit,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   contentEditorReducer,

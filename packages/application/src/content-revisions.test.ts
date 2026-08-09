@@ -8,7 +8,7 @@ import {
   referenceSiteDefinition,
   toPageComposition,
   type PageSection,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   ContentRevisionConflictError,

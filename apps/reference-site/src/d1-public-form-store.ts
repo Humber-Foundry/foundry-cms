@@ -3,8 +3,8 @@ import "server-only";
 import type {
   PublicFormAcceptance,
   PublicFormAcceptanceStore,
-} from "@foundry/application";
-import { createPublicFormReceiptId } from "@foundry/application";
+} from "@humber-foundry/application";
+import { createPublicFormReceiptId } from "@humber-foundry/application";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 

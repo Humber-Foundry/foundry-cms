@@ -5,7 +5,7 @@ import {
   createRichTextDocumentFromPlainText,
   createSiteId,
   type BlogPost,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   AccessDeniedError,

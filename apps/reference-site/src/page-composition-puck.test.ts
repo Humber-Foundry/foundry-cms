@@ -4,7 +4,7 @@ import {
   referenceSiteDefinition,
   type PageSection,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   definitionToPuckData,

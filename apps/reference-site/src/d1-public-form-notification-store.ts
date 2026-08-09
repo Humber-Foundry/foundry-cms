@@ -3,7 +3,7 @@ import {
   createPublicFormId,
   createPublicFormReceiptId,
   type PublicFormNotificationStore,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 

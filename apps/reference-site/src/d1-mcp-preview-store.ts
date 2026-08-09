@@ -4,7 +4,7 @@ import {
   type McpConnectionPrincipal,
   type McpDraftRuntime,
   type McpReadAuditEvent,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 

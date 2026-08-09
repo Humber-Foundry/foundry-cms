@@ -8,7 +8,7 @@
  * unavailable; breakdown rows below five are suppressed.
  */
 
-import type { SiteId } from "@foundry/site-definition";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 import {
   addUtcDays,

@@ -1,7 +1,7 @@
 import type {
   BlogPostOperationalState,
   RestoredBlogPostDraft,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import type { D1ContentRevisionInitializationExtension } from "./d1-content-revision-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";

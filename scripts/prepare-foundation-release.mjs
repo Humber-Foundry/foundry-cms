@@ -18,16 +18,16 @@ const artifactsDirectory = join(output, "artifacts");
 const stageDirectory = join(output, ".stage");
 const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const packageNames = [
-  "@foundry/application",
-  "@foundry/operator",
-  "@foundry/reference-site",
-  "@foundry/site-definition",
+  "@humber-foundry/application",
+  "@humber-foundry/operator",
+  "@humber-foundry/reference-site",
+  "@humber-foundry/site-definition",
 ];
 const packageLocations = {
-  "@foundry/application": "packages/application",
-  "@foundry/operator": "packages/operator",
-  "@foundry/reference-site": "apps/reference-site",
-  "@foundry/site-definition": "packages/site-definition",
+  "@humber-foundry/application": "packages/application",
+  "@humber-foundry/operator": "packages/operator",
+  "@humber-foundry/reference-site": "apps/reference-site",
+  "@humber-foundry/site-definition": "packages/site-definition",
 };
 
 function command(commandName, args, options = {}) {
@@ -106,9 +106,9 @@ async function stageReferenceSite(version) {
     target,
     dependencies: {
       ...source.dependencies,
-      "@foundry/application": version,
-      "@foundry/operator": version,
-      "@foundry/site-definition": version,
+      "@humber-foundry/application": version,
+      "@humber-foundry/operator": version,
+      "@humber-foundry/site-definition": version,
       ...source.devDependencies,
       "@types/commonmark": rootPackage.devDependencies["@types/commonmark"],
       ajv: rootPackage.devDependencies.ajv,
@@ -143,27 +143,27 @@ async function main() {
   await mkdir(stageDirectory, { recursive: true });
 
   const stages = {
-    "@foundry/site-definition": await stageLibrary({
-      name: "@foundry/site-definition",
+    "@humber-foundry/site-definition": await stageLibrary({
+      name: "@humber-foundry/site-definition",
       location: "packages/site-definition",
       entry: "src/index.ts",
       platform: "neutral",
     }),
-    "@foundry/application": await stageLibrary({
-      name: "@foundry/application",
+    "@humber-foundry/application": await stageLibrary({
+      name: "@humber-foundry/application",
       location: "packages/application",
       entry: "src/index.ts",
       platform: "neutral",
-      dependencies: { "@foundry/site-definition": version },
+      dependencies: { "@humber-foundry/site-definition": version },
     }),
-    "@foundry/operator": await stageLibrary({
-      name: "@foundry/operator",
+    "@humber-foundry/operator": await stageLibrary({
+      name: "@humber-foundry/operator",
       location: "packages/operator",
       entry: "src/index.ts",
       platform: "node",
-      dependencies: { "@foundry/application": version },
+      dependencies: { "@humber-foundry/application": version },
     }),
-    "@foundry/reference-site": await stageReferenceSite(version),
+    "@humber-foundry/reference-site": await stageReferenceSite(version),
   };
 
   const artifacts = {};
@@ -182,7 +182,7 @@ async function main() {
       engines: { node: rootPackage.engines.node },
       publishConfig: { access: "public" },
       dependencies: stage.dependencies,
-      ...(name === "@foundry/reference-site"
+      ...(name === "@humber-foundry/reference-site"
         ? { bin: { "foundry-reference-site": "scripts/scaffold-foundation-release.mjs" } }
         : {
             exports: {

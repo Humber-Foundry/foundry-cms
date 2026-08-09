@@ -6,7 +6,7 @@ import { useState } from "react";
 import type {
   FailedPublicFormDelivery,
   SuspectedSpamSubmission,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 export function FormOperationsControls({
   csrfToken,

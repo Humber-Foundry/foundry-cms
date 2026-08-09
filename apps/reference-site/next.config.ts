@@ -9,8 +9,8 @@ const nextConfig: NextConfig = {
       "",
   },
   transpilePackages: [
-    "@foundry/application",
-    "@foundry/site-definition",
+    "@humber-foundry/application",
+    "@humber-foundry/site-definition",
   ],
 };
 

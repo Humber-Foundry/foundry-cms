@@ -1,4 +1,4 @@
-import type { SiteMediaCrop } from "@foundry/site-definition";
+import type { SiteMediaCrop } from "@humber-foundry/site-definition";
 
 export function mediaCropStyle(
   crop: SiteMediaCrop,

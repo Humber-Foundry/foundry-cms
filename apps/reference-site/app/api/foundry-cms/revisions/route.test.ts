@@ -7,11 +7,11 @@ import {
   ContentRevisionValidationError,
   ContentWorkspaceAccessError,
   MediaValidationError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   referenceSiteDefinition,
   serializeRichTextDocument,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
 
 vi.mock("server-only", () => ({}));

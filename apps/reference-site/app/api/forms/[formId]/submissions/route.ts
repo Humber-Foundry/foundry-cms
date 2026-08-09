@@ -3,7 +3,7 @@ import {
   publicFormMaximumBodySize,
   PublicFormRejectedError,
   PublicFormUnavailableError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import { acceptPublicFormSubmission } from "../../../../../src/public-form-runtime";
 

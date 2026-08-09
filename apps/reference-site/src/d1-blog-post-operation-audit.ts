@@ -1,7 +1,7 @@
 import type {
   BlogPostOperationAuditEvent,
-} from "@foundry/application";
-import type { BlogPostId, SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { BlogPostId, SiteId } from "@humber-foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 

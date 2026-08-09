@@ -14,8 +14,8 @@ npm run release:prepare
 npm run release:verify
 ```
 
-Preparation packs `@foundry/operator`, `@foundry/reference-site`,
-`@foundry/application`, and `@foundry/site-definition` at the root version. It
+Preparation packs `@humber-foundry/operator`, `@humber-foundry/reference-site`,
+`@humber-foundry/application`, and `@humber-foundry/site-definition` at the root version. It
 then generates `foundation-release/foundation-release.json` from the tarball
 bytes and current commit. The descriptor records SHA-512 npm integrity,
 SHA-256, byte size, Node/npm compatibility, every migration checksum, the
@@ -52,7 +52,7 @@ administrator bypass. The live environment permits only `main`. The first
 registration of these package names is a one-time exception because npm cannot
 configure a trusted publisher until a package already exists. For that first
 run only, an owner creates a short-lived granular npm token with publish access
-to the `@foundry` scope, stores it as the `NPM_BOOTSTRAP_TOKEN` secret on the
+to the `@humber-foundry` scope, stores it as the `NPM_BOOTSTRAP_TOKEN` secret on the
 protected environment, and selects `bootstrap`. The workflow refuses bootstrap
 after all four package names exist. Immediately after that run, the owner
 configures this repository and `foundation-release.yml` as the trusted
@@ -70,9 +70,9 @@ the descriptor bytes first, then each artifact:
 node -e "const fs=require('node:fs'),c=require('node:crypto');const s=fs.readFileSync('foundation-release.json');const got='sha256:'+c.createHash('sha256').update(s).digest('hex');const want=fs.readFileSync('foundation-release.sha256','utf8').trim();if(got!==want)process.exit(1)"
 node -e "const fs=require('node:fs'),c=require('node:crypto'),d=require('./foundation-release.json');for(const a of Object.values(d.artifacts)){const b=fs.readFileSync(a.filename),i='sha512-'+c.createHash('sha512').update(b).digest('base64');if(i!==a.integrity||b.length!==a.size)process.exit(1)}"
 VERSION="$(node -p "require('./foundation-release.json').version")"
-npm install "@foundry/application@$VERSION" "@foundry/operator@$VERSION" "@foundry/reference-site@$VERSION" "@foundry/site-definition@$VERSION"
+npm install "@humber-foundry/application@$VERSION" "@humber-foundry/operator@$VERSION" "@humber-foundry/reference-site@$VERSION" "@humber-foundry/site-definition@$VERSION"
 npm audit signatures --json --include-attestations > npm-provenance.json
-node -e "Promise.all([import('@foundry/operator'),require('node:fs').promises.readFile('foundation-release.json','utf8'),require('node:fs').promises.readFile('npm-provenance.json','utf8')]).then(([o,d,a])=>o.assertFoundationReleaseNpmProvenance({descriptor:JSON.parse(d),auditSource:a}))"
+node -e "Promise.all([import('@humber-foundry/operator'),require('node:fs').promises.readFile('foundation-release.json','utf8'),require('node:fs').promises.readFile('npm-provenance.json','utf8')]).then(([o,d,a])=>o.assertFoundationReleaseNpmProvenance({descriptor:JSON.parse(d),auditSource:a}))"
 ```
 
 The #59 operator flow must pin the descriptor digest in its reviewed plan and

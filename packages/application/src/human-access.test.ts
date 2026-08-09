@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createSiteId } from "@foundry/site-definition";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import {
   AccessDeniedError,

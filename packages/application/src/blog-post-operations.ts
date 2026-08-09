@@ -1,4 +1,4 @@
-import type { BlogPostId, SiteId } from "@foundry/site-definition";
+import type { BlogPostId, SiteId } from "@humber-foundry/site-definition";
 
 import type {
   ContentActorId,

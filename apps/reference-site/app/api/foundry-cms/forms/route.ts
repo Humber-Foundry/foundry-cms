@@ -4,7 +4,7 @@ import {
   createPublicFormDeliveryId,
   createPublicFormReceiptId,
   type ExportedPublicFormSubmission,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   authorizeAuthenticatedHumanIdentity,

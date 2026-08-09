@@ -1,4 +1,4 @@
-import type { SiteId } from "@foundry/site-definition";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 declare const publicFormIdBrand: unique symbol;
 

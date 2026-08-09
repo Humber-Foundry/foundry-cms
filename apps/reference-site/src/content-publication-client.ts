@@ -2,7 +2,7 @@ import {
   contentPublicationHasUnresolvedGitOutcome,
   contentPublicationStatuses,
   type ContentPublicationHistoryEntry,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 export type ContentPublicationAttempt = Readonly<{
   body: string;

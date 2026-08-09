@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createContentWorkspaceId } from "@foundry/application";
+import { createContentWorkspaceId } from "@humber-foundry/application";
 
 import {
   PreviewCapabilityError,

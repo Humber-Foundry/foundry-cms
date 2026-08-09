@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import type { D1DatabaseBinding } from "../src/d1-human-access-store";
 import { createD1RestDatabase } from "../src/d1-rest-database";
@@ -22,7 +22,7 @@ type Options = Readonly<{
 }>;
 
 const usage = `Usage:
-  npm run forms:restore --workspace @foundry/reference-site -- \\
+  npm run forms:restore --workspace @humber-foundry/reference-site -- \\
     --account-id <cloudflare-account-id> \\
     --primary-database-id <primary-d1-id> \\
     --recovery-database-id <isolated-recovery-d1-id> \\

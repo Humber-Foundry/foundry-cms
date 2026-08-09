@@ -4,8 +4,8 @@ import {
   createCanonicalPreviewArtifactHash,
   createContentActorId,
   createContentWorkspaceId,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 const mocks = vi.hoisted(() => ({
   first: vi.fn(),

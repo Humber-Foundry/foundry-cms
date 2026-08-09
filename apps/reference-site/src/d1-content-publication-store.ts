@@ -12,7 +12,7 @@ import type {
   ContentPublicationMcpAuthority,
   ContentPublicationReservationProof,
   ContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   assertContentPublicationIdempotency,
   ContentPublicationIdempotencyError,
@@ -26,7 +26,7 @@ import {
   isBlogPostArtifactFingerprint,
   serializeContentPublicationCommandIdentity,
   serializeContentRestoreIdentity,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 

@@ -1,4 +1,4 @@
-import type { SiteId } from "@foundry/site-definition";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 import type { ContentActorId, ContentWorkspaceId } from "./content-revisions";
 import { sha256CanonicalJson } from "./deterministic-hash";

@@ -1,4 +1,4 @@
-import type { MediaSourceStore } from "@foundry/application";
+import type { MediaSourceStore } from "@humber-foundry/application";
 
 export interface PrivateMediaBucket {
   put(

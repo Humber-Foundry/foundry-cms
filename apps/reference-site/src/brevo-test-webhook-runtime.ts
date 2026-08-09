@@ -1,7 +1,7 @@
 import {
   sha256CanonicalJson,
   sha256Text,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   brevoTestRecipientFingerprint,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { campaignAnalyticsMeasurements } from "@foundry/application";
+import { campaignAnalyticsMeasurements } from "@humber-foundry/application";
 
 import {
   AnalyticsEngineSourceError,

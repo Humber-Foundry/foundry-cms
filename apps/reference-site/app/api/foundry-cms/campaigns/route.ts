@@ -11,7 +11,7 @@ import {
   type CampaignBulkDeliveryApplication,
   type CampaignCommandName,
   type CampaignEditableInput,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import { loadCampaignRequestContext } from "../../../../src/campaign-runtime";
 import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";

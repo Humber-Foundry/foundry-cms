@@ -6,7 +6,7 @@ import {
   type SiteDefinition,
   type SiteDefinitionEdit,
   type SiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   ContentRevisionConflictError,

@@ -5,7 +5,7 @@ import {
   sha256Text,
   type NewsletterDeliveryAdapter,
   type NewsletterTestRequest,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 import {

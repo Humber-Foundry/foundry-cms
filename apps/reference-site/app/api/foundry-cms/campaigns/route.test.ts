@@ -3,7 +3,7 @@ import {
   AccessDeniedError,
   CampaignBulkDeliveryError,
   CampaignValidationError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 vi.mock("server-only", () => ({}));
 

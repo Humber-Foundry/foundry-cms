@@ -1,4 +1,4 @@
-import type { HumanAccessEligibilitySynchronizer } from "@foundry/application";
+import type { HumanAccessEligibilitySynchronizer } from "@humber-foundry/application";
 
 export class AccessEligibilitySyncError extends Error {
   constructor() {

@@ -4,7 +4,7 @@ import {
   fromTipTapDocument,
   serializeRichTextDocument,
   type SerializedRichTextDocument,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 export const supportedRichTextStarterKitOptions = {
   code: false,

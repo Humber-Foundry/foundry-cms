@@ -8,7 +8,7 @@
  * a secret back from a provider.
  */
 
-import { canonicalJson, sha256CanonicalJson } from "@foundry/application";
+import { canonicalJson, sha256CanonicalJson } from "@humber-foundry/application";
 
 import { OperatorError, requireText } from "./operator-errors";
 import {

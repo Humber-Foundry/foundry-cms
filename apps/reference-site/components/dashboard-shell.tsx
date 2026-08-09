@@ -9,8 +9,8 @@ import type {
   MediaAsset,
   PublicFormDeliveryHealth,
   SuspectedSpamSubmission,
-} from "@foundry/application";
-import type { SiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { SiteDefinition } from "@humber-foundry/site-definition";
 import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime";
 import type { StaleRecoveryEdit } from "../src/content-editor-recovery";
 

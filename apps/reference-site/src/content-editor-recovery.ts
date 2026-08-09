@@ -9,8 +9,8 @@ import {
   type PageSection,
   type SiteDefinition,
   type SiteDefinitionEdit,
-} from "@foundry/site-definition";
-import { canonicalJson } from "@foundry/application";
+} from "@humber-foundry/site-definition";
+import { canonicalJson } from "@humber-foundry/application";
 
 const staleEditRecoveryPrefix = "foundry-cms:stale-edit-recovery";
 const maximumRecoveredEdits = 500;

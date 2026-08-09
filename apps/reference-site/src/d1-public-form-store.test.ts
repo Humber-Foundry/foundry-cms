@@ -12,8 +12,8 @@ import {
   createPublicFormRequestHash,
   createPublicFormSubmissionId,
   type PublicFormAcceptance,
-} from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import { createD1PublicFormAcceptanceStore } from "./d1-public-form-store";
 import { useMigratedTestDatabase } from "./test-support/migrated-test-database";

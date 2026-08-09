@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { createSiteId } from "@foundry/site-definition";
-import type { PublicFormBackupSnapshot } from "@foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
+import type { PublicFormBackupSnapshot } from "@humber-foundry/application";
 
 import {
   createEncryptedR2PublicFormBackupVault,

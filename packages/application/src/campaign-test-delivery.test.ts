@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createRichTextDocumentFromPlainText,
   createSiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   CampaignValidationError,

@@ -1,8 +1,8 @@
 // @ts-expect-error The OpenNext worker is generated before Wrangler bundles this entry.
 import openNextWorker from "./.open-next/worker.js";
 
-import { reconcileHumanAccessEligibility } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { reconcileHumanAccessEligibility } from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   createAccessEligibilitySynchronizer,

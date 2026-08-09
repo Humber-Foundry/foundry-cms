@@ -1,7 +1,7 @@
 import {
   sha256Text,
   type NewsletterUnsubscribeAdapter,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

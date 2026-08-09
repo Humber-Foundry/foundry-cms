@@ -2,7 +2,7 @@ import {
   createBlogPostRenderModel,
   type BlogPost,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { RichTextRenderer } from "./rich-text-renderer";
 

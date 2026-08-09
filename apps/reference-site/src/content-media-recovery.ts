@@ -1,9 +1,9 @@
-import type { ContentRevision } from "@foundry/application";
+import type { ContentRevision } from "@humber-foundry/application";
 import {
   isSiteDefinition,
   type SiteDefinition,
   type SiteMediaOccurrence,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import type { StaleRecoveryEdit } from "./content-editor-recovery";
 import { mediaManifestRecoveryPath } from "./content-schema-recovery";

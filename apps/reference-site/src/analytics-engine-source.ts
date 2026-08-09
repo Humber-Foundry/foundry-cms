@@ -1,4 +1,4 @@
-import type { AnalyticsFactMeasurement } from "@foundry/application";
+import type { AnalyticsFactMeasurement } from "@humber-foundry/application";
 
 /**
  * Workers Analytics Engine supplies the one thing Web Analytics cannot:

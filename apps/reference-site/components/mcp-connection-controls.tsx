@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import type { McpConnectionSummary } from "@foundry/application";
+import type { McpConnectionSummary } from "@humber-foundry/application";
 
 export function McpConnectionTable({
   connections,
