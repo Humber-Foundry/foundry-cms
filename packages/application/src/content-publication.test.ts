@@ -42,6 +42,7 @@ import {
   hashPublishedSiteDefinition,
   parseProductionBase,
   serializeContentPublicationArtifacts,
+  serializeContentPublicationArtifactsForVersion,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
   type ContentPublicationDraftRestorer,
@@ -254,7 +255,7 @@ describe("content publication application", () => {
           productionBase,
           artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           serializationVersion:
-            "foundry.site-publication-artifacts.v2",
+            "foundry.site-publication-artifacts.v3",
           postArtifacts: [],
         },
       }),
@@ -1493,7 +1494,7 @@ describe("content publication application", () => {
     );
   });
 
-  it("preserves the legacy v2 artifact contract when the historical definition has no blog", async () => {
+  it("preserves the legacy v2 path while current v3 uses the installation-owned path", async () => {
     const legacyDefinition = structuredClone(
       revisionApplication.saved.definition,
     ) as any;
@@ -1505,27 +1506,34 @@ describe("content publication application", () => {
       blog: { id: "blog", posts: [] },
     };
 
-    await expect(
-      hashContentPublicationArtifacts(
-        serializeContentPublicationArtifacts(legacyDefinition),
-      ),
-    ).resolves.toBe(
-      await hashContentPublicationArtifacts([
-        {
-          path: "foundry/published-site.json",
-          bytes: serializePublishedSiteDefinition(legacyDefinition),
-        },
-        ...serializeSiteDefinitionRichTextForPublication(
-          legacyRichTextDefinition,
-        ).map(({ filePath, markdown }) => ({
-          path: filePath,
-          bytes: markdown,
-        })),
-      ]),
+    const v2Artifacts = serializeContentPublicationArtifactsForVersion(
+      legacyDefinition,
+      "foundry.site-publication-artifacts.v2",
     );
-    expect(
-      serializeContentPublicationArtifacts(legacyDefinition)[0]!.bytes,
-    ).toBe(serializePublishedSiteDefinition(legacyDefinition));
+    const v3Artifacts = serializeContentPublicationArtifactsForVersion(
+      legacyDefinition,
+      "foundry.site-publication-artifacts.v3",
+    );
+
+    expect(v2Artifacts).toEqual([
+      {
+        path: "packages/site-definition/src/published-site.json",
+        bytes: serializePublishedSiteDefinition(legacyDefinition),
+      },
+      ...serializeSiteDefinitionRichTextForPublication(
+        legacyRichTextDefinition,
+      ).map(({ filePath, markdown }) => ({
+        path: filePath,
+        bytes: markdown,
+      })),
+    ]);
+    expect(v3Artifacts[0]).toEqual({
+      path: "foundry/published-site.json",
+      bytes: serializePublishedSiteDefinition(legacyDefinition),
+    });
+    await expect(hashContentPublicationArtifacts(v2Artifacts)).resolves.not.toBe(
+      await hashContentPublicationArtifacts(v3Artifacts),
+    );
   });
 
   it("rejects a current publication definition whose blog data is missing", () => {

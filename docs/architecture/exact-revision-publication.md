@@ -45,8 +45,8 @@ workspace to equal the approval workspace.
 
 Published site content is one atomic artifact set: canonical key-sorted JSON
 with one trailing newline at
-`packages/site-definition/src/published-site.json`, plus deterministic Markdown
-for every rich-text field under `content/rich-text/`. The v2 artifact
+`foundry/published-site.json`, plus deterministic Markdown for every rich-text
+field under `content/rich-text/`. The v3 artifact
 fingerprint hashes a canonical manifest of every sorted path, UTF-8 byte length,
 and SHA-256 digest. GitHub's `createCommitOnBranch` mutation receives the
 approved head as `expectedHeadOid`, every artifact addition, every obsolete
@@ -141,9 +141,12 @@ unchanged legacy artifact remains deployable while its reader is upgraded.
 Completed and in-flight approvals retain their recorded serialization contract
 across that rollout. A retained canonical-JSON v1 operation is restored,
 reconciled, or safely retried with its original single-file byte hash and v1
-HMAC payload; new approvals use the v2 JSON-plus-Markdown manifest. Once a
-legacy release is restored as a current draft, its next human-approved
-publication advances through v2 rather than rewriting the historical evidence.
+HMAC payload. A retained v2 operation keeps its original
+`packages/site-definition/src/published-site.json` path, Markdown manifest, and
+v2 HMAC payload. New approvals use the v3 JSON-plus-Markdown manifest at the
+installation-owned path. Once a legacy release is restored as a current draft,
+its next human-approved publication advances through v3 rather than rewriting
+the historical evidence.
 The required Cloudflare watch-filter expansion is the only compatible channel
 transition: for a retained v1 approval, the live adapter also computes the old
 fingerprint by removing the exact `content/rich-text/*` include while retaining
@@ -373,7 +376,7 @@ duplicates, malformed secret metadata, or an unreadable trigger fail closed.
 The trigger must also identify the
 configured GitHub owner/repository and its documented exclude-first branch and
 path filters must permit the production branch,
-`packages/site-definition/src/published-site.json`, and managed
+`foundry/published-site.json`, and managed
 `content/rich-text/` paths; otherwise Foundry refuses
 to approve a channel that cannot observe the publication commit. Production
 branch names are validated once against the supported Git ref-name subset and

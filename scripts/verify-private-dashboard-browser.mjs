@@ -57,6 +57,14 @@ function stopServer(child) {
   }
 }
 
+async function waitForEnabled(locator, failure) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (await locator.isEnabled()) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error(failure);
+}
+
 async function main() {
   const port = await availablePort();
   if (port === 3000) throw new Error("private_dashboard_origin_not_distinct");
@@ -120,7 +128,36 @@ async function main() {
     }
     await page.waitForURL(/\/dash\?workspace=workspace_[a-f0-9]{24}$/u);
     await page.getByRole("heading", { name: "Content editor" }).waitFor();
-    await page.getByRole("button", { name: "Save revision" }).waitFor();
+    await waitForEnabled(
+      page.getByRole("button", {
+        name: "Preview exact saved revision ↗",
+      }),
+      "private_dashboard_content_editor_not_ready",
+    );
+    const siteName = page.getByRole("textbox", { name: /^Site name/u });
+    await siteName.fill("Foundry private preview acceptance");
+    const saveRevision = page.getByRole("button", {
+      name: "Save revision",
+    });
+    await waitForEnabled(
+      saveRevision,
+      "private_dashboard_content_save_disabled",
+    );
+    const [saved] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname ===
+            "/api/foundry-cms/revisions",
+      ),
+      saveRevision.click({ force: true }),
+    ]);
+    if (saved.status() !== 201) {
+      throw new Error(
+        `private_dashboard_save_failed:${saved.status()}:${await saved.text()}`,
+      );
+    }
+    await page.getByText("Revision 1 · saved", { exact: true }).waitFor();
     await page.getByRole("heading", { name: "Blog posts" }).waitFor();
     const blogTitle = page.locator('.blog-post-form input[name="title"]');
     await blogTitle.waitFor();

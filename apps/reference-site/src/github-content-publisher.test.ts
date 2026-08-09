@@ -61,7 +61,7 @@ function publicationArtifactSet<
   }));
   return {
     serializationVersion:
-      "foundry.site-publication-artifacts.v2" as const,
+      "foundry.site-publication-artifacts.v3" as const,
     artifacts,
     artifactHash: createHash("sha256")
       .update(
@@ -86,6 +86,28 @@ function legacyPublicationArtifacts(bytes: string) {
       },
     ],
     artifactHash: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+function retainedV2PublicationArtifacts(bytes: string) {
+  const artifacts = [
+    {
+      path: "packages/site-definition/src/published-site.json" as const,
+      bytes,
+    },
+  ];
+  const manifest = artifacts.map((artifact) => ({
+    byteLength: Buffer.byteLength(artifact.bytes),
+    path: artifact.path,
+    sha256: createHash("sha256").update(artifact.bytes).digest("hex"),
+  }));
+  return {
+    serializationVersion:
+      "foundry.site-publication-artifacts.v2" as const,
+    artifacts,
+    artifactHash: createHash("sha256")
+      .update(JSON.stringify(manifest))
+      .digest("hex"),
   };
 }
 
@@ -116,29 +138,33 @@ function signedPublicationMessage(
     expectedHead: string;
     serializationVersion:
       | "foundry.site-definition.canonical-json.v1"
-      | "foundry.site-publication-artifacts.v2";
+      | "foundry.site-publication-artifacts.v2"
+      | "foundry.site-publication-artifacts.v3";
     artifacts: ReadonlyArray<{ path: string }>;
     artifactHash: string;
     contentHash: string;
     message: string;
   }>,
 ) {
-  const legacy =
+  const legacyV1 =
     input.serializationVersion ===
     "foundry.site-definition.canonical-json.v1";
+  const signatureVersion = legacyV1
+    ? "v1"
+    : input.serializationVersion === "foundry.site-publication-artifacts.v2"
+      ? "v2"
+      : "v3";
   return (
-    `${input.message}\nFoundry-Publication-Signature: ${legacy ? "v1" : "v2"}=` +
+    `${input.message}\nFoundry-Publication-Signature: ${signatureVersion}=` +
     createHmac(
       "sha256",
       configurationInputs.publicationSigningSecret,
     )
       .update(
         [
-          legacy
-            ? "foundry-publication-signature-v1"
-            : "foundry-publication-signature-v2",
+          `foundry-publication-signature-${signatureVersion}`,
           input.expectedHead,
-          legacy ? input.artifacts[0]!.path : input.artifactHash,
+          legacyV1 ? input.artifacts[0]!.path : input.artifactHash,
           input.contentHash,
           input.message,
         ].join("\0"),
@@ -450,13 +476,13 @@ describe("GitHub content publisher", () => {
       headline: "Publish",
       body:
         "Foundry-Publish-Id: publish_11111111111111111111111111111111\n" +
-        `Foundry-Publication-Signature: v2=${createHmac(
+        `Foundry-Publication-Signature: v3=${createHmac(
           "sha256",
           configurationInputs.publicationSigningSecret,
         )
           .update(
             [
-              "foundry-publication-signature-v2",
+              "foundry-publication-signature-v3",
               expectedHead,
               publication.artifactHash,
               "b".repeat(64),
@@ -473,6 +499,65 @@ describe("GitHub content publisher", () => {
         ).toString("base64"),
       },
     ]);
+  });
+
+  it("retains the v2 publication path and signature contract", async () => {
+    const expectedHead = "a".repeat(40);
+    const publication = retainedV2PublicationArtifacts(
+      "{\"schemaVersion\":\"1.0.0\"}\n",
+    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ token: "installation-token" }))
+      .mockResolvedValueOnce(json({ object: { sha: expectedHead } }))
+      .mockResolvedValueOnce(json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(json({ tree: [] }))
+      .mockResolvedValueOnce(
+        json({
+          data: {
+            createCommitOnBranch: {
+              commit: { oid: "c".repeat(40) },
+            },
+          },
+        }),
+      );
+    const publisher = createGitHubContentPublisher({
+      configuration: { ...configurationInputs, privateKey },
+      fetch: fetchMock,
+      now: () => new Date("2026-07-27T10:00:00Z"),
+    });
+
+    await expect(
+      publisher.createCommit({
+        publishId: createContentPublicationId(
+          `publish_${"2".repeat(32)}`,
+        ),
+        workspaceId: createContentWorkspaceId("workspace_publish_v2"),
+        revision: 2,
+        approvedBy: createHumanMembershipId("membership-editor"),
+        contributors: [createContentActorId("membership-editor")],
+        contentHash: "b".repeat(64),
+        expectedHead,
+        ...publication,
+        message:
+          "Publish retained v2\n\n" +
+          `Foundry-Publish-Id: publish_${"2".repeat(32)}`,
+        assertLease: async () => true,
+      }),
+    ).resolves.toEqual({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+
+    const mutation = JSON.parse(
+      fetchMock.mock.calls[4]![1]!.body as string,
+    );
+    expect(mutation.variables.input.fileChanges.additions[0].path).toBe(
+      "packages/site-definition/src/published-site.json",
+    );
+    expect(mutation.variables.input.message.body).toContain(
+      "Foundry-Publication-Signature: v2=",
+    );
   });
 
   it("repeats a legacy atomic publication with its original v1 signature contract", async () => {

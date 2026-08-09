@@ -23,11 +23,28 @@ export const publishedSiteDefinitionPath =
   "foundry/published-site.json";
 export const legacyPublishedSiteDefinitionPath =
   "packages/site-definition/src/published-site.json";
-export const contentSerializationVersion =
+export const legacyContentSerializationVersion =
+  "foundry.site-definition.canonical-json.v1";
+export const artifactContentSerializationVersion =
   "foundry.site-publication-artifacts.v2";
+export const contentSerializationVersion =
+  "foundry.site-publication-artifacts.v3";
 export type ContentSerializationVersion =
-  | "foundry.site-definition.canonical-json.v1"
+  | typeof legacyContentSerializationVersion
+  | typeof artifactContentSerializationVersion
   | typeof contentSerializationVersion;
+
+export function contentSerializationDescriptor(
+  version: ContentSerializationVersion,
+) {
+  return Object.freeze({
+    definitionPath:
+      version === contentSerializationVersion
+        ? publishedSiteDefinitionPath
+        : legacyPublishedSiteDefinitionPath,
+    includesRichText: version !== legacyContentSerializationVersion,
+  });
+}
 export type ContentPublicationSchemaVersion =
   | "1.0.0"
   | "1.1.0"
@@ -509,6 +526,18 @@ function publicSiteDefinition(definition: SiteDefinition): SiteDefinition {
 export function serializeContentPublicationArtifacts(
   definition: SiteDefinition,
 ): ReadonlyArray<ContentPublicationArtifact> {
+  return serializeContentPublicationArtifactsAtPath(
+    definition,
+    publishedSiteDefinitionPath,
+  );
+}
+
+function serializeContentPublicationArtifactsAtPath(
+  definition: SiteDefinition,
+  definitionPath:
+    | typeof publishedSiteDefinitionPath
+    | typeof legacyPublishedSiteDefinitionPath,
+): ReadonlyArray<ContentPublicationArtifact> {
   const publicDefinition = publicSiteDefinition(definition);
   const richTextDefinition =
     (
@@ -523,7 +552,7 @@ export function serializeContentPublicationArtifacts(
       : publicDefinition;
   return [
     {
-      path: publishedSiteDefinitionPath,
+      path: definitionPath,
       bytes: serializePublishedSiteDefinition(publicDefinition),
     },
     ...serializeSiteDefinitionRichTextForPublication(richTextDefinition).map(
@@ -535,19 +564,22 @@ export function serializeContentPublicationArtifacts(
   ];
 }
 
-function serializeContentPublicationArtifactsForVersion(
+export function serializeContentPublicationArtifactsForVersion(
   definition: SiteDefinition,
   serializationVersion: ContentSerializationVersion,
 ): ReadonlyArray<ContentPublicationArtifact> {
-  return serializationVersion ===
-    "foundry.site-definition.canonical-json.v1"
+  const descriptor = contentSerializationDescriptor(serializationVersion);
+  return !descriptor.includesRichText
     ? [
         {
-          path: legacyPublishedSiteDefinitionPath,
+          path: descriptor.definitionPath,
           bytes: serializePublishedSiteDefinition(definition),
         },
       ]
-    : serializeContentPublicationArtifacts(definition);
+    : serializeContentPublicationArtifactsAtPath(
+        definition,
+        descriptor.definitionPath,
+      );
 }
 
 export async function hashContentPublicationArtifacts(
@@ -558,12 +590,18 @@ export async function hashContentPublicationArtifacts(
   );
   if (
     sorted.length === 0 ||
-    !sorted.some(({ path }) => path === publishedSiteDefinitionPath) ||
+    sorted.filter(
+      ({ path }) =>
+        path === publishedSiteDefinitionPath ||
+        path === legacyPublishedSiteDefinitionPath,
+    ).length !== 1 ||
     sorted.some(
       (artifact, index) =>
-        (artifact.path === publishedSiteDefinitionPath &&
+        ((artifact.path === publishedSiteDefinitionPath ||
+          artifact.path === legacyPublishedSiteDefinitionPath) &&
           artifact.bytes.length === 0) ||
         (artifact.path !== publishedSiteDefinitionPath &&
+          artifact.path !== legacyPublishedSiteDefinitionPath &&
           !/^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u.test(
             artifact.path,
           )) ||
@@ -2725,11 +2763,10 @@ export function createContentPublicationApplication({
             "restore_artifact_unavailable",
           );
         }
-        const publishedDefinitionPath =
-          approval.fingerprint.serializationVersion ===
-          "foundry.site-definition.canonical-json.v1"
-            ? legacyPublishedSiteDefinitionPath
-            : publishedSiteDefinitionPath;
+        const serialization = contentSerializationDescriptor(
+          approval.fingerprint.serializationVersion,
+        );
+        const publishedDefinitionPath = serialization.definitionPath;
         const bytes = await publishedRevisions.readPublishedArtifact({
           commitSha: publication.commitSha,
           path: publishedDefinitionPath,
@@ -2762,14 +2799,16 @@ export function createContentPublicationApplication({
         let artifactHash: string;
         let publishedArtifactsMatch = true;
         if (
-          approval.fingerprint.serializationVersion ===
-          "foundry.site-definition.canonical-json.v1"
+          !serialization.includesRichText
         ) {
           artifactHash = await sha256Text(bytes);
         } else {
           let artifacts: ReadonlyArray<ContentPublicationArtifact>;
           try {
-            artifacts = serializeContentPublicationArtifacts(definition);
+            artifacts = serializeContentPublicationArtifactsForVersion(
+              definition,
+              approval.fingerprint.serializationVersion,
+            );
           } catch {
             throw new ContentPublicationValidationError(
               "restore_artifact_mismatch",
@@ -2779,7 +2818,7 @@ export function createContentPublicationApplication({
             hashContentPublicationArtifacts(artifacts),
             Promise.all(
               artifacts.map((artifact) =>
-                artifact.path === publishedSiteDefinitionPath
+                artifact.path === publishedDefinitionPath
                   ? bytes
                   : publishedRevisions.readPublishedArtifact({
                       commitSha: publication.commitSha!,

@@ -118,11 +118,20 @@ async function main() {
       join(target, "foundry/README.md"),
       "utf8",
     );
+    const scaffoldedSite = JSON.parse(
+      await readFile(join(target, "foundry/published-site.json"), "utf8"),
+    );
     if (
       !browserSafeSiteDefinition.includes("installedSiteDefinition") ||
       browserSafeSiteDefinition.includes('import "server-only"') ||
       !serverOnlySiteDefinition.includes('import "server-only"') ||
-      !installationGuide.includes("client repository's boundary")
+      !installationGuide.includes("client repository's boundary") ||
+      scaffoldedSite.site.id !== "site_client_installation" ||
+      scaffoldedSite.site.navigation.length !== 0 ||
+      scaffoldedSite.home.sections.length !== 0 ||
+      (scaffoldedSite.blog !== undefined &&
+        scaffoldedSite.blog.posts.length !== 0) ||
+      JSON.stringify(scaffoldedSite).includes("Foundry Reference")
     ) {
       throw new Error("foundation_scaffold_site_definition_seams_invalid");
     }

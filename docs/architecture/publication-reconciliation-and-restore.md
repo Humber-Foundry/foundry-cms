@@ -22,9 +22,11 @@ so history size does not create a per-entry subrequest fan-out.
 
 Only an active Owner or Editor can restore a history entry, and only a
 `verified-live` publication with a recorded commit is eligible. Restore reads
-`packages/site-definition/src/published-site.json` from that immutable Git
-commit. Before creating a draft, Foundry verifies all of the following against
-the retained approval:
+the definition path recorded by the retained serialization contract from that
+immutable Git commit: v1 and v2 use
+`packages/site-definition/src/published-site.json`, while v3 uses the
+installation-owned `foundry/published-site.json`. Before creating a draft,
+Foundry verifies all of the following against the retained approval:
 
 - the exact serialized-byte hash;
 - the canonical Site Definition content hash;
