@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -397,6 +397,30 @@ function runIndexAsync(repository, arguments_, options) {
 }
 
 describe("commit-pinned Graphify index", () => {
+  it("excludes installation-owned editorial data without excluding installation source", () => {
+    const graphifyIgnore = join(repositoryRoot, ".graphifyignore");
+    const isIgnored = (path) =>
+      spawnSync(
+        "git",
+        [
+          "-c",
+          `core.excludesFile=${graphifyIgnore}`,
+          "check-ignore",
+          "--no-index",
+          "--quiet",
+          path,
+        ],
+        { cwd: repositoryRoot },
+      ).status === 0;
+
+    expect(
+      isIgnored("apps/reference-site/foundry/published-site.json"),
+    ).toBe(true);
+    expect(
+      isIgnored("apps/reference-site/foundry/site-definition.ts"),
+    ).toBe(false);
+  });
+
   it("excludes the data-only MCP evidence manifest from code extraction", () => {
     const ignoredPaths = readFileSync(
       join(repositoryRoot, ".graphifyignore"),
