@@ -33,6 +33,17 @@ export type ContentSerializationVersion =
   | typeof legacyContentSerializationVersion
   | typeof artifactContentSerializationVersion
   | typeof contentSerializationVersion;
+export const contentSerializationVersions = Object.freeze([
+  legacyContentSerializationVersion,
+  artifactContentSerializationVersion,
+  contentSerializationVersion,
+] as const);
+
+export function isContentSerializationVersion(
+  value: unknown,
+): value is ContentSerializationVersion {
+  return contentSerializationVersions.some((version) => version === value);
+}
 
 export function contentSerializationDescriptor(
   version: ContentSerializationVersion,
@@ -648,6 +659,9 @@ export async function createContentApprovalFingerprint(
   revision: ContentRevision,
   channelConfigurationHash: string,
   channel: ContentPublicationChannel = "site",
+  serializationVersion:
+    | typeof artifactContentSerializationVersion
+    | typeof contentSerializationVersion = contentSerializationVersion,
 ): Promise<ContentApprovalFingerprint> {
   if (revision.inputs.schemaVersion !== revision.definition.schemaVersion) {
     throw new ContentApprovalInvalidError("revision_stale");
@@ -656,7 +670,10 @@ export async function createContentApprovalFingerprint(
     throw new ContentApprovalInvalidError("revision_stale");
   }
   const artifactHash = await hashContentPublicationArtifacts(
-    serializeContentPublicationArtifacts(revision.definition),
+    serializeContentPublicationArtifactsForVersion(
+      revision.definition,
+      serializationVersion,
+    ),
   );
   const canonicalDefinitionHash = await sha256Text(
     canonicalJson(revision.definition),
@@ -690,7 +707,7 @@ export async function createContentApprovalFingerprint(
     rendererVersion: revision.inputs.rendererVersion,
     productionBase: revision.inputs.productionBase,
     artifactHash,
-    serializationVersion: contentSerializationVersion,
+    serializationVersion,
     postArtifacts,
   } as const;
   return {
@@ -1135,6 +1152,7 @@ export function createContentPublicationApplication({
   async function approvalChannelConfigurationMatches(
     approval: ContentApproval,
   ) {
+    const serializationVersion = approval.fingerprint.serializationVersion;
     try {
       if (
         approval.fingerprint.channelConfigurationHash ===
@@ -1143,21 +1161,13 @@ export function createContentPublicationApplication({
         return true;
       }
     } catch (error) {
-      if (
-        approval.fingerprint.serializationVersion !==
-        "foundry.site-definition.canonical-json.v1"
-      ) {
+      if (serializationVersion === contentSerializationVersion) {
         throw error;
       }
     }
-    return (
-      approval.fingerprint.serializationVersion ===
-        "foundry.site-definition.canonical-json.v1" &&
-      approval.fingerprint.channelConfigurationHash ===
-        (await publisher.getChannelConfigurationHash(
-          "foundry.site-definition.canonical-json.v1",
-        ))
-    );
+    if (serializationVersion === contentSerializationVersion) return false;
+    return approval.fingerprint.channelConfigurationHash ===
+      (await publisher.getChannelConfigurationHash(serializationVersion));
   }
 
   async function requireApproval(
@@ -1211,11 +1221,14 @@ export function createContentPublicationApplication({
         throw new ContentApprovalInvalidError("approval_stale");
       }
     } else {
-      const channelConfigurationHash =
-        await publisher.getChannelConfigurationHash();
+      if (!(await approvalChannelConfigurationMatches(approval))) {
+        throw new ContentApprovalInvalidError("approval_stale");
+      }
       const fingerprint = await createContentApprovalFingerprint(
         revision,
-        channelConfigurationHash,
+        approval.fingerprint.channelConfigurationHash,
+        approval.fingerprint.channel,
+        approval.fingerprint.serializationVersion,
       );
       if (fingerprint.value !== approval.fingerprint.value) {
         throw new ContentApprovalInvalidError("approval_stale");

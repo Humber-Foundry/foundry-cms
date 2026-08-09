@@ -1708,6 +1708,93 @@ describe("content publication application", () => {
     );
   });
 
+  it("revalidates and retries a retained v2 approval with its original path after v3 rollout", async () => {
+    const backingStore = createInMemoryContentPublicationStore();
+    let approvalOverride: Awaited<
+      ReturnType<typeof backingStore.findApproval>
+    > = null;
+    const rolloutStore = {
+      ...backingStore,
+      findApproval: async (approvalId: Parameters<
+        typeof backingStore.findApproval
+      >[0]) =>
+        approvalOverride?.id === approvalId
+          ? approvalOverride
+          : backingStore.findApproval(approvalId),
+    };
+    let currentTime = "2026-07-27T10:00:00.000Z";
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: "git_result_unknown",
+    });
+    const app = createContentPublicationApplication({
+      store: rolloutStore,
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const v2Fingerprint = await createContentApprovalFingerprint(
+      revisionApplication.saved,
+      "channel-a",
+      "site",
+      "foundry.site-publication-artifacts.v2",
+    );
+    approvalOverride = { ...approval, fingerprint: v2Fingerprint };
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-ambiguous-retained-v2",
+    });
+
+    vi.mocked(publisher.getChannelConfigurationHash).mockImplementation(
+      async (serializationVersion) =>
+        serializationVersion === "foundry.site-publication-artifacts.v2"
+          ? "channel-a"
+          : "channel-b",
+    );
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "git_commit_not_found",
+      }),
+    );
+    createCommit.mockResolvedValue({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(createCommit.mock.calls[1]![0]).toEqual(
+      expect.objectContaining({
+        serializationVersion: "foundry.site-publication-artifacts.v2",
+        artifactHash: v2Fingerprint.artifactHash,
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "packages/site-definition/src/published-site.json",
+          }),
+        ]),
+      }),
+    );
+  });
+
   it("fails closed when historical Git bytes do not match the published evidence", async () => {
     const app = createContentPublicationApplication({
       store: createInMemoryContentPublicationStore(),

@@ -147,13 +147,15 @@ v2 HMAC payload. New approvals use the v3 JSON-plus-Markdown manifest at the
 installation-owned path. Once a legacy release is restored as a current draft,
 its next human-approved publication advances through v3 rather than rewriting
 the historical evidence.
-The required Cloudflare watch-filter expansion is the only compatible channel
-transition: for a retained v1 approval, the live adapter also computes the old
-fingerprint by removing the exact `content/rich-text/*` include while retaining
-every other repository, destination, trigger, branch, exclusion, environment,
-and secret-rotation field. A cryptographic match to that projection permits the
-single-JSON v1 operation; any other channel difference still vetoes it. New
-approvals always require the complete live v2 filter configuration.
+The required Cloudflare watch-filter expansions are the only compatible
+channel transitions. For a retained v1 approval, the live adapter computes the
+old fingerprint by removing the exact `content/rich-text/*` and `foundry/*`
+includes. For a retained v2 approval, it removes only the exact `foundry/*`
+include. Both projections retain every other repository, destination, trigger,
+branch, exclusion, environment, and secret-rotation field. A cryptographic
+match permits the retained operation; any other channel difference still
+vetoes it. New approvals always require the complete live v3 filter
+configuration.
 
 The client-owned GitHub App token is repository-limited and requests only
 contents write, checks read, and statuses read. The commit has no custom author
