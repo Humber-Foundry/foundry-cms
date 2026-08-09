@@ -417,7 +417,7 @@ describe("commit-pinned Graphify index", () => {
       isIgnored("apps/reference-site/foundry/published-site.json"),
     ).toBe(true);
     expect(
-      isIgnored("apps/reference-site/src/site-installation.test.tsx"),
+      isIgnored("apps/reference-site/foundry/site-definition.ts"),
     ).toBe(false);
   });
 
