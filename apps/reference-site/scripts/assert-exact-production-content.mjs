@@ -15,7 +15,7 @@ import {
 const objectIdPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 const contentHashPattern = /^[a-f0-9]{64}$/u;
 const publishedContentPath =
-  "packages/site-definition/src/published-site.json";
+  "foundry/published-site.json";
 const managedRichTextPathPattern =
   /^content\/rich-text\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.md$/u;
 

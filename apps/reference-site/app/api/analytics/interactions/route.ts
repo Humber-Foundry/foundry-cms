@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
+import { installedSiteDefinition } from "@/foundry/site-definition";
 import {
   collectInteraction,
   writeInteractionPoint,
@@ -22,9 +22,9 @@ const maximumBodySize = 512;
 /** Public CMS object IDs a browser may report an interaction against. */
 function publicSubjectIds(): ReadonlySet<string> {
   return new Set([
-    referenceSiteDefinition.home.id,
-    ...referenceSiteDefinition.home.sections.map((section) => section.id),
-    ...referenceSiteDefinition.blog.posts.map((post) => post.id),
+    installedSiteDefinition.home.id,
+    ...installedSiteDefinition.home.sections.map((section) => section.id),
+    ...installedSiteDefinition.blog.posts.map((post) => post.id),
   ]);
 }
 

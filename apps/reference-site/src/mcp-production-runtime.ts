@@ -9,7 +9,8 @@ import {
   createPublishedSiteBundle,
   createSiteApplication,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createMcpAnalyticsRuntime } from "./mcp-analytics-runtime";
 import { createMcpCampaignRuntime } from "./mcp-campaign-runtime";
@@ -163,9 +164,9 @@ export function createProductionMcpRuntime(
   const store = createD1McpConnectionStore(database);
   const cursors = createSignedMcpCursorCodec({ secret: signingSecret });
   const site = createSiteApplication({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     publishedSites: createInMemoryPublishedSiteRepository([
-      createPublishedSiteBundle(referenceSiteDefinition),
+      createPublishedSiteBundle(installedSiteDefinition),
     ]),
   });
   const readApplication = createMcpReadApplication({
@@ -175,7 +176,7 @@ export function createProductionMcpRuntime(
       locale: environment.FOUNDRY_SITE_LOCALE ?? "en-CA",
       timeZone: environment.FOUNDRY_SITE_TIME_ZONE ?? "America/Vancouver",
       getLiveRelease: () =>
-        store.findLiveRelease(referenceSiteDefinition.site.id),
+        store.findLiveRelease(installedSiteDefinition.site.id),
     },
     connections: store,
     cursors,
@@ -252,8 +253,8 @@ export function createProductionMcpRuntime(
     authorizationIssuer: canonicalOrigin,
     canonicalOrigin,
     signingSecret,
-    siteId: referenceSiteDefinition.site.id,
-    siteName: referenceSiteDefinition.site.name,
+    siteId: installedSiteDefinition.site.id,
+    siteName: installedSiteDefinition.site.name,
     store,
     readApplication: Object.assign(
       readApplication,
@@ -299,7 +300,7 @@ export function createProductionMcpRuntime(
         }
       }
       const membership = await humanStore.findMembershipByIdentity({
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         binding: identity.binding,
       });
       if (

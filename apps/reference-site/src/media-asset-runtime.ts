@@ -10,7 +10,8 @@ import {
   type MediaAssetStore,
   type MediaSourceStore,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createD1MediaAssetStore } from "./d1-media-asset-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
@@ -46,7 +47,7 @@ export function localMediaContentCoordinator(): InMemoryMediaContentCoordinator 
 export async function loadMediaAssetApplication(actorId: ContentActorId) {
   if (process.env.NODE_ENV === "development") {
     return createMediaAssetApplication({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       actorId,
       assets: localRuntime.__foundryMediaAssets!,
       sources: localRuntime.__foundryMediaSources!,
@@ -60,7 +61,7 @@ export async function loadMediaAssetApplication(actorId: ContentActorId) {
     throw new MediaAssetConfigurationError();
   }
   return createMediaAssetApplication({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     actorId,
     assets: createD1MediaAssetStore(environment.FOUNDRY_DB),
     sources: createR2MediaSourceStore(environment.FOUNDRY_MEDIA),

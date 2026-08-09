@@ -87,7 +87,7 @@ function assertLockedReleaseExecutable({ descriptor, lock, name }) {
 
 function isTemplatePath(path) {
   return (
-    /^(?:app|components|migrations|public|src)\//u.test(path) ||
+    /^(?:app|components|foundry|migrations|public|src)\//u.test(path) ||
     [
       "custom-worker.ts",
       "cloudflare-email.d.ts",
@@ -147,6 +147,37 @@ async function main() {
     await mkdir(dirname(destination), { recursive: true });
     await writeFile(destination, bytes, { flag: "wx" });
   }
+
+  const publishedSitePath = join(target, "foundry/published-site.json");
+  const packagedSite = JSON.parse(
+    await readFile(publishedSitePath, "utf8"),
+  );
+  const emptyProductionSite = {
+    ...packagedSite,
+    site: {
+      ...packagedSite.site,
+      id: "site_client_installation",
+      name: "Foundry site",
+      description: "Client-owned content managed with Foundry CMS.",
+      navigation: [],
+      footer: "Powered by Foundry CMS.",
+    },
+    home: {
+      ...packagedSite.home,
+      seo: {
+        title: "Foundry site",
+        description: "Client-owned content managed with Foundry CMS.",
+      },
+      sections: [],
+    },
+    ...(packagedSite.blog === undefined
+      ? {}
+      : { blog: { ...packagedSite.blog, posts: [] } }),
+  };
+  await writeFile(
+    publishedSitePath,
+    `${JSON.stringify(emptyProductionSite, null, 2)}\n`,
+  );
 
   const packagePath = join(target, "package.json");
   const targetPackage = JSON.parse(await readFile(packagePath, "utf8"));

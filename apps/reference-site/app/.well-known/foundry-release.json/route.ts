@@ -1,7 +1,8 @@
 import {
   hashPublishedSiteDefinition,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "@/foundry/site-definition";
 
 export const dynamic = "force-static";
 
@@ -23,9 +24,9 @@ export async function GET() {
     {
       commitSha,
       contentHash: await hashPublishedSiteDefinition(
-        referenceSiteDefinition,
+        installedSiteDefinition,
       ),
-      schemaVersion: referenceSiteDefinition.schemaVersion,
+      schemaVersion: installedSiteDefinition.schemaVersion,
     },
     {
       headers: {

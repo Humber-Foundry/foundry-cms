@@ -4,7 +4,8 @@ import {
   type AnalyticsQueryCache,
   type McpAnalyticsRuntime,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import {
@@ -44,7 +45,7 @@ export function createMcpAnalyticsRuntime({
       if (database === undefined) {
         throw new HumanAccessConfigurationError();
       }
-      const siteId = referenceSiteDefinition.site.id;
+      const siteId = installedSiteDefinition.site.id;
       const application = createAnalyticsQueryApplication<McpAnalyticsActor>({
         siteId,
         store: createD1AnalyticsStore(database, siteId),

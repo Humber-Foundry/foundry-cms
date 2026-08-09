@@ -16,7 +16,8 @@ import {
   createMediaOccurrenceId,
   requireRenderedMediaOccurrenceId,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "@/foundry/site-definition";
 
 import {
   AccessIdentityError,
@@ -277,7 +278,7 @@ async function bindOccurrenceToContentRevision({
         await contentApplication.commands.saveMediaOccurrence({
           actorId,
           workspaceId,
-          schemaVersion: referenceSiteDefinition.schemaVersion,
+          schemaVersion: installedSiteDefinition.schemaVersion,
           baseRevision: contentBaseRevision,
           occurrence: boundOccurrence,
           idempotencyKey: contentIdempotencyKey,

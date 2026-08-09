@@ -3,6 +3,7 @@ import "server-only";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 import type { HumanAccessEnvironment } from "./human-access-configuration";
+import { resolvePrivatePreviewOrigin } from "./private-preview-origin";
 
 export {
   HumanAccessConfigurationError,
@@ -12,7 +13,9 @@ export type { HumanAccessEnvironment } from "./human-access-configuration";
 export async function loadHumanAccessEnvironment(): Promise<HumanAccessEnvironment> {
   if (process.env.NODE_ENV === "development") {
     return {
-      FOUNDRY_CANONICAL_ORIGIN: "http://localhost:3000",
+      FOUNDRY_CANONICAL_ORIGIN: resolvePrivatePreviewOrigin(
+        process.env.FOUNDRY_PRIVATE_PREVIEW_ORIGIN,
+      ),
       FOUNDRY_CSRF_SECRET: "local-development-csrf-secret",
       FOUNDRY_SUBSCRIBER_IDENTITY_SECRET:
         "local-development-subscriber-identity-secret",

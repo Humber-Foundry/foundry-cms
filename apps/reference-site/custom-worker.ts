@@ -2,7 +2,8 @@
 import openNextWorker from "./.open-next/worker.js";
 
 import { reconcileHumanAccessEligibility } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "./foundry/site-definition";
 
 import {
   createAccessEligibilitySynchronizer,
@@ -51,7 +52,7 @@ async function reconcileHumanAccessEligibilityIfDue(
   const store = createD1HumanAccessStore(environment.FOUNDRY_DB);
   const now = new Date().toISOString();
   await reconcileHumanAccessEligibility({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     store,
     eligibilitySynchronizer:
       createAccessEligibilitySynchronizer(environment),

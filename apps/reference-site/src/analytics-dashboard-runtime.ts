@@ -13,7 +13,8 @@ import {
   type AnalyticsRangeRequest,
   type ExternalHumanIdentity,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
@@ -101,7 +102,7 @@ export async function createAnalyticsDashboardContext(
   if (database === undefined) {
     throw new AnalyticsDashboardError("analytics_not_configured");
   }
-  const siteId = referenceSiteDefinition.site.id;
+  const siteId = installedSiteDefinition.site.id;
   return createAnalyticsQueryApplication<ExternalHumanIdentity>({
     siteId,
     store: createD1AnalyticsStore(database, siteId),

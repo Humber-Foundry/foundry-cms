@@ -24,6 +24,7 @@ import {
   createContentWorkspaceId,
   createHumanMembershipId,
   isBlogPostArtifactFingerprint,
+  isContentSerializationVersion,
   serializeContentPublicationCommandIdentity,
   serializeContentRestoreIdentity,
 } from "@humber-foundry/application";
@@ -45,9 +46,7 @@ type ApprovalRow = {
   renderer_version: string;
   production_base: string;
   artifact_hash: string;
-  serialization_version:
-    | "foundry.site-definition.canonical-json.v1"
-    | "foundry.site-publication-artifacts.v2";
+  serialization_version: string;
   approved_by: string;
   approved_at: string;
   invalidated_at: string | null;
@@ -155,6 +154,9 @@ function toApproval(row: ApprovalRow): ContentApproval {
     !postArtifacts.every(isBlogPostArtifactFingerprint)
   ) {
     throw new Error("content_approval_blog_post_artifacts_invalid");
+  }
+  if (!isContentSerializationVersion(row.serialization_version)) {
+    throw new Error("content_approval_serialization_version_invalid");
   }
   const fingerprint: ContentApprovalFingerprint = {
     value: row.fingerprint,

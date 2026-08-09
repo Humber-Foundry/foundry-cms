@@ -10,7 +10,8 @@ import {
   createMediaOccurrenceId,
   type ContentWorkspaceId,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 import type { SiteDefinition } from "@humber-foundry/site-definition";
 
 import {
@@ -135,7 +136,7 @@ export async function latestContentWorkspaceIdForActor(
   }
   return findLatestContentWorkspaceIdForActor(
     environment.FOUNDRY_DB,
-    referenceSiteDefinition.site.id,
+    installedSiteDefinition.site.id,
     actorId,
   );
 }
@@ -146,7 +147,7 @@ async function contentWorkspaceIdFromSeed(
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(
-      `${referenceSiteDefinition.site.id}:${seed}`,
+      `${installedSiteDefinition.site.id}:${seed}`,
     ),
   );
   const suffix = [...new Uint8Array(digest)]
@@ -174,7 +175,7 @@ function applicationFor({
   initialCreatedBy?: ContentActorId;
 }) {
   return createContentRevisionApplication({
-    siteDefinition: referenceSiteDefinition,
+    siteDefinition: installedSiteDefinition,
     initialDefinition,
     initialCreatedBy,
     store,
@@ -224,7 +225,7 @@ export async function loadContentRevisionApplication(
         mediaContentCoordinator: localMediaContentCoordinator(),
         isMediaOccurrenceCurrent: async (expected) => {
           const current = await mediaAssets.getOccurrence(
-            referenceSiteDefinition.site.id,
+            installedSiteDefinition.site.id,
             workspaceId,
             createMediaOccurrenceId(expected.occurrenceId),
           );
@@ -257,14 +258,14 @@ export async function loadContentRevisionApplication(
     resolveContentReleaseInputs(environment);
   const initialDefinition = await hydrateManagedBlogPosts(
     environment.FOUNDRY_DB,
-    referenceSiteDefinition,
+    installedSiteDefinition,
   );
   return applicationFor({
     workspaceId,
     actorId,
     store: createD1ContentRevisionStore(
       environment.FOUNDRY_DB,
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       workspaceId,
     ),
     rendererVersion,
@@ -287,10 +288,10 @@ export async function loadRestoredContentRevisionApplication(
     throw new ContentRevisionConfigurationError();
   }
   if (
-    currentDefinition.site.id !== referenceSiteDefinition.site.id ||
-    currentDefinition.schemaVersion !== referenceSiteDefinition.schemaVersion ||
+    currentDefinition.site.id !== installedSiteDefinition.site.id ||
+    currentDefinition.schemaVersion !== installedSiteDefinition.schemaVersion ||
     currentDefinition.definitionVersion !==
-      referenceSiteDefinition.definitionVersion
+      installedSiteDefinition.definitionVersion
   ) {
     throw new ContentRevisionConfigurationError();
   }
@@ -327,7 +328,7 @@ export async function loadRestoredContentRevisionApplication(
     actorId,
     store: createD1ContentRevisionStore(
       environment.FOUNDRY_DB,
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       workspaceId,
     ),
     rendererVersion,
@@ -355,7 +356,7 @@ export async function requireExistingContentWorkspaceAccess(
   }
   await createD1ContentRevisionStore(
     environment.FOUNDRY_DB,
-    referenceSiteDefinition.site.id,
+    installedSiteDefinition.site.id,
     workspaceId,
   ).requireAccess(actorId);
 }

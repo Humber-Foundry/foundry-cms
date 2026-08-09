@@ -9,7 +9,7 @@ import {
 } from "./brevo-test-webhook-evidence";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
-import { referenceSiteApplication } from "./reference-installation";
+import { installedSite } from "../foundry/site-definition.server";
 import { createBrevoCampaignBulkWebhookIngestor } from "./brevo-campaign-bulk-webhook-runtime";
 
 const maximumWebhookBytes = 256 * 1024;
@@ -194,14 +194,14 @@ export function createBrevoTestWebhookHandler({
       });
       const eventFingerprint = await sha256CanonicalJson({
         version: "foundry.brevo-test-webhook-event.v4",
-        siteId: referenceSiteApplication.siteId,
+        siteId: installedSite.application.siteId,
         provider: "brevo",
         ...stablePayloadIdentity,
       });
       const recordResult = await store.recordVerified({
         eventFingerprint,
         payloadFingerprint,
-        siteId: referenceSiteApplication.siteId,
+        siteId: installedSite.application.siteId,
         executionId,
         foundrySendProof,
         providerMessageId,
@@ -252,7 +252,7 @@ export async function handleBrevoTestWebhook(request: Request) {
       environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY ?? "",
     store: createD1BrevoTestWebhookEvidenceStore({
       database: environment.FOUNDRY_DB,
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.application.siteId,
     }),
     handleBulkEvent: async (event) => {
       ingestBulkEvent ??= await createBrevoCampaignBulkWebhookIngestor({

@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createPublicFormPrivacyApplication } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import type { HumanAccessRequestContext } from "./human-access-runtime";
@@ -20,7 +21,7 @@ export async function createPublicFormPrivacyContext(
     (await loadHumanAccessEnvironment()) as PublicFormPrivacyEnvironment;
   const { store, vault } = createConfiguredPublicFormPrivacy(environment);
   return createPublicFormPrivacyApplication({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     store,
     vault,
     authorize: (actor, capability) =>

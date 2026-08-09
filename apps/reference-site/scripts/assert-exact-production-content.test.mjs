@@ -49,7 +49,7 @@ function canonicalHash(value) {
 const contentHash = canonicalHash(JSON.parse(bytes));
 const trackedPublishedBytes = readFileSync(
   new URL(
-    "../../../packages/site-definition/src/published-site.json",
+    "../foundry/published-site.json",
     import.meta.url,
   ),
   "utf8",
@@ -75,7 +75,7 @@ const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
 function defaultArtifacts() {
   return [
     {
-      path: "packages/site-definition/src/published-site.json",
+      path: "foundry/published-site.json",
       bytes,
     },
     { path: richTextPath, bytes: richTextBytes },
@@ -134,7 +134,7 @@ function inputs(overrides = {}) {
       `${expectedCommit} ${liveCommit}\n`,
     ),
     readChangedPaths: vi.fn().mockReturnValue(
-      "packages/site-definition/src/published-site.json\n" +
+      "foundry/published-site.json\n" +
         `${richTextPath}\n`,
     ),
     readCommitMessage: vi.fn().mockReturnValue(`${signedMessage()}\n\n`),
@@ -334,7 +334,7 @@ describe("exact production content authorization", () => {
   it("preserves the publisher hash for a current definition without optional media", async () => {
     const artifacts = [
       {
-        path: "packages/site-definition/src/published-site.json",
+        path: "foundry/published-site.json",
         bytes: currentBytesWithoutMedia,
       },
       { path: richTextPath, bytes: richTextBytes },
@@ -368,7 +368,7 @@ describe("exact production content authorization", () => {
       assertExactProductionContent(
         inputs({
           readChangedPaths: vi.fn().mockReturnValue(
-            "packages/site-definition/src/published-site.json\n" +
+            "foundry/published-site.json\n" +
               "apps/reference-site/app/page.tsx\n",
           ),
         }),
@@ -379,7 +379,7 @@ describe("exact production content authorization", () => {
   it("allows an obsolete managed Markdown path to be removed", async () => {
     const currentArtifacts = [
       {
-        path: "packages/site-definition/src/published-site.json",
+        path: "foundry/published-site.json",
         bytes,
       },
     ];
@@ -387,7 +387,7 @@ describe("exact production content authorization", () => {
       assertExactProductionContent(
         inputs({
           readChangedPaths: vi.fn().mockReturnValue(
-            "packages/site-definition/src/published-site.json\n" +
+            "foundry/published-site.json\n" +
               "content/rich-text/section_old/body.md\n",
           ),
           readManagedRichTextPaths: vi.fn().mockReturnValue(""),

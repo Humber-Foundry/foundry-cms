@@ -6,9 +6,11 @@ const mocks = vi.hoisted(() => ({
   loadApplication: vi.fn(),
   getPublishedSource: vi.fn(),
 }));
-vi.mock("../../../../src/reference-installation", () => ({
-  referenceSiteApplication: {
-    queries: { getPublishedSite: mocks.published },
+vi.mock("@/foundry/site-definition.server", () => ({
+  installedSite: {
+    application: {
+      queries: { getPublishedSite: mocks.published },
+    },
   },
 }));
 vi.mock("../../../../src/media-asset-runtime", () => ({

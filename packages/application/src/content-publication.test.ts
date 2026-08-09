@@ -42,6 +42,7 @@ import {
   hashPublishedSiteDefinition,
   parseProductionBase,
   serializeContentPublicationArtifacts,
+  serializeContentPublicationArtifactsForVersion,
   serializePublishedSiteDefinition,
   type ContentPublicationRevisionRepository,
   type ContentPublicationDraftRestorer,
@@ -167,7 +168,7 @@ describe("content publication application", () => {
 
   it("hashes the full publication manifest without path or byte ambiguity", async () => {
     const jsonArtifact = {
-      path: "packages/site-definition/src/published-site.json" as const,
+      path: "foundry/published-site.json" as const,
       bytes: "{}\n",
     };
     const richPath =
@@ -195,7 +196,7 @@ describe("content publication application", () => {
     await expect(
       hashContentPublicationArtifacts([
         {
-          path: "packages/site-definition/src/published-site.json",
+          path: "foundry/published-site.json",
           bytes: "{}\n",
         },
         {
@@ -254,7 +255,7 @@ describe("content publication application", () => {
           productionBase,
           artifactHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
           serializationVersion:
-            "foundry.site-publication-artifacts.v2",
+            "foundry.site-publication-artifacts.v3",
           postArtifacts: [],
         },
       }),
@@ -436,7 +437,7 @@ describe("content publication application", () => {
     const removalCommit = createCommit.mock.calls[1]?.[0];
     const removalJson = removalCommit?.artifacts.find(
       ({ path }) =>
-        path === "packages/site-definition/src/published-site.json",
+        path === "foundry/published-site.json",
     );
     expect(JSON.parse(removalJson?.bytes ?? "{}")).toMatchObject({
       blog: { posts: [] },
@@ -1118,7 +1119,7 @@ describe("content publication application", () => {
         expectedHead: productionCommit,
         artifacts: [
           {
-            path: "packages/site-definition/src/published-site.json",
+            path: "foundry/published-site.json",
             bytes: serializePublishedSiteDefinition(
               revisionApplication.saved.definition,
             ),
@@ -1315,7 +1316,7 @@ describe("content publication application", () => {
     );
     const historicalBytes = historicalArtifacts.find(
       ({ path }) =>
-        path === "packages/site-definition/src/published-site.json",
+        path === "foundry/published-site.json",
     )!.bytes;
     const reader: ContentPublishedRevisionReader = {
       readPublishedArtifact: vi.fn(async ({ path }) =>
@@ -1372,7 +1373,7 @@ describe("content publication application", () => {
 
     expect(reader.readPublishedArtifact).toHaveBeenCalledWith({
       commitSha: "c".repeat(40),
-      path: "packages/site-definition/src/published-site.json",
+      path: "foundry/published-site.json",
     });
     expect(reader.readPublishedArtifact).toHaveBeenCalledTimes(
       historicalArtifacts.length,
@@ -1493,7 +1494,7 @@ describe("content publication application", () => {
     );
   });
 
-  it("preserves the legacy v2 artifact contract when the historical definition has no blog", async () => {
+  it("preserves the legacy v2 path while current v3 uses the installation-owned path", async () => {
     const legacyDefinition = structuredClone(
       revisionApplication.saved.definition,
     ) as any;
@@ -1505,27 +1506,34 @@ describe("content publication application", () => {
       blog: { id: "blog", posts: [] },
     };
 
-    await expect(
-      hashContentPublicationArtifacts(
-        serializeContentPublicationArtifacts(legacyDefinition),
-      ),
-    ).resolves.toBe(
-      await hashContentPublicationArtifacts([
-        {
-          path: "packages/site-definition/src/published-site.json",
-          bytes: serializePublishedSiteDefinition(legacyDefinition),
-        },
-        ...serializeSiteDefinitionRichTextForPublication(
-          legacyRichTextDefinition,
-        ).map(({ filePath, markdown }) => ({
-          path: filePath,
-          bytes: markdown,
-        })),
-      ]),
+    const v2Artifacts = serializeContentPublicationArtifactsForVersion(
+      legacyDefinition,
+      "foundry.site-publication-artifacts.v2",
     );
-    expect(
-      serializeContentPublicationArtifacts(legacyDefinition)[0]!.bytes,
-    ).toBe(serializePublishedSiteDefinition(legacyDefinition));
+    const v3Artifacts = serializeContentPublicationArtifactsForVersion(
+      legacyDefinition,
+      "foundry.site-publication-artifacts.v3",
+    );
+
+    expect(v2Artifacts).toEqual([
+      {
+        path: "packages/site-definition/src/published-site.json",
+        bytes: serializePublishedSiteDefinition(legacyDefinition),
+      },
+      ...serializeSiteDefinitionRichTextForPublication(
+        legacyRichTextDefinition,
+      ).map(({ filePath, markdown }) => ({
+        path: filePath,
+        bytes: markdown,
+      })),
+    ]);
+    expect(v3Artifacts[0]).toEqual({
+      path: "foundry/published-site.json",
+      bytes: serializePublishedSiteDefinition(legacyDefinition),
+    });
+    await expect(hashContentPublicationArtifacts(v2Artifacts)).resolves.not.toBe(
+      await hashContentPublicationArtifacts(v3Artifacts),
+    );
   });
 
   it("rejects a current publication definition whose blog data is missing", () => {
@@ -1696,6 +1704,93 @@ describe("content publication application", () => {
             bytes: legacyBytes,
           },
         ],
+      }),
+    );
+  });
+
+  it("revalidates and retries a retained v2 approval with its original path after v3 rollout", async () => {
+    const backingStore = createInMemoryContentPublicationStore();
+    let approvalOverride: Awaited<
+      ReturnType<typeof backingStore.findApproval>
+    > = null;
+    const rolloutStore = {
+      ...backingStore,
+      findApproval: async (approvalId: Parameters<
+        typeof backingStore.findApproval
+      >[0]) =>
+        approvalOverride?.id === approvalId
+          ? approvalOverride
+          : backingStore.findApproval(approvalId),
+    };
+    let currentTime = "2026-07-27T10:00:00.000Z";
+    createCommit.mockResolvedValue({
+      state: "unknown",
+      detail: "git_result_unknown",
+    });
+    const app = createContentPublicationApplication({
+      store: rolloutStore,
+      revisions: repository,
+      publisher,
+      now: () => currentTime,
+    });
+    const approval = await app.commands.approve({
+      workspaceId,
+      revision: 1,
+      approvedBy: membershipId,
+      previewConfirmed: true,
+    });
+    const v2Fingerprint = await createContentApprovalFingerprint(
+      revisionApplication.saved,
+      "channel-a",
+      "site",
+      "foundry.site-publication-artifacts.v2",
+    );
+    approvalOverride = { ...approval, fingerprint: v2Fingerprint };
+    const publication = await app.commands.publish({
+      workspaceId,
+      approvalId: approval.id,
+      requestedBy: membershipId,
+      idempotencyKey: "publish-ambiguous-retained-v2",
+    });
+
+    vi.mocked(publisher.getChannelConfigurationHash).mockImplementation(
+      async (serializationVersion) =>
+        serializationVersion === "foundry.site-publication-artifacts.v2"
+          ? "channel-a"
+          : "channel-b",
+    );
+    vi.mocked(publisher.reconcileCommit).mockResolvedValue({
+      state: "not-found",
+    });
+    currentTime = "2026-07-27T10:16:00.000Z";
+
+    await expect(app.commands.refresh(publication.id)).resolves.toEqual(
+      expect.objectContaining({
+        status: "failed",
+        detail: "git_commit_not_found",
+      }),
+    );
+    createCommit.mockResolvedValue({
+      state: "committed",
+      commitSha: "c".repeat(40),
+    });
+    await expect(
+      app.commands.retryDeployment(publication.id, membershipId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: "committed",
+        commitSha: "c".repeat(40),
+      }),
+    );
+    expect(createCommit.mock.calls[1]![0]).toEqual(
+      expect.objectContaining({
+        serializationVersion: "foundry.site-publication-artifacts.v2",
+        artifactHash: v2Fingerprint.artifactHash,
+        artifacts: expect.arrayContaining([
+          expect.objectContaining({
+            path: "packages/site-definition/src/published-site.json",
+          }),
+        ]),
       }),
     );
   });
@@ -2344,7 +2439,7 @@ describe("content publication application", () => {
         expectedHead: publication.expectedHead,
         artifacts: expect.arrayContaining([
           expect.objectContaining({
-            path: "packages/site-definition/src/published-site.json",
+            path: "foundry/published-site.json",
           }),
           expect.objectContaining({
             path: "content/rich-text/section_contact/body.md",
@@ -2389,7 +2484,7 @@ describe("content publication application", () => {
         expectedHead: productionCommit,
         artifacts: expect.arrayContaining([
           expect.objectContaining({
-            path: "packages/site-definition/src/published-site.json",
+            path: "foundry/published-site.json",
           }),
           expect.objectContaining({
             path: "content/rich-text/section_contact/body.md",

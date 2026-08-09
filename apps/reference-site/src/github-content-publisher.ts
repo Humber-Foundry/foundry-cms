@@ -10,8 +10,12 @@ import type {
   PublicationCommitResult,
 } from "@humber-foundry/application";
 import {
+  artifactContentSerializationVersion,
+  contentSerializationDescriptor,
+  contentSerializationVersion,
   hashContentPublicationArtifacts,
   isValidGitBranchName,
+  legacyContentSerializationVersion,
 } from "@humber-foundry/application";
 
 export type GitHubContentPublisherConfiguration = Readonly<{
@@ -366,17 +370,25 @@ function publicationSignaturePayload(input: {
   contentHash: string;
   message: string;
 }) {
-  return input.serializationVersion ===
-    "foundry.site-definition.canonical-json.v1"
+  if (input.serializationVersion === legacyContentSerializationVersion) {
+    return [
+      "foundry-publication-signature-v1",
+      input.expectedHead,
+      input.path,
+      input.contentHash,
+      input.message,
+    ].join("\0");
+  }
+  return input.serializationVersion === artifactContentSerializationVersion
     ? [
-        "foundry-publication-signature-v1",
+        "foundry-publication-signature-v2",
         input.expectedHead,
-        input.path,
+        input.artifactHash,
         input.contentHash,
         input.message,
       ].join("\0")
     : [
-        "foundry-publication-signature-v2",
+        "foundry-publication-signature-v3",
         input.expectedHead,
         input.artifactHash,
         input.contentHash,
@@ -411,11 +423,42 @@ async function signPublicationMessage(
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
   const version =
-    input.serializationVersion ===
-    "foundry.site-definition.canonical-json.v1"
+    input.serializationVersion === legacyContentSerializationVersion
       ? "v1"
-      : "v2";
+      : input.serializationVersion === artifactContentSerializationVersion
+        ? "v2"
+        : "v3";
   return `${input.message}\nFoundry-Publication-Signature: ${version}=${hex}`;
+}
+
+async function artifactsMatchSerialization(input: {
+  serializationVersion: ContentSerializationVersion;
+  artifacts: ReadonlyArray<ContentPublicationArtifact>;
+  artifactHash: string;
+}) {
+  const descriptor = contentSerializationDescriptor(
+    input.serializationVersion,
+  );
+  const definitionArtifacts = input.artifacts.filter(
+    ({ path }) => path === descriptor.definitionPath,
+  );
+  if (!descriptor.includesRichText) {
+    return (
+      input.artifacts.length === 1 &&
+      definitionArtifacts.length === 1 &&
+      (await sha256(definitionArtifacts[0]!.bytes)) === input.artifactHash
+    );
+  }
+  return (
+    definitionArtifacts.length === 1 &&
+    input.artifacts.every(
+      ({ path }) =>
+        path === descriptor.definitionPath ||
+        path.startsWith("content/rich-text/"),
+    ) &&
+    (await hashContentPublicationArtifacts(input.artifacts)) ===
+      input.artifactHash
+  );
 }
 
 async function gitBlobSha(value: string, repositoryObjectId: string) {
@@ -795,30 +838,19 @@ export function createGitHubContentPublisher({
     const artifacts = [...input.artifacts].sort(
       ({ path: left }, { path: right }) => left.localeCompare(right),
     );
-    const legacyArtifact =
-      input.serializationVersion ===
-        "foundry.site-definition.canonical-json.v1" &&
-      artifacts.length === 1 &&
-      artifacts[0]?.path ===
-        "packages/site-definition/src/published-site.json"
-        ? artifacts[0]
-        : null;
-    if (
-      input.serializationVersion ===
-      "foundry.site-definition.canonical-json.v1"
-    ) {
-      if (
-        legacyArtifact === null ||
-        (await sha256(legacyArtifact.bytes)) !== input.artifactHash
-      ) {
-        return false;
-      }
-    } else if (
-      (await hashContentPublicationArtifacts(artifacts)) !==
-      input.artifactHash
-    ) {
+    if (!(await artifactsMatchSerialization({
+      serializationVersion: input.serializationVersion,
+      artifacts,
+      artifactHash: input.artifactHash,
+    }))) {
       return false;
     }
+    const serialization = contentSerializationDescriptor(
+      input.serializationVersion,
+    );
+    const legacyArtifact = serialization.includesRichText
+      ? null
+      : artifacts[0]!;
     const [candidate, comparison] = await Promise.all([
       request(token, `/git/commits/${commitSha}`),
       request(
@@ -1052,6 +1084,8 @@ export function createGitHubContentPublisher({
 
   return {
     async getChannelConfigurationHash(serializationVersion) {
+      const requestedVersion =
+        serializationVersion ?? contentSerializationVersion;
       const root =
         `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
           configuration.cloudflareAccountId,
@@ -1124,9 +1158,9 @@ export function createGitHubContentPublisher({
           )
         : undefined;
       const repository = trigger?.repo_connection;
-      const legacySerialization =
-        serializationVersion ===
-        "foundry.site-definition.canonical-json.v1";
+      const serialization = contentSerializationDescriptor(
+        requestedVersion,
+      );
       if (
         typeof trigger !== "object" ||
         trigger === null ||
@@ -1145,11 +1179,11 @@ export function createGitHubContentPublisher({
           trigger.branch_excludes,
         ) ||
         !cloudflareWatchFilterAllows(
-          "packages/site-definition/src/published-site.json",
+          serialization.definitionPath,
           trigger.path_includes,
           trigger.path_excludes,
         ) ||
-        (!legacySerialization &&
+        (serialization.includesRichText &&
           (!cloudflareWatchFilterAllows(
             "content/rich-text/foundry-probe.md",
             trigger.path_includes,
@@ -1164,11 +1198,18 @@ export function createGitHubContentPublisher({
         throw new Error("cloudflare_build_configuration_invalid");
       }
       const pathIncludes = sortedStrings(trigger.path_includes);
-      const fingerprintPathIncludes = legacySerialization
-        ? pathIncludes.filter(
-            (path) => path !== "content/rich-text/*",
-          )
-        : pathIncludes;
+      const fingerprintPathIncludes = pathIncludes.filter((path) => {
+        if (
+          requestedVersion !== contentSerializationVersion &&
+          path === "foundry/*"
+        ) {
+          return false;
+        }
+        return !(
+          requestedVersion === legacyContentSerializationVersion &&
+          path === "content/rich-text/*"
+        );
+      });
       return sha256(
         JSON.stringify({
           appId: configuration.appId,
@@ -1344,22 +1385,17 @@ export function createGitHubContentPublisher({
         const artifacts = [...input.artifacts].sort(
           ({ path: left }, { path: right }) => left.localeCompare(right),
         );
-        const legacyArtifact =
-          input.serializationVersion ===
-            "foundry.site-definition.canonical-json.v1" &&
-          artifacts.length === 1 &&
-          artifacts[0]?.path ===
-            "packages/site-definition/src/published-site.json"
-            ? artifacts[0]
-            : null;
-        const artifactsValid =
-          legacyArtifact !== null
-            ? (await sha256(legacyArtifact.bytes)) ===
-              input.artifactHash
-            : input.serializationVersion ===
-                "foundry.site-publication-artifacts.v2" &&
-              (await hashContentPublicationArtifacts(artifacts)) ===
-                input.artifactHash;
+        const serialization = contentSerializationDescriptor(
+          input.serializationVersion,
+        );
+        const legacyArtifact = serialization.includesRichText
+          ? null
+          : artifacts[0]!;
+        const artifactsValid = await artifactsMatchSerialization({
+          serializationVersion: input.serializationVersion,
+          artifacts,
+          artifactHash: input.artifactHash,
+        });
         if (!artifactsValid) {
           return { state: "failed", detail: "git_operation_failed" };
         }
@@ -1566,22 +1602,17 @@ export function createGitHubContentPublisher({
         const artifacts = [...input.artifacts].sort(
           ({ path: left }, { path: right }) => left.localeCompare(right),
         );
-        const legacyArtifact =
-          input.serializationVersion ===
-            "foundry.site-definition.canonical-json.v1" &&
-          artifacts.length === 1 &&
-          artifacts[0]?.path ===
-            "packages/site-definition/src/published-site.json"
-            ? artifacts[0]
-            : null;
-        const artifactsValid =
-          legacyArtifact !== null
-            ? (await sha256(legacyArtifact.bytes)) ===
-              input.artifactHash
-            : input.serializationVersion ===
-                "foundry.site-publication-artifacts.v2" &&
-              (await hashContentPublicationArtifacts(artifacts)) ===
-                input.artifactHash;
+        const serialization = contentSerializationDescriptor(
+          input.serializationVersion,
+        );
+        const legacyArtifact = serialization.includesRichText
+          ? null
+          : artifacts[0]!;
+        const artifactsValid = await artifactsMatchSerialization({
+          serializationVersion: input.serializationVersion,
+          artifacts,
+          artifactHash: input.artifactHash,
+        });
         if (!artifactsValid) {
           return {
             state: "failed",

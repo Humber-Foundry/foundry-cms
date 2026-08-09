@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import { installedSiteDefinition } from "../foundry/site-definition";
+
 
 import type { D1DatabaseBinding } from "../src/d1-human-access-store";
 import { createD1RestDatabase } from "../src/d1-rest-database";
@@ -155,7 +156,7 @@ function createRemoteBackupBucket({
       const bytes = await readFile(destination);
       return {
         customMetadata: {
-          siteId: referenceSiteDefinition.site.id,
+          siteId: installedSiteDefinition.site.id,
           backupId,
           createdAt: record.created_at,
           expiresAt: record.expires_at,

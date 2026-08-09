@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 
 import { SiteRenderer } from "@/components/site-renderer";
-import { referenceSiteApplication } from "@/src/reference-installation";
+import { installedSite } from "@/foundry/site-definition.server";
 
 import "./public.css";
 
 export async function generateMetadata(): Promise<Metadata> {
   const definition =
-    await referenceSiteApplication.queries.getPublishedSite();
+    await installedSite.application.queries.getPublishedSite();
 
   return {
     title: definition.home.seo.title,
@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function PublicHomePage() {
   const definition =
-    await referenceSiteApplication.queries.getPublishedSite();
+    await installedSite.application.queries.getPublishedSite();
 
   return <SiteRenderer definition={definition} />;
 }

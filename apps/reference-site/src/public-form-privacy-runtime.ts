@@ -5,7 +5,8 @@ import {
   type PublicFormBackupVault,
   type PublicFormRetentionPolicy,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1PublicFormPrivacyStore } from "./d1-public-form-privacy-store";
@@ -76,7 +77,7 @@ export function createConfiguredPublicFormPrivacy(
       bucket: environment.FOUNDRY_FORM_BACKUPS,
       recoveryRecipientBase64:
         environment.FOUNDRY_FORM_BACKUP_RECIPIENT,
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
     });
   };
   const hasVaultConfiguration =
@@ -122,7 +123,7 @@ export async function runPublicFormRetentionMaintenanceIfDue(
 ) {
   const { store, policy } = createConfiguredPublicFormRetention(environment);
   return runPublicFormRetentionMaintenance({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     store,
     now: new Date(),
     policy,
@@ -134,7 +135,7 @@ export async function runPublicFormBackupMaintenanceIfDue(
 ) {
   const { store, vault } = createConfiguredPublicFormPrivacy(environment);
   return runPublicFormBackupMaintenance({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     store,
     vault,
     now: new Date(),

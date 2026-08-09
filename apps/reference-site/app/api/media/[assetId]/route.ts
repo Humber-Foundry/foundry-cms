@@ -8,7 +8,7 @@ import {
   MediaAssetConfigurationError,
   loadMediaAssetApplication,
 } from "../../../../src/media-asset-runtime";
-import { referenceSiteApplication } from "../../../../src/reference-installation";
+import { installedSite } from "@/foundry/site-definition.server";
 
 const publicRendererActorId = createContentActorId(
   "integration-public-renderer",
@@ -20,7 +20,7 @@ export async function GET(
 ) {
   try {
     const assetId = createMediaAssetId((await context.params).assetId);
-    const published = await referenceSiteApplication.queries.getPublishedSite();
+    const published = await installedSite.application.queries.getPublishedSite();
     const isPublished = (published.home.media ?? []).some(
       (occurrence) => occurrence.asset.assetId === assetId,
     );

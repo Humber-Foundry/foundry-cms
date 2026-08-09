@@ -51,7 +51,7 @@ import {
 } from "./human-access-configuration";
 import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
-import { referenceSiteApplication } from "./reference-installation";
+import { installedSite } from "../foundry/site-definition.server";
 import {
   createSignedNewsletterDeliveryAdapter,
 } from "./newsletter-unsubscribe-token";
@@ -132,7 +132,7 @@ async function localPostRevision(
   revisionId: string,
 ): Promise<BlogPost | null> {
   const definition =
-    await referenceSiteApplication.queries.getPublishedSite();
+    await installedSite.application.queries.getPublishedSite();
   for (const post of definition.blog.posts) {
     const contentHash = await sha256Text(canonicalJson(post));
     const candidate = await createBlogPostRevisionId(
@@ -194,7 +194,7 @@ export async function loadCampaignRequestContext(
   let subscriberStore: SubscriberLedgerStore = localSubscriberStore;
   let bulkStateStore: CampaignBulkStateStore = localBulkStateStore;
   let resolveAudience = createSubscriberLedgerAudienceResolver({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     store: localSubscriberStore,
   });
   let findPostRevision = localPostRevision;
@@ -290,7 +290,7 @@ export async function loadCampaignRequestContext(
     );
     subscriberStore = createD1SubscriberLedgerStore(environment.FOUNDRY_DB);
     resolveAudience = createSubscriberLedgerAudienceResolver({
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.application.siteId,
       store: subscriberStore,
     });
     findPostRevision = (siteId, revisionId) =>
@@ -336,7 +336,7 @@ export async function loadCampaignRequestContext(
       senders,
       webhookEvidence: createD1BrevoTestWebhookEvidenceStore({
         database: environment.FOUNDRY_DB,
-        siteId: referenceSiteApplication.siteId,
+        siteId: installedSite.application.siteId,
       }),
     });
     bulkAdapter = createBrevoCampaignBulkDeliveryAdapter({
@@ -349,7 +349,7 @@ export async function loadCampaignRequestContext(
     });
   }
   const application = createCampaignApplication({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     store,
     authorize: (actor, capability) =>
       human.application.queries.requireCapability({
@@ -367,15 +367,15 @@ export async function loadCampaignRequestContext(
     schemaVersion: "1.3.0",
   });
   const audience = createCampaignBulkAudience({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     store: subscriberStore,
   });
   const isActiveOwner = createActiveOwnerCheck({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     database: () => durableDatabase,
   });
   const loadBulkSource = createCampaignBulkSourceReader({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     campaignStore: store,
     testStore: testDeliveryStore,
     senders: () => bulkSenders,
@@ -389,7 +389,7 @@ export async function loadCampaignRequestContext(
     },
   });
   const bulkDelivery = createCampaignBulkDeliveryApplication({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     store: bulkStateStore,
     loadSource: loadBulkSource,
     authorizeOwner: (actor) =>
@@ -413,7 +413,7 @@ export async function loadCampaignRequestContext(
     },
     resolveAudienceByIds: audience.resolveByIds,
     applyProviderSuppression: createProviderSuppressionRecorder({
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.application.siteId,
       store: subscriberStore,
       identityKeySecret: subscriberIdentityKeySecret,
     }),
@@ -427,7 +427,7 @@ export async function loadCampaignRequestContext(
     application,
     bulkDelivery,
     testDelivery: createCampaignTestDeliveryApplication({
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.application.siteId,
       campaignStore: store,
       store: testDeliveryStore,
       adapter: testAdapter,

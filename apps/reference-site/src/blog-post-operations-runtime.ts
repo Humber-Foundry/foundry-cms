@@ -16,6 +16,8 @@ import {
   type ContentPublicationStatus,
 } from "@humber-foundry/application";
 
+import { installedSiteDefinition } from "../foundry/site-definition";
+
 import { createD1BlogPostOperationsStore } from "./d1-blog-post-operations-store";
 import {
   createD1BlogPostRestoreInitializationExtension,
@@ -36,7 +38,6 @@ import {
 import {
   createBlogPostId,
   isSiteDefinition,
-  referenceSiteDefinition,
   type BlogPost,
   type BlogPostId,
 } from "@humber-foundry/site-definition";
@@ -397,7 +398,7 @@ async function restoreWorkspaceId(
   idempotencyKey: string,
 ) {
   const suffix = (await sha256Hex(
-    `${referenceSiteDefinition.site.id}:blog-restore:${actorId}:${idempotencyKey}`,
+    `${installedSiteDefinition.site.id}:blog-restore:${actorId}:${idempotencyKey}`,
   )).slice(0, 24);
   return createContentWorkspaceId(`workspace_${suffix}`);
 }
@@ -415,7 +416,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
   const database = input.environment.FOUNDRY_DB;
   const operationsStore = createD1BlogPostOperationsStore(database);
   if (!(await operationsStore.hasHumanContentAuthority({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     actorId: input.actorId,
   }))) {
     throw new BlogPostOperationError("human_authority_required");
@@ -434,7 +435,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
      ORDER BY record.id
      LIMIT 1`,
   ).bind(
-    referenceSiteDefinition.site.id,
+    installedSiteDefinition.site.id,
     input.postId,
     input.idempotencyKey,
   ).first<{
@@ -467,13 +468,13 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
     };
   }
   const operational = await createD1BlogPostOperationsStore(database)
-    .findPost(referenceSiteDefinition.site.id, input.postId);
+    .findPost(installedSiteDefinition.site.id, input.postId);
   if (operational?.collectionState !== "archived") {
     throw new BlogPostOperationError("post_not_archived");
   }
   await operationsStore.claimRestore({
     actorId: input.actorId,
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     postId: input.postId,
     selectedPostRevisionId: input.selectedPostRevisionId,
     idempotencyKey: input.idempotencyKey,
@@ -486,7 +487,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
        WHERE site_id = ?1 AND post_id = ?2 AND revision_id = ?3`,
     )
     .bind(
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       input.postId,
       input.selectedPostRevisionId,
     )
@@ -497,7 +498,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
   const selected = JSON.parse(source.snapshot_json) as BlogPost;
   const base = await hydrateManagedBlogPosts(
     database,
-    referenceSiteDefinition,
+    installedSiteDefinition,
   );
   const restoredPost: BlogPost = {
     ...selected,
@@ -549,7 +550,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
       error.message.includes("blog_post_restore_aggregate_not_advanced")
     ) {
       if (!(await operationsStore.hasHumanContentAuthority({
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         actorId: input.actorId,
       }))) {
         throw new BlogPostOperationError("human_authority_required");
@@ -588,7 +589,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
          AND record.actor_id = ?8`,
     )
     .bind(
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       input.postId,
       input.idempotencyKey,
       input.selectedPostRevisionId,
@@ -632,7 +633,7 @@ export async function restoreArchivedBlogPostAsDraft(input: {
       });
       await operations.commands.recordRejectedCommand({
         actorId: input.actorId,
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         postId: input.postId,
         commandType: "blog.post.restore",
         requestId: input.idempotencyKey,
@@ -663,7 +664,7 @@ export async function archiveBlogPostWithWithdrawal(input: {
   const operations = createBlogPostOperationsApplication({ store });
   const archived = await operations.commands.archive({
     actorId: input.actorId,
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     postId: input.postId,
     selectedPostRevisionId: input.selectedPostRevisionId,
     idempotencyKey: input.idempotencyKey,
@@ -742,7 +743,7 @@ async function prepareArchiveWithdrawal(input: {
     }
     const definition = await hydrateManagedBlogPosts(
       input.environment.FOUNDRY_DB,
-      referenceSiteDefinition,
+      installedSiteDefinition,
     );
     const revisions = createRestoredContentRevisionApplicationForEnvironment(
       input.environment,
@@ -766,7 +767,7 @@ async function prepareArchiveWithdrawal(input: {
     }
     if (input.withdrawalDraft === undefined) {
       await operations.commands.bindArchiveWithdrawalDraft({
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         postId: archived.postId,
         workspaceId: withdrawalWorkspaceId,
         contentRevision: expectedWithdrawalRevision,
@@ -778,7 +779,7 @@ async function prepareArchiveWithdrawal(input: {
     const withdrawal = await revisions.commands.unpublishBlogPost({
       actorId: input.actorId,
       workspaceId: withdrawalWorkspaceId,
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       schemaVersion: current.definition.schemaVersion,
       baseRevision: current.revision,
       postId: createBlogPostId(archived.postId),
@@ -799,7 +800,7 @@ async function prepareArchiveWithdrawal(input: {
     input.acceptedContinuation !== undefined
   ) {
     await store.grantArchiveWithdrawalRecoveryAccess({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       postId: archived.postId,
       archiveRequestId: input.archiveRequestId,
       workspaceId: withdrawalWorkspaceId,
@@ -923,7 +924,7 @@ async function prepareArchiveWithdrawal(input: {
     publication,
   };
   await operations.commands.bindArchiveWithdrawal({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     postId: archived.postId,
     publicationId: publication.id,
     occurredAt: publication.requestedAt,
@@ -938,7 +939,7 @@ async function prepareArchiveWithdrawal(input: {
   });
   if (publication.status === "verified-live") {
     await operations.commands.confirmArchiveWithdrawal({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       postId: archived.postId,
       publicationId: publication.id,
     });
@@ -964,7 +965,7 @@ export async function recoverArchiveBlogPostWithdrawalAccess(input: {
     beforeState: unknown = null,
   ) => {
     await store.recordAudit({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       postId: input.postId,
       actorId: input.actorId,
       commandType: "blog.post.archive.withdrawal.recover_access",
@@ -978,7 +979,7 @@ export async function recoverArchiveBlogPostWithdrawalAccess(input: {
     throw new BlogPostOperationError(reasonCode);
   };
   if (!(await store.hasHumanContentAuthority({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     actorId: input.actorId,
   }))) {
     return reject("human_authority_required");
@@ -993,7 +994,7 @@ export async function recoverArchiveBlogPostWithdrawalAccess(input: {
          AND collection_state IN ('archiving', 'archived')`,
     )
     .bind(
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       input.postId,
       input.archiveRequestId,
     )
@@ -1014,7 +1015,7 @@ export async function recoverArchiveBlogPostWithdrawalAccess(input: {
   );
   try {
     await store.grantArchiveWithdrawalRecoveryAccess({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       postId: input.postId,
       archiveRequestId: input.archiveRequestId,
       workspaceId,
@@ -1025,7 +1026,7 @@ export async function recoverArchiveBlogPostWithdrawalAccess(input: {
   } catch (error) {
     if (error instanceof BlogPostOperationError) {
       await store.recordAudit({
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         postId: input.postId,
         actorId: input.actorId,
         commandType: "blog.post.archive.withdrawal.recover_access",
@@ -1033,7 +1034,7 @@ export async function recoverArchiveBlogPostWithdrawalAccess(input: {
         outcome: "rejected",
         reasonCode: error.code,
         beforeState: await store.findPost(
-          referenceSiteDefinition.site.id,
+          installedSiteDefinition.site.id,
           input.postId,
         ),
         afterState: null,
@@ -1076,7 +1077,7 @@ export async function continueArchiveBlogPostWithdrawal(input: {
            AND request_id = ?2 AND outcome = 'accepted'`,
       )
       .bind(
-        referenceSiteDefinition.site.id,
+        installedSiteDefinition.site.id,
         input.requestId,
       )
       .first<{
@@ -1106,11 +1107,11 @@ export async function continueArchiveBlogPostWithdrawal(input: {
     return result;
   };
   if (!(await store.hasHumanContentAuthority({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     actorId: input.actorId,
   }))) {
     await store.recordAudit({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       postId: input.postId,
       actorId: input.actorId,
       commandType: "blog.post.archive.withdrawal.continue",
@@ -1137,7 +1138,7 @@ export async function continueArchiveBlogPostWithdrawal(input: {
          AND archive_request_id = ?3`,
     )
     .bind(
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       input.postId,
       input.archiveRequestId,
     )
@@ -1151,7 +1152,7 @@ export async function continueArchiveBlogPostWithdrawal(input: {
     }>();
   if (row === null) {
     await store.recordAudit({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       postId: input.postId,
       actorId: input.actorId,
       commandType: "blog.post.archive.withdrawal.continue",
@@ -1165,7 +1166,7 @@ export async function continueArchiveBlogPostWithdrawal(input: {
     throw new BlogPostOperationError("archive_request_not_found");
   }
   const operational = await store.findPost(
-    referenceSiteDefinition.site.id,
+    installedSiteDefinition.site.id,
     input.postId,
   );
   if (
@@ -1176,7 +1177,7 @@ export async function continueArchiveBlogPostWithdrawal(input: {
     )
   ) {
     await store.recordAudit({
-      siteId: referenceSiteDefinition.site.id,
+      siteId: installedSiteDefinition.site.id,
       postId: input.postId,
       actorId: input.actorId,
       commandType: "blog.post.archive.withdrawal.continue",
@@ -1245,7 +1246,7 @@ export async function continueArchiveBlogPostWithdrawal(input: {
     }
     if (row.collection_state === "archived") {
       await store.recordAudit({
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         postId: input.postId,
         actorId: input.actorId,
         commandType: "blog.post.archive.withdrawal.continue",
@@ -1275,7 +1276,7 @@ export async function continueArchiveBlogPostWithdrawal(input: {
             ? error.code
           : error.code;
       await store.recordAudit({
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         postId: input.postId,
         actorId: input.actorId,
         commandType: "blog.post.archive.withdrawal.continue",

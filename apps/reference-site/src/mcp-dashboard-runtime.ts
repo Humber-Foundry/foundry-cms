@@ -1,6 +1,6 @@
 import "server-only";
 
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
@@ -11,5 +11,5 @@ export async function loadMcpConnectionsForDashboard() {
   if (environment.FOUNDRY_DB === undefined) return [];
   return createD1McpConnectionStore(
     environment.FOUNDRY_DB,
-  ).listConnections(referenceSiteDefinition.site.id);
+  ).listConnections(installedSiteDefinition.site.id);
 }
