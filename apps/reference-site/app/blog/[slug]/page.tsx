@@ -6,7 +6,7 @@ import {
   blogPostMetadata,
   findPublicBlogPost,
 } from "@/src/blog-post-page";
-import { referenceSiteApplication } from "@/src/reference-installation";
+import { installedSite } from "@/foundry/site-definition.server";
 
 import "../../public.css";
 
@@ -16,7 +16,7 @@ type BlogPostPageProps = {
 
 async function loadPost(props: BlogPostPageProps) {
   const definition =
-    await referenceSiteApplication.queries.getPublishedSite();
+    await installedSite.application.queries.getPublishedSite();
   const { slug } = await props.params;
   const post = findPublicBlogPost(definition, slug);
   if (post === null) {

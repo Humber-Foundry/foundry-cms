@@ -4,7 +4,9 @@ import {
   createContentActorId,
   createContentApprovalId,
 } from "@humber-foundry/application";
-import { createBlogPostId, referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "@/foundry/site-definition";
+import { createBlogPostId } from "@humber-foundry/site-definition";
 
 import {
   archiveBlogPostWithWithdrawal,
@@ -237,7 +239,7 @@ export async function GET(request: Request) {
     );
     if (executionId !== null) {
       const execution = await application.queries.getExecution(
-        referenceSiteDefinition.site.id,
+        installedSiteDefinition.site.id,
         executionId,
       );
       if (execution === null) {
@@ -249,7 +251,7 @@ export async function GET(request: Request) {
       );
     }
     const schedule = await application.queries.getSchedule(
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       scheduleId!,
     );
     return Response.json(
@@ -297,7 +299,7 @@ export async function POST(request: Request) {
         }
         await application.commands.recordRejectedCommand({
           actorId: createContentActorId(access.membership.id),
-          siteId: referenceSiteDefinition.site.id,
+          siteId: installedSiteDefinition.site.id,
           postId: rejectedPostId,
           commandType:
             candidate !== null && isBlogOperation(candidate.operation)
@@ -327,7 +329,7 @@ export async function POST(request: Request) {
         );
         await application.commands.recordRejectedCommand({
           actorId: createContentActorId(access.membership.id),
-          siteId: referenceSiteDefinition.site.id,
+          siteId: installedSiteDefinition.site.id,
           postId: null,
           commandType:
             operationMetadata[command.operation].commandType,
@@ -367,7 +369,7 @@ export async function POST(request: Request) {
             case "retry_execution": {
               const retried = await retryScheduledBlogPostExecution(
                 environment,
-                referenceSiteDefinition.site.id,
+                installedSiteDefinition.site.id,
                 postId,
                 command.executionId,
                 actorId,
@@ -416,7 +418,7 @@ export async function POST(request: Request) {
               const schedule =
                 await application.commands.activateSchedule({
                   actorId,
-                  siteId: referenceSiteDefinition.site.id,
+                  siteId: installedSiteDefinition.site.id,
                   postId,
                   approvalId: createContentApprovalId(
                     command.approvalId,
@@ -432,7 +434,7 @@ export async function POST(request: Request) {
               const proposal =
                 await application.commands.proposeSchedule({
                   actorId,
-                  siteId: referenceSiteDefinition.site.id,
+                  siteId: installedSiteDefinition.site.id,
                   postId,
                   resolvedTime: command.resolvedTime,
                   idempotencyKey,
@@ -444,7 +446,7 @@ export async function POST(request: Request) {
                 await loadBlogPostOperationsApplication(environment);
               const schedule = await application.commands.cancelSchedule({
                 actorId,
-                siteId: referenceSiteDefinition.site.id,
+                siteId: installedSiteDefinition.site.id,
                 postId,
                 scheduleId: command.scheduleId,
                 idempotencyKey,

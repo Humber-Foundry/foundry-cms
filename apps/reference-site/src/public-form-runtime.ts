@@ -6,7 +6,8 @@ import {
   createPublicFormApplication,
   type AcceptPublicFormCommand,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createCloudflareTurnstileVerifier } from "./cloudflare-turnstile";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
@@ -74,7 +75,7 @@ export async function acceptPublicFormSubmission(
     throw new Error("public_form_not_configured");
   }
   const application = createPublicFormApplication({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     definitions: [
       {
         id: createPublicFormId("contact"),

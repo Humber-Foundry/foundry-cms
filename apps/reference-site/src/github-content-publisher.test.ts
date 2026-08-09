@@ -49,7 +49,7 @@ const configurationInputs = {
 function publicationArtifactSet<
   T extends ReadonlyArray<{
     path:
-      | "packages/site-definition/src/published-site.json"
+      | "foundry/published-site.json"
       | `content/rich-text/${string}.md`;
     bytes: string;
   }>,
@@ -92,7 +92,7 @@ function legacyPublicationArtifacts(bytes: string) {
 function publicationArtifacts(bytes: string) {
   return publicationArtifactSet([
     {
-      path: "packages/site-definition/src/published-site.json" as const,
+      path: "foundry/published-site.json" as const,
       bytes,
     },
   ]);
@@ -301,12 +301,12 @@ describe("GitHub content publisher", () => {
     await expect(
       publisher.readPublishedArtifact({
         commitSha,
-        path: "packages/site-definition/src/published-site.json",
+        path: "foundry/published-site.json",
       }),
     ).resolves.toBe(bytes);
     expect(fetchMock.mock.calls[1]![0]).toBe(
       "https://api.github.com/repos/client-owner/client-site/contents/" +
-        `packages/site-definition/src/published-site.json?ref=${commitSha}`,
+        `foundry/published-site.json?ref=${commitSha}`,
     );
     expect(fetchMock.mock.calls[1]![1]).toEqual(
       expect.objectContaining({
@@ -332,7 +332,7 @@ describe("GitHub content publisher", () => {
     await expect(
       publisher.readPublishedArtifact({
         commitSha: "c".repeat(40),
-        path: "packages/site-definition/src/published-site.json",
+        path: "foundry/published-site.json",
       }),
     ).resolves.toBe(bytes);
   });
@@ -369,7 +369,7 @@ describe("GitHub content publisher", () => {
 
     const artifact = await publisher.readPublishedArtifact({
       commitSha: "c".repeat(40),
-      path: "packages/site-definition/src/published-site.json",
+      path: "foundry/published-site.json",
     });
 
     expect(cancelled).toBe(true);
@@ -467,7 +467,7 @@ describe("GitHub content publisher", () => {
     });
     expect(mutation.variables.input.fileChanges.additions).toEqual([
       {
-        path: "packages/site-definition/src/published-site.json",
+        path: "foundry/published-site.json",
         contents: Buffer.from(
           "{\"schemaVersion\":\"1.0.0\"}\n",
         ).toString("base64"),
@@ -554,7 +554,7 @@ describe("GitHub content publisher", () => {
     const expectedHead = "a".repeat(40);
     const artifacts = publicationArtifactSet([
       {
-        path: "packages/site-definition/src/published-site.json",
+        path: "foundry/published-site.json",
         bytes: "{\"schemaVersion\":\"1.1.0\"}\n",
       },
       {
@@ -576,7 +576,7 @@ describe("GitHub content publisher", () => {
               sha: "old-rich-blob",
             },
             {
-              path: "packages/site-definition/src/published-site.json",
+              path: "foundry/published-site.json",
               type: "blob",
               sha: "old-json-blob",
             },
@@ -627,7 +627,7 @@ describe("GitHub content publisher", () => {
           contents: Buffer.from("New body.\n").toString("base64"),
         },
         {
-          path: "packages/site-definition/src/published-site.json",
+          path: "foundry/published-site.json",
           contents: Buffer.from(
             "{\"schemaVersion\":\"1.1.0\"}\n",
           ).toString("base64"),
@@ -866,6 +866,7 @@ describe("GitHub content publisher", () => {
           branch_includes: ["*"],
           branch_excludes: ["release/*"],
           path_includes: [
+            "foundry/*",
             "packages/site-definition/*",
             "content/rich-text/*",
           ],
@@ -1046,13 +1047,15 @@ describe("GitHub content publisher", () => {
         ...buildConfiguration.result[0],
         path_includes: ["*"],
         path_excludes: ["packages/site-definition/*"],
-      }).getChannelConfigurationHash(),
+      }).getChannelConfigurationHash(
+        "foundry.site-definition.canonical-json.v1",
+      ),
     ).rejects.toThrow("cloudflare_build_configuration_invalid");
     await expect(
       publisherForBuildTrigger({
         ...buildConfiguration.result[0],
         path_includes: ["*"],
-        path_excludes: ["packages/*/published-site.json"],
+        path_excludes: ["foundry/published-site.json"],
       }).getChannelConfigurationHash(),
     ).rejects.toThrow("cloudflare_build_configuration_invalid");
 
@@ -1601,7 +1604,7 @@ describe("GitHub content publisher", () => {
           files: [
             {
               filename:
-                "packages/site-definition/src/published-site.json",
+                "foundry/published-site.json",
               status: "modified",
               sha: blobSha,
             },
@@ -1612,7 +1615,7 @@ describe("GitHub content publisher", () => {
         json({
           tree: [
             {
-              path: "packages/site-definition/src/published-site.json",
+              path: "foundry/published-site.json",
               type: "blob",
               sha: blobSha,
             },
@@ -1732,7 +1735,7 @@ describe("GitHub content publisher", () => {
           files: [
             {
               filename:
-                "packages/site-definition/src/published-site.json",
+                "foundry/published-site.json",
               status: "modified",
               sha: blobSha,
             },
@@ -1743,7 +1746,7 @@ describe("GitHub content publisher", () => {
         json({
           tree: [
             {
-              path: "packages/site-definition/src/published-site.json",
+              path: "foundry/published-site.json",
               type: "blob",
               sha: blobSha,
             },
@@ -1798,7 +1801,7 @@ describe("GitHub content publisher", () => {
           files: [
             {
               filename:
-                "packages/site-definition/src/published-site.json",
+                "foundry/published-site.json",
               status: "modified",
               sha: blobSha,
             },
@@ -1856,7 +1859,7 @@ describe("GitHub content publisher", () => {
           files: [
             {
               filename:
-                "packages/site-definition/src/published-site.json",
+                "foundry/published-site.json",
               status: "modified",
               sha: blobSha,
             },
@@ -1867,7 +1870,7 @@ describe("GitHub content publisher", () => {
         json({
           tree: [
             {
-              path: "packages/site-definition/src/published-site.json",
+              path: "foundry/published-site.json",
               type: "blob",
               sha: blobSha,
             },
@@ -2162,7 +2165,7 @@ describe("GitHub content publisher", () => {
       expectedHead: "a".repeat(40),
       ...publicationArtifactSet([
         {
-          path: "packages/site-definition/src/published-site.json",
+          path: "foundry/published-site.json",
           bytes: "{\"schemaVersion\":\"1.1.0\"}\n",
         },
         {
@@ -2203,10 +2206,10 @@ describe("GitHub content publisher", () => {
           files: [
             {
               filename:
-                "packages/site-definition/src/published-site.json",
+                "foundry/published-site.json",
               status: "modified",
               sha: blobShas[
-                "packages/site-definition/src/published-site.json"
+                "foundry/published-site.json"
               ],
             },
           ],

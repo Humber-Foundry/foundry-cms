@@ -20,6 +20,8 @@ import type { HumanMembershipId } from "./human-access";
 import type { McpLinkedPublicationAudit } from "./mcp-read";
 
 export const publishedSiteDefinitionPath =
+  "foundry/published-site.json";
+export const legacyPublishedSiteDefinitionPath =
   "packages/site-definition/src/published-site.json";
 export const contentSerializationVersion =
   "foundry.site-publication-artifacts.v2";
@@ -79,6 +81,7 @@ export type ContentApprovalFingerprint = Readonly<{
 export type ContentPublicationArtifact = Readonly<{
   path:
     | typeof publishedSiteDefinitionPath
+    | typeof legacyPublishedSiteDefinitionPath
     | `content/rich-text/${string}.md`;
   bytes: string;
 }>;
@@ -540,7 +543,7 @@ function serializeContentPublicationArtifactsForVersion(
     "foundry.site-definition.canonical-json.v1"
     ? [
         {
-          path: publishedSiteDefinitionPath,
+          path: legacyPublishedSiteDefinitionPath,
           bytes: serializePublishedSiteDefinition(definition),
         },
       ]
@@ -2722,9 +2725,14 @@ export function createContentPublicationApplication({
             "restore_artifact_unavailable",
           );
         }
+        const publishedDefinitionPath =
+          approval.fingerprint.serializationVersion ===
+          "foundry.site-definition.canonical-json.v1"
+            ? legacyPublishedSiteDefinitionPath
+            : publishedSiteDefinitionPath;
         const bytes = await publishedRevisions.readPublishedArtifact({
           commitSha: publication.commitSha,
-          path: publishedSiteDefinitionPath,
+          path: publishedDefinitionPath,
         });
         if (bytes === null) {
           throw new ContentPublicationValidationError(

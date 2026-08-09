@@ -6,7 +6,8 @@ import {
   type HumanCapability,
   type HumanMembership,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import { createD1PublicFormPrivacyStore } from "./d1-public-form-privacy-store";
@@ -42,7 +43,7 @@ export async function runPublicFormRecoveryOperator({
   actorMembershipId: string;
   clock?: () => Date;
 }) {
-  const siteId = referenceSiteDefinition.site.id;
+  const siteId = installedSiteDefinition.site.id;
   const row = await primaryDatabase
     .prepare(
       `SELECT id, user_id, email, identity_issuer, identity_subject, role, status

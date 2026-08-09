@@ -28,7 +28,7 @@ import {
   requireExistingContentWorkspaceAccess,
 } from "@/src/content-revision-runtime";
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
-import { referenceSiteApplication } from "@/src/reference-installation";
+import { installedSite } from "@/foundry/site-definition.server";
 import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
 import { durableSchemaRecoveryEdits } from "@/src/content-schema-recovery";
 import type { StaleRecoveryEdit } from "@/src/content-editor-recovery";
@@ -67,7 +67,7 @@ export default async function DashboardPage({
   }
 
   const definition =
-    await referenceSiteApplication.queries.getPublishedSite();
+    await installedSite.application.queries.getPublishedSite();
   if (access.state === "invited") {
     return (
       <InvitationActivation

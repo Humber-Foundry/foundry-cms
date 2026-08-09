@@ -12,11 +12,12 @@ import {
   createContentWorkspaceId,
   createMediaAssetId,
 } from "@humber-foundry/application";
+
+import { installedSiteDefinition } from "@/foundry/site-definition";
 import {
   createSerializedRichTextDocument,
   createBlogPostId,
   parseSerializedRichTextDocument,
-  referenceSiteDefinition,
   RichTextValidationError,
   type PageComposition,
   type SiteDefinition,
@@ -132,7 +133,7 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
   }
   if (
     typeof candidate.workspaceId !== "string" ||
-    candidate.schemaVersion !== referenceSiteDefinition.schemaVersion ||
+    candidate.schemaVersion !== installedSiteDefinition.schemaVersion ||
     !Number.isSafeInteger(candidate.baseRevision) ||
     (candidate.baseRevision as number) < 0
   ) {
@@ -565,7 +566,7 @@ export async function POST(request: Request) {
       const command = {
         actorId,
         workspaceId: blogMutation.workspaceId,
-        siteId: referenceSiteDefinition.site.id,
+        siteId: installedSiteDefinition.site.id,
         schemaVersion: blogMutation.schemaVersion,
         baseRevision: blogMutation.baseRevision,
         idempotencyKey,

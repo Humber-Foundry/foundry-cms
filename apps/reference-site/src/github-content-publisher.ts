@@ -12,6 +12,8 @@ import type {
 import {
   hashContentPublicationArtifacts,
   isValidGitBranchName,
+  legacyPublishedSiteDefinitionPath,
+  publishedSiteDefinitionPath,
 } from "@humber-foundry/application";
 
 export type GitHubContentPublisherConfiguration = Readonly<{
@@ -799,8 +801,7 @@ export function createGitHubContentPublisher({
       input.serializationVersion ===
         "foundry.site-definition.canonical-json.v1" &&
       artifacts.length === 1 &&
-      artifacts[0]?.path ===
-        "packages/site-definition/src/published-site.json"
+      artifacts[0]?.path === legacyPublishedSiteDefinitionPath
         ? artifacts[0]
         : null;
     if (
@@ -1145,7 +1146,9 @@ export function createGitHubContentPublisher({
           trigger.branch_excludes,
         ) ||
         !cloudflareWatchFilterAllows(
-          "packages/site-definition/src/published-site.json",
+          legacySerialization
+            ? legacyPublishedSiteDefinitionPath
+            : publishedSiteDefinitionPath,
           trigger.path_includes,
           trigger.path_excludes,
         ) ||
@@ -1166,7 +1169,8 @@ export function createGitHubContentPublisher({
       const pathIncludes = sortedStrings(trigger.path_includes);
       const fingerprintPathIncludes = legacySerialization
         ? pathIncludes.filter(
-            (path) => path !== "content/rich-text/*",
+            (path) =>
+              path !== "content/rich-text/*" && path !== "foundry/*",
           )
         : pathIncludes;
       return sha256(
@@ -1348,8 +1352,7 @@ export function createGitHubContentPublisher({
           input.serializationVersion ===
             "foundry.site-definition.canonical-json.v1" &&
           artifacts.length === 1 &&
-          artifacts[0]?.path ===
-            "packages/site-definition/src/published-site.json"
+          artifacts[0]?.path === legacyPublishedSiteDefinitionPath
             ? artifacts[0]
             : null;
         const artifactsValid =
@@ -1570,8 +1573,7 @@ export function createGitHubContentPublisher({
           input.serializationVersion ===
             "foundry.site-definition.canonical-json.v1" &&
           artifacts.length === 1 &&
-          artifacts[0]?.path ===
-            "packages/site-definition/src/published-site.json"
+          artifacts[0]?.path === legacyPublishedSiteDefinitionPath
             ? artifacts[0]
             : null;
         const artifactsValid =

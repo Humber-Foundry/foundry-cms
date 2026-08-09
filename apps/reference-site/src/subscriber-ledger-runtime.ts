@@ -20,7 +20,7 @@ import {
 } from "./human-access-configuration";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
-import { referenceSiteApplication } from "./reference-installation";
+import { installedSite } from "../foundry/site-definition.server";
 
 export type SubscriberLedgerRequestContext = Readonly<{
   identity: Awaited<
@@ -48,7 +48,7 @@ async function createContext({
   return {
     identity: humanContext.identity,
     application: createSubscriberLedgerApplication({
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.application.siteId,
       store,
       identityKeySecret,
       authorize: (actor, capability) =>
@@ -84,7 +84,7 @@ async function loadDependencies(): Promise<{
 export async function loadSubscriberLedgerIntegrationApplication() {
   const dependencies = await loadDependencies();
   return createSubscriberLedgerApplication({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     ...dependencies,
     authorize: async () => {
       throw new AccessDeniedError("capability_not_authorized");

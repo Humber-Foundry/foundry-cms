@@ -5,7 +5,8 @@ import {
   type PublicFormDeliveryHealth,
   type PublicFormNotificationAdapter,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
 import {
@@ -54,7 +55,7 @@ export async function createPublicFormOperationsContext(
     },
   };
   const application = createPublicFormOperationsApplication({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     store: createD1PublicFormNotificationStore(
       database as Parameters<
         typeof createD1PublicFormNotificationStore

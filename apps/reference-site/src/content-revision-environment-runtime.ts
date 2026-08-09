@@ -4,8 +4,9 @@ import {
   type ContentActorId,
   type ContentWorkspaceId,
 } from "@humber-foundry/application";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 import {
-  referenceSiteDefinition,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
@@ -49,14 +50,14 @@ function application(input: {
   }
   const { commit, rendererVersion } = releaseInputs(input.environment);
   return createContentRevisionApplication({
-    siteDefinition: referenceSiteDefinition,
+    siteDefinition: installedSiteDefinition,
     initialDefinition: input.initialDefinition,
     ...(input.initialCreatedBy === undefined
       ? {}
       : { initialCreatedBy: input.initialCreatedBy }),
     store: createD1ContentRevisionStore(
       input.environment.FOUNDRY_DB,
-      referenceSiteDefinition.site.id,
+      installedSiteDefinition.site.id,
       input.workspaceId,
       input.initializationExtension,
     ),
@@ -82,7 +83,7 @@ export async function createContentRevisionApplicationForEnvironment(
     actorId,
     initialDefinition: await hydrateManagedBlogPosts(
       environment.FOUNDRY_DB,
-      referenceSiteDefinition,
+      installedSiteDefinition,
     ),
   });
 }
@@ -101,9 +102,9 @@ export function createRestoredContentRevisionApplicationForEnvironment(
     throw new ContentRevisionConfigurationError();
   }
   if (
-    current.site.id !== referenceSiteDefinition.site.id ||
-    current.schemaVersion !== referenceSiteDefinition.schemaVersion ||
-    current.definitionVersion !== referenceSiteDefinition.definitionVersion
+    current.site.id !== installedSiteDefinition.site.id ||
+    current.schemaVersion !== installedSiteDefinition.schemaVersion ||
+    current.definitionVersion !== installedSiteDefinition.definitionVersion
   ) {
     throw new ContentRevisionConfigurationError();
   }

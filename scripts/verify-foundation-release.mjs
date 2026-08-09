@@ -106,6 +106,26 @@ async function main() {
         "app/%5F%5Ffoundry/preview/[workspaceId]/[revision]/page.tsx",
       ),
     );
+    const browserSafeSiteDefinition = await readFile(
+      join(target, "foundry/site-definition.ts"),
+      "utf8",
+    );
+    const serverOnlySiteDefinition = await readFile(
+      join(target, "foundry/site-definition.server.ts"),
+      "utf8",
+    );
+    const installationGuide = await readFile(
+      join(target, "foundry/README.md"),
+      "utf8",
+    );
+    if (
+      !browserSafeSiteDefinition.includes("installedSiteDefinition") ||
+      browserSafeSiteDefinition.includes('import "server-only"') ||
+      !serverOnlySiteDefinition.includes('import "server-only"') ||
+      !installationGuide.includes("client repository's boundary")
+    ) {
+      throw new Error("foundation_scaffold_site_definition_seams_invalid");
+    }
     command("npm", ["run", "build:operator"], target, env);
     command("npm", ["run", "typecheck"], target, env);
     command("npm", ["run", "build"], target, env);

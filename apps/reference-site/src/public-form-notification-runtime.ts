@@ -1,7 +1,8 @@
 import {
   deliverDuePublicFormNotifications,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import {
   createCloudflareFormEmailAdapter,
@@ -26,7 +27,7 @@ export async function deliverPublicFormNotificationsIfDue(
     .map((field) => field.trim())
     .filter((field) => /^[a-z][a-z0-9_]*$/u.test(field));
   return deliverDuePublicFormNotifications({
-    siteId: referenceSiteDefinition.site.id,
+    siteId: installedSiteDefinition.site.id,
     store: createD1PublicFormNotificationStore(
       environment.FOUNDRY_DB,
       undefined,

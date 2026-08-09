@@ -16,7 +16,9 @@ import {
   type NewsletterDeliveryAdapter,
   type NewsletterProviderOwnershipEvidence,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition, type SiteId } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
+import { type SiteId } from "@humber-foundry/site-definition";
 
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
@@ -96,7 +98,7 @@ async function loadInstallationParts(
   if (database === undefined) {
     throw new HumanAccessConfigurationError();
   }
-  const siteId = referenceSiteDefinition.site.id;
+  const siteId = installedSiteDefinition.site.id;
   const { resolveContentReleaseInputs } = await import(
     "./content-revision-runtime"
   );

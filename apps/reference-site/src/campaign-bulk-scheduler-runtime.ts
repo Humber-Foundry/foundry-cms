@@ -3,7 +3,8 @@ import {
   CampaignBulkDeliveryError,
   createCampaignBulkDeliveryApplication,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import {
   brevoBulkRecipientLimit,
@@ -34,7 +35,7 @@ type DurableCampaignBulkEnvironment = HumanAccessEnvironment & {
 export async function createDurableCampaignBulkDeliveryApplication(
   environment: DurableCampaignBulkEnvironment,
 ) {
-  const siteId = referenceSiteDefinition.site.id;
+  const siteId = installedSiteDefinition.site.id;
   const campaignStore = createD1CampaignStore(environment.FOUNDRY_DB);
   const testStore = createD1CampaignTestDeliveryStore(environment.FOUNDRY_DB);
   const subscriberStore = createD1SubscriberLedgerStore(environment.FOUNDRY_DB);

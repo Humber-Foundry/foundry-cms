@@ -4,7 +4,9 @@ import {
   normalizeSubscriberEmail,
   type VerifiedCampaignDeliveryEvent,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition, type SiteId } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
+import { type SiteId } from "@humber-foundry/site-definition";
 
 import {
   brevoBulkCorrelationId,
@@ -75,7 +77,7 @@ export async function createBrevoCampaignBulkWebhookIngestor(
     FOUNDRY_DB: NonNullable<HumanAccessEnvironment["FOUNDRY_DB"]>;
   },
 ) {
-  const siteId = referenceSiteDefinition.site.id;
+  const siteId = installedSiteDefinition.site.id;
   const identityKeySecret = readSubscriberIdentityKeySecret(environment);
   const fingerprintKey =
     environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";

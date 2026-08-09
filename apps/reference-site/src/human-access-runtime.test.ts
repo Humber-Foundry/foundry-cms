@@ -17,7 +17,7 @@ import {
 } from "./human-access-runtime";
 import { AccessIdentityError } from "./access-identity";
 import { HumanAccessConfigurationError } from "./human-access-configuration";
-import { referenceSiteApplication } from "./reference-installation";
+import { installedSite } from "../foundry/site-definition.server";
 
 const configuration = {
   FOUNDRY_ACCESS_ISSUER: "https://foundry.cloudflareaccess.com",
@@ -61,7 +61,7 @@ describe("protected human request boundary", () => {
   it("returns a claimable invitation without mutating it during authentication", async () => {
     const invitation: HumanInvitation = {
       id: createHumanInvitationId("invitation-editor"),
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.siteId,
       email: identity.email,
       role: "editor",
       status: "pending_acceptance",
@@ -102,7 +102,7 @@ describe("protected human request boundary", () => {
   it("lets a reinvited revoked identity reach invitation activation", async () => {
     const invitation: HumanInvitation = {
       id: createHumanInvitationId("invitation-returning-editor"),
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.siteId,
       email: identity.email,
       role: "editor",
       status: "pending_acceptance",
@@ -120,7 +120,7 @@ describe("protected human request boundary", () => {
         memberships: [
           {
             id: createHumanMembershipId("membership-revoked-editor"),
-            siteId: referenceSiteApplication.siteId,
+            siteId: installedSite.siteId,
             userId: createHumanUserId("user-revoked-editor"),
             email: identity.email,
             identityBinding: identity.binding,

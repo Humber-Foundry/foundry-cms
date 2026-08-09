@@ -21,10 +21,11 @@ import {
   type createMcpPublicationApplication,
   type createMcpReadApplication,
 } from "@humber-foundry/application";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 import {
   designContract,
   listEditableSiteFields,
-  referenceSiteDefinition,
   siteDefinitionSchema,
   type RichTextDocument,
 } from "@humber-foundry/site-definition";
@@ -213,7 +214,7 @@ const publicationOperationResult = {
   required: ["operationId", "state", "replayed"],
 } as const;
 
-const contentFields = listEditableSiteFields(referenceSiteDefinition)
+const contentFields = listEditableSiteFields(installedSiteDefinition)
   .filter(({ group }) => group !== "Design");
 const contentFieldPaths = contentFields.map(({ path }) => path);
 const plainTextContentFieldPaths = contentFields
@@ -223,7 +224,7 @@ const richTextContentFieldPaths = contentFields
   .filter(({ format }) => format === "richText")
   .map(({ path }) => path);
 const designVariantContracts =
-  referenceSiteDefinition.home.sections.map(({ id, type }) => ({
+  installedSiteDefinition.home.sections.map(({ id, type }) => ({
     componentId: id,
     values: designContract.variants[type].values,
   }));

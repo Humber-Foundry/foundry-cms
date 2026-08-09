@@ -23,7 +23,7 @@ import {
   type HumanAccessEnvironment,
 } from "./human-access-configuration";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
-import { referenceSiteApplication } from "./reference-installation";
+import { installedSite } from "../foundry/site-definition.server";
 import {
   AccessIdentityError,
   validateCloudflareAccessAssertion,
@@ -61,7 +61,7 @@ const localStore = createInMemoryHumanAccessStore({
   memberships: [
     {
       id: createHumanMembershipId("membership-local-owner"),
-      siteId: referenceSiteApplication.siteId,
+      siteId: installedSite.application.siteId,
       userId: createHumanUserId("user-local-owner"),
       email: localIdentity.email,
       identityBinding: localIdentity.binding,
@@ -90,7 +90,7 @@ async function authorizeIdentity({
   eligibilitySynchronizer: HumanAccessEligibilitySynchronizer;
 }): Promise<HumanAccessRequestContext> {
   const application = createHumanAccessApplication({
-    siteId: referenceSiteApplication.siteId,
+    siteId: installedSite.application.siteId,
     store,
     eligibilitySynchronizer,
   });

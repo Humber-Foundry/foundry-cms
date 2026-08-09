@@ -25,6 +25,24 @@ the dashboard validates Cloudflare Access and reloads the current D1 membership
 on every protected request. It fails closed if the assertion, Access issuer,
 application audience or database binding is absent or invalid.
 
+For a private development preview on another port or hostname, set one exact
+origin before starting Next:
+
+```sh
+FOUNDRY_PRIVATE_PREVIEW_ORIGIN=https://private-preview.example.test npm run dev
+```
+
+The value is development-only and must be a complete HTTP(S) origin with no
+credentials, path, query, or fragment. It becomes both the exact human-mutation
+Origin and the hostname admitted by Next's development asset boundary. Requests
+from every other Origin still fail before command dispatch. Production ignores
+this setting and continues to require the Worker-bound
+`FOUNDRY_CANONICAL_ORIGIN`.
+
+The scaffolded `apps/reference-site/foundry/` directory is the
+installation-owned content boundary. Its README documents the browser-safe
+Site Definition, server-only application seam, and Git publication target.
+
 Production installation supplies:
 
 - a D1 database through the `FOUNDRY_DB` binding, after replacing the

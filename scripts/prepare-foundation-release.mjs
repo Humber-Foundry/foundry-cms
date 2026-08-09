@@ -78,7 +78,14 @@ async function stageLibrary({ name, location, entry, platform, dependencies = {}
 async function stageReferenceSite(version) {
   const target = join(stageDirectory, "foundry-reference-site");
   await mkdir(target, { recursive: true });
-  for (const directory of ["app", "components", "migrations", "public", "src"]) {
+  for (const directory of [
+    "app",
+    "components",
+    "foundry",
+    "migrations",
+    "public",
+    "src",
+  ]) {
     await copySources(
       join(root, "apps/reference-site", directory),
       join(target, directory),

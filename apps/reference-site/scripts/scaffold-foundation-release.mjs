@@ -87,7 +87,7 @@ function assertLockedReleaseExecutable({ descriptor, lock, name }) {
 
 function isTemplatePath(path) {
   return (
-    /^(?:app|components|migrations|public|src)\//u.test(path) ||
+    /^(?:app|components|foundry|migrations|public|src)\//u.test(path) ||
     [
       "custom-worker.ts",
       "cloudflare-email.d.ts",

@@ -11,7 +11,8 @@ import {
   type CampaignAnalyticsSnapshot,
   type NewsletterAnalyticsAdapter,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+
+import { installedSiteDefinition } from "../foundry/site-definition";
 
 import {
   analyticsEngineDefinitionVersion,
@@ -214,11 +215,11 @@ export function currentRouteHistory(): ReadonlyArray<PublishedRouteHistoryEntry>
   return [
     {
       path: "/",
-      contentId: referenceSiteDefinition.home.id,
+      contentId: installedSiteDefinition.home.id,
       fromUtc: "1970-01-01T00:00:00.000Z",
       toUtc: null,
     },
-    ...referenceSiteDefinition.blog.posts.map((post) => ({
+    ...installedSiteDefinition.blog.posts.map((post) => ({
       path: `/blog/${post.slug}`,
       contentId: post.id,
       fromUtc: "1970-01-01T00:00:00.000Z",
@@ -234,7 +235,7 @@ export async function runScheduledAnalyticsProjection(
   const database = environment.FOUNDRY_DB;
   if (database === undefined) return;
 
-  const siteId = referenceSiteDefinition.site.id;
+  const siteId = installedSiteDefinition.site.id;
   const store = createD1AnalyticsStore(database, siteId);
   const projection = createAnalyticsProjection({ siteId, store, now });
   const observedAt = now();
