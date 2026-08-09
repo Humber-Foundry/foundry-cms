@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { createPublicFormReceiptId } from "@foundry/application";
+import { createPublicFormReceiptId } from "@humber-foundry/application";
 
 import { FormSubmissionControls } from "@/components/form-submission-controls";
 import { loadHumanAccessRequestContext } from "@/src/human-access-runtime";

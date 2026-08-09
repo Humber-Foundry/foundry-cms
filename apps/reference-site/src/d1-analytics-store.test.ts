@@ -8,8 +8,8 @@ import {
   createAnalyticsQueryApplication,
   type AnalyticsFactMeasurement,
   type StoredAnalyticsFact,
-} from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";

@@ -56,7 +56,7 @@ const preview = spawn(
     "run",
     "preview:serve",
     "--workspace",
-    "@foundry/reference-site",
+    "@humber-foundry/reference-site",
     "--",
     "--port",
     String(port),

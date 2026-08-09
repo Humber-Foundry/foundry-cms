@@ -2,8 +2,8 @@ import {
   analyticsCompositeKey,
   type AnalyticsFactMeasurement,
   type AnalyticsMetricKey,
-} from "@foundry/application";
-import type { SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 

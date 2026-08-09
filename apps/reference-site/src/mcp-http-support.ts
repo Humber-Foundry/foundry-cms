@@ -1,5 +1,5 @@
-import type { McpCursorBinding, McpCursorCodec } from "@foundry/application";
-import type { SiteId } from "@foundry/site-definition";
+import type { McpCursorBinding, McpCursorCodec } from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 const cursorLifetimeSeconds = 15 * 60;
 

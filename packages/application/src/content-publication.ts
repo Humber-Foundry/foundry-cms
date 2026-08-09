@@ -3,7 +3,7 @@ import {
   serializeSiteDefinitionRichTextForPublication,
   type SiteDefinition,
   type SiteDefinitionSchemaVersion,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   isValidContentMutationIdempotencyKey,

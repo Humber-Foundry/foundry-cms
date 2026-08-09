@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AccessDeniedError } from "@foundry/application";
+import { AccessDeniedError } from "@humber-foundry/application";
 
 vi.mock("server-only", () => ({}));
 

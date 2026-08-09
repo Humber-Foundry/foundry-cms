@@ -3,11 +3,11 @@ import {
   createContentRevisionApplication,
   type ContentActorId,
   type ContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   referenceSiteDefinition,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { upgradeSiteDefinitionForCurrentSchema } from "./content-schema-recovery";
 import {

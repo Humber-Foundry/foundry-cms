@@ -9,7 +9,7 @@
  * anywhere in its production configuration.
  */
 
-import { canonicalJson } from "@foundry/application";
+import { canonicalJson } from "@humber-foundry/application";
 
 import type { CredentialSlot } from "./credential-slots";
 

@@ -3,8 +3,8 @@ import {
   BlogPostOperationError,
   createContentActorId,
   createContentApprovalId,
-} from "@foundry/application";
-import { createBlogPostId, referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createBlogPostId, referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   archiveBlogPostWithWithdrawal,

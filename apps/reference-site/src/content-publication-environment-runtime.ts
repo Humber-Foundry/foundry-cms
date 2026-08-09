@@ -13,7 +13,7 @@ import {
   type ContentPublishedRevisionReader,
   type ContentPublisher,
   type ContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import { createContentRevisionApplicationForEnvironment } from "./content-revision-environment-runtime";
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import {

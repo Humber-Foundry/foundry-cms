@@ -1,7 +1,7 @@
 import type {
   PublicFormNotification,
   PublicFormNotificationAdapter,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 type SendEmailBinding = Readonly<{
   send(message: unknown): Promise<void>;
@@ -93,7 +93,7 @@ function rawMessage(
       `From: ${encodeHeader(from)}`,
       `To: ${encodeHeader(to)}`,
       `Subject: ${encodeHeader(`New ${notification.formId} form submission`)}`,
-      `Message-ID: <${encodeHeader(notification.deliveryId)}@foundry.invalid>`,
+      `Message-ID: <${encodeHeader(notification.deliveryId)}@humber-foundry.invalid>`,
       "MIME-Version: 1.0",
       "Content-Type: text/plain; charset=utf-8",
       "Content-Transfer-Encoding: 8bit",

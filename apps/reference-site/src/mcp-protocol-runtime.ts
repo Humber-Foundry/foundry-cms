@@ -9,8 +9,8 @@ import {
   type McpConnectionPrincipal,
   type McpCursorCodec,
   type McpExecutionContext,
-} from "@foundry/application";
-import type { SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 
 import {
@@ -34,7 +34,7 @@ import {
   type McpReadApplication,
 } from "./mcp-tool-registry";
 
-export { mcpProtocolVersion } from "@foundry/application";
+export { mcpProtocolVersion } from "@humber-foundry/application";
 
 const rpcBodyLimitBytes = 256 * 1024;
 const rpcMaximumDepth = 32;

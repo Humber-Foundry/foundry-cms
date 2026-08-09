@@ -10,7 +10,7 @@ import {
   serializeRichTextDocument,
   toPageComposition,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   createVisualComponentConfig,

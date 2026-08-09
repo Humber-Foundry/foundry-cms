@@ -7,11 +7,11 @@ import {
   sha256CanonicalJson,
   type CampaignBulkProviderRequest,
   type CampaignRevision,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   createSiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   brevoBulkRecipientLimit,

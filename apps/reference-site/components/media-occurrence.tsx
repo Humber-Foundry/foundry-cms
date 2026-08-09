@@ -1,4 +1,4 @@
-import type { SiteMediaOccurrence } from "@foundry/site-definition";
+import type { SiteMediaOccurrence } from "@humber-foundry/site-definition";
 import type { ReactNode } from "react";
 
 import { mediaCropStyle } from "./media-crop";

@@ -12,7 +12,7 @@
  * an unsigned receipt, a broken link, a deleted entry or an unexpected signer.
  */
 
-import { canonicalJson, sha256CanonicalJson } from "@foundry/application";
+import { canonicalJson, sha256CanonicalJson } from "@humber-foundry/application";
 
 import {
   assertNonSecretConfiguration,

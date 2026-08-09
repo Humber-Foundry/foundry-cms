@@ -2,7 +2,7 @@ import {
   analyticsCompositeKey,
   splitAnalyticsCompositeKey,
   type AnalyticsFactMeasurement,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 /**
  * Cloudflare Web Analytics is the traffic authority. Foundry imports only the

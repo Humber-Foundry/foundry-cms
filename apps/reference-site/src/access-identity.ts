@@ -11,7 +11,7 @@ import {
   InvalidHumanEmailError,
   normalizeHumanEmail,
   type ExternalHumanIdentity,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 const clockToleranceSeconds = 60;
 const maximumKeyCacheAgeMs = 24 * 60 * 60 * 1_000;

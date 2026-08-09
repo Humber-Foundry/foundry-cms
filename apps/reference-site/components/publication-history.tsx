@@ -6,7 +6,7 @@ import type {
   ContentPublication,
   ContentPublicationHistoryEntry,
   ContentPublicationStatus,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   loadContentPublicationHistory,

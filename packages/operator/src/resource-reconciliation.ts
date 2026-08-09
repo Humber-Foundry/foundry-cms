@@ -9,7 +9,7 @@
  * conclusive create-request binding can adopt a resource.
  */
 
-import { canonicalJson } from "@foundry/application";
+import { canonicalJson } from "@humber-foundry/application";
 
 import {
   computeConfigurationFingerprint,

@@ -4,7 +4,7 @@ import {
   type BlogPostId,
   type SiteDefinition,
   type SiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   canonicalJson,

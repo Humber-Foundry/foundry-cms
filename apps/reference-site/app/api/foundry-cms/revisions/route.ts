@@ -11,7 +11,7 @@ import {
   createContentActorId,
   createContentWorkspaceId,
   createMediaAssetId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createSerializedRichTextDocument,
   createBlogPostId,
@@ -21,7 +21,7 @@ import {
   type PageComposition,
   type SiteDefinition,
   type SiteDefinitionEdit,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
 import {

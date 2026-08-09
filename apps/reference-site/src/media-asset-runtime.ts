@@ -9,8 +9,8 @@ import {
   type InMemoryMediaContentCoordinator,
   type MediaAssetStore,
   type MediaSourceStore,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createD1MediaAssetStore } from "./d1-media-asset-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";

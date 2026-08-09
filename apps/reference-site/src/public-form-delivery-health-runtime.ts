@@ -4,8 +4,8 @@ import {
   createPublicFormOperationsApplication,
   type PublicFormDeliveryHealth,
   type PublicFormNotificationAdapter,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createD1PublicFormNotificationStore } from "./d1-public-form-notification-store";
 import {

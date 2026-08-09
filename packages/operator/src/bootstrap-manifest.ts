@@ -9,7 +9,7 @@
  * email, health response or credential.
  */
 
-import { canonicalJson } from "@foundry/application";
+import { canonicalJson } from "@humber-foundry/application";
 
 import {
   fingerprintPattern,

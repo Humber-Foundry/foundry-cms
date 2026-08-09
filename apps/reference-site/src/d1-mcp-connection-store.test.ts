@@ -6,8 +6,8 @@ import {
   ContentRevisionIdempotencyError,
   mcpContractVersion,
   type McpReadAuditEvent,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
 import { createD1McpPreviewStore } from "./d1-mcp-preview-store";

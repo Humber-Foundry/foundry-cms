@@ -1,4 +1,4 @@
-import type { ContentRevision } from "@foundry/application";
+import type { ContentRevision } from "@humber-foundry/application";
 
 export function newestContentRevision(
   current: ContentRevision,

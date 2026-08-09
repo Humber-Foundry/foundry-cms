@@ -6,7 +6,7 @@ import {
   type PageComponentType,
   type PageSection,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 export type PageCompositionPuckData = {
   root: { props: Record<string, never> };

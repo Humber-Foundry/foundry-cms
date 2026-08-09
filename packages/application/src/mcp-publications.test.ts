@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createSiteId,
   referenceSiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 // Imported from its own module rather than the package barrel: the barrel
 // re-exports this file's subject, so going through it can leave the hash

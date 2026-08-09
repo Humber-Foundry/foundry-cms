@@ -1,4 +1,4 @@
-import { sha256CanonicalJson } from "@foundry/application";
+import { sha256CanonicalJson } from "@humber-foundry/application";
 
 /**
  * The one definition of a Brevo sender's identity digests.

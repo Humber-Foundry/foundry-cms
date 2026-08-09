@@ -3,7 +3,7 @@ import {
   siteDefinitionSchema,
   type SiteDefinition,
   type SiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import type { SiteApplication } from "./index";
 import {

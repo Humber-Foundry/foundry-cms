@@ -3,7 +3,7 @@ import {
   ContentRevisionConflictError,
   ContentWorkspaceAccessError,
   MediaMutationInProgressError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import { AccessIdentityUnavailableError } from "../../../../src/access-identity";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
 

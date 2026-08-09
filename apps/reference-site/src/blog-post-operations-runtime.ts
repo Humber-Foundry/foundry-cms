@@ -14,7 +14,7 @@ import {
   type BlogPostScheduleExecution,
   type BlogPostScheduleExecutionLease,
   type ContentPublicationStatus,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import { createD1BlogPostOperationsStore } from "./d1-blog-post-operations-store";
 import {
@@ -39,7 +39,7 @@ import {
   referenceSiteDefinition,
   type BlogPost,
   type BlogPostId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 import type { HumanAccessEnvironment } from "./human-access-configuration";
 
 const localRuntime = globalThis as typeof globalThis & {

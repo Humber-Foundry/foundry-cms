@@ -1,4 +1,4 @@
-import type { PublicFormTurnstile } from "@foundry/application";
+import type { PublicFormTurnstile } from "@humber-foundry/application";
 
 type FetchImplementation = (
   input: string,

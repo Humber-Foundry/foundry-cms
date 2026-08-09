@@ -2,7 +2,7 @@ import {
   MediaSiteAccessError,
   createContentActorId,
   createMediaAssetId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   MediaAssetConfigurationError,

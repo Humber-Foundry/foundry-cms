@@ -3,7 +3,7 @@ import {
   type CampaignBulkProviderOutcome,
   type CampaignBulkProviderReconciliation,
   type CampaignBulkProviderRequest,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   brevoBulkCorrelationId,

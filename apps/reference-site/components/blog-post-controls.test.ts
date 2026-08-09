@@ -4,7 +4,7 @@ import {
   createBlogPostId,
   type BlogPost,
   type BlogPostId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { blogPostLifecycleAction } from "./blog-post-controls";
 

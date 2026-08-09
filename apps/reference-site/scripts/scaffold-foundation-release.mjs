@@ -118,13 +118,13 @@ async function main() {
   }
   const untrustedDescriptor = JSON.parse(descriptorSource);
   const lock = JSON.parse(await readFile(join(target, "package-lock.json"), "utf8"));
-  for (const name of ["@foundry/operator", "@foundry/reference-site"]) {
+  for (const name of ["@humber-foundry/operator", "@humber-foundry/reference-site"]) {
     assertLockedReleaseExecutable({ descriptor: untrustedDescriptor, lock, name });
   }
   const {
     loadFoundationReleaseDescriptor,
     verifyFoundationReleaseArtifacts,
-  } = await import("@foundry/operator");
+  } = await import("@humber-foundry/operator");
   const descriptor = await loadFoundationReleaseDescriptor({
     descriptorPath,
     expectedDigest: options["descriptor-digest"],
@@ -139,7 +139,7 @@ async function main() {
     },
   });
 
-  const referenceArtifact = descriptor.artifacts["@foundry/reference-site"];
+  const referenceArtifact = descriptor.artifacts["@humber-foundry/reference-site"];
   const entries = tarEntries(artifactBytes.get(referenceArtifact.filename));
   for (const [path, bytes] of entries) {
     if (!isTemplatePath(path)) continue;
@@ -165,7 +165,7 @@ async function main() {
     ...(targetPackage.scripts ?? {}),
     build: "next build",
     "build:operator":
-      "node -e \"import('@foundry/operator').then(m=>{if(typeof m.parseFoundationReleaseDescriptor!=='function')process.exit(1)})\"",
+      "node -e \"import('@humber-foundry/operator').then(m=>{if(typeof m.parseFoundationReleaseDescriptor!=='function')process.exit(1)})\"",
     "build:worker": "opennextjs-cloudflare build",
     "smoke:deployment":
       "npm run build:worker && wrangler deploy --dry-run --outdir .foundry/deployment-smoke",

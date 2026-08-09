@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AccessDeniedError,
   PublicFormPrivacyError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 vi.mock("server-only", () => ({}));
 

@@ -5,7 +5,7 @@ import {
   createSiteId,
   listEditableSiteFields,
   referenceSiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   ContentWorkspaceAccessError,

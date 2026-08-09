@@ -9,8 +9,8 @@ import {
   createMediaAssetApplication,
   createMediaAssetId,
   createMediaOccurrenceId,
-} from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import { createD1MediaAssetStore } from "./d1-media-asset-store";
 import { useMigratedTestDatabase } from "./test-support/migrated-test-database";

@@ -15,7 +15,7 @@ import {
   type SiteDefinitionEdit,
   type StoredSiteDefinitionSchemaVersion,
   type SiteMediaOccurrence,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 import { sha256CanonicalJson } from "./deterministic-hash";
 import {
   createBlogPostArtifactFingerprint,

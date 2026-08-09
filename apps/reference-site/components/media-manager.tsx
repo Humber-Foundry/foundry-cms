@@ -5,10 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import type {
   ContentRevision,
   MediaAsset,
-} from "@foundry/application";
-import { renderedMediaOccurrenceIds } from "@foundry/application";
-import { createMediaOccurrenceId } from "@foundry/application";
-import { requireRenderedMediaOccurrenceId } from "@foundry/application";
+} from "@humber-foundry/application";
+import { renderedMediaOccurrenceIds } from "@humber-foundry/application";
+import { createMediaOccurrenceId } from "@humber-foundry/application";
+import { requireRenderedMediaOccurrenceId } from "@humber-foundry/application";
 
 import { MediaOccurrence } from "./media-occurrence";
 import { createMediaCatalogFence } from "./media-catalog-fence";

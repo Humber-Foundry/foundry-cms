@@ -3,7 +3,7 @@ import "server-only";
 import type {
   ContentWorkspaceId,
   ExternalHumanIdentity,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   readHumanMutationConfiguration,

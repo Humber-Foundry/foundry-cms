@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ContentApprovalInvalidError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
@@ -405,7 +405,7 @@ describe("content publication endpoint", () => {
 
   it("does not expose a workspace publication to an unauthorized actor", async () => {
     mocks.requireExistingAccess.mockRejectedValue(
-      new (await import("@foundry/application")).ContentWorkspaceAccessError(),
+      new (await import("@humber-foundry/application")).ContentWorkspaceAccessError(),
     );
     const response = await GET(
       new Request(

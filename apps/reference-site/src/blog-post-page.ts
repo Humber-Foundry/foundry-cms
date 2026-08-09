@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import type {
   BlogPost,
   SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 export function findPublicBlogPost(
   definition: SiteDefinition,

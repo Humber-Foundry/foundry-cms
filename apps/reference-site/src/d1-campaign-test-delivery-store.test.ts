@@ -4,8 +4,8 @@ import {
   createCampaignId,
   createCampaignRevisionId,
   type CampaignTestDeliveryOperation,
-} from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";

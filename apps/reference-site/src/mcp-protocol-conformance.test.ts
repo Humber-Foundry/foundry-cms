@@ -17,8 +17,8 @@ import {
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
   type McpConnectionPrincipal,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createRequestExecutionContext } from "./mcp-http-support";
 import { createMcpProtocolRuntime } from "./mcp-protocol-runtime";

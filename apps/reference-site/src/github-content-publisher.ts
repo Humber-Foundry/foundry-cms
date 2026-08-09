@@ -8,11 +8,11 @@ import type {
   ContentPublishedRevisionReader,
   ContentSerializationVersion,
   PublicationCommitResult,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   hashContentPublicationArtifacts,
   isValidGitBranchName,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 export type GitHubContentPublisherConfiguration = Readonly<{
   appId: string;

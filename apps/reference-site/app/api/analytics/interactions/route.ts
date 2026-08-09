@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   collectInteraction,

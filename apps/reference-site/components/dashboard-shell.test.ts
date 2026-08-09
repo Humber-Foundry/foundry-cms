@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { ContentRevision } from "@foundry/application";
+import type { ContentRevision } from "@humber-foundry/application";
 import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   contentWorkspaceRequiresSchemaRecovery,

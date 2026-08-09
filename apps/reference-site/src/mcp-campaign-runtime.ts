@@ -15,8 +15,8 @@ import {
   type McpConnectionPrincipal,
   type NewsletterDeliveryAdapter,
   type NewsletterProviderOwnershipEvidence,
-} from "@foundry/application";
-import { referenceSiteDefinition, type SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition, type SiteId } from "@humber-foundry/site-definition";
 
 import { createBrevoNewsletterDeliveryAdapter } from "./brevo-newsletter-delivery-adapter";
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";

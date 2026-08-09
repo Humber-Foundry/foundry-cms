@@ -27,12 +27,12 @@ import {
   type CampaignStore,
   type NewsletterDeliveryAdapter,
   type NewsletterProviderOwnershipEvidence,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   upgradeSiteDefinition,
   type BlogPost,
   type SiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { createD1CampaignStore } from "./d1-campaign-store";

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { createSiteId } from "@foundry/site-definition";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import { createD1OperationalAnalyticsSource } from "./d1-operational-analytics-source";
 import type { D1DatabaseBinding } from "./d1-human-access-store";

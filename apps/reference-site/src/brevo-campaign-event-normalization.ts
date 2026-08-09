@@ -1,4 +1,4 @@
-import type { CampaignDeliveryEventType } from "@foundry/application";
+import type { CampaignDeliveryEventType } from "@humber-foundry/application";
 
 /**
  * Brevo names the same delivery fact differently in its transactional webhook

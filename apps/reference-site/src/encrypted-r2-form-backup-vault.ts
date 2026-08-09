@@ -15,8 +15,8 @@ import {
   type PublicFormBackupSubmissionRow,
   type PublicFormBackupVault,
   type PublicFormRecoveryVault,
-} from "@foundry/application";
-import type { SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 export interface R2BackupBucket {
   put(

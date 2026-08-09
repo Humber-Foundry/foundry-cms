@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 
-import type { ContentRevision } from "@foundry/application";
+import type { ContentRevision } from "@humber-foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   serializeRichTextDocument,
   type BlogPost,
   type BlogPostId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   sendContentRevisionAttempt,

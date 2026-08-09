@@ -4,7 +4,7 @@ import {
   referenceSiteDefinition,
   serializeRichTextDocument,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   contentEditorReducer,

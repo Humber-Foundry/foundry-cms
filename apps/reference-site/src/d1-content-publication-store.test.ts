@@ -12,8 +12,8 @@ import {
   ContentPublicationIdempotencyError,
   type ContentApproval,
   type ContentPublication,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createD1ContentPublicationStore } from "./d1-content-publication-store";
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";

@@ -89,8 +89,8 @@ describe("foundation release descriptor", () => {
           ...descriptor,
           artifacts: {
             ...descriptor.artifacts,
-            "@foundry/operator": {
-              ...descriptor.artifacts["@foundry/operator"],
+            "@humber-foundry/operator": {
+              ...descriptor.artifacts["@humber-foundry/operator"],
               version: "0.1.1",
               integrity: `sha512-${Buffer.alloc(64).toString("base64")}`,
             },
@@ -110,13 +110,13 @@ describe("foundation release descriptor", () => {
           const artifact = Object.values(parsed.artifacts).find(
             (candidate) => candidate.filename === filename,
           );
-          return artifact!.name === "@foundry/reference-site"
+          return artifact!.name === "@humber-foundry/reference-site"
             ? Buffer.from("tampered")
             : (bytes[artifact!.name] as Buffer);
         },
       }),
     ).rejects.toThrow(
-      /foundation_release_artifact_mismatch:@foundry\/reference-site/u,
+      /foundation_release_artifact_mismatch:@humber-foundry\/reference-site/u,
     );
   });
 

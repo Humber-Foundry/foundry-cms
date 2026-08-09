@@ -7,7 +7,7 @@ import {
   createContentPublicationId,
   createContentWorkspaceId,
   createHumanMembershipId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   GitHubContentPublisherConfigurationError,

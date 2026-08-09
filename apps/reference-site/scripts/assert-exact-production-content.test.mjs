@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   assertExactProductionContent,

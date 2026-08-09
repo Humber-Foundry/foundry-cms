@@ -5,7 +5,7 @@ vi.mock("server-only", () => ({}));
 import {
   ContentRevisionConfigurationError,
   createContentActorId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   contentWorkspaceIdForActor,

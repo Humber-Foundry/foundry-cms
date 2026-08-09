@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createContentWorkspaceId } from "@foundry/application";
+import { createContentWorkspaceId } from "@humber-foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeRichTextDocument,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   preparePreservedRevisionRecovery,

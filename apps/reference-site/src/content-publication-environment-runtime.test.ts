@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createContentApprovalId,
   createContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 const mocks = vi.hoisted(() => ({
   findApproval: vi.fn(),

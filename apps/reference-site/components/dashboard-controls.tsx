@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { SiteId } from "@foundry/site-definition";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 export const DASHBOARD_PRIVATE_BUNDLE_MARKER =
   "FOUNDRY_DASHBOARD_PRIVATE_CLIENT_BOUNDARY";

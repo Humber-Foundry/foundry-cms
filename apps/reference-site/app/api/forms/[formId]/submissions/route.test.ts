@@ -4,7 +4,7 @@ import {
   PublicFormConflictError,
   PublicFormRejectedError,
   PublicFormUnavailableError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 const runtimeMocks = vi.hoisted(() => ({
   accept: vi.fn(),

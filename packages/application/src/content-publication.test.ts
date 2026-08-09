@@ -5,7 +5,7 @@ import {
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   createContentActorId,

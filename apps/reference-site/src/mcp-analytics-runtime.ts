@@ -3,8 +3,8 @@ import {
   createAnalyticsQueryCache,
   type AnalyticsQueryCache,
   type McpAnalyticsRuntime,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createD1AnalyticsStore } from "./d1-analytics-store";
 import {

@@ -8,7 +8,7 @@ import {
   referenceSiteDefinition,
   type PageSection,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { SiteRenderer, SiteSection } from "./site-renderer";
 import { BlogPostRenderer } from "./blog-post-renderer";

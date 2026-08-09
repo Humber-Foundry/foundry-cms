@@ -23,13 +23,13 @@ import {
   createSiteApplication,
   type McpConnectionGrant,
   type McpReadAuditEvent,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   type SiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   createMcpHttpRuntime,

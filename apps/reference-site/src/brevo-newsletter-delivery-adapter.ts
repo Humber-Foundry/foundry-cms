@@ -6,7 +6,7 @@ import {
   type NewsletterDeliveryCapabilities,
   type NewsletterTestOutcome,
   type NewsletterTestRequest,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   brevoTestRecipientFingerprint,

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRichTextDocumentFromPlainText,
   createSiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { createInMemoryCampaignBulkStateStore } from "./in-memory-campaign-bulk-state-store";
 import {

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
-import type { ContentRevision } from "@foundry/application";
+import type { ContentRevision } from "@humber-foundry/application";
 
 import {
   advanceWorkspaceRevisionHead,

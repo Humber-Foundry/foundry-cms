@@ -5,8 +5,8 @@ import {
   createPublicFormId,
   createPublicFormApplication,
   type AcceptPublicFormCommand,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createCloudflareTurnstileVerifier } from "./cloudflare-turnstile";
 import type { D1DatabaseBinding } from "./d1-human-access-store";

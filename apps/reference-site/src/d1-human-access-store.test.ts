@@ -7,8 +7,8 @@ import {
   createEligibilitySyncOperationId,
   createHumanAccessApplication,
   type ExternalHumanIdentity,
-} from "@foundry/application";
-import { createSiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { createSiteId } from "@humber-foundry/site-definition";
 
 import {
   createD1HumanAccessStore,

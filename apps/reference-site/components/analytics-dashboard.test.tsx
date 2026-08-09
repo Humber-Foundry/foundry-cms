@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { analyticsRetention } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { analyticsRetention } from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { AnalyticsDashboard } from "./analytics-dashboard";
 import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime";

@@ -12,7 +12,7 @@ import {
   createContentActorId,
   createContentWorkspaceId,
   type ContentRevision,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import { AccessIdentityError } from "./access-identity";
 import { loadContentRevisionApplication } from "./content-revision-runtime";

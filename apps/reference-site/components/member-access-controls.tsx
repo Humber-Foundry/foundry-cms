@@ -6,8 +6,8 @@ import { useRef, useState, type FormEvent } from "react";
 import type {
   HumanMembership,
   MembershipStatus,
-} from "@foundry/application";
-import { availableMembershipStatusActions } from "@foundry/application";
+} from "@humber-foundry/application";
+import { availableMembershipStatusActions } from "@humber-foundry/application";
 import {
   createHumanAccessMutationAttempt,
   isHumanAccessMutationAmbiguousFailure,

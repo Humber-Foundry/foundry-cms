@@ -1,6 +1,6 @@
 import {
   SubscriberNotFoundError,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   loadHumanAccessEnvironment,

@@ -4,7 +4,7 @@ import type {
   RichTextDocument,
   SiteDefinition,
   SiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import type { ExternalHumanIdentity } from "./human-access";
 

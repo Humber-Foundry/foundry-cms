@@ -15,8 +15,8 @@ import {
   createMediaAssetId,
   createMediaOccurrenceId,
   requireRenderedMediaOccurrenceId,
-} from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   AccessIdentityError,

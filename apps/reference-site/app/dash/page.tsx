@@ -10,7 +10,7 @@ import {
   createContentActorId,
   createBlogPostArtifactFingerprints,
   createContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import { InvitationActivation } from "@/components/invitation-activation";

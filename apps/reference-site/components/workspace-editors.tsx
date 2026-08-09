@@ -5,8 +5,8 @@ import { useCallback, useState } from "react";
 import type {
   ContentRevision,
   MediaAsset,
-} from "@foundry/application";
-import type { BlogPostId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { BlogPostId } from "@humber-foundry/site-definition";
 
 import { ContentEditor } from "./content-editor";
 import { MediaManager } from "./media-manager";

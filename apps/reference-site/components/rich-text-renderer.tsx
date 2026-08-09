@@ -4,7 +4,7 @@ import {
   type RichTextLinkMark,
   type RichTextParagraph,
   type RichTextText,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 function Text({ node }: { node: RichTextText }) {
   let content = <>{node.text}</>;

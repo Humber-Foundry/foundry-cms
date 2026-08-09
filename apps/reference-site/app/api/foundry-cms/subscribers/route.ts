@@ -8,7 +8,7 @@ import {
   SubscriberNotFoundError,
   type ConsentEvidence,
   type SuppressionReason,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   AccessIdentityError,

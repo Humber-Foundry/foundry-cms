@@ -1,6 +1,6 @@
 import type {
   CampaignChannelConfiguration,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import type {
   HumanAccessEnvironment,

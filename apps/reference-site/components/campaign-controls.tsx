@@ -7,14 +7,14 @@ import {
   type Campaign,
   type CampaignRevision,
   type RenderedCampaign,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createRichTextDocumentFromPlainText,
   parseSerializedRichTextDocument,
   serializeRichTextDocument,
   type SerializedRichTextDocument,
   type BlogPost,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { RichTextEditor } from "./rich-text-editor";
 

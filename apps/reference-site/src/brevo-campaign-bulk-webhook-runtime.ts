@@ -3,8 +3,8 @@ import {
   hmacSha256CanonicalJson,
   normalizeSubscriberEmail,
   type VerifiedCampaignDeliveryEvent,
-} from "@foundry/application";
-import { referenceSiteDefinition, type SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import { referenceSiteDefinition, type SiteId } from "@humber-foundry/site-definition";
 
 import {
   brevoBulkCorrelationId,

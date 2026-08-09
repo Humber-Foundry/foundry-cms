@@ -7,11 +7,11 @@ import { page, userEvent } from "vitest/browser";
 import type {
   Campaign,
   CampaignRevision,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createSiteId,
   type RichTextDocument,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { CampaignControls } from "./campaign-controls";
 

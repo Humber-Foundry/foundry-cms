@@ -3,7 +3,7 @@ import {
   type PublishedRichTextArtifact,
   type SiteDefinition,
   type SiteId,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 export * from "./human-access";
 export { isValidGitBranchName } from "./git-branch-name.mjs";

@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
-import { AccessDeniedError } from "@foundry/application";
+import { AccessDeniedError } from "@humber-foundry/application";
 
 import { AccessIdentityError } from "@/src/access-identity";
 import { HumanAccessConfigurationError } from "@/src/human-access-configuration";

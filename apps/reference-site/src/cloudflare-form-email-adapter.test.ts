@@ -22,7 +22,7 @@ import {
   createPublicFormDeliveryId,
   createPublicFormId,
   createPublicFormReceiptId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   createCloudflareFormEmailAdapter,

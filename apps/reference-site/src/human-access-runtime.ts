@@ -11,7 +11,7 @@ import {
   type HumanAccessEligibilitySynchronizer,
   type HumanAccessStore,
   type HumanMembership,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   authenticateCloudflareAccessIdentity,

@@ -1,5 +1,5 @@
-import { hmacSha256CanonicalJson } from "@foundry/application";
-import type { SiteId } from "@foundry/site-definition";
+import { hmacSha256CanonicalJson } from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 export type BrevoTestWebhookEvidence = Readonly<{
   eventFingerprint: string;

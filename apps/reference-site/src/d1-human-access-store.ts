@@ -5,7 +5,7 @@ import type {
   HumanRole,
   InvitationStatus,
   MembershipStatus,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createEligibilitySyncOperationId,
   createHumanInvitationId,
@@ -14,8 +14,8 @@ import {
   createInvitationEligibilitySyncOperationId,
   isMembershipStatusTransitionAllowed,
   readInvitationIdFromEligibilitySyncOperation,
-} from "@foundry/application";
-import type { SiteId } from "@foundry/site-definition";
+} from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 type D1Result = Readonly<{
   success: boolean;

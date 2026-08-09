@@ -9,7 +9,7 @@ import {
   createContentPublicationId,
   createContentWorkspaceId,
   type ContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   AccessIdentityError,

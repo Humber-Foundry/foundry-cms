@@ -9,7 +9,7 @@ import {
   createHumanUserId,
   createInMemoryHumanAccessStore,
   type HumanInvitation,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   authenticateHumanAccessRequest,

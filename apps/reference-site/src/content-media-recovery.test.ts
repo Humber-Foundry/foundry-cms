@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { canonicalJson } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import { canonicalJson } from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { mediaManifestRecoveryPath } from "./content-schema-recovery";
 import { restorePreservedMedia } from "./content-media-recovery";

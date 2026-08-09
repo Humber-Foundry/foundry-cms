@@ -1,8 +1,8 @@
 import type {
   PageSection,
   SiteDefinition,
-} from "@foundry/site-definition";
-import { siteDesignAttributes } from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
+import { siteDesignAttributes } from "@humber-foundry/site-definition";
 import type { ReactNode } from "react";
 
 import { MediaOccurrence } from "./media-occurrence";

@@ -11,13 +11,13 @@ import {
   createContentWorkspaceId,
   createHumanMembershipId,
   type ContentPublisher,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   createSiteId,
   referenceSiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import { createD1BlogPostOperationsStore } from "./d1-blog-post-operations-store";
 import {

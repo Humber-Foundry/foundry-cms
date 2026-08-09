@@ -135,4 +135,4 @@ export function readNewsletterDeliverySecret(
   return secret;
 }
 
-import type { HumanAccessEligibilitySynchronizer } from "@foundry/application";
+import type { HumanAccessEligibilitySynchronizer } from "@humber-foundry/application";

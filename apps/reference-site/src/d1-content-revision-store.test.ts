@@ -9,12 +9,12 @@ import {
   createContentActorId,
   createContentRevisionApplication,
   createContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
-} from "@foundry/site-definition";
+} from "@humber-foundry/site-definition";
 
 import {
   createD1ContentRevisionStore,

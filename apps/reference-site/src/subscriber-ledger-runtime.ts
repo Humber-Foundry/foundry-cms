@@ -6,7 +6,7 @@ import {
   createSubscriberLedgerApplication,
   type SubscriberLedgerApplication,
   type SubscriberLedgerStore,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   authorizeAuthenticatedHumanIdentity,

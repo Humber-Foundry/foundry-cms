@@ -11,7 +11,7 @@ import {
   type ContentPublicationStore,
   type ContentPublisher,
   type ContentWorkspaceId,
-} from "@foundry/application";
+} from "@humber-foundry/application";
 
 import {
   createD1ContentPublicationApplication,

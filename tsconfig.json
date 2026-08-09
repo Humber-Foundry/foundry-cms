@@ -23,13 +23,13 @@
       }
     ],
     "paths": {
-      "@foundry/application": [
+      "@humber-foundry/application": [
         "./packages/application/src/index.ts"
       ],
-      "@foundry/operator": [
+      "@humber-foundry/operator": [
         "./packages/operator/src/index.ts"
       ],
-      "@foundry/site-definition": [
+      "@humber-foundry/site-definition": [
         "./packages/site-definition/src/index.ts"
       ]
     }

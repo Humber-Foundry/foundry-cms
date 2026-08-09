@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { McpConnectionSummary } from "@foundry/application";
-import { referenceSiteDefinition } from "@foundry/site-definition";
+import type { McpConnectionSummary } from "@humber-foundry/application";
+import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { McpConnectionTable } from "./mcp-connection-controls";
 

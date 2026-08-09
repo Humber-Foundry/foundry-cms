@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { AnalyticsPrivacyViolationError } from "@foundry/application";
+import { AnalyticsPrivacyViolationError } from "@humber-foundry/application";
 
 import {
   AnalyticsDashboardError,

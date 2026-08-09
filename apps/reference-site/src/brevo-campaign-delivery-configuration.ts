@@ -1,4 +1,4 @@
-import { sha256CanonicalJson, sha256Text } from "@foundry/application";
+import { sha256CanonicalJson, sha256Text } from "@humber-foundry/application";
 
 import type { HumanAccessEnvironment } from "./human-access-configuration";
 import {
