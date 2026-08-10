@@ -5,6 +5,7 @@ import {
   remapPageSectionNestedIds,
   toPageCompositionIdentity,
   foundationPageComponentRegistry,
+  mergePageComponentFieldEdit,
   type PageComponentRegistry,
   type PageSection,
   type SiteDefinition,
@@ -174,8 +175,8 @@ export function puckDataToDefinition(
     const base =
       existing ??
       createDefaultPageSection(componentType, id, submittedContext, registry);
-    const editableProps =
-      registry.components[componentType]!.editableFields;
+    const registration = registry.components[componentType]!;
+    const editableProps = registration.editableFields;
     const section = structuredClone(base) as unknown as Record<
       string,
       unknown
@@ -204,9 +205,17 @@ export function puckDataToDefinition(
             },
           };
         }
-        editableTarget[property] = structuredClone(props[property]);
+        editableTarget[property] = mergePageComponentFieldEdit(
+          registration.fields[property]!,
+          editableTarget[property],
+          props[property],
+        );
       } else if (props[property] !== undefined) {
-        editableTarget[property] = structuredClone(props[property]);
+        editableTarget[property] = mergePageComponentFieldEdit(
+          registration.fields[property]!,
+          editableTarget[property],
+          props[property],
+        );
       }
     }
     if (base.type === "registered") section.props = editableTarget;
@@ -217,6 +226,13 @@ export function puckDataToDefinition(
         ? [...definition.home.sections, ...components].find((source) => {
             if (registry.keyFor(source) !== componentType) {
               return false;
+            }
+            if (source.type === "registered") {
+              return Object.entries(source.props).every(
+                ([key, propertyValue]) =>
+                  editableProps.includes(key) ||
+                  JSON.stringify(props[key]) === JSON.stringify(propertyValue),
+              );
             }
             const sourceRecord = source as unknown as Record<string, unknown>;
             return Object.entries(sourceRecord).every(
@@ -229,14 +245,32 @@ export function puckDataToDefinition(
           })
         : undefined;
     if (duplicateSource !== undefined) {
-      for (const [key, propertyValue] of Object.entries(duplicateSource)) {
-        if (
-          key !== "id" &&
-          key !== "type" &&
-          !editableProps.includes(key) &&
-          key in section
-        ) {
-          section[key] = structuredClone(propertyValue);
+      if (
+        base.type === "registered" &&
+        duplicateSource.type === "registered"
+      ) {
+        for (const [key, propertyValue] of Object.entries(
+          duplicateSource.props,
+        )) {
+          const field = registration.fields[key];
+          if (field === undefined) continue;
+          editableTarget[key] = mergePageComponentFieldEdit(
+            field,
+            propertyValue,
+            editableTarget[key],
+          );
+        }
+        section.props = editableTarget;
+      } else {
+        for (const [key, propertyValue] of Object.entries(duplicateSource)) {
+          if (
+            key !== "id" &&
+            key !== "type" &&
+            !editableProps.includes(key) &&
+            key in section
+          ) {
+            section[key] = structuredClone(propertyValue);
+          }
         }
       }
       Object.assign(

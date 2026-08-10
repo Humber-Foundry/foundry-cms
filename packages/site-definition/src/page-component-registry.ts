@@ -83,6 +83,35 @@ export type RegisteredPageComponentProps<
   [Key in keyof Fields]: FieldValue<Fields[Key]>;
 }>;
 
+type ValidatedPageComponentField<Field extends PageComponentField> =
+  Field extends Readonly<{
+    control: "array";
+    fields: infer Nested extends Readonly<Record<string, PageComponentField>>;
+  }>
+    ? Omit<Field, "fields" | "defaultValue"> & Readonly<{
+        fields: ValidatedPageComponentFields<Nested>;
+        defaultValue: ReadonlyArray<Readonly<{
+          [Key in keyof Nested]: FieldValue<Nested[Key]>;
+        }>>;
+      }>
+    : Field extends Readonly<{
+        control: "object";
+        fields: infer Nested extends Readonly<Record<string, PageComponentField>>;
+      }>
+      ? Omit<Field, "fields" | "defaultValue"> & Readonly<{
+          fields: ValidatedPageComponentFields<Nested>;
+          defaultValue: Readonly<{
+            [Key in keyof Nested]: FieldValue<Nested[Key]>;
+          }>;
+        }>
+      : Field;
+
+type ValidatedPageComponentFields<
+  Fields extends Readonly<Record<string, PageComponentField>>,
+> = Readonly<{
+  [Key in keyof Fields]: ValidatedPageComponentField<Fields[Key]>;
+}>;
+
 export type PageComponentValidation =
   | Readonly<{ ok: true }>
   | Readonly<{
@@ -219,7 +248,7 @@ export function createRegisteredPageComponent<
 >(input: Readonly<{
   type: Type;
   label: string;
-  fields: Fields;
+  fields: Fields & ValidatedPageComponentFields<Fields>;
 }>): PageComponentRegistration & Readonly<{
   type: Type;
   fields: Fields;
@@ -294,6 +323,49 @@ export function createRegisteredPageComponent<
   return Object.freeze(registration) as ReturnType<
     typeof createRegisteredPageComponent<Type, Fields>
   >;
+}
+
+export function mergePageComponentFieldEdit(
+  field: PageComponentField,
+  protectedValue: unknown,
+  submittedValue: unknown,
+): unknown {
+  if (field.editable === false) return structuredClone(protectedValue);
+  if (field.control === "object") {
+    if (!isRecord(submittedValue)) return structuredClone(submittedValue);
+    const protectedRecord = isRecord(protectedValue) ? protectedValue : {};
+    return Object.fromEntries(
+      Object.entries(field.fields).map(([key, nested]) => [
+        key,
+        mergePageComponentFieldEdit(
+          nested,
+          protectedRecord[key] ?? nested.defaultValue,
+          submittedValue[key],
+        ),
+      ]),
+    );
+  }
+  if (field.control === "array") {
+    if (!Array.isArray(submittedValue)) return structuredClone(submittedValue);
+    const protectedItems = Array.isArray(protectedValue) ? protectedValue : [];
+    return submittedValue.map((item, index) => {
+      if (!isRecord(item)) return structuredClone(item);
+      const protectedItem = isRecord(protectedItems[index])
+        ? protectedItems[index]
+        : {};
+      return Object.fromEntries(
+        Object.entries(field.fields).map(([key, nested]) => [
+          key,
+          mergePageComponentFieldEdit(
+            nested,
+            protectedItem[key] ?? nested.defaultValue,
+            item[key],
+          ),
+        ]),
+      );
+    });
+  }
+  return structuredClone(submittedValue);
 }
 
 function foundationRegistration(
@@ -407,8 +479,8 @@ const foundationComponents = {
     eyebrow: { control: "text", label: "Eyebrow", defaultValue: "Introduce this page" },
     title: { control: "text", label: "Title", defaultValue: "A clear page headline" },
     summary: { control: "textarea", label: "Summary", defaultValue: "Explain the page in a short, useful sentence." },
-    primaryAction: { control: "object", label: "Primary action", fields: linkFields, defaultValue: {}, editable: false },
-    secondaryAction: { control: "object", label: "Secondary action", fields: linkFields, defaultValue: {}, editable: false },
+    primaryAction: { control: "object", label: "Primary action", fields: linkFields, defaultValue: { id: "primary", label: "Primary action", href: "mailto:hello@example.com" }, editable: false },
+    secondaryAction: { control: "object", label: "Secondary action", fields: linkFields, defaultValue: { id: "secondary", label: "Learn more", href: "mailto:hello@example.com" }, editable: false },
   }, (id, definition) => foundationDefault("hero", id, definition)),
   services: foundationRegistration("services", "Services", {
     variant: { control: "select", label: "Variant", defaultValue: designContract.variants.services.values[0], options: designContract.variants.services.values.map((value) => ({ label: value, value })), editable: false },
@@ -420,7 +492,7 @@ const foundationComponents = {
       number: { control: "text", label: "Number", defaultValue: "01", editable: false },
       title: { control: "text", label: "Title", defaultValue: "A service", editable: false },
       description: { control: "textarea", label: "Description", defaultValue: "Explain this service.", editable: false },
-    }, defaultValue: [], editable: false },
+    }, defaultValue: [{ id: "service", number: "01", title: "A service", description: "Explain this service." }], editable: false },
   }, (id, definition) => foundationDefault("services", id, definition)),
   proof: foundationRegistration("proof", "Proof", {
     variant: { control: "select", label: "Variant", defaultValue: designContract.variants.proof.values[0], options: designContract.variants.proof.values.map((value) => ({ label: value, value })), editable: false },
@@ -430,14 +502,14 @@ const foundationComponents = {
       id: { control: "text", label: "Stable identifier", defaultValue: "metric", editable: false },
       value: { control: "text", label: "Value", defaultValue: "1", editable: false },
       label: { control: "text", label: "Label", defaultValue: "Meaningful result", editable: false },
-    }, defaultValue: [], editable: false },
+    }, defaultValue: [{ id: "metric", value: "1", label: "Meaningful result" }], editable: false },
   }, (id, definition) => foundationDefault("proof", id, definition)),
   callToAction: foundationRegistration("callToAction", "Call to action", {
     variant: { control: "select", label: "Variant", defaultValue: designContract.variants.callToAction.values[0], options: designContract.variants.callToAction.values.map((value) => ({ label: value, value })), editable: false },
     eyebrow: { control: "text", label: "Eyebrow", defaultValue: "Next step" },
     title: { control: "text", label: "Title", defaultValue: "Invite the reader to act" },
-    body: { control: "richText", label: "Body", defaultValue: { version: RICH_TEXT_VERSION, type: "document", children: [] } },
-    action: { control: "object", label: "Action", fields: linkFields, defaultValue: {}, editable: false },
+    body: { control: "richText", label: "Body", defaultValue: { version: RICH_TEXT_VERSION, type: "document", children: [{ type: "paragraph", children: [{ type: "text", text: "Explain what will happen next.", marks: [] }] }] } },
+    action: { control: "object", label: "Action", fields: linkFields, defaultValue: { id: "action", label: "Continue", href: "mailto:hello@example.com" }, editable: false },
   }, (id, definition) => foundationDefault("callToAction", id, definition)),
 };
 

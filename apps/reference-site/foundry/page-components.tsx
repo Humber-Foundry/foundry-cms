@@ -207,6 +207,9 @@ export const installedPageComponentRegistry =
   ) as InstalledPageComponentRegistry;
 
 export function createPuckField(field: PageComponentField): Record<string, unknown> {
+  if (field.editable === false) {
+    return { type: "custom", visible: false, render: () => null };
+  }
   if (field.control === "object") {
     return {
       type: "object",

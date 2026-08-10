@@ -4,6 +4,7 @@ import type {
 } from "./index";
 import {
   foundationPageComponentRegistry,
+  type PageComponentField,
   type PageComponentRegistry,
 } from "./page-component-registry";
 
@@ -135,6 +136,44 @@ export function referencedPageComponentIds(
   return referenced;
 }
 
+function protectedRegisteredFieldShape(
+  field: PageComponentField,
+  value: unknown,
+): unknown {
+  if (field.editable === false) return structuredClone(value);
+  if (field.control === "object" && isRecord(value)) {
+    const protectedEntries = Object.entries(field.fields).flatMap(
+      ([key, nested]) => {
+        const protectedValue = protectedRegisteredFieldShape(
+          nested,
+          value[key],
+        );
+        return protectedValue === undefined ? [] : [[key, protectedValue]];
+      },
+    );
+    return protectedEntries.length === 0
+      ? undefined
+      : Object.fromEntries(protectedEntries);
+  }
+  if (field.control === "array" && Array.isArray(value)) {
+    let protectsNestedValue = false;
+    const protectedItems = value.map((item) => {
+      if (!isRecord(item)) return item;
+      const entries = Object.entries(field.fields).flatMap(([key, nested]) => {
+          const protectedValue = protectedRegisteredFieldShape(
+            nested,
+            item[key],
+          );
+          return protectedValue === undefined ? [] : [[key, protectedValue]];
+        });
+      if (entries.length > 0) protectsNestedValue = true;
+      return Object.fromEntries(entries);
+    });
+    return protectsNestedValue ? protectedItems : undefined;
+  }
+  return undefined;
+}
+
 function protectedShape(
   section: PageSection,
   registry: PageComponentRegistry,
@@ -154,12 +193,15 @@ function protectedShape(
     delete protectedSection.variant;
   }
   if (section.type === "registered") {
-    const props = protectedSection.props;
-    if (isRecord(props)) {
-      for (const property of registration.editableFields) {
-        delete props[property];
-      }
-    }
+    const props = isRecord(protectedSection.props)
+      ? protectedSection.props
+      : {};
+    protectedSection.props = Object.fromEntries(
+      Object.entries(registration.fields).flatMap(([key, field]) => {
+        const protectedValue = protectedRegisteredFieldShape(field, props[key]);
+        return protectedValue === undefined ? [] : [[key, protectedValue]];
+      }),
+    );
   } else {
     for (const property of registration.editableFields) {
       delete protectedSection[property];

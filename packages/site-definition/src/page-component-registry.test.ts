@@ -47,6 +47,25 @@ const registry = createPageComponentRegistry(
   [story],
 );
 
+if (false) {
+  createRegisteredPageComponent({
+    type: "typedDefaultProof",
+    label: "Typed default proof",
+    fields: {
+      panel: {
+        control: "object",
+        label: "Panel",
+        fields: {
+          title: { control: "text", label: "Title", defaultValue: "Title" },
+          body: { control: "textarea", label: "Body", defaultValue: "Body" },
+        },
+        // @ts-expect-error A nested default must provide every registered field.
+        defaultValue: { title: "Missing the body" },
+      },
+    },
+  });
+}
+
 describe("installation-owned page component registry", () => {
   it("uses complete registry schemas to validate foundation components", () => {
     for (const registration of Object.values(
@@ -224,6 +243,70 @@ describe("installation-owned page component registry", () => {
       ok: false,
       errors: {
         "section_themed_story.props":
+          "This component scaffolding is protected by the Site Definition.",
+      },
+    });
+  });
+
+  it("protects nested non-editable fields inside an editable object", () => {
+    const profile = createRegisteredPageComponent({
+      type: "profileCard",
+      label: "Profile card",
+      fields: {
+        profile: {
+          control: "object",
+          label: "Profile",
+          fields: {
+            name: { control: "text", label: "Name", defaultValue: "A person" },
+            internalId: {
+              control: "text",
+              label: "Internal identifier",
+              defaultValue: "profile_default",
+              editable: false,
+            },
+          },
+          defaultValue: {
+            name: "A person",
+            internalId: "profile_default",
+          },
+        },
+      },
+    });
+    const profileRegistry = createPageComponentRegistry(
+      foundationPageComponentRegistry,
+      [profile],
+    );
+    const installed = {
+      ...profile.createDefault("section_profile"),
+      props: {
+        profile: { name: "Installed name", internalId: "profile_installed" },
+      },
+    } as const;
+    const definition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections, installed],
+      },
+    };
+    const changed = {
+      ...installed,
+      props: {
+        profile: { name: "Edited name", internalId: "profile_tampered" },
+      },
+    } as const;
+
+    expect(applyPageComposition(
+      definition,
+      {
+        ...toPageComposition(definition),
+        components: [...definition.home.sections.slice(0, -1), changed],
+      },
+      profileRegistry,
+    )).toMatchObject({
+      ok: false,
+      errors: {
+        "section_profile.props":
           "This component scaffolding is protected by the Site Definition.",
       },
     });

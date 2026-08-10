@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createPageComponentRegistry,
+  createRegisteredPageComponent,
+  foundationPageComponentRegistry,
   referenceSiteDefinition,
   type PageSection,
   type SiteDefinition,
@@ -26,6 +29,57 @@ function richBody(text: string) {
 }
 
 describe("Puck page-composition adapter", () => {
+  it("preserves protected registered props when Puck duplicates a component", () => {
+    const themedStory = createRegisteredPageComponent({
+      type: "themedStory",
+      label: "Themed story",
+      fields: {
+        title: { control: "text", label: "Title", defaultValue: "A story" },
+        theme: {
+          control: "select",
+          label: "Theme",
+          defaultValue: "warm",
+          options: [
+            { label: "Warm", value: "warm" },
+            { label: "Cool", value: "cool" },
+          ],
+          editable: false,
+        },
+      },
+    });
+    const registry = createPageComponentRegistry(
+      foundationPageComponentRegistry,
+      [themedStory],
+    );
+    const existing = {
+      ...themedStory.createDefault("section_themed_story"),
+      props: { title: "An installed story", theme: "cool" },
+    } as const;
+    const definition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [...referenceSiteDefinition.home.sections, existing],
+      },
+    } as SiteDefinition;
+    const data = definitionToPuckData(definition, registry);
+    const source = data.content.at(-1)!;
+    data.content.push({
+      ...structuredClone(source),
+      props: { ...structuredClone(source.props), id: "themedStory-generated-copy" },
+    });
+
+    const result = puckDataToDefinition(definition, data, registry);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.definition.home.sections.at(-1)).toMatchObject({
+      type: "registered",
+      component: "themedStory",
+      props: { title: "An installed story", theme: "cool" },
+    });
+  });
+
   it("binds Puck data to stable registered component identifiers", () => {
     const data = definitionToPuckData(referenceSiteDefinition);
 

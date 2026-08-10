@@ -78,10 +78,20 @@ describe("installation-owned page components", () => {
     expect(createPuckField({
       control: "object",
       label: "Action",
-      defaultValue: { label: "Continue", href: "#section_contact" },
+      defaultValue: {
+        label: "Continue",
+        href: "#section_contact",
+        internalId: "internal_action",
+      },
       fields: {
         label: { control: "text", label: "Label", defaultValue: "Continue" },
         href: { control: "url", label: "Destination", defaultValue: "#section_contact" },
+        internalId: {
+          control: "text",
+          label: "Internal identifier",
+          defaultValue: "internal_action",
+          editable: false,
+        },
       },
     })).toEqual({
       type: "object",
@@ -89,6 +99,11 @@ describe("installation-owned page components", () => {
       objectFields: {
         label: { type: "text", label: "Label" },
         href: { type: "text", label: "Destination" },
+        internalId: {
+          type: "custom",
+          visible: false,
+          render: expect.any(Function),
+        },
       },
     });
   });
