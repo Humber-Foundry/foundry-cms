@@ -29,10 +29,10 @@ import {
   type NewsletterProviderOwnershipEvidence,
 } from "@humber-foundry/application";
 import {
-  upgradeSiteDefinition,
   type BlogPost,
   type SiteId,
 } from "@humber-foundry/site-definition";
+import { upgradeInstalledSiteDefinition } from "../foundry/site-definition";
 
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { createD1CampaignStore } from "./d1-campaign-store";
@@ -169,7 +169,7 @@ async function d1PostRevision(
       post_revision: number;
     }>();
   if (row === null) return null;
-  const definition = upgradeSiteDefinition(JSON.parse(row.definition_json));
+  const definition = upgradeInstalledSiteDefinition(JSON.parse(row.definition_json));
   return definition.blog.posts.find(
     (post) =>
       post.id === row.post_id && post.revision === row.post_revision,

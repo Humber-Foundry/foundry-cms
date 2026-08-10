@@ -1,17 +1,14 @@
 import type {
   PageSection,
   SiteDefinition,
-  SiteHref,
 } from "./index";
 import {
-  RICH_TEXT_VERSION,
-  richTextDocumentHasVisibleText,
-  validateRichTextDocument,
-  type RichTextDocument,
-} from "./rich-text";
-import { designContract } from "./design-tokens";
+  foundationPageComponentRegistry,
+  type PageComponentField,
+  type PageComponentRegistry,
+} from "./page-component-registry";
 
-export type PageComponentType = PageSection["type"];
+export type PageComponentType = Exclude<PageSection["type"], "registered">;
 
 export type PageComposition = Readonly<{
   slotId: "slot_home_sections";
@@ -22,10 +19,20 @@ export type PageCompositionResult =
   | Readonly<{ ok: true; definition: SiteDefinition }>
   | Readonly<{ ok: false; errors: Readonly<Record<string, string>> }>;
 
-type ComponentRegistration = Readonly<{
-  label: string;
-  editableProps: ReadonlyArray<string>;
-}>;
+const foundationCompositionComponents = Object.freeze(
+  Object.fromEntries(
+    foundationPageComponentRegistry.allowedComponents.map((type) => {
+      const registration = foundationPageComponentRegistry.components[type]!;
+      return [
+        type,
+        Object.freeze({
+          label: registration.label,
+          editableProps: registration.editableFields,
+        }),
+      ];
+    }),
+  ),
+);
 
 export const pageCompositionContract = Object.freeze({
   slot: Object.freeze({
@@ -33,149 +40,18 @@ export const pageCompositionContract = Object.freeze({
     path: "home.sections" as const,
     minItems: 1,
     maxItems: 12,
-    allowedComponents: Object.freeze([
-      "hero",
-      "services",
-      "proof",
-      "callToAction",
-    ] as const),
+    allowedComponents: foundationPageComponentRegistry.allowedComponents,
   }),
-  components: Object.freeze({
-    hero: Object.freeze({
-      label: "Hero",
-      editableProps: Object.freeze([
-        "eyebrow",
-        "title",
-        "summary",
-      ]),
-    }),
-    services: Object.freeze({
-      label: "Services",
-      editableProps: Object.freeze([
-        "eyebrow",
-        "title",
-        "introduction",
-      ]),
-    }),
-    proof: Object.freeze({
-      label: "Proof",
-      editableProps: Object.freeze(["quote", "attribution"]),
-    }),
-    callToAction: Object.freeze({
-      label: "Call to action",
-      editableProps: Object.freeze(["eyebrow", "title", "body"]),
-    }),
-  } satisfies Readonly<Record<PageComponentType, ComponentRegistration>>),
+  components: foundationCompositionComponents,
 });
 
 export function createDefaultPageSection(
-  type: PageComponentType,
+  type: string,
   id: string,
   definition?: SiteDefinition,
+  registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): PageSection {
-  const existingCallToAction = definition?.home.sections.find(
-    (section) => section.type === "callToAction",
-  );
-  const contactNavigation = definition?.site.navigation.find(
-    (link) => link.href.startsWith("mailto:"),
-  );
-  const linkTo = (preferredType?: PageComponentType): SiteHref => {
-    const target =
-      definition?.home.sections.find(
-        (section) => section.type === preferredType,
-      ) ?? definition?.home.sections[0];
-    return target === undefined
-      ? "mailto:hello@example.com"
-      : `#${target.id}`;
-  };
-  switch (type) {
-    case "hero":
-      return {
-        id,
-        type,
-        variant: designContract.variants.hero.values[0],
-        eyebrow: "Introduce this page",
-        title: "A clear page headline",
-        summary: "Explain the page in a short, useful sentence.",
-        primaryAction: {
-          id: `${id}_primary`,
-          label: "Primary action",
-          href: linkTo("callToAction"),
-        },
-        secondaryAction: {
-          id: `${id}_secondary`,
-          label: "Learn more",
-          href: linkTo("services"),
-        },
-      };
-    case "services":
-      return {
-        id,
-        type,
-        variant: designContract.variants.services.values[0],
-        eyebrow: "Services",
-        title: "What we can make together",
-        introduction: "Describe the work available here.",
-        items: [
-          {
-            id: `${id}_item`,
-            number: "01",
-            title: "A service",
-            description: "Explain this service.",
-          },
-        ],
-      };
-    case "proof":
-      return {
-        id,
-        type,
-        variant: designContract.variants.proof.values[0],
-        quote: "Add a principle or a piece of evidence.",
-        attribution: "Source",
-        metrics: [
-          {
-            id: `${id}_metric`,
-            value: "1",
-            label: "Meaningful result",
-          },
-        ],
-      };
-    case "callToAction":
-      return {
-        id,
-        type,
-        variant: designContract.variants.callToAction.values[0],
-        eyebrow: "Next step",
-        title: "Invite the reader to act",
-        body: {
-          version: RICH_TEXT_VERSION,
-          type: "document",
-          children: [
-            {
-              type: "paragraph",
-              children: [
-                {
-                  type: "text",
-                  text: "Explain what will happen next.",
-                  marks: [],
-                },
-              ],
-            },
-          ],
-        },
-        action: {
-          id: `${id}_action`,
-          label:
-            existingCallToAction?.action.label ??
-            contactNavigation?.label ??
-            "Continue",
-          href:
-            existingCallToAction?.action.href ??
-            contactNavigation?.href ??
-            linkTo(),
-        },
-      };
-  }
+  return registry.createDefault(type, id, definition);
 }
 
 export function toPageComposition(
@@ -189,17 +65,18 @@ export function toPageComposition(
 
 export function toPageCompositionIdentity(
   definition: SiteDefinition,
+  registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): Readonly<{
   slotId: PageComposition["slotId"];
   components: ReadonlyArray<
-    Readonly<{ id: string; type: PageComponentType }>
+    Readonly<{ id: string; type: string }>
   >;
 }> {
   return {
     slotId: pageCompositionContract.slot.id,
-    components: definition.home.sections.map(({ id, type }) => ({
-      id,
-      type,
+    components: definition.home.sections.map((section) => ({
+      id: section.id,
+      type: registry.keyFor(section),
     })),
   };
 }
@@ -223,221 +100,6 @@ function validateObjectKeys(
     return false;
   }
   return true;
-}
-
-function validateTextFields(
-  value: Record<string, unknown>,
-  fields: ReadonlyArray<string>,
-  path: string,
-  errors: Record<string, string>,
-): boolean {
-  let valid = true;
-  for (const field of fields) {
-    if (
-      typeof value[field] !== "string" ||
-      (value[field] as string).trim() === ""
-    ) {
-      errors[`${path}.${field}`] = "Enter at least one visible character.";
-      valid = false;
-    }
-  }
-  return valid;
-}
-
-function validateLink(
-  value: unknown,
-  path: string,
-  errors: Record<string, string>,
-): boolean {
-  if (!validateObjectKeys(value, ["id", "label", "href"], path, errors)) {
-    return false;
-  }
-  const textValid = validateTextFields(value, ["id", "label"], path, errors);
-  const hrefValid =
-    typeof value.href === "string" &&
-    (/^#[a-z][a-z0-9_]*$/u.test(value.href) ||
-      /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value.href));
-  if (!hrefValid) {
-    errors[`${path}.href`] = "Use a registered page anchor or email link.";
-  }
-  return textValid && hrefValid;
-}
-
-function validateRichTextField(
-  value: unknown,
-  path: string,
-  errors: Record<string, string>,
-): boolean {
-  try {
-    const document = validateRichTextDocument(value as RichTextDocument);
-    if (!richTextDocumentHasVisibleText(document)) {
-      errors[path] = "Enter at least one visible character.";
-      return false;
-    }
-    return true;
-  } catch {
-    errors[path] =
-      "Provide supported, safe rich text in the versioned Site Definition format.";
-    return false;
-  }
-}
-
-function validateItemArray(
-  value: unknown,
-  path: string,
-  fields: ReadonlyArray<string>,
-  errors: Record<string, string>,
-): boolean {
-  if (!Array.isArray(value)) {
-    errors[path] = "Use the registered component item list.";
-    return false;
-  }
-  let valid = true;
-  value.forEach((item, index) => {
-    const itemPath = `${path}.${index}`;
-    if (!validateObjectKeys(item, fields, itemPath, errors)) {
-      valid = false;
-      return;
-    }
-    if (!validateTextFields(item, fields, itemPath, errors)) {
-      valid = false;
-    }
-  });
-  return valid;
-}
-
-function validateSectionSchema(
-  section: Record<string, unknown>,
-  type: PageComponentType,
-  id: string,
-  errors: Record<string, string>,
-): boolean {
-  const path = id;
-  if (
-    typeof section.variant !== "string" ||
-    !designContract.variants[type].values.includes(section.variant as never)
-  ) {
-    errors[`${path}.variant`] =
-      "Choose a variant registered for this component.";
-    return false;
-  }
-  switch (type) {
-    case "hero":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "summary",
-            "primaryAction",
-            "secondaryAction",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          ["id", "type", "variant", "eyebrow", "title", "summary"],
-          path,
-          errors,
-        ) &&
-        validateLink(section.primaryAction, `${path}.primaryAction`, errors) &&
-        validateLink(section.secondaryAction, `${path}.secondaryAction`, errors)
-      );
-    case "services":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "introduction",
-            "items",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "introduction",
-          ],
-          path,
-          errors,
-        ) &&
-        validateItemArray(
-          section.items,
-          `${path}.items`,
-          ["id", "number", "title", "description"],
-          errors,
-        )
-      );
-    case "proof":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "quote",
-            "attribution",
-            "metrics",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          ["id", "type", "variant", "quote", "attribution"],
-          path,
-          errors,
-        ) &&
-        validateItemArray(
-          section.metrics,
-          `${path}.metrics`,
-          ["id", "value", "label"],
-          errors,
-        )
-      );
-    case "callToAction":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "body",
-            "action",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          ["id", "type", "variant", "eyebrow", "title"],
-          path,
-          errors,
-        ) &&
-        validateRichTextField(section.body, `${path}.body`, errors) &&
-        validateLink(section.action, `${path}.action`, errors)
-      );
-  }
 }
 
 export function referencedPageComponentIds(
@@ -474,12 +136,51 @@ export function referencedPageComponentIds(
   return referenced;
 }
 
+function protectedRegisteredFieldShape(
+  field: PageComponentField,
+  value: unknown,
+): unknown {
+  if (field.editable === false) return structuredClone(value);
+  if (field.control === "object" && isRecord(value)) {
+    const protectedEntries = Object.entries(field.fields).flatMap(
+      ([key, nested]) => {
+        const protectedValue = protectedRegisteredFieldShape(
+          nested,
+          value[key],
+        );
+        return protectedValue === undefined ? [] : [[key, protectedValue]];
+      },
+    );
+    return protectedEntries.length === 0
+      ? undefined
+      : Object.fromEntries(protectedEntries);
+  }
+  if (field.control === "array" && Array.isArray(value)) {
+    let protectsNestedValue = false;
+    const protectedItems = value.map((item) => {
+      if (!isRecord(item)) return item;
+      const entries = Object.entries(field.fields).flatMap(([key, nested]) => {
+          const protectedValue = protectedRegisteredFieldShape(
+            nested,
+            item[key],
+          );
+          return protectedValue === undefined ? [] : [[key, protectedValue]];
+        });
+      if (entries.length > 0) protectsNestedValue = true;
+      return Object.fromEntries(entries);
+    });
+    return protectsNestedValue ? protectedItems : undefined;
+  }
+  return undefined;
+}
+
 function protectedShape(
   section: PageSection,
+  registry: PageComponentRegistry,
   normalizeNestedIds = false,
   protectVariant = true,
 ): Record<string, unknown> {
-  const registration = pageCompositionContract.components[section.type];
+  const registration = registry.components[registry.keyFor(section)]!;
   const protectedSection = structuredClone(section) as unknown as Record<
     string,
     unknown
@@ -491,15 +192,30 @@ function protectedShape(
   if (!protectVariant) {
     delete protectedSection.variant;
   }
-  for (const property of registration.editableProps) {
-    delete protectedSection[property];
+  if (section.type === "registered") {
+    const props = isRecord(protectedSection.props)
+      ? protectedSection.props
+      : {};
+    protectedSection.props = Object.fromEntries(
+      Object.entries(registration.fields).flatMap(([key, field]) => {
+        const protectedValue = protectedRegisteredFieldShape(field, props[key]);
+        return protectedValue === undefined ? [] : [[key, protectedValue]];
+      }),
+    );
+  } else {
+    for (const property of registration.editableFields) {
+      delete protectedSection[property];
+    }
   }
   const normalizeProtectedShape = (
     value: unknown,
     root = false,
+    preserveAll = false,
   ): unknown => {
     if (Array.isArray(value)) {
-      return value.map((nested) => normalizeProtectedShape(nested));
+      return value.map((nested) =>
+        normalizeProtectedShape(nested, false, preserveAll),
+      );
     }
     if (isRecord(value)) {
       return Object.fromEntries(
@@ -507,6 +223,7 @@ function protectedShape(
           .filter(
             ([key, nested]) =>
               root ||
+              preserveAll ||
               typeof nested !== "string" ||
               key === "id" ||
               key === "type" ||
@@ -516,7 +233,12 @@ function protectedShape(
             key,
             key === "id" && normalizeNestedIds
               ? "$stableId"
-              : normalizeProtectedShape(nested),
+              : normalizeProtectedShape(
+                  nested,
+                  false,
+                  preserveAll ||
+                    (section.type === "registered" && key === "props"),
+                ),
           ]),
       );
     }
@@ -531,6 +253,7 @@ function protectedShape(
 function equalProtectedShape(
   left: PageSection,
   right: PageSection,
+  registry: PageComponentRegistry,
   normalizeNestedIds = false,
   protectVariant = true,
 ): boolean {
@@ -550,12 +273,12 @@ function equalProtectedShape(
   return (
     JSON.stringify(
       canonicalize(
-        protectedShape(left, normalizeNestedIds, protectVariant),
+        protectedShape(left, registry, normalizeNestedIds, protectVariant),
       ),
     ) ===
     JSON.stringify(
       canonicalize(
-        protectedShape(right, normalizeNestedIds, protectVariant),
+        protectedShape(right, registry, normalizeNestedIds, protectVariant),
       ),
     )
   );
@@ -573,6 +296,8 @@ function nestedSectionRecords(
       return section.metrics;
     case "callToAction":
       return [section.action];
+    case "registered":
+      return [];
   }
 }
 
@@ -595,28 +320,17 @@ function hasCanonicalDuplicateIds(section: PageSection): boolean {
 
 function validateEditableProps(
   section: PageSection,
+  registry: PageComponentRegistry,
   errors: Record<string, string>,
 ): void {
-  const registration = pageCompositionContract.components[section.type];
-  const record = section as unknown as Record<string, unknown>;
-  for (const property of registration.editableProps) {
-    if (section.type === "callToAction" && property === "body") {
-      validateRichTextField(record[property], `${section.id}.${property}`, errors);
-      continue;
-    }
-    if (
-      typeof record[property] !== "string" ||
-      (record[property] as string).trim() === ""
-    ) {
-      errors[`${section.id}.${property}`] =
-        "Enter at least one visible character.";
-    }
-  }
+  const validation = registry.validate(section);
+  if (!validation.ok) Object.assign(errors, validation.errors);
 }
 
 export function applyPageComposition(
   definition: SiteDefinition,
   value: unknown,
+  registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): PageCompositionResult {
   const errors = Object.create(null) as Record<string, string>;
   if (!isRecord(value) || value.slotId !== pageCompositionContract.slot.id) {
@@ -702,21 +416,29 @@ export function applyPageComposition(
       continue;
     }
     ids.add(id);
-    if (
-      typeof candidate.type !== "string" ||
-      !Object.hasOwn(pageCompositionContract.components, candidate.type)
-    ) {
+    const componentKey =
+      candidate.type === "registered" && typeof candidate.component === "string"
+        ? candidate.component
+        : typeof candidate.type === "string"
+          ? candidate.type
+          : null;
+    if (componentKey === null || !Object.hasOwn(registry.components, componentKey)) {
       errors[`${id}.type`] =
         "This component is not registered for the page slot.";
       continue;
     }
-    const type = candidate.type as PageComponentType;
-    if (!validateSectionSchema(candidate, type, id, errors)) {
+    const componentValidation = registry.validate(candidate);
+    if (!componentValidation.ok) {
+      const validation = componentValidation;
+      if (!validation.ok) Object.assign(errors, validation.errors);
       continue;
     }
     const section = candidate as unknown as PageSection;
     const existing = existingById.get(id);
-    if (existing !== undefined && existing.type !== section.type) {
+    if (
+      existing !== undefined &&
+      registry.keyFor(existing) !== registry.keyFor(section)
+    ) {
       errors[`${id}.type`] =
         "An existing component cannot change its registered type.";
       continue;
@@ -740,14 +462,16 @@ export function applyPageComposition(
       existing === undefined &&
       (
         equalProtectedShape(
-          createDefaultPageSection(section.type, id, definition),
+          createDefaultPageSection(componentKey, id, definition, registry),
           section,
+          registry,
           false,
           false,
         ) ||
         equalProtectedShape(
-          createDefaultPageSection(section.type, id, submittedContext),
+          createDefaultPageSection(componentKey, id, submittedContext, registry),
           section,
+          registry,
           false,
           false,
         )
@@ -756,21 +480,21 @@ export function applyPageComposition(
       existing === undefined &&
       hasCanonicalDuplicateIds(section) &&
       [...definition.home.sections, ...accepted]
-        .filter((source) => source.type === section.type)
+        .filter((source) => registry.keyFor(source) === componentKey)
         .some((source) =>
-          equalProtectedShape(source, section, true, false),
+          equalProtectedShape(source, section, registry, true, false),
         );
     const scaffoldAllowed =
       existing === undefined
         ? defaultScaffold || duplicateScaffold
-        : equalProtectedShape(existing, section);
+        : equalProtectedShape(existing, section, registry);
     if (!scaffoldAllowed) {
-      const submittedProtected = protectedShape(section);
+      const submittedProtected = protectedShape(section, registry);
       const protectedProperty =
         (existing === undefined
           ? undefined
           : Object.keys(submittedProtected).find((property) => {
-              const existingValue = protectedShape(existing)[property];
+              const existingValue = protectedShape(existing, registry)[property];
               const submittedValue = submittedProtected[property];
               return (
                 JSON.stringify(existingValue) !==
@@ -814,7 +538,7 @@ export function applyPageComposition(
       }
     };
     visitIds(section);
-    validateEditableProps(section, errors);
+    validateEditableProps(section, registry, errors);
     accepted.push(structuredClone(section));
   }
   if (Object.keys(errors).length > 0) {

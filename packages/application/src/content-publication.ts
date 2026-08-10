@@ -647,11 +647,19 @@ function designProjection(definition: SiteDefinition) {
       href,
     })),
     pageId: definition.home.id,
-    sections: definition.home.sections.map(({ id, type, variant }) => ({
-      id,
-      type,
-      variant,
-    })),
+    sections: definition.home.sections.map((section) =>
+      section.type === "registered"
+        ? {
+            id: section.id,
+            type: section.type,
+            component: section.component,
+          }
+        : {
+            id: section.id,
+            type: section.type,
+            variant: section.variant,
+          },
+    ),
   };
 }
 
@@ -662,11 +670,12 @@ export async function createContentApprovalFingerprint(
   serializationVersion:
     | typeof artifactContentSerializationVersion
     | typeof contentSerializationVersion = contentSerializationVersion,
+  isDefinition: (value: unknown) => value is SiteDefinition = isSiteDefinition,
 ): Promise<ContentApprovalFingerprint> {
   if (revision.inputs.schemaVersion !== revision.definition.schemaVersion) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
-  if (!isSiteDefinition(revision.definition)) {
+  if (!isDefinition(revision.definition)) {
     throw new ContentApprovalInvalidError("revision_stale");
   }
   const artifactHash = await hashContentPublicationArtifacts(
@@ -1069,6 +1078,7 @@ export function createContentPublicationApplication({
   draftRestorer,
   restoreSourcePublication,
   onVerifiedLive,
+  isDefinition = isSiteDefinition,
   now = () => new Date().toISOString(),
 }: {
   store: ContentPublicationStore;
@@ -1081,6 +1091,7 @@ export function createContentPublicationApplication({
     publication: ContentPublication,
     revision: ContentRevision,
   ) => Promise<void>;
+  isDefinition?: (value: unknown) => value is SiteDefinition;
   now?: () => string;
 }) {
   async function reconcileVerifiedPublication(
@@ -1143,6 +1154,9 @@ export function createContentPublicationApplication({
       workspaceId,
       revisionNumber,
     );
+    if (!isDefinition(selected.definition)) {
+      throw new ContentApprovalInvalidError("revision_stale");
+    }
     if (!(await revisions.isCurrent(selected))) {
       throw new ContentApprovalInvalidError("revision_stale");
     }
@@ -1229,6 +1243,7 @@ export function createContentPublicationApplication({
         approval.fingerprint.channelConfigurationHash,
         approval.fingerprint.channel,
         approval.fingerprint.serializationVersion,
+        isDefinition,
       );
       if (fingerprint.value !== approval.fingerprint.value) {
         throw new ContentApprovalInvalidError("approval_stale");
@@ -1821,6 +1836,9 @@ export function createContentPublicationApplication({
           fingerprint: await createContentApprovalFingerprint(
             revision,
             await publisher.getChannelConfigurationHash(),
+            "site",
+            contentSerializationVersion,
+            isDefinition,
           ),
           approvedBy: input.approvedBy,
           approvedAt,

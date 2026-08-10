@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import {
+  createReferenceSiteDefinition,
+  referenceSiteDefinition,
+} from "@humber-foundry/site-definition";
 
 import {
   assertExactProductionContent,
@@ -63,14 +66,17 @@ const fixedBaseRuntimeContentHash = canonicalHash({
     media: trackedPublishedDefinition.home.media ?? [],
   },
 });
+const trackedRuntimeDefinition = createReferenceSiteDefinition(
+  trackedPublishedDefinition,
+);
 const { blog: _currentBlog, ...currentDefinitionWithoutBlog } =
-  referenceSiteDefinition;
+  trackedRuntimeDefinition;
 const previousProjectedContentHash = canonicalHash({
   ...currentDefinitionWithoutBlog,
   definitionVersion: "1.2.0",
   schemaVersion: "1.2.0",
 });
-const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
+const runtimePublishedContentHash = canonicalHash(trackedRuntimeDefinition);
 
 function defaultArtifacts() {
   return [

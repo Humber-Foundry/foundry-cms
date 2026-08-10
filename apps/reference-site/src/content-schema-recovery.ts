@@ -7,10 +7,10 @@ import {
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
-  upgradeSiteDefinition,
   type PageSection,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
+import { upgradeInstalledSiteDefinition } from "../foundry/site-definition";
 
 import {
   excludeCompositionOwnedEdits,
@@ -30,7 +30,7 @@ function upgradeLegacyPageComponent(component: unknown): PageSection {
   ) {
     throw new Error("unsupported_legacy_page_component");
   }
-  const type = component.type as PageSection["type"];
+  const type = component.type as Exclude<PageSection["type"], "registered">;
   let upgraded: Record<string, unknown> = { ...component };
   if ("variant" in upgraded) {
     if (
@@ -64,7 +64,7 @@ export function upgradeSiteDefinitionForCurrentSchema(
   definition: SiteDefinition,
 ): SiteDefinition {
   try {
-    return upgradeSiteDefinition(definition);
+    return upgradeInstalledSiteDefinition(definition);
   } catch {
     throw new Error("unsupported_site_definition_schema");
   }

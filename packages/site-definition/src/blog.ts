@@ -29,8 +29,11 @@ function requireSite(definition: SiteDefinition, siteId: SiteId) {
   }
 }
 
-function requireValid(definition: SiteDefinition): SiteDefinition {
-  if (!isSiteDefinition(definition)) {
+function requireValid(
+  definition: SiteDefinition,
+  isDefinition: (value: unknown) => value is SiteDefinition,
+): SiteDefinition {
+  if (!isDefinition(definition)) {
     throw new BlogPostSchemaError("schema_invalid");
   }
   return definition;
@@ -43,6 +46,7 @@ export function createBlogPostDefinition(
     BlogPost,
     "revision" | "collectionState" | "targetVisibility"
   >,
+  isDefinition: (value: unknown) => value is SiteDefinition = isSiteDefinition,
 ): SiteDefinition {
   requireSite(definition, siteId);
   if (definition.blog.posts.some(({ id }) => id === post.id)) {
@@ -65,7 +69,7 @@ export function createBlogPostDefinition(
         },
       ],
     },
-  });
+  }, isDefinition);
 }
 
 export function editBlogPostDefinition(
@@ -76,6 +80,7 @@ export function editBlogPostDefinition(
     BlogPost,
     "id" | "revision" | "collectionState" | "targetVisibility"
   >,
+  isDefinition: (value: unknown) => value is SiteDefinition = isSiteDefinition,
 ): SiteDefinition {
   requireSite(definition, siteId);
   const index = definition.blog.posts.findIndex(({ id }) => id === postId);
@@ -105,13 +110,14 @@ export function editBlogPostDefinition(
   return requireValid({
     ...definition,
     blog: { ...definition.blog, posts },
-  });
+  }, isDefinition);
 }
 
 export function unpublishBlogPostDefinition(
   definition: SiteDefinition,
   siteId: SiteId,
   postId: BlogPostId,
+  isDefinition: (value: unknown) => value is SiteDefinition = isSiteDefinition,
 ): SiteDefinition {
   requireSite(definition, siteId);
   if (!definition.blog.posts.some(({ id }) => id === postId)) {
@@ -135,13 +141,14 @@ export function unpublishBlogPostDefinition(
           : post,
       ),
     },
-  });
+  }, isDefinition);
 }
 
 export function republishBlogPostDefinition(
   definition: SiteDefinition,
   siteId: SiteId,
   postId: BlogPostId,
+  isDefinition: (value: unknown) => value is SiteDefinition = isSiteDefinition,
 ): SiteDefinition {
   requireSite(definition, siteId);
   const current = definition.blog.posts.find(({ id }) => id === postId);
@@ -165,5 +172,5 @@ export function republishBlogPostDefinition(
           : post,
       ),
     },
-  });
+  }, isDefinition);
 }

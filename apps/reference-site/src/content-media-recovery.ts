@@ -1,9 +1,9 @@
 import type { ContentRevision } from "@humber-foundry/application";
 import {
-  isSiteDefinition,
   type SiteDefinition,
   type SiteMediaOccurrence,
 } from "@humber-foundry/site-definition";
+import { isInstalledSiteDefinition } from "../foundry/site-definition";
 
 import type { StaleRecoveryEdit } from "./content-editor-recovery";
 import { mediaManifestRecoveryPath } from "./content-schema-recovery";
@@ -46,7 +46,7 @@ function parseMediaRecoveryManifest(
     ...definition,
     home: { ...definition.home, media },
   };
-  if (!isSiteDefinition(candidate)) {
+  if (!isInstalledSiteDefinition(candidate)) {
     throw new Error("content_media_recovery_invalid");
   }
   return candidate.home.media ?? [];

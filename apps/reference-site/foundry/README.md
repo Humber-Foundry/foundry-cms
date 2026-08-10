@@ -10,6 +10,11 @@ Foundry foundation.
   content together with the client's registered renderer inputs.
   Never import environment variables, credentials, database bindings, or
   server adapters there.
+- `page-components.tsx` is the browser-safe installation registry. Add a
+  component there with a stable type, declarative field schema, defaults, and
+  its real React renderer. Public pages, exact revision previews, and the Puck
+  canvas all dispatch through that registry; unknown or schema-invalid
+  components are rejected before they can be saved or published.
 - `site-definition.server.ts` is server-only. It binds that definition to the
   site-scoped application runtime. Client-owned private adapters belong on this
   side of the boundary.

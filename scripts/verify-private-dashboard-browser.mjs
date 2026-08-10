@@ -105,7 +105,10 @@ async function main() {
   try {
     await waitForDashboard(origin, server, logs);
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
     await page.goto(`${origin}/dash`);
 
     const startWorkspace = page.getByRole("button", {
@@ -134,30 +137,107 @@ async function main() {
       }),
       "private_dashboard_content_editor_not_ready",
     );
-    const siteName = page.getByRole("textbox", { name: /^Site name/u });
-    await siteName.fill("Foundry private preview acceptance");
+    await page.getByRole("button", {
+      name: "Add Image and copy story",
+    }).click();
+    const editorFrame = page.frameLocator(".puck-editor-frame iframe");
+    const storyHeading = editorFrame.getByRole("heading", {
+      name: "Make room for a better question",
+    });
+    await storyHeading.waitFor({ state: "visible" });
+    await page.getByRole("button", {
+      name: "Duplicate Image and copy story 5",
+    }).click();
+    await page.getByRole("button", {
+      name: "Move Image and copy story 6 up",
+    }).click();
+    await page.getByRole("button", {
+      name: "Remove Image and copy story 5",
+    }).click();
+    await waitForEnabled(
+      page.getByRole("button", { name: "Add Image and copy story" }),
+      "private_dashboard_structure_controls_locked",
+    );
+    const storyTitle = page.locator(
+      '.puck-editor-frame input[title="Title"]:visible:not([readonly])',
+    );
+    for (let attempt = 0; attempt < 20 && (await storyTitle.count()) === 0; attempt += 1) {
+      await editorFrame.getByRole("heading", {
+        name: "Make room for a better question",
+      }).click();
+      await page.waitForTimeout(250);
+    }
+    if ((await storyTitle.count()) !== 1) {
+      throw new Error(`private_dashboard_custom_title_field_count:${await storyTitle.count()}`);
+    }
+    const editedStoryTitle = "The useful question is already in the room.";
+    const savedResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/foundry-cms/revisions" &&
+        response.status() === 201,
+    );
+    await storyTitle.fill(editedStoryTitle);
+    await storyTitle.press("Tab");
+    await editorFrame.getByRole("heading", {
+      name: editedStoryTitle,
+    }).waitFor({ state: "visible" });
     const saveRevision = page.getByRole("button", {
       name: "Save revision",
     });
-    await waitForEnabled(
-      saveRevision,
-      "private_dashboard_content_save_disabled",
-    );
-    const [saved] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname ===
-            "/api/foundry-cms/revisions",
-      ),
-      saveRevision.click({ force: true }),
-    ]);
+    if (await saveRevision.isEnabled()) {
+      await saveRevision.click({ force: true });
+    }
+    const saved = await savedResponse;
     if (saved.status() !== 201) {
       throw new Error(
         `private_dashboard_save_failed:${saved.status()}:${await saved.text()}`,
       );
     }
-    await page.getByText("Revision 1 · saved", { exact: true }).waitFor();
+    const savedPayload = await saved.json();
+    if (typeof savedPayload.revision !== "number") {
+      throw new Error("private_dashboard_saved_revision_missing");
+    }
+    const savedRevision = savedPayload.revision;
+    await page.getByText(`Revision ${savedRevision} · saved`, { exact: true }).waitFor();
+    const [preview] = await Promise.all([
+      context.waitForEvent("page"),
+      page.getByRole("button", {
+        name: "Preview exact saved revision ↗",
+      }).click(),
+    ]);
+    await preview.waitForURL(
+      new RegExp(`/__foundry/preview/workspace_[a-f0-9]{24}/${savedRevision}\\?`, "u"),
+    );
+    await preview.getByRole("heading", { name: editedStoryTitle }).waitFor();
+    if ((await preview.locator(".story-section").count()) !== 1) {
+      throw new Error("private_dashboard_preview_custom_renderer_missing");
+    }
+    const publicPage = await context.newPage();
+    await publicPage.goto(origin);
+    await publicPage.getByRole("heading", {
+      name: "Turn a good idea into something people can use.",
+    }).waitFor();
+    if ((await publicPage.locator(".story-section").count()) !== 0) {
+      throw new Error("private_dashboard_unapproved_component_was_public");
+    }
+    const overflow = await page.locator("body").evaluate((body) => ({
+      width: body.scrollWidth,
+      elements: [...body.querySelectorAll("*")]
+        .filter((element) => element.getBoundingClientRect().right > 390)
+        .slice(0, 8)
+        .map((element) => ({
+          tag: element.tagName,
+          className: element.className,
+          right: element.getBoundingClientRect().right,
+          width: element.getBoundingClientRect().width,
+        })),
+    }));
+    if (overflow.width > 390) {
+      throw new Error(
+        `private_dashboard_mobile_horizontal_overflow:${JSON.stringify(overflow)}`,
+      );
+    }
     await page.getByRole("heading", { name: "Blog posts" }).waitFor();
     const blogTitle = page.locator('.blog-post-form input[name="title"]');
     await blogTitle.waitFor();

@@ -22,12 +22,12 @@ import {
   withContentRevisionBookmark,
 } from "@humber-foundry/application";
 import {
-  isSiteDefinition,
   type BlogPost,
   type SiteDefinition,
   type SiteId,
   type StoredSiteDefinitionSchemaVersion,
 } from "@humber-foundry/site-definition";
+import { isInstalledSiteDefinition } from "../foundry/site-definition";
 
 import type {
   D1DatabaseBinding,
@@ -331,7 +331,7 @@ export async function hydrateManagedBlogPosts(
       ],
     },
   };
-  if (!isSiteDefinition(hydrated)) {
+  if (!isInstalledSiteDefinition(hydrated)) {
     throw new ContentRevisionConfigurationError();
   }
   return hydrated;

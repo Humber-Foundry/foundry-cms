@@ -19,6 +19,7 @@ import {
   projectSiteDefinitionSchema,
 } from "./site-definition-projection.mjs";
 import validateSiteDefinition from "./site-definition-validator.mjs";
+import { isSiteDefinitionWithPageComponents } from "./page-component-registry";
 
 export * from "./rich-text";
 
@@ -151,11 +152,25 @@ export type CallToActionSection = Readonly<{
   action: SiteLink;
 }>;
 
+/**
+ * Installation-defined components use one stable envelope so adopting a site
+ * never requires adding its private component names to the foundation union.
+ * The installation registry owns the schema for `props`.
+ */
+export type RegisteredPageSection = Readonly<{
+  id: string;
+  type: "registered";
+  component: string;
+  props: Readonly<Record<string, unknown>>;
+  variant?: undefined;
+}>;
+
 export type PageSection =
   | HeroSection
   | ServicesSection
   | ProofSection
-  | CallToActionSection;
+  | CallToActionSection
+  | RegisteredPageSection;
 
 export type SiteDefinition = Readonly<{
   definitionVersion: "1.3.0";
@@ -354,6 +369,7 @@ export const siteDefinitionSchema = {
               { $ref: "#/$defs/servicesSection" },
               { $ref: "#/$defs/proofSection" },
               { $ref: "#/$defs/callToActionSection" },
+              { $ref: "#/$defs/registeredPageSection" },
             ],
           },
         },
@@ -401,6 +417,22 @@ export const siteDefinitionSchema = {
         { pattern: "^#[a-z][a-z0-9_]*$" },
         { pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" },
       ],
+    },
+    registeredPageSection: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "type", "component", "props"],
+      properties: {
+        id: { $ref: "#/$defs/id" },
+        type: { const: "registered" },
+        component: {
+          type: "string",
+          pattern: "^[a-z][A-Za-z0-9]*$",
+        },
+        props: {
+          type: "object",
+        },
+      },
     },
     blogPost: {
       type: "object",
@@ -804,15 +836,15 @@ export const siteDefinitionSchema = {
 } as const;
 
 export function isSiteDefinition(value: unknown): value is SiteDefinition {
-  if (!validateSiteDefinition(value)) {
-    return false;
-  }
+  return isSiteDefinitionWithPageComponents(value);
+}
+
+export function isBaseSiteDefinition(value: unknown): value is SiteDefinition {
+  if (!validateSiteDefinition(value)) return false;
   try {
     const definition = value as SiteDefinition;
     definition.home.sections.forEach((section) => {
-      if (section.type === "callToAction") {
-        validateRichTextDocument(section.body);
-      }
+      if (section.type === "callToAction") validateRichTextDocument(section.body);
     });
     const postIds = new Set<string>();
     const postSlugs = new Set<string>();
@@ -851,6 +883,7 @@ export const referenceSiteDefinition = createReferenceSiteDefinition(
 
 export * from "./editable-fields";
 export * from "./component-composition";
+export * from "./page-component-registry";
 export * from "./design-tokens";
 export * from "./blog";
 export * from "./blog-rendering";

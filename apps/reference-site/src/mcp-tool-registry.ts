@@ -224,10 +224,14 @@ const richTextContentFieldPaths = contentFields
   .filter(({ format }) => format === "richText")
   .map(({ path }) => path);
 const designVariantContracts =
-  installedSiteDefinition.home.sections.map(({ id, type }) => ({
-    componentId: id,
-    values: designContract.variants[type].values,
-  }));
+  installedSiteDefinition.home.sections.flatMap((section) =>
+    section.type === "registered"
+      ? []
+      : [{
+          componentId: section.id,
+          values: designContract.variants[section.type].values,
+        }],
+  );
 const draftResult = {
   type: "object",
   additionalProperties: false,

@@ -309,6 +309,195 @@
   background: var(--mint);
 }
 
+.story-section,
+.connector-section,
+.invitation-section {
+  width: min(100%, var(--design-content-width));
+  margin-inline: auto;
+  padding: clamp(4.5rem, 9vw, 8rem) var(--page-gutter);
+}
+
+.story-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(18rem, 0.92fr);
+  gap: clamp(2.5rem, 7vw, 7rem);
+  align-items: center;
+  background: #fffaf0;
+}
+
+.story-section[data-image-position="end"] figure {
+  order: 2;
+}
+
+.story-section figure {
+  margin: 0;
+  transform: rotate(-1.2deg);
+  border: 0.7rem solid #fff;
+  box-shadow: 0 1.25rem 3rem rgba(33, 37, 48, 0.14);
+}
+
+.story-section img,
+.photo-band img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.story-copy h2,
+.connector-heading h2,
+.invitation-section h2 {
+  max-width: 16ch;
+  margin: 0.5rem 0 1.25rem;
+  color: #212530;
+  font-family: var(--design-heading-font);
+  font-size: clamp(2.25rem, 5vw, 4.5rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+.story-copy > p:last-child,
+.connector-heading > p:last-child,
+.invitation-section > p:last-of-type {
+  max-width: 36rem;
+  color: #343947;
+  font-size: clamp(1rem, 1.5vw, 1.18rem);
+  line-height: 1.5;
+}
+
+.handwritten-label {
+  display: inline-block;
+  margin: 0;
+  color: #14795e;
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transform: rotate(-1deg);
+}
+
+.photo-band {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #8298cd;
+}
+
+.photo-band img {
+  min-height: 22rem;
+  max-height: 42rem;
+  object-fit: cover;
+}
+
+.photo-band figcaption {
+  position: absolute;
+  right: max(var(--page-gutter), calc((100% - var(--design-content-width)) / 2 + var(--page-gutter)));
+  bottom: 1.5rem;
+  max-width: 28rem;
+  padding: 0.8rem 1rem;
+  background: rgba(33, 37, 48, 0.9);
+  color: #fffaf0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.connector-section {
+  background: #8298cd;
+}
+
+.connector-heading {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.9fr) minmax(18rem, 1fr);
+  gap: 1rem clamp(2rem, 7vw, 7rem);
+  align-items: end;
+}
+
+.connector-heading .handwritten-label {
+  grid-column: 1 / -1;
+  color: #212530;
+}
+
+.connector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin: clamp(3rem, 6vw, 5rem) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connector-grid li {
+  min-height: 15rem;
+  padding: 1.5rem;
+  background: #fffaf0;
+  border: 2px solid #212530;
+  box-shadow: 0.35rem 0.35rem 0 #17a578;
+}
+
+.connector-grid span {
+  color: #14795e;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.connector-grid h3 {
+  margin: 2rem 0 0.65rem;
+  color: #212530;
+  font-family: var(--design-heading-font);
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+
+.connector-grid p {
+  margin: 0;
+  color: #343947;
+  line-height: 1.5;
+}
+
+.invitation-section {
+  background: #17a578;
+  text-align: center;
+}
+
+.invitation-section > * {
+  margin-inline: auto;
+}
+
+.invitation-section .handwritten-label {
+  color: #212530;
+}
+
+.invitation-action {
+  display: inline-flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.5rem;
+  padding: 0.75rem 1.35rem;
+  border: 2px solid #212530;
+  background: #fffaf0;
+  color: #212530;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0.3rem 0.3rem 0 #8298cd;
+}
+
+.invitation-action:hover,
+.invitation-action:focus-visible {
+  transform: translate(-0.1rem, -0.1rem);
+  box-shadow: 0.4rem 0.4rem 0 #8298cd;
+}
+
+.invitation-section small {
+  display: block;
+  margin-top: 1.25rem;
+  color: #212530;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
 .site-footer {
   display: flex;
   justify-content: space-between;
@@ -416,6 +605,30 @@
 
   .services[data-component-variant="cards"] .service-list {
     grid-template-columns: 1fr;
+  }
+
+  .story-section,
+  .connector-heading,
+  .connector-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .story-section[data-image-position="end"] figure {
+    order: initial;
+  }
+
+  .photo-band img {
+    min-height: 18rem;
+  }
+
+  .photo-band figcaption {
+    right: 1.5rem;
+    bottom: 1rem;
+    left: 1.5rem;
+  }
+
+  .connector-grid li {
+    min-height: auto;
   }
 
   .site-footer {

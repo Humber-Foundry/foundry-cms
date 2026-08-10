@@ -116,6 +116,8 @@
 
 .blog-post-form input,
 .blog-post-form textarea {
+  box-sizing: border-box;
+  width: 100%;
   padding: 0.75rem;
   border: 1px solid #cbd5d0;
   border-radius: 0.4rem;
@@ -881,7 +883,8 @@
 
   .status-grid,
   .version-card,
-  .editor-groups {
+  .editor-groups,
+  .blog-post-form {
     grid-template-columns: 1fr;
   }
 

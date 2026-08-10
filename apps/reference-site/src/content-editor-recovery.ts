@@ -11,6 +11,7 @@ import {
   type SiteDefinitionEdit,
 } from "@humber-foundry/site-definition";
 import { canonicalJson } from "@humber-foundry/application";
+import { installedPageComponentRegistry } from "../foundry/page-components";
 
 const staleEditRecoveryPrefix = "foundry-cms:stale-edit-recovery";
 const maximumRecoveredEdits = 500;
@@ -257,7 +258,11 @@ export function applyStructuralRecovery(
             )),
       ],
     };
-    const result = applyPageComposition(definition, mergedComposition);
+    const result = applyPageComposition(
+      definition,
+      mergedComposition,
+      installedPageComponentRegistry,
+    );
     return result.ok
       ? { ok: true, definition: result.definition }
       : { ok: false };
@@ -308,7 +313,7 @@ export function planStructuralFirstRecovery(
       continue;
     }
     if (
-      JSON.stringify(toPageCompositionIdentity(projectedDefinition)) !==
+      JSON.stringify(toPageCompositionIdentity(projectedDefinition, installedPageComponentRegistry)) !==
       comparableRecoveryBaseValue(edit)
     ) {
       continue;
@@ -326,7 +331,7 @@ export function planStructuralFirstRecovery(
       ),
       [
         pageCompositionContract.slot.id,
-        JSON.stringify(toPageCompositionIdentity(definition)),
+        JSON.stringify(toPageCompositionIdentity(definition, installedPageComponentRegistry)),
       ] as const,
     ]),
     projected: projectedDefinition !== definition,

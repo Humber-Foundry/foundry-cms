@@ -5,7 +5,11 @@ import {
   type ContentWorkspaceId,
 } from "@humber-foundry/application";
 
-import { installedSiteDefinition } from "../foundry/site-definition";
+import {
+  installedSiteDefinition,
+  isInstalledSiteDefinition,
+} from "../foundry/site-definition";
+import { installedPageComponentRegistry } from "../foundry/page-components";
 import {
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
@@ -51,6 +55,8 @@ function application(input: {
   const { commit, rendererVersion } = releaseInputs(input.environment);
   return createContentRevisionApplication({
     siteDefinition: installedSiteDefinition,
+    pageComponents: installedPageComponentRegistry,
+    isDefinition: isInstalledSiteDefinition,
     initialDefinition: input.initialDefinition,
     ...(input.initialCreatedBy === undefined
       ? {}

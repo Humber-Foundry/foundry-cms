@@ -1,4 +1,5 @@
 import "server-only";
+import { isInstalledSiteDefinition } from "../foundry/site-definition";
 
 import {
   ContentRevisionConfigurationError,
@@ -106,6 +107,7 @@ export async function loadContentPublicationApplication(
     environmentOverride === undefined
   ) {
     return createContentPublicationApplication({
+      isDefinition: isInstalledSiteDefinition,
       store: localRuntime.__foundryContentPublicationStore!,
       revisions: {
         async getRevision(targetWorkspaceId, revision) {

@@ -364,7 +364,7 @@ describe("page component composition", () => {
         ...referenceSiteDefinition.site,
         navigation: referenceSiteDefinition.site.navigation.map((link) =>
           link.href === "#section_contact"
-            ? { ...link, href: "#contact" }
+            ? { ...link, href: "#contact" as const }
             : link,
         ),
       },
@@ -376,7 +376,7 @@ describe("page component composition", () => {
               ...section,
               primaryAction: {
                 ...section.primaryAction,
-                href: "#contact",
+                href: "#contact" as const,
               },
             };
           }
