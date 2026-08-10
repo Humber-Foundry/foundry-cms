@@ -18,10 +18,20 @@ export type PageCompositionResult =
   | Readonly<{ ok: true; definition: SiteDefinition }>
   | Readonly<{ ok: false; errors: Readonly<Record<string, string>> }>;
 
-type ComponentRegistration = Readonly<{
-  label: string;
-  editableProps: ReadonlyArray<string>;
-}>;
+const foundationCompositionComponents = Object.freeze(
+  Object.fromEntries(
+    foundationPageComponentRegistry.allowedComponents.map((type) => {
+      const registration = foundationPageComponentRegistry.components[type]!;
+      return [
+        type,
+        Object.freeze({
+          label: registration.label,
+          editableProps: registration.editableFields,
+        }),
+      ];
+    }),
+  ),
+);
 
 export const pageCompositionContract = Object.freeze({
   slot: Object.freeze({
@@ -29,39 +39,9 @@ export const pageCompositionContract = Object.freeze({
     path: "home.sections" as const,
     minItems: 1,
     maxItems: 12,
-    allowedComponents: Object.freeze([
-      "hero",
-      "services",
-      "proof",
-      "callToAction",
-    ] as const),
+    allowedComponents: foundationPageComponentRegistry.allowedComponents,
   }),
-  components: Object.freeze({
-    hero: Object.freeze({
-      label: "Hero",
-      editableProps: Object.freeze([
-        "eyebrow",
-        "title",
-        "summary",
-      ]),
-    }),
-    services: Object.freeze({
-      label: "Services",
-      editableProps: Object.freeze([
-        "eyebrow",
-        "title",
-        "introduction",
-      ]),
-    }),
-    proof: Object.freeze({
-      label: "Proof",
-      editableProps: Object.freeze(["quote", "attribution"]),
-    }),
-    callToAction: Object.freeze({
-      label: "Call to action",
-      editableProps: Object.freeze(["eyebrow", "title", "body"]),
-    }),
-  } satisfies Readonly<Record<PageComponentType, ComponentRegistration>>),
+  components: foundationCompositionComponents,
 });
 
 export function createDefaultPageSection(
@@ -174,7 +154,12 @@ function protectedShape(
     delete protectedSection.variant;
   }
   if (section.type === "registered") {
-    delete protectedSection.props;
+    const props = protectedSection.props;
+    if (isRecord(props)) {
+      for (const property of registration.editableFields) {
+        delete props[property];
+      }
+    }
   } else {
     for (const property of registration.editableFields) {
       delete protectedSection[property];
@@ -183,9 +168,12 @@ function protectedShape(
   const normalizeProtectedShape = (
     value: unknown,
     root = false,
+    preserveAll = false,
   ): unknown => {
     if (Array.isArray(value)) {
-      return value.map((nested) => normalizeProtectedShape(nested));
+      return value.map((nested) =>
+        normalizeProtectedShape(nested, false, preserveAll),
+      );
     }
     if (isRecord(value)) {
       return Object.fromEntries(
@@ -193,6 +181,7 @@ function protectedShape(
           .filter(
             ([key, nested]) =>
               root ||
+              preserveAll ||
               typeof nested !== "string" ||
               key === "id" ||
               key === "type" ||
@@ -202,7 +191,12 @@ function protectedShape(
             key,
             key === "id" && normalizeNestedIds
               ? "$stableId"
-              : normalizeProtectedShape(nested),
+              : normalizeProtectedShape(
+                  nested,
+                  false,
+                  preserveAll ||
+                    (section.type === "registered" && key === "props"),
+                ),
           ]),
       );
     }

@@ -16,11 +16,8 @@ import {
   serializeRichTextDocument,
   siteDesignAttributes,
   type CallToActionSection,
-  type HeroSection,
   type PageComponentField,
   type PageSection,
-  type ProofSection,
-  type ServicesSection,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
@@ -33,18 +30,6 @@ import {
   installedPageComponentRegistry,
   type InstalledPageComponentRegistration,
 } from "../foundry/page-components";
-
-type RegisteredComponentProps = { id: string } & Record<string, unknown>;
-type RegisteredComponents = {
-  hero: HeroSection;
-  services: ServicesSection;
-  proof: ProofSection;
-  callToAction: CallToActionSection;
-  imageCopyStory: RegisteredComponentProps;
-  photoBand: RegisteredComponentProps;
-  connectorCards: RegisteredComponentProps;
-  invitationNewsletter: RegisteredComponentProps;
-};
 
 function DesignScopedSection({
   definition,
@@ -291,7 +276,7 @@ export function createVisualComponentConfig(
   definition: SiteDefinition,
   onValidationChange: (source: string, invalid: boolean) => void = ignoreRichTextValidation,
   disabled = false,
-): Config<RegisteredComponents> {
+): Config {
   const components = Object.fromEntries(
     installedPageComponentRegistry.allowedComponents.map((type) => {
       const registration = installedPageComponentRegistry.components[type]!;
@@ -343,7 +328,7 @@ export function createVisualComponentConfig(
       },
     },
     components,
-  } as unknown as Config<RegisteredComponents>;
+  } as Config;
 }
 
 export function VisualComponentEditor({
@@ -380,7 +365,7 @@ export function VisualComponentEditor({
     return () => { active.current = false; };
   }, []);
 
-  function accept(data: Data<RegisteredComponents>) {
+  function accept(data: Data) {
     if (!active.current || disabled) return;
     const result = puckDataToDefinition(definition, data, installedPageComponentRegistry);
     if (!result.ok) {
@@ -411,7 +396,7 @@ export function VisualComponentEditor({
           iframe={{ enabled: iframeEnabled, syncHostStyles: iframeEnabled }}
           height="46rem"
           permissions={{ insert: !disabled, drag: !disabled, duplicate: !disabled, delete: !disabled, edit: !disabled }}
-          onChange={(data) => accept(data as Data<RegisteredComponents>)}
+          onChange={(data) => accept(data as Data)}
         >
           <Puck.Layout>
             <InsertComponentActions disabled={disabled} />

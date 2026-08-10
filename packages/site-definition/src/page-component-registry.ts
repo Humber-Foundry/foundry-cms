@@ -59,10 +59,20 @@ export type PageComponentField =
   | ArrayField;
 
 type FieldValue<Field extends PageComponentField> =
-  Field extends ArrayField
-    ? ReadonlyArray<Readonly<Record<string, unknown>>>
-    : Field extends ObjectField
-      ? Readonly<Record<string, unknown>>
+  Field extends Readonly<{
+    control: "array";
+    fields: infer Nested extends Readonly<Record<string, PageComponentField>>;
+  }>
+    ? ReadonlyArray<Readonly<{
+        [Key in keyof Nested]: FieldValue<Nested[Key]>;
+      }>>
+    : Field extends Readonly<{
+        control: "object";
+        fields: infer Nested extends Readonly<Record<string, PageComponentField>>;
+      }>
+      ? Readonly<{
+          [Key in keyof Nested]: FieldValue<Nested[Key]>;
+        }>
       : Field extends RichTextField
         ? RichTextDocument
         : string;

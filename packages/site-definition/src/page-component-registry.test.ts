@@ -167,6 +167,68 @@ describe("installation-owned page component registry", () => {
     });
   });
 
+  it("protects registered properties marked non-editable", () => {
+    const themedStory = createRegisteredPageComponent({
+      type: "themedStory",
+      label: "Themed story",
+      fields: {
+        title: { control: "text", label: "Title", defaultValue: "A story" },
+        theme: {
+          control: "select",
+          label: "Theme",
+          defaultValue: "warm",
+          options: [
+            { label: "Warm", value: "warm" },
+            { label: "Cool", value: "cool" },
+          ],
+          editable: false,
+        },
+      },
+    });
+    const themedRegistry = createPageComponentRegistry(
+      foundationPageComponentRegistry,
+      [themedStory],
+    );
+    const initial = themedRegistry.createDefault(
+      "themedStory",
+      "section_themed_story",
+      referenceSiteDefinition,
+    );
+    if (initial.type !== "registered") throw new Error("expected_registered_component");
+    const inserted = applyPageComposition(
+      referenceSiteDefinition,
+      {
+        ...toPageComposition(referenceSiteDefinition),
+        components: [...referenceSiteDefinition.home.sections, initial],
+      },
+      themedRegistry,
+    );
+    expect(inserted.ok).toBe(true);
+    if (!inserted.ok) return;
+    const changedTheme = {
+      ...initial,
+      props: { ...initial.props, theme: "cool" },
+    };
+    const changed = applyPageComposition(
+      inserted.definition,
+      {
+        ...toPageComposition(inserted.definition),
+        components: [
+          ...inserted.definition.home.sections.slice(0, -1),
+          changedTheme,
+        ],
+      },
+      themedRegistry,
+    );
+    expect(changed).toMatchObject({
+      ok: false,
+      errors: {
+        "section_themed_story.props":
+          "This component scaffolding is protected by the Site Definition.",
+      },
+    });
+  });
+
   it("applies insert, edit, reorder, duplicate, and removal through the installed registry", () => {
     const first = registry.createDefault(
       "imageCopyStory",

@@ -23,6 +23,7 @@ import {
   puckDataToDefinition,
 } from "./page-composition-puck";
 import {
+  createPuckField,
   installedPageComponentRegistry,
 } from "../foundry/page-components";
 import {
@@ -71,6 +72,25 @@ describe("installation-owned page components", () => {
       expect(registration.renderer).toBeTypeOf("function");
       expect(Object.hasOwn(config.components, registration.type)).toBe(true);
     }
+  });
+
+  it("projects an editable object schema without flattening its nested fields", () => {
+    expect(createPuckField({
+      control: "object",
+      label: "Action",
+      defaultValue: { label: "Continue", href: "#section_contact" },
+      fields: {
+        label: { control: "text", label: "Label", defaultValue: "Continue" },
+        href: { control: "url", label: "Destination", defaultValue: "#section_contact" },
+      },
+    })).toEqual({
+      type: "object",
+      label: "Action",
+      objectFields: {
+        label: { type: "text", label: "Label" },
+        href: { type: "text", label: "Destination" },
+      },
+    });
   });
 
   it("uses the same real renderer for public and exact-preview projections", () => {

@@ -6,6 +6,7 @@ import {
   type PageComponentRegistration,
   type PageComponentRegistry,
   type PageSection,
+  type RegisteredPageComponentProps,
   type RegisteredPageSection,
 } from "@humber-foundry/site-definition";
 import {
@@ -102,19 +103,18 @@ function installPageComponent(
   return Object.freeze({ ...registration, renderer });
 }
 
-function registeredProps(section: PageSection): Record<string, unknown> {
+function registeredProps<
+  const Fields extends Readonly<Record<string, PageComponentField>>,
+>(
+  registration: PageComponentRegistration & Readonly<{ fields: Fields }>,
+  section: PageSection,
+): RegisteredPageComponentProps<Fields> {
   if (section.type !== "registered") {
     throw new TypeError("registered_page_component_required");
   }
-  const validation = installedPageComponentRegistry.validate(section);
+  const validation = registration.validate(section);
   if (!validation.ok) throw new TypeError("page_component_invalid");
-  return section.props as Record<string, unknown>;
-}
-
-function text(props: Record<string, unknown>, key: string): string {
-  const value = props[key];
-  if (typeof value !== "string") throw new TypeError("page_component_prop_invalid");
-  return value;
+  return section.props as RegisteredPageComponentProps<Fields>;
 }
 
 const installedRegistrations = Object.freeze([
@@ -135,43 +135,43 @@ const installedRegistrations = Object.freeze([
     renderCallToActionPageComponent,
   ),
   installPageComponent(imageCopyStoryComponent, ({ section }) => {
-    const props = registeredProps(section);
+    const props = registeredProps(imageCopyStoryComponent, section);
     return (
       <section
         className="story-section"
-        data-image-position={text(props, "imagePosition")}
+        data-image-position={props.imagePosition}
         id={section.id}
         aria-labelledby={`${section.id}_title`}
       >
         <figure>
-          <img src={text(props, "imageSrc")} alt={text(props, "imageAlt")} />
+          <img src={props.imageSrc} alt={props.imageAlt} />
         </figure>
         <div className="story-copy">
-          <p className="handwritten-label">{text(props, "eyebrow")}</p>
-          <h2 id={`${section.id}_title`}>{text(props, "title")}</h2>
-          <p>{text(props, "body")}</p>
+          <p className="handwritten-label">{props.eyebrow}</p>
+          <h2 id={`${section.id}_title`}>{props.title}</h2>
+          <p>{props.body}</p>
         </div>
       </section>
     );
   }),
   installPageComponent(photoBandComponent, ({ section }) => {
-    const props = registeredProps(section);
+    const props = registeredProps(photoBandComponent, section);
     return (
       <figure className="photo-band" id={section.id}>
-        <img src={text(props, "imageSrc")} alt={text(props, "imageAlt")} />
-        <figcaption>{text(props, "caption")}</figcaption>
+        <img src={props.imageSrc} alt={props.imageAlt} />
+        <figcaption>{props.caption}</figcaption>
       </figure>
     );
   }),
   installPageComponent(connectorCardsComponent, ({ section }) => {
-    const props = registeredProps(section);
-    const cards = props.cards as ReadonlyArray<Readonly<Record<string, string>>>;
+    const props = registeredProps(connectorCardsComponent, section);
+    const cards = props.cards;
     return (
       <section className="connector-section" id={section.id} aria-labelledby={`${section.id}_title`}>
         <div className="connector-heading">
-          <p className="handwritten-label">{text(props, "eyebrow")}</p>
-          <h2 id={`${section.id}_title`}>{text(props, "title")}</h2>
-          <p>{text(props, "introduction")}</p>
+          <p className="handwritten-label">{props.eyebrow}</p>
+          <h2 id={`${section.id}_title`}>{props.title}</h2>
+          <p>{props.introduction}</p>
         </div>
         <ul className="connector-grid">
           {cards.map((card, index) => (
@@ -186,16 +186,16 @@ const installedRegistrations = Object.freeze([
     );
   }),
   installPageComponent(invitationNewsletterComponent, ({ section }) => {
-    const props = registeredProps(section);
+    const props = registeredProps(invitationNewsletterComponent, section);
     return (
       <section className="invitation-section" id={section.id} aria-labelledby={`${section.id}_title`}>
-        <p className="handwritten-label">{text(props, "eyebrow")}</p>
-        <h2 id={`${section.id}_title`}>{text(props, "title")}</h2>
-        <p>{text(props, "body")}</p>
-        <a className="invitation-action" href={text(props, "actionHref")}>
-          {text(props, "actionLabel")}
+        <p className="handwritten-label">{props.eyebrow}</p>
+        <h2 id={`${section.id}_title`}>{props.title}</h2>
+        <p>{props.body}</p>
+        <a className="invitation-action" href={props.actionHref}>
+          {props.actionLabel}
         </a>
-        <small>{text(props, "note")}</small>
+        <small>{props.note}</small>
       </section>
     );
   }),
@@ -207,6 +207,15 @@ export const installedPageComponentRegistry =
   ) as InstalledPageComponentRegistry;
 
 export function createPuckField(field: PageComponentField): Record<string, unknown> {
+  if (field.control === "object") {
+    return {
+      type: "object",
+      label: field.label,
+      objectFields: Object.fromEntries(
+        Object.entries(field.fields).map(([key, nested]) => [key, createPuckField(nested)]),
+      ),
+    };
+  }
   if (field.control === "array") {
     return {
       type: "array",
@@ -245,7 +254,9 @@ export function asRegisteredPageSection(
     type: "registered",
     component: type,
     props: Object.fromEntries(
-      installedPageComponentRegistry.components[type]!.editableFields.map((key) => [key, props[key]]),
+      Object.keys(installedPageComponentRegistry.components[type]!.fields).map(
+        (key) => [key, props[key]],
+      ),
     ),
   };
 }
