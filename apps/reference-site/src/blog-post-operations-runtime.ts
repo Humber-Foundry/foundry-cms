@@ -16,7 +16,10 @@ import {
   type ContentPublicationStatus,
 } from "@humber-foundry/application";
 
-import { installedSiteDefinition } from "../foundry/site-definition";
+import {
+  installedSiteDefinition,
+  isInstalledSiteDefinition,
+} from "../foundry/site-definition";
 
 import { createD1BlogPostOperationsStore } from "./d1-blog-post-operations-store";
 import {
@@ -37,7 +40,6 @@ import {
 } from "./d1-content-revision-store";
 import {
   createBlogPostId,
-  isSiteDefinition,
   type BlogPost,
   type BlogPostId,
 } from "@humber-foundry/site-definition";
@@ -516,7 +518,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
       ],
     },
   };
-  if (!isSiteDefinition(definition)) {
+  if (!isInstalledSiteDefinition(definition)) {
     throw new BlogPostOperationError("restore_definition_invalid");
   }
   const workspaceId = await restoreWorkspaceId(

@@ -7,10 +7,10 @@ import {
   type ContentRevision,
 } from "@humber-foundry/application";
 import {
-  isSiteDefinition,
   pageCompositionContract,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
+import { isInstalledSiteDefinition } from "../foundry/site-definition";
 
 import { sendContentRevisionAttempt } from "../src/content-revision-client";
 import { restorePreservedMedia } from "../src/content-media-recovery";
@@ -289,7 +289,7 @@ export function ContentWorkspaceStarter({
         typeof created.workspaceId !== "string" ||
         !/^workspace_[a-z0-9_]+$/u.test(created.workspaceId) ||
         !Number.isSafeInteger(created.revision) ||
-        !isSiteDefinition(created.definition)
+        !isInstalledSiteDefinition(created.definition)
       ) {
         throw new Error("content_workspace_creation_invalid");
       }

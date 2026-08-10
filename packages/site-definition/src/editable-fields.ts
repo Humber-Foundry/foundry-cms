@@ -255,6 +255,7 @@ function editableFieldBindings(
   });
 
   definition.home.sections.forEach((section, sectionIndex) => {
+    if (section.type === "registered") return;
     const variant = designContract.variants[section.type];
     fields.push(
       fieldBinding({
@@ -604,6 +605,7 @@ export function updateEditableSiteField(
 export function applySiteDefinitionEdits(
   definition: SiteDefinition,
   edits: ReadonlyArray<SiteDefinitionEdit>,
+  isDefinition: (value: unknown) => value is SiteDefinition = isSiteDefinition,
 ): SiteDefinitionEditResult {
   const bindings = new Map(
     editableFieldBindings(definition).map((binding) => [
@@ -694,7 +696,7 @@ export function applySiteDefinitionEdits(
   if (Object.keys(duplicateSlugErrors).length > 0) {
     return { ok: false, errors: duplicateSlugErrors };
   }
-  if (!isSiteDefinition(draft)) {
+  if (!isDefinition(draft)) {
     return {
       ok: false,
       errors: { blog: "The blog post does not match the current schema." },

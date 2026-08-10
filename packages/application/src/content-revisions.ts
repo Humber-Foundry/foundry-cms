@@ -8,9 +8,12 @@ import {
   republishBlogPostDefinition,
   unpublishBlogPostDefinition,
   BlogPostSchemaError,
+  foundationPageComponentRegistry,
+  isSiteDefinitionWithPageComponents,
   type BlogPost,
   type BlogPostId,
   type PageComposition,
+  type PageComponentRegistry,
   type SiteDefinition,
   type SiteDefinitionEdit,
   type StoredSiteDefinitionSchemaVersion,
@@ -601,6 +604,9 @@ export function createContentRevisionApplication({
   actorId,
   rendererVersion,
   productionBase,
+  pageComponents = foundationPageComponentRegistry,
+  isDefinition = (value): value is SiteDefinition =>
+    isSiteDefinitionWithPageComponents(value, pageComponents),
   now = () => new Date().toISOString(),
 }: {
   siteDefinition: SiteDefinition;
@@ -611,6 +617,8 @@ export function createContentRevisionApplication({
   actorId: ContentActorId;
   rendererVersion: string;
   productionBase: string | ((publishedContentHash: string) => string);
+  pageComponents?: PageComponentRegistry;
+  isDefinition?: (value: unknown) => value is SiteDefinition;
   now?: () => string;
 }) {
   let initialization: Promise<boolean> | undefined;
@@ -962,6 +970,7 @@ export function createContentRevisionApplication({
                     command.composition,
                     command.edits,
                   ),
+                  pageComponents,
                 );
           if (!composed.ok) {
             throw new ContentRevisionValidationError(composed.errors);
@@ -969,6 +978,7 @@ export function createContentRevisionApplication({
           const edited = applySiteDefinitionEdits(
             composed.definition,
             command.edits,
+            isDefinition,
           );
           if (!edited.ok) {
             throw new ContentRevisionValidationError(edited.errors);
@@ -1119,6 +1129,7 @@ export function createContentRevisionApplication({
                 definition,
                 command.siteId,
                 command.post,
+                isDefinition,
               ),
             blogTransitions: [
               {
@@ -1144,6 +1155,7 @@ export function createContentRevisionApplication({
                 command.siteId,
                 command.postId,
                 command.post,
+                isDefinition,
               ),
             blogTransitions: [
               {
@@ -1179,6 +1191,7 @@ export function createContentRevisionApplication({
                   definition,
                   command.siteId,
                   command.postId,
+                  isDefinition,
                 );
               },
               blogTransitions: [
@@ -1221,6 +1234,7 @@ export function createContentRevisionApplication({
                   definition,
                   command.siteId,
                   command.postId,
+                  isDefinition,
                 );
               },
               blogTransitions: [

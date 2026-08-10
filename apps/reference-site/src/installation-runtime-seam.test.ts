@@ -7,7 +7,13 @@ vi.mock("../foundry/site-definition", async () => {
   const { alternateSiteDefinition } = await import(
     "./test-support/alternate-site-definition"
   );
-  return { installedSiteDefinition: alternateSiteDefinition };
+  const { isSiteDefinition } = await import(
+    "@humber-foundry/site-definition"
+  );
+  return {
+    installedSiteDefinition: alternateSiteDefinition,
+    isInstalledSiteDefinition: isSiteDefinition,
+  };
 });
 vi.mock("@opennextjs/cloudflare", () => ({
   getCloudflareContext: vi.fn(async () => ({

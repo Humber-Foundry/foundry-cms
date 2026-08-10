@@ -11,7 +11,11 @@ import {
   type ContentWorkspaceId,
 } from "@humber-foundry/application";
 
-import { installedSiteDefinition } from "../foundry/site-definition";
+import {
+  installedSiteDefinition,
+  isInstalledSiteDefinition,
+} from "../foundry/site-definition";
+import { installedPageComponentRegistry } from "../foundry/page-components";
 import type { SiteDefinition } from "@humber-foundry/site-definition";
 
 import {
@@ -176,6 +180,8 @@ function applicationFor({
 }) {
   return createContentRevisionApplication({
     siteDefinition: installedSiteDefinition,
+    pageComponents: installedPageComponentRegistry,
+    isDefinition: isInstalledSiteDefinition,
     initialDefinition,
     initialCreatedBy,
     store,

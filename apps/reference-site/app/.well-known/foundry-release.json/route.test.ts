@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   hashPublishedSiteDefinition,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import { installedSiteDefinition } from "@/foundry/site-definition";
 
 import { GET } from "./route";
 
@@ -27,9 +27,9 @@ describe("Foundry release marker", () => {
     await expect(response.json()).resolves.toEqual({
       commitSha: "a".repeat(40),
       contentHash: await hashPublishedSiteDefinition(
-        referenceSiteDefinition,
+        installedSiteDefinition,
       ),
-      schemaVersion: referenceSiteDefinition.schemaVersion,
+      schemaVersion: installedSiteDefinition.schemaVersion,
     });
   });
 

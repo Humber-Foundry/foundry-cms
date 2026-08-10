@@ -28,6 +28,7 @@ import {
   readContentEditorOutbox,
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
+import { installedSiteDefinition } from "../foundry/site-definition";
 function browserRevision(workspaceId: string) {
   return {
     workspaceId,
@@ -488,6 +489,55 @@ describe("visual component editor browser acceptance", () => {
             ({ id }) => id === section.id,
           ) &&
           /^section_proof_[a-z0-9_]+$/u.test(section.id),
+      ),
+    ).toBe(true);
+  });
+
+  it("adds and visibly edits an installation-owned component through Puck", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push(root);
+    let latest = installedSiteDefinition;
+    flushSync(() => {
+      root.render(
+        createElement(VisualComponentEditor, {
+          definition: installedSiteDefinition,
+          disabled: false,
+          iframeEnabled: false,
+          onChange: (definition) => {
+            latest = definition;
+          },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
+    await page.getByRole("button", { name: "Add Image and copy story" }).click();
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    const added = latest.home.sections.find(
+      (section) =>
+        section.type === "registered" &&
+        section.component === "imageCopyStory" &&
+        !installedSiteDefinition.home.sections.some(({ id }) => id === section.id),
+    );
+    expect(added?.id).toMatch(/^section_image_copy_story_[a-z0-9_]+$/u);
+
+    await page.getByRole("heading", {
+      name: "Make room for a better question",
+    }).click();
+    const title = page.getByTitle("Title");
+    await expect.element(title).toBeVisible();
+    await title.fill("A visible custom component edit");
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    expect(host.textContent).toContain("A visible custom component edit");
+    expect(
+      latest.home.sections.some(
+        (section) =>
+          section.type === "registered" &&
+          section.props.title === "A visible custom component edit",
       ),
     ).toBe(true);
   });

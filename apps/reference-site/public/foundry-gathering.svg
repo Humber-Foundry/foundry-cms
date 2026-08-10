@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 720" role="img" aria-labelledby="title desc">
+  <title id="title">Gathering space illustration</title>
+  <desc id="desc">A bright abstract room with chairs arranged for a gathering.</desc>
+  <rect width="1600" height="720" fill="#f5e9d6"/>
+  <path d="M0 0h1600v190H0z" fill="#8298cd"/>
+  <circle cx="800" cy="190" r="100" fill="#f4c95d"/>
+  <path d="M0 520q400-180 800 0t800 0v200H0z" fill="#17a578"/>
+  <g fill="#212530">
+    <path d="M250 380h180v120H250zm36 120h28v95h-28zm92 0h28v95h-28z"/>
+    <path d="M710 350h180v120H710zm36 120h28v95h-28zm92 0h28v95h-28z"/>
+    <path d="M1170 390h180v120h-180zm36 120h28v95h-28zm92 0h28v95h-28z"/>
+  </g>
+</svg>

@@ -27,6 +27,7 @@ import {
   readGitHubContentPublisherConfiguration,
 } from "./github-content-publisher";
 import type { HumanAccessEnvironment } from "./human-access-configuration";
+import { isInstalledSiteDefinition } from "../foundry/site-definition";
 
 export function createD1ContentPublicationApplication(input: {
   database: NonNullable<HumanAccessEnvironment["FOUNDRY_DB"]>;
@@ -37,6 +38,7 @@ export function createD1ContentPublicationApplication(input: {
   restoreSourcePublication?: ContentPublication;
 }) {
   return createContentPublicationApplication({
+    isDefinition: isInstalledSiteDefinition,
     store: createD1ContentPublicationStore(input.database),
     revisions: input.revisions,
     publisher: input.publisher,

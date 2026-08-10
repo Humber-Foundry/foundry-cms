@@ -8,6 +8,12 @@ import type { ReactNode } from "react";
 import { MediaOccurrence } from "./media-occurrence";
 import { sectionAnchor } from "@/src/section-anchor";
 import { RichTextRenderer } from "@/components/rich-text-renderer";
+import {
+  installedCustomPageComponentRenderers,
+  installedPageComponentRegistry,
+  type PageComponentRenderContext,
+  type PageComponentRenderer,
+} from "@/foundry/page-components";
 
 function occurrenceFor(
   definition: SiteDefinition | undefined,
@@ -18,14 +24,14 @@ function occurrenceFor(
   ) ?? null;
 }
 
-export function SiteSection({
+function FoundationSiteSection({
   section,
   definition,
   mediaDelivery = "published",
   mediaAccessToken,
   callToActionBody,
 }: {
-  section: PageSection;
+  section: Exclude<PageSection, { type: "registered" }>;
   definition?: SiteDefinition;
   mediaDelivery?: "authenticated" | "published";
   mediaAccessToken?: string;
@@ -159,6 +165,30 @@ export function SiteSection({
       return exhaustiveCheck;
     }
   }
+}
+
+const foundationRenderer: PageComponentRenderer = (context) => (
+  <FoundationSiteSection {...context} section={context.section as Exclude<PageSection, { type: "registered" }>} />
+);
+
+const installedPageComponentRenderers: Readonly<Record<string, PageComponentRenderer>> =
+  Object.freeze({
+    hero: foundationRenderer,
+    services: foundationRenderer,
+    proof: foundationRenderer,
+    callToAction: foundationRenderer,
+    ...installedCustomPageComponentRenderers,
+  });
+
+export function SiteSection(context: PageComponentRenderContext) {
+  const validation = installedPageComponentRegistry.validate(context.section);
+  const renderer = installedPageComponentRenderers[
+    installedPageComponentRegistry.keyFor(context.section)
+  ];
+  if (!validation.ok || renderer === undefined) {
+    throw new TypeError("page_component_renderer_unregistered");
+  }
+  return renderer(context);
 }
 
 export function SiteRenderer({

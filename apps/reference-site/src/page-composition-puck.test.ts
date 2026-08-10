@@ -253,7 +253,7 @@ describe("Puck page-composition adapter", () => {
     callToAction.props = {
       ...callToAction.props,
       body,
-    } as PageSection;
+    };
 
     const result = puckDataToDefinition(referenceSiteDefinition, data);
 

@@ -31,6 +31,12 @@ import {
 } from "../src/page-composition-puck";
 import { RichTextEditor } from "./rich-text-editor";
 import { SiteSection } from "./site-renderer";
+import {
+  asRegisteredPageSection,
+  createPuckField,
+  installedCustomPageComponents,
+  installedPageComponentRegistry,
+} from "../foundry/page-components";
 
 type RegisteredComponents = {
   [Type in PageComponentType]: Extract<PageSection, { type: Type }>;
@@ -50,7 +56,7 @@ function DesignScopedSection({
   );
 }
 
-function newStableComponentId(type: PageComponentType): string {
+function newStableComponentId(type: string): string {
   const typeSlug = type.replace(
     /[A-Z]/gu,
     (letter) => `_${letter.toLowerCase()}`,
@@ -153,7 +159,7 @@ function InsertComponentActions({ disabled }: { disabled: boolean }) {
   );
   return (
     <div aria-label="Add registered page component">
-      {pageCompositionContract.slot.allowedComponents.map((type) => (
+      {installedPageComponentRegistry.allowedComponents.map((type) => (
         <button
           key={type}
           type="button"
@@ -169,7 +175,7 @@ function InsertComponentActions({ disabled }: { disabled: boolean }) {
             })
           }
         >
-          Add {pageCompositionContract.components[type].label}
+          Add {installedPageComponentRegistry.components[type]!.label}
         </button>
       ))}
     </div>
@@ -338,8 +344,57 @@ export function createVisualComponentConfig(
   ) => void = ignoreRichTextValidation,
   disabled = false,
 ): Config<RegisteredComponents> {
+  const customComponents = Object.fromEntries(
+    installedCustomPageComponents.map((registration) => {
+      const defaultSection = registration.createDefault(
+        `section_new_${registration.type.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}`,
+        definition,
+      );
+      if (defaultSection.type !== "registered") {
+        throw new TypeError("registered_page_component_default_invalid");
+      }
+      return [
+        registration.type,
+        {
+          label: registration.label,
+          fields: {
+            id: { type: "custom", visible: false, render: () => <></> },
+            type: { type: "custom", visible: false, render: () => <></> },
+            component: { type: "custom", visible: false, render: () => <></> },
+            ...Object.fromEntries(
+              Object.entries(registration.fields).map(([key, field]) => [
+                key,
+                createPuckField(field),
+              ]),
+            ),
+          },
+          defaultProps: {
+            id: defaultSection.id,
+            type: defaultSection.type,
+            component: defaultSection.component,
+            ...defaultSection.props,
+          },
+          render: (props: Record<string, unknown>) => (
+            <DesignScopedSection
+              definition={definition}
+              section={asRegisteredPageSection(registration.type, props)}
+            />
+          ),
+          resolvePermissions: (data: { props: { id: string } }) => ({
+            delete: !protectedComponentIds.has(data.props.id),
+          }),
+        },
+      ];
+    }),
+  );
   return {
     ...visualComponentConfig,
+    categories: {
+      page: {
+        title: "Registered page components",
+        components: [...installedPageComponentRegistry.allowedComponents],
+      },
+    },
     components: {
       hero: {
         ...visualComponentConfig.components.hero,
@@ -436,8 +491,9 @@ export function createVisualComponentConfig(
           delete: !protectedComponentIds.has(data.props.id),
         }),
       },
+      ...customComponents,
     },
-  };
+  } as Config<RegisteredComponents>;
 }
 
 export function VisualComponentEditor({
@@ -454,7 +510,7 @@ export function VisualComponentEditor({
   iframeEnabled?: boolean;
 }) {
   const initialData = useMemo(
-    () => definitionToPuckData(definition),
+    () => definitionToPuckData(definition, installedPageComponentRegistry),
     // Puck owns its editing state after mount. A saved revision remounts this
     // component through the key supplied by ContentEditor.
     [],
@@ -483,7 +539,11 @@ export function VisualComponentEditor({
     if (!active.current || disabled) {
       return;
     }
-    const result = puckDataToDefinition(definition, data);
+    const result = puckDataToDefinition(
+      definition,
+      data,
+      installedPageComponentRegistry,
+    );
     if (!result.ok) {
       setMessage(Object.values(result.errors)[0] ?? "Composition rejected.");
       return;

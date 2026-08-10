@@ -105,7 +105,10 @@ async function main() {
   try {
     await waitForDashboard(origin, server, logs);
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
     await page.goto(`${origin}/dash`);
 
     const startWorkspace = page.getByRole("button", {
@@ -134,30 +137,78 @@ async function main() {
       }),
       "private_dashboard_content_editor_not_ready",
     );
-    const siteName = page.getByRole("textbox", { name: /^Site name/u });
-    await siteName.fill("Foundry private preview acceptance");
+    const editorFrame = page.frameLocator(".puck-editor-frame iframe");
+    const storyHeading = editorFrame.getByRole("heading", {
+      name: "There is useful information in the middle of the mess.",
+    });
+    await storyHeading.waitFor({ state: "visible" });
+    await storyHeading.click();
+    const storyTitle = page.locator(".puck-editor-frame").getByRole("textbox", {
+      name: "Title",
+      exact: true,
+    });
+    await storyTitle.waitFor({ state: "visible" });
+    const editedStoryTitle = "The useful question is already in the room.";
+    const savedResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/foundry-cms/revisions" &&
+        response.status() === 201,
+    );
+    await storyTitle.fill(editedStoryTitle);
+    await storyTitle.press("Tab");
+    await editorFrame.getByRole("heading", {
+      name: editedStoryTitle,
+    }).waitFor({ state: "visible" });
     const saveRevision = page.getByRole("button", {
       name: "Save revision",
     });
-    await waitForEnabled(
-      saveRevision,
-      "private_dashboard_content_save_disabled",
-    );
-    const [saved] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname ===
-            "/api/foundry-cms/revisions",
-      ),
-      saveRevision.click({ force: true }),
-    ]);
+    if (await saveRevision.isEnabled()) {
+      await saveRevision.click({ force: true });
+    }
+    const saved = await savedResponse;
     if (saved.status() !== 201) {
       throw new Error(
         `private_dashboard_save_failed:${saved.status()}:${await saved.text()}`,
       );
     }
     await page.getByText("Revision 1 · saved", { exact: true }).waitFor();
+    const [preview] = await Promise.all([
+      context.waitForEvent("page"),
+      page.getByRole("button", {
+        name: "Preview exact saved revision ↗",
+      }).click(),
+    ]);
+    await preview.waitForURL(/\/__foundry\/preview\/workspace_[a-f0-9]{24}\/1\?/u);
+    await preview.getByRole("heading", { name: editedStoryTitle }).waitFor();
+    if ((await preview.locator(".story-section").count()) !== 1) {
+      throw new Error("private_dashboard_preview_custom_renderer_missing");
+    }
+    const publicPage = await context.newPage();
+    await publicPage.goto(origin);
+    await publicPage.getByRole("heading", {
+      name: "There is useful information in the middle of the mess.",
+    }).waitFor();
+    if ((await publicPage.locator(".story-section").count()) !== 1) {
+      throw new Error("private_dashboard_public_custom_renderer_missing");
+    }
+    const overflow = await page.locator("body").evaluate((body) => ({
+      width: body.scrollWidth,
+      elements: [...body.querySelectorAll("*")]
+        .filter((element) => element.getBoundingClientRect().right > 390)
+        .slice(0, 8)
+        .map((element) => ({
+          tag: element.tagName,
+          className: element.className,
+          right: element.getBoundingClientRect().right,
+          width: element.getBoundingClientRect().width,
+        })),
+    }));
+    if (overflow.width > 390) {
+      throw new Error(
+        `private_dashboard_mobile_horizontal_overflow:${JSON.stringify(overflow)}`,
+      );
+    }
     await page.getByRole("heading", { name: "Blog posts" }).waitFor();
     const blogTitle = page.locator('.blog-post-form input[name="title"]');
     await blogTitle.waitFor();

@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import {
+  createReferenceSiteDefinition,
+  referenceSiteDefinition,
+} from "@humber-foundry/site-definition";
 
 import {
   assertExactProductionContent,
@@ -63,14 +66,17 @@ const fixedBaseRuntimeContentHash = canonicalHash({
     media: trackedPublishedDefinition.home.media ?? [],
   },
 });
+const trackedRuntimeDefinition = createReferenceSiteDefinition(
+  trackedPublishedDefinition,
+);
 const { blog: _currentBlog, ...currentDefinitionWithoutBlog } =
-  referenceSiteDefinition;
+  trackedRuntimeDefinition;
 const previousProjectedContentHash = canonicalHash({
   ...currentDefinitionWithoutBlog,
   definitionVersion: "1.2.0",
   schemaVersion: "1.2.0",
 });
-const runtimePublishedContentHash = canonicalHash(referenceSiteDefinition);
+const runtimePublishedContentHash = canonicalHash(trackedRuntimeDefinition);
 
 function defaultArtifacts() {
   return [
@@ -259,7 +265,7 @@ describe("exact production content authorization", () => {
 
   it("authorizes the first code-only reader upgrade against the fixed-base runtime hash", async () => {
     expect(fixedBaseRuntimeContentHash).toBe(
-      "4aa6fd159782ff3dd54a16be5447fc6e367eca5f9870bbf116255e6282f6f8a3",
+      "4487fed3883be01adaaea2872e3ff0c261cdd071dd8ef8c73663cede6db7a6af",
     );
     expect(fixedBaseRuntimeContentHash).not.toBe(
       trackedPublishedContentHash,

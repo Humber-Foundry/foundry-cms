@@ -52,6 +52,7 @@ import {
   type StaleRecoveryConflict,
   type StaleRecoveryEdit,
 } from "../src/content-editor-recovery";
+import { installedPageComponentRegistry } from "../foundry/page-components";
 import {
   outboxAttemptMatchesWorkspace,
   useContentEditorAutosave,
@@ -583,7 +584,7 @@ export function ContentEditor({
       [
         pageCompositionContract.slot.id,
         JSON.stringify(
-          toPageCompositionIdentity(state.workingDefinition),
+          toPageCompositionIdentity(state.workingDefinition, installedPageComponentRegistry),
         ),
       ] as const,
     ]);
