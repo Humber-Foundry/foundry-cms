@@ -265,7 +265,7 @@ describe("exact production content authorization", () => {
 
   it("authorizes the first code-only reader upgrade against the fixed-base runtime hash", async () => {
     expect(fixedBaseRuntimeContentHash).toBe(
-      "4487fed3883be01adaaea2872e3ff0c261cdd071dd8ef8c73663cede6db7a6af",
+      "4aa6fd159782ff3dd54a16be5447fc6e367eca5f9870bbf116255e6282f6f8a3",
     );
     expect(fixedBaseRuntimeContentHash).not.toBe(
       trackedPublishedContentHash,

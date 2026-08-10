@@ -48,6 +48,30 @@ const registry = createPageComponentRegistry(
 );
 
 describe("installation-owned page component registry", () => {
+  it("uses complete registry schemas to validate foundation components", () => {
+    for (const registration of Object.values(
+      foundationPageComponentRegistry.components,
+    )) {
+      expect(Object.keys(registration.fields).length).toBeGreaterThan(0);
+      expect(registration.editableFields.length).toBeGreaterThan(0);
+    }
+    const invalidHero = {
+      ...referenceSiteDefinition.home.sections[0],
+      primaryAction: {
+        id: "hero_action",
+        label: "Unsafe",
+        href: "javascript:alert(1)",
+      },
+    };
+    expect(foundationPageComponentRegistry.validate(invalidHero)).toMatchObject({
+      ok: false,
+      errors: {
+        "section_hero.primaryAction.href":
+          "Use a safe page, email, or HTTPS URL.",
+      },
+    });
+  });
+
   it("provides typed defaults and editable metadata for a registered component", () => {
     const section = registry.createDefault(
       "imageCopyStory",

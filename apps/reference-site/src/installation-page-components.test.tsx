@@ -16,6 +16,7 @@ import {
 import { pageCompositionContract } from "@humber-foundry/site-definition";
 
 import { SiteRenderer, SiteSection } from "../components/site-renderer";
+import { createVisualComponentConfig } from "../components/visual-component-editor";
 import {
   definitionToPuckData,
   pageCompositionChanged,
@@ -29,28 +30,72 @@ import {
   isInstalledSiteDefinition,
 } from "../foundry/site-definition";
 
+function registeredComponentFixture() {
+  const definition = structuredClone(installedSiteDefinition);
+  const sections = [
+    ["imageCopyStory", "section_story"],
+    ["photoBand", "section_gathering"],
+    ["connectorCards", "section_connectors"],
+    ["invitationNewsletter", "section_invitation"],
+  ].map(([type, id]) =>
+    installedPageComponentRegistry.createDefault(type!, id!, definition),
+  );
+  const fixture = {
+    ...definition,
+    home: {
+      ...definition.home,
+      sections: [
+        ...definition.home.sections.slice(0, 2),
+        ...sections,
+        ...definition.home.sections.slice(2),
+      ],
+    },
+  };
+  if (!isInstalledSiteDefinition(fixture)) {
+    throw new Error("registered_component_fixture_invalid");
+  }
+  return fixture;
+}
+
 describe("installation-owned page components", () => {
+  it("owns validation, editor metadata, and rendering in one installed registration", () => {
+    const config = createVisualComponentConfig(new Set(), installedSiteDefinition);
+    expect(Object.keys(config.components)).toEqual(
+      installedPageComponentRegistry.allowedComponents,
+    );
+    for (const registration of Object.values(
+      installedPageComponentRegistry.components,
+    )) {
+      expect(registration.editableFields.length).toBeGreaterThan(0);
+      expect(Object.keys(registration.fields).length).toBeGreaterThan(0);
+      expect(registration.renderer).toBeTypeOf("function");
+      expect(Object.hasOwn(config.components, registration.type)).toBe(true);
+    }
+  });
+
   it("uses the same real renderer for public and exact-preview projections", () => {
+    const definition = registeredComponentFixture();
     const publicMarkup = renderToStaticMarkup(
-      <SiteRenderer definition={installedSiteDefinition} />,
+      <SiteRenderer definition={definition} />,
     );
     const previewMarkup = renderToStaticMarkup(
       <SiteRenderer
-        definition={structuredClone(installedSiteDefinition)}
+        definition={structuredClone(definition)}
         mediaDelivery="authenticated"
         mediaAccessToken="preview-token"
       />,
     );
 
-    expect(publicMarkup).toContain("There is useful information in the middle of the mess.");
+    expect(publicMarkup).toContain("Make room for a better question");
     expect(publicMarkup).toContain('class="connector-grid"');
-    expect(publicMarkup).toContain('alt="An illustrated workshop table with people sharing notes"');
+    expect(publicMarkup).toContain('alt="People sharing ideas around a workshop table"');
     expect(previewMarkup).toBe(publicMarkup);
   });
 
   it("round-trips a visible custom edit through the installed Puck adapter", () => {
+    const definition = registeredComponentFixture();
     const data = definitionToPuckData(
-      installedSiteDefinition,
+      definition,
       installedPageComponentRegistry,
     );
     const story = data.content.find(({ type }) => type === "imageCopyStory");
@@ -58,7 +103,7 @@ describe("installation-owned page components", () => {
     story.props.title = "The useful question is already in the room.";
 
     const result = puckDataToDefinition(
-      installedSiteDefinition,
+      definition,
       data,
       installedPageComponentRegistry,
     );
@@ -73,7 +118,7 @@ describe("installation-owned page components", () => {
     });
     expect(
       pageCompositionChanged(
-        installedSiteDefinition,
+        definition,
         result.definition,
         installedPageComponentRegistry,
       ),
@@ -158,7 +203,7 @@ describe("installation-owned page components", () => {
   });
 
   it("rejects an invalid registered component before publication approval", async () => {
-    const invalid = structuredClone(installedSiteDefinition);
+    const invalid = registeredComponentFixture();
     const story = invalid.home.sections.find(({ id }) => id === "section_story");
     if (story?.type !== "registered") throw new Error("story_fixture_missing");
     (story.props as Record<string, unknown>).imageSrc = "javascript:alert(1)";
@@ -188,13 +233,14 @@ describe("installation-owned page components", () => {
   });
 
   it("fingerprints a valid registered composition for publication", async () => {
+    const definition = registeredComponentFixture();
     const revision = {
       workspaceId: createContentWorkspaceId("workspace_component_valid_publication"),
       revision: 1,
-      definition: installedSiteDefinition,
+      definition,
       inputs: {
-        contentHash: await sha256CanonicalJson(installedSiteDefinition),
-        schemaVersion: installedSiteDefinition.schemaVersion,
+        contentHash: await sha256CanonicalJson(definition),
+        schemaVersion: definition.schemaVersion,
         rendererVersion: "renderer-components",
         productionBase: "published-components",
       },
@@ -211,7 +257,7 @@ describe("installation-owned page components", () => {
         isInstalledSiteDefinition,
       ),
     ).resolves.toMatchObject({
-      schemaVersion: installedSiteDefinition.schemaVersion,
+      schemaVersion: definition.schemaVersion,
       rendererVersion: "renderer-components",
     });
   });

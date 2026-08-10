@@ -1,15 +1,7 @@
 import type {
   PageSection,
   SiteDefinition,
-  SiteHref,
 } from "./index";
-import {
-  RICH_TEXT_VERSION,
-  richTextDocumentHasVisibleText,
-  validateRichTextDocument,
-  type RichTextDocument,
-} from "./rich-text";
-import { designContract } from "./design-tokens";
 import {
   foundationPageComponentRegistry,
   type PageComponentRegistry,
@@ -127,221 +119,6 @@ function validateObjectKeys(
     return false;
   }
   return true;
-}
-
-function validateTextFields(
-  value: Record<string, unknown>,
-  fields: ReadonlyArray<string>,
-  path: string,
-  errors: Record<string, string>,
-): boolean {
-  let valid = true;
-  for (const field of fields) {
-    if (
-      typeof value[field] !== "string" ||
-      (value[field] as string).trim() === ""
-    ) {
-      errors[`${path}.${field}`] = "Enter at least one visible character.";
-      valid = false;
-    }
-  }
-  return valid;
-}
-
-function validateLink(
-  value: unknown,
-  path: string,
-  errors: Record<string, string>,
-): boolean {
-  if (!validateObjectKeys(value, ["id", "label", "href"], path, errors)) {
-    return false;
-  }
-  const textValid = validateTextFields(value, ["id", "label"], path, errors);
-  const hrefValid =
-    typeof value.href === "string" &&
-    (/^#[a-z][a-z0-9_]*$/u.test(value.href) ||
-      /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value.href));
-  if (!hrefValid) {
-    errors[`${path}.href`] = "Use a registered page anchor or email link.";
-  }
-  return textValid && hrefValid;
-}
-
-function validateRichTextField(
-  value: unknown,
-  path: string,
-  errors: Record<string, string>,
-): boolean {
-  try {
-    const document = validateRichTextDocument(value as RichTextDocument);
-    if (!richTextDocumentHasVisibleText(document)) {
-      errors[path] = "Enter at least one visible character.";
-      return false;
-    }
-    return true;
-  } catch {
-    errors[path] =
-      "Provide supported, safe rich text in the versioned Site Definition format.";
-    return false;
-  }
-}
-
-function validateItemArray(
-  value: unknown,
-  path: string,
-  fields: ReadonlyArray<string>,
-  errors: Record<string, string>,
-): boolean {
-  if (!Array.isArray(value)) {
-    errors[path] = "Use the registered component item list.";
-    return false;
-  }
-  let valid = true;
-  value.forEach((item, index) => {
-    const itemPath = `${path}.${index}`;
-    if (!validateObjectKeys(item, fields, itemPath, errors)) {
-      valid = false;
-      return;
-    }
-    if (!validateTextFields(item, fields, itemPath, errors)) {
-      valid = false;
-    }
-  });
-  return valid;
-}
-
-function validateSectionSchema(
-  section: Record<string, unknown>,
-  type: PageComponentType,
-  id: string,
-  errors: Record<string, string>,
-): boolean {
-  const path = id;
-  if (
-    typeof section.variant !== "string" ||
-    !designContract.variants[type].values.includes(section.variant as never)
-  ) {
-    errors[`${path}.variant`] =
-      "Choose a variant registered for this component.";
-    return false;
-  }
-  switch (type) {
-    case "hero":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "summary",
-            "primaryAction",
-            "secondaryAction",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          ["id", "type", "variant", "eyebrow", "title", "summary"],
-          path,
-          errors,
-        ) &&
-        validateLink(section.primaryAction, `${path}.primaryAction`, errors) &&
-        validateLink(section.secondaryAction, `${path}.secondaryAction`, errors)
-      );
-    case "services":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "introduction",
-            "items",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "introduction",
-          ],
-          path,
-          errors,
-        ) &&
-        validateItemArray(
-          section.items,
-          `${path}.items`,
-          ["id", "number", "title", "description"],
-          errors,
-        )
-      );
-    case "proof":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "quote",
-            "attribution",
-            "metrics",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          ["id", "type", "variant", "quote", "attribution"],
-          path,
-          errors,
-        ) &&
-        validateItemArray(
-          section.metrics,
-          `${path}.metrics`,
-          ["id", "value", "label"],
-          errors,
-        )
-      );
-    case "callToAction":
-      return (
-        validateObjectKeys(
-          section,
-          [
-            "id",
-            "type",
-            "variant",
-            "eyebrow",
-            "title",
-            "body",
-            "action",
-          ],
-          path,
-          errors,
-        ) &&
-        validateTextFields(
-          section,
-          ["id", "type", "variant", "eyebrow", "title"],
-          path,
-          errors,
-        ) &&
-        validateRichTextField(section.body, `${path}.body`, errors) &&
-        validateLink(section.action, `${path}.action`, errors)
-      );
-  }
 }
 
 export function referencedPageComponentIds(
@@ -512,22 +289,6 @@ function validateEditableProps(
 ): void {
   const validation = registry.validate(section);
   if (!validation.ok) Object.assign(errors, validation.errors);
-  if (section.type === "registered") return;
-  const registration = registry.components[section.type]!;
-  const record = section as unknown as Record<string, unknown>;
-  for (const property of registration.editableFields) {
-    if (section.type === "callToAction" && property === "body") {
-      validateRichTextField(record[property], `${section.id}.${property}`, errors);
-      continue;
-    }
-    if (
-      typeof record[property] !== "string" ||
-      (record[property] as string).trim() === ""
-    ) {
-      errors[`${section.id}.${property}`] =
-        "Enter at least one visible character.";
-    }
-  }
 }
 
 export function applyPageComposition(
@@ -630,17 +391,9 @@ export function applyPageComposition(
         "This component is not registered for the page slot.";
       continue;
     }
-    if (
-      candidate.type === "registered"
-        ? !registry.validate(candidate).ok
-        : !validateSectionSchema(
-            candidate,
-            candidate.type as PageComponentType,
-            id,
-            errors,
-          )
-    ) {
-      const validation = registry.validate(candidate);
+    const componentValidation = registry.validate(candidate);
+    if (!componentValidation.ok) {
+      const validation = componentValidation;
       if (!validation.ok) Object.assign(errors, validation.errors);
       continue;
     }

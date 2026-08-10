@@ -15,7 +15,6 @@ import {
 import {
   createVisualComponentConfig,
   VisualComponentEditor,
-  visualComponentConfig,
 } from "./visual-component-editor";
 import { ContentEditor } from "./content-editor";
 import { RichTextEditor } from "./rich-text-editor";
@@ -411,7 +410,11 @@ describe("visual component editor browser acceptance", () => {
   });
 
   it("keeps protected props out of the editable field controls", () => {
-    expect(Object.keys(visualComponentConfig.components.hero.fields!)).toEqual([
+    const config = createVisualComponentConfig(
+      new Set(["section_contact"]),
+      referenceSiteDefinition,
+    );
+    expect(Object.keys(config.components.hero.fields!)).toEqual([
       "id",
       "type",
       "variant",
@@ -422,17 +425,13 @@ describe("visual component editor browser acceptance", () => {
       "secondaryAction",
     ]);
     expect(
-      visualComponentConfig.components.hero.fields!.primaryAction,
+      config.components.hero.fields!.primaryAction,
     ).toEqual(expect.objectContaining({ visible: false }));
     expect(
-      visualComponentConfig.components.hero.fields!.variant,
+      config.components.hero.fields!.variant,
     ).toEqual(expect.objectContaining({ visible: false }));
-    expect(visualComponentConfig.components.services.fields!.items).toEqual(
+    expect(config.components.services.fields!.items).toEqual(
       expect.objectContaining({ visible: false }),
-    );
-    const config = createVisualComponentConfig(
-      new Set(["section_contact"]),
-      referenceSiteDefinition,
     );
     expect(
       config.components.callToAction.resolvePermissions!(
@@ -493,7 +492,7 @@ describe("visual component editor browser acceptance", () => {
     ).toBe(true);
   });
 
-  it("adds and visibly edits an installation-owned component through Puck", async () => {
+  it("adds, edits, reorders, duplicates, and removes an installation-owned component through Puck", async () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -540,6 +539,37 @@ describe("visual component editor browser acceptance", () => {
           section.props.title === "A visible custom component edit",
       ),
     ).toBe(true);
+
+    await page.getByRole("button", {
+      name: "Duplicate Image and copy story 5",
+    }).click();
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    const copies = latest.home.sections.filter(
+      (section) =>
+        section.type === "registered" &&
+        section.component === "imageCopyStory",
+    );
+    expect(copies).toHaveLength(2);
+    const duplicateId = copies.find(({ id }) => id !== added?.id)?.id;
+    expect(duplicateId).toBeDefined();
+
+    await page.getByRole("button", {
+      name: "Move Image and copy story 6 up",
+    }).click();
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    expect(latest.home.sections[4]?.id).toBe(duplicateId);
+
+    await page.getByRole("button", {
+      name: "Remove Image and copy story 5",
+    }).click();
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    expect(
+      latest.home.sections.filter(
+        (section) =>
+          section.type === "registered" &&
+          section.component === "imageCopyStory",
+      ),
+    ).toHaveLength(1);
   });
 
   it("round-trips unsaved structural edits through the browser outbox", async () => {

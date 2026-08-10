@@ -92,53 +92,6 @@
         ]
       },
       {
-        "id": "section_story",
-        "type": "registered",
-        "component": "imageCopyStory",
-        "props": {
-          "eyebrow": "Start with what is real",
-          "title": "There is useful information in the middle of the mess.",
-          "body": "A good conversation can make complexity feel workable. We listen for what matters, gather the people who need to be there, and shape a next step everyone can understand.",
-          "imageSrc": "/foundry-workshop.svg",
-          "imageAlt": "An illustrated workshop table with people sharing notes",
-          "imagePosition": "start"
-        }
-      },
-      {
-        "id": "section_gathering",
-        "type": "registered",
-        "component": "photoBand",
-        "props": {
-          "imageSrc": "/foundry-gathering.svg",
-          "imageAlt": "An illustrated bright room arranged for a group gathering",
-          "caption": "A generous space changes what a group can notice together."
-        }
-      },
-      {
-        "id": "section_connectors",
-        "type": "registered",
-        "component": "connectorCards",
-        "props": {
-          "eyebrow": "Connectors",
-          "title": "Bring the right people into the room.",
-          "introduction": "The strongest work often begins with a thoughtful introduction and a shared reason to care.",
-          "cards": [
-            {
-              "title": "Ideas to people",
-              "body": "Find collaborators who can move an idea into useful action."
-            },
-            {
-              "title": "People to purpose",
-              "body": "Create the conditions for a group to work with trust and direction."
-            },
-            {
-              "title": "Purpose to practice",
-              "body": "Turn shared intent into habits that last beyond one gathering."
-            }
-          ]
-        }
-      },
-      {
         "id": "section_proof",
         "type": "proof",
         "variant": "panel",
@@ -173,19 +126,6 @@
           "id": "action_email",
           "label": "Write the first note",
           "href": "mailto:hello@example.com"
-        }
-      },
-      {
-        "id": "section_invitation",
-        "type": "registered",
-        "component": "invitationNewsletter",
-        "props": {
-          "eyebrow": "An invitation",
-          "title": "Stay close to the useful questions.",
-          "body": "Occasional notes about gathering people, making change, and finding clarity in the middle.",
-          "actionLabel": "Join the list",
-          "actionHref": "#newsletter",
-          "note": "A thoughtful note now and then. Unsubscribe anytime."
         }
       }
     ]

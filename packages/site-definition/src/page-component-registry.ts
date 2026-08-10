@@ -5,36 +5,67 @@ import type {
 } from "./index";
 import { isBaseSiteDefinition } from "./index";
 import { designContract } from "./design-tokens";
-import { RICH_TEXT_VERSION } from "./rich-text";
+import {
+  RICH_TEXT_VERSION,
+  richTextDocumentHasVisibleText,
+  validateRichTextDocument,
+  type RichTextDocument,
+} from "./rich-text";
 
-type TextField = Readonly<{
-  control: "text" | "textarea" | "image" | "url";
+type FieldOptions = Readonly<{
+  editable?: boolean;
+}>;
+
+type TextField = FieldOptions & Readonly<{
+  control: "text" | "textarea" | "image" | "url" | "siteHref";
   label: string;
   defaultValue: string;
 }>;
 
-type SelectField = Readonly<{
+type SelectField = FieldOptions & Readonly<{
   control: "select";
   label: string;
   defaultValue: string;
   options: ReadonlyArray<Readonly<{ label: string; value: string }>>;
 }>;
 
-type ArrayField = Readonly<{
+type RichTextField = FieldOptions & Readonly<{
+  control: "richText";
+  label: string;
+  defaultValue: RichTextDocument;
+}>;
+
+type ObjectField = FieldOptions & Readonly<{
+  control: "object";
+  label: string;
+  defaultValue: Readonly<Record<string, unknown>>;
+  fields: Readonly<Record<string, PageComponentField>>;
+}>;
+
+type ArrayField = FieldOptions & Readonly<{
   control: "array";
   label: string;
-  defaultValue: ReadonlyArray<Readonly<Record<string, string>>>;
-  fields: Readonly<Record<string, TextField | SelectField>>;
+  defaultValue: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  fields: Readonly<Record<string, PageComponentField>>;
   minItems?: number;
   maxItems?: number;
 }>;
 
-export type PageComponentField = TextField | SelectField | ArrayField;
+export type PageComponentField =
+  | TextField
+  | SelectField
+  | RichTextField
+  | ObjectField
+  | ArrayField;
 
 type FieldValue<Field extends PageComponentField> =
   Field extends ArrayField
-    ? ReadonlyArray<Readonly<Record<string, string>>>
-    : string;
+    ? ReadonlyArray<Readonly<Record<string, unknown>>>
+    : Field extends ObjectField
+      ? Readonly<Record<string, unknown>>
+      : Field extends RichTextField
+        ? RichTextDocument
+        : string;
 
 export type RegisteredPageComponentProps<
   Fields extends Readonly<Record<string, PageComponentField>>,
@@ -94,6 +125,32 @@ function validateField(
   path: string,
   errors: Record<string, string>,
 ): void {
+  if (field.control === "richText") {
+    try {
+      const document = validateRichTextDocument(value as RichTextDocument);
+      if (!richTextDocumentHasVisibleText(document)) {
+        errors[path] = "Enter at least one visible character.";
+      }
+    } catch {
+      errors[path] =
+        "Provide supported, safe rich text in the versioned Site Definition format.";
+    }
+    return;
+  }
+  if (field.control === "object") {
+    if (
+      !isRecord(value) ||
+      Object.keys(value).some((key) => !Object.hasOwn(field.fields, key)) ||
+      Object.keys(field.fields).some((key) => !Object.hasOwn(value, key))
+    ) {
+      errors[path] = "Use only fields registered for this item.";
+      return;
+    }
+    Object.entries(field.fields).forEach(([key, nested]) =>
+      validateField(nested, value[key], `${path}.${key}`, errors),
+    );
+    return;
+  }
   if (field.control === "array") {
     if (!Array.isArray(value)) {
       errors[path] = "Provide the registered item list.";
@@ -129,11 +186,12 @@ function validateField(
   if (field.control === "image" && !validateSafeImage(value)) {
     errors[path] = "Use a safe site image path or HTTPS image URL.";
   } else if (
-    field.control === "url" &&
+    (field.control === "url" || field.control === "siteHref") &&
     !(
       /^#[a-z][a-z0-9_]*$/u.test(value) ||
       /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value) ||
-      /^https:\/\/[A-Za-z0-9.-]+(?::[0-9]+)?(?:\/[^\s]*)?$/u.test(value)
+      (field.control === "url" &&
+        /^https:\/\/[A-Za-z0-9.-]+(?::[0-9]+)?(?:\/[^\s]*)?$/u.test(value))
     )
   ) {
     errors[path] = "Use a safe page, email, or HTTPS URL.";
@@ -166,7 +224,11 @@ export function createRegisteredPageComponent<
   if (!/^[a-z][A-Za-z0-9]*$/u.test(input.type)) {
     throw new TypeError("page_component_type_invalid");
   }
-  const editableFields = Object.freeze(Object.keys(input.fields));
+  const editableFields = Object.freeze(
+    Object.entries(input.fields)
+      .filter(([, field]) => field.editable !== false)
+      .map(([key]) => key),
+  );
   const registration = {
     ...input,
     editableFields,
@@ -227,22 +289,49 @@ export function createRegisteredPageComponent<
 function foundationRegistration(
   type: "hero" | "services" | "proof" | "callToAction",
   label: string,
-  editableFields: ReadonlyArray<string>,
+  fields: Readonly<Record<string, PageComponentField>>,
   createDefault: (id: string, definition?: SiteDefinition) => PageSection,
 ): PageComponentRegistration {
   return Object.freeze({
     type,
     label,
-    editableFields: Object.freeze([...editableFields]),
-    fields: Object.freeze({}),
+    editableFields: Object.freeze(
+      Object.entries(fields)
+        .filter(([, field]) => field.editable !== false)
+        .map(([key]) => key),
+    ),
+    fields: Object.freeze({ ...fields }),
     createDefault,
     validate(section) {
-      return isRecord(section) && section.type === type
+      const errors = Object.create(null) as Record<string, string>;
+      const id = isRecord(section) && typeof section.id === "string"
+        ? section.id
+        : "component";
+      if (
+        !isRecord(section) ||
+        section.type !== type ||
+        typeof section.id !== "string" ||
+        !/^[a-z][a-z0-9_]*$/u.test(section.id)
+      ) {
+        return {
+          ok: false,
+          errors: { [`${id}.type`]: "This component is not registered for the page slot." },
+        };
+      }
+      const actual = Object.keys(section);
+      const expected = ["id", "type", ...Object.keys(fields)];
+      if (
+        actual.some((key) => !expected.includes(key)) ||
+        expected.some((key) => !actual.includes(key))
+      ) {
+        errors[id] = "Use only fields registered by the Site Definition.";
+      }
+      Object.entries(fields).forEach(([key, field]) =>
+        validateField(field, section[key], `${id}.${key}`, errors),
+      );
+      return Object.keys(errors).length === 0
         ? { ok: true }
-        : {
-            ok: false,
-            errors: { component: "This component is not registered for the page slot." },
-          };
+        : { ok: false, errors };
     },
   });
 }
@@ -296,11 +385,50 @@ function foundationDefault(
   };
 }
 
+const linkFields = {
+  id: { control: "text", label: "Stable identifier", defaultValue: "action", editable: false },
+  label: { control: "text", label: "Label", defaultValue: "Continue", editable: false },
+  href: { control: "siteHref", label: "Destination", defaultValue: "mailto:hello@example.com", editable: false },
+} as const;
+
 const foundationComponents = {
-  hero: foundationRegistration("hero", "Hero", ["eyebrow", "title", "summary"], (id, definition) => foundationDefault("hero", id, definition)),
-  services: foundationRegistration("services", "Services", ["eyebrow", "title", "introduction"], (id, definition) => foundationDefault("services", id, definition)),
-  proof: foundationRegistration("proof", "Proof", ["quote", "attribution"], (id, definition) => foundationDefault("proof", id, definition)),
-  callToAction: foundationRegistration("callToAction", "Call to action", ["eyebrow", "title", "body"], (id, definition) => foundationDefault("callToAction", id, definition)),
+  hero: foundationRegistration("hero", "Hero", {
+    variant: { control: "select", label: "Variant", defaultValue: designContract.variants.hero.values[0], options: designContract.variants.hero.values.map((value) => ({ label: value, value })), editable: false },
+    eyebrow: { control: "text", label: "Eyebrow", defaultValue: "Introduce this page" },
+    title: { control: "text", label: "Title", defaultValue: "A clear page headline" },
+    summary: { control: "textarea", label: "Summary", defaultValue: "Explain the page in a short, useful sentence." },
+    primaryAction: { control: "object", label: "Primary action", fields: linkFields, defaultValue: {}, editable: false },
+    secondaryAction: { control: "object", label: "Secondary action", fields: linkFields, defaultValue: {}, editable: false },
+  }, (id, definition) => foundationDefault("hero", id, definition)),
+  services: foundationRegistration("services", "Services", {
+    variant: { control: "select", label: "Variant", defaultValue: designContract.variants.services.values[0], options: designContract.variants.services.values.map((value) => ({ label: value, value })), editable: false },
+    eyebrow: { control: "text", label: "Eyebrow", defaultValue: "Services" },
+    title: { control: "text", label: "Title", defaultValue: "What we can make together" },
+    introduction: { control: "textarea", label: "Introduction", defaultValue: "Describe the work available here." },
+    items: { control: "array", label: "Services", fields: {
+      id: { control: "text", label: "Stable identifier", defaultValue: "item", editable: false },
+      number: { control: "text", label: "Number", defaultValue: "01", editable: false },
+      title: { control: "text", label: "Title", defaultValue: "A service", editable: false },
+      description: { control: "textarea", label: "Description", defaultValue: "Explain this service.", editable: false },
+    }, defaultValue: [], editable: false },
+  }, (id, definition) => foundationDefault("services", id, definition)),
+  proof: foundationRegistration("proof", "Proof", {
+    variant: { control: "select", label: "Variant", defaultValue: designContract.variants.proof.values[0], options: designContract.variants.proof.values.map((value) => ({ label: value, value })), editable: false },
+    quote: { control: "textarea", label: "Quote", defaultValue: "Add a principle or a piece of evidence." },
+    attribution: { control: "text", label: "Attribution", defaultValue: "Source" },
+    metrics: { control: "array", label: "Metrics", fields: {
+      id: { control: "text", label: "Stable identifier", defaultValue: "metric", editable: false },
+      value: { control: "text", label: "Value", defaultValue: "1", editable: false },
+      label: { control: "text", label: "Label", defaultValue: "Meaningful result", editable: false },
+    }, defaultValue: [], editable: false },
+  }, (id, definition) => foundationDefault("proof", id, definition)),
+  callToAction: foundationRegistration("callToAction", "Call to action", {
+    variant: { control: "select", label: "Variant", defaultValue: designContract.variants.callToAction.values[0], options: designContract.variants.callToAction.values.map((value) => ({ label: value, value })), editable: false },
+    eyebrow: { control: "text", label: "Eyebrow", defaultValue: "Next step" },
+    title: { control: "text", label: "Title", defaultValue: "Invite the reader to act" },
+    body: { control: "richText", label: "Body", defaultValue: { version: RICH_TEXT_VERSION, type: "document", children: [] } },
+    action: { control: "object", label: "Action", fields: linkFields, defaultValue: {}, editable: false },
+  }, (id, definition) => foundationDefault("callToAction", id, definition)),
 };
 
 function registryFromComponents(
@@ -338,6 +466,19 @@ export function createPageComponentRegistry(
 ): PageComponentRegistry {
   const components = { ...foundation.components };
   for (const registration of additions) {
+    if (Object.hasOwn(components, registration.type)) {
+      throw new TypeError("page_component_type_duplicate");
+    }
+    components[registration.type] = registration;
+  }
+  return registryFromComponents(components);
+}
+
+export function createPageComponentRegistryFromRegistrations(
+  registrations: ReadonlyArray<PageComponentRegistration>,
+): PageComponentRegistry {
+  const components: Record<string, PageComponentRegistration> = {};
+  for (const registration of registrations) {
     if (Object.hasOwn(components, registration.type)) {
       throw new TypeError("page_component_type_duplicate");
     }

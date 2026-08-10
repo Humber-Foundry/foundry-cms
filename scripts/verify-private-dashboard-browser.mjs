@@ -137,17 +137,39 @@ async function main() {
       }),
       "private_dashboard_content_editor_not_ready",
     );
+    await page.getByRole("button", {
+      name: "Add Image and copy story",
+    }).click();
     const editorFrame = page.frameLocator(".puck-editor-frame iframe");
     const storyHeading = editorFrame.getByRole("heading", {
-      name: "There is useful information in the middle of the mess.",
+      name: "Make room for a better question",
     });
     await storyHeading.waitFor({ state: "visible" });
-    await storyHeading.click();
-    const storyTitle = page.locator(".puck-editor-frame").getByRole("textbox", {
-      name: "Title",
-      exact: true,
-    });
-    await storyTitle.waitFor({ state: "visible" });
+    await page.getByRole("button", {
+      name: "Duplicate Image and copy story 5",
+    }).click();
+    await page.getByRole("button", {
+      name: "Move Image and copy story 6 up",
+    }).click();
+    await page.getByRole("button", {
+      name: "Remove Image and copy story 5",
+    }).click();
+    await waitForEnabled(
+      page.getByRole("button", { name: "Add Image and copy story" }),
+      "private_dashboard_structure_controls_locked",
+    );
+    const storyTitle = page.locator(
+      '.puck-editor-frame input[title="Title"]:visible:not([readonly])',
+    );
+    for (let attempt = 0; attempt < 20 && (await storyTitle.count()) === 0; attempt += 1) {
+      await editorFrame.getByRole("heading", {
+        name: "Make room for a better question",
+      }).click();
+      await page.waitForTimeout(250);
+    }
+    if ((await storyTitle.count()) !== 1) {
+      throw new Error(`private_dashboard_custom_title_field_count:${await storyTitle.count()}`);
+    }
     const editedStoryTitle = "The useful question is already in the room.";
     const savedResponse = page.waitForResponse(
       (response) =>
@@ -172,14 +194,21 @@ async function main() {
         `private_dashboard_save_failed:${saved.status()}:${await saved.text()}`,
       );
     }
-    await page.getByText("Revision 1 · saved", { exact: true }).waitFor();
+    const savedPayload = await saved.json();
+    if (typeof savedPayload.revision !== "number") {
+      throw new Error("private_dashboard_saved_revision_missing");
+    }
+    const savedRevision = savedPayload.revision;
+    await page.getByText(`Revision ${savedRevision} · saved`, { exact: true }).waitFor();
     const [preview] = await Promise.all([
       context.waitForEvent("page"),
       page.getByRole("button", {
         name: "Preview exact saved revision ↗",
       }).click(),
     ]);
-    await preview.waitForURL(/\/__foundry\/preview\/workspace_[a-f0-9]{24}\/1\?/u);
+    await preview.waitForURL(
+      new RegExp(`/__foundry/preview/workspace_[a-f0-9]{24}/${savedRevision}\\?`, "u"),
+    );
     await preview.getByRole("heading", { name: editedStoryTitle }).waitFor();
     if ((await preview.locator(".story-section").count()) !== 1) {
       throw new Error("private_dashboard_preview_custom_renderer_missing");
@@ -187,10 +216,10 @@ async function main() {
     const publicPage = await context.newPage();
     await publicPage.goto(origin);
     await publicPage.getByRole("heading", {
-      name: "There is useful information in the middle of the mess.",
+      name: "Turn a good idea into something people can use.",
     }).waitFor();
-    if ((await publicPage.locator(".story-section").count()) !== 1) {
-      throw new Error("private_dashboard_public_custom_renderer_missing");
+    if ((await publicPage.locator(".story-section").count()) !== 0) {
+      throw new Error("private_dashboard_unapproved_component_was_public");
     }
     const overflow = await page.locator("body").evaluate((body) => ({
       width: body.scrollWidth,

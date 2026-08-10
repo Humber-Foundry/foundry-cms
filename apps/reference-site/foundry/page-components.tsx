@@ -1,14 +1,20 @@
-import type { ReactNode } from "react";
-
 import {
-  createPageComponentRegistry,
+  createPageComponentRegistryFromRegistrations,
   createRegisteredPageComponent,
   foundationPageComponentRegistry,
   type PageComponentField,
+  type PageComponentRegistration,
+  type PageComponentRegistry,
   type PageSection,
   type RegisteredPageSection,
-  type SiteDefinition,
 } from "@humber-foundry/site-definition";
+import {
+  renderCallToActionPageComponent,
+  renderHeroPageComponent,
+  renderProofPageComponent,
+  renderServicesPageComponent,
+  type PageComponentRenderer,
+} from "./page-component-renderers";
 
 export const imageCopyStoryComponent = createRegisteredPageComponent({
   type: "imageCopyStory",
@@ -74,39 +80,27 @@ export const invitationNewsletterComponent = createRegisteredPageComponent({
     title: { control: "text", label: "Title", defaultValue: "Stay close to the useful questions" },
     body: { control: "textarea", label: "Body", defaultValue: "Occasional notes about gathering people, making change, and finding clarity in the middle." },
     actionLabel: { control: "text", label: "Action label", defaultValue: "Join the list" },
-    actionHref: { control: "url", label: "Action URL", defaultValue: "#newsletter" },
+    actionHref: { control: "url", label: "Action URL", defaultValue: "mailto:hello@example.com" },
     note: { control: "text", label: "Privacy note", defaultValue: "A thoughtful note now and then. Unsubscribe anytime." },
   },
 });
 
-export const installedPageComponentRegistry = createPageComponentRegistry(
-  foundationPageComponentRegistry,
-  [
-    imageCopyStoryComponent,
-    photoBandComponent,
-    connectorCardsComponent,
-    invitationNewsletterComponent,
-  ],
-);
+export type InstalledPageComponentRegistration = PageComponentRegistration &
+  Readonly<{ renderer: PageComponentRenderer }>;
 
-export const installedCustomPageComponents = Object.freeze([
-  imageCopyStoryComponent,
-  photoBandComponent,
-  connectorCardsComponent,
-  invitationNewsletterComponent,
-]);
-
-export type PageComponentRenderContext = Readonly<{
-  section: PageSection;
-  definition?: SiteDefinition;
-  mediaDelivery?: "authenticated" | "published";
-  mediaAccessToken?: string;
-  callToActionBody?: ReactNode;
+export type InstalledPageComponentRegistry = Omit<
+  PageComponentRegistry,
+  "components"
+> & Readonly<{
+  components: Readonly<Record<string, InstalledPageComponentRegistration>>;
 }>;
 
-export type PageComponentRenderer = (
-  context: PageComponentRenderContext,
-) => ReactNode;
+function installPageComponent(
+  registration: PageComponentRegistration,
+  renderer: PageComponentRenderer,
+): InstalledPageComponentRegistration {
+  return Object.freeze({ ...registration, renderer });
+}
 
 function registeredProps(section: PageSection): Record<string, unknown> {
   if (section.type !== "registered") {
@@ -123,10 +117,24 @@ function text(props: Record<string, unknown>, key: string): string {
   return value;
 }
 
-export const installedCustomPageComponentRenderers = Object.freeze<
-  Record<string, PageComponentRenderer>
->({
-  imageCopyStory: ({ section }) => {
+const installedRegistrations = Object.freeze([
+  installPageComponent(
+    foundationPageComponentRegistry.components.hero!,
+    renderHeroPageComponent,
+  ),
+  installPageComponent(
+    foundationPageComponentRegistry.components.services!,
+    renderServicesPageComponent,
+  ),
+  installPageComponent(
+    foundationPageComponentRegistry.components.proof!,
+    renderProofPageComponent,
+  ),
+  installPageComponent(
+    foundationPageComponentRegistry.components.callToAction!,
+    renderCallToActionPageComponent,
+  ),
+  installPageComponent(imageCopyStoryComponent, ({ section }) => {
     const props = registeredProps(section);
     return (
       <section
@@ -145,8 +153,8 @@ export const installedCustomPageComponentRenderers = Object.freeze<
         </div>
       </section>
     );
-  },
-  photoBand: ({ section }) => {
+  }),
+  installPageComponent(photoBandComponent, ({ section }) => {
     const props = registeredProps(section);
     return (
       <figure className="photo-band" id={section.id}>
@@ -154,8 +162,8 @@ export const installedCustomPageComponentRenderers = Object.freeze<
         <figcaption>{text(props, "caption")}</figcaption>
       </figure>
     );
-  },
-  connectorCards: ({ section }) => {
+  }),
+  installPageComponent(connectorCardsComponent, ({ section }) => {
     const props = registeredProps(section);
     const cards = props.cards as ReadonlyArray<Readonly<Record<string, string>>>;
     return (
@@ -176,8 +184,8 @@ export const installedCustomPageComponentRenderers = Object.freeze<
         </ul>
       </section>
     );
-  },
-  invitationNewsletter: ({ section }) => {
+  }),
+  installPageComponent(invitationNewsletterComponent, ({ section }) => {
     const props = registeredProps(section);
     return (
       <section className="invitation-section" id={section.id} aria-labelledby={`${section.id}_title`}>
@@ -190,8 +198,13 @@ export const installedCustomPageComponentRenderers = Object.freeze<
         <small>{text(props, "note")}</small>
       </section>
     );
-  },
-});
+  }),
+]);
+
+export const installedPageComponentRegistry =
+  createPageComponentRegistryFromRegistrations(
+    installedRegistrations,
+  ) as InstalledPageComponentRegistry;
 
 export function createPuckField(field: PageComponentField): Record<string, unknown> {
   if (field.control === "array") {
@@ -220,8 +233,15 @@ export function asRegisteredPageSection(
   type: string,
   props: Record<string, unknown>,
 ): RegisteredPageSection {
+  const candidateId = String(props.id);
+  const id = /^[a-z][a-z0-9_]*$/u.test(candidateId)
+    ? candidateId
+    : `section_${type.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}_${candidateId
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/gu, "_")
+        .replace(/^_+|_+$/gu, "")}`;
   return {
-    id: String(props.id),
+    id,
     type: "registered",
     component: type,
     props: Object.fromEntries(
