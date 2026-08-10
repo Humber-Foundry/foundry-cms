@@ -80,6 +80,72 @@ describe("Puck page-composition adapter", () => {
     });
   });
 
+  it("matches a duplicate to nested protected props when registered siblings differ", () => {
+    const profileCard = createRegisteredPageComponent({
+      type: "profileCard",
+      label: "Profile card",
+      fields: {
+        profile: {
+          control: "object",
+          label: "Profile",
+          fields: {
+            name: { control: "text", label: "Name", defaultValue: "A person" },
+            internalId: {
+              control: "text",
+              label: "Internal identifier",
+              defaultValue: "profile_default",
+              editable: false,
+            },
+          },
+          defaultValue: {
+            name: "A person",
+            internalId: "profile_default",
+          },
+        },
+      },
+    });
+    const registry = createPageComponentRegistry(
+      foundationPageComponentRegistry,
+      [profileCard],
+    );
+    const first = {
+      ...profileCard.createDefault("section_profile_one"),
+      props: { profile: { name: "First", internalId: "id_one" } },
+    } as const;
+    const second = {
+      ...profileCard.createDefault("section_profile_two"),
+      props: { profile: { name: "Second", internalId: "id_two" } },
+    } as const;
+    const definition = {
+      ...referenceSiteDefinition,
+      home: {
+        ...referenceSiteDefinition.home,
+        sections: [
+          ...referenceSiteDefinition.home.sections,
+          first,
+          second,
+        ],
+      },
+    } as SiteDefinition;
+    const data = definitionToPuckData(definition, registry);
+    const source = data.content.at(-1)!;
+    data.content.push({
+      ...structuredClone(source),
+      props: { ...structuredClone(source.props), id: "profileCard-generated-copy" },
+    });
+
+    const result = puckDataToDefinition(definition, data, registry);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.definition.home.sections.at(-1)).toMatchObject({
+      type: "registered",
+      component: "profileCard",
+      props: { profile: { name: "Second", internalId: "id_two" } },
+    });
+  });
+
+
   it("binds Puck data to stable registered component identifiers", () => {
     const data = definitionToPuckData(referenceSiteDefinition);
 

@@ -228,10 +228,15 @@ export function puckDataToDefinition(
               return false;
             }
             if (source.type === "registered") {
-              return Object.entries(source.props).every(
-                ([key, propertyValue]) =>
-                  editableProps.includes(key) ||
-                  JSON.stringify(props[key]) === JSON.stringify(propertyValue),
+              return Object.entries(registration.fields).every(
+                ([key, field]) =>
+                  JSON.stringify(
+                    mergePageComponentFieldEdit(
+                      field,
+                      source.props[key],
+                      props[key],
+                    ),
+                  ) === JSON.stringify(props[key]),
               );
             }
             const sourceRecord = source as unknown as Record<string, unknown>;
