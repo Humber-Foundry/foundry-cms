@@ -533,6 +533,23 @@
   opacity: 0.65;
 }
 
+/* Puck fills the whole hovered component with a translucent blue wash. On this
+   canvas a component is a full page section, so pointing at one repaints a
+   large block of the page. Sections also contain their own hover targets, such
+   as the rich text editor portal in the call-to-action, so moving the pointer
+   near those boundaries flips the wash on and off repeatedly.
+
+   Keep the outline, which says what you are pointing at, and drop the fill.
+   Puck exposes these as custom properties for exactly this purpose. The rule
+   has to sit at :root: Puck renders the canvas in an iframe and mirrors host
+   stylesheets into it, so a selector scoped to .puck-editor-frame would not
+   match inside that document. Only Puck reads these properties, so setting
+   them at :root does not affect anything else on the dashboard. */
+:root {
+  --puck-slot-component-color-overlay: transparent;
+  --puck-slot-component-color-overlay-border: #6f8fb3;
+}
+
 .editor-recovery-conflicts {
   border: 1px solid #dce1dc;
   border-radius: 0.65rem;
