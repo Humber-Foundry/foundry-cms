@@ -34,6 +34,9 @@ export default async function RevisionPreviewPage(
     ...(typeof accessToken === "string" ? { accessToken } : {}),
     ...(typeof previewId === "string" ? { previewId } : {}),
   });
+  const previewPath =
+    `/__foundry/preview/${revision.workspaceId}/${revision.revision}`;
+  const previewHomeHref = `${previewPath}?${previewQuery.toString()}`;
   return (
     <>
       <aside className="preview-provenance" aria-label="Preview provenance">
@@ -84,7 +87,7 @@ export default async function RevisionPreviewPage(
           </dl>
         )}
         <a
-          href={`/dash?workspace=${encodeURIComponent(revision.workspaceId)}`}
+          href={`/dash/pages?workspace=${encodeURIComponent(revision.workspaceId)}`}
         >
           Return to editor
         </a>
@@ -95,8 +98,10 @@ export default async function RevisionPreviewPage(
         mediaAccessToken={
           typeof accessToken === "string" ? accessToken : undefined
         }
+        homeHref={previewHomeHref}
+        blogHref={`${previewHomeHref}#blog_index_title`}
         blogPostHref={(slug) =>
-          `/__foundry/preview/${revision.workspaceId}/${revision.revision}` +
+          previewPath +
           `/blog/${encodeURIComponent(slug)}?${previewQuery.toString()}`
         }
       />

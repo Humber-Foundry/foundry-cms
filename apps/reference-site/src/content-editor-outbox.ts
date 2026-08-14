@@ -122,7 +122,7 @@ function parseOutboxCandidate(
   return candidate as ContentEditorOutboxRecord;
 }
 
-async function listContentEditorOutboxEntries(
+export async function listContentEditorOutboxRecords(
   workspaceId: string,
 ): Promise<ReadonlyArray<ContentEditorOutboxRecord>> {
   const database = await openOutbox();
@@ -152,7 +152,7 @@ async function listContentEditorOutboxEntries(
 async function readContentEditorOutboxEntry(
   workspaceId: string,
 ): Promise<ContentEditorOutboxRecord | null> {
-  const entries = await listContentEditorOutboxEntries(workspaceId);
+  const entries = await listContentEditorOutboxRecords(workspaceId);
   return workspaceId.includes("::")
     ? entries.find(({ workspaceId: id }) => id === workspaceId) ?? null
     : entries[0] ?? null;
@@ -241,7 +241,7 @@ export function createContentEditorOutboxController(
   workspaceId: string,
   driver: ContentEditorOutboxDriver = {
     read: readContentEditorOutboxEntry,
-    list: listContentEditorOutboxEntries,
+    list: listContentEditorOutboxRecords,
     write: writeContentEditorOutbox,
     clear: clearContentEditorOutbox,
     replace: replaceContentEditorOutboxEntries,

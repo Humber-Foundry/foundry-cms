@@ -16,13 +16,6 @@ export type InlineTextRenderer = (
   options?: Readonly<{ multiline?: boolean; label?: string }>,
 ) => ReactNode;
 
-/** Renders a link-destination editor beside the link itself. */
-export type InlineLinkRenderer = (
-  path: string,
-  href: string,
-  options?: Readonly<{ label?: string }>,
-) => ReactNode;
-
 export type PageComponentRenderContext = Readonly<{
   section: PageSection;
   definition?: SiteDefinition;
@@ -30,7 +23,6 @@ export type PageComponentRenderContext = Readonly<{
   mediaAccessToken?: string;
   callToActionBody?: ReactNode;
   inlineText?: InlineTextRenderer;
-  inlineLink?: InlineLinkRenderer;
   /**
    * True on editing surfaces (the canvas and browse mode), which render
    * inside the authenticated dashboard. Third-party embeds are sandboxed

@@ -1,9 +1,39 @@
-import type { SiteDefinition } from "@humber-foundry/site-definition";
+import type {
+  BlogPost,
+  SiteDefinition,
+} from "@humber-foundry/site-definition";
 
-export function BlogIndex({ definition }: { definition: SiteDefinition }) {
-  const posts = definition.blog.posts.filter(
+export function publicBlogPosts(
+  definition: SiteDefinition,
+): ReadonlyArray<BlogPost> {
+  return definition.blog.posts.filter(
     (post) => post.targetVisibility === "public",
   );
+}
+
+export function PublicBlogPostList({
+  posts,
+  postHref,
+  headingTag: Heading,
+}: {
+  posts: ReadonlyArray<BlogPost>;
+  postHref(post: BlogPost): string;
+  headingTag: "h2" | "h3";
+}) {
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>
+          <Heading><a href={postHref(post)}>{post.title}</a></Heading>
+          <p>{post.excerpt}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function BlogIndex({ definition }: { definition: SiteDefinition }) {
+  const posts = publicBlogPosts(definition);
   return (
     <main id="main-content" className="lh-blog-index" tabIndex={-1}>
       <p className="lh-hand-label">{definition.site.name}</p>
@@ -20,14 +50,11 @@ export function BlogIndex({ definition }: { definition: SiteDefinition }) {
           </a>
         </section>
       ) : (
-        <ul>
-          {posts.map((post) => (
-            <li key={post.id}>
-              <a href={`/blog/${post.slug}`}><h2>{post.title}</h2></a>
-              <p>{post.excerpt}</p>
-            </li>
-          ))}
-        </ul>
+        <PublicBlogPostList
+          posts={posts}
+          postHref={(post) => `/blog/${post.slug}`}
+          headingTag="h2"
+        />
       )}
     </main>
   );

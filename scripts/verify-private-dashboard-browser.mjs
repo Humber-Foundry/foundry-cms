@@ -129,33 +129,28 @@ async function main() {
         `private_dashboard_workspace_failed:${created.status()}:${await created.text()}`,
       );
     }
-    await page.waitForURL(/\/dash\?workspace=workspace_[a-f0-9]{24}$/u);
-    await page.getByRole("heading", { name: "Content editor" }).waitFor();
+    await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
+    await page.getByRole("heading", { name: "Pages" }).waitFor();
     await waitForEnabled(
       page.getByRole("button", {
-        name: "Preview exact saved revision ↗",
+        name: "Preview ↗",
       }),
       "private_dashboard_content_editor_not_ready",
     );
-    await page.getByRole("button", {
-      name: "Add Image and copy story",
-    }).click();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const addSection = page.locator(".add-section-menu summary");
+    await addSection.click();
+    await page.getByRole("button", { name: "Image and copy story" }).click();
     const editorFrame = page.frameLocator(".puck-editor-frame iframe");
     const storyHeading = editorFrame.getByRole("heading", {
       name: "Make room for a better question",
     });
     await storyHeading.waitFor({ state: "visible" });
-    await page.getByRole("button", {
-      name: "Duplicate Image and copy story 5",
-    }).click();
-    await page.getByRole("button", {
-      name: "Move Image and copy story 6 up",
-    }).click();
-    await page.getByRole("button", {
-      name: "Remove Image and copy story 5",
-    }).click();
+    await page.getByRole("button", { name: "Duplicate section" }).click();
+    await page.getByRole("button", { name: "Move section down" }).click();
+    await page.getByRole("button", { name: "Remove section" }).click();
     await waitForEnabled(
-      page.getByRole("button", { name: "Add Image and copy story" }),
+      addSection,
       "private_dashboard_structure_controls_locked",
     );
     const storyTitle = page.locator(
@@ -182,10 +177,8 @@ async function main() {
     await editorFrame.getByRole("heading", {
       name: editedStoryTitle,
     }).waitFor({ state: "visible" });
-    const saveRevision = page.getByRole("button", {
-      name: "Save revision",
-    });
-    if (await saveRevision.isEnabled()) {
+    const saveRevision = page.getByRole("button", { name: "Save" });
+    if ((await saveRevision.count()) === 1 && await saveRevision.isEnabled()) {
       await saveRevision.click({ force: true });
     }
     const saved = await savedResponse;
@@ -199,11 +192,13 @@ async function main() {
       throw new Error("private_dashboard_saved_revision_missing");
     }
     const savedRevision = savedPayload.revision;
-    await page.getByText(`Revision ${savedRevision} · saved`, { exact: true }).waitFor();
+    await page.locator(
+      `.state-label.state-saved[data-revision="${savedRevision}"]`,
+    ).waitFor();
     const [preview] = await Promise.all([
       context.waitForEvent("page"),
       page.getByRole("button", {
-        name: "Preview exact saved revision ↗",
+        name: "Preview ↗",
       }).click(),
     ]);
     await preview.waitForURL(
@@ -238,15 +233,20 @@ async function main() {
         `private_dashboard_mobile_horizontal_overflow:${JSON.stringify(overflow)}`,
       );
     }
-    await page.getByRole("heading", { name: "Blog posts" }).waitFor();
-    const blogTitle = page.locator('.blog-post-form input[name="title"]');
+    await page.getByRole("link", { name: "← Dashboard" }).click();
+    await page.waitForURL(/\/dash\?workspace=workspace_[a-f0-9]{24}$/u);
+    await page.getByRole("navigation", { name: "Dashboard sections" })
+      .getByRole("link", { name: "Blog", exact: true })
+      .click();
+    await page.waitForURL(/\/dash\/blog\?workspace=workspace_[a-f0-9]{24}$/u);
+    await page.getByRole("heading", { name: "Blog", exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Posts", exact: true }).waitFor();
+    const blogTitle = page.locator('.composer input[name="title"]');
     await blogTitle.waitFor();
     if (!(await blogTitle.isEnabled())) {
       throw new Error("private_dashboard_blog_controls_disabled");
     }
-    const createPost = page.getByRole("button", {
-      name: "Create post revision",
-    });
+    const createPost = page.getByRole("button", { name: "Save draft" });
     if (!(await createPost.isEnabled())) {
       throw new Error("private_dashboard_blog_submit_disabled");
     }

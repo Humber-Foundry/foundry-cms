@@ -1734,6 +1734,9 @@ export function ContentEditor({
       />
     </details>
   ) : null;
+  const activeWorkspaceQuery = activeWorkspaceUrl.includes("?")
+    ? activeWorkspaceUrl.slice(activeWorkspaceUrl.indexOf("?"))
+    : "";
 
   if (!showComposition) {
     // Design and any other canvas-less destination: a toolbar and the fields.
@@ -1761,7 +1764,7 @@ export function ContentEditor({
   return (
     <section className="content-editor editor-immersive" aria-label={heading}>
       <header className="editor-topbar">
-        <a className="topbar-back" href="/dash">
+        <a className="topbar-back" href={`/dash${activeWorkspaceQuery}`}>
           ← Dashboard
         </a>
         <h1 className="topbar-title">{heading}</h1>

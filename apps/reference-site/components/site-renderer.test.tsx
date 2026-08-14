@@ -64,6 +64,60 @@ describe("SiteRenderer controlled design projection", () => {
     expect(unpublished).not.toContain("/blog/renderer-post");
   });
 
+  it("keeps unpublished post and shell navigation inside an exact preview", () => {
+    const unpublishedPost = {
+      id: createBlogPostId(
+        "00000000-0000-4000-8000-000000000117",
+      ),
+      revision: 3,
+      collectionState: "active" as const,
+      targetVisibility: "unpublished" as const,
+      slug: "preview-only-post",
+      title: "Preview-only post",
+      excerpt: "Visible only in the exact draft preview.",
+      seo: {
+        title: "Preview-only post | Foundry",
+        description: "Visible only in the exact draft preview.",
+      },
+      body: createRichTextDocumentFromPlainText("Unpublished draft body."),
+    };
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      blog: { id: "blog", posts: [unpublishedPost] },
+    };
+    const previewHome =
+      "/__foundry/preview/workspace_preview/3?capability=preview-capability";
+    const previewBlog = `${previewHome}#blog_index_title`;
+
+    const home = renderToStaticMarkup(
+      <SiteRenderer
+        definition={definition}
+        homeHref={previewHome}
+        blogHref={previewBlog}
+      />,
+    );
+    const post = renderToStaticMarkup(
+      <BlogPostRenderer
+        definition={definition}
+        post={unpublishedPost}
+        preview
+        homeHref={previewHome}
+        blogHref={previewBlog}
+      />,
+    );
+
+    expect(home).toContain(
+      'href="/__foundry/preview/workspace_preview/3?capability=preview-capability#section_services"',
+    );
+    expect(home).toContain(
+      'href="/__foundry/preview/workspace_preview/3?capability=preview-capability#blog_index_title"',
+    );
+    expect(home).not.toContain('href="/"');
+    expect(post).toContain("<h1>Preview-only post</h1>");
+    expect(post).toContain("Unpublished draft body.");
+    expect(post).not.toContain('href="/"');
+  });
+
   it("renders registered tokens and variants as deterministic semantic attributes", () => {
     const result = applySiteDefinitionEdits(referenceSiteDefinition, [
       { path: "design.typography.heading", value: "modern" },

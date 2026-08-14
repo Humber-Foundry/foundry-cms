@@ -24,6 +24,7 @@ import {
 } from "../src/content-editor-recovery";
 import {
   clearContentEditorOutbox,
+  listContentEditorOutboxRecords,
   readContentEditorOutbox,
   writeContentEditorOutbox,
 } from "../src/content-editor-outbox";
@@ -1371,14 +1372,33 @@ describe("visual component editor browser acceptance", () => {
       "Unsaved browser edits were recovered",
     );
     expect(duplicateReady).toBe(true);
+    const duplicateSiteName = Array.from(
+      duplicateHost.querySelectorAll<HTMLInputElement>(
+        ".editor-groups input",
+      ),
+    ).find((input) => input.value === referenceSiteDefinition.site.name);
+    expect(duplicateSiteName).toBeDefined();
+    await userEvent.fill(duplicateSiteName!, "Duplicate tab draft");
+    let tabRecords = await listContentEditorOutboxRecords(workspaceId);
+    for (
+      let index = 0;
+      index < 20 &&
+      !tabRecords.some(
+        (record) =>
+          record.edits.some(
+            (edit) =>
+              edit.path === "site_foundry_reference.name" &&
+              edit.value === "Duplicate tab draft",
+          ),
+      );
+      index += 1
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+      tabRecords = await listContentEditorOutboxRecords(workspaceId);
+    }
     expect(
-      (await readContentEditorOutbox(workspaceId))?.edits,
-    ).toContainEqual({
-      path: "site_foundry_reference.name",
-      format: "plainText",
-      baseValue: "Foundry Reference",
-      value: "Owner tab draft",
-    });
+      tabRecords.map(({ edits }) => edits[0]?.value),
+    ).toEqual(expect.arrayContaining(["Owner tab draft", "Duplicate tab draft"]));
 
     await clearContentEditorOutbox(workspaceId);
   });

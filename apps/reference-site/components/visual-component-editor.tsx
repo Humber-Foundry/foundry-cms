@@ -21,7 +21,7 @@ import {
 } from "@humber-foundry/site-definition";
 
 import { definitionToPuckData, puckDataToDefinition } from "../src/page-composition-puck";
-import { InlineLink, InlineText } from "./inline-text";
+import { InlineText } from "./inline-text";
 import type { InlineTextRenderer } from "../foundry/page-component-renderers";
 import { RichTextEditor } from "./rich-text-editor";
 import { SiteSection } from "./site-renderer";
@@ -30,7 +30,6 @@ import {
   createPuckField,
   inlineEditedTextFields,
   installedPageComponentRegistry,
-  popoverLinkFields,
   type InstalledPageComponentRegistration,
 } from "../foundry/page-components";
 
@@ -149,29 +148,12 @@ function EditableRegisteredSection({
       )
     : undefined;
 
-  const inlineLink = isSelected
-    ? (
-        path: string,
-        href: string,
-        options?: Readonly<{ label?: string }>,
-      ) => (
-        <InlineLink
-          key={path}
-          path={path}
-          href={href}
-          label={options?.label ?? path}
-          onCommit={(next) => commitField(path, next)}
-        />
-      )
-    : undefined;
-
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
       <SiteSection
         section={section}
         definition={definition}
         inlineText={inlineText}
-        inlineLink={inlineLink}
         editingSurface
       />
     </div>
@@ -531,10 +513,7 @@ export function createVisualComponentConfig(
       // Fields the renderer edits in place stay out of the panel: each piece
       // of text gets exactly one editing surface. Arrays keep their panel
       // controls because items are added, removed and reordered there.
-      const inlineCovered = new Set<string>([
-        ...(inlineEditedTextFields[type] ?? []),
-        ...(popoverLinkFields[type] ?? []),
-      ]);
+      const inlineCovered = inlineEditedTextFields[type] ?? new Set<string>();
       const fields = {
         id: hiddenField,
         type: hiddenField,

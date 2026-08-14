@@ -216,14 +216,6 @@ export const inlineEditedTextFields: Readonly<Record<string, ReadonlySet<string>
   ]),
 };
 
-/**
- * Link-destination fields edited from the link itself (a chip beside the
- * button opens the URL there). Hidden from the side panel like the in-place
- * text fields. None of the installed components carry an inline-edited link
- * today, so this map is empty; the editor reads it defensively.
- */
-export const popoverLinkFields: Readonly<Record<string, ReadonlySet<string>>> = {};
-
 const installedRegistrations = Object.freeze([
   installPageComponent(
     foundationPageComponentRegistry.components.hero!,

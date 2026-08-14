@@ -11,10 +11,14 @@ export function BlogPostRenderer({
   definition,
   post,
   preview = false,
+  homeHref = "/",
+  blogHref = "/blog",
 }: {
   definition: SiteDefinition;
   post: BlogPost;
   preview?: boolean;
+  homeHref?: string;
+  blogHref?: string;
 }) {
   const model = createBlogPostRenderModel(
     definition,
@@ -27,7 +31,11 @@ export function BlogPostRenderer({
   }
   return (
     <div className="site-canvas" {...model.designAttributes}>
-      <SiteHeader definition={definition} />
+      <SiteHeader
+        definition={definition}
+        homeHref={homeHref}
+        blogHref={blogHref}
+      />
       <main id="main-content" className="blog-post" tabIndex={-1}>
         <article>
           <header>
@@ -40,7 +48,7 @@ export function BlogPostRenderer({
           </div>
         </article>
       </main>
-      <BlogFooter definition={definition} />
+      <BlogFooter definition={definition} homeHref={homeHref} />
     </div>
   );
 }
