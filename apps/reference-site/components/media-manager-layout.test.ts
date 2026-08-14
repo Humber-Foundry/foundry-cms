@@ -8,11 +8,13 @@ describe("media manager layout", () => {
       "utf8",
     );
 
+    // Placing a photo is blocked while a mutation owns retry state.
     expect(component).toMatch(
-      /Occurrence ID\s*<select\s+disabled=\{busy\}/su,
+      /disabled=\{\s*busy\s*\|\|[\s\S]*?\}\s*onClick=\{\(\) => void usePhotoInPlace/su,
     );
+    // The per-place crop inputs lock the same way.
     expect(component).toMatch(
-      /Source asset\s*<select\s+disabled=\{busy\}/su,
+      /disabled=\{busy \|\| occurrenceId !== id\}/su,
     );
   });
 

@@ -114,7 +114,7 @@ describe("campaign controls browser acceptance", () => {
       "Updated subject",
     );
     await userEvent.click(
-      page.getByRole("button", { name: "Save independent revision" }),
+      page.getByRole("button", { name: "Save changes" }),
     );
 
     expect(submitted).toMatchObject({
