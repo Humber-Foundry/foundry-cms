@@ -1,11 +1,12 @@
 # Client installations and the product boundary
 
-Foundry CMS is proven against real client sites. Real installations live in
-private repositories in this GitHub organization; the current acceptance
-installation is the one issue #101 describes, and its private repository's
-README documents its own setup, gates, and deploy safety. This document
-states the boundary between an installation and this product repository, and
-the workflow that keeps the boundary intact.
+Foundry CMS is proven against real client sites. Each installation has its
+own private repository in this GitHub organization. The current acceptance
+installation is the one issue #101 tracks; its repository is named in the
+acceptance comments on that issue, and its own README documents its setup,
+gates, and deploy safety. This document states the boundary between an
+installation and this product repository. It also states the workflow that
+keeps the boundary intact.
 
 This repository is public. That is why the boundary below is strict.
 
@@ -13,10 +14,10 @@ This repository is public. That is why the boundary below is strict.
 
 **This repository must stay client-neutral.** It must never contain a
 client's name, copy, photographs, domain, analytics, credentials, or design
-language. The executable installation in `apps/reference-site` uses only the
-neutral "Foundry Reference" content in `apps/reference-site/foundry/`.
+language. The reference site in `apps/reference-site` uses only the neutral
+"Foundry Reference" content in `apps/reference-site/foundry/`.
 
-**A client installation is its own repository.** It pins one exact foundation
+**A client installation has its own repository.** That repository pins one exact foundation
 release in `.foundry-foundation-release.json`, vendors or installs the
 `@humber-foundry/*` packages that release produced, and owns everything under
 its `foundry/` directory and its media. See
@@ -57,17 +58,13 @@ Treat this as recovery-only; the normal direction is product-first.
    installation's pin and vendored packages, and run the installation's own
    gates there.
 3. Redeploy the installation's private preview so the owner can verify the
-   feature against real content on desktop and phone. Owner acceptance on the
-   real installation — not the reference site — is what closes the loop for
-   product-recovery work (#101).
+   feature against real content on desktop and phone. The owner verifies a
+   product feature on the real installation, not on the reference site. A
+   feature is complete only after that verification.
 
-While foundry-cms PR #118 is open, the dashboard destinations exist only on
-that branch. Do not build dashboard-surface features (for example #109–#116)
-on `main`'s retired `DashboardShell`; land #117 and #118 first, or stack on
-#118 explicitly.
-
-## Release boundary
+Check the current build-order guidance on issue #101 before starting a
+dashboard-surface issue; it records which branch to build on.
 
 Client installations are private acceptance environments. Nothing in this
 document authorizes npm publication, a GitHub release, a production DNS
-change, or a client-domain cutover; those remain gated by #98 and #101.
+change, or a client-domain cutover. Those remain gated by #98 and #101.
