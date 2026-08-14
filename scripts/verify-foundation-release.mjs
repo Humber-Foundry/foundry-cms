@@ -48,7 +48,9 @@ async function main() {
     );
     const tiptapOverrides = Object.fromEntries(
       Object.entries(referenceManifest.dependencies).filter(([name]) =>
-        /^@tiptap\/(?:core|pm|extension-(?:bubble|floating)-menu)$/u.test(name),
+        /^@tiptap\/(?:core|pm|extension-(?:bubble|floating)-menu|extension-list)$/u.test(
+          name,
+        ),
       ),
     );
     const dependencies = Object.fromEntries(

@@ -1079,9 +1079,9 @@
 /* Immersive page editor ---------------------------------------------------
  *
  * Pages takes the whole window: one slim bar carries the workflow and the
- * site fills the rest of the screen, the way Squarespace or Framer present a
- * page. Browse mode shows the site as itself; Edit mode adds the canvas and
- * a docked panel.
+ * site fills the rest of the screen, the way full-window site builders
+ * present a page. Browse mode shows the site as itself; Edit mode adds the
+ * canvas and a docked panel.
  */
 .editor-immersive {
   position: fixed;
