@@ -52,7 +52,7 @@ async function waitForEditorValue(
     if (
       Array.from(
         host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-          ".editor-groups input, .editor-groups textarea",
+          ".editor-groups input, .editor-groups textarea, .editor-side-fields input, .editor-side-fields textarea",
         ),
       ).some(({ value }) => value === expected)
     ) {
@@ -61,6 +61,72 @@ async function waitForEditorValue(
     await new Promise((resolve) => window.setTimeout(resolve, 20));
   }
   return false;
+}
+
+async function enterEditMode(host: HTMLElement): Promise<void> {
+  const editButton = Array.from(
+    host.querySelectorAll<HTMLButtonElement>(".mode-toggle button"),
+  ).find((button) => button.textContent === "Edit");
+  expect(editButton).toBeDefined();
+  await userEvent.click(editButton!);
+  for (
+    let index = 0;
+    index < 100 && host.querySelector(".visual-component-editor") === null;
+    index += 1
+  ) {
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+  }
+  expect(host.querySelector(".visual-component-editor")).not.toBeNull();
+}
+
+async function editorCanvasDocument(host: HTMLElement): Promise<Document> {
+  for (let index = 0; index < 100; index += 1) {
+    const document = host.querySelector("iframe")?.contentDocument;
+    if (document?.querySelector(".site-canvas") != null) {
+      return document;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+  }
+  throw new Error("editor_canvas_not_ready");
+}
+
+async function selectEditorSection(
+  host: HTMLElement,
+  sectionId: string,
+): Promise<Document> {
+  let document = await editorCanvasDocument(host);
+  let section: HTMLElement | null = null;
+  for (let index = 0; index < 100 && section === null; index += 1) {
+    document = await editorCanvasDocument(host);
+    section = document.getElementById(sectionId);
+    if (section === null) {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    }
+  }
+  expect(section).not.toBeNull();
+  await userEvent.click(
+    section!.querySelector<HTMLElement>("h1, h2") ?? section!,
+  );
+  for (
+    let index = 0;
+    index < 100 && host.querySelector(".section-actions") === null;
+    index += 1
+  ) {
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+  }
+  expect(host.querySelector(".section-actions")).not.toBeNull();
+  return document;
+}
+
+async function openPublishingHistory(host: HTMLElement): Promise<void> {
+  const summary = host.querySelector<HTMLElement>(
+    ".publication-history-panel > summary",
+  );
+  expect(summary).not.toBeNull();
+  await userEvent.click(summary!);
+  expect(
+    host.querySelector<HTMLDetailsElement>(".publication-history-panel")?.open,
+  ).toBe(true);
 }
 
 describe("visual component editor browser acceptance", () => {
@@ -619,7 +685,7 @@ describe("visual component editor browser acceptance", () => {
     expect(await readContentEditorOutbox(workspaceId)).toBeNull();
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "records an accepted edit before the autosave debounce", async () => {
+  it("records an accepted edit before the autosave debounce", async () => {
     const workspaceId = "workspace_browser_snapshot";
     await clearContentEditorOutbox(workspaceId);
     const host = document.createElement("div");
@@ -639,6 +705,7 @@ describe("visual component editor browser acceptance", () => {
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
+    await enterEditMode(host);
     const siteName = Array.from(host.querySelectorAll("input")).find(
       (input) => input.value === referenceSiteDefinition.site.name,
     );
@@ -665,7 +732,7 @@ describe("visual component editor browser acceptance", () => {
     await clearContentEditorOutbox(workspaceId);
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "blocks save, preview, and autosave while a rich-text editor is locally invalid", async () => {
+  it("blocks save, preview, and autosave while a rich-text editor is locally invalid", async () => {
     const workspaceId = "workspace_browser_invalid_rich_text";
     await clearContentEditorOutbox(workspaceId);
     const fetchMock = vi.fn(
@@ -740,48 +807,41 @@ describe("visual component editor browser acceptance", () => {
         }),
       );
     });
-    for (
-      let index = 0;
-      index < 100 &&
-      host.querySelector<HTMLInputElement>(
-        'input[value="Foundry Reference"]',
-      )?.disabled !== false;
-      index += 1
-    ) {
-      await new Promise((resolve) => window.setTimeout(resolve, 20));
-    }
     const previewButton = Array.from(
       host.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) =>
-      button.textContent?.includes("Preview exact saved revision"),
-    )!;
-    await userEvent.click(previewButton);
-    const approvalButton = Array.from(
-      host.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent?.includes("Approve revision"))!;
+    ).find((button) => button.textContent === "Preview ↗");
+    expect(previewButton).toBeDefined();
+    await userEvent.click(previewButton!);
     for (
       let index = 0;
-      index < 20 && approvalButton.disabled;
+      index < 20 && !host.textContent?.includes("Previewed. Ready to publish.");
       index += 1
     ) {
       await new Promise((resolve) => window.setTimeout(resolve, 10));
     }
-    expect(approvalButton.disabled).toBe(false);
-    await userEvent.click(approvalButton);
+    expect(host.textContent).toContain("Previewed. Ready to publish.");
+    const publishSummary = host.querySelector<HTMLElement>(
+      ".publish-menu > summary",
+    );
+    expect(publishSummary).not.toBeNull();
+    await userEvent.click(publishSummary!);
     const publishButton = Array.from(
       host.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent === "Publish approved revision")!;
+    ).find((button) => button.textContent === "Publish now");
+    expect(publishButton).toBeDefined();
     for (
       let index = 0;
-      index < 20 && publishButton.disabled;
+      index < 20 && publishButton!.disabled;
       index += 1
     ) {
       await new Promise((resolve) => window.setTimeout(resolve, 10));
     }
-    expect(publishButton.disabled).toBe(false);
+    expect(publishButton!.disabled).toBe(false);
 
-    const richTextEditor = host
-      .querySelector("#section_contact\\.body-editor")
+    await enterEditMode(host);
+    const canvasDocument = await selectEditorSection(host, "section_contact");
+    const richTextEditor = canvasDocument
+      .querySelector("#section_contact-rendered-body-editor")
       ?.closest(".rich-text-editor");
     const linkButton = Array.from(
       richTextEditor?.querySelectorAll<HTMLButtonElement>("button") ?? [],
@@ -789,19 +849,24 @@ describe("visual component editor browser acceptance", () => {
     expect(linkButton).toBeDefined();
     await userEvent.click(linkButton!);
 
-    const siteName = host.querySelector<HTMLInputElement>(
-      'input[value="Foundry Reference"]',
+    const callToActionTitle = host.querySelector<HTMLInputElement>(
+      '.editor-side-fields input[title="Title"]',
     );
-    expect(siteName).not.toBeNull();
-    await userEvent.fill(siteName!, "Unsaved while rich text is invalid");
+    expect(callToActionTitle).not.toBeNull();
+    await userEvent.fill(
+      callToActionTitle!,
+      "Unsaved while rich text is invalid",
+    );
 
     const saveButton = Array.from(
       host.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent === "Save revision");
+    ).find((button) => button.textContent === "Save");
+    const blockedPreviewButton = Array.from(
+      host.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Preview last save ↗");
     expect(saveButton?.disabled).toBe(true);
-    expect(previewButton.disabled).toBe(true);
-    expect(approvalButton.disabled).toBe(true);
-    expect(publishButton.disabled).toBe(true);
+    expect(blockedPreviewButton?.disabled).toBe(true);
+    expect(publishButton!.disabled).toBe(true);
     await new Promise((resolve) => window.setTimeout(resolve, 350));
     expect(
       fetchMock.mock.calls.some(
@@ -813,8 +878,8 @@ describe("visual component editor browser acceptance", () => {
       ),
     ).toBe(false);
 
-    const editable = host.querySelector<HTMLElement>(
-      "#section_contact\\.body-editor",
+    const editable = canvasDocument.querySelector<HTMLElement>(
+      "#section_contact-rendered-body-editor",
     )!;
     editable.focus();
     await userEvent.keyboard("{End}x");
@@ -830,7 +895,7 @@ describe("visual component editor browser acceptance", () => {
     await clearContentEditorOutbox(workspaceId);
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "shows verified publication evidence with a restore-as-draft action", async () => {
+  it("shows verified publication evidence with a restore-as-draft action", async () => {
     const publicationId = `publish_${"2".repeat(32)}`;
     const restoreKeys: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -936,6 +1001,9 @@ describe("visual component editor browser acceptance", () => {
       );
     });
 
+    await enterEditMode(host);
+    await openPublishingHistory(host);
+
     for (
       let index = 0;
       index < 20 && !host.textContent?.includes("Revision 7");
@@ -946,7 +1014,7 @@ describe("visual component editor browser acceptance", () => {
 
     expect(host.textContent).toContain("Published history");
     expect(host.textContent).toContain("Revision 7");
-    expect(host.textContent).toContain("Verified live");
+    expect(host.textContent).toContain("Live — your site is up to date");
     expect(
       page.getByRole("button", { name: "Restore as new draft" }),
     ).toBeDefined();
@@ -1007,7 +1075,7 @@ describe("visual component editor browser acceptance", () => {
     expect(restoreKeys[5]).toBe(restoreKeys[4]);
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "distinguishes unavailable publication history from an empty history", async () => {
+  it("distinguishes unavailable publication history from an empty history", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       String(input).includes("view=history")
         ? Response.json({ error: "request_check_unavailable" }, { status: 503 })
@@ -1028,6 +1096,9 @@ describe("visual component editor browser acceptance", () => {
       );
     });
 
+    await enterEditMode(host);
+    await openPublishingHistory(host);
+
     for (
       let index = 0;
       index < 20 &&
@@ -1047,7 +1118,7 @@ describe("visual component editor browser acceptance", () => {
     );
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "restores a component before applying its dependent unsaved fields", async () => {
+  it("restores a component before applying its dependent unsaved fields", async () => {
     const workspaceId = "workspace_browser_structural_recovery";
     await clearContentEditorOutbox(workspaceId);
     const addedProof = createDefaultPageSection(
@@ -1092,6 +1163,8 @@ describe("visual component editor browser acceptance", () => {
       );
     });
 
+    await enterEditMode(host);
+    await selectEditorSection(host, addedProof.id);
     expect(
       await waitForEditorValue(
         host,
@@ -1102,7 +1175,7 @@ describe("visual component editor browser acceptance", () => {
     await clearContentEditorOutbox(workspaceId);
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "restores a migrated component before applying its dependent stale-workspace fields", async () => {
+  it("restores a migrated component before applying its dependent stale-workspace fields", async () => {
     const destinationWorkspaceId = "workspace_browser_migrated_recovery";
     const sourceWorkspaceId = "workspace_browser_legacy_recovery";
     const recoveryId = "recovery_browser_structural_dependency";
@@ -1172,20 +1245,25 @@ describe("visual component editor browser acceptance", () => {
       );
     });
 
-    expect(
-      await waitForEditorValue(
-        host,
-        "Unsaved evidence carried into the upgraded workspace",
-      ),
-    ).toBe(true);
+    await enterEditMode(host);
     expect(
       await waitForEditorValue(
         host,
         "Destination copy survives stale recovery",
       ),
     ).toBe(true);
-    const recoveredRichText = host.querySelector<HTMLElement>(
-      '[id="section_contact.body-editor"]',
+    const migratedCanvas = await selectEditorSection(host, addedProof.id);
+    expect(
+      await waitForEditorValue(
+        host,
+        "Unsaved evidence carried into the upgraded workspace",
+      ),
+    ).toBe(true);
+    await userEvent.click(
+      migratedCanvas.getElementById("section_contact")!.querySelector("h2")!,
+    );
+    const recoveredRichText = migratedCanvas.querySelector<HTMLElement>(
+      '[id="section_contact-rendered-body-editor"]',
     );
     for (
       let index = 0;
@@ -1213,7 +1291,7 @@ describe("visual component editor browser acceptance", () => {
     await clearContentEditorOutbox(destinationWorkspaceId);
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "keeps duplicate workspace tabs editable while coordinating browser persistence", async () => {
+  it("keeps duplicate workspace tabs editable while coordinating browser persistence", async () => {
     const workspaceId = "workspace_browser_lock";
     await clearContentEditorOutbox(workspaceId);
 
@@ -1237,6 +1315,7 @@ describe("visual component editor browser acceptance", () => {
         ),
       );
     });
+    await enterEditMode(ownerHost);
     let ownerReady = false;
     for (let index = 0; index < 10 && !ownerReady; index += 1) {
       const inputs = Array.from(ownerHost.querySelectorAll("input"));
@@ -1270,6 +1349,7 @@ describe("visual component editor browser acceptance", () => {
         ),
       );
     });
+    await enterEditMode(duplicateHost);
     let duplicateReady = false;
     for (let index = 0; index < 100 && !duplicateReady; index += 1) {
       const controls = Array.from(
@@ -1303,7 +1383,7 @@ describe("visual component editor browser acceptance", () => {
     await clearContentEditorOutbox(workspaceId);
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "recovers a legacy plain CTA outbox record into the rich-text editor", async () => {
+  it("recovers a legacy plain CTA outbox record into the rich-text editor", async () => {
     const workspaceId = "workspace_browser_legacy_rich_text";
     let attemptedBody: unknown;
     vi.stubGlobal(
@@ -1362,21 +1442,23 @@ describe("visual component editor browser acceptance", () => {
     expect(host.textContent).toContain(
       "Unsaved browser edits were recovered.",
     );
-    const editable = host.querySelector<HTMLElement>(
-      '[id="section_contact.body-editor"]',
+    await enterEditMode(host);
+    const recoveredCanvas = await selectEditorSection(host, "section_contact");
+    const editable = recoveredCanvas.querySelector<HTMLElement>(
+      '[id="section_contact-rendered-body-editor"]',
     );
     expect(editable?.closest("label")).toBeNull();
-    expect(editable?.getAttribute("aria-labelledby")).toBe(
-      "section_contact.body-label",
-    );
+    expect(editable?.getAttribute("aria-label")).toBe("Body");
     expect(
-      host.querySelector(".rich-text-toolbar")?.getAttribute(
-        "aria-labelledby",
+      recoveredCanvas.querySelector(
+        '[data-rendered-rich-text-editor="section_contact"] .rich-text-toolbar',
+      )?.getAttribute(
+        "aria-label",
       ),
-    ).toBe("section_contact.body-label");
+    ).toBe("Text formatting for Body");
   });
 
-  it.skip(/* TODO(#117): re-author for the Browse/Edit inline editor */ "preserves an incompatible rich-text recovery conflict when use-my-value is rejected", async () => {
+  it("preserves an incompatible rich-text recovery conflict when use-my-value is rejected", async () => {
     const workspaceId = "workspace_browser_invalid_rich_text_recovery";
     const callToAction = referenceSiteDefinition.home.sections.find(
       (section) => section.type === "callToAction",
@@ -1425,8 +1507,10 @@ describe("visual component editor browser acceptance", () => {
     expect(host.textContent).toContain(
       "That recovered value no longer fits the current Site Definition.",
     );
+    await enterEditMode(host);
+    const conflictCanvas = await editorCanvasDocument(host);
     expect(
-      host.querySelector('[id="section_contact.body-editor"]')
+      conflictCanvas.querySelector('[id="section_contact-rendered-body-editor"]')
         ?.textContent,
     ).not.toContain("This explicit plain-text format is incompatible.");
     expect(await readContentEditorOutbox(workspaceId)).toEqual(
