@@ -9,13 +9,16 @@ import {
   type RegisteredPageComponentProps,
   type RegisteredPageSection,
 } from "@humber-foundry/site-definition";
+import type { ReactNode } from "react";
 import {
   renderCallToActionPageComponent,
   renderHeroPageComponent,
   renderProofPageComponent,
   renderServicesPageComponent,
+  type InlineTextRenderer,
   type PageComponentRenderer,
 } from "./page-component-renderers";
+import { AttentionNotes } from "../components/attention-notes";
 
 export const imageCopyStoryComponent = createRegisteredPageComponent({
   type: "imageCopyStory",
@@ -86,6 +89,60 @@ export const invitationNewsletterComponent = createRegisteredPageComponent({
   },
 });
 
+const text = (label: string, defaultValue: string) =>
+  ({ control: "text", label, defaultValue }) as const;
+const textarea = (label: string, defaultValue: string) =>
+  ({ control: "textarea", label, defaultValue }) as const;
+const image = (label: string, defaultValue: string) =>
+  ({ control: "image", label, defaultValue }) as const;
+
+/**
+ * A story section with movable "attention notes" — sticky-note text a visitor
+ * can drag around, or nudge with the arrow keys. It carries the editor's
+ * in-place text editing so each sentence is edited where it stands.
+ */
+export const attentionStoryComponent = createRegisteredPageComponent({
+  type: "attentionStory",
+  label: "Attention story",
+  fields: {
+    title: text("Title", "How it works"),
+    introduction: textarea("Introduction", "People call it many things. Accurate, but incomplete."),
+    statementBefore: text("Statement before highlight", "What it comes down to is "),
+    statementHighlight: text("Highlighted statement", "paying attention"),
+    body: textarea("Body", "To what is said, and to what sits just beneath the surface — the patterns and quiet signals that show where a group is stuck, and where movement is possible."),
+    attentionLabel: text("Notes heading", "Worth paying attention to:"),
+    attentionHint: text("Notes invitation", "go on — move them around"),
+    notes: {
+      control: "array",
+      label: "Attention notes",
+      minItems: 1,
+      maxItems: 8,
+      fields: {
+        body: textarea("Note", "the space between people"),
+        tone: {
+          control: "select",
+          label: "Paper colour",
+          defaultValue: "green",
+          options: [
+            { label: "Green", value: "green" },
+            { label: "Periwinkle", value: "periwinkle" },
+            { label: "Yellow", value: "yellow" },
+          ],
+        },
+      },
+      defaultValue: [
+        { body: "the space between people", tone: "green" },
+        { body: "the words we use, and how they open or close connection", tone: "periwinkle" },
+        { body: "small shifts in understanding as people think out loud", tone: "yellow" },
+        { body: "what happens just before a group arrives, and what lingers after", tone: "green" },
+      ],
+    },
+    quote: text("Pull quote", "That is not accidental. It is the work."),
+    imageSrc: image("Image", "/foundry-workshop.svg"),
+    imageAlt: textarea("Image description", "A presenter writing on a whiteboard while a group looks on."),
+  },
+});
+
 export type InstalledPageComponentRegistration = PageComponentRegistration &
   Readonly<{ renderer: PageComponentRenderer }>;
 
@@ -116,6 +173,56 @@ function registeredProps<
   if (!validation.ok) throw new TypeError("page_component_invalid");
   return section.props as RegisteredPageComponentProps<Fields>;
 }
+
+function Highlight({ children }: { children: ReactNode }) {
+  return <span className="marker-highlight">{children}</span>;
+}
+
+/**
+ * The renderer's bridge to in-place editing. When the editor supplies an
+ * inline-text renderer (the section is selected in the canvas), each wrapped
+ * string renders editable where it stands; everywhere else it renders as the
+ * plain string it always was. Labels and multiline behaviour come from the
+ * component's own field registration.
+ */
+function inlineTextFor(
+  inlineText: InlineTextRenderer | undefined,
+  registration: Readonly<{ fields: Readonly<Record<string, PageComponentField>> }>,
+) {
+  return (path: string, value: string): ReactNode => {
+    if (inlineText === undefined) return value;
+    const [head, , itemKey] = path.split(".");
+    const field = registration.fields[head!];
+    const resolved =
+      field !== undefined && field.control === "array" && itemKey !== undefined
+        ? field.fields[itemKey]
+        : field;
+    return inlineText(path, value, {
+      multiline: resolved?.control === "textarea",
+      label: resolved?.label ?? head!,
+    });
+  };
+}
+
+/**
+ * The fields each registered renderer edits in place. The editor hides these
+ * from the side panel so every piece of text has exactly one editing surface;
+ * array fields stay in the panel because items are added and removed there.
+ */
+export const inlineEditedTextFields: Readonly<Record<string, ReadonlySet<string>>> = {
+  attentionStory: new Set([
+    "title", "introduction", "statementBefore", "statementHighlight", "body",
+    "attentionLabel", "attentionHint", "quote",
+  ]),
+};
+
+/**
+ * Link-destination fields edited from the link itself (a chip beside the
+ * button opens the URL there). Hidden from the side panel like the in-place
+ * text fields. None of the installed components carry an inline-edited link
+ * today, so this map is empty; the editor reads it defensively.
+ */
+export const popoverLinkFields: Readonly<Record<string, ReadonlySet<string>>> = {};
 
 const installedRegistrations = Object.freeze([
   installPageComponent(
@@ -199,6 +306,36 @@ const installedRegistrations = Object.freeze([
       </section>
     );
   }),
+  installPageComponent(attentionStoryComponent, ({ section, inlineText }) => {
+    const props = registeredProps(attentionStoryComponent, section);
+    const t = inlineTextFor(inlineText, attentionStoryComponent);
+    return (
+      <section className="lh-section" id={section.id} aria-labelledby={`${section.id}_title`}>
+        <div className="lh-contained">
+          <div className="lh-story-grid lh-story-grid-wide">
+            <div>
+              <h2 id={`${section.id}_title`}>{t("title", props.title)}</h2>
+              <p>{t("introduction", props.introduction)}</p>
+              <p className="lh-big-line">
+                {t("statementBefore", props.statementBefore)}
+                <Highlight>{t("statementHighlight", props.statementHighlight)}</Highlight>.
+              </p>
+              <p>{t("body", props.body)}</p>
+            </div>
+            <figure className="lh-bare-photo">
+              <img src={props.imageSrc} alt={props.imageAlt} width="1067" height="1600" loading="lazy" />
+            </figure>
+          </div>
+          <AttentionNotes
+            label={t("attentionLabel", props.attentionLabel)}
+            hint={t("attentionHint", props.attentionHint)}
+            notes={props.notes}
+          />
+          <blockquote>{t("quote", props.quote)}</blockquote>
+        </div>
+      </section>
+    );
+  }),
 ]);
 
 export const installedPageComponentRegistry =
@@ -229,7 +366,13 @@ export function createPuckField(field: PageComponentField): Record<string, unkno
         Object.entries(field.fields).map(([key, nested]) => [key, createPuckField(nested)]),
       ),
       getItemSummary: (item: Record<string, unknown>) =>
-        typeof item.title === "string" ? item.title : field.label,
+        typeof item.title === "string"
+          ? item.title
+          : typeof item.label === "string"
+            ? item.label
+            : typeof item.body === "string"
+              ? item.body
+              : field.label,
     };
   }
   if (field.control === "select") {

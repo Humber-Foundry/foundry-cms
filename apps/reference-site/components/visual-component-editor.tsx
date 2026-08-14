@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createUsePuck,
   Puck,
@@ -11,7 +11,6 @@ import {
 
 import {
   parseSerializedRichTextDocument,
-  pageCompositionContract,
   referencedPageComponentIds,
   serializeRichTextDocument,
   siteDesignAttributes,
@@ -22,12 +21,16 @@ import {
 } from "@humber-foundry/site-definition";
 
 import { definitionToPuckData, puckDataToDefinition } from "../src/page-composition-puck";
+import { InlineLink, InlineText } from "./inline-text";
+import type { InlineTextRenderer } from "../foundry/page-component-renderers";
 import { RichTextEditor } from "./rich-text-editor";
 import { SiteSection } from "./site-renderer";
 import {
   asRegisteredPageSection,
   createPuckField,
+  inlineEditedTextFields,
   installedPageComponentRegistry,
+  popoverLinkFields,
   type InstalledPageComponentRegistration,
 } from "../foundry/page-components";
 
@@ -40,7 +43,137 @@ function DesignScopedSection({
 }) {
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
-      <SiteSection section={section} definition={definition} />
+      <SiteSection section={section} definition={definition} editingSurface />
+    </div>
+  );
+}
+
+/** Set one dot-path field ("principles.2.text") in a props object, immutably. */
+function setAtPath(
+  value: unknown,
+  segments: ReadonlyArray<string>,
+  next: string,
+): unknown {
+  if (segments.length === 0) return next;
+  const [head, ...rest] = segments;
+  if (Array.isArray(value)) {
+    const index = Number(head);
+    return value.map((item, at) =>
+      at === index ? setAtPath(item, rest, next) : item,
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    return {
+      ...(value as Record<string, unknown>),
+      [head!]: setAtPath((value as Record<string, unknown>)[head!], rest, next),
+    };
+  }
+  return value;
+}
+
+/**
+ * A registered section on the canvas. While it is the selected section, its
+ * text renders editable in place — click into a sentence and type; the value
+ * commits when focus leaves it. Selection is the unlock, so a stray click on
+ * an unselected section cannot change words by mistake.
+ */
+function EditableRegisteredSection({
+  definition,
+  section,
+  disabled,
+}: {
+  definition: SiteDefinition;
+  section: PageSection & Readonly<{ type: "registered" }>;
+  disabled: boolean;
+}) {
+  const dispatch = useVisualPuck((state) => state.dispatch);
+  const getSelectorForId = useVisualPuck((state) => state.getSelectorForId);
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
+
+  const selector = getSelectorForId(section.id);
+  const isSelected =
+    !disabled &&
+    selector !== undefined &&
+    selected !== null &&
+    selected.index === selector.index &&
+    (selected.zone ?? rootZone) === (selector.zone ?? rootZone);
+
+  // One commit path for everything edited on the page itself. The schema
+  // decides what is allowed; a refused value — emptied text, a malformed
+  // destination — reverts in the editor instead of entering the canvas and
+  // breaking the section's render.
+  const commitField = (path: string, next: string): boolean => {
+    const liveSelector = getSelectorForId(section.id);
+    if (liveSelector === undefined) return false;
+    const nextProps = setAtPath(
+      section.props,
+      path.split("."),
+      next,
+    ) as Record<string, unknown>;
+    const registration =
+      installedPageComponentRegistry.components[section.component];
+    if (
+      registration === undefined ||
+      !registration.validate({ ...section, props: nextProps }).ok
+    ) {
+      return false;
+    }
+    dispatch({
+      type: "replace",
+      destinationIndex: liveSelector.index,
+      destinationZone: liveSelector.zone,
+      data: {
+        type: section.component,
+        props: {
+          id: section.id,
+          type: section.type,
+          component: section.component,
+          ...nextProps,
+        },
+      },
+      recordHistory: true,
+    });
+    return true;
+  };
+
+  const inlineText: InlineTextRenderer | undefined = isSelected
+    ? (path, value, options) => (
+        <InlineText
+          key={path}
+          path={path}
+          value={value}
+          multiline={options?.multiline ?? false}
+          label={options?.label ?? path}
+          onCommit={(next) => commitField(path, next)}
+        />
+      )
+    : undefined;
+
+  const inlineLink = isSelected
+    ? (
+        path: string,
+        href: string,
+        options?: Readonly<{ label?: string }>,
+      ) => (
+        <InlineLink
+          key={path}
+          path={path}
+          href={href}
+          label={options?.label ?? path}
+          onCommit={(next) => commitField(path, next)}
+        />
+      )
+    : undefined;
+
+  return (
+    <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
+      <SiteSection
+        section={section}
+        definition={definition}
+        inlineText={inlineText}
+        inlineLink={inlineLink}
+        editingSurface
+      />
     </div>
   );
 }
@@ -124,35 +257,30 @@ function RenderedCallToActionSection({
   );
 }
 
-function InsertComponentActions({ disabled }: { disabled: boolean }) {
-  const dispatch = useVisualPuck((state) => state.dispatch);
-  const contentLength = useVisualPuck((state) => state.appState.data.content.length);
-  return (
-    <div aria-label="Add registered page component">
-      {installedPageComponentRegistry.allowedComponents.map((type) => (
-        <button
-          key={type}
-          type="button"
-          disabled={disabled}
-          onClick={() =>
-            dispatch({
-              type: "insert",
-              componentType: type,
-              destinationIndex: contentLength,
-              destinationZone: "root:default-zone",
-              id: newStableComponentId(type),
-              recordHistory: true,
-            })
-          }
-        >
-          Add {installedPageComponentRegistry.components[type]!.label}
-        </button>
-      ))}
-    </div>
-  );
+const rootZone = "root:default-zone";
+
+/**
+ * Puck caches each section's resolved permissions. The config's permission
+ * getter reads live state, but the cache only refreshes when asked — so when
+ * the definition changes (a section becoming referenced makes it protected),
+ * the cache is told to re-resolve. Without this, Puck's own overlay could
+ * offer Delete on a section the schema no longer allows removing.
+ */
+function PermissionRefresher({ definition }: { definition: SiteDefinition }) {
+  const refreshPermissions = useVisualPuck((state) => state.refreshPermissions);
+  useEffect(() => {
+    refreshPermissions();
+  }, [definition, refreshPermissions]);
+  return null;
 }
 
-function ComponentStructureActions({
+/**
+ * The actions for whichever section is selected in the page. They sit at the
+ * top of the side panel, directly above that section's fields, so selecting a
+ * section brings everything about it to one place. There is no separate
+ * arrange-the-page list: the page itself is the list.
+ */
+function SelectedSectionActions({
   disabled,
   protectedComponentIds,
 }: {
@@ -160,69 +288,173 @@ function ComponentStructureActions({
   protectedComponentIds: ReadonlySet<string>;
 }) {
   const dispatch = useVisualPuck((state) => state.dispatch);
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
   const content = useVisualPuck((state) => state.appState.data.content);
-  const zone = "root:default-zone";
+  const barRef = useRef<HTMLDivElement>(null);
+
+  // On a phone the panel sits below the canvas, so selecting a section looked
+  // like nothing happened. Nudge the panel into view — nearest edge only, so
+  // the tapped section stays on screen.
+  const selectionKey =
+    selected === null ? null : `${selected.zone ?? rootZone}:${selected.index}`;
+  useEffect(() => {
+    if (selectionKey === null || barRef.current === null) return;
+    if (!window.matchMedia("(max-width: 60rem)").matches) return;
+    barRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectionKey]);
+
+  if (
+    selected === null ||
+    (selected.zone !== undefined && selected.zone !== rootZone)
+  ) {
+    return (
+      <p className="section-actions-hint">
+        Select a section in the page to edit or move it.
+      </p>
+    );
+  }
+
+  const index = selected.index;
+  const item = content[index];
+  if (item === undefined) {
+    return null;
+  }
+  const label =
+    installedPageComponentRegistry.components[item.type]?.label ?? item.type;
+  const id = String(item.props.id);
+  const moveSelected = (destinationIndex: number) => {
+    dispatch({
+      type: "move",
+      sourceIndex: index,
+      sourceZone: rootZone,
+      destinationIndex,
+      destinationZone: rootZone,
+      recordHistory: true,
+    });
+    // Puck clears the selection on move; the owner is still working with the
+    // same section, so it stays selected at its new place.
+    dispatch({
+      type: "setUi",
+      ui: { itemSelector: { index: destinationIndex, zone: rootZone } },
+    });
+  };
+
   return (
-    <ol aria-label="Order registered page components">
-      {content.map((item, index) => {
-        const registration = installedPageComponentRegistry.components[item.type];
-        const label = registration?.label ?? item.type;
-        const id = String(item.props.id);
-        return (
-          <li key={id}>
-            <span>{label}</span>
-            <button
-              type="button"
-              disabled={disabled || index === 0}
-              aria-label={`Move ${label} ${index + 1} up`}
-              onClick={() => dispatch({
-                type: "move",
-                sourceIndex: index,
-                sourceZone: zone,
-                destinationIndex: index - 1,
-                destinationZone: zone,
+    <div
+      className="section-actions"
+      role="group"
+      aria-label={`${label} section`}
+      ref={barRef}
+    >
+      <span className="section-actions-label">{label}</span>
+      <span className="section-actions-buttons">
+        <button
+          type="button"
+          disabled={disabled || index === 0}
+          aria-label="Move section up"
+          title="Move section up"
+          onClick={() => moveSelected(index - 1)}
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          disabled={disabled || index === content.length - 1}
+          aria-label="Move section down"
+          title="Move section down"
+          onClick={() => moveSelected(index + 1)}
+        >
+          ↓
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label="Duplicate section"
+          onClick={() => {
+            dispatch({
+              type: "duplicate",
+              sourceIndex: index,
+              sourceZone: rootZone,
+              recordHistory: true,
+            });
+            // The original stays selected; the copy sits directly under it.
+            dispatch({
+              type: "setUi",
+              ui: { itemSelector: { index, zone: rootZone } },
+            });
+          }}
+        >
+          Duplicate
+        </button>
+        <button
+          type="button"
+          disabled={disabled || protectedComponentIds.has(id)}
+          aria-label="Remove section"
+          onClick={() => {
+            dispatch({
+              type: "remove",
+              index,
+              zone: rootZone,
+              recordHistory: true,
+            });
+            dispatch({ type: "setUi", ui: { itemSelector: null } });
+          }}
+        >
+          Remove
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The one place a section is added. The new section lands after the selected
+ * one — or at the end when nothing is selected — and becomes the selection, so
+ * its fields are immediately in front of the owner.
+ */
+function AddSectionMenu({ disabled }: { disabled: boolean }) {
+  const dispatch = useVisualPuck((state) => state.dispatch);
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
+  const contentLength = useVisualPuck((state) => state.appState.data.content.length);
+  const menuRef = useRef<HTMLDetailsElement>(null);
+
+  const destinationIndex =
+    selected === null || (selected.zone !== undefined && selected.zone !== rootZone)
+      ? contentLength
+      : selected.index + 1;
+
+  return (
+    <details className="add-section-menu" ref={menuRef}>
+      <summary aria-label="Add section">+ Add section</summary>
+      <div role="group" aria-label="Section to add">
+        {installedPageComponentRegistry.allowedComponents.map((type) => (
+          <button
+            key={type}
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              dispatch({
+                type: "insert",
+                componentType: type,
+                destinationIndex,
+                destinationZone: rootZone,
+                id: newStableComponentId(type),
                 recordHistory: true,
-              })}
-            >↑</button>
-            <button
-              type="button"
-              disabled={disabled || index === content.length - 1}
-              aria-label={`Move ${label} ${index + 1} down`}
-              onClick={() => dispatch({
-                type: "move",
-                sourceIndex: index,
-                sourceZone: zone,
-                destinationIndex: index + 1,
-                destinationZone: zone,
-                recordHistory: true,
-              })}
-            >↓</button>
-            <button
-              type="button"
-              disabled={disabled}
-              aria-label={`Duplicate ${label} ${index + 1}`}
-              onClick={() => dispatch({
-                type: "duplicate",
-                sourceIndex: index,
-                sourceZone: zone,
-                recordHistory: true,
-              })}
-            >Duplicate</button>
-            <button
-              type="button"
-              disabled={disabled || protectedComponentIds.has(id)}
-              aria-label={`Remove ${label} ${index + 1}`}
-              onClick={() => dispatch({
-                type: "remove",
-                index,
-                zone,
-                recordHistory: true,
-              })}
-            >Remove</button>
-          </li>
-        );
-      })}
-    </ol>
+              });
+              dispatch({
+                type: "setUi",
+                ui: { itemSelector: { index: destinationIndex, zone: rootZone } },
+              });
+              if (menuRef.current !== null) {
+                menuRef.current.open = false;
+              }
+            }}
+          >
+            {installedPageComponentRegistry.components[type]!.label}
+          </button>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -271,17 +503,23 @@ function puckPropsToSection(
   } as unknown as PageSection;
 }
 
+/**
+ * Build the Puck config once per mount. Everything that changes while editing
+ * — the working definition, the protected sections, the disabled state — is
+ * read through getters, because giving Puck a new config object resets its UI
+ * state and throws away the owner's selection mid-edit.
+ */
 export function createVisualComponentConfig(
-  protectedComponentIds: ReadonlySet<string>,
-  definition: SiteDefinition,
+  getProtectedComponentIds: () => ReadonlySet<string>,
+  getDefinition: () => SiteDefinition,
   onValidationChange: (source: string, invalid: boolean) => void = ignoreRichTextValidation,
-  disabled = false,
+  getDisabled: () => boolean = () => false,
 ): Config {
   const components = Object.fromEntries(
     installedPageComponentRegistry.allowedComponents.map((type) => {
       const registration = installedPageComponentRegistry.components[type]!;
       const id = `section_new_${type.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}`;
-      const defaultSection = registration.createDefault(id, definition);
+      const defaultSection = registration.createDefault(id, getDefinition());
       const defaultProps = defaultSection.type === "registered"
         ? {
             id: defaultSection.id,
@@ -290,6 +528,13 @@ export function createVisualComponentConfig(
             ...defaultSection.props,
           }
         : defaultSection;
+      // Fields the renderer edits in place stay out of the panel: each piece
+      // of text gets exactly one editing surface. Arrays keep their panel
+      // controls because items are added, removed and reordered there.
+      const inlineCovered = new Set<string>([
+        ...(inlineEditedTextFields[type] ?? []),
+        ...(popoverLinkFields[type] ?? []),
+      ]);
       const fields = {
         id: hiddenField,
         type: hiddenField,
@@ -297,7 +542,9 @@ export function createVisualComponentConfig(
         ...Object.fromEntries(
           Object.entries(registration.fields).map(([key, field]) => [
             key,
-            editorField(field, onValidationChange),
+            inlineCovered.has(key)
+              ? hiddenField
+              : editorField(field, onValidationChange),
           ]),
         ),
       };
@@ -309,26 +556,50 @@ export function createVisualComponentConfig(
           defaultProps,
           render: (props: Record<string, unknown>) => {
             const section = puckPropsToSection(registration, defaultSection, props);
-            return section.type === "callToAction"
-              ? <RenderedCallToActionSection definition={definition} section={section} disabled={disabled} onValidationChange={onValidationChange} />
-              : <DesignScopedSection definition={definition} section={section} />;
+            if (section.type === "callToAction") {
+              return <RenderedCallToActionSection definition={getDefinition()} section={section} disabled={getDisabled()} onValidationChange={onValidationChange} />;
+            }
+            if (section.type === "registered") {
+              return <EditableRegisteredSection definition={getDefinition()} section={section} disabled={getDisabled()} />;
+            }
+            return <DesignScopedSection definition={getDefinition()} section={section} />;
           },
           resolvePermissions: (data: { props: { id: string } }) => ({
-            delete: !protectedComponentIds.has(data.props.id),
+            delete: !getProtectedComponentIds().has(data.props.id),
           }),
         },
       ];
     }),
   );
   return {
-    categories: {
-      page: {
-        title: "Registered page components",
-        components: [...installedPageComponentRegistry.allowedComponents],
-      },
-    },
     components,
+    // The page's root carries no editable fields of its own; without this Puck
+    // offers its built-in "title" input when nothing is selected.
+    root: { fields: {} },
   } as Config;
+}
+
+/** The side panel body when no section is selected. */
+function PanelWhenEmpty({ children }: { children?: ReactNode }) {
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
+  if (selected !== null) return null;
+  return <div className="editor-side-page">{children}</div>;
+}
+
+/**
+ * The selected section's fields; hidden — not unmounted — when nothing is
+ * selected, because Puck's field state belongs to its mounted form.
+ */
+function PanelFields() {
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
+  return (
+    <div
+      className="editor-side-fields"
+      style={selected === null ? { display: "none" } : undefined}
+    >
+      <Puck.Fields />
+    </div>
+  );
 }
 
 export function VisualComponentEditor({
@@ -337,25 +608,39 @@ export function VisualComponentEditor({
   onChange,
   onValidationChange = ignoreRichTextValidation,
   iframeEnabled = true,
+  panelWhenEmpty,
 }: {
   definition: SiteDefinition;
   disabled: boolean;
   onChange(definition: SiteDefinition): void;
   onValidationChange?(source: string, invalid: boolean): void;
   iframeEnabled?: boolean;
+  /**
+   * What the side panel shows when no section is selected — the page-level
+   * settings, in practice, so the panel is never a dead surface.
+   */
+  panelWhenEmpty?: ReactNode;
 }) {
   const initialData = useMemo(
     () => definitionToPuckData(definition, installedPageComponentRegistry),
     [],
   );
+  // Live values behind stable getters: a new config object would reset Puck's
+  // UI state and drop the owner's selection after every accepted edit.
+  const definitionRef = useRef(definition);
+  definitionRef.current = definition;
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+  const validationRef = useRef(onValidationChange);
+  validationRef.current = onValidationChange;
   const config = useMemo(
     () => createVisualComponentConfig(
-      referencedPageComponentIds(definition),
-      definition,
-      onValidationChange,
-      disabled,
+      () => referencedPageComponentIds(definitionRef.current),
+      () => definitionRef.current,
+      (source, invalid) => validationRef.current(source, invalid),
+      () => disabledRef.current,
     ),
-    [definition, disabled, onValidationChange],
+    [],
   );
   const [message, setMessage] = useState("");
   const active = useRef(true);
@@ -378,17 +663,10 @@ export function VisualComponentEditor({
   }
 
   return (
-    <section className="visual-component-editor" aria-labelledby="visual-component-editor-heading">
-      <div className="dashboard-section-heading">
-        <div>
-          <h3 id="visual-component-editor-heading">Visual page composition</h3>
-          <p>
-            Add, order, duplicate, remove, and configure registered components in{" "}
-            <code>{pageCompositionContract.slot.id}</code>. Use Tab to move between controls and the canvas; focus remains visible in both.
-          </p>
-        </div>
-      </div>
-      <p className="editor-message" role="status" aria-live="polite">{message}</p>
+    <section className="visual-component-editor" aria-label="Page editor">
+      {message !== "" ? (
+        <p className="editor-message" role="status" aria-live="polite">{message}</p>
+      ) : null}
       <div className="puck-editor-frame" aria-disabled={disabled} inert={disabled ? true : undefined}>
         <Puck
           config={config as Config}
@@ -399,14 +677,26 @@ export function VisualComponentEditor({
           onChange={(data) => accept(data as Data)}
         >
           <Puck.Layout>
-            <InsertComponentActions disabled={disabled} />
-            <ComponentStructureActions
-              disabled={disabled}
-              protectedComponentIds={referencedPageComponentIds(definition)}
-            />
-            <Puck.Components />
-            <Puck.Preview />
-            <Puck.Fields />
+            <PermissionRefresher definition={definition} />
+            {/* The page is the editing surface: the live preview dominates,
+              * and everything about the selected section sits beside it. */}
+            <div className="editor-workbench">
+              <div
+                className="editor-canvas"
+                aria-label="Your page — click a section to edit it"
+              >
+                <Puck.Preview />
+              </div>
+              <aside className="editor-side" aria-label="Page settings and selected section">
+                <SelectedSectionActions
+                  disabled={disabled}
+                  protectedComponentIds={referencedPageComponentIds(definition)}
+                />
+                <PanelFields />
+                <PanelWhenEmpty>{panelWhenEmpty}</PanelWhenEmpty>
+                <AddSectionMenu disabled={disabled} />
+              </aside>
+            </div>
           </Puck.Layout>
         </Puck>
       </div>

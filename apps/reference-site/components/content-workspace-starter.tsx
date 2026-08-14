@@ -312,7 +312,15 @@ export function ContentWorkspaceStarter({
         query.set("recovery", staleRecovery.id);
         query.set("recoverFrom", staleRecovery.sourceWorkspaceId);
       }
-      window.location.assign(`/dash?${query.toString()}`);
+      // Starting a draft leads into editing it: from Overview that means
+      // Pages; from an editing destination it means staying where you are.
+      // Recovery is the exception — the page editor is what applies preserved
+      // edits, so a recovering start always lands on Pages.
+      const destination =
+        query.has("recovery") || window.location.pathname === "/dash"
+          ? "/dash/pages"
+          : window.location.pathname;
+      window.location.assign(`${destination}?${query.toString()}`);
     } catch {
       setStarting(false);
       setMessage(

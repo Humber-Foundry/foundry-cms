@@ -15,17 +15,22 @@ import {
 
 export type PublicationRecord = ContentPublication;
 
+/**
+ * The publish pipeline in the owner's words. The stages are real — request,
+ * commit, build, deploy, live check — but the owner only needs to know
+ * whether it is still working, finished, or stopped.
+ */
 export const publicationLabels: Readonly<
   Record<ContentPublicationStatus, string>
 > = {
-  requested: "Publish requested",
-  committed: "Commit created",
-  building: "Cloudflare building",
-  deployed: "Deployed; verifying release",
-  "verified-live": "Verified live",
-  blocked: "Publish blocked",
-  failed: "Publish failed",
-  unknown: "Publish state unknown",
+  requested: "Publishing…",
+  committed: "Publishing — your changes are recorded",
+  building: "Publishing — the site is being rebuilt",
+  deployed: "Almost done — checking the live site",
+  "verified-live": "Live — your site is up to date",
+  blocked: "Publishing stopped before anything went live",
+  failed: "Publishing failed — check the live site before trying again",
+  unknown: "Checking what happened to the last publish…",
 };
 
 export function PublicationHistory({
@@ -101,7 +106,10 @@ export function PublicationHistory({
       const query = new URLSearchParams({
         workspace: result.body.draft.workspaceId,
       });
-      window.location.assign(`/dash?${query.toString()}`);
+      // The restored draft opens where the owner already is.
+      window.location.assign(
+        `${window.location.pathname}?${query.toString()}`,
+      );
     } catch {
       onMessage(
         "That published version could not be restored safely. No live content was changed.",
@@ -118,8 +126,9 @@ export function PublicationHistory({
       <div>
         <h3 id="publication-history-heading">Published history</h3>
         <p>
-          Durable approval, commit, build, and live-verification evidence.
-          Restoring creates a new unpublished draft.
+          Every publish is recorded here, with its build evidence. Restoring
+          an older published version creates a new draft — nothing goes live
+          until you publish it.
         </p>
       </div>
       {historyState === "loading" ? (

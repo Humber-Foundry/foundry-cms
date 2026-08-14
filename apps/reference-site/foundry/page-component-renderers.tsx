@@ -5,12 +5,38 @@ import { MediaOccurrence } from "@/components/media-occurrence";
 import { RichTextRenderer } from "@/components/rich-text-renderer";
 import { sectionAnchor } from "@/src/section-anchor";
 
+/**
+ * Renders one field's text editable in place inside the section's own markup.
+ * The editor supplies this while the section is selected; on the public site
+ * and in previews it is absent and renderers fall back to the plain string.
+ */
+export type InlineTextRenderer = (
+  path: string,
+  value: string,
+  options?: Readonly<{ multiline?: boolean; label?: string }>,
+) => ReactNode;
+
+/** Renders a link-destination editor beside the link itself. */
+export type InlineLinkRenderer = (
+  path: string,
+  href: string,
+  options?: Readonly<{ label?: string }>,
+) => ReactNode;
+
 export type PageComponentRenderContext = Readonly<{
   section: PageSection;
   definition?: SiteDefinition;
   mediaDelivery?: "authenticated" | "published";
   mediaAccessToken?: string;
   callToActionBody?: ReactNode;
+  inlineText?: InlineTextRenderer;
+  inlineLink?: InlineLinkRenderer;
+  /**
+   * True on editing surfaces (the canvas and browse mode), which render
+   * inside the authenticated dashboard. Third-party embeds are sandboxed
+   * there; the public site and the exact preview render them live.
+   */
+  editingSurface?: boolean;
 }>;
 
 export type PageComponentRenderer = (

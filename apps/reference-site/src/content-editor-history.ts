@@ -370,7 +370,13 @@ export function contentEditorReducer(
         persistedDefinition: action.definition,
         persistedRevision: action.revision,
         workingDefinition: action.definition,
-        projectionVersion: state.projectionVersion + 1,
+        // A save acknowledges persistence; it does not change what the canvas
+        // shows. Saves also run automatically after edits, so refreshing the
+        // projection here would rebuild the canvas mid-edit and throw away the
+        // owner's selection. If a recovered save ever lands content older than
+        // the screen, the next canvas change composes the on-screen state
+        // again, and every revision stays restorable regardless.
+        projectionVersion: state.projectionVersion,
         status: "saved",
         errors: {},
       };

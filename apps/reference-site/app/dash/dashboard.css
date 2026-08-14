@@ -1,6 +1,287 @@
+/* Dashboard type system --------------------------------------------------
+ *
+ * One family for every part of the CMS. The site's own Poppins and Caveat
+ * belong to the rendered site and stay inside `.site-canvas`, which
+ * `public.css` scopes them to. Monospace is for identifiers a person has to
+ * copy exactly, and nothing else.
+ *
+ * Four tokens carry the scale: `--dash-text-small` for labels and captions,
+ * `--dash-text` for body copy and fields, `--dash-h2` for a panel heading and
+ * `--dash-h1` for the page heading. Inside one panel, use the heading size
+ * once and let colour and weight carry the rest.
+ *
+ * Some older rules set a size directly — `.dashboard code` and the inline
+ * link chip and popover among them — so use the tokens for new work and move
+ * a rule across when you are already editing it. Do not read the browser
+ * test "the dashboard uses one typeface and one type scale" as proof there
+ * are none: it skips everything inside `.site-canvas`, where the link chip
+ * and popover render, and it audits a page with no `<code>` on it.
+ */
 .dashboard {
+  --dash-font:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --dash-font-mono: ui-monospace, "SF Mono", "IBM Plex Mono", monospace;
+
+  --dash-h1: clamp(1.75rem, 1.2rem + 1.6vw, 2.25rem);
+  --dash-h2: 1.25rem;
+  --dash-text: 1rem;
+  --dash-text-small: 0.875rem;
+
+  --dash-ink: #17201d;
+  --dash-ink-soft: #4a5651;
+  --dash-accent: #14563d;
+  --dash-accent-tint: #e7f0ea;
+  --dash-line: #d3dad5;
+  --dash-surface: #ffffff;
+  --dash-canvas: #f3f5f2;
+
+  --dash-gap: 1rem;
+  --dash-panel-gap: 2rem;
+
+  /* Corners: --dash-radius on containers, --dash-field-radius below on text
+   * fields. Older rules in this file set their own; use these for new work
+   * and move a rule across when you are already editing it. */
+  --dash-radius: 0.5rem;
+
+  /* The border, background and corner for a text field. Use these on new
+   * field rules so a field's look changes in one place. Some older fields
+   * still set their own, and .inline-link-popover input keeps a 0.4rem
+   * corner because it sits in a compact row. */
+  --dash-field-line: #cbd2cd;
+  --dash-field-bg: #fbfcfa;
+  --dash-field-radius: 0.45rem;
+
   min-height: 100vh;
-  background: #f3f5f2;
+  background: var(--dash-canvas);
+  color: var(--dash-ink);
+  font-family: var(--dash-font);
+  font-size: var(--dash-text);
+  line-height: 1.55;
+}
+
+/* Controls inherit the dashboard face. Without this, a button with no class
+ * falls back to the browser's own font and stands out as a different
+ * typeface — the single most visible inconsistency in the previous build. */
+.dashboard button,
+.dashboard input,
+.dashboard select,
+.dashboard textarea,
+.dashboard optgroup {
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+/* Puck ships its own face and sets it on its own hashed module classes, so the
+ * override has to reach every element it renders. The rendered site inside
+ * `.site-canvas` is exempt: that is the real page, and it keeps the site's
+ * own brand fonts. */
+.dashboard .puck-editor-frame *:not(.site-canvas *) {
+  font-family: var(--dash-font);
+}
+
+/* The wordmark badge and shared button take their face and size from the
+ * public stylesheet. The dashboard is CMS chrome, so it uses the CMS scale. */
+.dashboard .wordmark,
+.dashboard .wordmark span,
+.dashboard .button {
+  font-family: var(--dash-font);
+  font-size: var(--dash-text-small);
+}
+
+.dashboard h1 {
+  margin: 0;
+  font-size: var(--dash-h1);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.dashboard h2 {
+  margin: 0;
+  font-size: var(--dash-h2);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.dashboard h3 {
+  margin: 0;
+  font-size: var(--dash-text);
+  font-weight: 600;
+}
+
+.dashboard code {
+  font-family: var(--dash-font-mono);
+  font-size: 0.9em;
+}
+
+/* Page heading ----------------------------------------------------------- */
+
+.page-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--dash-gap);
+  margin-bottom: var(--dash-panel-gap);
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--dash-line);
+}
+
+.page-heading p {
+  max-width: 60ch;
+  margin: 0.4rem 0 0;
+  color: var(--dash-ink-soft);
+}
+
+/* Each destination separates its sections with space and a rule, so a long
+ * page still reads as distinct jobs rather than one column of text. The
+ * editor card is excluded: it is the page's single surface and carries its
+ * own border on all four sides, so the divider would double the top line
+ * and, being more specific, would strip the card's own top border and
+ * padding. */
+.dashboard-main > section:not(.content-editor) {
+  margin-top: var(--dash-panel-gap);
+  padding-top: var(--dash-panel-gap);
+  border-top: 1px solid var(--dash-line);
+}
+
+.dashboard-main > section > p {
+  max-width: 60ch;
+  margin: 0.4rem 0 1.25rem;
+  color: var(--dash-ink-soft);
+}
+
+.panel {
+  margin-top: var(--dash-panel-gap);
+  padding: 1.5rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+.panel h2 + p {
+  max-width: 60ch;
+  margin: 0.4rem 0 0;
+  color: var(--dash-ink-soft);
+}
+
+.panel-actions {
+  margin: 1.25rem 0 0;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 1.25rem;
+  border: 1px dashed var(--dash-line);
+  border-radius: var(--dash-radius);
+  color: var(--dash-ink-soft);
+}
+
+/* Destination and attention lists ---------------------------------------- */
+
+.destination-list,
+.attention-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.destination-list li,
+.attention-list li {
+  padding-block: 0.85rem;
+  border-top: 1px solid var(--dash-line);
+}
+
+.destination-list li:first-child,
+.attention-list li:first-child {
+  border-top: 0;
+}
+
+.destination-list a,
+.attention-list a {
+  display: inline-block;
+  min-height: 1.5rem;
+  color: var(--dash-accent);
+  font-weight: 600;
+  text-decoration: none;
+  text-underline-offset: 0.3rem;
+}
+
+.destination-list a:hover,
+.attention-list a:hover {
+  text-decoration: underline;
+}
+
+.destination-list span {
+  display: block;
+  color: var(--dash-ink-soft);
+}
+
+/* Facts ------------------------------------------------------------------
+ *
+ * Label above, value below, both at body size. The previous build set these
+ * values in a large serif, which made ordinary status words read as page
+ * headings. */
+.fact-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--dash-gap);
+  margin: 0;
+}
+
+.fact-list > div {
+  padding: 1rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+.fact-list dt {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.fact-list dd {
+  margin: 0.3rem 0 0;
+  font-weight: 600;
+}
+
+.technical-inventory {
+  margin-top: 1.25rem;
+}
+
+.technical-inventory summary {
+  min-height: 2.75rem;
+  padding: 0.6rem 0;
+  color: var(--dash-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.technical-inventory table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.technical-inventory caption {
+  margin-bottom: 0.75rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  text-align: left;
+}
+
+.technical-inventory th,
+.technical-inventory td {
+  padding: 0.6rem 0.75rem 0.6rem 0;
+  border-bottom: 1px solid var(--dash-line);
+  font-weight: 400;
+}
+
+.technical-inventory thead th {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
 }
 
 .dashboard-header {
@@ -20,28 +301,34 @@
 .dashboard-header-meta {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  font-size: 0.8rem;
+  gap: 1.25rem;
+  font-size: var(--dash-text-small);
 }
 
-.dashboard-header-meta a {
-  font-weight: 700;
-  text-underline-offset: 0.3rem;
+.signed-in-as {
+  color: var(--dash-ink-soft);
 }
 
-.status-dot {
+@media (max-width: 40rem) {
+  /* Keep the link out of the header on a narrow phone; the account line is
+   * what matters there and the public site is one tap from Overview. */
+  .signed-in-as {
+    max-width: 14ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Header links are touch targets like any other, so they carry the same 44px
+ * minimum rather than sitting at their text height. */
+.dashboard-header-meta a,
+.dashboard .wordmark-dashboard {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  color: var(--ink-soft);
-}
-
-.status-dot::before {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: #78817d;
-  content: "";
+  min-height: 2.75rem;
+  font-weight: 700;
+  text-underline-offset: 0.3rem;
 }
 
 .dashboard-layout {
@@ -59,130 +346,320 @@
   background: var(--white);
 }
 
-.dashboard-nav a,
-.dashboard-nav span {
-  border-radius: 0.5rem;
-  padding: 0.65rem 0.8rem;
-  color: var(--ink-soft);
-  font-size: 0.875rem;
+.dashboard-nav a {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+  border-radius: var(--dash-radius);
+  padding: 0.55rem 0.8rem;
+  color: var(--dash-ink-soft);
   text-decoration: none;
 }
 
+.dashboard-nav a:hover {
+  background: #eef2ef;
+  color: var(--dash-ink);
+}
+
 .dashboard-nav a[aria-current="page"] {
-  background: #e7f0ea;
-  color: var(--moss-dark);
-  font-weight: 700;
+  background: var(--dash-accent-tint);
+  color: var(--dash-accent);
+  font-weight: 600;
 }
 
-.dashboard-nav span[aria-disabled="true"] {
-  color: #929a96;
-}
-
-.nav-label {
-  margin: 1.4rem 0 0.4rem;
+.dashboard-nav-group h2 {
+  margin: 1.25rem 0 0.35rem;
   padding-inline: 0.8rem;
-  color: #78817d;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
 }
 
-.nav-label:first-child {
+.dashboard-nav-group:first-child h2 {
   margin-top: 0;
 }
 
 .dashboard-main {
   width: min(100%, 76rem);
   margin: 0 auto;
-  padding: clamp(1.5rem, 4vw, 3.5rem);
+  padding: clamp(1.5rem, 4vw, 3rem);
 }
 
-.blog-post-form {
+/* On a phone the navigation becomes a scrollable row above the content, so
+ * every destination stays one tap away without a menu to discover. */
+@media (max-width: 60rem) {
+  .dashboard-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-nav {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    flex-direction: row;
+    min-height: 0;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding: 0.5rem 0.75rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--dash-line);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dashboard-nav-group {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.25rem;
+  }
+
+  /* The group names are a desktop affordance; on a phone the row is short
+   * enough to read directly, and the labels would cost a scroll. */
+  .dashboard-nav-group h2 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .dashboard-nav-group + .dashboard-nav-group {
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--dash-line);
+  }
+
+  .dashboard-nav a {
+    white-space: nowrap;
+  }
+
+  /* On small screens the toolbar scrolls with the page instead of staying
+   * pinned — the controls are one scroll away, and the page keeps the room.
+   * (Extra specificity: the base sticky rule appears later in this file.) */
+  .dashboard .editor-toolbar {
+    position: static;
+  }
+}
+
+/* Writing composer (Blog posts and Newsletter emails) ---------------------
+ *
+ * A large title, the body underneath it, and the details (summary, web
+ * address, inbox lines) either below or folded away. One set of rules serves
+ * Blog and Newsletter, so both look the same. */
+.composer {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+  max-width: 46rem;
 }
 
-.blog-post-form label {
+.composer-title {
   display: grid;
   gap: 0.4rem;
 }
 
-.blog-post-form label:nth-of-type(n + 3),
-.blog-post-form button {
-  grid-column: 1 / -1;
-}
-
-.blog-post-form input,
-.blog-post-form textarea {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #cbd5d0;
-  border-radius: 0.4rem;
-  font: inherit;
-}
-
-.blog-post-operations {
-  padding: 0;
-  margin: 1.5rem 0 0;
-  list-style: none;
-}
-
-.blog-post-operations li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-block: 0.75rem;
-  border-top: 1px solid #dce3df;
-}
-
-.blog-post-operations li div,
-.blog-post-operations li span {
-  display: block;
-}
-
-.notice {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 2.5rem;
-  border: 1px solid #c6dacc;
-  border-radius: 0.65rem;
-  padding: 0.8rem 1rem;
-  background: #edf6f0;
-  color: var(--ink-soft);
-  font-size: 0.875rem;
-}
-
-.notice span {
-  color: var(--moss-dark);
+.composer-title > span {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
   font-weight: 700;
 }
 
-.dashboard-title-row {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 2rem;
-  margin-bottom: 3.5rem;
+/* One skin for the composer fields and the "Start from a blog post" select
+ * listed below. Size, weight and padding differ per field and stay with the
+ * individual rules. Other fields elsewhere in the dashboard set their own. */
+.composer-title input,
+.composer-settings :is(input, textarea),
+.composer-settings-open :is(input, textarea),
+.campaign-from-post select {
+  box-sizing: border-box;
+  border: 1px solid var(--dash-field-line);
+  border-radius: var(--dash-field-radius);
+  background: var(--dash-field-bg);
+  color: var(--dash-ink);
+  font: inherit;
 }
 
-.dashboard-title-row h1 {
+/* Weight carries the emphasis here. The panel heading already uses
+ * --dash-h2, so the title field stays at --dash-text. */
+.composer-title input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  font-size: var(--dash-text);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* The body is the largest field in the form, because writing is the job. */
+.composer .rich-text-editor .tiptap {
+  min-height: 16rem;
+}
+
+.composer-hint {
   margin: 0;
-  font-family: var(--font-serif);
-  font-size: clamp(2.25rem, 4vw, 3.5rem);
-  font-weight: 400;
-  letter-spacing: -0.035em;
-  line-height: 1.1;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
 }
 
-.dashboard-title-row > div > p:last-child {
-  max-width: 42rem;
-  margin: 0.85rem 0 0;
-  color: var(--ink-soft);
+.composer-settings {
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 0 1rem;
+}
+
+.composer-settings > summary {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--dash-accent);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.composer-settings > div,
+.composer-settings-open {
+  display: grid;
+  gap: 1rem;
+}
+
+.composer-settings > div {
+  padding: 0.25rem 0 1rem;
+}
+
+.composer-settings label,
+.composer-settings-open label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 700;
+}
+
+.composer-settings :is(input, textarea),
+.composer-settings-open :is(input, textarea) {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  font-size: var(--dash-text-small);
+  font-weight: 400;
+}
+
+.composer-settings textarea,
+.composer-settings-open textarea {
+  resize: vertical;
+}
+
+.composer-slug {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 400;
+}
+
+.composer-slug input {
+  flex: 1;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.composer-actions .button {
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+/* Post and email lists ----------------------------------------------------
+ *
+ * One row per item: its title and its state in words on the left, its
+ * buttons on the right. */
+.post-list {
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.post-list > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding-block: 0.85rem;
+  border-top: 1px solid var(--dash-line);
+}
+
+.post-list > li:first-child {
+  border-top: 0;
+}
+
+.post-list-summary {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.post-list-summary span {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.post-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.post-list-editing {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.campaign-from-post {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.campaign-from-post label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 16rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 700;
+}
+
+.campaign-from-post select {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--dash-text-small);
+  font-weight: 400;
+}
+
+.email-preview {
+  margin-top: 1.5rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 1rem;
+  background: var(--dash-surface);
+}
+
+.email-preview pre {
+  margin: 0.75rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--dash-font);
+  font-size: var(--dash-text-small);
+  line-height: 1.5;
+}
+
+.email-preview summary {
+  color: var(--dash-accent);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .copy-button {
@@ -194,7 +671,7 @@
   background: var(--white);
   color: var(--ink);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--dash-text-small);
   font-weight: 700;
   cursor: pointer;
 }
@@ -213,7 +690,7 @@
 .copy-status {
   max-width: 15rem;
   color: #8a352f;
-  font-size: 0.75rem;
+  font-size: var(--dash-text-small);
   text-align: right;
 }
 
@@ -228,8 +705,8 @@
 .access-invite-form label {
   display: grid;
   gap: 0.35rem;
-  color: var(--ink-subtle);
-  font-size: 0.78rem;
+  color: var(--ink-soft);
+  font-size: var(--dash-text-small);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -249,8 +726,8 @@
 
 .inventory-row strong small {
   display: block;
-  color: var(--ink-subtle);
-  font-size: 0.7rem;
+  color: var(--ink-soft);
+  font-size: var(--dash-text-small);
   font-weight: 500;
   text-transform: capitalize;
 }
@@ -287,14 +764,14 @@
 
 .dashboard-section-heading h2 {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--dash-h2);
   line-height: 1.3;
 }
 
 .dashboard-section-heading p {
   margin: 0.35rem 0 0;
   color: var(--ink-soft);
-  font-size: 0.875rem;
+  font-size: var(--dash-text-small);
 }
 
 .state-label {
@@ -304,7 +781,7 @@
   padding: 0.3rem 0.65rem;
   background: #dff2e6;
   color: #17613d;
-  font-size: 0.75rem;
+  font-size: var(--dash-text-small);
   font-weight: 700;
 }
 
@@ -325,30 +802,32 @@
 
 .status-grid dt {
   color: var(--ink-soft);
-  font-size: 0.75rem;
+  font-size: var(--dash-text-small);
 }
 
 .status-grid dd {
   margin: 1.5rem 0 0.25rem;
-  font-family: var(--font-serif);
-  font-size: 1.65rem;
+  font-family: var(--dash-font);
+  font-size: var(--dash-h2);
 }
 
 .status-grid p {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 0.8rem;
-}
-
-.inventory-section {
-  margin-top: 3.5rem;
+  font-size: var(--dash-text-small);
 }
 
 .content-editor {
+  --editor-pad: clamp(1rem, 3vw, 1.5rem);
+
   margin-bottom: 3.5rem;
   border: 1px solid #dce1dc;
   border-radius: 0.8rem;
-  padding: clamp(1rem, 3vw, 1.5rem);
+  /* Even padding on every side. Content sits off the border by default;
+   * a child that wants to reach an edge (the draft toolbar below) pulls
+   * itself out with a matching negative margin, rather than the card
+   * dropping its padding and every other child having to add it back. */
+  padding: var(--editor-pad);
   background: var(--white);
 }
 
@@ -363,62 +842,56 @@
   height: auto;
 }
 
-.editor-heading {
-  align-items: center;
-}
-
-.editor-actions,
-.editor-status {
+/* Draft toolbar -----------------------------------------------------------
+ *
+ * The whole draft workflow lives in one bar that stays put while the page
+ * below is edited: status on the left, then undo/redo, save, preview,
+ * approve, publish — in the order the work happens. */
+.editor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
   align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  /* Reaches out to the card's top and side edges to form its header strip,
+   * cancelling the card padding on those three sides so the sticky bar meets
+   * the rounded corners. The bottom keeps a gap to the content below. */
+  margin: calc(-1 * var(--editor-pad, 0rem)) calc(-1 * var(--editor-pad, 0rem))
+    1rem;
+  padding: 0.6rem var(--editor-pad, 0rem);
+  border-bottom: 1px solid var(--dash-line);
+  border-radius: 0.8rem 0.8rem 0 0;
+  background: var(--dash-canvas);
 }
 
-.editor-actions .button {
+.editor-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-toolbar .button {
   min-height: 2.75rem;
   cursor: pointer;
 }
 
-.editor-actions button:disabled {
+.editor-toolbar button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.editor-status {
-  padding-block: 0.85rem;
-  border-block: 1px solid #e6e9e6;
-  font-size: 0.8rem;
+.editor-notes {
+  margin-bottom: 0.75rem;
 }
 
-.editor-status a {
-  font-weight: 700;
-  text-underline-offset: 0.25rem;
-}
-
-.publication-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-  padding-block: 0.9rem;
-  border-bottom: 1px solid #e6e9e6;
-}
-
-.publication-actions > div {
-  display: grid;
-  gap: 0.2rem;
-  margin-right: auto;
-  font-size: 0.8rem;
-}
-
-.publication-actions > div span {
-  color: var(--ink-soft);
-}
-
-.publication-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
+.editor-publication-note {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
 }
 
 .publication-history {
@@ -446,7 +919,7 @@
 .publication-history > p,
 .publication-history > ol > li > div span {
   color: var(--ink-soft);
-  font-size: 0.8rem;
+  font-size: var(--dash-text-small);
 }
 
 .publication-history > ol {
@@ -466,7 +939,7 @@
 .publication-history dl {
   display: grid;
   gap: 0.3rem;
-  font-size: 0.75rem;
+  font-size: var(--dash-text-small);
 }
 
 .publication-history dl > div {
@@ -483,7 +956,7 @@
   margin: 0;
   padding-left: 1.25rem;
   color: var(--ink-soft);
-  font-size: 0.75rem;
+  font-size: var(--dash-text-small);
 }
 
 .publication-history li > ol span {
@@ -496,31 +969,28 @@
 }
 
 .editor-message {
-  min-height: 1.5rem;
-  margin: 0.75rem 0;
-  color: #8a352f;
-  font-size: 0.8rem;
+  margin: 0;
+  color: var(--dash-ink);
+  font-size: var(--dash-text-small);
 }
 
 .visual-component-editor {
-  margin: 1.25rem 0 1.5rem;
-  border-top: 1px solid #e6e9e6;
-  padding-top: 1.25rem;
+  margin: 1rem 0 1.5rem;
 }
 
 .visual-component-editor h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--dash-text);
 }
 
 .visual-component-editor code {
-  font-size: 0.75rem;
+  font-size: var(--dash-text-small);
 }
 
 .puck-editor-frame {
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid #cbd2cd;
-  border-radius: 0.65rem;
+  border-radius: var(--dash-radius);
   background: var(--white);
 }
 
@@ -533,9 +1003,541 @@
   opacity: 0.65;
 }
 
+/* In-place text editing ---------------------------------------------------
+ *
+ * While a section is selected, its text renders editable where it stands.
+ * Hover shows what can be edited; focus shows what is being edited. Unselected
+ * sections carry none of this, so the page looks like the page.
+ *
+ * Colours are literal on purpose: these rules apply inside the canvas iframe,
+ * where the dashboard's --dash-* custom properties are out of scope.
+ */
+.site-canvas [data-inline-edit] {
+  border-radius: 3px;
+  cursor: text;
+  /* These regions are inline spans, so a paragraph that wraps is three or
+   * four line boxes. An outline is drawn around each line box, and with an
+   * offset the outlines of neighbouring lines touch, which looks like a thick
+   * dark bar between the lines. A background colour is used instead, because
+   * it covers only the text. box-decoration-break keeps it the same on every
+   * line of a wrapped span. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  transition: background-color 120ms ease-out;
+}
+
+/* The tint is mixed from the text's own colour, so it reads the same on the
+ * dark sections as on the light ones, and it stays faint enough that reading
+ * and writing in the canvas still feels like reading the page. Browsers
+ * without color-mix simply show no tint, which is the safe way to fail. */
+.site-canvas [data-inline-edit]:hover {
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+/* The editable spans carry tabindex="0", so they also match the public site's
+ * own focus ring in public.css:
+ *
+ *   .site-canvas :is(a, button, input, textarea, select, [tabindex]):focus-visible
+ *     { outline: 3px solid #fff; box-shadow: 0 0 0 6px #101820; }
+ *
+ * That ring suits a link or a button, which is one box. These regions are
+ * inline spans, so a wrapped paragraph is three or four line boxes, and the
+ * 6px #101820 box-shadow is drawn around each one. Setting outline to none is
+ * not enough, because the box-shadow is set by that separate rule.
+ *
+ * The selector names tabindex as well as data-inline-edit, so it is one
+ * attribute more specific than the public rule and wins without !important.
+ * Links and buttons inside the canvas keep the full ring. */
+.site-canvas [data-inline-edit][tabindex]:focus,
+.site-canvas [data-inline-edit][tabindex]:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+}
+
+/* Touch screens have no hover: while a section is selected (these regions
+ * only exist then), every editable text carries the faint tint, so a phone
+ * shows what a pointer would discover. */
+@media (hover: none) {
+  .site-canvas [data-inline-edit] {
+    background: color-mix(in srgb, currentColor 5%, transparent);
+  }
+}
+
+/* Each editable region is also registered as a Puck overlay portal, and Puck
+ * rings those in a 2px dashed azure box on hover and focus. Stacked on the
+ * tint that is a second frame around the same words, and on wrapped text it
+ * is drawn once per line. The tint and the caret already say what is being
+ * edited, so the dashed box is removed for these regions only; other overlay
+ * portals keep Puck's default. The selector carries one more attribute than
+ * Puck's so it wins without !important. */
+[data-puck-entry][data-puck-preview-mode="edit"] [data-puck-overlay-portal][data-inline-edit]:hover,
+[data-puck-entry][data-puck-preview-mode="edit"] [data-puck-overlay-portal][data-inline-edit]:focus-within {
+  outline: none;
+}
+
+/* Immersive page editor ---------------------------------------------------
+ *
+ * Pages takes the whole window: one slim bar carries the workflow and the
+ * site fills the rest of the screen, the way Squarespace or Framer present a
+ * page. Browse mode shows the site as itself; Edit mode adds the canvas and
+ * a docked panel.
+ */
+.editor-immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: var(--dash-canvas);
+}
+
+.editor-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  min-height: 3.25rem;
+  padding: 0.35rem 0.9rem;
+  border-bottom: 1px solid var(--dash-line);
+  background: var(--dash-surface);
+}
+
+.topbar-back {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topbar-back:hover {
+  color: var(--dash-ink);
+}
+
+/* Wins over the dashboard's generic h1 sizing: this is chrome, not a page
+ * heading. */
+.dashboard .editor-topbar .topbar-title {
+  margin: 0;
+  font-size: var(--dash-text);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+.topbar-grow {
+  flex: 1;
+}
+
+.mode-toggle {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--dash-line);
+  border-radius: 0.5rem;
+}
+
+.mode-toggle button {
+  min-height: 2.25rem;
+  border: 0;
+  padding: 0.35rem 0.9rem;
+  background: var(--dash-surface);
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode-toggle button[aria-pressed="true"] {
+  background: var(--dash-accent-tint);
+  color: var(--dash-accent);
+}
+
+.editor-immersive .editor-toolbar-actions {
+  gap: 0.4rem;
+}
+
+.editor-immersive .editor-toolbar-actions .copy-button,
+.editor-immersive .editor-toolbar-actions .button {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.8rem;
+  font-size: var(--dash-text-small);
+}
+
+.editor-immersive .editor-notes {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  /* A constant height: the text inside changes with the autosave cycle, and
+   * a strip that appears and disappears would make the canvas jump. */
+  min-height: 2rem;
+  margin: 0;
+  padding: 0.2rem 0.9rem;
+  border-bottom: 1px solid var(--dash-line);
+  background: var(--dash-surface);
+}
+
+.editor-immersive .editor-notes p {
+  overflow: hidden;
+  margin: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Browse: the site, full width, nothing else.
+ *
+ * .editor-stage and .editor-browse are isolated stacking contexts at level 0 so
+ * the site's own sticky header cannot paint over the editor chrome — the
+ * publish panel opens from the top bar and must stay on top. */
+.editor-browse {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--white);
+}
+
+.editor-immersive .editor-notes {
+  position: relative;
+  z-index: 31;
+}
+
+/* Above the notes strip: the publish panel opens from this bar and drops
+ * over the strip. */
+.editor-immersive .editor-topbar {
+  position: relative;
+  z-index: 32;
+}
+
+/* Edit: canvas plus docked panel fill the remaining height. Isolated for the
+ * same reason as Browse: the top bar's publish panel stays on top. */
+.editor-stage {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-stage .visual-component-editor {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.editor-stage .puck-editor-frame {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.editor-stage .puck-editor-frame .Puck,
+.editor-stage .puck-editor-frame [class*="_Puck_"] {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+/* Section hover in Edit mode.
+ *
+ * Puck fills the whole hovered component with a translucent blue background.
+ * Here a component is a whole page section, so pointing anywhere in one
+ * repaints a block over a thousand pixels tall. Sections also contain their
+ * own hover targets, the inline-editable text regions, and Puck hides a
+ * parent's overlay while a child is hovered. Moving the pointer across those
+ * boundaries turns the background on and off repeatedly.
+ *
+ * The background is removed and a 1px border kept, so the section being
+ * pointed at is still identifiable. These are Puck's own theming properties.
+ *
+ * The rule sits at :root because Puck renders the canvas in an iframe and
+ * mirrors host stylesheets into it; a selector scoped to .editor-stage does
+ * not match inside that document. Nothing but Puck reads these properties. */
+:root {
+  --puck-slot-component-color-overlay: transparent;
+  --puck-slot-component-color-overlay-border: #9aa7a0;
+  --puck-slot-component-border-width: 1px;
+}
+
+.editor-stage .editor-workbench {
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr) 21.5rem;
+}
+
+.editor-stage .editor-canvas {
+  height: 100%;
+  min-height: 0;
+}
+
+.editor-stage .editor-canvas [class*="_PuckPreview"] {
+  height: 100% !important;
+  min-height: 0;
+  padding: 0;
+  overflow: auto;
+}
+
+.editor-stage .editor-side {
+  height: 100%;
+  max-height: none;
+}
+
+/* The panel's page-settings body when nothing is selected. */
+.editor-side-page {
+  padding: 1rem;
+}
+
+.editor-side-page .editor-groups {
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+
+.editor-side-page .publication-history-panel {
+  margin-top: 1.25rem;
+  padding-top: 0.75rem;
+}
+
+.editor-side-fields {
+  min-height: 0;
+}
+
+/* Link editing from the link itself ---------------------------------------
+ *
+ * Colours are literal for the same reason as the in-place text rules: these
+ * render inside the canvas iframe, outside the dashboard's custom
+ * properties. */
+.inline-link-edit {
+  position: relative;
+  display: inline-block;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.inline-link-chip {
+  min-height: 1.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inline-link-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 0.4rem;
+  width: 18rem;
+  padding: 0.6rem;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(16, 24, 32, 0.18);
+}
+
+.inline-link-popover input {
+  min-height: 2.25rem;
+  border: 1px solid var(--dash-field-line);
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  color: #17201d;
+  font-size: 0.85rem;
+}
+
+.inline-link-popover input[aria-invalid="true"] {
+  border-color: #8a352f;
+}
+
+.inline-link-popover button {
+  justify-self: start;
+  min-height: 2rem;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.4rem;
+  padding: 0.2rem 0.7rem;
+  background: #fff;
+  color: #17201d;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inline-link-popover em {
+  color: #8a352f;
+  font-size: 0.8rem;
+  font-style: normal;
+}
+
+/* Editing workbench -------------------------------------------------------
+ *
+ * The live page is the editing surface; everything about the selected
+ * section sits in one panel beside it. There is no separate component
+ * drawer and no arrange-the-page list — the page itself is the list. */
+.editor-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+  align-items: start;
+}
+
+.editor-canvas {
+  min-width: 0;
+}
+
+/* The canvas is a tall scrollable viewport onto the real page, the way any
+ * mature CMS presents it. Replacing Puck's own layout removed its height
+ * chain, so the frame takes its height here. */
+.editor-canvas [class*="_PuckPreview"] {
+  height: calc(100vh - 9rem);
+  min-height: 30rem;
+  padding: 0;
+  overflow: auto;
+}
+
+.editor-canvas iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+}
+
+.editor-side {
+  /* Sticky resolves against Puck's own scroll container, whose top edge is
+   * the canvas top — so 0 aligns the panel with the canvas. */
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 9rem);
+  overflow-y: auto;
+  border-left: 1px solid #dce1dc;
+  background: var(--white);
+}
+
+.section-actions,
+.section-actions-hint {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid #dce1dc;
+  background: #f8f9f7;
+}
+
+.section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.section-actions-hint {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.section-actions-label {
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+}
+
+.section-actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.section-actions-buttons button {
+  min-width: 2.4rem;
+  min-height: 2.4rem;
+  border: 1px solid #cbd2cd;
+  border-radius: var(--dash-field-radius);
+  padding: 0.3rem 0.6rem;
+  background: var(--white);
+  color: var(--dash-ink);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.section-actions-buttons button:hover {
+  border-color: var(--moss);
+}
+
+.section-actions-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.add-section-menu {
+  margin-top: auto;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid #dce1dc;
+}
+
+.add-section-menu summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.5rem;
+  background: var(--white);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.add-section-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.add-section-menu summary:hover {
+  border-color: var(--moss);
+}
+
+.add-section-menu > div {
+  display: grid;
+  gap: 0.4rem;
+  padding-top: 0.6rem;
+}
+
+.add-section-menu > div button {
+  min-height: 2.75rem;
+  border: 1px solid #cbd2cd;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--white);
+  color: var(--dash-ink);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.add-section-menu > div button:hover {
+  border-color: var(--moss);
+}
+
+/* The side panel's field list aligns to the same 1rem grid as the panel's
+ * own sections. */
+.editor-side [class*="_PuckFields"] {
+  padding: 1rem;
+}
+
 .editor-recovery-conflicts {
   border: 1px solid #dce1dc;
-  border-radius: 0.65rem;
+  border-radius: var(--dash-radius);
   padding: 1rem;
 }
 
@@ -569,7 +1571,7 @@
   min-width: 0;
   margin: 0;
   border: 1px solid #dce1dc;
-  border-radius: 0.65rem;
+  border-radius: var(--dash-radius);
   padding: 1rem;
 }
 
@@ -578,12 +1580,34 @@
   font-weight: 700;
 }
 
+.page-settings,
+.publication-history-panel {
+  margin-top: var(--dash-panel-gap);
+  padding-top: 1rem;
+  border-top: 1px solid var(--dash-line);
+}
+
+.page-settings > summary,
+.publication-history-panel > summary {
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--dash-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.page-settings[open] > summary,
+.publication-history-panel[open] > summary {
+  margin-bottom: 1rem;
+}
+
 .editor-groups label,
 .editor-groups .editor-field {
   display: grid;
   gap: 0.35rem;
   color: var(--ink-soft);
-  font-size: 0.8rem;
+  font-size: var(--dash-text-small);
   font-weight: 700;
 }
 
@@ -596,9 +1620,9 @@
 }
 
 .editor-groups code {
-  color: #78817d;
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
+  color: var(--ink-soft);
+  font-family: var(--dash-font-mono);
+  font-size: var(--dash-text-small);
   font-weight: 400;
 }
 
@@ -606,21 +1630,21 @@
 .editor-groups select,
 .editor-groups textarea {
   width: 100%;
-  border: 1px solid #cbd2cd;
-  border-radius: 0.45rem;
+  border: 1px solid var(--dash-field-line);
+  border-radius: var(--dash-field-radius);
   padding: 0.65rem 0.75rem;
-  background: #fbfcfa;
+  background: var(--dash-field-bg);
   color: var(--ink);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--dash-text-small);
   font-weight: 400;
 }
 
 .rich-text-editor {
   overflow: hidden;
-  border: 1px solid #cbd2cd;
-  border-radius: 0.45rem;
-  background: #fbfcfa;
+  border: 1px solid var(--dash-field-line);
+  border-radius: var(--dash-field-radius);
+  background: var(--dash-field-bg);
   color: var(--ink);
   font-weight: 400;
 }
@@ -639,6 +1663,8 @@
 }
 
 .rich-text-toolbar button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
   border: 1px solid transparent;
   border-radius: 0.3rem;
   padding: 0.35rem 0.5rem;
@@ -646,7 +1672,7 @@
   color: var(--ink);
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--dash-text-small);
   font-weight: 700;
 }
 
@@ -663,10 +1689,20 @@
 .rich-text-editor .tiptap {
   min-height: 9rem;
   padding: 0.75rem;
-  font-family: var(--font-serif);
-  font-size: 1rem;
+  font-family: var(--dash-font);
+  font-size: var(--dash-text);
   line-height: 1.5;
   outline: none;
+}
+
+/* :focus as well as :focus-visible: .tiptap is a contenteditable div, and a
+ * focused contenteditable does not always match :focus-visible the way an
+ * input does. Text is typed here, so it shows its ring on every focus. */
+.rich-text-editor .tiptap:focus,
+.rich-text-editor .tiptap:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px #101820;
 }
 
 .rich-text-editor .tiptap > :first-child {
@@ -682,8 +1718,8 @@
 .rich-text-editor .tiptap h4,
 .rich-text-editor .tiptap h5 {
   margin-block: 1rem 0.5rem;
-  font-family: var(--font-serif);
-  font-size: 1.5rem;
+  font-family: var(--dash-font);
+  font-size: var(--dash-h2);
   letter-spacing: -0.015em;
   line-height: 1.2;
 }
@@ -755,7 +1791,7 @@
   min-height: 3.6rem;
   padding: 0.8rem 1rem;
   border-top: 1px solid #e6e9e6;
-  font-size: 0.85rem;
+  font-size: var(--dash-text-small);
 }
 
 .inventory-row:first-child {
@@ -766,7 +1802,7 @@
   min-height: 2.8rem;
   background: #f8f9f7;
   color: var(--ink-soft);
-  font-size: 0.72rem;
+  font-size: var(--dash-text-small);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -774,67 +1810,12 @@
 
 .inventory-row code {
   color: var(--ink-soft);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-family: var(--dash-font-mono);
+  font-size: var(--dash-text-small);
 }
 
 .state-label {
   width: fit-content;
-}
-
-.version-card {
-  display: grid;
-  grid-template-columns: 1.4fr 0.8fr;
-  gap: 3rem;
-  align-items: end;
-  margin-top: 3.5rem;
-  border-radius: 1rem;
-  padding: clamp(1.5rem, 4vw, 3rem);
-  background: var(--ink);
-  color: var(--paper-bright);
-}
-
-.version-card h2 {
-  max-width: 20ch;
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: clamp(1.8rem, 3vw, 2.8rem);
-  font-weight: 400;
-  letter-spacing: -0.035em;
-  line-height: 1.05;
-}
-
-.version-card > div > p:last-child {
-  max-width: 38rem;
-  margin: 1.25rem 0 0;
-  color: #cbd2ce;
-}
-
-.version-card .eyebrow {
-  color: #9fceb2;
-}
-
-.version-card dl {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin: 0;
-}
-
-.version-card dl div {
-  border-top: 1px solid #59615d;
-  padding-top: 0.8rem;
-}
-
-.version-card dt {
-  color: #aeb7b2;
-  font-size: 0.75rem;
-}
-
-.version-card dd {
-  margin: 0.35rem 0 0;
-  font-family: var(--font-mono);
-  font-size: 1rem;
 }
 
 @media (max-width: 760px) {
@@ -862,18 +1843,7 @@
     border-bottom: 1px solid #dce1dc;
   }
 
-  .dashboard-nav .nav-label,
-  .dashboard-nav span[aria-disabled="true"] {
-    display: none;
-  }
-
-  .notice,
-  .dashboard-title-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .copy-control {
+      .copy-control {
     justify-items: start;
   }
 
@@ -882,9 +1852,7 @@
   }
 
   .status-grid,
-  .version-card,
-  .editor-groups,
-  .blog-post-form {
+  .editor-groups {
     grid-template-columns: 1fr;
   }
 
@@ -897,6 +1865,119 @@
   .inventory-head {
     display: none;
   }
+
+  .dashboard-main {
+    padding: 1.5rem;
+  }
+
+  .content-editor {
+    --editor-pad: 0rem;
+
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  .editor-toolbar {
+    border-radius: 0;
+  }
+
+  .dashboard-section-heading {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+
+  .editor-toolbar-actions button {
+    min-height: 2.75rem;
+  }
+
+  .puck-editor-frame {
+    overflow: visible;
+  }
+
+  .puck-editor-frame .Puck,
+  .puck-editor-frame [class*="_Puck_"] {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Give the page preview the width of the phone.
+   *
+   * The main column, the editor section and Puck's own preview wrapper each
+   * added their own side padding, which nested to 116px on a 390px screen and
+   * left the owner editing their site through a 274px window. On a phone the
+   * canvas runs to the edges instead. */
+  .dashboard-main {
+    padding-inline: 1rem;
+  }
+
+  .content-editor,
+  .visual-component-editor {
+    padding-inline: 0;
+  }
+
+  .puck-editor-frame {
+    margin-inline: -1rem;
+    border-inline: 0;
+    border-radius: 0;
+  }
+
+  .editor-canvas [class*="_PuckPreview"] {
+    height: min(70vh, 38rem) !important;
+    min-height: 30rem;
+    padding: 0;
+  }
+
+  /* One column: the page, then the selected section's panel. */
+  .editor-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-side {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid #dce1dc;
+  }
+
+  .section-actions-buttons button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  /* Immersive editor on a phone: the stage stacks and scrolls as one. */
+  .editor-stage {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .editor-stage .editor-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-stage .editor-workbench,
+  .editor-stage .editor-canvas,
+  .editor-stage .editor-side {
+    height: auto;
+  }
+
+  .inline-link-popover {
+    right: auto;
+    left: 0;
+  }
+
+  /* One column on a phone: the row's actions drop under its name. */
+  .post-list > li {
+    grid-template-columns: 1fr;
+  }
+
+  .post-list-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* Analytics -------------------------------------------------------------- */
@@ -907,15 +1988,15 @@
 
 .analytics h3 {
   margin: 2.5rem 0 0.75rem;
-  font-family: var(--font-serif);
-  font-size: 1.15rem;
+  font-family: var(--dash-font);
+  font-size: var(--dash-text);
 }
 
 .analytics h4 {
   margin: 0 0 0.5rem;
   color: var(--ink-soft);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-family: var(--dash-font-mono);
+  font-size: var(--dash-text-small);
   font-weight: 400;
 }
 
@@ -947,7 +2028,7 @@
 
 .analytics-metric dt {
   grid-column: 1;
-  font-size: 0.85rem;
+  font-size: var(--dash-text-small);
   font-weight: 700;
 }
 
@@ -956,15 +2037,15 @@
   grid-row: 1 / span 3;
   align-self: center;
   margin: 0;
-  font-family: var(--font-serif);
-  font-size: 1.65rem;
+  font-family: var(--dash-font);
+  font-size: var(--dash-h2);
   text-align: right;
 }
 
 .analytics-value-unavailable {
   color: var(--ink-soft);
-  font-family: var(--font-sans);
-  font-size: 0.85rem;
+  font-family: var(--dash-font);
+  font-size: var(--dash-text-small);
 }
 
 .analytics-metric-meta,
@@ -972,7 +2053,7 @@
   grid-column: 1;
   margin: 0;
   color: var(--ink-soft);
-  font-size: 0.85rem;
+  font-size: var(--dash-text-small);
 }
 
 .analytics-quality {
@@ -993,7 +2074,7 @@
 .analytics-empty {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 0.85rem;
+  font-size: var(--dash-text-small);
 }
 
 /* Names the reporting source when one referrer arrives from two of them. */
@@ -1009,7 +2090,7 @@
   padding: 1rem;
   background: var(--paper-bright);
   color: var(--ink-soft);
-  font-size: 0.85rem;
+  font-size: var(--dash-text-small);
 }
 
 .analytics-warning p,
@@ -1031,7 +2112,7 @@
 
 .analytics-collapsed summary {
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--dash-text-small);
   font-weight: 700;
 }
 
@@ -1041,4 +2122,369 @@
 
 .analytics .inventory-row {
   grid-template-columns: 1.2fr 1.4fr 1fr 1fr;
+}
+
+/* Photo library -----------------------------------------------------------
+ *
+ * The drop zone itself has two looks, waiting and .is-dragover, and swaps
+ * its contents for the file name and a moving bar while an upload runs.
+ * Success and failure are words, not a zone state: the status paragraph at
+ * the foot of the section says what happened, and a failure also renders a
+ * .media-upload-retry button after the zone. Below it, a list of every photo
+ * with its size and whether it is on the page, then the two fixed places a
+ * photo can go. */
+.media-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  min-height: 8rem;
+  border: 2px dashed #b8c4bd;
+  border-radius: var(--dash-radius);
+  padding: 1.25rem;
+  background: #fbfcfa;
+  text-align: center;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.media-dropzone p {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.media-dropzone .button {
+  cursor: pointer;
+}
+
+.media-dropzone.is-dragover {
+  border-color: var(--dash-accent);
+  background: var(--dash-accent-tint);
+}
+
+.media-upload-progress {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: center;
+  width: min(100%, 20rem);
+  font-size: var(--dash-text-small);
+}
+
+/* A moving bar that says work is happening. It does not measure how much of
+ * the file has been sent: the upload uses fetch, which reports nothing until
+ * it finishes. Named "activity" rather than "progress" so that nobody reads
+ * a percentage into it. */
+.media-activity-track {
+  overflow: hidden;
+  width: 100%;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: #dfe6e1;
+}
+
+.media-activity-fill {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--dash-accent);
+  animation: media-activity-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes media-activity-slide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.media-upload-retry {
+  margin-top: 0.75rem;
+  cursor: pointer;
+}
+
+.media-asset-list {
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.media-asset-list > li {
+  border-top: 1px solid var(--dash-line);
+}
+
+.media-asset-list > li:first-child {
+  border-top: 0;
+}
+
+.media-asset-deleting {
+  padding: 0.85rem 0.5rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.media-asset-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 0.85rem;
+  width: 100%;
+  border: 0;
+  border-radius: var(--dash-field-radius);
+  padding: 0.6rem 0.5rem;
+  background: transparent;
+  color: var(--dash-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.media-asset-row[aria-pressed="true"] {
+  background: var(--dash-accent-tint);
+}
+
+.media-asset-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Photographs are the one place square corners belong. */
+.media-asset-thumb {
+  grid-row: 1 / span 2;
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  background: #e6ebe7;
+}
+
+.media-asset-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.media-asset-meta {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.media-asset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.media-asset-hint {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.media-places-heading {
+  margin: 2rem 0 0.25rem;
+}
+
+.media-places-intro {
+  margin: 0 0 1rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* Exactly two places exist, so two cards always make one complete row. */
+.media-places {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.media-place {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 0.75rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 1rem;
+  background: var(--dash-surface);
+}
+
+.media-place h4 {
+  margin: 0;
+  font-size: var(--dash-text);
+  font-weight: 600;
+}
+
+.media-place p {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.media-place .media-manager-preview {
+  align-self: stretch;
+  margin: 0;
+}
+
+.media-place .button {
+  cursor: pointer;
+}
+
+.media-place .button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.media-place-empty {
+  align-self: stretch;
+  border: 1px dashed var(--dash-line);
+  border-radius: var(--dash-field-radius);
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+.media-crop-editor {
+  align-self: stretch;
+  border-top: 1px solid var(--dash-line);
+  padding-top: 0.5rem;
+}
+
+.media-crop-editor summary {
+  display: flex;
+  align-items: center;
+  min-height: 2.4rem;
+  color: var(--dash-accent);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.media-crop-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.media-crop-fields label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 700;
+}
+
+.media-crop-fields input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--dash-field-line);
+  border-radius: var(--dash-field-radius);
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  font-size: var(--dash-text-small);
+  font-weight: 400;
+}
+
+.media-empty {
+  margin: 1.25rem 0 0;
+  color: var(--dash-ink-soft);
+}
+
+/* Publish menu ------------------------------------------------------------
+ *
+ * One Publish button in the top bar. The panel behind it holds the two
+ * checks, saved and previewed, and the publish action. The words revision,
+ * approval and fingerprint stay out of the top bar; the model behind them is
+ * unchanged. */
+.publish-menu {
+  position: relative;
+}
+
+.publish-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.publish-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.publish-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 0.75rem;
+  width: min(22rem, calc(100vw - 2rem));
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 1rem;
+  background: var(--dash-surface);
+  box-shadow: 0 10px 24px rgba(16, 24, 32, 0.18);
+  text-align: left;
+}
+
+.publish-panel-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.publish-steps {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: var(--dash-text-small);
+}
+
+.publish-steps li[data-done="true"] {
+  color: var(--dash-accent);
+}
+
+.publish-steps li .copy-button {
+  display: inline-flex;
+  margin-top: 0.4rem;
+}
+
+.publish-panel > .button {
+  justify-self: start;
+  cursor: pointer;
+}
+
+.publish-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.publish-panel-state {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* Phone layout for the blocks above. This sits after them on purpose: the
+ * base rules and these overrides share specificity, so file order decides. */
+@media (max-width: 760px) {
+  .media-places {
+    grid-template-columns: 1fr;
+  }
+
+  .media-crop-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* The wrapped toolbar can put Publish at either edge; anchor its panel to
+   * the left so it stays on screen. */
+  .publish-panel {
+    right: auto;
+    left: 0;
+  }
 }

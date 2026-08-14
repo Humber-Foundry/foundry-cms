@@ -8,3 +8,7 @@ apps/reference-site/.open-next/
 apps/reference-site/cloudflare-env.d.ts
 *.tsbuildinfo
 .DS_Store
+
+# Test artifacts
+.vitest-attachments/
+**/__screenshots__/

@@ -4,6 +4,7 @@ import {
   installedPageComponentRegistry,
 } from "@/foundry/page-components";
 import type { PageComponentRenderContext } from "@/foundry/page-component-renderers";
+import { SiteHeader } from "@/foundry/site-shell";
 
 export function SiteSection(context: PageComponentRenderContext) {
   const validation = installedPageComponentRegistry.validate(context.section);
@@ -25,31 +26,25 @@ export function SiteRenderer({
   mediaDelivery = "published",
   mediaAccessToken,
   blogPostHref = (slug) => `/blog/${slug}`,
+  editingSurface = false,
 }: {
   definition: SiteDefinition;
   mediaDelivery?: "authenticated" | "published";
   mediaAccessToken?: string;
   blogPostHref?: (slug: string) => string;
+  /** Set inside the editor: embeds sandbox and the main landmark defers. */
+  editingSurface?: boolean;
 }) {
+  // Inside the editor the host page owns the main landmark; the site's
+  // wrapper becomes a plain region so landmarks do not nest.
+  const Landmark = editingSurface ? "div" : "main";
   const publicPosts = definition.blog.posts.filter(
     ({ targetVisibility }) => targetVisibility === "public",
   );
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
-      <header className="site-header">
-        <a className="wordmark" href="/" aria-label={`${definition.site.name} home`}>
-          <span aria-hidden="true">F</span>
-          {definition.site.name}
-        </a>
-        <nav aria-label="Primary navigation">
-          {definition.site.navigation.map((item) => (
-            <a key={item.id} href={item.href}>
-              {item.label}
-            </a>
-          ))}
-        </nav>
-      </header>
-      <main>
+      <SiteHeader definition={definition} />
+      <Landmark id="main-content" tabIndex={-1}>
         {definition.home.sections.map((section) => (
           <SiteSection
             key={section.id}
@@ -57,6 +52,7 @@ export function SiteRenderer({
             definition={definition}
             mediaDelivery={mediaDelivery}
             mediaAccessToken={mediaAccessToken}
+            editingSurface={editingSurface}
           />
         ))}
         {publicPosts.length === 0 ? null : (
@@ -73,11 +69,7 @@ export function SiteRenderer({
             </ul>
           </section>
         )}
-      </main>
-      <footer className="site-footer">
-        <p>{definition.site.footer}</p>
-        <p>Site Definition v{definition.definitionVersion}</p>
-      </footer>
+      </Landmark>
     </div>
   );
 }

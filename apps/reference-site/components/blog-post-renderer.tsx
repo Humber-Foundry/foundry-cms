@@ -5,32 +5,30 @@ import {
 } from "@humber-foundry/site-definition";
 
 import { RichTextRenderer } from "./rich-text-renderer";
+import { BlogFooter, SiteHeader } from "@/foundry/site-shell";
 
 export function BlogPostRenderer({
   definition,
   post,
+  preview = false,
 }: {
   definition: SiteDefinition;
   post: BlogPost;
+  preview?: boolean;
 }) {
-  const model = createBlogPostRenderModel(definition, post);
+  const model = createBlogPostRenderModel(
+    definition,
+    preview && post.targetVisibility === "unpublished"
+      ? { ...post, targetVisibility: "public" }
+      : post,
+  );
   if ("absent" in model) {
     return null;
   }
   return (
     <div className="site-canvas" {...model.designAttributes}>
-      <header className="site-header">
-        <a className="wordmark" href="/" aria-label={model.wordmark.label}>
-          <span aria-hidden="true">{model.wordmark.mark}</span>
-          {model.wordmark.name}
-        </a>
-        <nav aria-label="Primary navigation">
-          {model.navigation.map((item) => (
-            <a key={item.href} href={item.href}>{item.label}</a>
-          ))}
-        </nav>
-      </header>
-      <main className="blog-post">
+      <SiteHeader definition={definition} />
+      <main id="main-content" className="blog-post" tabIndex={-1}>
         <article>
           <header>
             <p className="eyebrow">{model.eyebrow}</p>
@@ -42,10 +40,7 @@ export function BlogPostRenderer({
           </div>
         </article>
       </main>
-      <footer className="site-footer">
-        <p>{model.footer}</p>
-        <p>Site Definition v{model.definitionVersion}</p>
-      </footer>
+      <BlogFooter definition={definition} />
     </div>
   );
 }
