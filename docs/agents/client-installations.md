@@ -2,11 +2,13 @@
 
 Foundry CMS is proven against real client sites. Each installation has its
 own private repository in this GitHub organization. The current acceptance
-installation is the one issue #101 tracks; its repository is named in the
-acceptance comments on that issue, and its own README documents its setup,
-gates, and deploy safety. This document states the boundary between an
-installation and this product repository. It also states the workflow that
-keeps the boundary intact.
+installation is the one issue #101 tracks. Its repository is private and is
+never named in this public repository. To find it, list the organization's
+private repositories; the installation repository's README identifies itself
+as the Foundry CMS acceptance testbed and references issue #101. That README
+also documents the installation's setup, gates, and deploy safety. This
+document states the boundary between an installation and this product
+repository. It also states the workflow that keeps the boundary intact.
 
 This repository is public. That is why the boundary below is strict.
 
@@ -34,9 +36,9 @@ and `docs/architecture/guided-client-provisioning.md` for provisioning.
   defect or feature gap found while testing a client installation is a
   product issue. File it here, written client-neutrally: describe the CMS
   behaviour, not the client's content. Do not paste client copy, photographs,
-  media, or screenshots of client pages into issues or test fixtures. Naming
-  the installation repository in an issue comment is allowed; that reference
-  is how the acceptance installation is located.
+  media, or screenshots of client pages into issues or test fixtures. Do not
+  name the client or the installation repository anywhere in this repository
+  — files, issues, comments, pull requests, or commit messages.
 - **Client-content work stays in the client repository.** Words, photos,
   design language, DNS, and deploys for the client site are issues and pull
   requests on the client repository, never here.
