@@ -18,6 +18,14 @@ Use the canonical `needs-triage`, `needs-info`, `ready-for-agent`,
 This is a single-context repository. Read the root `CONTEXT.md` and relevant
 ADRs under `docs/decisions/`. See `docs/agents/domain.md`.
 
+### Client installations
+
+This repository is the client-neutral product. Real client sites are separate
+private installation repositories that pin a foundation release. Client
+content never enters this repository; product feedback found on an
+installation is filed here as a client-neutral issue. See
+`docs/agents/client-installations.md`.
+
 ### Graphify navigation
 
 Before broad code exploration, run `npm run graphify:status`. When an exact
