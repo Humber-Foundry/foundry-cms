@@ -21,8 +21,8 @@ language. The reference site in `apps/reference-site` uses only the neutral
 release in `.foundry-foundation-release.json`, vendors or installs the
 `@humber-foundry/*` packages that release produced, and owns everything under
 its `foundry/` directory and its media. See
-`apps/reference-site/foundry/README.md` for the seam and
-`docs/architecture/guided-client-provisioning.md` for provisioning.
+`apps/reference-site/foundry/README.md` for which files an installation owns
+and `docs/architecture/guided-client-provisioning.md` for provisioning.
 
 ## Direction of flow
 
@@ -34,7 +34,9 @@ its `foundry/` directory and its media. See
   defect or feature gap found while testing a client installation is a
   product issue. File it here, written client-neutrally: describe the CMS
   behaviour, not the client's content. Do not paste client copy, photographs,
-  or domain names into issues, screenshots, or test fixtures.
+  media, or screenshots of client pages into issues or test fixtures. Naming
+  the installation repository in an issue comment is allowed; that reference
+  is how the acceptance installation is located.
 - **Client-content work stays in the client repository.** Words, photos,
   design language, DNS, and deploys for the client site are issues and pull
   requests on the client repository, never here.
