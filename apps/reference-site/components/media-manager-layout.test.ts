@@ -30,3 +30,45 @@ describe("media manager layout", () => {
     );
   });
 });
+
+describe("photo gallery layout", () => {
+  it("loads a gallery tile from the thumbnail variant, not the original", async () => {
+    const gallery = await readFile(
+      new URL("./media-gallery.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(gallery).toContain("mediaThumbnailUrl(asset.assetId, accessToken)");
+    expect(gallery).toContain('loading="lazy"');
+    // No surface may address the media route by hand and skip the variant.
+    expect(gallery).not.toMatch(/\/api\/foundry-cms\/media\?/u);
+  });
+
+  it("lays the gallery out so its last row is as full as the rows above", async () => {
+    const stylesheet = await readFile(
+      new URL("../app/dash/dashboard.css", import.meta.url),
+      "utf8",
+    );
+
+    expect(stylesheet).toMatch(
+      /\.media-gallery\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*\}/su,
+    );
+    expect(stylesheet).toMatch(
+      /\.media-gallery > li\s*\{[^}]*flex:\s*1 1 [^;]+;[^}]*\}/su,
+    );
+  });
+
+  it("keeps the picker dialog inside the window on a phone", async () => {
+    const stylesheet = await readFile(
+      new URL("../app/dash/dashboard.css", import.meta.url),
+      "utf8",
+    );
+
+    expect(stylesheet).toMatch(
+      /\.media-picker\s*\{[^}]*width:\s*min\([^;]*100vw[^;]*;[^}]*\}/su,
+    );
+    expect(stylesheet).toMatch(
+      /\.media-picker\s*\{[^}]*max-height:[^;]+;[^}]*overflow-y:\s*auto;[^}]*\}/su,
+    );
+  });
+});

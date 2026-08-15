@@ -10,8 +10,21 @@ import { renderedMediaOccurrenceIds } from "@humber-foundry/application";
 import { createMediaOccurrenceId } from "@humber-foundry/application";
 import { requireRenderedMediaOccurrenceId } from "@humber-foundry/application";
 
+import { MediaGallery } from "./media-gallery";
 import { MediaOccurrence } from "./media-occurrence";
+import { MediaPicker } from "./media-picker";
 import { createMediaCatalogFence } from "./media-catalog-fence";
+import {
+  mediaAccessRefreshDelayMs,
+  mediaAccessRequestBody,
+  parseMediaCatalogGrant,
+} from "./media-catalog-grant";
+import { placeFor } from "./media-places";
+import {
+  acceptedPhotoTypes,
+  createMediaUploadAttempt,
+  isAcceptedPhoto,
+} from "./media-upload";
 import {
   cropBaseRevisionForEdit,
   cropForCatalogRefresh,
@@ -32,18 +45,6 @@ import {
 } from "./media-upload-attempt";
 import { sendMediaMutationAttempt } from "../src/media-mutation-client";
 
-async function imageDimensions(file: File) {
-  const url = URL.createObjectURL(file);
-  try {
-    const image = new Image();
-    image.src = url;
-    await image.decode();
-    return { width: image.naturalWidth, height: image.naturalHeight };
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
 class MediaMutationRequestError extends Error {
   constructor(
     readonly response: Response,
@@ -52,31 +53,6 @@ class MediaMutationRequestError extends Error {
     super("media_mutation_failed");
     this.name = "MediaMutationRequestError";
   }
-}
-
-const acceptedPhotoTypes = ["image/jpeg", "image/png", "image/webp"];
-
-/** Where a photo can appear on the page, in the owner's words. */
-type PlaceId = "occurrence_home_hero" | "occurrence_home_detail";
-
-const places: Readonly<Record<PlaceId, { name: string; detail: string }>> = {
-  occurrence_home_hero: {
-    name: "Top of the page",
-    detail: "The large photo visitors see first.",
-  },
-  occurrence_home_detail: {
-    name: "Further down the page",
-    detail: "The smaller photo beside the text.",
-  },
-};
-
-/**
- * The place with this id, or a stand-in built from the id itself. Occurrence
- * ids arrive from the server, so one that this build does not know about is
- * possible; showing the raw id beats showing nothing.
- */
-function placeFor(id: string): { name: string; detail: string } {
-  return places[id as PlaceId] ?? { name: id, detail: "" };
 }
 
 export function MediaManager({
@@ -118,6 +94,8 @@ export function MediaManager({
     cropForOccurrence(initialOccurrences, "occurrence_home_hero"),
   );
   const [previewUrl, setPreviewUrl] = useState<string>();
+  // The place the photo picker is open for, or null when it is closed.
+  const [pickerPlaceId, setPickerPlaceId] = useState<string | null>(null);
   const [uploadPending, setUploadPending] = useState(false);
   // The upload control's own feedback: what is being uploaded right now, and
   // whether a file is being dragged over the drop zone.
@@ -160,38 +138,24 @@ export function MediaManager({
     const idempotencyKey = accessAttempt.current.idempotencyKey;
     void sendMediaMutationAttempt({
       attempt: {
-        body: JSON.stringify({ operation: "access", workspaceId }),
+        body: mediaAccessRequestBody(workspaceId),
         contentType: "application/json",
         idempotencyKey,
       },
       mutationToken: mutationTokenRef.current,
     })
       .then((result) => {
-        if (
-          cancelled ||
-          !result.response.ok ||
-          typeof result.body !== "object" ||
-          result.body === null ||
-          !("assets" in result.body) ||
-          !Array.isArray(result.body.assets) ||
-          !("occurrences" in result.body) ||
-          !Array.isArray(result.body.occurrences) ||
-          !("accessToken" in result.body) ||
-          typeof result.body.accessToken !== "string" ||
-          !("accessTokenExpiresAt" in result.body) ||
-          typeof result.body.accessTokenExpiresAt !== "number"
-        ) {
-          throw new Error("media_access_grant_failed");
-        }
-        const grantedAssets = result.body.assets as ReadonlyArray<MediaAsset>;
-        const grantedOccurrences =
-          result.body.occurrences as ReadonlyArray<MediaOccurrenceState>;
+        if (cancelled) return;
+        if (!result.response.ok) throw new Error("media_access_grant_failed");
+        const grant = parseMediaCatalogGrant(result.body);
+        const grantedAssets = grant.assets;
+        const grantedOccurrences = grant.occurrences;
         if (accessAttempt.current?.idempotencyKey === idempotencyKey) {
           accessAttempt.current = null;
         }
         mutationTokenRef.current = result.mutationToken;
-        setMediaAccessToken(result.body.accessToken);
-        onAccessGranted(result.body.accessToken);
+        setMediaAccessToken(grant.accessToken);
+        onAccessGranted(grant.accessToken);
         if (catalogFence.isCurrent(catalogSnapshot)) {
           const mergedOccurrences = mergeMediaOccurrenceState(
             grantedOccurrences,
@@ -221,12 +185,7 @@ export function MediaManager({
         }
         refreshTimer = setTimeout(
           () => setAccessGeneration((generation) => generation + 1),
-          Math.max(
-            1_000,
-            result.body.accessTokenExpiresAt * 1_000 -
-              Date.now() -
-              30_000,
-          ),
+          mediaAccessRefreshDelayMs(grant.accessTokenExpiresAt, Date.now()),
         );
       })
       .catch(() => {
@@ -306,7 +265,7 @@ export function MediaManager({
   function acceptFiles(files: FileList | null) {
     const file = files?.[0];
     if (file === undefined) return;
-    if (!acceptedPhotoTypes.includes(file.type)) {
+    if (!isAcceptedPhoto(file)) {
       setMessage(`“${file.name}” is not a photo file. Use JPEG, PNG or WebP.`);
       return;
     }
@@ -319,18 +278,7 @@ export function MediaManager({
     setMessage("");
     try {
       if (file !== undefined) {
-        const dimensions = await imageDimensions(file);
-        const assetId = `asset_${crypto.randomUUID().replaceAll("-", "")}`;
-        const body = new FormData();
-        body.set("assetId", assetId);
-        body.set("width", String(dimensions.width));
-        body.set("height", String(dimensions.height));
-        body.set("source", file);
-        uploadAttempt.current = {
-          assetId,
-          idempotencyKey: crypto.randomUUID(),
-          body,
-        };
+        uploadAttempt.current = await createMediaUploadAttempt(file);
       }
       const attempt = uploadAttempt.current;
       if (attempt === null) return;
@@ -372,7 +320,15 @@ export function MediaManager({
     }
   }
 
-  async function usePhotoInPlace(targetOccurrenceId: string) {
+  /**
+   * Puts a photo in one place. The caller may name the photo, because a
+   * photo chosen in the picker is not in `selectedAsset` state yet when the
+   * placement starts.
+   */
+  async function usePhotoInPlace(
+    targetOccurrenceId: string,
+    assetId: string = selectedAsset,
+  ) {
     if (!occurrenceMutationsEnabled) return;
     selectPlace(targetOccurrenceId);
     const current = occurrences.find(
@@ -387,7 +343,7 @@ export function MediaManager({
         body: {
           operation: "replace",
           occurrenceId: targetOccurrenceId,
-          assetId: selectedAsset,
+          assetId,
           baseRevision: current?.revision ?? 0,
           workspaceId: activeContentRevision.workspaceId,
           contentBaseRevision: activeContentRevision.revision,
@@ -597,60 +553,19 @@ export function MediaManager({
       ) : null}
       {assets.length > 0 || deletionFinishing ? (
         <>
-          <ul className="media-asset-list">
-            {deletionFinishing ? (
-              <li className="media-asset-deleting">
-                Finishing deletion of the last photo…
-              </li>
-            ) : null}
-            {assets.map((asset) => {
-              const usedIn = occurrences
-                .filter((occurrence) => occurrence.assetId === asset.assetId)
-                .map(
-                  (occurrence) =>
-                    placeFor(occurrence.occurrenceId).name,
-                );
-              return (
-                <li key={asset.assetId}>
-                  <button
-                    type="button"
-                    className="media-asset-row"
-                    aria-pressed={selectedAsset === asset.assetId}
-                    disabled={busy}
-                    onClick={() => selectAsset(asset.assetId)}
-                  >
-                    {mediaAccessToken === undefined ? (
-                      <span className="media-asset-thumb" aria-hidden="true" />
-                    ) : (
-                      /* The media route serves the stored original, so this
-                       * 3.5rem square costs the whole file. lazy keeps the
-                       * rows below the fold from fetching at all, and the
-                       * real dimensions let the browser reserve the space.
-                       * A resized variant is still the actual fix. */
-                      <img
-                        className="media-asset-thumb"
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                        width={asset.width}
-                        height={asset.height}
-                        src={`/api/foundry-cms/media?assetId=${encodeURIComponent(
-                          asset.assetId,
-                        )}&accessToken=${encodeURIComponent(mediaAccessToken)}`}
-                      />
-                    )}
-                    <span className="media-asset-name">{asset.fileName}</span>
-                    <span className="media-asset-meta">
-                      {asset.width}×{asset.height}
-                      {usedIn.length > 0
-                        ? ` · On the page: ${usedIn.join(" and ")}`
-                        : " · Not on the page"}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <MediaGallery
+            assets={assets}
+            occurrences={occurrences}
+            accessToken={mediaAccessToken}
+            selectedAssetId={selectedAsset}
+            disabled={busy}
+            deletingMessage={
+              deletionFinishing
+                ? "Finishing deletion of the last photo…"
+                : undefined
+            }
+            onSelect={selectAsset}
+          />
           <div className="media-asset-actions">
             <button
               className="copy-button"
@@ -728,6 +643,16 @@ export function MediaManager({
                     onClick={() => void usePhotoInPlace(id)}
                   >
                     Use the selected photo here
+                  </button>
+                  {/* The picker is the one place an owner can upload a photo
+                   * and put it here in the same step. */}
+                  <button
+                    className="copy-button media-place-picker"
+                    type="button"
+                    disabled={busy || !occurrenceMutationsEnabled}
+                    onClick={() => setPickerPlaceId(id)}
+                  >
+                    Choose or upload a photo…
                   </button>
                   {occurrence === undefined ? null : (
                     <details
@@ -823,6 +748,25 @@ export function MediaManager({
         </p>
       ) : null}
       <p role="status" aria-live="polite">{message}</p>
+      <MediaPicker
+        open={pickerPlaceId !== null}
+        // The picker keeps its own token and refreshes a stale one itself, so
+        // it starts from the token this page was rendered with.
+        csrfToken={csrfToken}
+        workspaceId={workspaceId}
+        title={
+          pickerPlaceId === null
+            ? undefined
+            : `Choose or upload a photo for “${placeFor(pickerPlaceId).name}”`
+        }
+        confirmLabel="Use this photo here"
+        onChoose={(photo) => {
+          if (pickerPlaceId === null) return;
+          selectAsset(photo.assetId);
+          void usePhotoInPlace(pickerPlaceId, photo.assetId);
+        }}
+        onClose={() => setPickerPlaceId(null)}
+      />
     </section>
   );
 }
