@@ -58,10 +58,11 @@ type InboxRow = {
  * not exist yet. Keeping the walk in one place stops the page query and the
  * unread count from drifting apart.
  *
- * A query built here binds the site id as `?1`. Anything a caller adds in
- * `extraConditions` therefore starts at `?2`.
+ * A query built here binds the site id as `?1`, so any value a caller binds
+ * in `tail` starts at `?2`. `tail` closes the statement: further conditions
+ * first, each led by `AND`, then any ordering and limit.
  */
-function acceptedInboxQuery(columns: string, extraConditions = "") {
+function acceptedInboxQuery(columns: string, tail = "") {
   return `SELECT ${columns}
      FROM public_form_submissions AS submission
      JOIN public_form_classifications AS classification
@@ -74,7 +75,7 @@ function acceptedInboxQuery(columns: string, extraConditions = "") {
       AND read_state.submission_id = submission.submission_id
      WHERE submission.site_id = ?1
        AND classification.classification = 'accepted'
-       ${extraConditions}`;
+       ${tail}`;
 }
 
 const unreadInboxCount = acceptedInboxQuery(

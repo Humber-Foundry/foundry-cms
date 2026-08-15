@@ -148,9 +148,10 @@ The reply rule rejects some valid but rare addresses, such as an
 internationalized one. That address is still readable in full on the message's
 own page.
 
-Opening a message held as spam marks it read, so accepting it later puts it in
-the inbox already read. That is truthful — a human did open it and decide —
-but it means an accepted message never appears in the unread count.
+Opening a message held as spam marks it read, so a message that was opened
+before it was accepted arrives in the inbox already read. That is truthful: a
+human did open it and decide. Accepting one straight from the spam list does
+not open it, so that message arrives unread.
 
 The stored failure code is still shown beside the sentence that explains an
 alert. The sentence leads and the code follows in small type, because the code

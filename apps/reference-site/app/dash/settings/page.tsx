@@ -21,17 +21,18 @@ export const dynamic = "force-dynamic";
  * percentage is kept because it is the only number that says how much room is
  * left.
  */
-function storageSentence(
-  capacity: PublicFormDeliveryHealth["capacity"],
-) {
-  const used = `Messages are using ${capacity.usedPercent.toFixed(1)}% of the room they have.`;
-  if (capacity.state === "critical") {
-    return `${used} There is very little left. Erase messages you no longer need.`;
-  }
-  if (capacity.state === "warning") {
-    return `${used} It is getting full, so plan what to keep.`;
-  }
-  return `${used} There is plenty of room.`;
+const roomLeft: Readonly<
+  Record<PublicFormDeliveryHealth["capacity"]["state"], string>
+> = {
+  normal: "There is plenty of room.",
+  warning: "It is getting full, so plan what to keep.",
+  critical: "There is very little left. Erase messages you no longer need.",
+};
+
+function storageSentence(capacity: PublicFormDeliveryHealth["capacity"]) {
+  return `Messages are using ${capacity.usedPercent.toFixed(
+    1,
+  )}% of the room they have. ${roomLeft[capacity.state]}`;
 }
 
 /**
@@ -51,7 +52,7 @@ export default async function DashboardSettingsPage() {
     actor: access.identity,
   });
   const mcpConnections = await loadMcpConnectionsForDashboard();
-  const emailAlerts = await loadOwnerNotificationStatus(access);
+  const ownerNotifications = await loadOwnerNotificationStatus(access);
 
   return (
     <main className="dashboard-main" id="main">
@@ -93,40 +94,40 @@ export default async function DashboardSettingsPage() {
           <div>
             <dt>Waiting to send</dt>
             <dd>
-              {emailAlerts.health.pending === 0 &&
-              emailAlerts.health.processing === 0
+              {ownerNotifications.health.pending === 0 &&
+              ownerNotifications.health.processing === 0
                 ? "Nothing waiting"
-                : `${emailAlerts.health.pending} waiting · ${emailAlerts.health.processing} sending`}
+                : `${ownerNotifications.health.pending} waiting · ${ownerNotifications.health.processing} sending`}
             </dd>
           </div>
           <div>
             <dt>Did not arrive</dt>
             <dd>
-              {emailAlerts.health.failed === 0
+              {ownerNotifications.health.failed === 0
                 ? "None"
-                : `${emailAlerts.health.failed} after ${emailAlerts.health.retries} retries`}
+                : `${ownerNotifications.health.failed} after ${ownerNotifications.health.retries} retries`}
             </dd>
           </div>
           <div>
             <dt>Longest wait</dt>
             <dd>
-              {emailAlerts.health.oldestPendingAgeSeconds === null
+              {ownerNotifications.health.oldestPendingAgeSeconds === null
                 ? "Nothing waiting"
                 : `${Math.ceil(
-                    emailAlerts.health.oldestPendingAgeSeconds / 60,
+                    ownerNotifications.health.oldestPendingAgeSeconds / 60,
                   )} minutes`}
             </dd>
           </div>
         </dl>
         <OwnerNotificationControls
           csrfToken={mutationToken}
-          failedDeliveries={emailAlerts.failedDeliveries}
+          failedDeliveries={ownerNotifications.failedDeliveries}
         />
       </section>
 
       <section aria-labelledby="message-storage">
         <h2 id="message-storage">Room left for messages</h2>
-        <p>{storageSentence(emailAlerts.health.capacity)}</p>
+        <p>{storageSentence(ownerNotifications.health.capacity)}</p>
       </section>
 
       <SiteTechnicalDetail definition={definition} />
