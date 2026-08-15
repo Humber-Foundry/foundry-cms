@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { SiteRenderer } from "../components/site-renderer";
-import { verifiedPublicBlogPostIds } from "../components/dashboard-shell";
+import { verifiedPublicBlogPostIds } from "../components/published-blog-posts";
 import { findPublicBlogPost } from "./blog-post-page";
 import { createSiteInstallation } from "../foundry/site-definition.server";
 import { alternateSiteDefinition } from "./test-support/alternate-site-definition";

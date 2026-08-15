@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { BlogPostRenderer } from "@/components/blog-post-renderer";
 import {
   blogPostMetadata,
-  findPublicBlogPost,
+  findBlogPost,
 } from "@/src/blog-post-page";
 import { loadRevisionPreview } from "@/src/revision-preview-page";
 
@@ -23,6 +23,7 @@ type BlogPostPreviewProps = {
     capability?: string | string[];
     bookmark?: string | string[];
     accessToken?: string | string[];
+    previewId?: string | string[];
   }>;
 };
 
@@ -32,7 +33,7 @@ async function loadPostPreview(props: BlogPostPreviewProps) {
     params: Promise.resolve(params),
     searchParams: props.searchParams,
   });
-  const post = findPublicBlogPost(revision.definition, params.slug);
+  const post = findBlogPost(revision.definition, params.slug);
   if (post === null) {
     notFound();
   }
@@ -53,6 +54,17 @@ export default async function BlogPostPreviewPage(
   props: BlogPostPreviewProps,
 ) {
   const { revision, post } = await loadPostPreview(props);
+  const { accessToken, capability, bookmark, previewId } =
+    await props.searchParams;
+  const previewQuery = new URLSearchParams({
+    capability: typeof capability === "string" ? capability : "",
+    bookmark: typeof bookmark === "string" ? bookmark : "",
+    ...(typeof accessToken === "string" ? { accessToken } : {}),
+    ...(typeof previewId === "string" ? { previewId } : {}),
+  });
+  const previewPath =
+    `/__foundry/preview/${revision.workspaceId}/${revision.revision}`;
+  const previewHomeHref = `${previewPath}?${previewQuery.toString()}`;
   return (
     <>
       <aside className="preview-provenance" aria-label="Preview provenance">
@@ -81,12 +93,18 @@ export default async function BlogPostPreviewPage(
           </div>
         </dl>
         <a
-          href={`/dash?workspace=${encodeURIComponent(revision.workspaceId)}`}
+          href={`/dash/pages?workspace=${encodeURIComponent(revision.workspaceId)}`}
         >
           Return to editor
         </a>
       </aside>
-      <BlogPostRenderer definition={revision.definition} post={post} />
+      <BlogPostRenderer
+        definition={revision.definition}
+        post={post}
+        preview
+        homeHref={previewHomeHref}
+        blogHref={`${previewHomeHref}#blog_index_title`}
+      />
     </>
   );
 }

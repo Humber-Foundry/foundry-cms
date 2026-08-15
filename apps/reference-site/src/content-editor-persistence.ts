@@ -384,24 +384,41 @@ export function useContentEditorAutosave({
 }: {
   enabled: boolean;
   fingerprint: string;
-  onSave(): void;
+  /**
+   * Starts a save. Returns false when the editor cannot start one right now —
+   * for example while the previous save is still in flight — in which case
+   * the autosave keeps retrying instead of treating the edit as saved.
+   */
+  onSave(): boolean;
 }) {
   const lastSavedFingerprint = useRef<string | null>(null);
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
-  const save = () => {
-    if (lastSavedFingerprint.current === fingerprint) {
-      return;
-    }
-    lastSavedFingerprint.current = fingerprint;
-    onSaveRef.current();
-  };
 
   useEffect(() => {
     if (!enabled) {
       return;
     }
-    const timer = window.setTimeout(save, 250);
+    let timer: number | undefined;
+    const save = () => {
+      // One pending timer at a time: a blur while a retry is queued must not
+      // start a second chain.
+      window.clearTimeout(timer);
+      timer = undefined;
+      if (lastSavedFingerprint.current === fingerprint) {
+        return;
+      }
+      // The fingerprint is recorded only after a save actually starts. It
+      // used to be recorded first, so a save that bailed — the previous one
+      // still finishing, say — stranded the edit unsaved until the window
+      // lost focus.
+      if (onSaveRef.current()) {
+        lastSavedFingerprint.current = fingerprint;
+        return;
+      }
+      timer = window.setTimeout(save, 500);
+    };
+    timer = window.setTimeout(save, 250);
     window.addEventListener("blur", save);
     return () => {
       window.clearTimeout(timer);

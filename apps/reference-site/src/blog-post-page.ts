@@ -9,11 +9,15 @@ export function findPublicBlogPost(
   definition: SiteDefinition,
   slug: string,
 ): BlogPost | null {
-  return (
-    definition.blog.posts.find(
-      (post) => post.slug === slug && post.targetVisibility === "public",
-    ) ?? null
-  );
+  const post = findBlogPost(definition, slug);
+  return post?.targetVisibility === "public" ? post : null;
+}
+
+export function findBlogPost(
+  definition: SiteDefinition,
+  slug: string,
+): BlogPost | null {
+  return definition.blog.posts.find((post) => post.slug === slug) ?? null;
 }
 
 export function blogPostMetadata(post: BlogPost): Metadata {

@@ -5,11 +5,11 @@ import { useState } from "react";
 import {
   type BlogPostArtifactFingerprint,
   type Campaign,
+  type CampaignLifecycleState,
   type CampaignRevision,
   type RenderedCampaign,
 } from "@humber-foundry/application";
 import {
-  createRichTextDocumentFromPlainText,
   parseSerializedRichTextDocument,
   serializeRichTextDocument,
   type SerializedRichTextDocument,
@@ -17,6 +17,141 @@ import {
 } from "@humber-foundry/site-definition";
 
 import { RichTextEditor } from "./rich-text-editor";
+import { ComposerActions, emptyRichTextBody } from "./composer";
+
+/**
+ * Plain words for a campaign's lifecycle state. Typed by the union rather
+ * than by string, so adding a state to CampaignLifecycleState fails the build
+ * here until it has a label, instead of falling through to a generated one.
+ */
+const campaignStateLabels: Readonly<Record<CampaignLifecycleState, string>> = {
+  draft: "Draft",
+};
+
+/**
+ * The form for one email: a subject, the email itself, and the inbox
+ * details below it. Used both for a new email and for editing a saved one;
+ * the key on the caller resets the fields when the saved revision changes.
+ */
+function EmailComposer({
+  heading,
+  initialRevision,
+  busy,
+  saveLabel,
+  onSave,
+  onCancel,
+}: {
+  heading: string;
+  initialRevision?: CampaignRevision;
+  busy: boolean;
+  saveLabel: string;
+  onSave(email: {
+    subject: string;
+    previewText: string;
+    callToAction: { label: string; href: string };
+    emailContent: SerializedRichTextDocument;
+  }): void;
+  onCancel?(): void;
+}) {
+  const [subject, setSubject] = useState(initialRevision?.subject ?? "");
+  const [previewText, setPreviewText] = useState(
+    initialRevision?.previewText ?? "",
+  );
+  const [ctaLabel, setCtaLabel] = useState(
+    initialRevision?.callToAction.label ?? "",
+  );
+  const [ctaHref, setCtaHref] = useState(
+    initialRevision?.callToAction.href ?? "",
+  );
+  const [content, setContent] = useState<SerializedRichTextDocument>(() =>
+    initialRevision === undefined
+      ? emptyRichTextBody()
+      : serializeRichTextDocument(initialRevision.emailContent),
+  );
+  const [contentInvalid, setContentInvalid] = useState(false);
+
+  return (
+    <form
+      className="composer"
+      aria-label={heading}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave({
+          subject: subject.trim(),
+          previewText: previewText.trim(),
+          callToAction: { label: ctaLabel.trim(), href: ctaHref.trim() },
+          emailContent: content,
+        });
+      }}
+    >
+      <label className="composer-title">
+        <span>Subject</span>
+        <input
+          name="subject"
+          required
+          maxLength={200}
+          placeholder="Email subject"
+          value={subject}
+          onChange={(event) => setSubject(event.target.value)}
+        />
+      </label>
+      <RichTextEditor
+        id="campaign-email-content"
+        label="Email body"
+        describedBy="campaign-email-content-hint"
+        value={content}
+        disabled={busy}
+        invalid={contentInvalid}
+        onChange={setContent}
+        onValidationChange={setContentInvalid}
+      />
+      <p className="composer-hint" id="campaign-email-content-hint">
+        Write the email here. Formatting and links are kept exactly as you set
+        them.
+      </p>
+      <div className="composer-settings-open">
+        <label>
+          <span>Preview line — shown after the subject in inboxes</span>
+          <textarea
+            name="previewText"
+            required
+            maxLength={1000}
+            value={previewText}
+            onChange={(event) => setPreviewText(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Button label</span>
+          <input
+            name="callToActionLabel"
+            required
+            maxLength={200}
+            placeholder="Read the post"
+            value={ctaLabel}
+            onChange={(event) => setCtaLabel(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Button link</span>
+          <input
+            name="callToActionHref"
+            required
+            type="url"
+            placeholder="https://…"
+            value={ctaHref}
+            onChange={(event) => setCtaHref(event.target.value)}
+          />
+        </label>
+      </div>
+      <ComposerActions
+        busy={busy}
+        saveLabel={saveLabel}
+        blocked={contentInvalid}
+        onCancel={onCancel}
+      />
+    </form>
+  );
+}
 
 export function CampaignControls({
   csrfToken,
@@ -35,14 +170,13 @@ export function CampaignControls({
   >;
 }) {
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   const [campaigns, setCampaigns] = useState<
     ReadonlyArray<Readonly<{ campaign: Campaign; revision: CampaignRevision }>>
   >(initialCampaigns);
   const [selected, setSelected] = useState<CampaignRevision | null>(null);
-  const [selectedEmailContent, setSelectedEmailContent] =
-    useState<SerializedRichTextDocument | null>(null);
-  const [selectedEmailContentInvalid, setSelectedEmailContentInvalid] =
-    useState(false);
+  // The composer opens by itself when there is nothing to list yet.
+  const [writingNew, setWritingNew] = useState(initialCampaigns.length === 0);
   const [rendered, setRendered] = useState<RenderedCampaign | null>(null);
 
   async function loadCampaigns(selectedCampaignId?: string) {
@@ -57,40 +191,42 @@ export function CampaignControls({
     };
     setCampaigns(body.campaigns);
     if (selectedCampaignId !== undefined) {
-      const refreshed = body.campaigns.find(
-        ({ campaign }) => campaign.id === selectedCampaignId,
-      )?.revision ?? null;
-      setSelected(refreshed);
-      setSelectedEmailContent(
-        refreshed === null
-          ? null
-          : serializeRichTextDocument(refreshed.emailContent),
+      setSelected(
+        body.campaigns.find(
+          ({ campaign }) => campaign.id === selectedCampaignId,
+        )?.revision ?? null,
       );
+      setWritingNew(false);
     }
     return body.campaigns;
   }
 
   async function submit(command: unknown) {
-    const response = await fetch("/api/foundry-cms/campaigns", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "idempotency-key": `campaign:${crypto.randomUUID()}`,
-        "x-foundry-csrf": csrfToken,
-      },
-      body: JSON.stringify(command),
-    });
-    setMessage(
-      response.ok
-        ? "Campaign revision saved."
-        : "The campaign was rejected. Check the fields and retry.",
-    );
-    if (response.ok) {
-      const body = (await response.json()) as {
-        campaign: Campaign;
-        revision: CampaignRevision;
-      };
-      await loadCampaigns(body.campaign.id);
+    setBusy(true);
+    try {
+      const response = await fetch("/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": `campaign:${crypto.randomUUID()}`,
+          "x-foundry-csrf": csrfToken,
+        },
+        body: JSON.stringify(command),
+      });
+      setMessage(
+        response.ok
+          ? "Email draft saved. Nothing is sent from here."
+          : "The email could not be saved. Check the fields and retry.",
+      );
+      if (response.ok) {
+        const body = (await response.json()) as {
+          campaign: Campaign;
+          revision: CampaignRevision;
+        };
+        await loadCampaigns(body.campaign.id);
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -98,66 +234,73 @@ export function CampaignControls({
     <section aria-labelledby="campaigns-heading">
       <div className="dashboard-section-heading">
         <div>
-          <h2 id="campaigns-heading">Campaigns</h2>
+          <h2 id="campaigns-heading">Emails</h2>
           <p>
-            Create an independent email revision without exposing subscriber
-            identities.
+            Write an email to your subscribers. It stays a private draft here;
+            subscriber identities are never shown.
           </p>
         </div>
+        {writingNew || selected !== null ? null : (
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={busy}
+            onClick={() => {
+              setSelected(null);
+              setWritingNew(true);
+            }}
+          >
+            New email
+          </button>
+        )}
       </div>
-      <form
-        className="blog-post-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const data = new FormData(event.currentTarget);
-          const subject = String(data.get("subject") ?? "").trim();
-          const previewText = String(data.get("previewText") ?? "").trim();
-          const callToActionLabel = String(
-            data.get("callToActionLabel") ?? "",
-          ).trim();
-          const callToActionHref = String(
-            data.get("callToActionHref") ?? "",
-          ).trim();
-          const emailContent = String(data.get("emailContent") ?? "").trim();
-          void submit({
-            action: "create_standalone",
-            input: {
-              subject,
-              previewText,
-              callToAction: {
-                label: callToActionLabel,
-                href: callToActionHref,
+      {writingNew ? (
+        <EmailComposer
+          heading="New email"
+          busy={busy}
+          saveLabel={busy ? "Saving…" : "Save email"}
+          onSave={(email) => {
+            void submit({
+              action: "create_standalone",
+              input: {
+                ...email,
+                emailContent: parseSerializedRichTextDocument(
+                  email.emailContent,
+                ),
               },
-              emailContent: createRichTextDocumentFromPlainText(emailContent),
-            },
-          });
-        }}
-      >
-        <label>
-          Subject
-          <input name="subject" required maxLength={200} />
-        </label>
-        <label>
-          Preview text
-          <textarea name="previewText" required maxLength={1000} />
-        </label>
-        <label>
-          Call-to-action label
-          <input name="callToActionLabel" required maxLength={200} />
-        </label>
-        <label>
-          Call-to-action URL
-          <input name="callToActionHref" required type="url" />
-        </label>
-        <label>
-          Email content
-          <textarea name="emailContent" required />
-        </label>
-        <button type="submit">Create standalone campaign</button>
-      </form>
+            });
+          }}
+          onCancel={
+            campaigns.length === 0 ? undefined : () => setWritingNew(false)
+          }
+        />
+      ) : null}
+      {selected !== null ? (
+        <EmailComposer
+          key={`${selected.campaignId}:${selected.revisionNumber}`}
+          heading="Edit email"
+          initialRevision={selected}
+          busy={busy}
+          saveLabel={busy ? "Saving…" : "Save changes"}
+          onSave={(email) => {
+            void submit({
+              action: "edit",
+              campaignId: selected.campaignId,
+              expectedVersion: selected.revisionNumber,
+              input: {
+                ...email,
+                emailContent: parseSerializedRichTextDocument(
+                  email.emailContent,
+                ),
+              },
+            });
+          }}
+          onCancel={() => setSelected(null)}
+        />
+      ) : null}
       {postSources.length === 0 ? null : (
         <form
-          className="blog-post-form"
+          className="campaign-from-post"
           onSubmit={(event) => {
             event.preventDefault();
             const sourcePostRevisionId = String(
@@ -171,148 +314,79 @@ export function CampaignControls({
           }}
         >
           <label>
-            Source post revision
-            <select name="sourcePostRevisionId" required>
+            <span>Start from a blog post</span>
+            <select name="sourcePostRevisionId" required disabled={busy}>
               {postSources.map(({ post, artifact }) => (
                 <option
                   key={artifact.postRevisionId}
                   value={artifact.postRevisionId}
                 >
-                  {post.title} · revision {artifact.revision}
+                  {post.title}
                 </option>
               ))}
             </select>
           </label>
-          <button type="submit">Derive campaign from post</button>
-        </form>
-      )}
-      <ul className="blog-post-operations">
-        {campaigns.map(({ campaign, revision }) => (
-          <li key={campaign.id}>
-            <div>
-              <strong>{revision.subject}</strong>
-              <span>
-                Revision {revision.revisionNumber} · {campaign.lifecycleState}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setSelected(revision);
-                setSelectedEmailContent(
-                  serializeRichTextDocument(revision.emailContent),
-                );
-                setSelectedEmailContentInvalid(false);
-              }}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void fetch(
-                  `/api/foundry-cms/campaigns?campaignId=${encodeURIComponent(
-                    campaign.id,
-                  )}`,
-                  { cache: "no-store" },
-                )
-                  .then((response) => response.json())
-                  .then((body: { rendered: RenderedCampaign }) =>
-                    setRendered(body.rendered),
-                  );
-              }}
-            >
-              Render preview
-            </button>
-          </li>
-        ))}
-      </ul>
-      {selected === null ? null : (
-        <form
-          key={selected.id}
-          className="blog-post-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const data = new FormData(event.currentTarget);
-            void submit({
-              action: "edit",
-              campaignId: selected.campaignId,
-              expectedVersion: selected.revisionNumber,
-              input: {
-                subject: String(data.get("subject") ?? ""),
-                previewText: String(data.get("previewText") ?? ""),
-                callToAction: {
-                  label: String(data.get("callToActionLabel") ?? ""),
-                  href: String(data.get("callToActionHref") ?? ""),
-                },
-                emailContent: parseSerializedRichTextDocument(
-                  selectedEmailContent ??
-                    serializeRichTextDocument(selected.emailContent),
-                ),
-              },
-            });
-          }}
-        >
-          <h3>Edit campaign revision</h3>
-          <label>
-            Subject
-            <input name="subject" defaultValue={selected.subject} required />
-          </label>
-          <label>
-            Preview text
-            <textarea
-              name="previewText"
-              defaultValue={selected.previewText}
-              required
-            />
-          </label>
-          <label>
-            Call-to-action label
-            <input
-              name="callToActionLabel"
-              defaultValue={selected.callToAction.label}
-              required
-            />
-          </label>
-          <label>
-            Call-to-action URL
-            <input
-              name="callToActionHref"
-              defaultValue={selected.callToAction.href}
-              required
-            />
-          </label>
-          <div>
-            <span id="campaign-email-content-label">Email content</span>
-            <p id="campaign-email-content-description">
-              Formatting and links are preserved in each immutable revision.
-            </p>
-            <RichTextEditor
-              id="campaign-email-content"
-              labelledBy="campaign-email-content-label"
-              describedBy="campaign-email-content-description"
-              value={
-                selectedEmailContent ??
-                serializeRichTextDocument(selected.emailContent)
-              }
-              disabled={false}
-              invalid={selectedEmailContentInvalid}
-              onChange={setSelectedEmailContent}
-              onValidationChange={setSelectedEmailContentInvalid}
-            />
-          </div>
-          <button type="submit" disabled={selectedEmailContentInvalid}>
-            Save independent revision
+          <button type="submit" className="copy-button" disabled={busy}>
+            Create email from post
           </button>
         </form>
       )}
+      <ul className="post-list">
+        {campaigns.map(({ campaign, revision }) => (
+          <li key={campaign.id}>
+            <div className="post-list-summary">
+              <strong>{revision.subject}</strong>
+              <span>{campaignStateLabels[campaign.lifecycleState]}</span>
+            </div>
+            <div className="post-list-actions">
+              <button
+                type="button"
+                className="copy-button"
+                disabled={busy}
+                onClick={() => {
+                  setWritingNew(false);
+                  setRendered(null);
+                  setSelected(revision);
+                }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="copy-button"
+                disabled={busy}
+                onClick={() => {
+                  void fetch(
+                    `/api/foundry-cms/campaigns?campaignId=${encodeURIComponent(
+                      campaign.id,
+                    )}`,
+                    { cache: "no-store" },
+                  )
+                    .then((response) => response.json())
+                    .then((body: { rendered: RenderedCampaign }) =>
+                      setRendered(body.rendered),
+                    )
+                    .catch(() =>
+                      setMessage("The preview could not be loaded. Try again."),
+                    );
+                }}
+              >
+                Preview
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
       {rendered === null ? null : (
-        <section aria-label="Rendered campaign preview">
-          <h3>Plain-text preview</h3>
+        <section className="email-preview" aria-label="Email preview">
+          <h3>How the email reads</h3>
           <pre>{rendered.text.bytes}</pre>
-          <p>
-            HTML fingerprint: <code>{rendered.html.fingerprint}</code>
-          </p>
+          <details>
+            <summary>Technical details</summary>
+            <p>
+              HTML fingerprint: <code>{rendered.html.fingerprint}</code>
+            </p>
+          </details>
         </section>
       )}
       {message === "" ? null : <p role="status">{message}</p>}

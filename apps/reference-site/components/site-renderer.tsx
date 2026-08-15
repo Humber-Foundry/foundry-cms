@@ -4,6 +4,11 @@ import {
   installedPageComponentRegistry,
 } from "@/foundry/page-components";
 import type { PageComponentRenderContext } from "@/foundry/page-component-renderers";
+import { SiteHeader } from "@/foundry/site-shell";
+import {
+  PublicBlogPostList,
+  publicBlogPosts,
+} from "./blog-index";
 
 export function SiteSection(context: PageComponentRenderContext) {
   const validation = installedPageComponentRegistry.validate(context.section);
@@ -25,31 +30,31 @@ export function SiteRenderer({
   mediaDelivery = "published",
   mediaAccessToken,
   blogPostHref = (slug) => `/blog/${slug}`,
+  homeHref = "/",
+  blogHref = "/blog",
+  editingSurface = false,
 }: {
   definition: SiteDefinition;
   mediaDelivery?: "authenticated" | "published";
   mediaAccessToken?: string;
   blogPostHref?: (slug: string) => string;
+  homeHref?: string;
+  blogHref?: string;
+  /** Set inside the editor: embeds sandbox and the main landmark defers. */
+  editingSurface?: boolean;
 }) {
-  const publicPosts = definition.blog.posts.filter(
-    ({ targetVisibility }) => targetVisibility === "public",
-  );
+  // Inside the editor the host page owns the main landmark; the site's
+  // wrapper becomes a plain region so landmarks do not nest.
+  const Landmark = editingSurface ? "div" : "main";
+  const posts = publicBlogPosts(definition);
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
-      <header className="site-header">
-        <a className="wordmark" href="/" aria-label={`${definition.site.name} home`}>
-          <span aria-hidden="true">F</span>
-          {definition.site.name}
-        </a>
-        <nav aria-label="Primary navigation">
-          {definition.site.navigation.map((item) => (
-            <a key={item.id} href={item.href}>
-              {item.label}
-            </a>
-          ))}
-        </nav>
-      </header>
-      <main>
+      <SiteHeader
+        definition={definition}
+        homeHref={homeHref}
+        blogHref={blogHref}
+      />
+      <Landmark id="main-content" tabIndex={-1}>
         {definition.home.sections.map((section) => (
           <SiteSection
             key={section.id}
@@ -57,27 +62,21 @@ export function SiteRenderer({
             definition={definition}
             mediaDelivery={mediaDelivery}
             mediaAccessToken={mediaAccessToken}
+            editingSurface={editingSurface}
           />
         ))}
-        {publicPosts.length === 0 ? null : (
+        {posts.length === 0 ? null : (
           <section className="blog-index" aria-labelledby="blog_index_title">
             <p className="eyebrow">Journal</p>
             <h2 id="blog_index_title">Latest posts</h2>
-            <ul>
-              {publicPosts.map((post) => (
-                <li key={post.id}>
-                  <a href={blogPostHref(post.slug)}>{post.title}</a>
-                  <p>{post.excerpt}</p>
-                </li>
-              ))}
-            </ul>
+            <PublicBlogPostList
+              posts={posts}
+              postHref={(post) => blogPostHref(post.slug)}
+              headingTag="h3"
+            />
           </section>
         )}
-      </main>
-      <footer className="site-footer">
-        <p>{definition.site.footer}</p>
-        <p>Site Definition v{definition.definitionVersion}</p>
-      </footer>
+      </Landmark>
     </div>
   );
 }

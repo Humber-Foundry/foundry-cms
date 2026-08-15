@@ -60,7 +60,7 @@ function registeredComponentFixture() {
 
 describe("installation-owned page components", () => {
   it("owns validation, editor metadata, and rendering in one installed registration", () => {
-    const config = createVisualComponentConfig(new Set(), installedSiteDefinition);
+    const config = createVisualComponentConfig(() => new Set(), () => installedSiteDefinition);
     expect(Object.keys(config.components)).toEqual(
       installedPageComponentRegistry.allowedComponents,
     );
