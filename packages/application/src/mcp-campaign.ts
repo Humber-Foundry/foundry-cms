@@ -179,6 +179,7 @@ function campaignDocument(campaign: Campaign, revision: CampaignRevision) {
     provenance: { kind: revision.provenance.kind },
     subject: revision.subject,
     previewText: revision.previewText,
+    shareImage: revision.shareImage,
     callToAction: revision.callToAction,
     emailContent: revision.emailContent,
     schemaVersion: revision.schemaVersion,
@@ -201,6 +202,7 @@ export function createMcpCampaignApplication({
         idempotencyKey: string;
         subject: string;
         previewText: string;
+        shareImage?: CampaignEditableInput["shareImage"];
         callToAction: CampaignCallToAction;
         emailContent: CampaignEditableInput["emailContent"];
       }>,
@@ -221,6 +223,7 @@ export function createMcpCampaignApplication({
                 editable: {
                   subject: input.subject,
                   previewText: input.previewText,
+                  shareImage: input.shareImage ?? null,
                   callToAction: input.callToAction,
                   emailContent: input.emailContent,
                 },
@@ -241,6 +244,7 @@ export function createMcpCampaignApplication({
         idempotencyKey: string;
         subject: string;
         previewText: string;
+        shareImage?: CampaignEditableInput["shareImage"];
         callToAction: CampaignCallToAction;
         emailContent: CampaignEditableInput["emailContent"];
       }>,
@@ -263,6 +267,7 @@ export function createMcpCampaignApplication({
                 editable: {
                   subject: input.subject,
                   previewText: input.previewText,
+                  shareImage: input.shareImage ?? null,
                   callToAction: input.callToAction,
                   emailContent: input.emailContent,
                 },

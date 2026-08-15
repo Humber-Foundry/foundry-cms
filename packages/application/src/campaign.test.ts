@@ -77,12 +77,15 @@ const sourcePost: BlogPost = {
   seo: {
     title: "Independent campaigns | Foundry",
     description: "A copied introduction.",
+    keywords: [],
+    shareImage: null
   },
   body: createRichTextDocumentFromPlainText("The copied post body."),
 };
 const standaloneInput: CampaignEditableInput = {
   subject: "A standalone campaign",
   previewText: "An introduction with <unsafe> punctuation & symbols.",
+  shareImage: null,
   callToAction: {
     label: "Read the update",
     href: "https://example.com/update?from=email&kind=campaign",
@@ -130,7 +133,7 @@ function createFixture() {
     resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
     channelConfiguration,
     rendererVersion: "1111111111111111111111111111111111111111",
-    schemaVersion: "1.3.0",
+    schemaVersion: "1.4.0",
     clock: () => new Date("2026-07-29T07:00:00.000Z"),
     createId: (kind) =>
       kind === "campaign"
@@ -438,7 +441,7 @@ describe("campaign authoring and rendering", () => {
       resolveAudience: async () => ({ eligibleSubscriberCount: 0 }),
       channelConfiguration,
       rendererVersion: "1111111111111111111111111111111111111111",
-      schemaVersion: "1.3.0",
+      schemaVersion: "1.4.0",
     });
     await expect(
       otherSiteApplication.commands.createFromPost({
@@ -523,7 +526,7 @@ describe("campaign authoring and rendering", () => {
       resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
       channelConfiguration,
       rendererVersion: "2222222222222222222222222222222222222222",
-      schemaVersion: "1.3.0",
+      schemaVersion: "1.4.0",
     });
 
     await expect(

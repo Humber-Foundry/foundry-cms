@@ -66,6 +66,30 @@ never rewrites the media asset's source object. A selected occurrence revision
 is bound into an immutable content revision before it appears in an exact
 preview; only the Git-published Site Definition is public.
 
+## Search and sharing
+
+**SEO metadata** — The owner-filled block that decides how one piece of content
+looks in a search result and in a link preview: title, description, keywords and
+share image. Site pages, blog posts and newsletter campaigns carry the same
+field set. Every field may be left blank; blank asks for the fallback.
+
+**Fallback** — The value the renderer uses when an SEO field is blank. A blank
+description becomes the post excerpt, then the site description. A blank title
+becomes the content's own heading followed by the site name. A blank share image
+becomes the home page's share image, then the home hero. A fallback is computed
+at render time and never written back into the content.
+
+**Share image** — The picture shown when a page, post or campaign is shared as a
+link. It is an address and an alt text. A page or post may use a path on the
+site; a campaign must use an absolute address, because an email is read outside
+the site.
+
+**Canonical origin** — The public address a site serves from, held in the Site
+Definition. Every canonical and share URL is derived from it plus the route
+path. It is not `FOUNDRY_CANONICAL_ORIGIN`, which is the dashboard's
+request-integrity origin. An empty canonical origin means the installation has
+not set one, and the renderer then emits no address rather than a wrong one.
+
 ## Blog
 
 **Post** — A stable blog-content identity with zero or more immutable post
@@ -248,6 +272,7 @@ The value is never part of the record.
 
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
 - [Draft, preview and publish pipeline](docs/decisions/ADR-0004-draft-preview-publish-pipeline.md)
+- [One SEO and sharing field set](docs/decisions/ADR-0008-seo-metadata-shared-field-set.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)

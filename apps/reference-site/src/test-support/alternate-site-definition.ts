@@ -25,6 +25,8 @@ export const alternateSiteDefinition = {
     seo: {
       title: "Alternate installation home",
       description: "A second installation acceptance fixture.",
+      keywords: [],
+      shareImage: null
     },
   },
   blog: {
@@ -41,6 +43,8 @@ export const alternateSiteDefinition = {
         seo: {
           title: "Alternate installation post",
           description: "A post scoped to the alternate fixture.",
+          keywords: [],
+          shareImage: null
         },
         body: createRichTextDocumentFromPlainText(
           "This post belongs only to the alternate installation.",

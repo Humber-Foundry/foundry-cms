@@ -73,6 +73,36 @@ export function validateCampaignChannelConfiguration(
   });
 }
 
+/**
+ * Accept only an absolute `https://` share image address.
+ *
+ * An email is read outside the site, so a path such as `/api/media/asset_hero`
+ * would resolve against the reader's mail host and break. Any other scheme is
+ * refused because the address is written straight into the message.
+ */
+function validateCampaignShareImage(
+  value: CampaignEditableInput["shareImage"],
+): CampaignEditableInput["shareImage"] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "object" || typeof value.url !== "string") {
+    throw new CampaignValidationError("campaign_share_image_invalid");
+  }
+  const url = value.url.trim();
+  if (url === "") {
+    return null;
+  }
+  if (!/^https:\/\/[^\s/?#]+[^\s]*$/u.test(url) || url.length > 2_000) {
+    throw new CampaignValidationError("campaign_share_image_invalid");
+  }
+  const alt = typeof value.alt === "string" ? value.alt.trim() : "";
+  if (alt.length > 300) {
+    throw new CampaignValidationError("campaign_share_image_invalid");
+  }
+  return Object.freeze({ url, alt });
+}
+
 export function validateCampaignInput(
   input: CampaignEditableInput,
   channelConfiguration: CampaignChannelConfiguration,
@@ -86,6 +116,7 @@ export function validateCampaignInput(
     }
     const subject = requireText(input.subject, 200);
     const previewText = requireText(input.previewText, 1_000);
+    const shareImage = validateCampaignShareImage(input.shareImage);
     const callToAction = Object.freeze({
       label: requireText(input.callToAction.label, 200),
       href: requireText(input.callToAction.href, 2_000),
@@ -99,6 +130,7 @@ export function validateCampaignInput(
     return Object.freeze({
       subject,
       previewText,
+      shareImage,
       callToAction,
       emailContent,
       ...channelConfiguration,
@@ -199,10 +231,22 @@ export function renderRichTextPlain(document: RichTextDocument): string {
 }
 
 function renderCampaignBytes(revision: CampaignRevision) {
+  // A revision stored before share images existed has no such field, so it
+  // reads as `undefined` rather than `null`. Treat both as "no image".
+  const shareImage = revision.shareImage ?? null;
   const html = [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
-    `<title>${escapeHtml(revision.subject)}</title></head><body>`,
+    `<title>${escapeHtml(revision.subject)}</title>`,
+    shareImage === null
+      ? ""
+      : `<meta property="og:image" content="${escapeHtml(shareImage.url)}">`,
+    "</head><body>",
+    shareImage === null
+      ? ""
+      : `<img src="${escapeHtml(shareImage.url)}" alt="${escapeHtml(
+          shareImage.alt,
+        )}">`,
     `<p>${escapeHtml(revision.previewText)}</p>`,
     renderRichTextHtml(revision.emailContent),
     `<p><a href="${escapeHtml(revision.callToAction.href)}">${escapeHtml(

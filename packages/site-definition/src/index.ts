@@ -59,6 +59,34 @@ export function createBlogPostId(value: string): BlogPostId {
   return value as BlogPostId;
 }
 
+/**
+ * A picture used when a page, post or campaign is shared as a link.
+ *
+ * `url` is either a path on this site, such as `/api/media/asset_hero`, or an
+ * absolute `https://` address. Relative paths become absolute at render time
+ * using the site's canonical origin, because link previews and email clients
+ * cannot resolve a path.
+ */
+export type SeoShareImage = Readonly<{
+  url: string;
+  alt: string;
+}>;
+
+/**
+ * The owner-filled metadata that decides how one piece of content looks in
+ * search results and in link previews. Every field may be left blank; the
+ * renderer supplies a fallback. See `seo.ts` for the fallback rules.
+ *
+ * Site pages, blog posts and newsletter campaigns all use this same field set,
+ * so one drafting tool can fill any of the three.
+ */
+export type SeoMetadata = Readonly<{
+  title: string;
+  description: string;
+  keywords: ReadonlyArray<string>;
+  shareImage: SeoShareImage | null;
+}>;
+
 export type BlogPost = Readonly<{
   id: BlogPostId;
   revision: number;
@@ -67,10 +95,7 @@ export type BlogPost = Readonly<{
   slug: string;
   title: string;
   excerpt: string;
-  seo: Readonly<{
-    title: string;
-    description: string;
-  }>;
+  seo: SeoMetadata;
   body: RichTextDocument;
 }>;
 
@@ -173,23 +198,28 @@ export type PageSection =
   | RegisteredPageSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.3.0";
-  schemaVersion: "1.3.0";
+  definitionVersion: "1.4.0";
+  schemaVersion: "1.4.0";
   design: SiteDesign;
   site: Readonly<{
     id: SiteId;
     name: string;
     description: string;
+    /**
+     * The public address this site serves from, such as
+     * `https://example.com`, with no trailing slash. It is the base for every
+     * canonical and share URL the public pages emit. An empty string means the
+     * installation has not set it yet, and the renderer then emits no
+     * canonical or share URL rather than a wrong one.
+     */
+    canonicalOrigin: string;
     navigation: ReadonlyArray<SiteLink>;
     footer: string;
   }>;
   home: Readonly<{
     id: string;
     media?: ReadonlyArray<SiteMediaOccurrence>;
-    seo: Readonly<{
-      title: string;
-      description: string;
-    }>;
+    seo: SeoMetadata;
     sections: ReadonlyArray<PageSection>;
   }>;
   blog: Readonly<{
@@ -203,6 +233,7 @@ export type StoredSiteDefinitionSchemaVersion =
   | "1.0.0"
   | "1.1.0"
   | "1.2.0"
+  | "1.3.0"
   | SiteDefinitionSchemaVersion;
 
 function isSiteDefinitionRecord(
@@ -241,7 +272,7 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.3.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.4.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
@@ -254,8 +285,8 @@ export const siteDefinitionSchema = {
     "blog",
   ],
   properties: {
-    definitionVersion: { const: "1.3.0" },
-    schemaVersion: { const: "1.3.0" },
+    definitionVersion: { const: "1.4.0" },
+    schemaVersion: { const: "1.4.0" },
     design: {
       type: "object",
       additionalProperties: false,
@@ -306,11 +337,19 @@ export const siteDefinitionSchema = {
     site: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "name", "description", "navigation", "footer"],
+      required: [
+        "id",
+        "name",
+        "description",
+        "canonicalOrigin",
+        "navigation",
+        "footer",
+      ],
       properties: {
         id: { $ref: "#/$defs/siteId" },
         name: { $ref: "#/$defs/text" },
         description: { $ref: "#/$defs/text" },
+        canonicalOrigin: { $ref: "#/$defs/canonicalOrigin" },
         navigation: {
           type: "array",
           items: { $ref: "#/$defs/link" },
@@ -352,15 +391,7 @@ export const siteDefinitionSchema = {
             },
           ],
         },
-        seo: {
-          type: "object",
-          additionalProperties: false,
-          required: ["title", "description"],
-          properties: {
-            title: { $ref: "#/$defs/text" },
-            description: { $ref: "#/$defs/text" },
-          },
-        },
+        seo: { $ref: "#/$defs/seoMetadata" },
         sections: {
           type: "array",
           items: {
@@ -400,6 +431,54 @@ export const siteDefinitionSchema = {
     text: {
       type: "string",
       minLength: 1,
+    },
+    canonicalOrigin: {
+      type: "string",
+      maxLength: 2_000,
+      pattern: "^$|^https?://[^\\s/?#]+$",
+    },
+    seoShareImageUrl: {
+      type: "string",
+      minLength: 1,
+      maxLength: 2_000,
+      pattern: "^(?:/[^\\s]*|https://[^\\s/?#]+(?:[^\\s]*)?)$",
+    },
+    seoMetadata: {
+      $comment:
+        "Every field may be blank. `seo.ts` supplies the fallback used when " +
+        "one is. Blank is how an owner asks for the fallback.",
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "description", "keywords", "shareImage"],
+      properties: {
+        title: { type: "string", maxLength: 300 },
+        description: { type: "string", maxLength: 1_000 },
+        keywords: {
+          type: "array",
+          maxItems: 12,
+          uniqueItems: true,
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: 60,
+            pattern: "^[^,\\s](?:[^,]*[^,\\s])?$",
+          },
+        },
+        shareImage: {
+          anyOf: [
+            { type: "null" },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["url", "alt"],
+              properties: {
+                url: { $ref: "#/$defs/seoShareImageUrl" },
+                alt: { type: "string", maxLength: 300 },
+              },
+            },
+          ],
+        },
+      },
     },
     link: {
       type: "object",
@@ -464,15 +543,7 @@ export const siteDefinitionSchema = {
         },
         title: { $ref: "#/$defs/text" },
         excerpt: { $ref: "#/$defs/text" },
-        seo: {
-          type: "object",
-          additionalProperties: false,
-          required: ["title", "description"],
-          properties: {
-            title: { $ref: "#/$defs/text" },
-            description: { $ref: "#/$defs/text" },
-          },
-        },
+        seo: { $ref: "#/$defs/seoMetadata" },
         body: { $ref: "#/$defs/richTextDocument" },
       },
     },
@@ -887,3 +958,4 @@ export * from "./page-component-registry";
 export * from "./design-tokens";
 export * from "./blog";
 export * from "./blog-rendering";
+export * from "./seo";

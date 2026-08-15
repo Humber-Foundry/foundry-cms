@@ -1,5 +1,5 @@
 export const projectedRichTextVersion = "1.0.0";
-export const projectedSiteDefinitionVersion = "1.3.0";
+export const projectedSiteDefinitionVersion = "1.4.0";
 
 const projectedDefaultSiteDesign = Object.freeze({
   typography: Object.freeze({ heading: "editorial" }),
@@ -33,6 +33,35 @@ export function projectPlainTextRichTextDocument(value) {
   };
 }
 
+/**
+ * Fill the 1.4.0 sharing fields on a definition stored under an older schema.
+ *
+ * A definition written before 1.4.0 has no canonical origin, no keywords and
+ * no share image. Each one projects to the value that means "not set", so an
+ * upgraded definition renders exactly what it rendered before until an owner
+ * fills the new fields.
+ */
+function projectSeoMetadata(projected) {
+  if (isRecord(projected.site)) {
+    projected.site.canonicalOrigin ??= "";
+  }
+  const seoBlocks = [];
+  if (isRecord(projected.home) && isRecord(projected.home.seo)) {
+    seoBlocks.push(projected.home.seo);
+  }
+  if (isRecord(projected.blog) && Array.isArray(projected.blog.posts)) {
+    for (const post of projected.blog.posts) {
+      if (isRecord(post) && isRecord(post.seo)) {
+        seoBlocks.push(post.seo);
+      }
+    }
+  }
+  for (const seo of seoBlocks) {
+    seo.keywords ??= [];
+    seo.shareImage ??= null;
+  }
+}
+
 export function projectSiteDefinitionSchema(value) {
   if (
     !isRecord(value) ||
@@ -51,7 +80,8 @@ export function projectSiteDefinitionSchema(value) {
     value.definitionVersion !== value.schemaVersion ||
     (value.schemaVersion !== "1.0.0" &&
       value.schemaVersion !== "1.1.0" &&
-      value.schemaVersion !== "1.2.0")
+      value.schemaVersion !== "1.2.0" &&
+      value.schemaVersion !== "1.3.0")
   ) {
     throw new TypeError("site_definition_version_unsupported");
   }
@@ -60,6 +90,7 @@ export function projectSiteDefinitionSchema(value) {
   projected.definitionVersion = projectedSiteDefinitionVersion;
   projected.schemaVersion = projectedSiteDefinitionVersion;
   projected.blog ??= { id: "blog", posts: [] };
+  projectSeoMetadata(projected);
   if (needsDesignProjection) {
     projected.design ??= projectedDefaultSiteDesign;
   }

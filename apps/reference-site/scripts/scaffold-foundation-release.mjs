@@ -167,6 +167,8 @@ async function main() {
       seo: {
         title: "Foundry site",
         description: "Client-owned content managed with Foundry CMS.",
+        keywords: [],
+        shareImage: null
       },
       sections: [],
     },

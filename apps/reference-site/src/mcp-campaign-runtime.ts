@@ -205,7 +205,7 @@ function bindApplications(
     resolveAudience: parts.resolveAudience,
     channelConfiguration: parts.channelConfiguration,
     rendererVersion: parts.rendererVersion,
-    schemaVersion: "1.3.0",
+    schemaVersion: "1.4.0",
   });
   const testDelivery = createCampaignTestDeliveryApplication({
     siteId: parts.siteId,

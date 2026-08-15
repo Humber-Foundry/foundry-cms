@@ -20,6 +20,7 @@ import {
   parseSerializedRichTextDocument,
   RichTextValidationError,
   type PageComposition,
+  type SeoMetadata,
   type SiteDefinition,
   type SiteDefinitionEdit,
 } from "@humber-foundry/site-definition";
@@ -160,6 +161,40 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
   if (typeof candidate.post !== "object" || candidate.post === null) {
     throw new TypeError("blog_command_invalid");
   }
+  /**
+   * Read the SEO and sharing block a composer sent. Every field may be blank
+   * or absent; the renderer fills a blank from the post itself. The schema
+   * validator rejects a malformed value before it becomes a revision.
+   */
+  function parseSeoMetadata(seo: Record<string, unknown>): SeoMetadata {
+    const shareImage = seo.shareImage;
+    const keywords = Array.isArray(seo.keywords)
+      ? seo.keywords.filter(
+          (keyword): keyword is string => typeof keyword === "string",
+        )
+      : [];
+    if (
+      shareImage !== undefined &&
+      shareImage !== null &&
+      (typeof shareImage !== "object" ||
+        typeof (shareImage as Record<string, unknown>).url !== "string" ||
+        typeof (shareImage as Record<string, unknown>).alt !== "string")
+    ) {
+      throw new TypeError("blog_command_invalid");
+    }
+    return {
+      title: seo.title as string,
+      description: seo.description as string,
+      keywords,
+      shareImage:
+        shareImage === undefined || shareImage === null
+          ? null
+          : {
+              url: (shareImage as Record<string, string>).url!,
+              alt: (shareImage as Record<string, string>).alt!,
+            },
+    };
+  }
   const post = candidate.post as Record<string, unknown>;
   if (
     typeof post.slug !== "string" ||
@@ -177,10 +212,7 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
     slug: post.slug,
     title: post.title,
     excerpt: post.excerpt,
-    seo: {
-      title: (post.seo as Record<string, string>).title!,
-      description: (post.seo as Record<string, string>).description!,
-    },
+    seo: parseSeoMetadata(post.seo as Record<string, unknown>),
     body: parseSerializedRichTextDocument(
       createSerializedRichTextDocument(post.body),
     ),

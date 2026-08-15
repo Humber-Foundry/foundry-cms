@@ -1890,6 +1890,17 @@ function EditorFieldGroups({
                 const fieldLabel = (
                   <span id={labelId}>{field.label}</span>
                 );
+                // An optional field needs to say what happens when it is left
+                // blank, or the owner cannot tell "empty" from "broken".
+                const fieldHint =
+                  field.hint === undefined ? null : (
+                    <small
+                      className="editor-field-hint"
+                      id={`${field.path}-hint`}
+                    >
+                      {field.hint}
+                    </small>
+                  );
                 const fieldError = (
                   <small id={`${field.path}-error`}>
                     {errors[field.path] ?? ""}
@@ -1905,6 +1916,7 @@ function EditorFieldGroups({
                       aria-labelledby={labelId}
                     >
                       {fieldLabel}
+                      {fieldHint}
                       <RichTextEditor
                         id={`${field.path}-editor`}
                         disabled={editorLocked}
@@ -1930,6 +1942,7 @@ function EditorFieldGroups({
                 return (
                   <label key={field.path} data-field-path={field.path}>
                     {fieldLabel}
+                    {fieldHint}
                     {field.values !== undefined ? (
                       <select
                         disabled={editorLocked}

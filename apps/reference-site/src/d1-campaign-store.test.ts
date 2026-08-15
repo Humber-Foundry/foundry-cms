@@ -95,7 +95,7 @@ describe("D1 campaign store", () => {
         audienceDefinition: campaignAudienceDefinition,
       },
       rendererVersion: "1111111111111111111111111111111111111111",
-      schemaVersion: "1.3.0",
+      schemaVersion: "1.4.0",
       createId: (kind) =>
         kind === "campaign"
           ? "20000000-0000-4000-8000-000000000001"
@@ -107,6 +107,7 @@ describe("D1 campaign store", () => {
       input: {
         subject: "Durable campaign",
         previewText: "Durable preview text.",
+        shareImage: null,
         callToAction: {
           label: "Read more",
           href: "https://example.com",
@@ -120,6 +121,7 @@ describe("D1 campaign store", () => {
       input: {
         subject: "Durable campaign",
         previewText: "Durable preview text.",
+        shareImage: null,
         callToAction: {
           label: "Read more",
           href: "https://example.com",
@@ -135,6 +137,7 @@ describe("D1 campaign store", () => {
         input: {
           subject: "Different command input",
           previewText: "Durable preview text.",
+          shareImage: null,
           callToAction: {
             label: "Read more",
             href: "https://example.com",

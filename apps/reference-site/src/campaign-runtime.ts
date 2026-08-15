@@ -364,7 +364,7 @@ export async function loadCampaignRequestContext(
     resolveAudience,
     channelConfiguration,
     rendererVersion: rendererCommit,
-    schemaVersion: "1.3.0",
+    schemaVersion: "1.4.0",
   });
   const audience = createCampaignBulkAudience({
     siteId: installedSite.application.siteId,

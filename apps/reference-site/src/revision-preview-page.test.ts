@@ -72,6 +72,8 @@ describe("revision preview page", () => {
           seo: {
             title: "Edited SEO title",
             description: "Edited SEO description",
+            keywords: [],
+            shareImage: null
           },
         },
       },

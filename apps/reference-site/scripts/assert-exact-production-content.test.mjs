@@ -69,12 +69,28 @@ const fixedBaseRuntimeContentHash = canonicalHash({
 const trackedRuntimeDefinition = createReferenceSiteDefinition(
   trackedPublishedDefinition,
 );
-const { blog: _currentBlog, ...currentDefinitionWithoutBlog } =
-  trackedRuntimeDefinition;
+const { canonicalOrigin: _canonicalOrigin, ...previousSite } =
+  trackedRuntimeDefinition.site;
+const withoutSharingFields = (seo) => {
+  const { keywords: _keywords, shareImage: _shareImage, ...previous } = seo;
+  return previous;
+};
 const previousProjectedContentHash = canonicalHash({
-  ...currentDefinitionWithoutBlog,
-  definitionVersion: "1.2.0",
-  schemaVersion: "1.2.0",
+  ...trackedRuntimeDefinition,
+  definitionVersion: "1.3.0",
+  schemaVersion: "1.3.0",
+  site: previousSite,
+  home: {
+    ...trackedRuntimeDefinition.home,
+    seo: withoutSharingFields(trackedRuntimeDefinition.home.seo),
+  },
+  blog: {
+    ...trackedRuntimeDefinition.blog,
+    posts: trackedRuntimeDefinition.blog.posts.map((post) => ({
+      ...post,
+      seo: withoutSharingFields(post.seo),
+    })),
+  },
 });
 const runtimePublishedContentHash = canonicalHash(trackedRuntimeDefinition);
 
@@ -265,7 +281,7 @@ describe("exact production content authorization", () => {
 
   it("authorizes the first code-only reader upgrade against the fixed-base runtime hash", async () => {
     expect(fixedBaseRuntimeContentHash).toBe(
-      "4aa6fd159782ff3dd54a16be5447fc6e367eca5f9870bbf116255e6282f6f8a3",
+      "8272592d78e9e839e675382ae72df46a2a00371e0b755308385674504a6f29ae",
     );
     expect(fixedBaseRuntimeContentHash).not.toBe(
       trackedPublishedContentHash,
@@ -292,7 +308,7 @@ describe("exact production content authorization", () => {
     expect(options.readCommitParents).not.toHaveBeenCalled();
   });
 
-  it("authorizes a code-only 1.3 reader upgrade against the prior 1.2 projection hash", async () => {
+  it("authorizes a code-only 1.4 reader upgrade against the prior 1.3 projection hash", async () => {
     const options = inputs({
       readLiveMarker: vi.fn().mockResolvedValue({
         commitSha: liveCommit,

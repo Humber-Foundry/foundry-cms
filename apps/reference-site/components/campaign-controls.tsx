@@ -48,6 +48,7 @@ function EmailComposer({
   onSave(email: {
     subject: string;
     previewText: string;
+    shareImage: CampaignRevision["shareImage"];
     callToAction: { label: string; href: string };
     emailContent: SerializedRichTextDocument;
   }): void;
@@ -63,6 +64,12 @@ function EmailComposer({
   const [ctaHref, setCtaHref] = useState(
     initialRevision?.callToAction.href ?? "",
   );
+  const [shareImageUrl, setShareImageUrl] = useState(
+    initialRevision?.shareImage?.url ?? "",
+  );
+  const [shareImageAlt, setShareImageAlt] = useState(
+    initialRevision?.shareImage?.alt ?? "",
+  );
   const [content, setContent] = useState<SerializedRichTextDocument>(() =>
     initialRevision === undefined
       ? emptyRichTextBody()
@@ -76,9 +83,14 @@ function EmailComposer({
       aria-label={heading}
       onSubmit={(event) => {
         event.preventDefault();
+        const shareImage = shareImageUrl.trim();
         onSave({
           subject: subject.trim(),
           previewText: previewText.trim(),
+          shareImage:
+            shareImage === ""
+              ? null
+              : { url: shareImage, alt: shareImageAlt.trim() },
           callToAction: { label: ctaLabel.trim(), href: ctaHref.trim() },
           emailContent: content,
         });
@@ -118,6 +130,33 @@ function EmailComposer({
             maxLength={1000}
             value={previewText}
             onChange={(event) => setPreviewText(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Share image address</span>
+          <small className="composer-hint">
+            Shown at the top of the email. Use a full https address, because a
+            mail app cannot resolve a path on your site.
+          </small>
+          <input
+            name="shareImageUrl"
+            type="url"
+            maxLength={2000}
+            placeholder="https://…"
+            value={shareImageUrl}
+            onChange={(event) => setShareImageUrl(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Share image description</span>
+          <small className="composer-hint">
+            Describe the picture for people who cannot see it.
+          </small>
+          <input
+            name="shareImageAlt"
+            maxLength={300}
+            value={shareImageAlt}
+            onChange={(event) => setShareImageAlt(event.target.value)}
           />
         </label>
         <label>

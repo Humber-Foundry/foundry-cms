@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 
-import type {
-  BlogPost,
-  SiteDefinition,
+import {
+  resolveBlogPostSeo,
+  type BlogPost,
+  type SiteDefinition,
 } from "@humber-foundry/site-definition";
+
+import { publicMetadata } from "./public-metadata";
 
 export function findPublicBlogPost(
   definition: SiteDefinition,
@@ -20,9 +23,12 @@ export function findBlogPost(
   return definition.blog.posts.find((post) => post.slug === slug) ?? null;
 }
 
-export function blogPostMetadata(post: BlogPost): Metadata {
-  return {
-    title: post.seo.title,
-    description: post.seo.description,
-  };
+export function blogPostMetadata(
+  definition: SiteDefinition,
+  post: BlogPost,
+): Metadata {
+  return publicMetadata(resolveBlogPostSeo(definition, post), {
+    siteName: definition.site.name,
+    kind: "article",
+  });
 }

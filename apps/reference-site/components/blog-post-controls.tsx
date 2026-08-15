@@ -4,11 +4,14 @@ import { useState } from "react";
 
 import type { ContentRevision } from "@humber-foundry/application";
 import {
+  formatSeoKeywords,
+  parseSeoKeywords,
   parseSerializedRichTextDocument,
   serializeRichTextDocument,
   type BlogPost,
   type BlogPostId,
   type RichTextDocument,
+  type SeoMetadata,
   type SerializedRichTextDocument,
 } from "@humber-foundry/site-definition";
 
@@ -115,13 +118,17 @@ function PostComposer({
   onCancel,
 }: {
   editorId: string;
-  initialPost?: Pick<BlogPost, "title" | "slug" | "excerpt" | "body">;
+  initialPost?: Pick<
+    BlogPost,
+    "title" | "slug" | "excerpt" | "body" | "seo"
+  >;
   busy: boolean;
   saveLabel: string;
   onSave(post: {
     title: string;
     slug: string;
     excerpt: string;
+    seo: SeoMetadata;
     body: SerializedRichTextDocument;
   }): void;
   onCancel?(): void;
@@ -130,6 +137,19 @@ function PostComposer({
   const [slug, setSlug] = useState(initialPost?.slug ?? "");
   const [slugEdited, setSlugEdited] = useState(initialPost !== undefined);
   const [summary, setSummary] = useState(initialPost?.excerpt ?? "");
+  const [seoTitle, setSeoTitle] = useState(initialPost?.seo.title ?? "");
+  const [seoDescription, setSeoDescription] = useState(
+    initialPost?.seo.description ?? "",
+  );
+  const [keywords, setKeywords] = useState(
+    formatSeoKeywords(initialPost?.seo.keywords ?? []),
+  );
+  const [shareImageUrl, setShareImageUrl] = useState(
+    initialPost?.seo.shareImage?.url ?? "",
+  );
+  const [shareImageAlt, setShareImageAlt] = useState(
+    initialPost?.seo.shareImage?.alt ?? "",
+  );
   const [body, setBody] = useState<SerializedRichTextDocument>(() =>
     initialPost === undefined
       ? emptyRichTextBody()
@@ -143,10 +163,20 @@ function PostComposer({
       className="composer"
       onSubmit={(event) => {
         event.preventDefault();
+        const shareImage = shareImageUrl.trim();
         onSave({
           title: title.trim(),
           slug: effectiveSlug,
           excerpt: blogPostSummary(summary, body, title.trim()),
+          seo: {
+            title: seoTitle.trim(),
+            description: seoDescription.trim(),
+            keywords: parseSeoKeywords(keywords),
+            shareImage:
+              shareImage === ""
+                ? null
+                : { url: shareImage, alt: shareImageAlt.trim() },
+          },
           body,
         });
       }}
@@ -205,6 +235,71 @@ function PostComposer({
                 }}
               />
             </span>
+          </label>
+        </div>
+      </details>
+      <details className="composer-settings">
+        <summary>Search and sharing — how this post looks when shared</summary>
+        <div>
+          <label>
+            <span>Search title</span>
+            <small className="composer-hint">
+              Left blank, the post title and the site name are used.
+            </small>
+            <input
+              name="seoTitle"
+              maxLength={300}
+              value={seoTitle}
+              onChange={(event) => setSeoTitle(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Search description</span>
+            <small className="composer-hint">
+              Left blank, the summary above is used.
+            </small>
+            <textarea
+              name="seoDescription"
+              maxLength={1000}
+              value={seoDescription}
+              onChange={(event) => setSeoDescription(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Keywords</span>
+            <small className="composer-hint">
+              Separate keywords with commas. Up to 12.
+            </small>
+            <input
+              name="seoKeywords"
+              value={keywords}
+              onChange={(event) => setKeywords(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Share image address</span>
+            <small className="composer-hint">
+              The picture shown when this link is shared. Left blank, the
+              site&rsquo;s main image is used.
+            </small>
+            <input
+              name="seoShareImageUrl"
+              maxLength={2000}
+              value={shareImageUrl}
+              onChange={(event) => setShareImageUrl(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Share image description</span>
+            <small className="composer-hint">
+              Describe the picture for people who cannot see it.
+            </small>
+            <input
+              name="seoShareImageAlt"
+              maxLength={300}
+              value={shareImageAlt}
+              onChange={(event) => setShareImageAlt(event.target.value)}
+            />
           </label>
         </div>
       </details>
@@ -351,6 +446,7 @@ export function BlogPostControls({
       title: string;
       slug: string;
       excerpt: string;
+      seo: SeoMetadata;
       body: SerializedRichTextDocument;
     }>,
     existingPostId?: string,
@@ -360,19 +456,21 @@ export function BlogPostControls({
       schemaVersion: revision.definition.schemaVersion,
       baseRevision: revision.revision,
     };
-    const seo = { title: post.title, description: post.excerpt };
+    // Blank SEO fields are saved blank on purpose. The renderer fills them
+    // from the post title and summary, so a later edit to either keeps the
+    // search result and the link preview in step.
     void send(
       existingPostId === undefined
         ? {
             operation: "create_blog_post",
             ...shared,
-            post: { id: crypto.randomUUID(), ...post, seo },
+            post: { id: crypto.randomUUID(), ...post },
           }
         : {
             operation: "edit_blog_post",
             ...shared,
             postId: existingPostId,
-            post: { ...post, seo },
+            post,
           },
       existingPostId === undefined ? "create-blog-post" : "edit-blog-post",
     );

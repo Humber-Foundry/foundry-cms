@@ -290,6 +290,8 @@ describe("content publication application", () => {
           seo: {
             title: "Exact pipeline | Foundry",
             description: "A post using the exact site publication pipeline.",
+            keywords: [],
+            shareImage: null
           },
           body: createRichTextDocumentFromPlainText("Exact post body."),
         },

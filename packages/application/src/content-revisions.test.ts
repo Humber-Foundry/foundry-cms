@@ -39,7 +39,7 @@ const applicationInputs = {
 
 const commandInputs = {
   workspaceId: applicationInputs.workspaceId,
-  schemaVersion: "1.3.0",
+  schemaVersion: "1.4.0",
 } as const;
 
 async function createWorkspace(
@@ -92,6 +92,8 @@ describe("content revision application", () => {
       seo: {
         title: "Memory aggregate invariant | Foundry",
         description: "The adapter must preserve command shape.",
+        keywords: [],
+        shareImage: null
       },
       body: createRichTextDocumentFromPlainText("Invariant body."),
     };
@@ -210,6 +212,8 @@ describe("content revision application", () => {
         seo: {
           title: "First post | Foundry",
           description: "The first post from Foundry.",
+          keywords: [],
+          shareImage: null
         },
         body: createRichTextDocumentFromPlainText("Original body."),
       },
@@ -248,6 +252,8 @@ describe("content revision application", () => {
         seo: {
           title: "First post, revised | Foundry",
           description: "The revised first post from Foundry.",
+          keywords: [],
+          shareImage: null
         },
         body: createRichTextDocumentFromPlainText("Revised body."),
       },
@@ -306,6 +312,8 @@ describe("content revision application", () => {
             seo: {
               title: "Live post | Foundry",
               description: "A live post ready to be unpublished.",
+              keywords: [],
+              shareImage: null
             },
             body: createRichTextDocumentFromPlainText("Live body."),
           },
@@ -350,6 +358,8 @@ describe("content revision application", () => {
           seo: {
             title: "Recreated post | Foundry",
             description: "Identity reuse must fail.",
+            keywords: [],
+            shareImage: null
           },
           body: createRichTextDocumentFromPlainText("Recreated body."),
         },
@@ -424,6 +434,8 @@ describe("content revision application", () => {
         seo: {
           title: "Concurrent post | Foundry",
           description: "A concurrency test post.",
+          keywords: [],
+          shareImage: null
         },
         body: createRichTextDocumentFromPlainText("Body."),
       },
@@ -587,21 +599,21 @@ describe("content revision application", () => {
     );
     expect(saved.inputs).toEqual({
       contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      schemaVersion: "1.3.0",
+      schemaVersion: "1.4.0",
       rendererVersion: "renderer-commit-a",
       productionBase: "published:site_foundry_reference@1.1.0",
     });
     expect(Object.isFrozen(saved)).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.3.0",
+        schemaVersion: "1.4.0",
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.3.0",
+        schemaVersion: "1.4.0",
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
       }),
@@ -613,7 +625,7 @@ describe("content revision application", () => {
           inputs: { ...saved.inputs, schemaVersion: "1.0.0" },
         },
         {
-          schemaVersion: "1.3.0",
+          schemaVersion: "1.4.0",
           rendererVersion: "renderer-commit-a",
           productionBase: applicationInputs.productionBase,
         },
@@ -1339,7 +1351,7 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: createContentWorkspaceId("workspace_other"),
-        schemaVersion: "1.3.0",
+        schemaVersion: "1.4.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong workspace" }],
         idempotencyKey: "save-section-hero-0007",
@@ -1353,14 +1365,14 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: applicationInputs.workspaceId,
-        schemaVersion: "2.0.0" as "1.3.0",
+        schemaVersion: "2.0.0" as "1.4.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong schema" }],
         idempotencyKey: "save-section-hero-0008",
       }),
     ).rejects.toEqual(
       new ContentRevisionValidationError({
-        schemaVersion: "Use Site Definition schema 1.3.0.",
+        schemaVersion: "Use Site Definition schema 1.4.0.",
       }),
     );
   });

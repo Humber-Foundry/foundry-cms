@@ -43,6 +43,7 @@ const membership: HumanMembership = {
 const input: CampaignEditableInput = {
   subject: "An exact test campaign",
   previewText: "Review this exact delivery.",
+  shareImage: null,
   callToAction: {
     label: "Read the update",
     href: "https://example.test/update",
@@ -114,7 +115,7 @@ function createFixture(
     resolveAudience: async () => ({ eligibleSubscriberCount: 3 }),
     channelConfiguration,
     rendererVersion: "1111111111111111111111111111111111111111",
-    schemaVersion: "1.3.0",
+    schemaVersion: "1.4.0",
     clock: () => new Date("2026-07-29T19:00:00.000Z"),
     createId: (kind) =>
       kind === "campaign"

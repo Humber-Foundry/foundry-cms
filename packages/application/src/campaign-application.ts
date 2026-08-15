@@ -663,6 +663,13 @@ export function createCampaignApplication({
         input: {
           subject: post.title,
           previewText: post.excerpt,
+          // A post share image may be a path on the site. An email cannot
+          // resolve a path, so only an absolute address carries over.
+          shareImage:
+            post.seo.shareImage !== null &&
+            post.seo.shareImage.url.startsWith("https://")
+              ? post.seo.shareImage
+              : null,
           callToAction: {
             label: "Read more",
             href: `/blog/${post.slug}`,
