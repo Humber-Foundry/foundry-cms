@@ -185,7 +185,9 @@ for everyone. The first reader is recorded and never replaced.
 
 **Spam hold** — The state of a submission the spam check kept out of the
 inbox. The submission is stored in full and its owner notification waits.
-Accepting it moves it to the inbox and releases that notification.
+Accepting it moves it to the inbox and releases that notification. Messages
+shows these under "Spam and messages to check", because an owner reads that
+heading faster than the state name.
 
 **Owner notification** — The email that tells the Owner a submission arrived.
 Storing the submission and sending this email are separate operations, so a

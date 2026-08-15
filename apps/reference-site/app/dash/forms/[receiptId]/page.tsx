@@ -42,10 +42,13 @@ export default async function FormSubmissionPage({
     formId: submission.formId,
     fields: submission.fields,
   });
+  // A held message is not in the inbox yet, so there is nothing to reply to
+  // until someone accepts it. An erased message has no address left to use.
   const replyAddress =
     summary.replyAddress !== null &&
     isPublicFormReplyAddress(summary.replyAddress) &&
-    !submission.payloadDeleted
+    !submission.payloadDeleted &&
+    submission.classification === "accepted"
       ? summary.replyAddress
       : null;
 

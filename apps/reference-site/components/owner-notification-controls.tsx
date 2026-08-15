@@ -1,19 +1,34 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-
-import type { FailedPublicFormDelivery } from "@humber-foundry/application";
+import type {
+  FailedPublicFormDelivery,
+  PublicFormDeliveryId,
+} from "@humber-foundry/application";
 
 import { formatDashboardMoment } from "@/src/dashboard-time";
 
-import { applyFormOperation } from "./form-operation-request";
+import { useFormOperation } from "./use-form-operation";
 
 const outcomeMessages = {
   applied: "Sending again.",
   refused: "That alert could not be sent again. Reload and try again.",
   unconfirmed: "The result is unknown. Reload the page before trying again.",
 } as const;
+
+/**
+ * Why one alert stopped, in words. The stored code is a stable, non-secret
+ * value meant for support, so it is named after the sentence rather than
+ * shown on its own.
+ */
+const stopReasons: Readonly<Record<string, string>> = {
+  adapter_outcome_unknown: "The email service did not answer.",
+  claim_outcome_unknown: "Sending was interrupted part way.",
+  retry_window_exhausted: "It was tried for a day and never went through.",
+};
+
+function stopReason(errorCode: string): string {
+  return stopReasons[errorCode] ?? "The email service refused it.";
+}
 
 /**
  * The alerts that never reached the owner's email.
@@ -23,14 +38,14 @@ const outcomeMessages = {
  */
 export function OwnerNotificationTable({
   failedDeliveries,
-  pending = false,
-  message = "",
+  pending,
+  message,
   onSendAgain,
 }: {
   failedDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
-  pending?: boolean;
-  message?: string;
-  onSendAgain?: (deliveryId: string) => void;
+  pending: boolean;
+  message: string;
+  onSendAgain: (deliveryId: PublicFormDeliveryId) => void;
 }) {
   if (failedDeliveries.length === 0) {
     return (
@@ -67,12 +82,17 @@ export function OwnerNotificationTable({
                 {delivery.attempts === 1 ? "" : "s"}
               </small>
             </strong>
-            <code role="cell">{delivery.errorCode}</code>
+            <span role="cell">
+              {stopReason(delivery.errorCode)}
+              <small>
+                <code>{delivery.errorCode}</code>
+              </small>
+            </span>
             <div role="cell">
               <button
                 className="copy-button"
                 disabled={pending}
-                onClick={() => onSendAgain?.(delivery.deliveryId)}
+                onClick={() => onSendAgain(delivery.deliveryId)}
                 type="button"
               >
                 Send the alert again
@@ -92,27 +112,18 @@ export function OwnerNotificationControls({
   csrfToken: string;
   failedDeliveries: ReadonlyArray<FailedPublicFormDelivery>;
 }) {
-  const router = useRouter();
-  const [message, setMessage] = useState("");
-  const [pending, setPending] = useState(false);
-
-  async function sendAgain(deliveryId: string) {
-    setPending(true);
-    setMessage("");
-    const outcome = await applyFormOperation(
-      { action: "replay_delivery", deliveryId },
-      csrfToken,
-    );
-    setMessage(outcomeMessages[outcome]);
-    setPending(false);
-    if (outcome === "applied") router.refresh();
-  }
+  const { message, pending, run } = useFormOperation(
+    csrfToken,
+    outcomeMessages,
+  );
 
   return (
     <OwnerNotificationTable
       failedDeliveries={failedDeliveries}
       message={message}
-      onSendAgain={sendAgain}
+      onSendAgain={(deliveryId) =>
+        void run({ action: "replay_delivery", deliveryId })
+      }
       pending={pending}
     />
   );

@@ -1,6 +1,7 @@
 import {
   isPublicFormReplyAddress,
   type PublicFormInboxMessage,
+  type PublicFormReceiptId,
 } from "@humber-foundry/application";
 
 import { formatDashboardMoment } from "@/src/dashboard-time";
@@ -15,7 +16,7 @@ export function MessageInbox({
   olderCursor,
 }: {
   messages: ReadonlyArray<PublicFormInboxMessage>;
-  olderCursor: string | null;
+  olderCursor: PublicFormReceiptId | null;
 }) {
   if (messages.length === 0) {
     return (

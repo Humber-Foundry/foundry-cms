@@ -1,13 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-
-import type { SuspectedSpamSubmission } from "@humber-foundry/application";
+import type {
+  PublicFormReceiptId,
+  SuspectedSpamSubmission,
+} from "@humber-foundry/application";
 
 import { formatDashboardMoment } from "@/src/dashboard-time";
 
-import { applyFormOperation } from "./form-operation-request";
+import { useFormOperation } from "./use-form-operation";
 
 const outcomeMessages = {
   applied: "Accepted. It is in your inbox now.",
@@ -25,15 +25,15 @@ const outcomeMessages = {
 export function SpamReviewList({
   suspectedSpam,
   canAccept,
-  pending = false,
-  message = "",
+  pending,
+  message,
   onAccept,
 }: {
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
   canAccept: boolean;
-  pending?: boolean;
-  message?: string;
-  onAccept?: (receiptId: string) => void;
+  pending: boolean;
+  message: string;
+  onAccept: (receiptId: PublicFormReceiptId) => void;
 }) {
   if (suspectedSpam.length === 0) {
     return (
@@ -69,7 +69,7 @@ export function SpamReviewList({
               <button
                 className="copy-button"
                 disabled={pending}
-                onClick={() => onAccept?.(submission.receiptId)}
+                onClick={() => onAccept(submission.receiptId)}
                 type="button"
               >
                 Not spam — accept it
@@ -97,27 +97,18 @@ export function SpamReviewControls({
   canAccept: boolean;
   suspectedSpam: ReadonlyArray<SuspectedSpamSubmission>;
 }) {
-  const router = useRouter();
-  const [message, setMessage] = useState("");
-  const [pending, setPending] = useState(false);
-
-  async function accept(receiptId: string) {
-    setPending(true);
-    setMessage("");
-    const outcome = await applyFormOperation(
-      { action: "release_spam", receiptId },
-      csrfToken,
-    );
-    setMessage(outcomeMessages[outcome]);
-    setPending(false);
-    if (outcome === "applied") router.refresh();
-  }
+  const { message, pending, run } = useFormOperation(
+    csrfToken,
+    outcomeMessages,
+  );
 
   return (
     <SpamReviewList
       canAccept={canAccept}
       message={message}
-      onAccept={accept}
+      onAccept={(receiptId) =>
+        void run({ action: "release_spam", receiptId })
+      }
       pending={pending}
       suspectedSpam={suspectedSpam}
     />

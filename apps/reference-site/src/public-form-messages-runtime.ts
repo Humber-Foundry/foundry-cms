@@ -3,11 +3,11 @@ import "server-only";
 import {
   createPublicFormId,
   createPublicFormInboxPlan,
-  createPublicFormReceiptId,
   createPublicFormOperationsApplication,
   type PublicFormDeliveryHealth,
   type PublicFormInboxPage,
   type PublicFormNotificationAdapter,
+  type PublicFormReceiptId,
 } from "@humber-foundry/application";
 
 import { installedPublicForms } from "../foundry/public-forms";
@@ -102,7 +102,7 @@ export async function createPublicFormOperationsContext(
  */
 export async function loadPublicFormInbox(
   humanContext: HumanAccessRequestContext,
-  olderThanReceiptId: string | null = null,
+  olderThanReceiptId: PublicFormReceiptId | null = null,
 ) {
   if (humanContext.state !== "authorized") {
     throw new Error("form_delivery_not_authorized");
@@ -118,10 +118,7 @@ export async function loadPublicFormInbox(
   const [inbox, suspectedSpam, notificationHealth] = await Promise.all([
     application.queries.inbox({
       actor: humanContext.identity,
-      olderThanReceiptId:
-        olderThanReceiptId === null
-          ? null
-          : createPublicFormReceiptId(olderThanReceiptId),
+      olderThanReceiptId,
     }),
     application.queries.suspectedSpam({ actor: humanContext.identity }),
     application.queries.health({ actor: humanContext.identity }),
@@ -154,8 +151,8 @@ export async function loadOwnerNotificationStatus(
 }
 
 /**
- * The counts Overview needs to say what is waiting, without loading any
- * message content.
+ * The counts Overview needs to say what is waiting. It reads two numbers and
+ * no message content: what nobody has opened, and what is held as spam.
  */
 export async function loadMessagesAttention(
   humanContext: HumanAccessRequestContext,
@@ -164,22 +161,12 @@ export async function loadMessagesAttention(
     throw new Error("form_delivery_not_authorized");
   }
   if (isLocalDevelopment()) {
-    return { unreadCount: 0, heldForReview: 0, undeliveredNotifications: 0 };
+    return { unreadCount: 0, heldForReview: 0 };
   }
   const application = await createPublicFormOperationsContext(humanContext);
-  const [inbox, suspectedSpam, failedDeliveries] = await Promise.all([
-    application.queries.inbox({
-      actor: humanContext.identity,
-      olderThanReceiptId: null,
-    }),
+  const [unreadCount, suspectedSpam] = await Promise.all([
+    application.queries.unreadCount({ actor: humanContext.identity }),
     application.queries.suspectedSpam({ actor: humanContext.identity }),
-    humanContext.membership.role === "owner"
-      ? application.queries.failedDeliveries({ actor: humanContext.identity })
-      : Promise.resolve([]),
   ]);
-  return {
-    unreadCount: inbox.unreadCount,
-    heldForReview: suspectedSpam.length,
-    undeliveredNotifications: failedDeliveries.length,
-  };
+  return { unreadCount, heldForReview: suspectedSpam.length };
 }

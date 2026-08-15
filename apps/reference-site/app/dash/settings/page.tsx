@@ -15,6 +15,24 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
+ * How full the message store is, in words rather than a state name. The
+ * percentage is kept because it is the only number that says how much room is
+ * left.
+ */
+function storageSentence(
+  capacity: Readonly<{ usedPercent: number; state: string }>,
+) {
+  const used = `Messages are using ${capacity.usedPercent.toFixed(1)}% of the room they have.`;
+  if (capacity.state === "critical") {
+    return `${used} There is very little left. Erase messages you no longer need.`;
+  }
+  if (capacity.state === "warning") {
+    return `${used} It is getting full, so plan what to keep.`;
+  }
+  return `${used} There is plenty of room.`;
+}
+
+/**
  * Settings holds the jobs an owner does rarely: who can sign in, which agents
  * are connected, and the technical record of the installation. Keeping them
  * here is what lets the editing destinations stay about editing.
@@ -63,11 +81,11 @@ export default async function DashboardSettingsPage() {
         />
       </section>
 
-      <section aria-labelledby="email-alerts" id="email-alerts">
+      <section aria-labelledby="email-alerts">
         <h2 id="email-alerts">Email alerts about new messages</h2>
         <p>
           Every message people send is saved in Messages. These alerts only
-          tell you one arrived, so a failed alert never loses a message.
+          tell you one arrived, so an alert that fails never loses a message.
         </p>
         <dl className="fact-list">
           <div>
@@ -97,19 +115,16 @@ export default async function DashboardSettingsPage() {
                   )} minutes`}
             </dd>
           </div>
-          <div>
-            <dt>Message storage used</dt>
-            <dd>
-              {emailAlerts.health.capacity.state} ·{" "}
-              {emailAlerts.health.capacity.usedPercent.toFixed(1)}% of the
-              limit
-            </dd>
-          </div>
         </dl>
         <OwnerNotificationControls
           csrfToken={mutationToken}
           failedDeliveries={emailAlerts.failedDeliveries}
         />
+      </section>
+
+      <section aria-labelledby="message-storage">
+        <h2 id="message-storage">Room left for messages</h2>
+        <p>{storageSentence(emailAlerts.health.capacity)}</p>
       </section>
 
       <SiteTechnicalDetail definition={definition} />

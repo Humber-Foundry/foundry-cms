@@ -84,9 +84,7 @@ export default async function DashboardOverviewPage({
 
       <section aria-labelledby="attention">
         <h2 id="attention">Needs attention</h2>
-        {messages.unreadCount === 0 &&
-        messages.heldForReview === 0 &&
-        messages.undeliveredNotifications === 0 ? (
+        {messages.unreadCount === 0 && messages.heldForReview === 0 ? (
           <p className="empty-state">
             Nothing is waiting for you. New messages, and anything held as
             spam, appear here.
@@ -106,15 +104,6 @@ export default async function DashboardOverviewPage({
                 <a href="/dash/forms">
                   {messages.heldForReview} message
                   {messages.heldForReview === 1 ? "" : "s"} held as spam
-                </a>
-              </li>
-            ) : null}
-            {messages.undeliveredNotifications > 0 ? (
-              <li>
-                <a href="/dash/settings#email-alerts">
-                  {messages.undeliveredNotifications} email alert
-                  {messages.undeliveredNotifications === 1 ? "" : "s"} did not
-                  reach you. Every message is still saved.
                 </a>
               </li>
             ) : null}

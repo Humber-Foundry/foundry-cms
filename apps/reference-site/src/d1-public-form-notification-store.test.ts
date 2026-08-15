@@ -223,6 +223,31 @@ describe("D1 public form inbox", () => {
     });
   });
 
+  it("counts unread messages without reading what they say", async () => {
+    const acceptanceStore = createD1PublicFormAcceptanceStore(database);
+    await acceptanceStore.accept(
+      submissionAt(1, { fields: { name: "Ada", message: "Secret words" } }),
+    );
+    await acceptanceStore.accept(submissionAt(2));
+    await acceptanceStore.accept(
+      submissionAt(3, {
+        classification: "suspected_spam",
+        deliveryStatus: "held",
+      }),
+    );
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    await expect(store.countUnreadInbox({ siteId })).resolves.toBe(2);
+
+    await store.viewSubmission({
+      siteId,
+      receiptId: createPublicFormReceiptId("receipt-01"),
+      actorMembershipId: "membership-owner",
+      now: "2026-07-27T20:05:00.000Z",
+    });
+    await expect(store.countUnreadInbox({ siteId })).resolves.toBe(1);
+  });
+
   it("keeps an erased message in the inbox without its payload", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(submissionAt(1));
     await createD1PublicFormPrivacyStore(

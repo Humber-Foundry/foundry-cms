@@ -54,6 +54,7 @@ function store(
       olderCursor: null,
       unreadCount: 0,
     }),
+    countUnreadInbox: vi.fn().mockResolvedValue(0),
     listSuspectedSpam: vi.fn().mockResolvedValue([]),
     listFailed: vi.fn().mockResolvedValue([]),
     viewSubmission: vi.fn().mockResolvedValue(null),
@@ -164,6 +165,36 @@ describe("public form notification delivery", () => {
       limit: publicFormInboxPageSize,
       olderThanReceiptId: null,
     });
+  });
+
+  it("counts unread messages behind the same review authority", async () => {
+    const notificationStore = store();
+    const authorize = vi.fn().mockResolvedValue({
+      id: createHumanMembershipId("membership-editor"),
+      siteId,
+      userId: createHumanUserId("user-editor"),
+      email: "editor@example.com",
+      identityBinding: { issuer: "issuer", subject: "editor" },
+      role: "editor",
+      status: "active",
+    });
+    const actor = {
+      binding: { issuer: "issuer", subject: "editor" },
+      email: "editor@example.com",
+      nonce: "nonce",
+    };
+    const application = createPublicFormOperationsApplication({
+      siteId,
+      store: notificationStore,
+      adapter: { notify: vi.fn(), health: vi.fn() },
+      authorize,
+    });
+
+    await application.queries.unreadCount({ actor });
+
+    expect(authorize).toHaveBeenCalledWith(actor, "forms.review");
+    expect(notificationStore.countUnreadInbox).toHaveBeenCalledWith({ siteId });
+    expect(notificationStore.listInbox).not.toHaveBeenCalled();
   });
 
   it("claims a bounded lease and sends only adapter-defined destinations", async () => {

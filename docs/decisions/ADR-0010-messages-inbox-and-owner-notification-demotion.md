@@ -91,10 +91,26 @@ a message it is read for everyone. One site has a handful of members who share
 one inbox, and per-person state would show the same message as unread to a
 second person who has no work left to do on it.
 
+### The reference installation collects an address to reply to
+
+A reply link needs an address, and the reference `contact` form collected only
+a name and a message. It gains an optional `email` field, declared in the new
+installation-owned `foundry/public-forms.ts` alongside the field roles, so the
+product's own acceptance site can exercise the reply path.
+
+The field is optional and additive, so its `schemaVersion` stays `1.0.0`. A
+submission carries the schema version it was built against, and an
+installation's published form markup keeps posting `1.0.0`; bumping the
+version would reject every one of those submissions to add a field nobody is
+required to fill in.
+
 ### Owner-notification detail moves to Settings
 
-Messages keeps one line: whether the alerts are arriving, and the fact that
-every message is saved here even when an alert fails. The queue counts and the
+Messages keeps one line for the Owner: whether the alerts are arriving, and
+the fact that every message is saved here even when an alert fails. An Editor
+sees no alert line, because an Editor can neither open the Settings section
+nor send an alert again. Overview stops naming alerts at all; it lists only
+unread messages and messages held as spam. The queue counts and the
 "send the alert again" control move to a Settings section named "Email alerts
 about new messages", which is already Owner-only. The delivery machinery,
 including retries, the permanent-failure state and replay, is unchanged.

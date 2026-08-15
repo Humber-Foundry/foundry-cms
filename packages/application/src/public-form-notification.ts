@@ -117,6 +117,7 @@ export interface PublicFormNotificationStore {
     limit: number;
     olderThanReceiptId: PublicFormReceiptId | null;
   }): Promise<PublicFormInboxPage>;
+  countUnreadInbox(input: { siteId: SiteId }): Promise<number>;
   listSuspectedSpam(input: {
     siteId: SiteId;
   }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
@@ -146,6 +147,7 @@ export type PublicFormOperationsApplication = Readonly<{
       actor: ExternalHumanIdentity;
       olderThanReceiptId?: PublicFormReceiptId | null;
     }): Promise<PublicFormInboxPage>;
+    unreadCount(input: { actor: ExternalHumanIdentity }): Promise<number>;
     suspectedSpam(input: {
       actor: ExternalHumanIdentity;
     }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
@@ -277,6 +279,10 @@ export function createPublicFormOperationsApplication({
           limit: publicFormInboxPageSize,
           olderThanReceiptId,
         });
+      },
+      async unreadCount({ actor }) {
+        await authorize(actor, "forms.review");
+        return store.countUnreadInbox({ siteId });
       },
       async suspectedSpam({ actor }) {
         await authorize(actor, "forms.review");

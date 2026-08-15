@@ -1,3 +1,8 @@
+import {
+  createPublicFormReceiptId,
+  type PublicFormReceiptId,
+} from "@humber-foundry/application";
+
 import { MessageInbox } from "@/components/message-inbox";
 import { SpamReviewControls } from "@/components/spam-review-controls";
 import { loadPublicFormInbox } from "@/src/public-form-messages-runtime";
@@ -15,9 +20,9 @@ export const dynamic = "force-dynamic";
  */
 function readInboxCursor(
   value: string | string[] | undefined,
-): string | null {
+): PublicFormReceiptId | null {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,80}$/u.test(value)
-    ? value
+    ? createPublicFormReceiptId(value)
     : null;
 }
 
@@ -80,20 +85,17 @@ export default async function DashboardFormsPage({
         />
       </section>
 
-      <p className="dashboard-note">
-        {notificationHealth.failed === 0
-          ? "Email alerts about new messages are working."
-          : `${notificationHealth.failed} email alert${
-              notificationHealth.failed === 1 ? "" : "s"
-            } did not reach you.`}{" "}
-        Every message is saved here even when an alert fails.
-        {access.membership.role === "owner" ? (
-          <>
-            {" "}
-            <a href="/dash/settings#email-alerts">See email alerts</a>
-          </>
-        ) : null}
-      </p>
+      {access.membership.role === "owner" ? (
+        <p className="dashboard-note">
+          {notificationHealth.failed === 0
+            ? "Email alerts about new messages are working."
+            : `${notificationHealth.failed} email alert${
+                notificationHealth.failed === 1 ? "" : "s"
+              } did not reach you.`}{" "}
+          Every message is saved here even when an alert fails.{" "}
+          <a href="/dash/settings#email-alerts">See email alerts</a>
+        </p>
+      ) : null}
     </main>
   );
 }

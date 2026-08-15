@@ -1,9 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-
-import { applyFormOperation } from "./form-operation-request";
+import { useFormOperation } from "./use-form-operation";
 
 const outcomeMessages = {
   applied: "Done.",
@@ -18,18 +15,18 @@ const outcomeMessages = {
  */
 export function FormSubmissionActions({
   classification,
-  pending = false,
-  message = "",
+  pending,
+  message,
   onDownload,
   onReclassify,
   onErase,
 }: {
   classification: "accepted" | "suspected_spam";
-  pending?: boolean;
-  message?: string;
-  onDownload?: () => void;
-  onReclassify?: () => void;
-  onErase?: () => void;
+  pending: boolean;
+  message: string;
+  onDownload: () => void;
+  onReclassify: () => void;
+  onErase: () => void;
 }) {
   return (
     <section aria-labelledby="message-actions">
@@ -41,7 +38,7 @@ export function FormSubmissionActions({
         <button
           className="copy-button"
           disabled={pending}
-          onClick={() => onDownload?.()}
+          onClick={onDownload}
           type="button"
         >
           Download a copy
@@ -49,7 +46,7 @@ export function FormSubmissionActions({
         <button
           className="copy-button"
           disabled={pending}
-          onClick={() => onReclassify?.()}
+          onClick={onReclassify}
           type="button"
         >
           {classification === "accepted"
@@ -59,7 +56,7 @@ export function FormSubmissionActions({
         <button
           className="copy-button"
           disabled={pending}
-          onClick={() => onErase?.()}
+          onClick={onErase}
           type="button"
         >
           Erase what it says
@@ -78,19 +75,15 @@ export function FormSubmissionControls({
   receiptId: string;
   classification: "accepted" | "suspected_spam";
 }) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const { message, pending, run, setMessage, setPending } = useFormOperation(
+    csrfToken,
+    outcomeMessages,
+  );
 
-  async function apply(command: unknown) {
-    setPending(true);
-    setMessage("");
-    const outcome = await applyFormOperation(command, csrfToken);
-    setMessage(outcomeMessages[outcome]);
-    setPending(false);
-    if (outcome === "applied") router.refresh();
-  }
-
+  /**
+   * The copy is a file, not a state change, so it does not go through the
+   * shared command path: it needs the response body rather than its status.
+   */
   async function download() {
     setPending(true);
     setMessage("");
@@ -108,10 +101,10 @@ export function FormSubmissionControls({
         return;
       }
       const objectUrl = URL.createObjectURL(await response.blob());
-      const download = document.createElement("a");
-      download.href = objectUrl;
-      download.download = `message-${receiptId}.json`;
-      download.click();
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `message-${receiptId}.json`;
+      link.click();
       URL.revokeObjectURL(objectUrl);
       setMessage("The copy was downloaded. Taking it is recorded.");
     } catch {
@@ -132,11 +125,11 @@ export function FormSubmissionControls({
             "Erase what this message says? The receipt and the record of what happened to it stay.",
           )
         ) {
-          void apply({ action: "erase_submission", receiptId });
+          void run({ action: "erase_submission", receiptId });
         }
       }}
       onReclassify={() =>
-        void apply({
+        void run({
           action: "classify_submission",
           receiptId,
           classification:

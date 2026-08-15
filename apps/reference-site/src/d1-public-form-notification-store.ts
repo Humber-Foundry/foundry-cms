@@ -52,6 +52,28 @@ type InboxRow = {
   first_read_at: string | null;
 };
 
+/**
+ * Every inbox read walks the same three tables: the submission, the
+ * classification that says it was accepted, and the read row that may or may
+ * not exist yet. Keeping the walk in one place stops the page query and the
+ * unread count from drifting apart.
+ */
+const acceptedInboxJoin = `FROM public_form_submissions AS submission
+     JOIN public_form_classifications AS classification
+       ON classification.site_id = submission.site_id
+      AND classification.form_id = submission.form_id
+      AND classification.submission_id = submission.submission_id
+     LEFT JOIN public_form_submission_reads AS read_state
+       ON read_state.site_id = submission.site_id
+      AND read_state.form_id = submission.form_id
+      AND read_state.submission_id = submission.submission_id
+     WHERE submission.site_id = ?1
+       AND classification.classification = 'accepted'`;
+
+const unreadInboxCount = `SELECT COUNT(*) AS unread
+     ${acceptedInboxJoin}
+       AND read_state.first_read_at IS NULL`;
+
 export type D1PublicFormNotificationStoreOptions = Readonly<{
   capacityLimitBytes?: number;
   notificationPreviewFieldIds?: ReadonlyArray<string>;
@@ -392,17 +414,7 @@ export function createD1PublicFormNotificationStore(
                submission.fields_json,
                submission.payload_deleted_at,
                read_state.first_read_at
-             FROM public_form_submissions AS submission
-             JOIN public_form_classifications AS classification
-               ON classification.site_id = submission.site_id
-              AND classification.form_id = submission.form_id
-              AND classification.submission_id = submission.submission_id
-             LEFT JOIN public_form_submission_reads AS read_state
-               ON read_state.site_id = submission.site_id
-              AND read_state.form_id = submission.form_id
-              AND read_state.submission_id = submission.submission_id
-             WHERE submission.site_id = ?1
-               AND classification.classification = 'accepted'
+             ${acceptedInboxJoin}
                AND (
                  ?2 IS NULL
                  OR submission.accepted_at < ?2
@@ -422,21 +434,7 @@ export function createD1PublicFormNotificationStore(
           )
           .all<InboxRow>(),
         database
-          .prepare(
-            `SELECT COUNT(*) AS unread
-             FROM public_form_submissions AS submission
-             JOIN public_form_classifications AS classification
-               ON classification.site_id = submission.site_id
-              AND classification.form_id = submission.form_id
-              AND classification.submission_id = submission.submission_id
-             LEFT JOIN public_form_submission_reads AS read_state
-               ON read_state.site_id = submission.site_id
-              AND read_state.form_id = submission.form_id
-              AND read_state.submission_id = submission.submission_id
-             WHERE submission.site_id = ?1
-               AND classification.classification = 'accepted'
-               AND read_state.first_read_at IS NULL`,
-          )
+          .prepare(unreadInboxCount)
           .bind(siteId)
           .first<{ unread: number }>(),
       ]);
@@ -450,6 +448,13 @@ export function createD1PublicFormNotificationStore(
             : null,
         unreadCount: unread?.unread ?? 0,
       };
+    },
+    async countUnreadInbox({ siteId }) {
+      const row = await database
+        .prepare(unreadInboxCount)
+        .bind(siteId)
+        .first<{ unread: number }>();
+      return row?.unread ?? 0;
     },
     async listSuspectedSpam({ siteId }) {
       const rows = await database
