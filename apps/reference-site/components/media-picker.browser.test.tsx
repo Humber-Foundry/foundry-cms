@@ -33,6 +33,8 @@ const grant = {
   ],
   accessToken: "signed-media-access",
   accessTokenExpiresAt: Math.floor(Date.now() / 1_000) + 600,
+  libraryToken: "signed-media-library",
+  libraryTokenExpiresAt: Math.floor(Date.now() / 1_000) + 600,
 };
 
 /** A real PNG, drawn in this browser, big enough that a thumbnail shrinks it. */
@@ -107,7 +109,7 @@ describe("photo picker browser acceptance", () => {
     );
 
     expect(tile.getAttribute("src")).toBe(
-      "/api/foundry-cms/media?assetId=asset_harbour&accessToken=signed-media-access&variant=thumbnail",
+      "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
     );
     expect(tile.getAttribute("loading")).toBe("lazy");
     const text = host.querySelector(".media-gallery-tile")?.textContent ?? "";
@@ -134,9 +136,7 @@ describe("photo picker browser acceptance", () => {
         height: 900,
         contentType: "image/jpeg",
         thumbnailUrl:
-          "/api/foundry-cms/media?assetId=asset_harbour&accessToken=signed-media-access&variant=thumbnail",
-        sourceUrl:
-          "/api/foundry-cms/media?assetId=asset_harbour&accessToken=signed-media-access",
+          "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
       },
     ]);
   });
@@ -200,7 +200,7 @@ describe("photo picker browser acceptance", () => {
       assetId: "asset_jetty",
       fileName: "jetty.png",
       thumbnailUrl:
-        "/api/foundry-cms/media?assetId=asset_jetty&accessToken=signed-media-access&variant=thumbnail",
+        "/api/foundry-cms/media?assetId=asset_jetty&libraryToken=signed-media-library&variant=thumbnail",
     });
   });
 

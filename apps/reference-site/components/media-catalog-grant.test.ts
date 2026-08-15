@@ -18,6 +18,8 @@ const grant = {
   ],
   accessToken: "signed-media-access",
   accessTokenExpiresAt: 1_785_124_800,
+  libraryToken: "signed-media-library",
+  libraryTokenExpiresAt: 1_785_124_800,
 };
 
 describe("media access request", () => {
@@ -63,6 +65,15 @@ describe("media catalog grant", () => {
   it("refuses a grant without an expiry instant", () => {
     expect(() =>
       parseMediaCatalogGrant({ ...grant, accessTokenExpiresAt: "soon" }),
+    ).toThrow("media_access_grant_failed");
+  });
+
+  it("refuses a grant without a library capability for the gallery", () => {
+    expect(() =>
+      parseMediaCatalogGrant({ ...grant, libraryToken: undefined }),
+    ).toThrow("media_access_grant_failed");
+    expect(() =>
+      parseMediaCatalogGrant({ ...grant, libraryTokenExpiresAt: "soon" }),
     ).toThrow("media_access_grant_failed");
   });
 });

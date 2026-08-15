@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   chosenPhoto,
-  mediaSourceUrl,
   mediaThumbnailUrl,
   photoSizeLabel,
-  photoTileHeight,
   photoUsageNames,
 } from "./media-gallery-item";
 
@@ -69,30 +67,16 @@ describe("photo usage", () => {
 });
 
 describe("media urls", () => {
-  it("asks the media route for the thumbnail variant", () => {
+  it("asks the media route for the thumbnail variant with the library capability", () => {
     expect(mediaThumbnailUrl("asset_hero", "token/value")).toBe(
-      "/api/foundry-cms/media?assetId=asset_hero&accessToken=token%2Fvalue&variant=thumbnail",
+      "/api/foundry-cms/media?assetId=asset_hero&libraryToken=token%2Fvalue&variant=thumbnail",
     );
   });
 
-  it("asks the media route for the full-resolution source", () => {
-    expect(mediaSourceUrl("asset_hero", "token/value")).toBe(
-      "/api/foundry-cms/media?assetId=asset_hero&accessToken=token%2Fvalue",
+  it("never puts the per-asset capability on a thumbnail address", () => {
+    expect(mediaThumbnailUrl("asset_hero", "token")).not.toContain(
+      "accessToken",
     );
-  });
-});
-
-describe("photo tile height", () => {
-  it("scales the height to the tile width for a wide photo", () => {
-    expect(photoTileHeight(1600, 900, 160)).toBe(90);
-  });
-
-  it("caps a very tall photo at the tile width", () => {
-    expect(photoTileHeight(400, 4000, 160)).toBe(160);
-  });
-
-  it("falls back to a square tile when the photo size is unusable", () => {
-    expect(photoTileHeight(0, 0, 160)).toBe(160);
   });
 });
 
@@ -116,8 +100,7 @@ describe("chosen photo", () => {
       height: 900,
       contentType: "image/jpeg",
       thumbnailUrl:
-        "/api/foundry-cms/media?assetId=asset_hero&accessToken=token&variant=thumbnail",
-      sourceUrl: "/api/foundry-cms/media?assetId=asset_hero&accessToken=token",
+        "/api/foundry-cms/media?assetId=asset_hero&libraryToken=token&variant=thumbnail",
     });
   });
 });

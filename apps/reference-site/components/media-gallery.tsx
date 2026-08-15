@@ -5,29 +5,32 @@ import type { MediaAsset } from "@humber-foundry/application";
 import {
   mediaThumbnailUrl,
   photoSizeLabel,
-  photoTileHeight,
   photoUsageNames,
 } from "./media-gallery-item";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { placeNameFor } from "./media-places";
 
 /**
- * The photo library as a grid of tiles. Every surface that shows the
- * library — the Photos page and the photo picker — renders this component,
- * so a tile looks and behaves the same everywhere.
+ * The photo library as a grid of tiles. The Photos page and the photo picker
+ * both render this component, so a tile looks and behaves the same in each.
  *
  * Each tile carries the thumbnail, the file name, the size, and a badge when
- * the photo is on the page. Selecting a tile is the caller's business: this
- * component reports the choice and shows which tile is chosen.
+ * the photo is on the page. This component does not decide what a selection
+ * means. It reports the choice and shows which tile is chosen.
  */
 
-/** The width a tile reserves for its photo, in CSS pixels. */
+/**
+ * The box a tile reserves for its photo, in CSS pixels. The frame is a fixed
+ * shape and the photo fills it, so every tile reserves the same box whatever
+ * the photo's own proportions are.
+ */
 const galleryTileWidth = 176;
+const galleryTileHeight = 132;
 
 export function MediaGallery({
   assets,
   occurrences,
-  accessToken,
+  libraryToken,
   selectedAssetId,
   disabled = false,
   deletingMessage,
@@ -35,8 +38,8 @@ export function MediaGallery({
 }: {
   assets: ReadonlyArray<MediaAsset>;
   occurrences: ReadonlyArray<MediaOccurrenceState>;
-  /** The media capability, or undefined while one is still being granted. */
-  accessToken: string | undefined;
+  /** The library capability, or undefined while one is being granted. */
+  libraryToken: string | undefined;
   selectedAssetId: string;
   disabled?: boolean;
   /** What to say about a deletion that has not finished yet. */
@@ -54,11 +57,6 @@ export function MediaGallery({
           asset.assetId,
           placeNameFor,
         );
-        const tileHeight = photoTileHeight(
-          asset.width,
-          asset.height,
-          galleryTileWidth,
-        );
         return (
           <li key={asset.assetId}>
             <button
@@ -69,20 +67,20 @@ export function MediaGallery({
               onClick={() => onSelect(asset.assetId)}
             >
               <span className="media-gallery-frame">
-                {accessToken === undefined ? (
+                {libraryToken === undefined ? (
                   <span className="media-gallery-placeholder" aria-hidden="true" />
                 ) : (
                   /* The thumbnail variant is a small copy, so a full grid
                    * costs a fraction of the library. lazy keeps tiles below
-                   * the fold from loading, and the tile size lets the
-                   * browser reserve the space. */
+                   * the fold from loading, and the fixed box lets the
+                   * browser reserve the space before the photo arrives. */
                   <img
                     alt=""
                     loading="lazy"
                     decoding="async"
                     width={galleryTileWidth}
-                    height={tileHeight}
-                    src={mediaThumbnailUrl(asset.assetId, accessToken)}
+                    height={galleryTileHeight}
+                    src={mediaThumbnailUrl(asset.assetId, libraryToken)}
                   />
                 )}
               </span>

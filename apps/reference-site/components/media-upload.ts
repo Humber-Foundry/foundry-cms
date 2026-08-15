@@ -1,14 +1,16 @@
+import { mediaContentTypes } from "@humber-foundry/application";
+
 import { createThumbnailFile } from "../src/media-thumbnail";
 import type { MediaUploadAttempt } from "./media-upload-attempt";
 
 /**
- * How a photo surface turns a chosen file into one upload request. The
- * Photos page and the photo picker both build the request here, so an
- * upload carries the same parts wherever it starts.
+ * How a chosen file becomes one upload request. The Photos page and the photo
+ * picker both build the request here, so an upload carries the same parts
+ * wherever it starts.
  */
 
 /** The photo files the media library accepts. */
-export const acceptedPhotoTypes = ["image/jpeg", "image/png", "image/webp"];
+export const acceptedPhotoTypes: ReadonlyArray<string> = mediaContentTypes;
 
 export function isAcceptedPhoto(file: File): boolean {
   return acceptedPhotoTypes.includes(file.type);

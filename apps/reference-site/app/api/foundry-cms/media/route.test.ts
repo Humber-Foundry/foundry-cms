@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   verifyMutation: vi.fn(),
   verifyMediaAccess: vi.fn(),
   createMediaAccess: vi.fn(),
+  createMediaLibrary: vi.fn(),
+  verifyMediaLibrary: vi.fn(),
   loadApplication: vi.fn(),
   upload: vi.fn(),
   replace: vi.fn(),
@@ -39,7 +41,9 @@ vi.mock("../../../../src/human-access-runtime", () => ({
 }));
 vi.mock("../../../../src/human-mutation-runtime", () => ({
   createHumanMediaAccessToken: mocks.createMediaAccess,
+  createHumanMediaLibraryToken: mocks.createMediaLibrary,
   verifyHumanMediaAccessToken: mocks.verifyMediaAccess,
+  verifyHumanMediaLibraryToken: mocks.verifyMediaLibrary,
   verifyHumanMutation: mocks.verifyMutation,
 }));
 vi.mock("../../../../src/media-asset-runtime", () => ({
@@ -72,6 +76,11 @@ describe("media endpoint", () => {
       token: "signed-media-access",
       expiresAt: 1_785_124_800,
     });
+    mocks.createMediaLibrary.mockResolvedValue({
+      token: "signed-media-library",
+      expiresAt: 1_785_124_800,
+    });
+    mocks.verifyMediaLibrary.mockResolvedValue(undefined);
     mocks.listAssets.mockResolvedValue([]);
     mocks.listOccurrences.mockResolvedValue([]);
     mocks.getAsset.mockResolvedValue({
@@ -975,7 +984,9 @@ describe("media endpoint", () => {
       }),
     );
 
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
+      libraryToken: "signed-media-library",
+      libraryTokenExpiresAt: 1_785_124_800,
       assets: [{ assetId: "asset_hero" }],
       occurrences: [
         {
@@ -1205,7 +1216,7 @@ describe("media thumbnails", () => {
 
     const response = await GET(
       new Request(
-        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access&variant=thumbnail",
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&libraryToken=signed-media-library&variant=thumbnail",
       ),
     );
 
@@ -1228,7 +1239,7 @@ describe("media thumbnails", () => {
 
     const response = await GET(
       new Request(
-        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access&variant=thumbnail",
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&libraryToken=signed-media-library&variant=thumbnail",
       ),
     );
 
@@ -1239,8 +1250,10 @@ describe("media thumbnails", () => {
     );
   });
 
-  it("requires the same media capability for a thumbnail as for the source", async () => {
-    mocks.verifyMediaAccess.mockRejectedValue(new HumanRequestIntegrityError());
+  it("refuses a thumbnail without the library capability", async () => {
+    mocks.verifyMediaLibrary.mockRejectedValue(
+      new HumanRequestIntegrityError(),
+    );
 
     const response = await GET(
       new Request(
@@ -1250,12 +1263,45 @@ describe("media thumbnails", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.getThumbnailSource).not.toHaveBeenCalled();
+    expect(mocks.getSource).not.toHaveBeenCalled();
+  });
+
+  it("never unlocks a thumbnail with the per-asset capability alone", async () => {
+    // The two capabilities have different audiences on purpose. A thumbnail
+    // is checked against the library capability and nothing else.
+    mocks.verifyMediaLibrary.mockRejectedValue(
+      new HumanRequestIntegrityError(),
+    );
+    mocks.verifyMediaAccess.mockResolvedValue(undefined);
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access&variant=thumbnail",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.verifyMediaAccess).not.toHaveBeenCalled();
+  });
+
+  it("never unlocks a full-resolution source with the library capability", async () => {
+    mocks.verifyMediaAccess.mockRejectedValue(new HumanRequestIntegrityError());
+    mocks.verifyMediaLibrary.mockResolvedValue(undefined);
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&libraryToken=signed-media-library",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.getSource).not.toHaveBeenCalled();
   });
 
   it("rejects a variant name the media route does not serve", async () => {
     const response = await GET(
       new Request(
-        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access&variant=original",
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&libraryToken=signed-media-library&variant=original",
       ),
     );
 
@@ -1279,5 +1325,124 @@ describe("media thumbnails", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-foundry-media-variant")).toBe("source");
     expect(mocks.getThumbnailSource).not.toHaveBeenCalled();
+  });
+});
+
+describe("media capability scope", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    const identity = {
+      binding: { issuer: "issuer", subject: "subject" },
+      email: "editor@example.com",
+      nonce: "nonce",
+    };
+    mocks.loadIdentity.mockResolvedValue({ identity });
+    mocks.authorize.mockResolvedValue({
+      state: "authorized",
+      identity,
+      membership: { id: "membership-editor", role: "editor" },
+    });
+    mocks.verifyMutation.mockResolvedValue(undefined);
+    mocks.createMediaAccess.mockResolvedValue({
+      token: "signed-media-access",
+      expiresAt: 1_785_124_800,
+    });
+    mocks.createMediaLibrary.mockResolvedValue({
+      token: "signed-media-library",
+      expiresAt: 1_785_124_800,
+    });
+    mocks.verifyMediaLibrary.mockResolvedValue(undefined);
+    mocks.loadContentApplication.mockResolvedValue({
+      commands: { saveMediaOccurrence: mocks.saveMediaOccurrence },
+      queries: {
+        getCurrent: mocks.getCurrentContent,
+        getRevision: mocks.getContentRevision,
+        isRevisionCurrent: mocks.isRevisionCurrent,
+      },
+    });
+    mocks.getCurrentContent.mockResolvedValue({
+      revision: 3,
+      definition: { home: { media: [] } },
+    });
+    mocks.loadApplication.mockResolvedValue({
+      commands: { grantAccess: mocks.grantAccess },
+      queries: {},
+    });
+  });
+
+  it("issues a library capability that names no asset, so the gallery can show every photo", async () => {
+    // A per-asset capability carries its asset list inside the token, so it
+    // is deliberately limited to the photos on the page. The gallery shows
+    // the whole library, so it is unlocked by a capability with no list.
+    mocks.grantAccess.mockResolvedValue({
+      assets: Array.from({ length: 500 }, (_, index) => ({
+        assetId: `asset_catalog_${index}`,
+      })),
+      occurrences: [
+        { occurrenceId: "occurrence_home_hero", assetId: "asset_catalog_7" },
+      ],
+      accessGrantedAt: "2026-07-27T12:00:00.000Z",
+    });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "grant-media-access-scope-0001",
+        },
+        body: JSON.stringify({
+          operation: "access",
+          workspaceId: "workspace_editor",
+        }),
+      }),
+    );
+
+    expect(mocks.createMediaAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      ["asset_catalog_7"],
+      "2026-07-27T12:00:00.000Z",
+    );
+    expect(mocks.createMediaLibrary).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-07-27T12:00:00.000Z",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      libraryToken: "signed-media-library",
+    });
+  });
+
+  it("still covers a photo the published page uses but the library no longer lists", async () => {
+    mocks.grantAccess.mockResolvedValue({
+      assets: [],
+      occurrences: [],
+      accessGrantedAt: "2026-07-27T12:00:00.000Z",
+    });
+    mocks.getCurrentContent.mockResolvedValue({
+      revision: 3,
+      definition: {
+        home: { media: [{ asset: { assetId: "asset_published" } }] },
+      },
+    });
+
+    await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "grant-media-access-scope-0002",
+        },
+        body: JSON.stringify({
+          operation: "access",
+          workspaceId: "workspace_editor",
+        }),
+      }),
+    );
+
+    expect(mocks.createMediaAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      ["asset_published"],
+      "2026-07-27T12:00:00.000Z",
+    );
   });
 });

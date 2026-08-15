@@ -1,9 +1,9 @@
 import type { MediaOccurrenceState } from "./media-manager-state";
 
 /**
- * The plain values one photo tile in the gallery shows, and the media-route
- * addresses it loads. Kept apart from the components so the wording and the
- * arithmetic can be tested without a browser.
+ * The values one photo tile shows, and the media-route addresses it loads.
+ * These sit apart from the components so they can be tested without a
+ * browser.
  */
 
 const kilobyte = 1024;
@@ -37,51 +37,33 @@ export function photoUsageNames(
   return [...names].sort();
 }
 
-function mediaUrl(
+/**
+ * The small copy of a photo, for a gallery tile. It is unlocked by the
+ * library capability, which names no asset, because the gallery shows every
+ * photo in the library.
+ */
+export function mediaThumbnailUrl(
   assetId: string,
-  accessToken: string,
-  variant?: "thumbnail",
+  libraryToken: string,
 ): string {
-  const query = new URLSearchParams({ assetId, accessToken });
-  if (variant !== undefined) query.set("variant", variant);
+  const query = new URLSearchParams({
+    assetId,
+    libraryToken,
+    variant: "thumbnail",
+  });
   return `/api/foundry-cms/media?${query.toString()}`;
 }
 
-/** The small copy of a photo, for a gallery tile. */
-export function mediaThumbnailUrl(assetId: string, accessToken: string): string {
-  return mediaUrl(assetId, accessToken, "thumbnail");
-}
-
-/** The full-resolution photo, for a place on the page. */
-export function mediaSourceUrl(assetId: string, accessToken: string): string {
-  return mediaUrl(assetId, accessToken);
-}
-
 /**
- * The height a photo of this size gets in a tile of `tileWidth`, so the
- * browser reserves the right space before the image arrives. A very tall
- * photo is capped at a square tile.
- */
-export function photoTileHeight(
-  width: number,
-  height: number,
-  tileWidth: number,
-): number {
-  if (
-    !Number.isFinite(width) ||
-    width <= 0 ||
-    !Number.isFinite(height) ||
-    height <= 0
-  ) {
-    return tileWidth;
-  }
-  return Math.min(tileWidth, Math.round((height / width) * tileWidth));
-}
-
-/**
- * The photo one surface hands back to another: the asset identity, plus the
- * addresses that render it. A caller shows `thumbnailUrl` in its own
- * controls and uses `sourceUrl` where the full photo belongs.
+ * The photo the picker hands back to its caller: the asset identity, its size
+ * and type, and the address of a rendered thumbnail the caller can show in
+ * its own controls.
+ *
+ * There is no full-resolution address here. A capability for the source
+ * names the exact assets it covers and is issued for the photos already
+ * placed on the page, so an address for a photo the caller has not placed
+ * yet would be refused. A caller places the photo by its `assetId`, and the
+ * placement then renders it.
  */
 export type ChosenPhoto = Readonly<{
   assetId: string;
@@ -90,7 +72,6 @@ export type ChosenPhoto = Readonly<{
   height: number;
   contentType: string;
   thumbnailUrl: string;
-  sourceUrl: string;
 }>;
 
 export function chosenPhoto(
@@ -101,7 +82,7 @@ export function chosenPhoto(
     height: number;
     contentType: string;
   }>,
-  accessToken: string,
+  libraryToken: string,
 ): ChosenPhoto {
   return {
     assetId: asset.assetId,
@@ -109,7 +90,6 @@ export function chosenPhoto(
     width: asset.width,
     height: asset.height,
     contentType: asset.contentType,
-    thumbnailUrl: mediaThumbnailUrl(asset.assetId, accessToken),
-    sourceUrl: mediaSourceUrl(asset.assetId, accessToken),
+    thumbnailUrl: mediaThumbnailUrl(asset.assetId, libraryToken),
   };
 }

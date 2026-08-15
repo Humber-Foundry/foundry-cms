@@ -362,6 +362,58 @@ export async function verifyHumanMediaAccessToken(
   });
 }
 
+const mediaLibraryAudienceSuffix = ":media-library";
+
+/**
+ * A capability to read thumbnails of this site's media library.
+ *
+ * It names no asset. A media-access capability lists the exact assets it
+ * covers, and that list is carried in the token itself, so it is deliberately
+ * limited to the photos placed on the page — a token naming a whole library
+ * would not fit in an image URL. The gallery shows every photo, so it needs a
+ * capability whose size does not grow with the library.
+ *
+ * This is why it is safe to leave the assets unnamed: it only ever unlocks a
+ * thumbnail, which is a copy no larger than `mediaThumbnailMaxEdge`; the
+ * request that presents it is already authenticated and authorized as an
+ * active member of this site; and the media application it reads through is
+ * scoped to that one site. The full-resolution source keeps the strict
+ * per-asset capability.
+ */
+export async function createHumanMediaLibraryToken(
+  identity: ExternalHumanIdentity,
+  issuedAt: string,
+) {
+  const configuration = await loadHumanMutationConfiguration();
+  const now = new Date(issuedAt);
+  if (!Number.isFinite(now.getTime())) {
+    throw new HumanRequestIntegrityError();
+  }
+  return {
+    token: await createHumanCsrfToken({
+      identity,
+      audience: `${configuration.audience}${mediaLibraryAudienceSuffix}`,
+      secret: configuration.secret,
+      now,
+    }),
+    expiresAt:
+      Math.floor(now.getTime() / 1_000) + humanTokenLifetimeSeconds,
+  };
+}
+
+export async function verifyHumanMediaLibraryToken(
+  token: string | null,
+  identity: ExternalHumanIdentity,
+) {
+  const configuration = await loadHumanMutationConfiguration();
+  await verifyHumanCsrfToken({
+    token,
+    identity,
+    audience: `${configuration.audience}${mediaLibraryAudienceSuffix}`,
+    secret: configuration.secret,
+  });
+}
+
 export async function executeIdempotentHumanMutation({
   request,
   identity,

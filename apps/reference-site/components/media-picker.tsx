@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { MediaAsset } from "@humber-foundry/application";
 
+import { MediaDropzone } from "./media-dropzone";
 import { MediaGallery } from "./media-gallery";
 import {
   chosenPhoto,
@@ -15,24 +16,20 @@ import {
   parseMediaCatalogGrant,
 } from "./media-catalog-grant";
 import type { MediaOccurrenceState } from "./media-manager-state";
-import {
-  acceptedPhotoTypes,
-  createMediaUploadAttempt,
-  isAcceptedPhoto,
-} from "./media-upload";
+import { createMediaUploadAttempt, isAcceptedPhoto } from "./media-upload";
 import type { MediaUploadAttempt } from "./media-upload-attempt";
 import { sendMediaMutationAttempt } from "../src/media-mutation-client";
 
 /**
  * "Choose or upload a photo" — the one photo picker.
  *
- * Every surface that needs a photo opens this dialog instead of building its
- * own upload and library handling. The owner picks a photo already in the
+ * Every page that needs a photo opens this dialog instead of building its own
+ * upload and library handling. The owner picks a photo already in the
  * library, or uploads a new one and picks it in the same step. The dialog
  * reports the chosen photo to its caller and closes.
  *
- * The dialog holds no draft content and changes nothing on the page. Placing
- * the chosen photo is the caller's business.
+ * The dialog holds no draft content and changes nothing on the page. The
+ * caller places the chosen photo.
  */
 export function MediaPicker({
   open,
@@ -60,7 +57,7 @@ export function MediaPicker({
   const [occurrences, setOccurrences] = useState<
     ReadonlyArray<MediaOccurrenceState>
   >([]);
-  const [accessToken, setAccessToken] = useState<string>();
+  const [libraryToken, setLibraryToken] = useState<string>();
   const [accessGeneration, setAccessGeneration] = useState(0);
   const [selectedAsset, setSelectedAsset] = useState("");
   const [message, setMessage] = useState("");
@@ -69,7 +66,6 @@ export function MediaPicker({
     null,
   );
   const [uploadPending, setUploadPending] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
 
   // A native dialog gives the modal its own focus handling and its own
   // Escape key, so the picker does not reimplement either.
@@ -99,7 +95,7 @@ export function MediaPicker({
         mutationTokenRef.current = result.mutationToken;
         setAssets(grant.assets);
         setOccurrences(grant.occurrences);
-        setAccessToken(grant.accessToken);
+        setLibraryToken(grant.libraryToken);
         const pending = pendingSelection.current;
         if (
           pending !== null &&
@@ -186,12 +182,10 @@ export function MediaPicker({
     const asset = assets.find(
       (candidate) => candidate.assetId === selectedAsset,
     );
-    if (asset === undefined || accessToken === undefined) return;
-    onChoose(chosenPhoto(asset, accessToken));
+    if (asset === undefined || libraryToken === undefined) return;
+    onChoose(chosenPhoto(asset, libraryToken));
     closePicker();
   }
-
-  const uploading = uploadingFileName !== null;
 
   return (
     <dialog
@@ -212,60 +206,19 @@ export function MediaPicker({
           Close
         </button>
       </div>
-      <div
-        className={`media-dropzone${dragActive ? " is-dragover" : ""}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragActive(true);
-        }}
-        onDragLeave={() => setDragActive(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragActive(false);
-          if (!busy) acceptFiles(event.dataTransfer.files);
-        }}
-      >
-        {uploading ? (
-          <div className="media-upload-progress" role="status">
-            <span>Uploading “{uploadingFileName}”…</span>
-            <span className="media-activity-track" aria-hidden="true">
-              <span className="media-activity-fill" />
-            </span>
-          </div>
-        ) : (
-          <>
-            <label className="button button-secondary">
-              Upload a photo
-              <input
-                hidden
-                type="file"
-                accept={acceptedPhotoTypes.join(",")}
-                disabled={busy}
-                onChange={(event) => {
-                  acceptFiles(event.currentTarget.files);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </label>
-            <p>or drag a photo here — JPEG, PNG or WebP</p>
-          </>
-        )}
-      </div>
-      {uploadPending ? (
-        <button
-          className="button button-secondary media-upload-retry"
-          type="button"
-          disabled={busy}
-          onClick={() => void upload()}
-        >
-          Retry the upload
-        </button>
-      ) : null}
+      <MediaDropzone
+        busy={busy}
+        uploadingFileName={uploadingFileName}
+        uploadPending={uploadPending}
+        chooseLabel="Upload a photo"
+        onFiles={acceptFiles}
+        onRetry={() => void upload()}
+      />
       {assets.length > 0 ? (
         <MediaGallery
           assets={assets}
           occurrences={occurrences}
-          accessToken={accessToken}
+          libraryToken={libraryToken}
           selectedAssetId={selectedAsset}
           disabled={busy}
           onSelect={setSelectedAsset}
@@ -282,7 +235,7 @@ export function MediaPicker({
         <button
           className="button button-primary"
           type="button"
-          disabled={busy || selectedAsset === "" || accessToken === undefined}
+          disabled={busy || selectedAsset === "" || libraryToken === undefined}
           onClick={choose}
         >
           {confirmLabel}

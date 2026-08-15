@@ -1,4 +1,7 @@
-import type { MediaSourceStore } from "@humber-foundry/application";
+import {
+  isMediaContentType,
+  type MediaSourceStore,
+} from "@humber-foundry/application";
 
 export interface PrivateMediaBucket {
   put(
@@ -31,13 +34,6 @@ export interface PrivateMediaBucket {
   >;
   delete(key: string): Promise<unknown>;
 }
-
-/** The image types the library writes as a thumbnail and will serve back. */
-const servedVariantContentTypes = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-]);
 
 export function createR2MediaSourceStore(
   bucket: PrivateMediaBucket,
@@ -101,7 +97,7 @@ export function createR2MediaSourceStore(
       if (
         object.customMetadata?.variantOf !== expected.variantOf ||
         contentType === undefined ||
-        !servedVariantContentTypes.has(contentType)
+        !isMediaContentType(contentType)
       ) {
         return null;
       }

@@ -55,6 +55,14 @@ claimed about the copy:
 - A refused copy fails the whole upload, so a stored asset never has a copy the
   library would not serve.
 
+These checks prove the copy is a small image of a permitted type. They do not
+prove it is a picture of the source. Nothing on the server can prove that
+without decoding both images, which is the capability this decision does not
+have. The consequence is bounded: an Owner or Editor could make one of their
+own site's tiles show the wrong picture of their own choosing. It cannot
+mislead about another site, and it cannot change what a visitor sees, because
+a rendered artifact is always produced from the source.
+
 ### Storing the copy
 
 - The copy is stored in the same private R2 bucket at
@@ -72,8 +80,28 @@ claimed about the copy:
 ### Serving the copy
 
 - `GET /api/foundry-cms/media?assetId=…&variant=thumbnail` serves the copy. It
-  needs the same media capability as the source, and it is still
-  `private, no-store`.
+  is `private, no-store`, like the source.
+- A thumbnail is unlocked by a **library capability**, not by the per-asset
+  media-access capability.
+
+  A media-access capability lists the exact assets it covers, and that list is
+  carried inside the token. The token then travels in an image URL, so the
+  list is deliberately limited to the photos placed on the page. The gallery
+  shows every photo in the library, so a capability built that way would
+  either refuse a tile for every photo the owner has not yet used, or grow a
+  500-photo list into an unusable URL.
+
+  The library capability therefore names no asset. It is bound to one human
+  identity, expires on the same short clock, and carries its own audience
+  (`…:media-library`), so it cannot unlock a full-resolution source and a
+  media-access capability cannot unlock a thumbnail.
+
+  It grants no authority the holder lacks. The request that presents it is
+  already authenticated and authorized as an active member of the site, the
+  media application it reads through is scoped to that one site, and the same
+  member already receives every asset's metadata in the access grant. What it
+  unlocks is a copy no larger than `mediaThumbnailMaxEdge`. The
+  full-resolution source keeps the strict per-asset capability.
 - An asset stored before this decision has no copy. The route then serves the
   source and says so in `x-foundry-media-variant: source`, rather than
   returning a broken image.

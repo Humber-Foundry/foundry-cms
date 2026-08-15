@@ -99,6 +99,8 @@ describe("photo library browser acceptance", () => {
       occurrences: [heroOccurrence],
       accessToken: "signed-media-access",
       accessTokenExpiresAt: Math.floor(Date.now() / 1_000) + 600,
+      libraryToken: "signed-media-library",
+      libraryTokenExpiresAt: Math.floor(Date.now() / 1_000) + 600,
     };
   }
 
@@ -117,8 +119,8 @@ describe("photo library browser acceptance", () => {
         (tile) => tile.querySelector("img")?.getAttribute("src") ?? "",
       ),
     ).toEqual([
-      "/api/foundry-cms/media?assetId=asset_harbour&accessToken=signed-media-access&variant=thumbnail",
-      "/api/foundry-cms/media?assetId=asset_spare&accessToken=signed-media-access&variant=thumbnail",
+      "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
+      "/api/foundry-cms/media?assetId=asset_spare&libraryToken=signed-media-library&variant=thumbnail",
     ]);
     expect(tiles[0].textContent).toContain("On the page: Top of the page");
     expect(tiles[1].textContent).not.toContain("On the page");

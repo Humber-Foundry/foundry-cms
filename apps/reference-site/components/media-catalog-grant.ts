@@ -3,17 +3,21 @@ import type { MediaAsset } from "@humber-foundry/application";
 import type { MediaOccurrenceState } from "./media-manager-state";
 
 /**
- * The access request every photo surface makes, and the reading of its
- * answer. The media route grants a short-lived capability along with the
- * catalog, so a surface that shows photos always asks for both together.
+ * The access request every photo page makes, and how its answer is read.
+ * The media route grants short-lived capabilities along with the catalog,
+ * so a page that shows photos asks for both in one request.
  */
 
 export type MediaCatalogGrant = Readonly<{
   assets: ReadonlyArray<MediaAsset>;
   occurrences: ReadonlyArray<MediaOccurrenceState>;
+  /** Unlocks the full-resolution photos placed on the page. */
   accessToken: string;
   /** Seconds since the epoch, as the media route reports it. */
   accessTokenExpiresAt: number;
+  /** Unlocks a thumbnail of any photo in the library. */
+  libraryToken: string;
+  libraryTokenExpiresAt: number;
 }>;
 
 export function mediaAccessRequestBody(workspaceId: string): string {
@@ -22,7 +26,7 @@ export function mediaAccessRequestBody(workspaceId: string): string {
 
 /**
  * Reads a granted catalog, or throws. A partial answer is refused rather
- * than shown, because a surface with a token and no photos looks the same as
+ * than shown, because a page with a token and no photos looks the same as
  * an empty library.
  */
 export function parseMediaCatalogGrant(body: unknown): MediaCatalogGrant {
@@ -36,7 +40,11 @@ export function parseMediaCatalogGrant(body: unknown): MediaCatalogGrant {
     !("accessToken" in body) ||
     typeof body.accessToken !== "string" ||
     !("accessTokenExpiresAt" in body) ||
-    typeof body.accessTokenExpiresAt !== "number"
+    typeof body.accessTokenExpiresAt !== "number" ||
+    !("libraryToken" in body) ||
+    typeof body.libraryToken !== "string" ||
+    !("libraryTokenExpiresAt" in body) ||
+    typeof body.libraryTokenExpiresAt !== "number"
   ) {
     throw new Error("media_access_grant_failed");
   }
@@ -45,6 +53,8 @@ export function parseMediaCatalogGrant(body: unknown): MediaCatalogGrant {
     occurrences: body.occurrences as ReadonlyArray<MediaOccurrenceState>,
     accessToken: body.accessToken,
     accessTokenExpiresAt: body.accessTokenExpiresAt,
+    libraryToken: body.libraryToken,
+    libraryTokenExpiresAt: body.libraryTokenExpiresAt,
   };
 }
 

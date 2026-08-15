@@ -1,4 +1,7 @@
-import { mediaThumbnailMaxEdge } from "@humber-foundry/application";
+import {
+  mediaContentTypes,
+  mediaThumbnailMaxEdge,
+} from "@humber-foundry/application";
 
 /**
  * Makes the small copy of a photo that the dashboard gallery shows.
@@ -12,11 +15,9 @@ import { mediaThumbnailMaxEdge } from "@humber-foundry/application";
 export const thumbnailMaxEdge = mediaThumbnailMaxEdge;
 
 /** The image types the media library stores. */
-export const acceptedThumbnailTypes: ReadonlySet<string> = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-]);
+export const acceptedThumbnailTypes: ReadonlySet<string> = new Set(
+  mediaContentTypes,
+);
 
 /**
  * The size of the thumbnail for a photo of this size: the same aspect ratio,

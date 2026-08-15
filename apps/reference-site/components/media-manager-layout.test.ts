@@ -38,9 +38,9 @@ describe("photo gallery layout", () => {
       "utf8",
     );
 
-    expect(gallery).toContain("mediaThumbnailUrl(asset.assetId, accessToken)");
+    expect(gallery).toContain("mediaThumbnailUrl(asset.assetId, libraryToken)");
     expect(gallery).toContain('loading="lazy"');
-    // No surface may address the media route by hand and skip the variant.
+    // No page may address the media route by hand and skip the variant.
     expect(gallery).not.toMatch(/\/api\/foundry-cms\/media\?/u);
   });
 

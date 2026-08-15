@@ -10,6 +10,7 @@ import { renderedMediaOccurrenceIds } from "@humber-foundry/application";
 import { createMediaOccurrenceId } from "@humber-foundry/application";
 import { requireRenderedMediaOccurrenceId } from "@humber-foundry/application";
 
+import { MediaDropzone } from "./media-dropzone";
 import { MediaGallery } from "./media-gallery";
 import { MediaOccurrence } from "./media-occurrence";
 import { MediaPicker } from "./media-picker";
@@ -20,11 +21,7 @@ import {
   parseMediaCatalogGrant,
 } from "./media-catalog-grant";
 import { placeFor } from "./media-places";
-import {
-  acceptedPhotoTypes,
-  createMediaUploadAttempt,
-  isAcceptedPhoto,
-} from "./media-upload";
+import { createMediaUploadAttempt, isAcceptedPhoto } from "./media-upload";
 import {
   cropBaseRevisionForEdit,
   cropForCatalogRefresh,
@@ -97,13 +94,13 @@ export function MediaManager({
   // The place the photo picker is open for, or null when it is closed.
   const [pickerPlaceId, setPickerPlaceId] = useState<string | null>(null);
   const [uploadPending, setUploadPending] = useState(false);
-  // The upload control's own feedback: what is being uploaded right now, and
-  // whether a file is being dragged over the drop zone.
+  // What is being uploaded right now, or null when nothing is.
   const [uploadingFileName, setUploadingFileName] = useState<string | null>(
     null,
   );
-  const [dragActive, setDragActive] = useState(false);
   const [mediaAccessToken, setMediaAccessToken] = useState<string>();
+  // Unlocks a thumbnail of any photo, including one not on the page.
+  const [mediaLibraryToken, setMediaLibraryToken] = useState<string>();
   const [accessGeneration, setAccessGeneration] = useState(0);
   const mutationTokenRef = useRef(csrfToken);
   const selectedAssetId = useRef(selectedAsset);
@@ -155,6 +152,7 @@ export function MediaManager({
         }
         mutationTokenRef.current = result.mutationToken;
         setMediaAccessToken(grant.accessToken);
+        setMediaLibraryToken(grant.libraryToken);
         onAccessGranted(grant.accessToken);
         if (catalogFence.isCurrent(catalogSnapshot)) {
           const mergedOccurrences = mergeMediaOccurrenceState(
@@ -480,7 +478,6 @@ export function MediaManager({
     }
   }
 
-  const uploading = uploadingFileName !== null;
   const deletionFinishing =
     deleteAttempt.current !== null &&
     !assets.some((asset) => asset.assetId === selectedAsset);
@@ -502,61 +499,20 @@ export function MediaManager({
           </p>
         </div>
       </div>
-      <div
-        className={`media-dropzone${dragActive ? " is-dragover" : ""}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragActive(true);
-        }}
-        onDragLeave={() => setDragActive(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragActive(false);
-          if (!busy) acceptFiles(event.dataTransfer.files);
-        }}
-      >
-        {uploading ? (
-          <div className="media-upload-progress" role="status">
-            <span>Uploading “{uploadingFileName}”…</span>
-            <span className="media-activity-track" aria-hidden="true">
-              <span className="media-activity-fill" />
-            </span>
-          </div>
-        ) : (
-          <>
-            <label className="button button-secondary">
-              Choose a photo
-              <input
-                hidden
-                type="file"
-                accept={acceptedPhotoTypes.join(",")}
-                disabled={busy}
-                onChange={(event) => {
-                  acceptFiles(event.currentTarget.files);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </label>
-            <p>or drag a photo here — JPEG, PNG or WebP</p>
-          </>
-        )}
-      </div>
-      {uploadPending ? (
-        <button
-          className="button button-secondary media-upload-retry"
-          type="button"
-          disabled={busy}
-          onClick={() => void upload()}
-        >
-          Retry the upload
-        </button>
-      ) : null}
+      <MediaDropzone
+        busy={busy}
+        uploadingFileName={uploadingFileName}
+        uploadPending={uploadPending}
+        chooseLabel="Choose a photo"
+        onFiles={acceptFiles}
+        onRetry={() => void upload()}
+      />
       {assets.length > 0 || deletionFinishing ? (
         <>
           <MediaGallery
             assets={assets}
             occurrences={occurrences}
-            accessToken={mediaAccessToken}
+            libraryToken={mediaLibraryToken}
             selectedAssetId={selectedAsset}
             disabled={busy}
             deletingMessage={

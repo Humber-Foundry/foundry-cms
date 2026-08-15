@@ -346,11 +346,20 @@ type CropMediaOccurrenceCommand = Readonly<{
   idempotencyKey: string;
 }>;
 
-const allowedContentTypes = new Set<MediaAsset["contentType"]>([
+/** The image types the media library stores and serves. */
+export const mediaContentTypes = [
   "image/jpeg",
   "image/png",
   "image/webp",
-]);
+] as const satisfies ReadonlyArray<MediaAsset["contentType"]>;
+
+const allowedContentTypes = new Set<MediaAsset["contentType"]>(
+  mediaContentTypes,
+);
+
+export function isMediaContentType(value: string): boolean {
+  return allowedContentTypes.has(value as MediaAsset["contentType"]);
+}
 
 function assertIdempotencyKey(value: string): void {
   if (value.trim().length < 8 || value.length > 200) {

@@ -34,7 +34,9 @@ import {
 } from "../../../../src/human-access-configuration";
 import {
   createHumanMediaAccessToken,
+  createHumanMediaLibraryToken,
   verifyHumanMediaAccessToken,
+  verifyHumanMediaLibraryToken,
   verifyHumanMutation,
 } from "../../../../src/human-mutation-runtime";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
@@ -95,11 +97,21 @@ export async function GET(request: Request) {
       return Response.json({ error: "invalid_query" }, { status: 400 });
     }
     if (requestedAsset !== null) {
-      await verifyHumanMediaAccessToken(
-        searchParams.get("accessToken"),
-        authenticated.identity,
-        requestedAsset,
-      );
+      // A thumbnail is unlocked by the library capability, which names no
+      // asset, because the gallery shows every photo. The full-resolution
+      // source keeps the capability that names the exact assets it covers.
+      if (requestedVariant === "thumbnail") {
+        await verifyHumanMediaLibraryToken(
+          searchParams.get("libraryToken"),
+          authenticated.identity,
+        );
+      } else {
+        await verifyHumanMediaAccessToken(
+          searchParams.get("accessToken"),
+          authenticated.identity,
+          requestedAsset,
+        );
+      }
       const assetId = createMediaAssetId(requestedAsset);
       if (requestedVariant === "thumbnail") {
         const thumbnail =
@@ -495,10 +507,16 @@ export async function POST(request: Request) {
         ],
         accessGrantedAt,
       );
+      const libraryCapability = await createHumanMediaLibraryToken(
+        authenticated.identity,
+        accessGrantedAt,
+      );
       return Response.json({
         ...catalog,
         accessToken: capability.token,
         accessTokenExpiresAt: capability.expiresAt,
+        libraryToken: libraryCapability.token,
+        libraryTokenExpiresAt: libraryCapability.expiresAt,
       });
     }
     if (body.operation === "replace") {

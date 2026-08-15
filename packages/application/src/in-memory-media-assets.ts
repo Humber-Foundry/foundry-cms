@@ -9,6 +9,7 @@ import {
   MediaOccurrenceConflictError,
   MediaSiteAccessError,
   MediaValidationError,
+  isMediaContentType,
   type MediaAsset,
   type MediaAssetId,
   type MediaAssetStore,
@@ -22,6 +23,9 @@ import {
 function immutable<Value>(value: Value): Value {
   return Object.freeze(structuredClone(value));
 }
+
+const thumbnailObjectKeyPattern =
+  /^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/thumbnail$/u;
 
 export function createInMemoryMediaSourceStore(): MediaSourceStore & {
   readForTest(objectKey: string): Promise<Uint8Array | null>;
@@ -65,10 +69,19 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
           };
     },
     async putVariant(objectKey, variant, metadata) {
+      if (!thumbnailObjectKeyPattern.test(objectKey)) {
+        throw new TypeError("media_variant_key_invalid");
+      }
       const existing = objects.get(objectKey);
       if (existing !== undefined) {
-        if (existing.sourceHash === metadata.variantHash) return;
-        throw new MediaValidationError("thumbnail");
+        if (
+          existing.sourceHash === metadata.variantHash &&
+          existing.variantOf === metadata.variantOf &&
+          existing.contentType === metadata.contentType
+        ) {
+          return;
+        }
+        throw new Error("media_variant_identity_conflict");
       }
       objects.set(objectKey, {
         source: variant.slice(),
@@ -79,7 +92,11 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
     },
     async getVariant(objectKey, expected) {
       const object = objects.get(objectKey);
-      return object === undefined || object.variantOf !== expected.variantOf
+      // Same rules as the R2 store: a variant made from another source, or
+      // one claiming a type the library never writes, reads as missing.
+      return object === undefined ||
+        object.variantOf !== expected.variantOf ||
+        !isMediaContentType(object.contentType)
         ? null
         : {
             body: object.source.slice(),
