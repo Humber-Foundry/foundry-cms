@@ -15,6 +15,12 @@ Foundry foundation.
   its real React renderer. Public pages, exact revision previews, and the Puck
   canvas all dispatch through that registry; unknown or schema-invalid
   components are rejected before they can be saved or published.
+- `public-forms.ts` is the browser-safe list of the forms this site publishes.
+  Each field states its length limit and whether it is required. `inboxRole`
+  states what a field means in the Messages inbox — `sender`, `replyAddress`
+  or `preview` — so the inbox can name the person, offer a reply link and show
+  a preview line. A form with no roles still works; its messages list without
+  a name, a preview or a reply link.
 - `site-definition.server.ts` is server-only. It binds that definition to the
   site-scoped application runtime. Client-owned private adapters belong on this
   side of the boundary.

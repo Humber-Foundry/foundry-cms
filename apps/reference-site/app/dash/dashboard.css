@@ -178,6 +178,115 @@
   color: var(--dash-ink-soft);
 }
 
+/* Message inbox ----------------------------------------------------------
+ *
+ * One row is one message. Two sizes only: body size for the sender and what
+ * they wrote, small for the form and the time. Colour and weight carry the
+ * rest, so an unread message reads as unread without a third size. */
+.message-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+  list-style: none;
+}
+
+.message-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dash-gap);
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--dash-line);
+}
+
+.message-item:first-child {
+  border-top: 0;
+}
+
+.message-unread {
+  background: var(--dash-accent-tint);
+}
+
+.message-open {
+  display: grid;
+  flex: 1;
+  gap: 0.15rem;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.message-open:hover .message-sender {
+  text-decoration: underline;
+  text-underline-offset: 0.3rem;
+}
+
+.message-sender {
+  color: var(--dash-accent);
+  font-weight: 600;
+}
+
+.message-unread .message-sender {
+  font-weight: 700;
+}
+
+.message-flag {
+  margin-left: 0.5rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.message-preview {
+  overflow: hidden;
+  color: var(--dash-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-meta,
+.message-note {
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.message-reply {
+  color: var(--dash-accent);
+  font-weight: 600;
+  text-decoration: none;
+  text-underline-offset: 0.3rem;
+  white-space: nowrap;
+}
+
+.message-reply:hover {
+  text-decoration: underline;
+}
+
+.message-older {
+  margin: var(--dash-gap) 0 0;
+}
+
+.dashboard-note {
+  margin: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+@media (max-width: 760px) {
+  .message-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .message-preview {
+    white-space: normal;
+  }
+}
+
 /* Destination and attention lists ---------------------------------------- */
 
 .destination-list,

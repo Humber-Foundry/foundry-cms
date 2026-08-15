@@ -1,7 +1,7 @@
 import { ContentWorkspaceStarter } from "@/components/content-workspace-starter";
 import { DashboardControls } from "@/components/dashboard-controls";
 import { OverviewDestinations } from "@/components/overview-destinations";
-import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
+import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -28,7 +28,7 @@ export default async function DashboardOverviewPage({
     await readWorkspaceSearchParams(searchParams);
   const dashboardWorkspace = await loadDashboardWorkspace(workspace, "/dash");
   const mutationToken = await loadMutationToken();
-  const formOperations = await loadPublicFormOperationsDashboard(access);
+  const messages = await loadMessagesAttention(access);
 
   const hasDraft = dashboardWorkspace.contentRevision !== undefined;
   const needsFreshWorkspace =
@@ -84,29 +84,37 @@ export default async function DashboardOverviewPage({
 
       <section aria-labelledby="attention">
         <h2 id="attention">Needs attention</h2>
-        {formOperations.failedDeliveries.length === 0 &&
-        formOperations.suspectedSpam.length === 0 ? (
+        {messages.unreadCount === 0 &&
+        messages.heldForReview === 0 &&
+        messages.undeliveredNotifications === 0 ? (
           <p className="empty-state">
-            Nothing is waiting for you. Messages that fail to send, and
-            submissions held for review, appear here.
+            Nothing is waiting for you. New messages, and anything held as
+            spam, appear here.
           </p>
         ) : (
           <ul className="attention-list">
-            {formOperations.failedDeliveries.length > 0 ? (
+            {messages.unreadCount > 0 ? (
               <li>
                 <a href="/dash/forms">
-                  {formOperations.failedDeliveries.length} message
-                  {formOperations.failedDeliveries.length === 1 ? "" : "s"} did
-                  not reach your inbox
+                  {messages.unreadCount} message
+                  {messages.unreadCount === 1 ? "" : "s"} you have not read
                 </a>
               </li>
             ) : null}
-            {formOperations.suspectedSpam.length > 0 ? (
+            {messages.heldForReview > 0 ? (
               <li>
                 <a href="/dash/forms">
-                  {formOperations.suspectedSpam.length} submission
-                  {formOperations.suspectedSpam.length === 1 ? "" : "s"} held
-                  for your review
+                  {messages.heldForReview} message
+                  {messages.heldForReview === 1 ? "" : "s"} held as spam
+                </a>
+              </li>
+            ) : null}
+            {messages.undeliveredNotifications > 0 ? (
+              <li>
+                <a href="/dash/settings#email-alerts">
+                  {messages.undeliveredNotifications} email alert
+                  {messages.undeliveredNotifications === 1 ? "" : "s"} did not
+                  reach you. Every message is still saved.
                 </a>
               </li>
             ) : null}

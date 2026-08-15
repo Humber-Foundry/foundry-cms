@@ -6,6 +6,7 @@ import {
   createPublicFormAuditEventId,
   createPublicFormClassificationId,
   createPublicFormDeliveryId,
+  createPublicFormInboxPlan,
   createPublicFormId,
   createPublicFormOutboxEventId,
   createPublicFormReceiptId,
@@ -25,6 +26,7 @@ const { database } = useMigratedTestDatabase([
   "0003_public_forms.sql",
   "0004_public_form_notifications.sql",
   "0006_public_form_privacy.sql",
+  "0026_public_form_inbox.sql",
 ]);
 
 const siteId = createSiteId("site_reference");
@@ -49,6 +51,205 @@ const accepted: PublicFormAcceptance = {
   acceptedAt: "2026-07-27T20:00:00.000Z",
 };
 
+const inboxPlan = createPublicFormInboxPlan([
+  {
+    id: createPublicFormId("contact"),
+    fields: [
+      { id: "name", required: true, maximumLength: 100, inboxRole: "sender" },
+      {
+        id: "email",
+        required: false,
+        maximumLength: 254,
+        inboxRole: "replyAddress",
+      },
+      {
+        id: "message",
+        required: true,
+        maximumLength: 2_000,
+        inboxRole: "preview",
+      },
+    ],
+  },
+]);
+
+function submissionAt(
+  index: number,
+  overrides: Partial<PublicFormAcceptance> = {},
+): PublicFormAcceptance {
+  const suffix = String(index).padStart(2, "0");
+  return {
+    ...accepted,
+    identity: {
+      ...accepted.identity,
+      submissionId: createPublicFormSubmissionId(
+        `00000000-0000-4000-8000-0000000000${suffix}`,
+      ),
+    },
+    receiptId: createPublicFormReceiptId(`receipt-${suffix}`),
+    requestHash: createPublicFormRequestHash(`hash-${suffix}`),
+    classificationId: createPublicFormClassificationId(
+      `classification-${suffix}`,
+    ),
+    auditEventId: createPublicFormAuditEventId(`audit-${suffix}`),
+    deliveryId: createPublicFormDeliveryId(`delivery-${suffix}`),
+    outboxEventId: createPublicFormOutboxEventId(`outbox-${suffix}`),
+    acceptedAt: `2026-07-2${index}T20:00:00.000Z`,
+    ...overrides,
+  };
+}
+
+describe("D1 public form inbox", () => {
+  it("lists received messages newest first and leaves held spam out", async () => {
+    const acceptanceStore = createD1PublicFormAcceptanceStore(database);
+    await acceptanceStore.accept(
+      submissionAt(1, {
+        fields: {
+          name: "Ada",
+          email: "ada@example.com",
+          message: "Please call me back.",
+        },
+      }),
+    );
+    await acceptanceStore.accept(
+      submissionAt(2, { fields: { name: "Grace", message: "Second message" } }),
+    );
+    await acceptanceStore.accept(
+      submissionAt(3, {
+        fields: { name: "Robot", message: "Cheap watches" },
+        classification: "suspected_spam",
+        deliveryStatus: "held",
+      }),
+    );
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    const page = await store.listInbox({
+      siteId,
+      limit: 25,
+      olderThanReceiptId: null,
+    });
+
+    expect(page.messages).toEqual([
+      {
+        formId: accepted.identity.formId,
+        receiptId: createPublicFormReceiptId("receipt-02"),
+        acceptedAt: "2026-07-22T20:00:00.000Z",
+        read: false,
+        senderName: "Grace",
+        replyAddress: null,
+        preview: "Second message",
+        payloadDeleted: false,
+      },
+      {
+        formId: accepted.identity.formId,
+        receiptId: createPublicFormReceiptId("receipt-01"),
+        acceptedAt: "2026-07-21T20:00:00.000Z",
+        read: false,
+        senderName: "Ada",
+        replyAddress: "ada@example.com",
+        preview: "Please call me back.",
+        payloadDeleted: false,
+      },
+    ]);
+    expect(page.olderCursor).toBeNull();
+    expect(page.unreadCount).toBe(2);
+  });
+
+  it("pages through older messages with a receipt cursor", async () => {
+    const acceptanceStore = createD1PublicFormAcceptanceStore(database);
+    for (const index of [1, 2, 3]) {
+      await acceptanceStore.accept(submissionAt(index));
+    }
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    const first = await store.listInbox({
+      siteId,
+      limit: 2,
+      olderThanReceiptId: null,
+    });
+    expect(first.messages.map((message) => message.receiptId)).toEqual([
+      "receipt-03",
+      "receipt-02",
+    ]);
+    expect(first.olderCursor).toBe("receipt-02");
+
+    const second = await store.listInbox({
+      siteId,
+      limit: 2,
+      olderThanReceiptId: first.olderCursor,
+    });
+    expect(second.messages.map((message) => message.receiptId)).toEqual([
+      "receipt-01",
+    ]);
+    expect(second.olderCursor).toBeNull();
+    expect(second.unreadCount).toBe(3);
+  });
+
+  it("marks a message read the first time a human opens it", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(submissionAt(1));
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    await store.viewSubmission({
+      siteId,
+      receiptId: createPublicFormReceiptId("receipt-01"),
+      actorMembershipId: "membership-owner",
+      now: "2026-07-27T20:05:00.000Z",
+    });
+    await store.viewSubmission({
+      siteId,
+      receiptId: createPublicFormReceiptId("receipt-01"),
+      actorMembershipId: "membership-editor",
+      now: "2026-07-27T21:05:00.000Z",
+    });
+
+    const page = await store.listInbox({
+      siteId,
+      limit: 25,
+      olderThanReceiptId: null,
+    });
+    expect(page.messages).toEqual([
+      expect.objectContaining({ read: true }),
+    ]);
+    expect(page.unreadCount).toBe(0);
+    await expect(
+      database
+        .prepare(
+          `SELECT first_read_at, first_read_by
+           FROM public_form_submission_reads`,
+        )
+        .first<{ first_read_at: string; first_read_by: string }>(),
+    ).resolves.toEqual({
+      first_read_at: "2026-07-27T20:05:00.000Z",
+      first_read_by: "membership-owner",
+    });
+  });
+
+  it("keeps an erased message in the inbox without its payload", async () => {
+    await createD1PublicFormAcceptanceStore(database).accept(submissionAt(1));
+    await createD1PublicFormPrivacyStore(
+      database as unknown as D1DatabaseBinding,
+    ).eraseSubmissionPayload({
+      siteId,
+      receiptId: createPublicFormReceiptId("receipt-01"),
+      actorMembershipId: "membership-owner",
+      reason: "authorized_erasure",
+      now: "2026-07-27T20:05:00.000Z",
+    });
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    await expect(
+      store.listInbox({ siteId, limit: 25, olderThanReceiptId: null }),
+    ).resolves.toMatchObject({
+      messages: [
+        expect.objectContaining({
+          payloadDeleted: true,
+          preview: "",
+          senderName: null,
+        }),
+      ],
+    });
+  });
+});
+
 describe("D1 public form notification store", () => {
   it("measures capacity in UTF-8 bytes", async () => {
     const unicodeAcceptance = {
@@ -59,10 +260,9 @@ describe("D1 public form notification store", () => {
     const encodedBytes = new TextEncoder().encode(
       JSON.stringify(unicodeAcceptance.fields),
     ).byteLength;
-    const store = createD1PublicFormNotificationStore(
-      database,
-      encodedBytes + 1024,
-    );
+    const store = createD1PublicFormNotificationStore(database, {
+      capacityLimitBytes: encodedBytes + 1024,
+    });
 
     await expect(
       store.deliveryHealth({
@@ -76,11 +276,9 @@ describe("D1 public form notification store", () => {
 
   it("claims once, exposes only configured preview fields, and records delivery", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(accepted);
-    const store = createD1PublicFormNotificationStore(
-      database,
-      undefined,
-      ["name"],
-    );
+    const store = createD1PublicFormNotificationStore(database, {
+      notificationPreviewFieldIds: ["name"],
+    });
 
     const claim = await store.claimDue({
       siteId,

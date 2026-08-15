@@ -49,6 +49,12 @@ export type PublicFormFieldDefinition = Readonly<{
   id: string;
   required: boolean;
   maximumLength: number;
+  /**
+   * What this field means in the Messages inbox: the person's name, the
+   * address to reply to, or the text worth previewing in the list. A field
+   * without a role is only ever shown when a human opens the submission.
+   */
+  inboxRole?: "sender" | "replyAddress" | "preview";
 }>;
 
 export type PublicFormDefinition = Readonly<{

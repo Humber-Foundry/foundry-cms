@@ -157,6 +157,40 @@ authorizes a second one.
 **Suppression** — A durable negative subscriber state that blocks delivery.
 Routine synchronization never reverses it.
 
+## Messages
+
+**Submission** — One thing a visitor sent through a form on the site: the
+field values, the instant it arrived, and its receipt. A submission is
+immutable. The only change it ever takes is erasure of what it says.
+
+**Receipt** — The identifier that names one submission to a human. It appears
+in the dashboard address for that submission and in the owner notification.
+
+**Inbox** — The list of accepted submissions, newest first. It shows a bounded
+summary of each one, never the whole submission.
+
+**Inbox role** — What one form field means in that summary: `sender` for the
+person's name, `replyAddress` for the address to reply to, `preview` for the
+line worth showing. A field with no role appears only when a human opens the
+submission.
+
+**Reply address** — The address a visitor gave in the field the form marks as
+`replyAddress`. It becomes a reply link only when it holds nothing but an
+ordinary address; otherwise it is still stored and still read in full on the
+submission's own page.
+
+**Read state** — Whether any human has opened a submission. It belongs to the
+site, not to one person: an Owner or an Editor opening a message makes it read
+for everyone. The first reader is recorded and never replaced.
+
+**Spam hold** — The state of a submission the spam check kept out of the
+inbox. The submission is stored in full and its owner notification waits.
+Accepting it moves it to the inbox and releases that notification.
+
+**Owner notification** — The email that tells the Owner a submission arrived.
+Storing the submission and sending this email are separate operations, so a
+notification that never arrives never loses a submission.
+
 ## Analytics
 
 **Analytics fact** — One aggregate measurement of a product object over one

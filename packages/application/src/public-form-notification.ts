@@ -5,6 +5,10 @@ import type {
   HumanCapability,
   HumanMembership,
 } from "./human-access";
+import {
+  publicFormInboxPageSize,
+  type PublicFormInboxPage,
+} from "./public-form-inbox";
 import type {
   PublicFormDeliveryId,
   PublicFormId,
@@ -52,6 +56,12 @@ export type PublicFormDeliveryHealth = Readonly<{
   }>;
 }>;
 
+/**
+ * A submission the spam check held back.
+ *
+ * It deliberately carries no field content. Reading what a held submission
+ * says is an audited act, so a human opens it through `submission` instead.
+ */
 export type SuspectedSpamSubmission = Readonly<{
   formId: PublicFormId;
   receiptId: PublicFormReceiptId;
@@ -102,6 +112,11 @@ export interface PublicFormNotificationStore {
     actorMembershipId: string;
     now: string;
   }): Promise<boolean>;
+  listInbox(input: {
+    siteId: SiteId;
+    limit: number;
+    olderThanReceiptId: PublicFormReceiptId | null;
+  }): Promise<PublicFormInboxPage>;
   listSuspectedSpam(input: {
     siteId: SiteId;
   }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
@@ -127,6 +142,10 @@ export type PublicFormOperationsApplication = Readonly<{
     health(input: {
       actor: ExternalHumanIdentity;
     }): Promise<PublicFormDeliveryHealth>;
+    inbox(input: {
+      actor: ExternalHumanIdentity;
+      olderThanReceiptId?: PublicFormReceiptId | null;
+    }): Promise<PublicFormInboxPage>;
     suspectedSpam(input: {
       actor: ExternalHumanIdentity;
     }): Promise<ReadonlyArray<SuspectedSpamSubmission>>;
@@ -250,6 +269,14 @@ export function createPublicFormOperationsApplication({
               ? "degraded"
               : adapterHealth,
         };
+      },
+      async inbox({ actor, olderThanReceiptId = null }) {
+        await authorize(actor, "forms.review");
+        return store.listInbox({
+          siteId,
+          limit: publicFormInboxPageSize,
+          olderThanReceiptId,
+        });
       },
       async suspectedSpam({ actor }) {
         await authorize(actor, "forms.review");

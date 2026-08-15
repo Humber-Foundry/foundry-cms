@@ -2,6 +2,9 @@ import {
   createPublicFormDeliveryId,
   createPublicFormId,
   createPublicFormReceiptId,
+  summarizePublicFormSubmission,
+  type PublicFormInboxMessage,
+  type PublicFormInboxPlan,
   type PublicFormNotificationStore,
 } from "@humber-foundry/application";
 
@@ -40,12 +43,55 @@ function capacityState(usedPercent: number) {
   return "normal" as const;
 }
 
+type InboxRow = {
+  form_id: string;
+  receipt_id: string;
+  accepted_at: string;
+  fields_json: string;
+  payload_deleted_at: string | null;
+  first_read_at: string | null;
+};
+
+export type D1PublicFormNotificationStoreOptions = Readonly<{
+  capacityLimitBytes?: number;
+  notificationPreviewFieldIds?: ReadonlyArray<string>;
+  inboxPlan?: PublicFormInboxPlan;
+}>;
+
+function parseFields(fieldsJson: string): Readonly<Record<string, unknown>> {
+  const value: unknown = JSON.parse(fieldsJson);
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 export function createD1PublicFormNotificationStore(
   database: D1DatabaseBinding,
-  capacityLimitBytes = 500 * 1_024 * 1_024,
-  notificationPreviewFieldIds: ReadonlyArray<string> = [],
+  options: D1PublicFormNotificationStoreOptions = {},
 ): PublicFormNotificationStore {
-  const allowedPreviewFieldIds = new Set(notificationPreviewFieldIds);
+  const capacityLimitBytes =
+    options.capacityLimitBytes ?? 500 * 1_024 * 1_024;
+  const inboxPlan: PublicFormInboxPlan = options.inboxPlan ?? {};
+  const allowedPreviewFieldIds = new Set(
+    options.notificationPreviewFieldIds ?? [],
+  );
+
+  function inboxMessage(row: InboxRow): PublicFormInboxMessage {
+    const formId = createPublicFormId(row.form_id);
+    return {
+      formId,
+      receiptId: createPublicFormReceiptId(row.receipt_id),
+      acceptedAt: row.accepted_at,
+      read: row.first_read_at !== null,
+      payloadDeleted: row.payload_deleted_at !== null,
+      ...summarizePublicFormSubmission({
+        plan: inboxPlan,
+        formId,
+        fields: parseFields(row.fields_json),
+      }),
+    };
+  }
+
   return {
     async claimDue({ siteId, now, leaseToken, leaseUntil, limit }) {
       await database.batch([
@@ -324,6 +370,87 @@ export function createD1PublicFormNotificationStore(
       ]);
       return (results[0]?.meta.changes ?? 0) > 0;
     },
+    async listInbox({ siteId, limit, olderThanReceiptId }) {
+      const cursor =
+        olderThanReceiptId === null
+          ? null
+          : await database
+              .prepare(
+                `SELECT accepted_at, submission_id
+                 FROM public_form_submissions
+                 WHERE site_id = ?1 AND receipt_id = ?2`,
+              )
+              .bind(siteId, olderThanReceiptId)
+              .first<{ accepted_at: string; submission_id: string }>();
+      const [rows, unread] = await Promise.all([
+        database
+          .prepare(
+            `SELECT
+               submission.form_id,
+               submission.receipt_id,
+               submission.accepted_at,
+               submission.fields_json,
+               submission.payload_deleted_at,
+               read_state.first_read_at
+             FROM public_form_submissions AS submission
+             JOIN public_form_classifications AS classification
+               ON classification.site_id = submission.site_id
+              AND classification.form_id = submission.form_id
+              AND classification.submission_id = submission.submission_id
+             LEFT JOIN public_form_submission_reads AS read_state
+               ON read_state.site_id = submission.site_id
+              AND read_state.form_id = submission.form_id
+              AND read_state.submission_id = submission.submission_id
+             WHERE submission.site_id = ?1
+               AND classification.classification = 'accepted'
+               AND (
+                 ?2 IS NULL
+                 OR submission.accepted_at < ?2
+                 OR (
+                   submission.accepted_at = ?2
+                   AND submission.submission_id < ?3
+                 )
+               )
+             ORDER BY submission.accepted_at DESC, submission.submission_id DESC
+             LIMIT ?4`,
+          )
+          .bind(
+            siteId,
+            cursor?.accepted_at ?? null,
+            cursor?.submission_id ?? null,
+            limit + 1,
+          )
+          .all<InboxRow>(),
+        database
+          .prepare(
+            `SELECT COUNT(*) AS unread
+             FROM public_form_submissions AS submission
+             JOIN public_form_classifications AS classification
+               ON classification.site_id = submission.site_id
+              AND classification.form_id = submission.form_id
+              AND classification.submission_id = submission.submission_id
+             LEFT JOIN public_form_submission_reads AS read_state
+               ON read_state.site_id = submission.site_id
+              AND read_state.form_id = submission.form_id
+              AND read_state.submission_id = submission.submission_id
+             WHERE submission.site_id = ?1
+               AND classification.classification = 'accepted'
+               AND read_state.first_read_at IS NULL`,
+          )
+          .bind(siteId)
+          .first<{ unread: number }>(),
+      ]);
+      const messages = rows.results.slice(0, limit).map(inboxMessage);
+      const lastMessage = messages.at(-1);
+      return {
+        messages,
+        olderCursor:
+          rows.results.length > limit && lastMessage !== undefined
+            ? lastMessage.receiptId
+            : null,
+        unreadCount: unread?.unread ?? 0,
+      };
+    },
     async listSuspectedSpam({ siteId }) {
       const rows = await database
         .prepare(
@@ -420,21 +547,34 @@ export function createD1PublicFormNotificationStore(
       if (row === null) {
         return null;
       }
-      await database
-        .prepare(
-          `INSERT INTO public_form_operation_audit_events (
-             site_id, delivery_id, actor_membership_id, action, occurred_at
-           )
-           SELECT ?1, delivery.id, ?2, 'submission_viewed', ?3
-           FROM public_form_delivery_intents AS delivery
-           JOIN public_form_submissions AS submission
-             ON submission.site_id = delivery.site_id
-            AND submission.form_id = delivery.form_id
-            AND submission.submission_id = delivery.submission_id
-           WHERE delivery.site_id = ?1 AND submission.receipt_id = ?4`,
-        )
-        .bind(siteId, actorMembershipId, now, receiptId)
-        .run();
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO public_form_operation_audit_events (
+               site_id, delivery_id, actor_membership_id, action, occurred_at
+             )
+             SELECT ?1, delivery.id, ?2, 'submission_viewed', ?3
+             FROM public_form_delivery_intents AS delivery
+             JOIN public_form_submissions AS submission
+               ON submission.site_id = delivery.site_id
+              AND submission.form_id = delivery.form_id
+              AND submission.submission_id = delivery.submission_id
+             WHERE delivery.site_id = ?1 AND submission.receipt_id = ?4`,
+          )
+          .bind(siteId, actorMembershipId, now, receiptId),
+        // Opening a message marks it read for the whole site. The first
+        // reader stays on the record; a later reader never replaces them.
+        database
+          .prepare(
+            `INSERT OR IGNORE INTO public_form_submission_reads (
+               site_id, form_id, submission_id, first_read_at, first_read_by
+             )
+             SELECT site_id, form_id, submission_id, ?2, ?3
+             FROM public_form_submissions
+             WHERE site_id = ?1 AND receipt_id = ?4`,
+          )
+          .bind(siteId, now, actorMembershipId, receiptId),
+      ]);
       return {
         formId: createPublicFormId(row.form_id),
         receiptId: createPublicFormReceiptId(row.receipt_id),

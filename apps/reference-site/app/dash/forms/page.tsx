@@ -1,5 +1,6 @@
-import { FormOperationsControls } from "@/components/form-operations-controls";
-import { loadPublicFormOperationsDashboard } from "@/src/public-form-delivery-health-runtime";
+import { MessageInbox } from "@/components/message-inbox";
+import { SpamReviewControls } from "@/components/spam-review-controls";
+import { loadPublicFormInbox } from "@/src/public-form-messages-runtime";
 import {
   loadMutationToken,
   requireAuthorizedDashboardAccess,
@@ -8,14 +9,45 @@ import {
 export const dynamic = "force-dynamic";
 
 /**
- * Messages covers everything that arrives through the site's forms: what came
- * in, what was held for review, and whether the notification email went out.
+ * `?older=` carries the receipt of the last message on the page before it.
+ * Anything that is not shaped like a receipt is ignored, so a hand-edited
+ * address opens the newest page instead of failing.
  */
-export default async function DashboardFormsPage() {
+function readInboxCursor(
+  value: string | string[] | undefined,
+): string | null {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,80}$/u.test(value)
+    ? value
+    : null;
+}
+
+function unreadLine(unreadCount: number) {
+  if (unreadCount === 0) {
+    return "You have read every message.";
+  }
+  return unreadCount === 1
+    ? "1 message you have not read yet."
+    : `${unreadCount} messages you have not read yet.`;
+}
+
+/**
+ * Messages is an inbox. It leads with what people sent, keeps anything held
+ * as spam next to it, and says in one line whether the email alerts about new
+ * messages are arriving. The alert detail lives in Settings, because a message
+ * is saved here whether or not its alert was sent.
+ */
+export default async function DashboardFormsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const access = await requireAuthorizedDashboardAccess();
   const mutationToken = await loadMutationToken();
-  const operations = await loadPublicFormOperationsDashboard(access);
-  const { health } = operations;
+  const { inbox, suspectedSpam, notificationHealth } =
+    await loadPublicFormInbox(
+      access,
+      readInboxCursor((await searchParams).older),
+    );
 
   return (
     <main className="dashboard-main" id="main">
@@ -26,54 +58,42 @@ export default async function DashboardFormsPage() {
         </div>
       </div>
 
-      <FormOperationsControls
-        csrfToken={mutationToken}
-        canReleaseSpam={access.membership.role === "owner"}
-        failedDeliveries={operations.failedDeliveries}
-        suspectedSpam={operations.suspectedSpam}
-      />
-
-      <section aria-labelledby="delivery-health">
-        <h2 id="delivery-health">Delivery</h2>
-        <p>
-          Whether the emails telling you about new messages are getting
-          through. The messages themselves are always kept, even if an email
-          fails.
-        </p>
-        <dl className="fact-list">
-          <div>
-            <dt>Waiting to send</dt>
-            <dd>
-              {health.pending === 0 && health.processing === 0
-                ? "Nothing waiting"
-                : `${health.pending} waiting · ${health.processing} sending`}
-            </dd>
-          </div>
-          <div>
-            <dt>Failed to send</dt>
-            <dd>
-              {health.failed === 0
-                ? "None"
-                : `${health.failed} failed after ${health.retries} retries`}
-            </dd>
-          </div>
-          <div>
-            <dt>Oldest still waiting</dt>
-            <dd>
-              {health.oldestPendingAgeSeconds === null
-                ? "Nothing waiting"
-                : `${Math.ceil(health.oldestPendingAgeSeconds / 60)} minutes`}
-            </dd>
-          </div>
-          <div>
-            <dt>Storage used</dt>
-            <dd>
-              {health.capacity.state} · {health.capacity.usedPercent.toFixed(1)}
-              % of the limit
-            </dd>
-          </div>
-        </dl>
+      <section aria-labelledby="inbox">
+        <h2 id="inbox">Inbox</h2>
+        <p>{unreadLine(inbox.unreadCount)}</p>
+        <MessageInbox
+          messages={inbox.messages}
+          olderCursor={inbox.olderCursor}
+        />
       </section>
+
+      <section aria-labelledby="spam">
+        <h2 id="spam">Spam and messages to check</h2>
+        <p>
+          These were held because they look like spam. Accepting one moves it
+          to your inbox.
+        </p>
+        <SpamReviewControls
+          canAccept={access.membership.role === "owner"}
+          csrfToken={mutationToken}
+          suspectedSpam={suspectedSpam}
+        />
+      </section>
+
+      <p className="dashboard-note">
+        {notificationHealth.failed === 0
+          ? "Email alerts about new messages are working."
+          : `${notificationHealth.failed} email alert${
+              notificationHealth.failed === 1 ? "" : "s"
+            } did not reach you.`}{" "}
+        Every message is saved here even when an alert fails.
+        {access.membership.role === "owner" ? (
+          <>
+            {" "}
+            <a href="/dash/settings#email-alerts">See email alerts</a>
+          </>
+        ) : null}
+      </p>
     </main>
   );
 }

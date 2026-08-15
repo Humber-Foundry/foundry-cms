@@ -16,7 +16,7 @@ import {
 } from "../../../../src/access-identity";
 import { HumanAccessConfigurationError } from "../../../../src/human-access-configuration";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
-import { createPublicFormOperationsContext } from "../../../../src/public-form-delivery-health-runtime";
+import { createPublicFormOperationsContext } from "../../../../src/public-form-messages-runtime";
 import { createPublicFormPrivacyContext } from "../../../../src/public-form-privacy-dashboard-runtime";
 import {
   executeIdempotentHumanMutation,

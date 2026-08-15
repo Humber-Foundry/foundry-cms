@@ -3,6 +3,72 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { applyFormOperation } from "./form-operation-request";
+
+const outcomeMessages = {
+  applied: "Done.",
+  refused: "That did not work. Reload the page and try again.",
+  unconfirmed: "The result is unknown. Reload the page before trying again.",
+} as const;
+
+/**
+ * What an Owner can do with one message: keep a copy, move it to or out of
+ * spam, or erase what it says. Erasing keeps the receipt and the record of
+ * what happened, so the site can still prove the message arrived.
+ */
+export function FormSubmissionActions({
+  classification,
+  pending = false,
+  message = "",
+  onDownload,
+  onReclassify,
+  onErase,
+}: {
+  classification: "accepted" | "suspected_spam";
+  pending?: boolean;
+  message?: string;
+  onDownload?: () => void;
+  onReclassify?: () => void;
+  onErase?: () => void;
+}) {
+  return (
+    <section aria-labelledby="message-actions">
+      <h2 id="message-actions">What you can do with this message</h2>
+      <p role="status" aria-live="polite">
+        {message}
+      </p>
+      <p>
+        <button
+          className="copy-button"
+          disabled={pending}
+          onClick={() => onDownload?.()}
+          type="button"
+        >
+          Download a copy
+        </button>{" "}
+        <button
+          className="copy-button"
+          disabled={pending}
+          onClick={() => onReclassify?.()}
+          type="button"
+        >
+          {classification === "accepted"
+            ? "Move it to spam"
+            : "Not spam — accept it"}
+        </button>{" "}
+        <button
+          className="copy-button"
+          disabled={pending}
+          onClick={() => onErase?.()}
+          type="button"
+        >
+          Erase what it says
+        </button>
+      </p>
+    </section>
+  );
+}
+
 export function FormSubmissionControls({
   csrfToken,
   receiptId,
@@ -19,30 +85,13 @@ export function FormSubmissionControls({
   async function apply(command: unknown) {
     setPending(true);
     setMessage("");
-    try {
-      const response = await fetch("/api/foundry-cms/forms", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": crypto.randomUUID(),
-          "x-foundry-csrf": csrfToken,
-        },
-        body: JSON.stringify(command),
-      });
-      setMessage(
-        response.ok
-          ? "Form data operation applied."
-          : "The form data operation could not be applied.",
-      );
-      if (response.ok) router.refresh();
-    } catch {
-      setMessage("The result is unknown. Refresh before trying again.");
-    } finally {
-      setPending(false);
-    }
+    const outcome = await applyFormOperation(command, csrfToken);
+    setMessage(outcomeMessages[outcome]);
+    setPending(false);
+    if (outcome === "applied") router.refresh();
   }
 
-  async function exportSubmission() {
+  async function download() {
     setPending(true);
     setMessage("");
     try {
@@ -55,71 +104,46 @@ export function FormSubmissionControls({
         body: JSON.stringify({ action: "export_submission", receiptId }),
       });
       if (!response.ok) {
-        setMessage("The form data export could not be created.");
+        setMessage("The copy could not be made.");
         return;
       }
       const objectUrl = URL.createObjectURL(await response.blob());
       const download = document.createElement("a");
       download.href = objectUrl;
-      download.download = `form-${receiptId}.json`;
+      download.download = `message-${receiptId}.json`;
       download.click();
       URL.revokeObjectURL(objectUrl);
-      setMessage("The audited form data export was created.");
+      setMessage("The copy was downloaded. Taking it is recorded.");
     } catch {
-      setMessage("The form data export result is unknown. Try again.");
+      setMessage("The result is unknown. Try again.");
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <section aria-labelledby="form-data-actions">
-      <h2 id="form-data-actions">Owner data actions</h2>
-      <p role="status" aria-live="polite">{message}</p>
-      <p>
-        <button
-          className="copy-button"
-          disabled={pending}
-          onClick={() => void exportSubmission()}
-          type="button"
-        >
-          Export audited JSON
-        </button>{" "}
-        <button
-          className="copy-button"
-          disabled={pending}
-          onClick={() =>
-            apply({
-              action: "classify_submission",
-              receiptId,
-              classification:
-                classification === "accepted"
-                  ? "suspected_spam"
-                  : "accepted",
-            })
-          }
-          type="button"
-        >
-          Mark as{" "}
-          {classification === "accepted" ? "suspected spam" : "accepted"}
-        </button>{" "}
-        <button
-          className="copy-button"
-          disabled={pending}
-          onClick={() => {
-            if (
-              window.confirm(
-                "Erase this submission payload? The receipt and minimal audit evidence will remain.",
-              )
-            ) {
-              void apply({ action: "erase_submission", receiptId });
-            }
-          }}
-          type="button"
-        >
-          Erase payload
-        </button>
-      </p>
-    </section>
+    <FormSubmissionActions
+      classification={classification}
+      message={message}
+      onDownload={() => void download()}
+      onErase={() => {
+        if (
+          window.confirm(
+            "Erase what this message says? The receipt and the record of what happened to it stay.",
+          )
+        ) {
+          void apply({ action: "erase_submission", receiptId });
+        }
+      }}
+      onReclassify={() =>
+        void apply({
+          action: "classify_submission",
+          receiptId,
+          classification:
+            classification === "accepted" ? "suspected_spam" : "accepted",
+        })
+      }
+      pending={pending}
+    />
   );
 }

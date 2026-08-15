@@ -13,3 +13,4 @@
 | [ADR-0006](ADR-0006-bulk-campaign-execution-boundary.md) | Bulk campaign execution boundary | Accepted | 2026-07-30 |
 | [ADR-0007](ADR-0007-mcp-publication-scope-derivation-boundary.md) | MCP publication scope derivation and enforcement boundary | Accepted | 2026-07-30 |
 | [ADR-0008](ADR-0008-seo-metadata-shared-field-set.md) | One SEO and sharing field set, with a derived canonical URL | Accepted | 2026-08-15 |
+| [ADR-0010](ADR-0010-messages-inbox-and-owner-notification-demotion.md) | Messages is an inbox, and the owner notification is demoted | Accepted | 2026-08-15 |
