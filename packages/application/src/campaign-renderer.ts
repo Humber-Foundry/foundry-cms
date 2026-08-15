@@ -103,6 +103,31 @@ function validateCampaignShareImage(
   return Object.freeze({ url, alt });
 }
 
+/**
+ * Carry a post's share image onto a campaign derived from that post.
+ *
+ * A post may name its share image by a path on the site. An email cannot
+ * resolve a path, so the site's own address makes it absolute here. Without
+ * that address the image is dropped, because a path in an email is a broken
+ * picture in every inbox.
+ */
+export function campaignShareImageFromPost(
+  postShareImage: CampaignEditableInput["shareImage"],
+  siteCanonicalOrigin: string,
+): CampaignEditableInput["shareImage"] {
+  if (postShareImage === null) {
+    return null;
+  }
+  const url = postShareImage.url.trim();
+  if (url.startsWith("https://")) {
+    return { url, alt: postShareImage.alt };
+  }
+  const origin = siteCanonicalOrigin.trim().replace(/\/+$/u, "");
+  return origin === "" || !url.startsWith("/")
+    ? null
+    : { url: `${origin}${url}`, alt: postShareImage.alt };
+}
+
 export function validateCampaignInput(
   input: CampaignEditableInput,
   channelConfiguration: CampaignChannelConfiguration,

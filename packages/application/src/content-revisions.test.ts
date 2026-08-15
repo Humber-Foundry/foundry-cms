@@ -93,7 +93,7 @@ describe("content revision application", () => {
         title: "Memory aggregate invariant | Foundry",
         description: "The adapter must preserve command shape.",
         keywords: [],
-        shareImage: null
+        shareImage: null,
       },
       body: createRichTextDocumentFromPlainText("Invariant body."),
     };
@@ -213,7 +213,7 @@ describe("content revision application", () => {
           title: "First post | Foundry",
           description: "The first post from Foundry.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText("Original body."),
       },
@@ -253,7 +253,7 @@ describe("content revision application", () => {
           title: "First post, revised | Foundry",
           description: "The revised first post from Foundry.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText("Revised body."),
       },
@@ -313,7 +313,7 @@ describe("content revision application", () => {
               title: "Live post | Foundry",
               description: "A live post ready to be unpublished.",
               keywords: [],
-              shareImage: null
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("Live body."),
           },
@@ -359,7 +359,7 @@ describe("content revision application", () => {
             title: "Recreated post | Foundry",
             description: "Identity reuse must fail.",
             keywords: [],
-            shareImage: null
+            shareImage: null,
           },
           body: createRichTextDocumentFromPlainText("Recreated body."),
         },
@@ -435,7 +435,7 @@ describe("content revision application", () => {
           title: "Concurrent post | Foundry",
           description: "A concurrency test post.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText("Body."),
       },

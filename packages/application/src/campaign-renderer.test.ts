@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { createRichTextDocumentFromPlainText } from "@humber-foundry/site-definition";
+import {
+  createRichTextDocumentFromPlainText,
+  createSiteId,
+} from "@humber-foundry/site-definition";
 
 import {
+  campaignShareImageFromPost,
   renderCampaignRevision,
   validateCampaignInput,
 } from "./campaign-renderer";
@@ -12,7 +16,6 @@ import {
   type CampaignEditableInput,
   type CampaignRevision,
 } from "./campaign-types";
-import { createSiteId } from "@humber-foundry/site-definition";
 
 const channelConfiguration = {
   senderIdentityId: "sender_primary",
@@ -163,5 +166,38 @@ describe("campaign share image", () => {
     );
 
     expect(rendered.text.bytes).not.toContain("cdn.example.com/harbour.png");
+  });
+});
+
+describe("share image carried from a post", () => {
+  it("makes a post share image path absolute using the site address", () => {
+    expect(
+      campaignShareImageFromPost(
+        { url: "/api/media/asset_hero", alt: "The harbour" },
+        "https://harbour.example",
+      ),
+    ).toEqual({
+      url: "https://harbour.example/api/media/asset_hero",
+      alt: "The harbour",
+    });
+  });
+
+  it("keeps an address that is already absolute", () => {
+    expect(
+      campaignShareImageFromPost(
+        { url: "https://cdn.example.com/card.png", alt: "" },
+        "https://harbour.example",
+      ),
+    ).toEqual({ url: "https://cdn.example.com/card.png", alt: "" });
+  });
+
+  it("drops a path when the site has no address to make it absolute", () => {
+    expect(
+      campaignShareImageFromPost({ url: "/api/media/asset_hero", alt: "" }, ""),
+    ).toBeNull();
+  });
+
+  it("carries nothing when the post has no share image", () => {
+    expect(campaignShareImageFromPost(null, "https://harbour.example")).toBeNull();
   });
 });

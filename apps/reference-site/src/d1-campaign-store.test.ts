@@ -94,6 +94,7 @@ describe("D1 campaign store", () => {
         },
         audienceDefinition: campaignAudienceDefinition,
       },
+      siteCanonicalOrigin: "https://example.test",
       rendererVersion: "1111111111111111111111111111111111111111",
       schemaVersion: "1.4.0",
       createId: (kind) =>

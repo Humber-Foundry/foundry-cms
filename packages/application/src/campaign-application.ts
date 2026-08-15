@@ -1,4 +1,5 @@
 import {
+  campaignShareImageFromPost,
   renderCampaignRevision,
   validateCampaignChannelConfiguration,
   validateCampaignInput,
@@ -64,6 +65,7 @@ export function createCampaignApplication({
   findPostRevision,
   resolveAudience,
   channelConfiguration,
+  siteCanonicalOrigin,
   rendererVersion,
   schemaVersion,
   clock = () => new Date(),
@@ -663,13 +665,10 @@ export function createCampaignApplication({
         input: {
           subject: post.title,
           previewText: post.excerpt,
-          // A post share image may be a path on the site. An email cannot
-          // resolve a path, so only an absolute address carries over.
-          shareImage:
-            post.seo.shareImage !== null &&
-            post.seo.shareImage.url.startsWith("https://")
-              ? post.seo.shareImage
-              : null,
+          shareImage: campaignShareImageFromPost(
+            post.seo.shareImage,
+            siteCanonicalOrigin,
+          ),
           callToAction: {
             label: "Read more",
             href: `/blog/${post.slug}`,

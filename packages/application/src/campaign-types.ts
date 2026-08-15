@@ -403,6 +403,12 @@ export type CampaignApplicationDependencies = Readonly<{
     definition: CampaignAudienceDefinition,
   ): Promise<Readonly<{ eligibleSubscriberCount: number }>>;
   channelConfiguration: CampaignChannelConfiguration;
+  /**
+   * The site's public address, used to make a post share image absolute when a
+   * campaign is derived from that post. Empty when the installation has not set
+   * one, and a path share image is then dropped rather than sent broken.
+   */
+  siteCanonicalOrigin: string;
   rendererVersion: string;
   schemaVersion: SiteDefinition["schemaVersion"];
   clock?: () => Date;

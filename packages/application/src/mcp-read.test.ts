@@ -37,7 +37,7 @@ const definitionWithPost = {
           title: "First post",
           description: "A first published post.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText("A first post."),
       },
@@ -58,7 +58,7 @@ const secondSiteDefinition = {
       ...definitionWithPost.home.seo,
       title: "SECOND-SITE-PRIVATE-CANARY",
       keywords: [],
-      shareImage: null
+      shareImage: null,
     },
   },
   blog: {

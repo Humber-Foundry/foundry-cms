@@ -124,6 +124,39 @@ function isBlogMutationOperation(
   );
 }
 
+/**
+ * Read the SEO and sharing block a composer sent. Every field may be blank
+ * or absent; the renderer fills a blank from the post itself. The schema
+ * validator rejects a malformed value before it becomes a revision.
+ */
+function parseSeoShareImage(value: unknown): SeoMetadata["shareImage"] {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof value !== "object" ||
+    typeof candidate.url !== "string" ||
+    typeof candidate.alt !== "string"
+  ) {
+    throw new TypeError("blog_command_invalid");
+  }
+  return { url: candidate.url, alt: candidate.alt };
+}
+
+function parseSeoMetadata(seo: Record<string, unknown>): SeoMetadata {
+  return {
+    title: seo.title as string,
+    description: seo.description as string,
+    keywords: Array.isArray(seo.keywords)
+      ? seo.keywords.filter(
+          (keyword): keyword is string => typeof keyword === "string",
+        )
+      : [],
+    shareImage: parseSeoShareImage(seo.shareImage),
+  };
+}
+
 function parseBlogMutation(value: unknown): BlogMutationBody | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -160,40 +193,6 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
   }
   if (typeof candidate.post !== "object" || candidate.post === null) {
     throw new TypeError("blog_command_invalid");
-  }
-  /**
-   * Read the SEO and sharing block a composer sent. Every field may be blank
-   * or absent; the renderer fills a blank from the post itself. The schema
-   * validator rejects a malformed value before it becomes a revision.
-   */
-  function parseSeoMetadata(seo: Record<string, unknown>): SeoMetadata {
-    const shareImage = seo.shareImage;
-    const keywords = Array.isArray(seo.keywords)
-      ? seo.keywords.filter(
-          (keyword): keyword is string => typeof keyword === "string",
-        )
-      : [];
-    if (
-      shareImage !== undefined &&
-      shareImage !== null &&
-      (typeof shareImage !== "object" ||
-        typeof (shareImage as Record<string, unknown>).url !== "string" ||
-        typeof (shareImage as Record<string, unknown>).alt !== "string")
-    ) {
-      throw new TypeError("blog_command_invalid");
-    }
-    return {
-      title: seo.title as string,
-      description: seo.description as string,
-      keywords,
-      shareImage:
-        shareImage === undefined || shareImage === null
-          ? null
-          : {
-              url: (shareImage as Record<string, string>).url!,
-              alt: (shareImage as Record<string, string>).alt!,
-            },
-    };
   }
   const post = candidate.post as Record<string, unknown>;
   if (

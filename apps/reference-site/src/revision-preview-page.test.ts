@@ -73,7 +73,7 @@ describe("revision preview page", () => {
             title: "Edited SEO title",
             description: "Edited SEO description",
             keywords: [],
-            shareImage: null
+            shareImage: null,
           },
         },
       },

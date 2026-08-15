@@ -282,3 +282,57 @@ describe("editing a share image as two fields", () => {
     expect(result.ok ? result.definition.home.seo.shareImage : "x").toBeNull();
   });
 });
+
+describe("editing the canonical origin", () => {
+  const path = `${referenceSiteDefinition.site.id}.canonicalOrigin`;
+
+  it("is an editable field the owner can set", () => {
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      { path, value: "https://harbour.example" },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.definition.site.canonicalOrigin).toBe(
+      "https://harbour.example",
+    );
+    expect(resolveHomeSeo(result.definition).canonicalUrl).toBe(
+      "https://harbour.example/",
+    );
+  });
+
+  it("may be cleared, which withholds every address", () => {
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      { path, value: "" },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(
+      result.ok ? resolveHomeSeo(result.definition).canonicalUrl : "x",
+    ).toBeNull();
+  });
+
+  it("drops a trailing slash so no URL is built with two", () => {
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      { path, value: "https://harbour.example/" },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(
+      result.ok ? result.definition.site.canonicalOrigin : "x",
+    ).toBe("https://harbour.example");
+  });
+
+  it("rejects an address that is not a bare origin", () => {
+    for (const value of [
+      "harbour.example",
+      "https://harbour.example/blog",
+      "javascript:alert(1)",
+    ]) {
+      const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+        { path, value },
+      ]);
+      expect(result.ok, value).toBe(false);
+    }
+  });
+});

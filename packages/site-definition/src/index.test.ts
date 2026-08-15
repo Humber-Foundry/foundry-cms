@@ -489,7 +489,7 @@ describe("reference Site Definition", () => {
             excerpt: "First excerpt",
             seo: { title: "First", description: "First excerpt",
               keywords: [],
-              shareImage: null
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("First body"),
           },
@@ -503,7 +503,7 @@ describe("reference Site Definition", () => {
             excerpt: "Second excerpt",
             seo: { title: "Second", description: "Second excerpt",
               keywords: [],
-              shareImage: null
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("Second body"),
           },

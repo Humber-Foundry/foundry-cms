@@ -179,7 +179,9 @@ function campaignDocument(campaign: Campaign, revision: CampaignRevision) {
     provenance: { kind: revision.provenance.kind },
     subject: revision.subject,
     previewText: revision.previewText,
-    shareImage: revision.shareImage,
+    // A revision stored before share images existed has no such
+    // field. The result schema requires one, so read it as absent.
+    shareImage: revision.shareImage ?? null,
     callToAction: revision.callToAction,
     emailContent: revision.emailContent,
     schemaVersion: revision.schemaVersion,

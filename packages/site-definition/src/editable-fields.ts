@@ -371,6 +371,21 @@ function editableFieldBindings(
       },
     }),
     fieldBinding({
+      path: `${definition.site.id}.canonicalOrigin`,
+      label: "Site address",
+      group: "SEO",
+      value: definition.site.canonicalOrigin,
+      multiline: false,
+      optional: true,
+      hint:
+        "The address this site serves from, such as https://example.com. " +
+        "Leave blank and no canonical or share links are published.",
+      write: (draft, value) => {
+        // A trailing slash here would produce "https://example.com//blog".
+        draft.site.canonicalOrigin = value.trim().replace(/\/+$/u, "");
+      },
+    }),
+    fieldBinding({
       path: `${definition.site.id}.footer`,
       label: "Footer",
       group: "Footer",

@@ -71,12 +71,29 @@ live in one pure module, `packages/site-definition/src/seo.ts`:
 Site Definition and is combined with the route path — `/` for the home page,
 `/blog/<slug>` for a post. The owner's control over the canonical URL is the
 slug, which they already edit. When `canonicalOrigin` is empty the renderer
-emits no canonical URL and no absolute share URL at all.
+emits no canonical URL and no absolute share URL at all. The origin itself is an
+editable field, "Site address", in the SEO group, so an owner sets it in the
+dashboard rather than by hand-editing published content.
 
 **A share image is a URL and an alt text, not an asset reference.** For a page
 or post the URL may be a path on the site, such as `/api/media/asset_hero`,
 which the renderer makes absolute using the canonical origin. For a campaign it
 must be an absolute `https://` address.
+
+## What this decision does not cover
+
+**A slug for site pages.** The issue asks for one. A Site Definition has exactly
+one page, `home`, served at the site root, and no page collection exists to give
+a slug to. A slug here would be a name for a route that cannot vary. Multi-page
+sites are a separate piece of work, and a page slug belongs with them. Blog
+posts already have a slug, and it is now the owner's control over the canonical
+URL.
+
+**A share image fallback for a standalone campaign.** A campaign is not part of
+the Site Definition and has no page to inherit from, so a campaign written from
+scratch shows no picture unless the owner gives one. A campaign derived from a
+post does inherit that post's share image, made absolute with the site's
+canonical origin.
 
 ## Consequences
 

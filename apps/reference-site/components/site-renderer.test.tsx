@@ -29,7 +29,7 @@ describe("SiteRenderer controlled design projection", () => {
         title: "Renderer post | Foundry",
         description: "A public post.",
         keywords: [],
-        shareImage: null
+        shareImage: null,
       },
       body: createRichTextDocumentFromPlainText("Rendered body."),
     };
@@ -81,7 +81,7 @@ describe("SiteRenderer controlled design projection", () => {
         title: "Preview-only post | Foundry",
         description: "Visible only in the exact draft preview.",
         keywords: [],
-        shareImage: null
+        shareImage: null,
       },
       body: createRichTextDocumentFromPlainText("Unpublished draft body."),
     };
@@ -169,7 +169,7 @@ describe("site renderer media placement", () => {
         title: "Same preview | Foundry",
         description: "One canonical revision renderer.",
         keywords: [],
-        shareImage: null
+        shareImage: null,
       },
       body: createRichTextDocumentFromPlainText("Canonical preview."),
     };

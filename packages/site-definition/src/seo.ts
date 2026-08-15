@@ -18,7 +18,7 @@ export type ResolvedSeo = Readonly<{
   description: string;
   canonicalUrl: string | null;
   keywords: ReadonlyArray<string>;
-  shareImage: Readonly<{ url: string; alt: string }> | null;
+  shareImage: SeoShareImage | null;
 }>;
 
 function firstFilled(...candidates: ReadonlyArray<string>): string {

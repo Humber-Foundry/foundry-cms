@@ -276,7 +276,7 @@ function fixture(
           title: `Post ${index + 1}`,
           description: `Published post ${index + 1}.`,
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText(
           `Published post ${index + 1}.`,

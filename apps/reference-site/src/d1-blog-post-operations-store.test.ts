@@ -139,7 +139,7 @@ describe("D1 blog post operations store", () => {
           title: "Scheduled post | Foundry",
           description: "A durable scheduled post.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText("Scheduled body."),
       },
@@ -3678,7 +3678,7 @@ describe("D1 blog post operations store", () => {
           title: "Request identity sibling | Foundry",
           description: "A sibling post for request identity checks.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText(
           "Request identity sibling body.",
@@ -4128,7 +4128,7 @@ describe("D1 blog post operations store", () => {
           title: "Sibling live title | Foundry",
           description: "A sibling that must remain live.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText("Sibling live body."),
       },
@@ -4755,7 +4755,7 @@ describe("D1 blog post operations store", () => {
           title: "Second live archive | Foundry",
           description: "A second live post competing for withdrawal.",
           keywords: [],
-          shareImage: null
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText(
           "Second live archive body.",

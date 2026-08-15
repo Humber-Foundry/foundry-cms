@@ -114,6 +114,7 @@ function createFixture(
     findPostRevision: async () => null,
     resolveAudience: async () => ({ eligibleSubscriberCount: 3 }),
     channelConfiguration,
+    siteCanonicalOrigin: "https://example.test",
     rendererVersion: "1111111111111111111111111111111111111111",
     schemaVersion: "1.4.0",
     clock: () => new Date("2026-07-29T19:00:00.000Z"),

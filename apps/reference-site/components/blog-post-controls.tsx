@@ -239,12 +239,12 @@ function PostComposer({
         </div>
       </details>
       <details className="composer-settings">
-        <summary>Search and sharing — how this post looks when shared</summary>
+        <summary>SEO and sharing — how this post looks in search and when shared</summary>
         <div>
           <label>
-            <span>Search title</span>
+            <span>SEO title</span>
             <small className="composer-hint">
-              Left blank, the post title and the site name are used.
+              Leave blank to use the post title and the site name.
             </small>
             <input
               name="seoTitle"
@@ -254,9 +254,9 @@ function PostComposer({
             />
           </label>
           <label>
-            <span>Search description</span>
+            <span>SEO description</span>
             <small className="composer-hint">
-              Left blank, the summary above is used.
+              Leave blank to use the summary above.
             </small>
             <textarea
               name="seoDescription"
@@ -279,8 +279,8 @@ function PostComposer({
           <label>
             <span>Share image address</span>
             <small className="composer-hint">
-              The picture shown when this link is shared. Left blank, the
-              site&rsquo;s main image is used.
+              The picture shown when this link is shared. Leave blank to use
+              the site&rsquo;s main image.
             </small>
             <input
               name="seoShareImageUrl"

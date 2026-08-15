@@ -78,7 +78,7 @@ const sourcePost: BlogPost = {
     title: "Independent campaigns | Foundry",
     description: "A copied introduction.",
     keywords: [],
-    shareImage: null
+    shareImage: null,
   },
   body: createRichTextDocumentFromPlainText("The copied post body."),
 };
@@ -132,6 +132,7 @@ function createFixture() {
         : null,
     resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
     channelConfiguration,
+    siteCanonicalOrigin: "https://example.test",
     rendererVersion: "1111111111111111111111111111111111111111",
     schemaVersion: "1.4.0",
     clock: () => new Date("2026-07-29T07:00:00.000Z"),
@@ -440,6 +441,7 @@ describe("campaign authoring and rendering", () => {
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 0 }),
       channelConfiguration,
+      siteCanonicalOrigin: "https://example.test",
       rendererVersion: "1111111111111111111111111111111111111111",
       schemaVersion: "1.4.0",
     });
@@ -525,6 +527,7 @@ describe("campaign authoring and rendering", () => {
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 2 }),
       channelConfiguration,
+      siteCanonicalOrigin: "https://example.test",
       rendererVersion: "2222222222222222222222222222222222222222",
       schemaVersion: "1.4.0",
     });

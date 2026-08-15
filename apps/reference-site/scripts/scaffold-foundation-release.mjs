@@ -159,6 +159,10 @@ async function main() {
       id: "site_client_installation",
       name: "Foundry site",
       description: "Client-owned content managed with Foundry CMS.",
+      // A scaffolded installation has no address of its own yet. It must
+      // never inherit the packaged site's, or its pages would name the wrong
+      // host in every canonical and share URL.
+      canonicalOrigin: "",
       navigation: [],
       footer: "Powered by Foundry CMS.",
     },
@@ -168,7 +172,7 @@ async function main() {
         title: "Foundry site",
         description: "Client-owned content managed with Foundry CMS.",
         keywords: [],
-        shareImage: null
+        shareImage: null,
       },
       sections: [],
     },

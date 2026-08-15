@@ -28,6 +28,7 @@ import {
   listEditableSiteFields,
   siteDefinitionSchema,
   type RichTextDocument,
+  type SeoShareImage,
 } from "@humber-foundry/site-definition";
 
 import { hasExactKeys, isRecord } from "./mcp-http-support";
@@ -816,27 +817,30 @@ const analyticsResult = {
 
 const localDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
 
+/**
+ * Read an optional share image. Following this file's convention, `null` means
+ * the value was unusable and the tool call is rejected. An absent or explicitly
+ * null share image is valid and reads as `{ shareImage: null }`.
+ */
 function parseCampaignShareImage(
   value: unknown,
-): Readonly<{ url: string; alt: string }> | null | undefined {
-  if (value === undefined || value === null) return null;
+): Readonly<{ shareImage: SeoShareImage | null }> | null {
+  if (value === undefined || value === null) return { shareImage: null };
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["url", "alt"]) ||
     typeof value.url !== "string" ||
     typeof value.alt !== "string"
   ) {
-    // `undefined` means the value was present but unusable, which the caller
-    // turns into a rejected tool call. `null` means "no share image".
-    return undefined;
+    return null;
   }
-  return { url: value.url, alt: value.alt };
+  return { shareImage: { url: value.url, alt: value.alt } };
 }
 
 function parseCampaignEditable(input: unknown): Readonly<{
   subject: string;
   previewText: string;
-  shareImage: Readonly<{ url: string; alt: string }> | null;
+  shareImage: SeoShareImage | null;
   callToAction: { label: string; href: string };
   emailContent: RichTextDocument;
 }> | null {
@@ -845,7 +849,7 @@ function parseCampaignEditable(input: unknown): Readonly<{
   }
   const shareImage = parseCampaignShareImage(input.shareImage);
   if (
-    shareImage === undefined ||
+    shareImage === null ||
     typeof input.subject !== "string" ||
     typeof input.previewText !== "string" ||
     !isRecord(input.callToAction) ||
@@ -859,7 +863,7 @@ function parseCampaignEditable(input: unknown): Readonly<{
   return {
     subject: input.subject,
     previewText: input.previewText,
-    shareImage,
+    shareImage: shareImage.shareImage,
     callToAction: {
       label: input.callToAction.label,
       href: input.callToAction.href,

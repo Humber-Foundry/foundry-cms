@@ -441,7 +441,10 @@ export const siteDefinitionSchema = {
       type: "string",
       minLength: 1,
       maxLength: 2_000,
-      pattern: "^(?:/[^\\s]*|https://[^\\s/?#]+(?:[^\\s]*)?)$",
+      // A leading "//" is a protocol-relative address naming another host.
+      // Only a single-slash path on this site, or an explicit https
+      // address, is accepted.
+      pattern: "^(?:/(?!/)[^\\s]*|https://[^\\s/?#]+[^\\s]*)$",
     },
     seoMetadata: {
       $comment:

@@ -1,4 +1,7 @@
-import type { SiteMediaOccurrence } from "@humber-foundry/site-definition";
+import {
+  publishedMediaPath,
+  type SiteMediaOccurrence,
+} from "@humber-foundry/site-definition";
 import type { ReactNode } from "react";
 
 import { mediaCropStyle } from "./media-crop";
@@ -29,7 +32,7 @@ export function MediaOccurrence({
         <img
           src={
             delivery === "published"
-              ? `/api/media/${encodeURIComponent(occurrence.asset.assetId)}`
+              ? publishedMediaPath(occurrence.asset.assetId)
               : `/api/foundry-cms/media?assetId=${encodeURIComponent(
                   occurrence.asset.assetId,
                 )}&accessToken=${encodeURIComponent(accessToken ?? "")}`

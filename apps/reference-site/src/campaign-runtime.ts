@@ -363,6 +363,7 @@ export async function loadCampaignRequestContext(
     findPostRevision,
     resolveAudience,
     channelConfiguration,
+    siteCanonicalOrigin: installedSite.definition.site.canonicalOrigin,
     rendererVersion: rendererCommit,
     schemaVersion: "1.4.0",
   });
