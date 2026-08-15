@@ -50,14 +50,27 @@ export function useFormOperation(
   const [pending, setPending] = useState(false);
 
   async function run(command: unknown) {
-    setPending(true);
-    setMessage("");
-    const outcome = await applyFormOperation(command, csrfToken);
-    setMessage(messages[outcome]);
-    setPending(false);
-    if (outcome === "applied") router.refresh();
-    return outcome;
+    return report(async () => {
+      const outcome = await applyFormOperation(command, csrfToken);
+      if (outcome === "applied") router.refresh();
+      return messages[outcome];
+    });
   }
 
-  return { message, pending, run, setMessage, setPending };
+  /**
+   * For work that is not a command with an outcome — downloading a copy, for
+   * one — where the caller decides what to say. It owns the busy state and
+   * the message so no caller has to hold React state of its own.
+   */
+  async function report(work: () => Promise<string>) {
+    setPending(true);
+    setMessage("");
+    try {
+      setMessage(await work());
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return { message, pending, report, run };
 }

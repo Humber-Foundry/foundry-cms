@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 
+import type { PublicFormDeliveryHealth } from "@humber-foundry/application";
+
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
 import { MemberAccessControls } from "@/components/member-access-controls";
 import { OwnerNotificationControls } from "@/components/owner-notification-controls";
@@ -20,7 +22,7 @@ export const dynamic = "force-dynamic";
  * left.
  */
 function storageSentence(
-  capacity: Readonly<{ usedPercent: number; state: string }>,
+  capacity: PublicFormDeliveryHealth["capacity"],
 ) {
   const used = `Messages are using ${capacity.usedPercent.toFixed(1)}% of the room they have.`;
   if (capacity.state === "critical") {

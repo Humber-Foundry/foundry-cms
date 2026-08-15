@@ -99,10 +99,24 @@ installation-owned `foundry/public-forms.ts` alongside the field roles, so the
 product's own acceptance site can exercise the reply path.
 
 The field is optional and additive, so its `schemaVersion` stays `1.0.0`. A
-submission carries the schema version it was built against, and an
-installation's published form markup keeps posting `1.0.0`; bumping the
-version would reject every one of those submissions to add a field nobody is
-required to fill in.
+submission carries the schema version it was built against, and
+`createPublicFormApplication` rejects a submission whose version differs from
+the definition, so bumping the version would reject every live form still
+posting `1.0.0` in order to add a field nobody is required to fill in.
+
+This repository publishes no form markup: nothing here renders a `<form>` that
+posts to `/api/forms/<formId>/submissions`. The reply path is therefore proven
+by tests and by an installation that renders its own contact form, not by a
+page in this repository. Anyone adding public form markup here should include
+the optional email input so the reference site exercises it too.
+
+### One reporting time zone for the dashboard
+
+A message's arrival time is shown in the same zone analytics already reports
+in. `src/dashboard-time.ts` owns that constant and analytics imports it, so
+one instant is never labelled with two different days on two destinations.
+The analytics module keeps exporting `defaultReportingTimeZone`, so nothing
+that reads it had to change.
 
 ### Owner-notification detail moves to Settings
 
@@ -133,3 +147,11 @@ roles at the same time.
 The reply rule rejects some valid but rare addresses, such as an
 internationalized one. That address is still readable in full on the message's
 own page.
+
+Opening a message held as spam marks it read, so accepting it later puts it in
+the inbox already read. That is truthful — a human did open it and decide —
+but it means an accepted message never appears in the unread count.
+
+The stored failure code is still shown beside the sentence that explains an
+alert. The sentence leads and the code follows in small type, because the code
+is a stable, non-secret value that support needs to name the exact failure.

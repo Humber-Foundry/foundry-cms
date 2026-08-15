@@ -1,5 +1,7 @@
 "use client";
 
+import type { PublicFormReceiptId } from "@humber-foundry/application";
+
 import { useFormOperation } from "./use-form-operation";
 
 const outcomeMessages = {
@@ -72,10 +74,10 @@ export function FormSubmissionControls({
   classification,
 }: {
   csrfToken: string;
-  receiptId: string;
+  receiptId: PublicFormReceiptId;
   classification: "accepted" | "suspected_spam";
 }) {
-  const { message, pending, run, setMessage, setPending } = useFormOperation(
+  const { message, pending, report, run } = useFormOperation(
     csrfToken,
     outcomeMessages,
   );
@@ -85,8 +87,6 @@ export function FormSubmissionControls({
    * shared command path: it needs the response body rather than its status.
    */
   async function download() {
-    setPending(true);
-    setMessage("");
     try {
       const response = await fetch("/api/foundry-cms/forms", {
         method: "POST",
@@ -97,8 +97,7 @@ export function FormSubmissionControls({
         body: JSON.stringify({ action: "export_submission", receiptId }),
       });
       if (!response.ok) {
-        setMessage("The copy could not be made.");
-        return;
+        return "The copy could not be made.";
       }
       const objectUrl = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
@@ -106,11 +105,9 @@ export function FormSubmissionControls({
       link.download = `message-${receiptId}.json`;
       link.click();
       URL.revokeObjectURL(objectUrl);
-      setMessage("The copy was downloaded. Taking it is recorded.");
+      return "The copy was downloaded. Taking it is recorded.";
     } catch {
-      setMessage("The result is unknown. Try again.");
-    } finally {
-      setPending(false);
+      return "The result is unknown. Try again.";
     }
   }
 
@@ -118,7 +115,7 @@ export function FormSubmissionControls({
     <FormSubmissionActions
       classification={classification}
       message={message}
-      onDownload={() => void download()}
+      onDownload={() => void report(download)}
       onErase={() => {
         if (
           window.confirm(

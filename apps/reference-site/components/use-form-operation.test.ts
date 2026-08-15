@@ -6,7 +6,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("form operation request", () => {
+describe("form operation", () => {
   it("sends the command with the mutation token and a fresh idempotency key", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);

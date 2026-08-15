@@ -57,8 +57,13 @@ type InboxRow = {
  * classification that says it was accepted, and the read row that may or may
  * not exist yet. Keeping the walk in one place stops the page query and the
  * unread count from drifting apart.
+ *
+ * A query built here binds the site id as `?1`. Anything a caller adds in
+ * `extraConditions` therefore starts at `?2`.
  */
-const acceptedInboxJoin = `FROM public_form_submissions AS submission
+function acceptedInboxQuery(columns: string, extraConditions = "") {
+  return `SELECT ${columns}
+     FROM public_form_submissions AS submission
      JOIN public_form_classifications AS classification
        ON classification.site_id = submission.site_id
       AND classification.form_id = submission.form_id
@@ -68,11 +73,14 @@ const acceptedInboxJoin = `FROM public_form_submissions AS submission
       AND read_state.form_id = submission.form_id
       AND read_state.submission_id = submission.submission_id
      WHERE submission.site_id = ?1
-       AND classification.classification = 'accepted'`;
+       AND classification.classification = 'accepted'
+       ${extraConditions}`;
+}
 
-const unreadInboxCount = `SELECT COUNT(*) AS unread
-     ${acceptedInboxJoin}
-       AND read_state.first_read_at IS NULL`;
+const unreadInboxCount = acceptedInboxQuery(
+  "COUNT(*) AS unread",
+  "AND read_state.first_read_at IS NULL",
+);
 
 export type D1PublicFormNotificationStoreOptions = Readonly<{
   capacityLimitBytes?: number;
@@ -407,15 +415,14 @@ export function createD1PublicFormNotificationStore(
       const [rows, unread] = await Promise.all([
         database
           .prepare(
-            `SELECT
-               submission.form_id,
+            acceptedInboxQuery(
+              `submission.form_id,
                submission.receipt_id,
                submission.accepted_at,
                submission.fields_json,
                submission.payload_deleted_at,
-               read_state.first_read_at
-             ${acceptedInboxJoin}
-               AND (
+               read_state.first_read_at`,
+              `AND (
                  ?2 IS NULL
                  OR submission.accepted_at < ?2
                  OR (
@@ -423,8 +430,10 @@ export function createD1PublicFormNotificationStore(
                    AND submission.submission_id < ?3
                  )
                )
-             ORDER BY submission.accepted_at DESC, submission.submission_id DESC
-             LIMIT ?4`,
+               ORDER BY submission.accepted_at DESC,
+                        submission.submission_id DESC
+               LIMIT ?4`,
+            ),
           )
           .bind(
             siteId,
