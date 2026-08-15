@@ -9,10 +9,12 @@ The owner dashboard shows the media library as a grid of tiles. Before this
 decision the media route served the stored original for every tile, so opening
 the Photos page downloaded the whole library at full resolution. A library of
 twenty 3 MB photos cost 60 MB to show forty thumbnails. The Photos page and the
-photo picker both need the grid, so the cost appears on every photo surface.
+photo picker both need the grid, so the cost appears on every page that
+shows photos.
 
 A thumbnail is a resized copy. Foundry runs on Cloudflare Workers, which have no
-canvas and no image codec. Making the copy on the server therefore needs one of:
+canvas and no image codec. Making the copy on the server therefore needs one
+of:
 
 1. **A WebAssembly image codec in the Worker.** It decodes and re-encodes JPEG,
    PNG and WebP. It adds a large dependency to a repository that has none for
@@ -102,9 +104,10 @@ a rendered artifact is always produced from the source.
   member already receives every asset's metadata in the access grant. What it
   unlocks is a copy no larger than `mediaThumbnailMaxEdge`. The
   full-resolution source keeps the strict per-asset capability.
-- An asset stored before this decision has no copy. The route then serves the
-  source and says so in `x-foundry-media-variant: source`, rather than
-  returning a broken image.
+- An asset with no stored copy answers `404`. The thumbnail path never falls
+  back to the source, because the library capability names no asset and must
+  not be a way to read full-resolution originals. The gallery shows that
+  tile's frame empty, with its file name, size and badge intact.
 - The public route `/api/media/[assetId]` is unchanged. It serves photos placed
   on the published site at full resolution, which is what a visitor needs.
 
@@ -119,9 +122,12 @@ a rendered artifact is always produced from the source.
   acceptable because a thumbnail is presentation data: the source is immutable,
   every rendered artifact is produced from the source, and no fingerprint,
   approval or publication covers a thumbnail.
-- Assets uploaded before this decision keep costing a full download until they
-  are uploaded again. Backfilling them needs a separate decision, because the
-  server still cannot resize.
+- Assets uploaded before this decision have no copy, so their tiles show an
+  empty frame. Uploading the photo again creates a new asset, which does get a
+  copy. Backfilling the old ones in place needs a separate decision, because
+  the server still cannot resize.
+- A browser that cannot draw the copy uploads the photo alone, and that photo
+  has no copy for as long as it exists.
 - A future server-side resizer can replace how the copy is made without
   changing where it is stored or how it is served, because the route, the
   object key and the `variantOf` binding do not name the browser.

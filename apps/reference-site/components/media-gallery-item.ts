@@ -59,6 +59,11 @@ export function mediaThumbnailUrl(
  * and type, and the address of a rendered thumbnail the caller can show in
  * its own controls.
  *
+ * `thumbnailUrl` carries a capability that expires with the picker's own
+ * short-lived grant. It is for showing the choice back to the owner now, not
+ * for storing. A caller that must render the photo later keeps `assetId` and
+ * asks for a fresh capability.
+ *
  * There is no full-resolution address here. A capability for the source
  * names the exact assets it covers and is issued for the photos already
  * placed on the page, so an address for a photo the caller has not placed

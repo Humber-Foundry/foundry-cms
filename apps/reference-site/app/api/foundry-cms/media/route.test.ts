@@ -984,7 +984,7 @@ describe("media endpoint", () => {
       }),
     );
 
-    await expect(response.json()).resolves.toMatchObject({
+    await expect(response.json()).resolves.toEqual({
       libraryToken: "signed-media-library",
       libraryTokenExpiresAt: 1_785_124_800,
       assets: [{ assetId: "asset_hero" }],
@@ -1230,7 +1230,10 @@ describe("media thumbnails", () => {
     );
   });
 
-  it("falls back to the source for an asset stored before thumbnails existed", async () => {
+  it("never serves the source in a thumbnail's place", async () => {
+    // The library capability names no asset. If a missing thumbnail fell back
+    // to the source, that capability would become a way to read every
+    // full-resolution original on the site.
     mocks.getThumbnailSource.mockResolvedValue(null);
     mocks.getSource.mockResolvedValue({
       body: new Uint8Array([1, 2, 3]),
@@ -1243,11 +1246,11 @@ describe("media thumbnails", () => {
       ),
     );
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-foundry-media-variant")).toBe("source");
-    expect(new Uint8Array(await response.arrayBuffer())).toEqual(
-      new Uint8Array([1, 2, 3]),
-    );
+    expect(response.status).toBe(404);
+    expect(mocks.getSource).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: "media_not_found",
+    });
   });
 
   it("refuses a thumbnail without the library capability", async () => {
@@ -1287,14 +1290,27 @@ describe("media thumbnails", () => {
   it("never unlocks a full-resolution source with the library capability", async () => {
     mocks.verifyMediaAccess.mockRejectedValue(new HumanRequestIntegrityError());
     mocks.verifyMediaLibrary.mockResolvedValue(undefined);
+    mocks.getThumbnailSource.mockResolvedValue(null);
+    mocks.getSource.mockResolvedValue({
+      body: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+    });
 
-    const response = await GET(
+    const withoutVariant = await GET(
       new Request(
         "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&libraryToken=signed-media-library",
       ),
     );
+    // The same capability, on the path it is actually for, still cannot
+    // reach the source when no thumbnail exists.
+    const withVariant = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&libraryToken=signed-media-library&variant=thumbnail",
+      ),
+    );
 
-    expect(response.status).toBe(403);
+    expect(withoutVariant.status).toBe(403);
+    expect(withVariant.status).toBe(404);
     expect(mocks.getSource).not.toHaveBeenCalled();
   });
 

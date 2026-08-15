@@ -98,29 +98,34 @@ export async function GET(request: Request) {
     }
     if (requestedAsset !== null) {
       // A thumbnail is unlocked by the library capability, which names no
-      // asset, because the gallery shows every photo. The full-resolution
-      // source keeps the capability that names the exact assets it covers.
+      // asset, because the gallery shows every photo. That capability can
+      // reach nothing else: this branch never serves the source, not even
+      // when no thumbnail was stored. The full-resolution source keeps the
+      // capability that names the exact assets it covers.
       if (requestedVariant === "thumbnail") {
         await verifyHumanMediaLibraryToken(
           searchParams.get("libraryToken"),
           authenticated.identity,
         );
-      } else {
-        await verifyHumanMediaAccessToken(
-          searchParams.get("accessToken"),
-          authenticated.identity,
-          requestedAsset,
+        const thumbnail = await application.queries.getThumbnailSource(
+          createMediaAssetId(requestedAsset),
         );
+        if (thumbnail === null) {
+          // An asset stored before thumbnails existed has none. The gallery
+          // shows the tile without a preview rather than paying for the
+          // original.
+          return Response.json({ error: "media_not_found" }, { status: 404 });
+        }
+        return mediaResponse(thumbnail, "thumbnail");
       }
-      const assetId = createMediaAssetId(requestedAsset);
-      if (requestedVariant === "thumbnail") {
-        const thumbnail =
-          await application.queries.getThumbnailSource(assetId);
-        // An asset stored before thumbnails existed has none. Serving the
-        // source keeps the gallery working while it is still the wrong size.
-        if (thumbnail !== null) return mediaResponse(thumbnail, "thumbnail");
-      }
-      const source = await application.queries.getSource(assetId);
+      await verifyHumanMediaAccessToken(
+        searchParams.get("accessToken"),
+        authenticated.identity,
+        requestedAsset,
+      );
+      const source = await application.queries.getSource(
+        createMediaAssetId(requestedAsset),
+      );
       if (source === null) {
         return Response.json({ error: "media_not_found" }, { status: 404 });
       }

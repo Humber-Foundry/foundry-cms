@@ -377,8 +377,10 @@ const mediaLibraryAudienceSuffix = ":media-library";
  * thumbnail, which is a copy no larger than `mediaThumbnailMaxEdge`; the
  * request that presents it is already authenticated and authorized as an
  * active member of this site; and the media application it reads through is
- * scoped to that one site. The full-resolution source keeps the strict
- * per-asset capability.
+ * scoped to that one site. An asset with no stored thumbnail answers 404 —
+ * the thumbnail path never falls back to the source, or this capability
+ * would become a way to read full-resolution originals. The source keeps the
+ * strict per-asset capability.
  */
 export async function createHumanMediaLibraryToken(
   identity: ExternalHumanIdentity,

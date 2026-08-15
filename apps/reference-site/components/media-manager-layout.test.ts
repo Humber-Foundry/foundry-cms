@@ -58,6 +58,37 @@ describe("photo gallery layout", () => {
     );
   });
 
+  it("reserves a tile box that matches the frame's shape in the stylesheet", async () => {
+    const [gallery, stylesheet] = await Promise.all([
+      readFile(new URL("./media-gallery.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/dash/dashboard.css", import.meta.url), "utf8"),
+    ]);
+
+    const width = Number(/galleryTileWidth = (\d+)/u.exec(gallery)?.[1]);
+    const height = Number(/galleryTileHeight = (\d+)/u.exec(gallery)?.[1]);
+    const ratio = /\.media-gallery-frame\s*\{[^}]*aspect-ratio:\s*(\d+)\s*\/\s*(\d+);/su.exec(
+      stylesheet,
+    );
+
+    expect(Number.isInteger(width)).toBe(true);
+    expect(Number.isInteger(height)).toBe(true);
+    expect(ratio).not.toBeNull();
+    // A mismatch would make every row shift as its photos arrive.
+    expect(width / height).toBeCloseTo(Number(ratio![1]) / Number(ratio![2]), 5);
+  });
+
+  it("shows an empty frame when a photo has no stored thumbnail", async () => {
+    const gallery = await readFile(
+      new URL("./media-gallery.tsx", import.meta.url),
+      "utf8",
+    );
+
+    // The media route answers 404 rather than serving the original, so the
+    // tile must not be left showing a broken image.
+    expect(gallery).toContain("onError");
+    expect(gallery).toContain("withoutThumbnail");
+  });
+
   it("keeps the picker dialog inside the window on a phone", async () => {
     const stylesheet = await readFile(
       new URL("../app/dash/dashboard.css", import.meta.url),

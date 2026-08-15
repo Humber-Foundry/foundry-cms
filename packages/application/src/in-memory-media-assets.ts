@@ -24,6 +24,9 @@ function immutable<Value>(value: Value): Value {
   return Object.freeze(structuredClone(value));
 }
 
+const sourceObjectKeyPattern =
+  /^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/source$/u;
+
 const thumbnailObjectKeyPattern =
   /^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/thumbnail$/u;
 
@@ -41,10 +44,20 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
   >();
   return {
     async put(objectKey, source, metadata) {
+      // Same rules as the R2 store, so a test cannot pass here and fail in a
+      // deployed installation.
+      if (!sourceObjectKeyPattern.test(objectKey)) {
+        throw new TypeError("media_object_key_invalid");
+      }
       const existing = objects.get(objectKey);
       if (existing !== undefined) {
-        if (existing.sourceHash === metadata.sourceHash) return;
-        throw new MediaValidationError("assetId");
+        if (
+          existing.sourceHash === metadata.sourceHash &&
+          existing.contentType === metadata.contentType
+        ) {
+          return;
+        }
+        throw new Error("media_source_identity_conflict");
       }
       objects.set(objectKey, {
         source: source.slice(),
@@ -59,7 +72,7 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
         (object.sourceHash !== expected.sourceHash ||
           object.contentType !== expected.contentType)
       ) {
-        throw new MediaSiteAccessError();
+        throw new Error("media_source_identity_conflict");
       }
       return object === undefined
         ? null

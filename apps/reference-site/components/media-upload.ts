@@ -18,8 +18,11 @@ export function isAcceptedPhoto(file: File): boolean {
 
 /**
  * Builds one upload request for `file`, including the small copy the gallery
- * shows. A browser that cannot make the small copy still uploads the photo;
- * the media route then serves the original until a later upload supplies one.
+ * shows. A browser that cannot make the small copy still uploads the photo.
+ * That photo then has no small copy for as long as it exists: the copy is
+ * stored only when the source object is first created, and uploading the
+ * same photo again returns the asset that is already there. Its tile falls
+ * back to the full-resolution original.
  *
  * The identifiers are minted once and kept with the request, so a retry
  * sends the same upload rather than a second photo.

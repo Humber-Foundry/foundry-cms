@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import type { MediaAsset } from "@humber-foundry/application";
 
 import {
@@ -46,6 +48,12 @@ export function MediaGallery({
   deletingMessage?: string;
   onSelect(assetId: string): void;
 }) {
+  // Photos stored before thumbnails existed have none, and the media route
+  // will not serve the original in a thumbnail's place. Those tiles show the
+  // empty frame instead of a broken image.
+  const [withoutThumbnail, setWithoutThumbnail] = useState<
+    ReadonlySet<string>
+  >(new Set());
   return (
     <ul className="media-gallery">
       {deletingMessage === undefined ? null : (
@@ -67,7 +75,8 @@ export function MediaGallery({
               onClick={() => onSelect(asset.assetId)}
             >
               <span className="media-gallery-frame">
-                {libraryToken === undefined ? (
+                {libraryToken === undefined ||
+                withoutThumbnail.has(asset.assetId) ? (
                   <span className="media-gallery-placeholder" aria-hidden="true" />
                 ) : (
                   /* The thumbnail variant is a small copy, so a full grid
@@ -81,6 +90,11 @@ export function MediaGallery({
                     width={galleryTileWidth}
                     height={galleryTileHeight}
                     src={mediaThumbnailUrl(asset.assetId, libraryToken)}
+                    onError={() =>
+                      setWithoutThumbnail(
+                        (current) => new Set([...current, asset.assetId]),
+                      )
+                    }
                   />
                 )}
               </span>
