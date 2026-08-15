@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   listAssets: vi.fn(),
   listOccurrences: vi.fn(),
   getSource: vi.fn(),
+  getThumbnailSource: vi.fn(),
   getAsset: vi.fn(),
   getOccurrence: vi.fn(),
   getReplacementReceipt: vi.fn(),
@@ -118,6 +119,7 @@ describe("media endpoint", () => {
         listAssets: mocks.listAssets,
         listOccurrences: mocks.listOccurrences,
         getSource: mocks.getSource,
+        getThumbnailSource: mocks.getThumbnailSource,
         getAsset: mocks.getAsset,
         getOccurrence: mocks.getOccurrence,
         getReplacementReceipt: mocks.getReplacementReceipt,
@@ -1065,5 +1067,217 @@ describe("media endpoint", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.grantAccess).not.toHaveBeenCalled();
+  });
+});
+
+const onePixelPng = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  ),
+);
+
+describe("media thumbnails", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    const identity = {
+      binding: { issuer: "issuer", subject: "subject" },
+      email: "editor@example.com",
+      nonce: "nonce",
+    };
+    mocks.loadIdentity.mockResolvedValue({ identity });
+    mocks.authorize.mockResolvedValue({
+      state: "authorized",
+      identity,
+      membership: { id: "membership-editor", role: "editor" },
+    });
+    mocks.verifyMutation.mockResolvedValue(undefined);
+    mocks.verifyMediaAccess.mockResolvedValue(undefined);
+    mocks.loadApplication.mockResolvedValue({
+      commands: {
+        upload: mocks.upload,
+        replaceOccurrence: mocks.replace,
+        cropOccurrence: mocks.crop,
+        delete: mocks.delete,
+        grantAccess: mocks.grantAccess,
+      },
+      queries: {
+        listAssets: mocks.listAssets,
+        listOccurrences: mocks.listOccurrences,
+        getSource: mocks.getSource,
+        getThumbnailSource: mocks.getThumbnailSource,
+        getAsset: mocks.getAsset,
+        getOccurrence: mocks.getOccurrence,
+        getReplacementReceipt: mocks.getReplacementReceipt,
+      },
+    });
+  });
+
+  function uploadRequest(form: FormData, contentLength: number) {
+    return new Request("https://foundry.example/api/foundry-cms/media", {
+      method: "POST",
+      headers: {
+        "content-length": String(contentLength),
+        "idempotency-key": "upload-with-thumbnail-0001",
+      },
+      body: form,
+    });
+  }
+
+  it("passes an uploaded thumbnail to the library with bytes-derived metadata", async () => {
+    const form = new FormData();
+    form.set("assetId", "asset_pixel");
+    form.set("source", new File([onePixelPng], "pixel.png"));
+    form.set("thumbnail", new File([onePixelPng], "thumbnail"));
+    mocks.upload.mockResolvedValue({ assetId: "asset_pixel" });
+
+    const response = await POST(
+      uploadRequest(form, onePixelPng.byteLength * 2 + 1024),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset_pixel",
+        thumbnail: {
+          contentType: "image/png",
+          byteLength: onePixelPng.byteLength,
+          width: 1,
+          height: 1,
+          source: expect.any(Uint8Array),
+        },
+      }),
+    );
+  });
+
+  it("uploads without a thumbnail when the browser did not send one", async () => {
+    const form = new FormData();
+    form.set("assetId", "asset_pixel");
+    form.set("source", new File([onePixelPng], "pixel.png"));
+    mocks.upload.mockResolvedValue({ assetId: "asset_pixel" });
+
+    const response = await POST(
+      uploadRequest(form, onePixelPng.byteLength + 1024),
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.upload).toHaveBeenCalledWith(
+      expect.not.objectContaining({ thumbnail: expect.anything() }),
+    );
+  });
+
+  it("rejects an upload whose thumbnail part is not an image file", async () => {
+    const form = new FormData();
+    form.set("assetId", "asset_pixel");
+    form.set("source", new File([onePixelPng], "pixel.png"));
+    form.set("thumbnail", new File([new Uint8Array([1, 2, 3])], "thumbnail"));
+
+    const response = await POST(
+      uploadRequest(form, onePixelPng.byteLength + 1024),
+    );
+
+    expect(response.status).toBe(422);
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
+  it("rejects an upload whose thumbnail part is larger than the thumbnail limit", async () => {
+    const form = new FormData();
+    form.set("assetId", "asset_pixel");
+    form.set("source", new File([onePixelPng], "pixel.png"));
+    form.set(
+      "thumbnail",
+      new File([new Uint8Array(512 * 1024 + 1)], "thumbnail"),
+    );
+
+    const response = await POST(
+      uploadRequest(form, onePixelPng.byteLength + 512 * 1024 + 2048),
+    );
+
+    expect(response.status).toBe(422);
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
+  it("serves the stored thumbnail when the gallery asks for that variant", async () => {
+    mocks.getThumbnailSource.mockResolvedValue({
+      body: new Uint8Array([7, 7, 7]),
+      contentType: "image/webp",
+    });
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access&variant=thumbnail",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/webp");
+    expect(response.headers.get("x-foundry-media-variant")).toBe("thumbnail");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mocks.getSource).not.toHaveBeenCalled();
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+      new Uint8Array([7, 7, 7]),
+    );
+  });
+
+  it("falls back to the source for an asset stored before thumbnails existed", async () => {
+    mocks.getThumbnailSource.mockResolvedValue(null);
+    mocks.getSource.mockResolvedValue({
+      body: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+    });
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access&variant=thumbnail",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-foundry-media-variant")).toBe("source");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
+  });
+
+  it("requires the same media capability for a thumbnail as for the source", async () => {
+    mocks.verifyMediaAccess.mockRejectedValue(new HumanRequestIntegrityError());
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&variant=thumbnail",
+      ),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.getThumbnailSource).not.toHaveBeenCalled();
+  });
+
+  it("rejects a variant name the media route does not serve", async () => {
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access&variant=original",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.getThumbnailSource).not.toHaveBeenCalled();
+    expect(mocks.getSource).not.toHaveBeenCalled();
+  });
+
+  it("marks a plain source read as the source variant", async () => {
+    mocks.getSource.mockResolvedValue({
+      body: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+    });
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/media?assetId=asset_hero&accessToken=signed-media-access",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-foundry-media-variant")).toBe("source");
+    expect(mocks.getThumbnailSource).not.toHaveBeenCalled();
   });
 });

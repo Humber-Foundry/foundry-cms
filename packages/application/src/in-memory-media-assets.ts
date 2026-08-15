@@ -32,6 +32,7 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
       source: Uint8Array;
       sourceHash: string;
       contentType: string;
+      variantOf?: string;
     }>
   >();
   return {
@@ -57,6 +58,28 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
         throw new MediaSiteAccessError();
       }
       return object === undefined
+        ? null
+        : {
+            body: object.source.slice(),
+            contentType: object.contentType,
+          };
+    },
+    async putVariant(objectKey, variant, metadata) {
+      const existing = objects.get(objectKey);
+      if (existing !== undefined) {
+        if (existing.sourceHash === metadata.variantHash) return;
+        throw new MediaValidationError("thumbnail");
+      }
+      objects.set(objectKey, {
+        source: variant.slice(),
+        sourceHash: metadata.variantHash,
+        contentType: metadata.contentType,
+        variantOf: metadata.variantOf,
+      });
+    },
+    async getVariant(objectKey, expected) {
+      const object = objects.get(objectKey);
+      return object === undefined || object.variantOf !== expected.variantOf
         ? null
         : {
             body: object.source.slice(),

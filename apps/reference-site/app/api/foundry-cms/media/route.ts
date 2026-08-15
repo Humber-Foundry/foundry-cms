@@ -14,7 +14,9 @@ import {
   createContentWorkspaceId,
   createMediaAssetId,
   createMediaOccurrenceId,
+  mediaThumbnailMaxByteLength,
   requireRenderedMediaOccurrenceId,
+  type MediaThumbnailUpload,
 } from "@humber-foundry/application";
 
 import { installedSiteDefinition } from "@/foundry/site-definition";
@@ -56,36 +58,61 @@ async function authorized(request: Request) {
   };
 }
 
+/**
+ * The stored objects this route serves. `thumbnail` is the small copy the
+ * dashboard gallery shows; anything else is the full-resolution source.
+ */
+function mediaResponse(
+  media: Readonly<{
+    body: Uint8Array | ReadableStream<Uint8Array>;
+    contentType: string;
+  }>,
+  variant: "thumbnail" | "source",
+) {
+  return new Response(
+    media.body instanceof Uint8Array
+      ? (media.body.slice().buffer as ArrayBuffer)
+      : media.body,
+    {
+      headers: {
+        "cache-control": "private, no-store",
+        "content-type": media.contentType,
+        "x-content-type-options": "nosniff",
+        "x-foundry-media-variant": variant,
+      },
+    },
+  );
+}
+
 export async function GET(request: Request) {
   try {
     const { authenticated, actorId } = await authorized(request);
     const application = await loadMediaAssetApplication(actorId);
     const searchParams = new URL(request.url).searchParams;
     const requestedAsset = searchParams.get("assetId");
+    const requestedVariant = searchParams.get("variant");
+    if (requestedVariant !== null && requestedVariant !== "thumbnail") {
+      return Response.json({ error: "invalid_query" }, { status: 400 });
+    }
     if (requestedAsset !== null) {
       await verifyHumanMediaAccessToken(
         searchParams.get("accessToken"),
         authenticated.identity,
         requestedAsset,
       );
-      const source = await application.queries.getSource(
-        createMediaAssetId(requestedAsset),
-      );
+      const assetId = createMediaAssetId(requestedAsset);
+      if (requestedVariant === "thumbnail") {
+        const thumbnail =
+          await application.queries.getThumbnailSource(assetId);
+        // An asset stored before thumbnails existed has none. Serving the
+        // source keeps the gallery working while it is still the wrong size.
+        if (thumbnail !== null) return mediaResponse(thumbnail, "thumbnail");
+      }
+      const source = await application.queries.getSource(assetId);
       if (source === null) {
         return Response.json({ error: "media_not_found" }, { status: 404 });
       }
-      return new Response(
-        source.body instanceof Uint8Array
-          ? (source.body.slice().buffer as ArrayBuffer)
-          : source.body,
-        {
-          headers: {
-            "cache-control": "private, no-store",
-            "content-type": source.contentType,
-            "x-content-type-options": "nosniff",
-          },
-        },
-      );
+      return mediaResponse(source, "source");
     }
     return Response.json({ error: "invalid_query" }, { status: 400 });
   } catch (error) {
@@ -343,6 +370,32 @@ function finiteNumber(value: unknown, field: string) {
   return value;
 }
 
+/**
+ * The optional small copy the browser made before the upload. Its type and
+ * size come from the bytes themselves, never from what the browser claimed,
+ * so a wrong or hostile part is rejected instead of stored.
+ */
+async function readUploadedThumbnail(
+  form: FormData,
+): Promise<Readonly<{ thumbnail?: MediaThumbnailUpload }>> {
+  const part = form.get("thumbnail");
+  if (part === null) return {};
+  if (!(part instanceof File) || part.size > mediaThumbnailMaxByteLength) {
+    throw new MediaValidationError("thumbnail");
+  }
+  const bytes = new Uint8Array(await part.arrayBuffer());
+  const metadata = await inspectImageSource(bytes);
+  return {
+    thumbnail: {
+      contentType: metadata.contentType,
+      byteLength: bytes.byteLength,
+      width: metadata.width,
+      height: metadata.height,
+      source: bytes,
+    },
+  };
+}
+
 async function loadContentBinding(
   body: Record<string, unknown>,
   actorId: ReturnType<typeof createContentActorId>,
@@ -386,7 +439,8 @@ export async function POST(request: Request) {
       if (
         !Number.isSafeInteger(contentLength) ||
         contentLength <= 0 ||
-        contentLength > 20 * 1024 * 1024 + 64 * 1024
+        contentLength >
+          20 * 1024 * 1024 + mediaThumbnailMaxByteLength + 64 * 1024
       ) {
         throw new MediaValidationError("source");
       }
@@ -407,6 +461,7 @@ export async function POST(request: Request) {
         height: metadata.height,
         source: sourceBytes,
         idempotencyKey,
+        ...(await readUploadedThumbnail(form)),
       });
       return Response.json(asset, { status: 201 });
     }
