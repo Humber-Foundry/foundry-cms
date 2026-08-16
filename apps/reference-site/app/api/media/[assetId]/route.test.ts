@@ -65,4 +65,32 @@ describe("published media delivery", () => {
     expect(mocks.loadApplication).not.toHaveBeenCalled();
     expect(mocks.getPublishedSource).not.toHaveBeenCalled();
   });
+
+  it("serves a photo the published page references through an image field", async () => {
+    mocks.published.mockResolvedValue({
+      home: {
+        media: [],
+        sections: [
+          {
+            id: "section_story",
+            type: "registered",
+            component: "photoBand",
+            props: {
+              imageSrc: "/api/media/asset_page_photo",
+              imageAlt: "Alt",
+              caption: "Caption",
+            },
+          },
+        ],
+      },
+    });
+
+    const response = await GET(
+      new Request("https://foundry.example/api/media/asset_page_photo"),
+      { params: Promise.resolve({ assetId: "asset_page_photo" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getPublishedSource).toHaveBeenCalledWith("asset_page_photo");
+  });
 });

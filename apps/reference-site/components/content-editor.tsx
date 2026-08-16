@@ -1875,6 +1875,10 @@ export function ContentEditor({
             key={`projection:${state.projectionVersion}`}
             definition={state.workingDefinition}
             disabled={editorLocked}
+            media={{
+              csrfToken: mutationToken,
+              workspaceId: initialRevision.workspaceId,
+            }}
             onValidationChange={updateVisualRichTextValidation}
             panelWhenEmpty={
               <>

@@ -2,6 +2,7 @@ import {
   createPageComponentRegistryFromRegistrations,
   createRegisteredPageComponent,
   foundationPageComponentRegistry,
+  resolveMediaImageSrc,
   type PageComponentField,
   type PageComponentRegistration,
   type PageComponentRegistry,
@@ -233,7 +234,7 @@ const installedRegistrations = Object.freeze([
     foundationPageComponentRegistry.components.callToAction!,
     renderCallToActionPageComponent,
   ),
-  installPageComponent(imageCopyStoryComponent, ({ section }) => {
+  installPageComponent(imageCopyStoryComponent, ({ section, mediaDelivery = "published", mediaAccessToken }) => {
     const props = registeredProps(imageCopyStoryComponent, section);
     return (
       <section
@@ -243,7 +244,7 @@ const installedRegistrations = Object.freeze([
         aria-labelledby={`${section.id}_title`}
       >
         <figure>
-          <img src={props.imageSrc} alt={props.imageAlt} />
+          <img src={resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken)} alt={props.imageAlt} />
         </figure>
         <div className="story-copy">
           <p className="handwritten-label">{props.eyebrow}</p>
@@ -253,11 +254,11 @@ const installedRegistrations = Object.freeze([
       </section>
     );
   }),
-  installPageComponent(photoBandComponent, ({ section }) => {
+  installPageComponent(photoBandComponent, ({ section, mediaDelivery = "published", mediaAccessToken }) => {
     const props = registeredProps(photoBandComponent, section);
     return (
       <figure className="photo-band" id={section.id}>
-        <img src={props.imageSrc} alt={props.imageAlt} />
+        <img src={resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken)} alt={props.imageAlt} />
         <figcaption>{props.caption}</figcaption>
       </figure>
     );
@@ -298,7 +299,7 @@ const installedRegistrations = Object.freeze([
       </section>
     );
   }),
-  installPageComponent(attentionStoryComponent, ({ section, inlineText }) => {
+  installPageComponent(attentionStoryComponent, ({ section, inlineText, mediaDelivery = "published", mediaAccessToken }) => {
     const props = registeredProps(attentionStoryComponent, section);
     const t = inlineTextFor(inlineText, attentionStoryComponent);
     return (
@@ -315,7 +316,7 @@ const installedRegistrations = Object.freeze([
               <p>{t("body", props.body)}</p>
             </div>
             <figure className="lh-bare-photo">
-              <img src={props.imageSrc} alt={props.imageAlt} width="1067" height="1600" loading="lazy" />
+              <img src={resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken)} alt={props.imageAlt} width="1067" height="1600" loading="lazy" />
             </figure>
           </div>
           <AttentionNotes

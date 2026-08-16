@@ -21,6 +21,7 @@ import {
 } from "@humber-foundry/site-definition";
 
 import { definitionToPuckData, puckDataToDefinition } from "../src/page-composition-puck";
+import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { InlineText } from "./inline-text";
 import type { InlineTextRenderer } from "../foundry/page-component-renderers";
 import { RichTextEditor } from "./rich-text-editor";
@@ -443,8 +444,33 @@ function AddSectionMenu({ disabled }: { disabled: boolean }) {
 function editorField(
   field: PageComponentField,
   onValidationChange: (source: string, invalid: boolean) => void,
+  getMediaContext: () => EditorMediaContext | undefined,
 ): Record<string, unknown> {
   if (field.editable === false) return hiddenField;
+  if (field.control === "image") {
+    const media = getMediaContext();
+    // Without the picker's site context (a canvas-less surface) there is no
+    // safe swap, so fall back to the plain field rather than a dead button.
+    if (media === undefined) return createPuckField(field);
+    return {
+      type: "custom",
+      label: field.label,
+      render: ({
+        onChange,
+        value,
+      }: {
+        onChange(value: unknown): void;
+        value: unknown;
+      }) => (
+        <ChangePhotoField
+          label={field.label}
+          value={typeof value === "string" ? value : ""}
+          onChange={onChange}
+          media={media}
+        />
+      ),
+    };
+  }
   if (field.control !== "richText") return createPuckField(field);
   return {
     type: "custom",
@@ -496,6 +522,7 @@ export function createVisualComponentConfig(
   getDefinition: () => SiteDefinition,
   onValidationChange: (source: string, invalid: boolean) => void = ignoreRichTextValidation,
   getDisabled: () => boolean = () => false,
+  getMediaContext: () => EditorMediaContext | undefined = () => undefined,
 ): Config {
   const components = Object.fromEntries(
     installedPageComponentRegistry.allowedComponents.map((type) => {
@@ -523,7 +550,7 @@ export function createVisualComponentConfig(
             key,
             inlineCovered.has(key)
               ? hiddenField
-              : editorField(field, onValidationChange),
+              : editorField(field, onValidationChange, getMediaContext),
           ]),
         ),
       };
@@ -588,6 +615,7 @@ export function VisualComponentEditor({
   onValidationChange = ignoreRichTextValidation,
   iframeEnabled = true,
   panelWhenEmpty,
+  media,
 }: {
   definition: SiteDefinition;
   disabled: boolean;
@@ -599,6 +627,11 @@ export function VisualComponentEditor({
    * settings, in practice, so the panel is never a dead surface.
    */
   panelWhenEmpty?: ReactNode;
+  /**
+   * The site context the "Change photo" picker needs. Absent on canvas-less
+   * surfaces, where image fields fall back to a plain address field.
+   */
+  media?: EditorMediaContext;
 }) {
   const initialData = useMemo(
     () => definitionToPuckData(definition, installedPageComponentRegistry),
@@ -612,12 +645,15 @@ export function VisualComponentEditor({
   disabledRef.current = disabled;
   const validationRef = useRef(onValidationChange);
   validationRef.current = onValidationChange;
+  const mediaRef = useRef(media);
+  mediaRef.current = media;
   const config = useMemo(
     () => createVisualComponentConfig(
       () => referencedPageComponentIds(definitionRef.current),
       () => definitionRef.current,
       (source, invalid) => validationRef.current(source, invalid),
       () => disabledRef.current,
+      () => mediaRef.current,
     ),
     [],
   );
