@@ -19,6 +19,7 @@ import {
   createBlogPostId,
   parseSerializedRichTextDocument,
   RichTextValidationError,
+  siteDefinitionMediaAssetIds,
   type PageComposition,
   type SeoMetadata,
   type SiteDefinition,
@@ -682,13 +683,12 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
+      // Every photo the previewed revision references — placed occurrences and
+      // page-component image fields — so the authenticated preview can fetch
+      // each one at full resolution.
       const requestedAssetIds = [
-        ...new Set(
-          (revision.definition.home.media ?? []).map((occurrence) =>
-            createMediaAssetId(occurrence.asset.assetId),
-          ),
-        ),
-      ];
+        ...siteDefinitionMediaAssetIds(revision.definition),
+      ].map((assetId) => createMediaAssetId(assetId));
       const mediaApplication = await loadMediaAssetApplication(actorId);
       const grant = await mediaApplication.commands.grantRevisionAccess({
         actorId,

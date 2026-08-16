@@ -19,6 +19,8 @@ import {
   type MediaThumbnailUpload,
 } from "@humber-foundry/application";
 
+import { siteDefinitionMediaAssetIds } from "@humber-foundry/site-definition";
+
 import { installedSiteDefinition } from "@/foundry/site-definition";
 
 import {
@@ -504,9 +506,10 @@ export async function POST(request: Request) {
               ...catalog.occurrences.map(
                 (occurrence) => occurrence.assetId,
               ),
-              ...(currentContent.definition.home.media ?? []).map(
-                (occurrence) => occurrence.asset.assetId,
-              ),
+              // Every photo the draft references — placed occurrences and
+              // page-component image fields — so an authenticated preview can
+              // fetch each one at full resolution.
+              ...siteDefinitionMediaAssetIds(currentContent.definition),
             ],
           ),
         ],

@@ -86,6 +86,15 @@ asset in editable content. Replacing an occurrence changes that placement
 without changing other occurrences or another workspace that uses the same
 occurrence identity.
 
+**Image field reference** — A page-component image field that holds a gallery
+photo, stored as that photo's public media path `/api/media/<assetId>`. The
+page editor's "Change photo" action sets it through the shared picker. A photo
+the published site references this way is public, exactly as a placed
+occurrence's photo is, and the same reference resolves through the
+authenticated media route while a draft is edited or previewed. A static
+bundled path or an external address in the same field is not a reference and is
+drawn unchanged.
+
 **Media occurrence revision** — An immutable snapshot of one occurrence's
 asset reference and optional normalized crop. A crop is presentation data; it
 never rewrites the media asset's source object. A selected occurrence revision
@@ -347,6 +356,7 @@ The value is never part of the record.
 - [Draft, preview and publish pipeline](docs/decisions/ADR-0004-draft-preview-publish-pipeline.md)
 - [One SEO and sharing field set](docs/decisions/ADR-0008-seo-metadata-shared-field-set.md)
 - [Messages is an inbox](docs/decisions/ADR-0010-messages-inbox-and-owner-notification-demotion.md)
+- [Page-component image fields reference gallery photos](docs/decisions/ADR-0012-page-image-field-media-reference.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)

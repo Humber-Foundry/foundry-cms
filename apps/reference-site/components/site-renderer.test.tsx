@@ -66,6 +66,57 @@ describe("SiteRenderer controlled design projection", () => {
     expect(unpublished).not.toContain("/blog/renderer-post");
   });
 
+  it("delivers a page-component gallery photo per delivery mode", () => {
+    const storySection: PageSection = {
+      id: "section_story",
+      type: "registered",
+      component: "imageCopyStory",
+      props: {
+        eyebrow: "Eyebrow",
+        title: "Title",
+        body: "Body",
+        imageSrc: "/api/media/asset_story_photo",
+        imageAlt: "A chosen photo",
+        imagePosition: "start",
+      },
+    };
+    const definition: SiteDefinition = {
+      ...referenceSiteDefinition,
+      home: { ...referenceSiteDefinition.home, sections: [storySection] },
+    };
+
+    const published = renderToStaticMarkup(
+      <SiteSection section={storySection} definition={definition} />,
+    );
+    expect(published).toContain('src="/api/media/asset_story_photo"');
+
+    const preview = renderToStaticMarkup(
+      <SiteSection
+        section={storySection}
+        definition={definition}
+        mediaDelivery="authenticated"
+        mediaAccessToken="cap-token"
+      />,
+    );
+    expect(preview).toContain(
+      "/api/foundry-cms/media?assetId=asset_story_photo&amp;accessToken=cap-token",
+    );
+
+    const staticSection: PageSection = {
+      ...storySection,
+      props: { ...storySection.props, imageSrc: "/foundry-workshop.svg" },
+    };
+    const staticMarkup = renderToStaticMarkup(
+      <SiteSection
+        section={staticSection}
+        definition={definition}
+        mediaDelivery="authenticated"
+        mediaAccessToken="cap-token"
+      />,
+    );
+    expect(staticMarkup).toContain('src="/foundry-workshop.svg"');
+  });
+
   it("keeps unpublished post and shell navigation inside an exact preview", () => {
     const unpublishedPost = {
       id: createBlogPostId(

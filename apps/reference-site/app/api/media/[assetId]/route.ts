@@ -3,6 +3,7 @@ import {
   createContentActorId,
   createMediaAssetId,
 } from "@humber-foundry/application";
+import { siteDefinitionMediaAssetIds } from "@humber-foundry/site-definition";
 
 import {
   MediaAssetConfigurationError,
@@ -21,9 +22,9 @@ export async function GET(
   try {
     const assetId = createMediaAssetId((await context.params).assetId);
     const published = await installedSite.application.queries.getPublishedSite();
-    const isPublished = (published.home.media ?? []).some(
-      (occurrence) => occurrence.asset.assetId === assetId,
-    );
+    // A photo the published site references is public — whether it is placed
+    // as a media occurrence or chosen for a page-component image field.
+    const isPublished = siteDefinitionMediaAssetIds(published).has(assetId);
     if (!isPublished) return new Response(null, { status: 404 });
     const application = await loadMediaAssetApplication(publicRendererActorId);
     const source = await application.queries.getPublishedSource(assetId);
