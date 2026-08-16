@@ -1,7 +1,71 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import type { PublicFormReceiptId } from "@humber-foundry/application";
+
+import { useFormOperation } from "./use-form-operation";
+
+const outcomeMessages = {
+  applied: "Done.",
+  refused: "That did not work. Reload the page and try again.",
+} as const;
+
+/**
+ * What an Owner can do with one message: keep a copy, move it to or out of
+ * spam, or erase what it says. Erasing keeps the receipt and the record of
+ * what happened, so the site can still prove the message arrived.
+ */
+export function FormSubmissionActions({
+  classification,
+  pending,
+  message,
+  onDownload,
+  onReclassify,
+  onErase,
+}: {
+  classification: "accepted" | "suspected_spam";
+  pending: boolean;
+  message: string;
+  onDownload: () => void;
+  onReclassify: () => void;
+  onErase: () => void;
+}) {
+  return (
+    <section aria-labelledby="message-actions">
+      <h2 id="message-actions">What you can do with this message</h2>
+      <p role="status" aria-live="polite">
+        {message}
+      </p>
+      <p>
+        <button
+          className="copy-button"
+          disabled={pending}
+          onClick={onDownload}
+          type="button"
+        >
+          Download a copy
+        </button>{" "}
+        <button
+          className="copy-button"
+          disabled={pending}
+          onClick={onReclassify}
+          type="button"
+        >
+          {classification === "accepted"
+            ? "Move it to spam"
+            : "Not spam — accept it"}
+        </button>{" "}
+        <button
+          className="copy-button"
+          disabled={pending}
+          onClick={onErase}
+          type="button"
+        >
+          Erase what it says
+        </button>
+      </p>
+    </section>
+  );
+}
 
 export function FormSubmissionControls({
   csrfToken,
@@ -9,42 +73,19 @@ export function FormSubmissionControls({
   classification,
 }: {
   csrfToken: string;
-  receiptId: string;
+  receiptId: PublicFormReceiptId;
   classification: "accepted" | "suspected_spam";
 }) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  const { message, pending, report, run } = useFormOperation(
+    csrfToken,
+    outcomeMessages,
+  );
 
-  async function apply(command: unknown) {
-    setPending(true);
-    setMessage("");
-    try {
-      const response = await fetch("/api/foundry-cms/forms", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": crypto.randomUUID(),
-          "x-foundry-csrf": csrfToken,
-        },
-        body: JSON.stringify(command),
-      });
-      setMessage(
-        response.ok
-          ? "Form data operation applied."
-          : "The form data operation could not be applied.",
-      );
-      if (response.ok) router.refresh();
-    } catch {
-      setMessage("The result is unknown. Refresh before trying again.");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  async function exportSubmission() {
-    setPending(true);
-    setMessage("");
+  /**
+   * The copy is a file, not a state change, so it does not go through the
+   * shared command path: it needs the response body rather than its status.
+   */
+  async function download() {
     try {
       const response = await fetch("/api/foundry-cms/forms", {
         method: "POST",
@@ -55,71 +96,43 @@ export function FormSubmissionControls({
         body: JSON.stringify({ action: "export_submission", receiptId }),
       });
       if (!response.ok) {
-        setMessage("The form data export could not be created.");
-        return;
+        return "The copy could not be made.";
       }
       const objectUrl = URL.createObjectURL(await response.blob());
-      const download = document.createElement("a");
-      download.href = objectUrl;
-      download.download = `form-${receiptId}.json`;
-      download.click();
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `message-${receiptId}.json`;
+      link.click();
       URL.revokeObjectURL(objectUrl);
-      setMessage("The audited form data export was created.");
+      return "The copy was downloaded. Taking it is recorded.";
     } catch {
-      setMessage("The form data export result is unknown. Try again.");
-    } finally {
-      setPending(false);
+      return "The result is unknown. Try again.";
     }
   }
 
   return (
-    <section aria-labelledby="form-data-actions">
-      <h2 id="form-data-actions">Owner data actions</h2>
-      <p role="status" aria-live="polite">{message}</p>
-      <p>
-        <button
-          className="copy-button"
-          disabled={pending}
-          onClick={() => void exportSubmission()}
-          type="button"
-        >
-          Export audited JSON
-        </button>{" "}
-        <button
-          className="copy-button"
-          disabled={pending}
-          onClick={() =>
-            apply({
-              action: "classify_submission",
-              receiptId,
-              classification:
-                classification === "accepted"
-                  ? "suspected_spam"
-                  : "accepted",
-            })
-          }
-          type="button"
-        >
-          Mark as{" "}
-          {classification === "accepted" ? "suspected spam" : "accepted"}
-        </button>{" "}
-        <button
-          className="copy-button"
-          disabled={pending}
-          onClick={() => {
-            if (
-              window.confirm(
-                "Erase this submission payload? The receipt and minimal audit evidence will remain.",
-              )
-            ) {
-              void apply({ action: "erase_submission", receiptId });
-            }
-          }}
-          type="button"
-        >
-          Erase payload
-        </button>
-      </p>
-    </section>
+    <FormSubmissionActions
+      classification={classification}
+      message={message}
+      onDownload={() => void report(download)}
+      onErase={() => {
+        if (
+          window.confirm(
+            "Erase what this message says? The receipt and the record of what happened to it stay.",
+          )
+        ) {
+          void run({ action: "erase_submission", receiptId });
+        }
+      }}
+      onReclassify={() =>
+        void run({
+          action: "classify_submission",
+          receiptId,
+          classification:
+            classification === "accepted" ? "suspected_spam" : "accepted",
+        })
+      }
+      pending={pending}
+    />
   );
 }

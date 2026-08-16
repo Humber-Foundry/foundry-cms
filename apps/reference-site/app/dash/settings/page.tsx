@@ -1,9 +1,14 @@
 import { notFound } from "next/navigation";
 
+import type { PublicFormDeliveryHealth } from "@humber-foundry/application";
+
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
 import { MemberAccessControls } from "@/components/member-access-controls";
+import { OwnerNotificationControls } from "@/components/owner-notification-controls";
 import { SiteTechnicalDetail } from "@/components/site-technical-detail";
 import { loadMcpConnectionsForDashboard } from "@/src/mcp-dashboard-runtime";
+import { ownerAlertSenderState } from "@/src/owner-alert-status";
+import { loadOwnerNotificationStatus } from "@/src/public-form-messages-runtime";
 import {
   loadMutationToken,
   loadPublishedDefinition,
@@ -11,6 +16,25 @@ import {
 } from "@/src/dashboard-page-context";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * How full the message store is, in words rather than a state name. The
+ * percentage is kept because it is the only number that says how much room is
+ * left.
+ */
+const roomLeft: Readonly<
+  Record<PublicFormDeliveryHealth["capacity"]["state"], string>
+> = {
+  normal: "There is plenty of room.",
+  warning: "It is getting full, so plan what to keep.",
+  critical: "There is very little left. Erase messages you no longer need.",
+};
+
+function storageSentence(capacity: PublicFormDeliveryHealth["capacity"]) {
+  return `Messages are using ${capacity.usedPercent.toFixed(
+    1,
+  )}% of the room they have. ${roomLeft[capacity.state]}`;
+}
 
 /**
  * Settings holds the jobs an owner does rarely: who can sign in, which agents
@@ -29,6 +53,7 @@ export default async function DashboardSettingsPage() {
     actor: access.identity,
   });
   const mcpConnections = await loadMcpConnectionsForDashboard();
+  const ownerNotifications = await loadOwnerNotificationStatus(access);
 
   return (
     <main className="dashboard-main" id="main">
@@ -58,6 +83,58 @@ export default async function DashboardSettingsPage() {
           connections={mcpConnections}
           csrfToken={mutationToken}
         />
+      </section>
+
+      <section aria-labelledby="email-alerts">
+        <h2 id="email-alerts">Email alerts about new messages</h2>
+        <p>
+          Every message people send is saved in Messages. These alerts only
+          tell you one arrived, so an alert that fails never loses a message.
+        </p>
+        <dl className="fact-list">
+          <div>
+            <dt>Can alerts be sent</dt>
+            <dd>
+              {ownerAlertSenderState(ownerNotifications.health.adapter)}
+            </dd>
+          </div>
+          <div>
+            <dt>Waiting to send</dt>
+            <dd>
+              {ownerNotifications.health.pending === 0 &&
+              ownerNotifications.health.processing === 0
+                ? "Nothing waiting"
+                : `${ownerNotifications.health.pending} waiting · ${ownerNotifications.health.processing} sending`}
+            </dd>
+          </div>
+          <div>
+            <dt>Did not arrive</dt>
+            <dd>
+              {ownerNotifications.health.failed === 0
+                ? "None"
+                : `${ownerNotifications.health.failed} after ${ownerNotifications.health.retries} retries`}
+            </dd>
+          </div>
+          <div>
+            <dt>Longest wait</dt>
+            <dd>
+              {ownerNotifications.health.oldestPendingAgeSeconds === null
+                ? "Nothing waiting"
+                : `${Math.ceil(
+                    ownerNotifications.health.oldestPendingAgeSeconds / 60,
+                  )} minutes`}
+            </dd>
+          </div>
+        </dl>
+        <OwnerNotificationControls
+          csrfToken={mutationToken}
+          failedDeliveries={ownerNotifications.failedDeliveries}
+        />
+      </section>
+
+      <section aria-labelledby="message-storage">
+        <h2 id="message-storage">Room left for messages</h2>
+        <p>{storageSentence(ownerNotifications.health.capacity)}</p>
       </section>
 
       <SiteTechnicalDetail definition={definition} />

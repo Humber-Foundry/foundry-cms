@@ -28,11 +28,9 @@ export async function deliverPublicFormNotificationsIfDue(
     .filter((field) => /^[a-z][a-z0-9_]*$/u.test(field));
   return deliverDuePublicFormNotifications({
     siteId: installedSiteDefinition.site.id,
-    store: createD1PublicFormNotificationStore(
-      environment.FOUNDRY_DB,
-      undefined,
-      previewFieldIds,
-    ),
+    store: createD1PublicFormNotificationStore(environment.FOUNDRY_DB, {
+      notificationPreviewFieldIds: previewFieldIds,
+    }),
     adapter: createCloudflareFormEmailAdapter(environment),
     now: new Date(),
     createLeaseToken: () => crypto.randomUUID(),

@@ -29,6 +29,9 @@ const privacyMigrations = [
   "0003_public_forms.sql",
   "0004_public_form_notifications.sql",
   "0006_public_form_privacy.sql",
+  // Read state is not part of a backup, but its rows hang off a submission,
+  // so wiping a recovery target has to take them with it.
+  "0026_public_form_inbox.sql",
 ] as const;
 const testDatabase = useMigratedTestDatabase({
   FOUNDRY_DB: privacyMigrations,
@@ -704,6 +707,24 @@ describe("D1 public form privacy store", () => {
       )
       .first<{ count: number }>();
     expect(primaryFacts?.count).toBe(1);
+    // A human who opened a restored message leaves a read row behind. Wiping
+    // the target has to take it with the submission it belongs to.
+    await recovery
+      .prepare(
+        `INSERT INTO public_form_submission_reads (
+           site_id, form_id, submission_id, first_read_at, first_read_by
+         )
+         SELECT site_id, form_id, submission_id, ?1, ?2
+         FROM public_form_submissions`,
+      )
+      .bind("2026-07-27T01:00:00.000Z", "membership-owner")
+      .run();
+    await expect(
+      recovery
+        .prepare("SELECT COUNT(*) AS count FROM public_form_submission_reads")
+        .first<{ count: number }>(),
+    ).resolves.toEqual({ count: 1 });
+
     await target.clearRestoredSnapshot({
       siteId,
       backupId: "backup-48",
@@ -714,6 +735,11 @@ describe("D1 public form privacy store", () => {
       backupId: "backup-48",
       evidence,
     });
+    await expect(
+      recovery
+        .prepare("SELECT COUNT(*) AS count FROM public_form_submission_reads")
+        .first<{ count: number }>(),
+    ).resolves.toEqual({ count: 0 });
     const recoveryRows = await recovery
       .prepare(`SELECT (${[
         "public_form_submissions",

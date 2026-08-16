@@ -7,6 +7,7 @@ import {
   type AcceptPublicFormCommand,
 } from "@humber-foundry/application";
 
+import { installedPublicForms } from "../foundry/public-forms";
 import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createCloudflareTurnstileVerifier } from "./cloudflare-turnstile";
@@ -76,19 +77,14 @@ export async function acceptPublicFormSubmission(
   }
   const application = createPublicFormApplication({
     siteId: installedSiteDefinition.site.id,
-    definitions: [
-      {
-        id: createPublicFormId("contact"),
-        schemaVersion: "1.0.0",
-        allowedOrigin,
-        turnstileHostname: canonicalUrl.hostname,
-        turnstileAction: "contact",
-        fields: [
-          { id: "name", required: true, maximumLength: 100 },
-          { id: "message", required: true, maximumLength: 2_000 },
-        ],
-      },
-    ],
+    definitions: installedPublicForms.map((form) => ({
+      id: createPublicFormId(form.id),
+      schemaVersion: form.schemaVersion,
+      allowedOrigin,
+      turnstileHostname: canonicalUrl.hostname,
+      turnstileAction: form.turnstileAction,
+      fields: form.fields,
+    })),
     store: createD1PublicFormAcceptanceStore(environment.FOUNDRY_DB),
     rateLimiter: {
       async allow({ key }) {

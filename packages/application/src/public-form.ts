@@ -49,6 +49,12 @@ export type PublicFormFieldDefinition = Readonly<{
   id: string;
   required: boolean;
   maximumLength: number;
+  /**
+   * What this field means in the Messages inbox: the person's name, the
+   * address to reply to, or the text worth previewing in the list. A field
+   * without a role is only ever shown when a human opens the submission.
+   */
+  inboxRole?: "sender" | "replyAddress" | "preview";
 }>;
 
 export type PublicFormDefinition = Readonly<{
@@ -59,6 +65,101 @@ export type PublicFormDefinition = Readonly<{
   turnstileAction: string;
   fields: ReadonlyArray<PublicFormFieldDefinition>;
 }>;
+
+/**
+ * The part of a form definition an installation owns.
+ *
+ * The allowed origin and the Turnstile hostname come from the deployment, so
+ * an installation states only the form's identity, its schema version, its
+ * Turnstile action and its fields. The product owns this contract, and
+ * `isInstalledPublicFormList` is the guard an installation's value must pass.
+ */
+export type InstalledPublicFormDefinition = Readonly<{
+  id: string;
+  schemaVersion: string;
+  turnstileAction: string;
+  fields: ReadonlyArray<PublicFormFieldDefinition>;
+}>;
+
+const inboxRoles: ReadonlySet<string> = new Set([
+  "sender",
+  "replyAddress",
+  "preview",
+]);
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
+function isPublicFormFieldDefinition(
+  value: unknown,
+): value is PublicFormFieldDefinition {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const field = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(field.id) &&
+    typeof field.required === "boolean" &&
+    typeof field.maximumLength === "number" &&
+    Number.isInteger(field.maximumLength) &&
+    field.maximumLength > 0 &&
+    (field.inboxRole === undefined ||
+      (typeof field.inboxRole === "string" && inboxRoles.has(field.inboxRole)))
+  );
+}
+
+/**
+ * Whether an installation's form list is one the CMS can serve.
+ *
+ * A misspelled `inboxRole`, a repeated field id, or two fields claiming one
+ * role would otherwise fail silently: the inbox would list every message as
+ * "Someone" with no reply link, previewing whichever field happened to come
+ * first, and nothing would say why. This guard makes the installation fail to
+ * start instead.
+ */
+export function isInstalledPublicFormList(
+  value: unknown,
+): value is ReadonlyArray<InstalledPublicFormDefinition> {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  const formIds = new Set<string>();
+  for (const candidate of value as ReadonlyArray<unknown>) {
+    if (typeof candidate !== "object" || candidate === null) {
+      return false;
+    }
+    const form = candidate as Record<string, unknown>;
+    if (
+      !isNonEmptyString(form.id) ||
+      !isNonEmptyString(form.schemaVersion) ||
+      !isNonEmptyString(form.turnstileAction) ||
+      !Array.isArray(form.fields) ||
+      form.fields.length === 0 ||
+      formIds.has(form.id)
+    ) {
+      return false;
+    }
+    formIds.add(form.id);
+    const fieldIds = new Set<string>();
+    const declaredRoles = new Set<string>();
+    for (const field of form.fields as ReadonlyArray<unknown>) {
+      if (!isPublicFormFieldDefinition(field) || fieldIds.has(field.id)) {
+        return false;
+      }
+      fieldIds.add(field.id);
+      // Two fields claiming one role is a mistake with a silent result: the
+      // inbox would take the first and never show the second.
+      if (field.inboxRole !== undefined) {
+        if (declaredRoles.has(field.inboxRole)) {
+          return false;
+        }
+        declaredRoles.add(field.inboxRole);
+      }
+    }
+  }
+  return true;
+}
 
 export type PublicFormSubmissionIdentity = Readonly<{
   siteId: SiteId;

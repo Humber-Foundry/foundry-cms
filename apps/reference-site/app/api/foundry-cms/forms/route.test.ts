@@ -28,7 +28,7 @@ vi.mock("../../../../src/human-access-runtime", () => ({
   authorizeAuthenticatedHumanIdentity: mocks.authorizeIdentity,
   loadHumanIdentityRequestContext: mocks.loadIdentity,
 }));
-vi.mock("../../../../src/public-form-delivery-health-runtime", () => ({
+vi.mock("../../../../src/public-form-messages-runtime", () => ({
   createPublicFormOperationsContext: mocks.createOperations,
 }));
 vi.mock("../../../../src/public-form-privacy-dashboard-runtime", () => ({

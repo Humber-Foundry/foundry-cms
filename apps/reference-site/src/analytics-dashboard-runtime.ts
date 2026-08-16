@@ -17,6 +17,7 @@ import {
 import { installedSiteDefinition } from "../foundry/site-definition";
 
 import { createD1AnalyticsStore } from "./d1-analytics-store";
+import { dashboardTimeZone } from "./dashboard-time";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import type { HumanAccessRequestContext } from "./human-access-runtime";
 
@@ -26,7 +27,7 @@ import type { HumanAccessRequestContext } from "./human-access-runtime";
  * queries a source API directly.
  */
 
-export const defaultReportingTimeZone = "America/Vancouver";
+export const defaultReportingTimeZone = dashboardTimeZone;
 
 export type AnalyticsDashboardErrorCode =
   | "analytics_not_authorized"
