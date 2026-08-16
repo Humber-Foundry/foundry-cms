@@ -59,6 +59,7 @@ import {
   useContentEditorPersistence,
 } from "../src/content-editor-persistence";
 import { pageCompositionChanged } from "../src/page-composition-puck";
+import { DesignDestination } from "./design-destination";
 import { RichTextEditor } from "./rich-text-editor";
 import {
   PublicationHistory,
@@ -149,6 +150,7 @@ export function ContentEditor({
   heading = "Content editor",
   fieldGroups = allEditableFieldGroups,
   showComposition = true,
+  showDesignDestination = false,
   showPublicationHistory = true,
 }: {
   csrfToken: string;
@@ -175,6 +177,11 @@ export function ContentEditor({
   fieldGroups?: ReadonlyArray<EditableFieldGroup>;
   /** The visual page canvas belongs to Pages, not to Design or Blog. */
   showComposition?: boolean;
+  /**
+   * Design replaces the plain list of fields with the preset looks, the
+   * fine-tune controls and a live preview of the site.
+   */
+  showDesignDestination?: boolean;
   showPublicationHistory?: boolean;
 }) {
   const [state, dispatch] = useReducer(
@@ -1039,25 +1046,58 @@ export function ContentEditor({
     onSave: startSave,
   });
 
-  function edit(edit: SiteDefinitionEdit): boolean {
-    if (
+  /**
+   * Whether the draft will take an edit at all. It repeats `editorLocked`
+   * rather than reading it because `saveInFlight` is a ref: a save that starts
+   * between renders must still stop an edit, and a ref cannot drive the
+   * `disabled` attribute that `editorLocked` drives.
+   */
+  function editsAreAccepted(): boolean {
+    return !(
       publicationBusy ||
       saveInFlight.current ||
       !persistence.coordinated ||
       !persistence.ready ||
       contentEditorStatusLocked(state.status)
-    ) {
-      return false;
-    }
-    if (updateEditableSiteField(state.workingDefinition, edit) === null) {
-      return false;
-    }
+    );
+  }
+
+  /**
+   * What every edit invalidates. An approval and a preview both name one exact
+   * revision, so changing the draft ends them, and any save attempt already
+   * queued is for content that no longer exists.
+   */
+  function discardEvidenceForChangedDraft(): void {
     persistence.discardAttempt();
     setApprovalId(null);
     setPreviewedRevision(null);
     pendingApprovalAttempt.current = null;
     pendingPublicationAttempt.current = null;
+  }
+
+  function edit(edit: SiteDefinitionEdit): boolean {
+    if (!editsAreAccepted()) {
+      return false;
+    }
+    if (updateEditableSiteField(state.workingDefinition, edit) === null) {
+      return false;
+    }
+    discardEvidenceForChangedDraft();
     dispatch({ type: "edit", ...edit });
+    return true;
+  }
+
+  /**
+   * Several field edits as one step, so choosing a preset look is one change
+   * to undo instead of six. It fails the same way a single edit does: if any
+   * one value is not registered, nothing changes.
+   */
+  function editMany(edits: ReadonlyArray<SiteDefinitionEdit>): boolean {
+    if (edits.length === 0 || !editsAreAccepted()) {
+      return false;
+    }
+    discardEvidenceForChangedDraft();
+    dispatch({ type: "editMany", edits });
     return true;
   }
 
@@ -1711,7 +1751,14 @@ export function ContentEditor({
       </div>
     ) : null;
 
-  const fieldGroupsNode = (
+  const editorBodyNode = showDesignDestination ? (
+    <DesignDestination
+      definition={state.workingDefinition}
+      disabled={editorLocked}
+      onEdit={edit}
+      onEditMany={editMany}
+    />
+  ) : (
     <EditorFieldGroups
       groups={groups}
       collapsed={false}
@@ -1751,7 +1798,7 @@ export function ContentEditor({
         </div>
         {notesNode}
         {conflictsNode}
-        {fieldGroupsNode}
+        {editorBodyNode}
         {historyPanelNode}
       </section>
     );
@@ -1831,7 +1878,7 @@ export function ContentEditor({
             onValidationChange={updateVisualRichTextValidation}
             panelWhenEmpty={
               <>
-                {fieldGroupsNode}
+                {editorBodyNode}
                 {historyPanelNode}
               </>
             }

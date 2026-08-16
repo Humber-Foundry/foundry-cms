@@ -11,7 +11,14 @@ import {
   type ServicesSection,
   type SiteDefinition,
 } from "./index";
-import { designContract } from "./design-tokens";
+import {
+  designContract,
+  designTokenFieldPath,
+  designTokenValue,
+  sectionVariantFieldPath,
+  setDesignTokenValue,
+  type DesignTokenKey,
+} from "./design-tokens";
 import {
   normalizeCanonicalOrigin,
   seoFieldHints,
@@ -307,69 +314,26 @@ function editableFieldBindings(
       }),
     ];
   };
-  const designTokenBinding = ({
-    path,
-    label,
-    value,
-    values,
-    write,
-  }: {
-    path: string;
-    label: string;
-    value: string;
-    values: ReadonlyArray<string>;
-    write(definition: MutableSiteDefinition, value: string): void;
-  }) =>
+  // One binding per registered design token. Driving these from the contract
+  // means a new token is editable as soon as it is registered, and a removed
+  // one disappears from the editor in the same change.
+  const designTokenBindings = (
+    Object.keys(designContract.tokens) as DesignTokenKey[]
+  ).map((key) =>
     fieldBinding({
-      path,
-      label,
+      path: designTokenFieldPath(key),
+      label: designContract.tokens[key].label,
       group: "Design",
-      value,
+      value: designTokenValue(definition.design, key),
       multiline: false,
-      values,
-      write,
-    });
+      values: designContract.tokens[key].values,
+      write: (draft, value) => {
+        setDesignTokenValue(draft.design, key, value);
+      },
+    }),
+  );
   const fields: EditableFieldBinding[] = [
-    designTokenBinding({
-      path: "design.typography.heading",
-      label: designContract.tokens["typography.heading"].label,
-      value: definition.design.typography.heading,
-      values: designContract.tokens["typography.heading"].values,
-      write: (draft, value) => {
-        draft.design.typography.heading =
-          value as SiteDefinition["design"]["typography"]["heading"];
-      },
-    }),
-    designTokenBinding({
-      path: "design.colour.accent",
-      label: designContract.tokens["colour.accent"].label,
-      value: definition.design.colour.accent,
-      values: designContract.tokens["colour.accent"].values,
-      write: (draft, value) => {
-        draft.design.colour.accent =
-          value as SiteDefinition["design"]["colour"]["accent"];
-      },
-    }),
-    designTokenBinding({
-      path: "design.spacing.section",
-      label: designContract.tokens["spacing.section"].label,
-      value: definition.design.spacing.section,
-      values: designContract.tokens["spacing.section"].values,
-      write: (draft, value) => {
-        draft.design.spacing.section =
-          value as SiteDefinition["design"]["spacing"]["section"];
-      },
-    }),
-    designTokenBinding({
-      path: "design.layout.contentWidth",
-      label: designContract.tokens["layout.contentWidth"].label,
-      value: definition.design.layout.contentWidth,
-      values: designContract.tokens["layout.contentWidth"].values,
-      write: (draft, value) => {
-        draft.design.layout.contentWidth =
-          value as SiteDefinition["design"]["layout"]["contentWidth"];
-      },
-    }),
+    ...designTokenBindings,
     fieldBinding({
       path: `${definition.site.id}.name`,
       label: "Site name",
@@ -443,7 +407,7 @@ function editableFieldBindings(
     const variant = designContract.variants[section.type];
     fields.push(
       fieldBinding({
-        path: `${section.id}.variant`,
+        path: sectionVariantFieldPath(section.id),
         label: variant.label,
         group: "Design",
         value: section.variant,

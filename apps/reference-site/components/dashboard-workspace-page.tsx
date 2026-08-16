@@ -17,7 +17,7 @@ const workspaceDestinations = {
     route: "/dash/design",
     title: "Design",
     description:
-      "Change the fonts, colour and spacing your site uses. These are the choices the design allows, so the site stays consistent.",
+      "Pick a look for your site, then change its fonts, colours, spacing and width. Every choice shows in the preview beside the controls, and nothing reaches the live site until you publish.",
     headingOnlyWhenStarting: false,
   },
 } as const;

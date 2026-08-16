@@ -43,8 +43,16 @@
   min-height: 43rem;
   padding-block: var(--design-section-padding);
   background:
-    radial-gradient(circle at 82% 22%, rgba(30, 92, 67, 0.13), transparent 25%),
-    linear-gradient(135deg, transparent 62%, rgba(233, 225, 207, 0.72) 62%);
+    radial-gradient(
+      circle at 82% 22%,
+      color-mix(in srgb, var(--design-accent) 14%, transparent),
+      transparent 25%
+    ),
+    linear-gradient(
+      135deg,
+      transparent 62%,
+      color-mix(in srgb, var(--panel) 78%, transparent) 62%
+    );
 }
 
 .hero h1 {
@@ -166,7 +174,7 @@
   grid-template-columns: 1.45fr 0.8fr;
   gap: clamp(3rem, 8vw, 8rem);
   padding-block: var(--design-section-padding);
-  background: var(--sand);
+  background: var(--panel);
 }
 
 .proof figure {
@@ -201,7 +209,7 @@
   justify-content: space-between;
   gap: 1.5rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid rgba(23, 32, 29, 0.2);
+  border-bottom: 1px solid var(--line);
 }
 
 .metrics dt {
@@ -212,14 +220,14 @@
 
 .metrics dd {
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   font-size: 2rem;
 }
 
 .contact {
   padding-block: var(--design-section-padding);
-  background: var(--moss-dark);
-  color: var(--paper-bright);
+  background: var(--design-accent-deep);
+  color: #ffffff;
 }
 
 .hero[data-component-variant="focused"] h1 {
@@ -253,13 +261,13 @@
 }
 
 .contact .eyebrow {
-  color: #b8d9c6;
+  color: color-mix(in srgb, var(--design-accent) 30%, #ffffff);
 }
 
 .contact .rich-text {
   max-width: 36rem;
   margin: 2rem 0;
-  color: #d5e0da;
+  color: color-mix(in srgb, var(--design-accent) 12%, #ffffff);
   font-size: 1.1rem;
 }
 
@@ -283,7 +291,7 @@
 .contact .rich-text h6 {
   max-width: 28ch;
   margin: 1.5rem 0 0.5rem;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   letter-spacing: -0.015em;
   line-height: 1.2;
 }
@@ -295,18 +303,18 @@
 
 .contact .rich-text blockquote {
   margin-inline: 0;
-  border-left: 0.2rem solid #b8d9c6;
+  border-left: 0.2rem solid color-mix(in srgb, var(--design-accent) 30%, #ffffff);
   padding-left: 1rem;
   font-style: italic;
 }
 
 .button-light {
-  background: var(--paper-bright);
-  color: var(--moss-dark);
+  background: #ffffff;
+  color: var(--design-accent-deep);
 }
 
 .button-light:hover {
-  background: var(--mint);
+  background: color-mix(in srgb, var(--design-accent) 15%, #ffffff);
 }
 
 .story-section,
@@ -513,14 +521,14 @@
 
 .blog-index,
 .blog-post {
-  padding-block: var(--section-space);
+  padding-block: var(--design-section-padding);
 }
 
 .blog-index h2,
 .blog-post h1 {
   max-width: 18ch;
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   font-size: clamp(2.5rem, 7vw, 5rem);
   font-weight: 500;
   letter-spacing: -0.04em;
@@ -538,7 +546,7 @@
 
 .blog-index a {
   color: inherit;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
   font-size: 1.5rem;
 }
 
@@ -564,7 +572,7 @@
 .blog-post .rich-text h4,
 .blog-post .rich-text h5 {
   margin-top: 2.5rem;
-  font-family: var(--font-serif);
+  font-family: var(--design-heading-font);
 }
 
 @media (max-width: 760px) {

@@ -31,13 +31,13 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.4.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.4.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.5.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.5.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.4.0",
+      "https://foundrycms.dev/schemas/site-definition/1.5.0",
     );
     expect(
       siteDefinitionSchema.$defs.richTextDocument.$comment,
@@ -113,6 +113,71 @@ describe("reference Site Definition", () => {
     expect(isSiteDefinition(referenceSiteDefinition)).toBe(true);
   });
 
+  it("gives a stored 1.3 definition the body font and page tone it never had", () => {
+    const stored = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    stored.definitionVersion = "1.3.0";
+    stored.schemaVersion = "1.3.0";
+    delete stored.design.typography.body;
+    delete stored.design.colour.neutral;
+
+    const upgraded = upgradeSiteDefinition(stored);
+
+    // The values the stylesheet already used before either token existed, so
+    // an upgraded site looks exactly as it did.
+    expect(upgraded.design).toEqual({
+      typography: { heading: "editorial", body: "modern" },
+      colour: { accent: "moss", neutral: "warm" },
+      spacing: { section: "relaxed" },
+      layout: { contentWidth: "standard" },
+    });
+    expect(isSiteDefinition(upgraded)).toBe(true);
+  });
+
+  it("keeps a stored 1.3 definition's own design values while filling the new ones", () => {
+    const stored = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    stored.definitionVersion = "1.3.0";
+    stored.schemaVersion = "1.3.0";
+    stored.design.typography.heading = "modern";
+    stored.design.colour.accent = "clay";
+    stored.design.spacing.section = "compact";
+    stored.design.layout.contentWidth = "wide";
+    delete stored.design.typography.body;
+    delete stored.design.colour.neutral;
+
+    expect(upgradeSiteDefinition(stored).design).toEqual({
+      typography: { heading: "modern", body: "modern" },
+      colour: { accent: "clay", neutral: "warm" },
+      spacing: { section: "compact" },
+      layout: { contentWidth: "wide" },
+    });
+  });
+
+  it("gives a stored 1.0 definition with no design block the whole default design", () => {
+    const stored = structuredClone(
+      referenceSiteDefinition,
+    ) as unknown as Record<string, any>;
+    stored.definitionVersion = "1.0.0";
+    stored.schemaVersion = "1.0.0";
+    delete stored.design;
+    for (const section of stored.home.sections) {
+      delete section.variant;
+    }
+
+    const upgraded = upgradeSiteDefinition(stored);
+
+    expect(upgraded.design).toEqual({
+      typography: { heading: "editorial", body: "modern" },
+      colour: { accent: "moss", neutral: "warm" },
+      spacing: { section: "relaxed" },
+      layout: { contentWidth: "standard" },
+    });
+    expect(isSiteDefinition(upgraded)).toBe(true);
+  });
+
   it("projects a preserved 1.0 definition into the current rich-text schema", () => {
     const legacy = structuredClone(
       referenceSiteDefinition,
@@ -128,8 +193,8 @@ describe("reference Site Definition", () => {
     )!;
 
     expect(upgraded).not.toBe(legacy);
-    expect(upgraded.definitionVersion).toBe("1.4.0");
-    expect(upgraded.schemaVersion).toBe("1.4.0");
+    expect(upgraded.definitionVersion).toBe("1.5.0");
+    expect(upgraded.schemaVersion).toBe("1.5.0");
     expect(callToAction).toEqual(
       expect.objectContaining({
         body: {
@@ -762,9 +827,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.4.0.",
+        "section_missing.title": "This field is not in Site Definition 1.5.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.4.0.",
+        "section_hero.href": "This field is not in Site Definition 1.5.0.",
       },
     });
   });
@@ -778,7 +843,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.4.0.",
+        "This field is not in Site Definition 1.5.0.",
       );
     }
   });

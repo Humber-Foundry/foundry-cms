@@ -2638,3 +2638,275 @@
     left: 0;
   }
 }
+
+/* Design ------------------------------------------------------------------
+ *
+ * Two columns: the choices on the left, the real site on the right. The
+ * preview keeps pace with the working draft, so a choice and its effect are
+ * on screen together. Sizes follow the dashboard type tokens: the group
+ * heading uses --dash-h2 and everything inside it uses --dash-text-small,
+ * with colour carrying the rest of the hierarchy.
+ */
+.design-destination {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: var(--dash-panel-gap);
+}
+
+.design-controls {
+  display: grid;
+  gap: var(--dash-panel-gap);
+  min-width: 0;
+}
+
+.design-section {
+  min-width: 0;
+}
+
+.design-section > h2 {
+  margin: 0;
+  font-size: var(--dash-h2);
+}
+
+.design-section-help {
+  margin: 0.25rem 0 1rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.design-presets {
+  display: grid;
+  grid-template-columns: repeat(var(--option-columns, 2), minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+/* A preset card and an option card share their behaviour: the whole card is
+ * the control, the radio itself is only the accessible name and focus target,
+ * and the selected state is drawn on the card. */
+.design-preset,
+.design-option {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+  color: var(--dash-ink);
+  font-size: var(--dash-text-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.design-preset:hover,
+.design-option:hover {
+  border-color: var(--dash-accent);
+}
+
+.design-preset[data-selected="true"],
+.design-option[data-selected="true"] {
+  border-color: var(--dash-accent);
+  background: var(--dash-accent-tint);
+  box-shadow: inset 0 0 0 1px var(--dash-accent);
+}
+
+.design-preset input,
+.design-option input {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  margin: 0;
+  accent-color: var(--dash-accent);
+}
+
+.design-preset:has(input:focus-visible),
+.design-option:has(input:focus-visible) {
+  outline: 3px solid #477a5d;
+  outline-offset: 2px;
+}
+
+.design-preset:has(input:disabled),
+.design-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.design-preset-name,
+.design-option-label {
+  font-weight: 700;
+}
+
+.design-preset-description,
+.design-option-description {
+  color: var(--dash-ink-soft);
+}
+
+/* The card paints itself with the preset's own paper, ink, accent and heading
+ * font, so the card is a small sample of the look it applies. */
+.design-preset-swatch {
+  display: grid;
+  height: 3.25rem;
+  align-content: center;
+  justify-content: start;
+  margin-bottom: 0.15rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--dash-line);
+  border-radius: 0.35rem;
+  background:
+    linear-gradient(
+      to right,
+      transparent 0 65%,
+      var(--swatch-panel) 65% 82%,
+      var(--swatch-accent) 82% 100%
+    ),
+    var(--swatch-paper);
+  color: var(--swatch-ink);
+  font-family: var(--swatch-heading-font);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.design-control {
+  min-width: 0;
+  margin: 0 0 1rem;
+  border: 0;
+  padding: 0;
+}
+
+.design-control > legend {
+  padding: 0;
+  font-size: var(--dash-text-small);
+  font-weight: 700;
+}
+
+.design-control-help {
+  margin: 0.15rem 0 0.6rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.design-options {
+  display: grid;
+  grid-template-columns: repeat(var(--option-columns, 2), minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+/* One sample per option kind. Each one is drawn from the same value the site
+ * uses, so what the card shows is what the page gets. */
+.design-sample {
+  display: block;
+  height: 2.1rem;
+  border: 1px solid var(--dash-line);
+  border-radius: 0.35rem;
+}
+
+.design-sample-font {
+  display: grid;
+  place-content: center;
+  border-color: transparent;
+  background: var(--dash-canvas);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.design-sample-accent {
+  background: linear-gradient(
+    to right,
+    var(--sample-colour) 0 60%,
+    var(--sample-deep-colour) 60% 100%
+  );
+  border-color: transparent;
+}
+
+.design-sample-neutral {
+  background:
+    linear-gradient(
+      to right,
+      transparent 0 62%,
+      var(--sample-panel) 62% 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0 55%,
+      var(--sample-ink) 55% 72%,
+      transparent 72% 100%
+    ),
+    var(--sample-paper);
+}
+
+.design-sample-scale {
+  display: grid;
+  align-content: center;
+  border-color: transparent;
+  background: var(--dash-canvas);
+}
+
+.design-sample-scale::before {
+  content: "";
+  display: block;
+  width: calc(var(--sample-ratio) * 100%);
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--dash-accent);
+}
+
+.design-preview {
+  position: sticky;
+  top: 4rem;
+  min-width: 0;
+}
+
+.design-preview-head h2 {
+  margin: 0;
+  font-size: var(--dash-h2);
+}
+
+.design-preview-head p {
+  margin: 0.25rem 0 1rem;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.design-preview-window {
+  overflow: auto;
+  max-height: calc(100vh - 14rem);
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+/* `zoom` rather than `transform: scale`: zoom shrinks the laid-out box as
+ * well as the paint, so the window scrolls by the height the owner can
+ * actually see. The page is laid out at a fixed desktop width first, so the
+ * content-width control has room to show what it does. */
+.design-preview-page {
+  width: var(--preview-width);
+  zoom: var(--preview-scale);
+}
+
+@media (max-width: 70rem) {
+  .design-destination {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .design-preview {
+    position: static;
+  }
+
+  .design-preview-window {
+    max-height: 60vh;
+  }
+}
+
+@media (max-width: 45rem) {
+  .design-presets,
+  .design-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

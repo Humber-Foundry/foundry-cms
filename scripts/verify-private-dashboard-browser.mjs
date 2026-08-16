@@ -1,10 +1,58 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 
 import { chromium } from "playwright";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+
+const siteStylesheet = readFileSync(
+  resolve(repositoryRoot, "apps/reference-site/app/globals.css"),
+  "utf8",
+);
+
+/**
+ * The colour one design option declares in the site stylesheet, as the `rgb()`
+ * string a browser reports.
+ *
+ * This script does not keep its own copy of the palette. It reads the
+ * stylesheet, which `apps/reference-site/src/design-stylesheet.test.ts` already
+ * binds to the design contract, and then checks the browser really delivers
+ * that colour to the element in the live preview. The declaration is the
+ * promise; the computed style is whether the cascade kept it.
+ */
+function declaredValue(attribute, value, property) {
+  const selector = `.site-canvas[${attribute}="${value}"]`;
+  const start = siteStylesheet.indexOf(`${selector} {`);
+  if (start < 0) {
+    throw new Error(`private_dashboard_design_no_rule:${selector}`);
+  }
+  const open = siteStylesheet.indexOf("{", start);
+  const rule = siteStylesheet.slice(open + 1, siteStylesheet.indexOf("}", open));
+  const declared = new RegExp(`${property}:\\s*([^;]+);`, "u").exec(rule);
+  if (declared === null) {
+    throw new Error(
+      `private_dashboard_design_no_declaration:${selector}:${property}`,
+    );
+  }
+  return declared[1].trim();
+}
+
+/** The same declaration as the `rgb()` string a browser reports. */
+function declaredColour(attribute, value, property) {
+  const declared = declaredValue(attribute, value, property);
+  if (!/^#[0-9a-f]{6}$/iu.test(declared)) {
+    throw new Error(`private_dashboard_design_not_a_colour:${declared}`);
+  }
+  const channels = Number.parseInt(declared.slice(1), 16);
+  return `rgb(${(channels >> 16) & 0xff}, ${(channels >> 8) & 0xff}, ${
+    channels & 0xff
+  })`;
+}
+
+/** The fewest preset looks the destination may offer and still be a choice. */
+const leastPresetLooks = 6;
 
 async function availablePort() {
   return new Promise((resolvePort, reject) => {
@@ -63,6 +111,166 @@ async function waitForEnabled(locator, failure) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
   throw new Error(failure);
+}
+
+/** One computed style value from the live preview inside the Design page. */
+async function previewStyle(page, selector, property) {
+  return page
+    .locator(`.design-preview ${selector}`)
+    .first()
+    .evaluate(
+      (element, name) => getComputedStyle(element).getPropertyValue(name),
+      property,
+    );
+}
+
+async function expectPreviewStyle(page, selector, property, expected, failure) {
+  const actual = (await previewStyle(page, selector, property)).trim();
+  if (!actual.includes(expected)) {
+    throw new Error(`${failure}:${property}:${actual}`);
+  }
+}
+
+/**
+ * The Design destination, driven the way an owner drives it: pick a preset
+ * look, then fine-tune one value. Each step is checked against what the real
+ * stylesheet computes in the live preview, not against the data attribute
+ * alone, because the attribute is only a promise until the CSS keeps it.
+ */
+async function verifyDesignDestination(page) {
+  await page.getByRole("navigation", { name: "Dashboard sections" })
+    .getByRole("link", { name: "Design", exact: true })
+    .click();
+  await page.waitForURL(/\/dash\/design\?workspace=workspace_[a-f0-9]{24}$/u);
+  await page.getByRole("heading", { name: "Start from a look" }).waitFor();
+
+  const presets = await page.locator(".design-preset").count();
+  if (presets < leastPresetLooks) {
+    throw new Error(`private_dashboard_design_preset_count:${presets}`);
+  }
+  if ((await page.locator(".design-destination select").count()) !== 0) {
+    throw new Error("private_dashboard_design_unlabelled_dropdown");
+  }
+  await page.locator(".design-preview .site-canvas").waitFor();
+  await expectPreviewStyle(
+    page,
+    ".contact",
+    "background-color",
+    declaredColour("data-colour-accent", "moss", "--design-accent-deep"),
+    "private_dashboard_design_initial_accent",
+  );
+
+  // Choosing a preset changes type, colour, spacing and width together.
+  await page
+    .locator(".design-preset", { hasText: "Gallery" })
+    .locator("input")
+    .click();
+  await page
+    .locator('.design-preview .site-canvas[data-colour-accent="plum"]')
+    .waitFor();
+  await expectPreviewStyle(
+    page,
+    ".site-canvas",
+    "background-color",
+    declaredColour("data-colour-neutral", "bright", "--paper"),
+    "private_dashboard_design_preset_page_tone",
+  );
+  await expectPreviewStyle(
+    page,
+    ".contact",
+    "background-color",
+    declaredColour("data-colour-accent", "plum", "--design-accent-deep"),
+    "private_dashboard_design_preset_accent",
+  );
+  await expectPreviewStyle(
+    page,
+    ".hero h1",
+    "font-family",
+    declaredValue("data-typography-heading", "editorial", "--design-heading-font"),
+    "private_dashboard_design_preset_heading_font",
+  );
+
+  // Fine-tuning one value changes only that value, and the page says the
+  // design is no longer one of the presets.
+  await page
+    .locator(".design-option", { hasText: "Clay red" })
+    .locator("input")
+    .click();
+  await page
+    .locator('.design-preview .site-canvas[data-colour-accent="clay"]')
+    .waitFor();
+  await expectPreviewStyle(
+    page,
+    ".contact",
+    "background-color",
+    declaredColour("data-colour-accent", "clay", "--design-accent-deep"),
+    "private_dashboard_design_fine_tuned_accent",
+  );
+  await page
+    .getByText("does not match any of these looks", { exact: false })
+    .waitFor();
+  if (
+    (await page.locator(".design-preset[data-selected='true']").count()) !== 0
+  ) {
+    throw new Error("private_dashboard_design_preset_still_claimed");
+  }
+
+  // Content width has to change the page it is previewed on. The preview is
+  // laid out wider than the widest option so the two ends are different
+  // widths rather than both clamped to the preview box.
+  const widthOf = async () =>
+    Number.parseFloat(await previewStyle(page, ".hero", "width"));
+  // Selected by value, not by label text: the Narrow option's own description
+  // contains the word "wide".
+  const chooseWidth = async (value) => {
+    await page
+      .locator(`.design-option input[name="design.layout.contentWidth"]` +
+        `[value="${value}"]`)
+      .click();
+    await page
+      .locator(
+        `.design-preview .site-canvas[data-layout-content-width="${value}"]`,
+      )
+      .waitFor();
+    return widthOf();
+  };
+  const narrowWidth = await chooseWidth("narrow");
+  const wideWidth = await chooseWidth("wide");
+  if (!(wideWidth > narrowWidth * 1.2)) {
+    throw new Error(
+      `private_dashboard_design_content_width_invisible:${narrowWidth}:${wideWidth}`,
+    );
+  }
+
+  // Design edits are ordinary draft edits: they autosave and reach a saved
+  // revision through the same toolbar Pages uses.
+  await page.locator(".state-label.state-saved").waitFor({ timeout: 30_000 });
+  await waitForEnabled(
+    page.getByRole("button", { name: "Preview ↗" }),
+    "private_dashboard_design_preview_unavailable",
+  );
+
+  const overflow = await page.locator("body").evaluate((body) => ({
+    width: body.scrollWidth,
+    elements: [...body.querySelectorAll("*")]
+      .filter((element) => element.getBoundingClientRect().right > 390)
+      .slice(0, 8)
+      .map((element) => ({
+        tag: element.tagName,
+        className: String(element.className),
+        right: element.getBoundingClientRect().right,
+      })),
+  }));
+  if (overflow.width > 390) {
+    throw new Error(
+      `private_dashboard_design_mobile_overflow:${JSON.stringify(overflow)}`,
+    );
+  }
+
+  await page.getByRole("navigation", { name: "Dashboard sections" })
+    .getByRole("link", { name: "Overview", exact: true })
+    .click();
+  await page.waitForURL(/\/dash\?workspace=workspace_[a-f0-9]{24}$/u);
 }
 
 async function main() {
@@ -235,6 +443,7 @@ async function main() {
     }
     await page.getByRole("link", { name: "← Dashboard" }).click();
     await page.waitForURL(/\/dash\?workspace=workspace_[a-f0-9]{24}$/u);
+    await verifyDesignDestination(page);
     await page.getByRole("navigation", { name: "Dashboard sections" })
       .getByRole("link", { name: "Blog", exact: true })
       .click();

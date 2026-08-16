@@ -64,25 +64,28 @@ function fixedBaseRuntimeContentHash(bytes) {
 }
 
 /**
- * The content hash a site still running the previous schema reader would have
- * written for this same published content.
+ * The content hash the same stored file produced under Site Definition 1.3.0,
+ * before the body font, the page tone, the site's canonical origin, and the
+ * per-block keywords and share image.
  *
  * A code-only upgrade changes the reader, not the published bytes, so the live
  * marker still carries the older hash. Recomputing it here lets that upgrade
  * pass without a content change being mistaken for drift.
- *
- * Schema 1.4.0 added the site's canonical origin and, on every SEO block, the
- * keywords list and share image. A 1.3.0 reader wrote none of them.
  */
 function previousProjectedContentHash(bytes) {
   const stored = JSON.parse(bytes);
   if (
-    stored.schemaVersion === "1.4.0" ||
-    stored.definitionVersion === "1.4.0"
+    stored.schemaVersion === "1.5.0" ||
+    stored.definitionVersion === "1.5.0"
   ) {
     return null;
   }
   const projected = projectPublishedSiteDefinition(stored);
+  const {
+    typography: { body: _body, ...typography },
+    colour: { neutral: _neutral, ...colour },
+    ...design
+  } = projected.design;
   const { canonicalOrigin: _canonicalOrigin, ...previousSite } =
     projected.site;
   const withoutSharingFields = (seo) => {
@@ -95,6 +98,7 @@ function previousProjectedContentHash(bytes) {
         ...projected,
         definitionVersion: "1.3.0",
         schemaVersion: "1.3.0",
+        design: { ...design, typography, colour },
         site: previousSite,
         home: {
           ...projected.home,

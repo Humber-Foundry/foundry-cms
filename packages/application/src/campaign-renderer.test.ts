@@ -56,7 +56,7 @@ function buildRevision(input: CampaignEditableInput): CampaignRevision {
     campaignId: createCampaignId("20000000-0000-4000-8000-000000000001"),
     revisionNumber: 1,
     provenance: { kind: "standalone" },
-    schemaVersion: "1.4.0",
+    schemaVersion: "1.5.0",
     rendererVersion: "1".repeat(40),
     createdAt: "2026-08-15T00:00:00.000Z",
     createdByActorId: "membership-editor",

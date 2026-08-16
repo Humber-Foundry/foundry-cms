@@ -50,6 +50,26 @@ preserves the item, its revisions and its history. Archive is not deletion.
 selected published revision. It does not silently republish an old revision;
 published-version restore creates a new draft on the current production base.
 
+## Design
+
+**Design token** — One design decision the owner may change, such as the
+heading font or the accent colour. A token offers a fixed list of options.
+Content stores an option's stable value and never a colour, font stack or
+length.
+
+**Design option** — One registered value of one token, with the plain label
+and description the owner reads, and the exact colour, font stack or relative
+size the editor draws as a sample.
+
+**Preset look** — A named, complete set of token values. Choosing one writes
+every value into the draft. A preset is never stored: which preset a design
+matches is derived by comparing the design with each preset, so a preset name
+can never disagree with the site.
+
+**Section style** — Which registered arrangement one band of the page uses,
+such as a stacked list or three cards. It belongs to that section, not to the
+whole site.
+
 ## Media
 
 **Media asset** — A stable, site-scoped identity and metadata record for one
@@ -317,6 +337,7 @@ The value is never part of the record.
 ## Linked domain documents
 
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
+- [Preset looks and the design token vocabulary](docs/decisions/ADR-0009-design-presets-and-token-vocabulary.md)
 - [Draft, preview and publish pipeline](docs/decisions/ADR-0004-draft-preview-publish-pipeline.md)
 - [One SEO and sharing field set](docs/decisions/ADR-0008-seo-metadata-shared-field-set.md)
 - [Messages is an inbox](docs/decisions/ADR-0010-messages-inbox-and-owner-notification-demotion.md)

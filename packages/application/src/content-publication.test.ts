@@ -610,7 +610,7 @@ describe("content publication application", () => {
       ...base.definition,
       design: {
         ...base.definition.design,
-        colour: { accent: "clay" },
+        colour: { ...base.definition.design.colour, accent: "clay" },
       },
     });
     const variantRevision = await revisionWith({

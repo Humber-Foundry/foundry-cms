@@ -69,6 +69,11 @@ const fixedBaseRuntimeContentHash = canonicalHash({
 const trackedRuntimeDefinition = createReferenceSiteDefinition(
   trackedPublishedDefinition,
 );
+const {
+  typography: { body: _previousBody, ...previousTypography },
+  colour: { neutral: _previousNeutral, ...previousColour },
+  ...previousDesign
+} = trackedRuntimeDefinition.design;
 const { canonicalOrigin: _canonicalOrigin, ...previousSite } =
   trackedRuntimeDefinition.site;
 const withoutSharingFields = (seo) => {
@@ -79,6 +84,11 @@ const previousProjectedContentHash = canonicalHash({
   ...trackedRuntimeDefinition,
   definitionVersion: "1.3.0",
   schemaVersion: "1.3.0",
+  design: {
+    ...previousDesign,
+    typography: previousTypography,
+    colour: previousColour,
+  },
   site: previousSite,
   home: {
     ...trackedRuntimeDefinition.home,

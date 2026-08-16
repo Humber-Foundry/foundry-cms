@@ -198,8 +198,8 @@ export type PageSection =
   | RegisteredPageSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.4.0";
-  schemaVersion: "1.4.0";
+  definitionVersion: "1.5.0";
+  schemaVersion: "1.5.0";
   design: SiteDesign;
   site: Readonly<{
     id: SiteId;
@@ -234,6 +234,7 @@ export type StoredSiteDefinitionSchemaVersion =
   | "1.1.0"
   | "1.2.0"
   | "1.3.0"
+  | "1.4.0"
   | SiteDefinitionSchemaVersion;
 
 function isSiteDefinitionRecord(
@@ -272,7 +273,7 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.4.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.5.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
@@ -285,8 +286,8 @@ export const siteDefinitionSchema = {
     "blog",
   ],
   properties: {
-    definitionVersion: { const: "1.4.0" },
-    schemaVersion: { const: "1.4.0" },
+    definitionVersion: { const: "1.5.0" },
+    schemaVersion: { const: "1.5.0" },
     design: {
       type: "object",
       additionalProperties: false,
@@ -295,20 +296,26 @@ export const siteDefinitionSchema = {
         typography: {
           type: "object",
           additionalProperties: false,
-          required: ["heading"],
+          required: ["heading", "body"],
           properties: {
             heading: {
               enum: designContract.tokens["typography.heading"].values,
+            },
+            body: {
+              enum: designContract.tokens["typography.body"].values,
             },
           },
         },
         colour: {
           type: "object",
           additionalProperties: false,
-          required: ["accent"],
+          required: ["accent", "neutral"],
           properties: {
             accent: {
               enum: designContract.tokens["colour.accent"].values,
+            },
+            neutral: {
+              enum: designContract.tokens["colour.neutral"].values,
             },
           },
         },
@@ -959,6 +966,7 @@ export * from "./editable-fields";
 export * from "./component-composition";
 export * from "./page-component-registry";
 export * from "./design-tokens";
+export * from "./design-presets";
 export * from "./blog";
 export * from "./blog-rendering";
 export * from "./seo";
