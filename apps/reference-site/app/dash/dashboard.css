@@ -567,6 +567,19 @@
   resize: vertical;
 }
 
+/* What is wrong with one composer field, said next to that field. Reserve the
+   line so the form does not jump when the message appears. */
+.composer-error {
+  min-height: 1rem;
+  color: #a94a42;
+  font-size: var(--dash-text-small);
+  font-weight: 500;
+}
+
+.composer :is(input, textarea)[aria-invalid="true"] {
+  border-color: #a94a42;
+}
+
 .composer-slug {
   display: flex;
   align-items: center;

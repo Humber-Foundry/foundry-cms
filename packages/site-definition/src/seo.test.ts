@@ -5,6 +5,7 @@ import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
+  updateEditableSiteField,
   type BlogPost,
   type SiteDefinition,
 } from "./index";
@@ -12,6 +13,8 @@ import {
   resolveBlogIndexSeo,
   resolveBlogPostSeo,
   resolveHomeSeo,
+  seoKeywordLimit,
+  toSeoShareImage,
 } from "./seo";
 
 const postId = createBlogPostId("11111111-1111-4111-8111-111111111111");
@@ -334,5 +337,76 @@ describe("editing the canonical origin", () => {
       ]);
       expect(result.ok, value).toBe(false);
     }
+  });
+});
+
+describe("editing keywords", () => {
+  const path = `${referenceSiteDefinition.home.id}.seo.keywords`;
+
+  it("reads a comma-separated list the way an owner types it", () => {
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      { path, value: "boats, , boats , harbour" },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.definition.home.seo.keywords : []).toEqual([
+      "boats",
+      "harbour",
+    ]);
+  });
+
+  it("says how many keywords are allowed instead of a schema complaint", () => {
+    const tooMany = Array.from(
+      { length: seoKeywordLimit + 1 },
+      (_unused, index) => `keyword-${index}`,
+    ).join(", ");
+    const result = applySiteDefinitionEdits(referenceSiteDefinition, [
+      { path, value: tooMany },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? {} : result.errors).toEqual({
+      [path]: `Use at most ${seoKeywordLimit} keywords, separated by commas.`,
+    });
+  });
+
+  it("accepts a list exactly at the limit", () => {
+    const atLimit = Array.from(
+      { length: seoKeywordLimit },
+      (_unused, index) => `keyword-${index}`,
+    ).join(", ");
+
+    expect(
+      applySiteDefinitionEdits(referenceSiteDefinition, [
+        { path, value: atLimit },
+      ]).ok,
+    ).toBe(true);
+  });
+
+  it("refuses a single over-long list through the single-field path", () => {
+    const tooMany = Array.from(
+      { length: seoKeywordLimit + 1 },
+      (_unused, index) => `keyword-${index}`,
+    ).join(", ");
+
+    expect(
+      updateEditableSiteField(referenceSiteDefinition, {
+        path,
+        value: tooMany,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("assembling a share image from two boxes", () => {
+  it("is no picture when the address is blank, whatever the description says", () => {
+    expect(toSeoShareImage("  ", "A harbour")).toBeNull();
+  });
+
+  it("trims both parts", () => {
+    expect(toSeoShareImage(" /api/media/asset_hero ", " A harbour ")).toEqual({
+      url: "/api/media/asset_hero",
+      alt: "A harbour",
+    });
   });
 });

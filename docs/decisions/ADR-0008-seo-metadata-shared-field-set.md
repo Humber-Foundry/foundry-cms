@@ -80,6 +80,28 @@ or post the URL may be a path on the site, such as `/api/media/asset_hero`,
 which the renderer makes absolute using the canonical origin. For a campaign it
 must be an absolute `https://` address.
 
+**One share image is two editable fields.** An editable Site Definition field
+holds one string, and that is what the field-group editor, the save endpoint and
+the MCP `foundry.content.patch` contract all assume. The address and the
+description are therefore separate fields that each write their own half. A pair
+left with a description but no address is dropped once every edit in a batch has
+been written, not while writing, because a later edit in the same batch may be
+about to supply the address.
+
+**A campaign emits no Open Graph tag.** The rendered campaign bytes are only
+ever sent to the delivery provider as the message body, and a mail client
+discards `<head>`. An `og:image` there would be markup nobody reads, inside the
+bytes the send fingerprint covers. The share image reaches the reader as a
+picture in the body instead. The preview line stays the first thing in that
+body, because an inbox builds its preview from the first text it finds.
+
+**A listing borrows the site's metadata.** The blog index is a route the product
+generates, not content an owner writes, so it has no SEO block to fill. It takes
+the site name, the site description and the home page's share image. Giving it
+editable fields would ask an owner to write metadata for a page they did not
+write; leaving it with the hand-written title it had before would have been the
+one public route with no canonical URL and no Open Graph tags.
+
 ## What this decision does not cover
 
 **A slug for site pages.** The issue asks for one. A Site Definition has exactly
@@ -87,7 +109,13 @@ one page, `home`, served at the site root, and no page collection exists to give
 a slug to. A slug here would be a name for a route that cannot vary. Multi-page
 sites are a separate piece of work, and a page slug belongs with them. Blog
 posts already have a slug, and it is now the owner's control over the canonical
-URL.
+URL, so it sits in the post composer's "SEO and sharing" section rather than
+with the post's other settings.
+
+**A hidden pre-header for campaigns.** The preview line is delivered as the
+first visible paragraph of the message, which is what an inbox reads. Making it
+a hidden pre-header block, so it shows in the inbox list but not in the opened
+message, changes what a reader sees and is its own piece of work.
 
 **A share image fallback for a standalone campaign.** A campaign is not part of
 the Site Definition and has no page to inherit from, so a campaign written from

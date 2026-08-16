@@ -64,7 +64,7 @@ function buildRevision(input: CampaignEditableInput): CampaignRevision {
 }
 
 describe("campaign share image", () => {
-  it("renders the share image as an Open Graph tag and a visible picture", async () => {
+  it("renders the share image as a picture in the message body", async () => {
     const rendered = await renderCampaignRevision(
       buildRevision(
         buildInput({
@@ -78,10 +78,37 @@ describe("campaign share image", () => {
     );
 
     expect(rendered.html.bytes).toContain(
-      '<meta property="og:image" content="https://cdn.example.com/harbour.png">',
-    );
-    expect(rendered.html.bytes).toContain(
       '<img src="https://cdn.example.com/harbour.png" alt="The harbour at dawn">',
+    );
+  });
+
+  it("emits no Open Graph tag, because a mail client drops the head", async () => {
+    const rendered = await renderCampaignRevision(
+      buildRevision(
+        buildInput({
+          shareImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
+        }),
+      ),
+      2,
+    );
+
+    expect(rendered.html.bytes).not.toContain("og:image");
+  });
+
+  it("keeps the preview line ahead of the picture", async () => {
+    const rendered = await renderCampaignRevision(
+      buildRevision(
+        buildInput({
+          shareImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
+        }),
+      ),
+      2,
+    );
+
+    // An inbox builds its preview from the first text in the body, so the
+    // preview line must come before anything else.
+    expect(rendered.html.bytes.indexOf("What changed this month.")).toBeLessThan(
+      rendered.html.bytes.indexOf("<img"),
     );
   });
 

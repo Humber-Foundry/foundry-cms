@@ -1,5 +1,6 @@
 import {
   SAFE_RICH_TEXT_LINK_PATTERN,
+  absoluteSiteUrl,
   validateRichTextDocument,
   visitRichTextBlock,
   type RichTextDocument,
@@ -122,10 +123,11 @@ export function campaignShareImageFromPost(
   if (url.startsWith("https://")) {
     return { url, alt: postShareImage.alt };
   }
-  const origin = siteCanonicalOrigin.trim().replace(/\/+$/u, "");
-  return origin === "" || !url.startsWith("/")
-    ? null
-    : { url: `${origin}${url}`, alt: postShareImage.alt };
+  if (!url.startsWith("/")) {
+    return null;
+  }
+  const absolute = absoluteSiteUrl(siteCanonicalOrigin, url as `/${string}`);
+  return absolute === null ? null : { url: absolute, alt: postShareImage.alt };
 }
 
 export function validateCampaignInput(
@@ -263,16 +265,18 @@ function renderCampaignBytes(revision: CampaignRevision) {
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
     `<title>${escapeHtml(revision.subject)}</title>`,
-    shareImage === null
-      ? ""
-      : `<meta property="og:image" content="${escapeHtml(shareImage.url)}">`,
+    // No Open Graph tag here. These bytes are only ever sent to the delivery
+    // provider as the message body, and a mail client drops the head. The
+    // share image reaches the reader as the picture below.
     "</head><body>",
+    // The preview line stays the first thing in the body. An inbox builds its
+    // preview from the first text it finds, so nothing may come before it.
+    `<p>${escapeHtml(revision.previewText)}</p>`,
     shareImage === null
       ? ""
       : `<img src="${escapeHtml(shareImage.url)}" alt="${escapeHtml(
           shareImage.alt,
         )}">`,
-    `<p>${escapeHtml(revision.previewText)}</p>`,
     renderRichTextHtml(revision.emailContent),
     `<p><a href="${escapeHtml(revision.callToAction.href)}">${escapeHtml(
       revision.callToAction.label,

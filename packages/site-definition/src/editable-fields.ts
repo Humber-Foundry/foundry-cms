@@ -12,6 +12,11 @@ import {
   type SiteDefinition,
 } from "./index";
 import { designContract } from "./design-tokens";
+import {
+  normalizeCanonicalOrigin,
+  seoFieldHints,
+  seoKeywordLimit,
+} from "./seo";
 
 export type SiteDefinitionEdit =
   | Readonly<{
@@ -69,6 +74,13 @@ type MutableSiteDefinition = DeepMutable<SiteDefinition>;
 type EditableFieldBinding = Readonly<{
   field: EditableSiteField;
   blogPostId?: BlogPostId;
+  /**
+   * A rule this one field enforces beyond its schema, returning the sentence
+   * to show the owner or `null` when the value is good. It exists so a field
+   * with a real limit can say what the limit is, instead of falling through to
+   * the generic schema-mismatch message.
+   */
+  validate?(value: string): string | null;
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
@@ -91,6 +103,7 @@ type EditableFieldBindingInput = Readonly<{
   optional?: boolean;
   hint?: string;
   blogPostId?: BlogPostId;
+  validate?(value: string): string | null;
   write(definition: MutableSiteDefinition, value: string): void;
 }>;
 
@@ -113,6 +126,7 @@ function fieldBinding({
   optional = false,
   hint,
   blogPostId,
+  validate,
   write,
 }: EditableFieldBindingInput &
   Readonly<{
@@ -132,6 +146,7 @@ function fieldBinding({
       ...(hint === undefined ? {} : { hint }),
     } as EditableSiteField,
     ...(blogPostId === undefined ? {} : { blogPostId }),
+    ...(validate === undefined ? {} : { validate }),
     write,
   };
 }
@@ -254,7 +269,14 @@ function editableFieldBindings(
         value: formatSeoKeywords(seo.keywords),
         multiline: false,
         optional: true,
-        hint: "Separate keywords with commas. Up to 12.",
+        hint: seoFieldHints.keywords,
+        // The schema caps the list too, but a schema failure reads as "the
+        // field value format does not match its schema". An owner who typed
+        // one keyword too many deserves to be told that.
+        validate: (value) =>
+          parseSeoKeywords(value).length > seoKeywordLimit
+            ? `Use at most ${seoKeywordLimit} keywords, separated by commas.`
+            : null,
         write: (draft, value) => {
           select(draft).keywords = parseSeoKeywords(value);
         },
@@ -266,9 +288,7 @@ function editableFieldBindings(
         value: seo.shareImage?.url ?? "",
         multiline: false,
         optional: true,
-        hint:
-          "The picture shown when this link is shared. Leave blank to use " +
-          "the site's main image.",
+        hint: seoFieldHints.shareImageUrl,
         write: (draft, value) => {
           writeShareImage(draft, "url", value);
         },
@@ -280,7 +300,7 @@ function editableFieldBindings(
         value: seo.shareImage?.alt ?? "",
         multiline: false,
         optional: true,
-        hint: "Describe the picture for people who cannot see it.",
+        hint: seoFieldHints.shareImageAlt,
         write: (draft, value) => {
           writeShareImage(draft, "alt", value);
         },
@@ -377,12 +397,9 @@ function editableFieldBindings(
       value: definition.site.canonicalOrigin,
       multiline: false,
       optional: true,
-      hint:
-        "The address this site serves from, such as https://example.com. " +
-        "Leave blank and no canonical or share links are published.",
+      hint: seoFieldHints.siteAddress,
       write: (draft, value) => {
-        // A trailing slash here would produce "https://example.com//blog".
-        draft.site.canonicalOrigin = value.trim().replace(/\/+$/u, "");
+        draft.site.canonicalOrigin = normalizeCanonicalOrigin(value);
       },
     }),
     fieldBinding({
@@ -751,7 +768,9 @@ export function updateEditableSiteField(
   if (
     (edit.format ?? "plainText") !== binding.field.format ||
     (binding.field.values !== undefined &&
-      !binding.field.values.includes(edit.value))
+      !binding.field.values.includes(edit.value)) ||
+    (edit.format !== "richText" &&
+      binding.validate?.(edit.value) != null)
   ) {
     return null;
   }
@@ -819,6 +838,12 @@ export function applySiteDefinitionEdits(
       if (values !== undefined && !values.includes(edit.value)) {
         errors[edit.path] =
           `Choose a value registered by Site Definition ${definition.definitionVersion}.`;
+      }
+    }
+    if (errors[edit.path] === undefined && edit.format !== "richText") {
+      const failure = bindings.get(edit.path)!.validate?.(edit.value);
+      if (failure !== undefined && failure !== null) {
+        errors[edit.path] = failure;
       }
     }
   }

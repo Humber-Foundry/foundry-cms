@@ -11,7 +11,9 @@ import {
 } from "@humber-foundry/application";
 import {
   parseSerializedRichTextDocument,
+  seoFieldHints,
   serializeRichTextDocument,
+  toSeoShareImage,
   type SerializedRichTextDocument,
   type BlogPost,
 } from "@humber-foundry/site-definition";
@@ -83,14 +85,10 @@ function EmailComposer({
       aria-label={heading}
       onSubmit={(event) => {
         event.preventDefault();
-        const shareImage = shareImageUrl.trim();
         onSave({
           subject: subject.trim(),
           previewText: previewText.trim(),
-          shareImage:
-            shareImage === ""
-              ? null
-              : { url: shareImage, alt: shareImageAlt.trim() },
+          shareImage: toSeoShareImage(shareImageUrl, shareImageAlt),
           callToAction: { label: ctaLabel.trim(), href: ctaHref.trim() },
           emailContent: content,
         });
@@ -145,8 +143,7 @@ function EmailComposer({
           <label>
             <span>Share image address</span>
             <small className="composer-hint">
-              Shown at the top of the email. Use a full https address, because
-              a mail app cannot resolve a path on your site.
+              {seoFieldHints.campaignShareImageUrl}
             </small>
             <input
               name="shareImageUrl"
@@ -160,7 +157,7 @@ function EmailComposer({
           <label>
             <span>Share image description</span>
             <small className="composer-hint">
-              Describe the picture for people who cannot see it.
+              {seoFieldHints.shareImageAlt}
             </small>
             <input
               name="shareImageAlt"

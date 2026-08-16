@@ -24,10 +24,16 @@ export function publicMetadata(
   seo: ResolvedSeo,
   { siteName, kind }: PublicMetadataOptions,
 ): Metadata {
+  // An empty alt is no description, so the tag is left off rather than
+  // published empty. The home hero fallback carries no alt text of its own.
   const images =
     seo.shareImage === null
       ? undefined
-      : [{ url: seo.shareImage.url, alt: seo.shareImage.alt }];
+      : [
+          seo.shareImage.alt.trim() === ""
+            ? { url: seo.shareImage.url }
+            : { url: seo.shareImage.url, alt: seo.shareImage.alt },
+        ];
 
   return {
     title: seo.title,

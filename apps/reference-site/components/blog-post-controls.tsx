@@ -7,7 +7,10 @@ import {
   formatSeoKeywords,
   parseSeoKeywords,
   parseSerializedRichTextDocument,
+  seoFieldHints,
+  seoKeywordLimit,
   serializeRichTextDocument,
+  toSeoShareImage,
   type BlogPost,
   type BlogPostId,
   type RichTextDocument,
@@ -144,6 +147,9 @@ function PostComposer({
   const [keywords, setKeywords] = useState(
     formatSeoKeywords(initialPost?.seo.keywords ?? []),
   );
+  // The schema refuses a longer list. Say so here, next to the box, rather
+  // than letting the save come back with a generic schema complaint.
+  const tooManyKeywords = parseSeoKeywords(keywords).length > seoKeywordLimit;
   const [shareImageUrl, setShareImageUrl] = useState(
     initialPost?.seo.shareImage?.url ?? "",
   );
@@ -163,7 +169,6 @@ function PostComposer({
       className="composer"
       onSubmit={(event) => {
         event.preventDefault();
-        const shareImage = shareImageUrl.trim();
         onSave({
           title: title.trim(),
           slug: effectiveSlug,
@@ -172,10 +177,7 @@ function PostComposer({
             title: seoTitle.trim(),
             description: seoDescription.trim(),
             keywords: parseSeoKeywords(keywords),
-            shareImage:
-              shareImage === ""
-                ? null
-                : { url: shareImage, alt: shareImageAlt.trim() },
+            shareImage: toSeoShareImage(shareImageUrl, shareImageAlt),
           },
           body,
         });
@@ -207,7 +209,7 @@ function PostComposer({
         lists and links.
       </p>
       <details className="composer-settings">
-        <summary>Post settings — summary and web address</summary>
+        <summary>Post settings — summary shown in the blog list</summary>
         <div>
           <label>
             <span>Summary — shown in the blog list</span>
@@ -219,6 +221,15 @@ function PostComposer({
               onChange={(event) => setSummary(event.target.value)}
             />
           </label>
+        </div>
+      </details>
+      <details className="composer-settings">
+        <summary>SEO and sharing — how this post looks in search and when shared</summary>
+        <div>
+          {/*
+            The web address leads this section because it is the owner's only
+            control over the post's canonical URL. See ADR-0008.
+          */}
           <label>
             <span>Web address</span>
             <span className="composer-slug">
@@ -236,11 +247,6 @@ function PostComposer({
               />
             </span>
           </label>
-        </div>
-      </details>
-      <details className="composer-settings">
-        <summary>SEO and sharing — how this post looks in search and when shared</summary>
-        <div>
           <label>
             <span>SEO title</span>
             <small className="composer-hint">
@@ -267,20 +273,24 @@ function PostComposer({
           </label>
           <label>
             <span>Keywords</span>
-            <small className="composer-hint">
-              Separate keywords with commas. Up to 12.
-            </small>
+            <small className="composer-hint">{seoFieldHints.keywords}</small>
             <input
               name="seoKeywords"
               value={keywords}
+              aria-invalid={tooManyKeywords}
+              aria-describedby="seo-keywords-error"
               onChange={(event) => setKeywords(event.target.value)}
             />
+            <small className="composer-error" id="seo-keywords-error">
+              {tooManyKeywords
+                ? `Use at most ${seoKeywordLimit} keywords, separated by commas.`
+                : ""}
+            </small>
           </label>
           <label>
             <span>Share image address</span>
             <small className="composer-hint">
-              The picture shown when this link is shared. Leave blank to use
-              the site&rsquo;s main image.
+              {seoFieldHints.shareImageUrl}
             </small>
             <input
               name="seoShareImageUrl"
@@ -292,7 +302,7 @@ function PostComposer({
           <label>
             <span>Share image description</span>
             <small className="composer-hint">
-              Describe the picture for people who cannot see it.
+              {seoFieldHints.shareImageAlt}
             </small>
             <input
               name="seoShareImageAlt"
@@ -306,7 +316,7 @@ function PostComposer({
       <ComposerActions
         busy={busy}
         saveLabel={saveLabel}
-        blocked={bodyInvalid}
+        blocked={bodyInvalid || tooManyKeywords}
         onCancel={onCancel}
       />
     </form>

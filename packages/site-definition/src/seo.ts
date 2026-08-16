@@ -25,17 +25,76 @@ function firstFilled(...candidates: ReadonlyArray<string>): string {
   return candidates.find((candidate) => candidate.trim() !== "")?.trim() ?? "";
 }
 
+/** The most keywords one piece of content may carry. Matches the schema. */
+export const seoKeywordLimit = 12;
+
 /**
- * Turn a path on this site into the one address search engines should index.
- * Returns `null` when the installation has not set a canonical origin, because
- * a canonical pointing at the wrong host is worse than none at all.
+ * What the dashboard tells an owner about each SEO field.
+ *
+ * One copy, read by both the field-group editor and the blog and campaign
+ * composers. Two copies of the same sentence drift, and then two owners are
+ * told two different things about one field.
  */
+export const seoFieldHints = {
+  keywords: `Separate keywords with commas. Up to ${seoKeywordLimit}.`,
+  shareImageUrl:
+    "The picture shown when this link is shared. Leave blank to use the " +
+    "site's main image.",
+  shareImageAlt: "Describe the picture for people who cannot see it.",
+  campaignShareImageUrl:
+    "Shown at the top of the email. Use a full https address, because a mail " +
+    "app cannot resolve a path on your site.",
+  siteAddress:
+    "The address this site serves from, such as https://example.com. Leave " +
+    "blank and no canonical or share links are published.",
+} as const;
+
+/**
+ * Assemble one share image from the two boxes an owner fills.
+ *
+ * An address with nothing in it is no picture, whatever the description says,
+ * so the pair collapses to `null`. Both composers build the value this way.
+ */
+export function toSeoShareImage(
+  url: string,
+  alt: string,
+): SeoShareImage | null {
+  const address = url.trim();
+  return address === "" ? null : { url: address, alt: alt.trim() };
+}
+
+/**
+ * The canonical origin as it must be stored: no surrounding space, no trailing
+ * slash. A trailing slash here would build "https://example.com//blog".
+ *
+ * This is the one place that rule lives. Every writer and reader of
+ * `site.canonicalOrigin` goes through it.
+ */
+export function normalizeCanonicalOrigin(value: string): string {
+  return value.trim().replace(/\/+$/u, "");
+}
+
+/**
+ * Turn a path on this site into one absolute address.
+ *
+ * Returns `null` when the installation has not set a canonical origin, because
+ * an address pointing at the wrong host is worse than none at all. Also the one
+ * place a path is joined to the origin, so canonical URLs and share images
+ * cannot drift apart.
+ */
+export function absoluteSiteUrl(
+  canonicalOrigin: string,
+  path: `/${string}`,
+): string | null {
+  const origin = normalizeCanonicalOrigin(canonicalOrigin);
+  return origin === "" ? null : `${origin}${path}`;
+}
+
 function canonicalUrlFor(
   definition: SiteDefinition,
   path: `/${string}`,
 ): string | null {
-  const origin = definition.site.canonicalOrigin.trim().replace(/\/+$/u, "");
-  return origin === "" ? null : `${origin}${path}`;
+  return absoluteSiteUrl(definition.site.canonicalOrigin, path);
 }
 
 /**
@@ -61,9 +120,10 @@ function resolveShareImage(
   ...candidates: ReadonlyArray<SeoShareImage | null>
 ): SeoShareImage | null {
   const chosen = candidates.find(
-    (candidate) => candidate !== null && candidate.url.trim() !== "",
+    (candidate): candidate is SeoShareImage =>
+      candidate !== null && candidate.url.trim() !== "",
   );
-  if (chosen === undefined || chosen === null) {
+  if (chosen === undefined) {
     return null;
   }
   const url = chosen.url.trim();
@@ -75,26 +135,20 @@ function resolveShareImage(
 }
 
 /**
- * The browser-tab and search-result title for a page below the home page.
- *
- * A blank SEO title falls back to the content's own heading followed by the
- * site name, which is what an owner expects from Yoast or Rank Math. A filled
- * SEO title is used exactly as written, with no suffix added.
+ * The title a page below the home page shows when its owner wrote no SEO
+ * title: the page's own heading, then the site name. This is what an owner
+ * expects from Yoast or Rank Math. A filled SEO title is used exactly as
+ * written, with no suffix added, so this is never consulted then.
  */
-function titleWithSiteName(
+function headingWithSiteName(
   definition: SiteDefinition,
-  seoTitle: string,
-  contentTitle: string,
+  heading: string,
 ): string {
-  const written = seoTitle.trim();
-  if (written !== "") {
-    return written;
-  }
   const siteName = definition.site.name.trim();
-  const heading = firstFilled(contentTitle, siteName);
-  return siteName === "" || heading === siteName
-    ? heading
-    : `${heading} — ${siteName}`;
+  const written = firstFilled(heading, siteName);
+  return siteName === "" || written === siteName
+    ? written
+    : `${written} — ${siteName}`;
 }
 
 export function resolveHomeSeo(definition: SiteDefinition): ResolvedSeo {
@@ -115,13 +169,14 @@ export function resolveHomeSeo(definition: SiteDefinition): ResolvedSeo {
 }
 
 /**
- * The blog index has no editable metadata of its own. It borrows the site's
- * name, description and share image so its link previews still look right.
+ * The blog index has no editable metadata of its own, because it is a listing
+ * rather than a piece of content an owner writes. It borrows the site's name,
+ * description and share image so its link previews still look right.
  */
 export function resolveBlogIndexSeo(definition: SiteDefinition): ResolvedSeo {
   return {
-    title: titleWithSiteName(definition, "", "Blog"),
-    description: firstFilled(definition.site.description),
+    title: headingWithSiteName(definition, "Blog"),
+    description: definition.site.description.trim(),
     canonicalUrl: canonicalUrlFor(definition, "/blog"),
     keywords: [],
     shareImage: resolveShareImage(
@@ -137,7 +192,10 @@ export function resolveBlogPostSeo(
   post: BlogPost,
 ): ResolvedSeo {
   return {
-    title: titleWithSiteName(definition, post.seo.title, post.title),
+    title: firstFilled(
+      post.seo.title,
+      headingWithSiteName(definition, post.title),
+    ),
     description: firstFilled(
       post.seo.description,
       post.excerpt,

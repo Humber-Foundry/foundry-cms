@@ -116,6 +116,8 @@ describe("revision preview page", () => {
     expect(metadataRevision.definition.home.seo).toEqual({
       title: "Edited SEO title",
       description: "Edited SEO description",
+      keywords: [],
+      shareImage: null,
     });
     expect(mocks.loadIdentity).toHaveBeenCalledTimes(1);
     expect(mocks.authorize).toHaveBeenCalledTimes(1);

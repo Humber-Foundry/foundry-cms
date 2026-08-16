@@ -75,9 +75,16 @@ field set. Every field may be left blank; blank asks for the fallback.
 
 **Fallback** — The value the renderer uses when an SEO field is blank. A blank
 description becomes the post excerpt, then the site description. A blank title
-becomes the content's own heading followed by the site name. A blank share image
-becomes the home page's share image, then the home hero. A fallback is computed
-at render time and never written back into the content.
+becomes the content's own heading followed by the site name, except on the home
+page, whose heading is the site name itself, so it uses the site name alone. A
+blank share image becomes the home page's share image, then the home hero. A
+fallback is computed at render time and never written back into the content.
+
+**Listing** — A public route that shows other content rather than content an
+owner writes, such as the blog index. A listing has no SEO metadata of its own.
+It borrows the site name, description and share image, so its link preview is
+still right, and no owner is asked to fill a field for a page they did not
+write.
 
 **Share image** — The picture shown when a page, post or campaign is shared as a
 link. It is an address and an alt text. A page or post may use a path on the
