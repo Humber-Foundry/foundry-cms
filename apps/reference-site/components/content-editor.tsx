@@ -1901,6 +1901,13 @@ function EditorFieldGroups({
                       {field.hint}
                     </small>
                   );
+                // A hint a screen reader never reaches is not a hint. Name it
+                // ahead of the error so the control reads out what the field
+                // is for before what is wrong with it.
+                const fieldDescribedBy =
+                  field.hint === undefined
+                    ? `${field.path}-error`
+                    : `${field.path}-hint ${field.path}-error`;
                 const fieldError = (
                   <small id={`${field.path}-error`}>
                     {errors[field.path] ?? ""}
@@ -1922,7 +1929,7 @@ function EditorFieldGroups({
                         disabled={editorLocked}
                         value={field.value}
                         invalid={Boolean(errors[field.path])}
-                        describedBy={`${field.path}-error`}
+                        describedBy={fieldDescribedBy}
                         labelledBy={labelId}
                         onChange={(value) =>
                           edit({
@@ -1948,7 +1955,7 @@ function EditorFieldGroups({
                         disabled={editorLocked}
                         value={field.value}
                         aria-invalid={Boolean(errors[field.path])}
-                        aria-describedby={`${field.path}-error`}
+                        aria-describedby={fieldDescribedBy}
                         onChange={(event) =>
                           edit({
                             path: field.path,
@@ -1969,7 +1976,7 @@ function EditorFieldGroups({
                         disabled={editorLocked}
                         value={field.value}
                         aria-invalid={Boolean(errors[field.path])}
-                        aria-describedby={`${field.path}-error`}
+                        aria-describedby={fieldDescribedBy}
                         onChange={(event) =>
                           edit({
                             path: field.path,
@@ -1983,7 +1990,7 @@ function EditorFieldGroups({
                         disabled={editorLocked}
                         value={field.value}
                         aria-invalid={Boolean(errors[field.path])}
-                        aria-describedby={`${field.path}-error`}
+                        aria-describedby={fieldDescribedBy}
                         onChange={(event) =>
                           edit({
                             path: field.path,

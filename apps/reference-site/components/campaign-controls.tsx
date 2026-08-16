@@ -122,43 +122,54 @@ function EmailComposer({
         them.
       </p>
       <div className="composer-settings-open">
-        <label>
-          <span>Preview line — shown after the subject in inboxes</span>
-          <textarea
-            name="previewText"
-            required
-            maxLength={1000}
-            value={previewText}
-            onChange={(event) => setPreviewText(event.target.value)}
-          />
-        </label>
-        <label>
-          <span>Share image address</span>
-          <small className="composer-hint">
-            Shown at the top of the email. Use a full https address, because a
-            mail app cannot resolve a path on your site.
-          </small>
-          <input
-            name="shareImageUrl"
-            type="url"
-            maxLength={2000}
-            placeholder="https://…"
-            value={shareImageUrl}
-            onChange={(event) => setShareImageUrl(event.target.value)}
-          />
-        </label>
-        <label>
-          <span>Share image description</span>
-          <small className="composer-hint">
-            Describe the picture for people who cannot see it.
-          </small>
-          <input
-            name="shareImageAlt"
-            maxLength={300}
-            value={shareImageAlt}
-            onChange={(event) => setShareImageAlt(event.target.value)}
-          />
-        </label>
+        {/*
+          The same SEO and sharing block the page and post editors show, named
+          in the words an email uses. The subject above is this campaign's
+          title, so the section holds the two lines below it and the picture.
+        */}
+        <fieldset className="composer-section">
+          <legend>SEO and sharing — how this email looks in an inbox</legend>
+          <p className="composer-hint">
+            The subject above is the first line an inbox shows.
+          </p>
+          <label>
+            <span>Preview line — shown after the subject in inboxes</span>
+            <textarea
+              name="previewText"
+              required
+              maxLength={1000}
+              value={previewText}
+              onChange={(event) => setPreviewText(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Share image address</span>
+            <small className="composer-hint">
+              Shown at the top of the email. Use a full https address, because
+              a mail app cannot resolve a path on your site.
+            </small>
+            <input
+              name="shareImageUrl"
+              type="url"
+              maxLength={2000}
+              placeholder="https://…"
+              value={shareImageUrl}
+              onChange={(event) => setShareImageUrl(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Share image description</span>
+            <small className="composer-hint">
+              Describe the picture for people who cannot see it.
+            </small>
+            <input
+              name="shareImageAlt"
+              maxLength={300}
+              value={shareImageAlt}
+              onChange={(event) => setShareImageAlt(event.target.value)}
+            />
+          </label>
+        </fieldset>
         <label>
           <span>Button label</span>
           <input

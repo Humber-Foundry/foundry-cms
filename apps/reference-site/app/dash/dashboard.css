@@ -526,6 +526,25 @@
   padding: 0.25rem 0 1rem;
 }
 
+/* A named block of fields inside an always-open composer. The campaign
+   composer uses it for the lines and picture that decide how the message
+   looks before anyone opens it. */
+.composer-section {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 1rem;
+}
+
+.composer-section > legend {
+  padding: 0 0.35rem;
+  color: var(--dash-accent);
+  font-size: var(--dash-text-small);
+  font-weight: 600;
+}
+
 .composer-settings label,
 .composer-settings-open label {
   display: grid;
@@ -1762,6 +1781,15 @@
   min-height: 1rem;
   color: #a94a42;
   font-weight: 500;
+}
+
+/* A hint says what a blank field falls back to. It is not an error, so it must
+   not borrow the error colour the rule above sets for every other `small`. */
+.editor-groups .editor-field-hint {
+  min-height: 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 400;
 }
 
 .state-dirty,

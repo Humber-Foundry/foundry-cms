@@ -391,6 +391,44 @@ describe("reference Site Definition", () => {
         ];
       },
     },
+    {
+      // "//host/x" is a protocol-relative address for another host. It looks
+      // like a path on this site but is not one, so it must not pass as one.
+      name: "a protocol-relative share image address",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.shareImage = {
+          url: "//attacker.example/card.png",
+          alt: "",
+        };
+      },
+    },
+    {
+      name: "an insecure share image address",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.shareImage = {
+          url: "http://attacker.example/card.png",
+          alt: "",
+        };
+      },
+    },
+    {
+      name: "an executable share image address",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.shareImage = {
+          url: "javascript:alert(1)",
+          alt: "",
+        };
+      },
+    },
+    {
+      name: "more keywords than an owner may set",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.keywords = Array.from(
+          { length: 13 },
+          (_unused, index) => `keyword-${index}`,
+        );
+      },
+    },
   ])("rejects $name", ({ change }) => {
     const malformed = structuredClone(referenceSiteDefinition) as unknown as Record<
       string,
