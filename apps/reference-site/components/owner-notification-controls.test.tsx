@@ -55,8 +55,11 @@ describe("owner notification controls", () => {
     expect(markup).toContain("The email service refused it.");
   });
 
-  it("confirms the alerts arrived when none failed", () => {
-    expect(render([])).toContain("reached your email");
+  it("says no alert stopped, not that every alert arrived", () => {
+    const markup = render([]);
+
+    expect(markup).toContain("No alert about a new message has stopped.");
+    expect(markup).not.toContain("reached your email");
   });
 
   it("still says what happened after the last stopped alert is sent again", () => {

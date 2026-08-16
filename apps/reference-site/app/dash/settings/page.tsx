@@ -93,7 +93,7 @@ export default async function DashboardSettingsPage() {
         </p>
         <dl className="fact-list">
           <div>
-            <dt>The email service</dt>
+            <dt>Can alerts be sent</dt>
             <dd>
               {ownerAlertSenderState(ownerNotifications.health.adapter)}
             </dd>

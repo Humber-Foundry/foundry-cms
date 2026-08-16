@@ -51,11 +51,26 @@ function configurationHealth(environment: Record<string, unknown>) {
 }
 
 /**
- * `next dev` runs without the deployed bindings, so the dashboard cannot read
- * real submissions there. It shows an empty inbox rather than an error.
+ * What every Messages read does before it reads anything.
+ *
+ * A caller must be an authorized member. `next dev` then runs without the
+ * deployed bindings, so the dashboard has no submissions to read there and
+ * shows the empty result the caller supplies rather than an error.
  */
-function isLocalDevelopment() {
-  return process.env.NODE_ENV === "development";
+async function readMessages<Local, Result>(
+  humanContext: HumanAccessRequestContext,
+  local: Local,
+  read: (
+    application: Awaited<ReturnType<typeof createPublicFormOperationsContext>>,
+  ) => Promise<Result>,
+): Promise<Local | Result> {
+  if (humanContext.state !== "authorized") {
+    throw new Error("form_delivery_not_authorized");
+  }
+  if (process.env.NODE_ENV === "development") {
+    return local;
+  }
+  return read(await createPublicFormOperationsContext(humanContext));
 }
 
 export async function createPublicFormOperationsContext(
@@ -104,50 +119,50 @@ export async function loadPublicFormInbox(
   humanContext: HumanAccessRequestContext,
   olderThanReceiptId: PublicFormReceiptId | null = null,
 ) {
-  if (humanContext.state !== "authorized") {
-    throw new Error("form_delivery_not_authorized");
-  }
-  if (isLocalDevelopment()) {
-    return {
+  return readMessages(
+    humanContext,
+    {
       inbox: emptyInbox,
       suspectedSpam: [],
       notificationHealth: localHealth,
-    };
-  }
-  const application = await createPublicFormOperationsContext(humanContext);
-  const [inbox, suspectedSpam, notificationHealth] = await Promise.all([
-    application.queries.inbox({
-      actor: humanContext.identity,
-      olderThanReceiptId,
-    }),
-    application.queries.suspectedSpam({ actor: humanContext.identity }),
-    application.queries.health({ actor: humanContext.identity }),
-  ]);
-  return { inbox, suspectedSpam, notificationHealth };
+    },
+    async (application) => {
+      const [inbox, suspectedSpam, notificationHealth] = await Promise.all([
+        application.queries.inbox({
+          actor: humanContext.identity,
+          olderThanReceiptId,
+        }),
+        application.queries.suspectedSpam({ actor: humanContext.identity }),
+        application.queries.health({ actor: humanContext.identity }),
+      ]);
+      return { inbox, suspectedSpam, notificationHealth };
+    },
+  );
 }
 
 /**
  * Settings shows the owner-notification detail: the email queue and any
  * notification that never reached the owner. The messages themselves are kept
  * whatever this says.
+ *
+ * Only an Owner reaches this. The Settings page sends anyone else away, and
+ * `failedDeliveries` requires `forms.delivery.manage`, so this function states
+ * the rule nowhere itself.
  */
 export async function loadOwnerNotificationStatus(
   humanContext: HumanAccessRequestContext,
 ) {
-  if (humanContext.state !== "authorized") {
-    throw new Error("form_delivery_not_authorized");
-  }
-  if (isLocalDevelopment()) {
-    return { health: localHealth, failedDeliveries: [] };
-  }
-  const application = await createPublicFormOperationsContext(humanContext);
-  const [health, failedDeliveries] = await Promise.all([
-    application.queries.health({ actor: humanContext.identity }),
-    humanContext.membership.role === "owner"
-      ? application.queries.failedDeliveries({ actor: humanContext.identity })
-      : Promise.resolve([]),
-  ]);
-  return { health, failedDeliveries };
+  return readMessages(
+    humanContext,
+    { health: localHealth, failedDeliveries: [] },
+    async (application) => {
+      const [health, failedDeliveries] = await Promise.all([
+        application.queries.health({ actor: humanContext.identity }),
+        application.queries.failedDeliveries({ actor: humanContext.identity }),
+      ]);
+      return { health, failedDeliveries };
+    },
+  );
 }
 
 /**
@@ -157,16 +172,15 @@ export async function loadOwnerNotificationStatus(
 export async function loadMessagesAttention(
   humanContext: HumanAccessRequestContext,
 ) {
-  if (humanContext.state !== "authorized") {
-    throw new Error("form_delivery_not_authorized");
-  }
-  if (isLocalDevelopment()) {
-    return { unreadCount: 0, heldForReview: 0 };
-  }
-  const application = await createPublicFormOperationsContext(humanContext);
-  const [unreadCount, suspectedSpam] = await Promise.all([
-    application.queries.unreadCount({ actor: humanContext.identity }),
-    application.queries.suspectedSpam({ actor: humanContext.identity }),
-  ]);
-  return { unreadCount, heldForReview: suspectedSpam.length };
+  return readMessages(
+    humanContext,
+    { unreadCount: 0, heldForReview: 0 },
+    async (application) => {
+      const [unreadCount, suspectedSpam] = await Promise.all([
+        application.queries.unreadCount({ actor: humanContext.identity }),
+        application.queries.suspectedSpam({ actor: humanContext.identity }),
+      ]);
+      return { unreadCount, heldForReview: suspectedSpam.length };
+    },
+  );
 }

@@ -352,6 +352,30 @@ describe("installed public form list", () => {
     ).toBe(false);
   });
 
+  it("refuses two fields claiming one role, because the second would never show", () => {
+    expect(
+      isInstalledPublicFormList([
+        {
+          ...contactForm,
+          fields: [
+            {
+              id: "name",
+              required: true,
+              maximumLength: 100,
+              inboxRole: "sender",
+            },
+            {
+              id: "nickname",
+              required: false,
+              maximumLength: 100,
+              inboxRole: "sender",
+            },
+          ],
+        },
+      ]),
+    ).toBe(false);
+  });
+
   it("refuses a form whose field ids repeat, because one would hide the other", () => {
     expect(
       isInstalledPublicFormList([

@@ -42,7 +42,8 @@ export function OwnerNotificationTable({
       </p>
       {failedDeliveries.length === 0 ? (
         <p className="empty-state">
-          Every alert about a new message reached your email.
+          No alert about a new message has stopped. An alert still waiting is
+          counted above.
         </p>
       ) : (
         <div

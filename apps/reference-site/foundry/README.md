@@ -19,8 +19,9 @@ Foundry foundation.
   Each field states its length limit and whether it is required. `inboxRole`
   states what a field means in the Messages inbox — `sender`, `replyAddress`
   or `preview` — so the inbox can name the person, offer a reply link and show
-  a preview line. A form with no roles still works; its messages list without
-  a name, a preview or a reply link.
+  a preview line. Declare each role at most once. A form with no roles still
+  works; its messages list without a name and without a reply link, and
+  preview the first field the form declares.
 - `site-definition.server.ts` is server-only. It binds that definition to the
   site-scoped application runtime. Client-owned private adapters belong on this
   side of the boundary.

@@ -25,12 +25,12 @@ describe("owner alert summary", () => {
     );
   });
 
-  it("never claims the alerts are working while the email service cannot send", () => {
+  it("never claims the alerts are working while the sender says it cannot send", () => {
     expect(ownerAlertSummary({ ...healthy, adapter: "unavailable" })).toBe(
-      "Email alerts about new messages are not being sent right now.",
+      "Email alerts about new messages cannot be sent at the moment.",
     );
     expect(ownerAlertSummary({ ...healthy, adapter: "degraded" })).toBe(
-      "Email alerts about new messages are slower than usual.",
+      "Email alerts about new messages are not all going through.",
     );
   });
 
@@ -62,12 +62,13 @@ describe("owner alert summary", () => {
 });
 
 describe("owner alert sender state", () => {
-  it("says in words whether the email service can send", () => {
-    expect(ownerAlertSenderState("healthy")).toBe(
-      "The email service is working.",
+  it("says in words whether alerts can be sent, and claims nothing about speed", () => {
+    expect(ownerAlertSenderState("healthy")).toBe("Alerts can be sent.");
+    expect(ownerAlertSenderState("degraded")).toBe(
+      "Alerts can be sent, but not everything is going through.",
     );
-    expect(ownerAlertSenderState("unavailable")).toBe(
-      "Email alerts about new messages are not being sent right now.",
+    expect(ownerAlertSenderState("unavailable")).toContain(
+      "Alerts cannot be sent.",
     );
   });
 });

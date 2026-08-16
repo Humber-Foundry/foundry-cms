@@ -133,11 +133,20 @@ the fact that every message is saved here even when an alert fails.
 
 That line only says the alerts are working when the CMS has checked both
 things the health record separates: that no alert has stopped, and that the
-email service itself is healthy. A healthy queue with an unavailable sender
+sender reports it can send. An empty queue with a sender that cannot send
 still means nothing arrives, so a line that read only the failure count would
-tell the Owner something the code never checked. `src/owner-alert-status.ts`
-owns those sentences, and Settings reads the sender state from it too. An
-Editor sees no alert line, because an Editor can neither open the Settings
+tell the Owner something the code never checked.
+
+`src/owner-alert-status.ts` owns those sentences, and Settings reads the
+sender state from it too. Every sentence there is bounded by what was
+measured. The store counted the alerts that stopped for good, and the adapter
+reported on itself. Nothing measured how fast an alert travels or whether the
+provider is reachable, so no sentence says so: `unavailable` reads as "alerts
+cannot be sent", not as "the provider is down". Settings says "no alert has
+stopped" rather than "every alert arrived", because an alert still in the
+queue has not arrived and the queue counts sit beside that sentence.
+
+An Editor sees no alert line, because an Editor can neither open the Settings
 section nor send an alert again. Overview stops naming alerts at all; it lists only
 unread messages and messages held as spam. The queue counts and the
 "send the alert again" control move to a Settings section named "Email alerts
@@ -155,9 +164,9 @@ recovery target arrives unread. The read row is removed with its submission by
 `ON DELETE CASCADE` when a recovery target is wiped.
 
 A form that declares no `inboxRole` on any field lists as "Someone" with no
-preview and no reply link. That is truthful — the CMS was told nothing about
-what those fields mean — but an installation adding a form should set the
-roles at the same time.
+reply link, and previews whichever field it declared first. That is the
+deterministic fallback above rather than a guess, but an installation adding a
+form should set the roles at the same time.
 
 The reply rule rejects some valid but rare addresses, such as an
 internationalized one. That address is still readable in full on the message's
@@ -171,3 +180,10 @@ not open it, so that message arrives unread.
 The stored failure code is still shown beside the sentence that explains an
 alert. The sentence leads and the code follows in small type, because the code
 is a stable, non-secret value that support needs to name the exact failure.
+
+The sender state this installation reports is a configuration check, not a
+call to the email provider: the dashboard adapter answers `healthy` when the
+form-email binding and addresses are set and `unavailable` when they are not.
+That is why the Owner-facing words say only whether alerts can be sent. An
+installation whose adapter really probes its provider gets a stronger fact
+through the same sentence without a change here.

@@ -21,33 +21,34 @@ import {
  * adapters out of it. The origin and Turnstile settings that complete a form
  * definition come from the deployment environment, not from here.
  */
-const installedCandidate: unknown = Object.freeze([
-  Object.freeze({
-    id: "contact",
-    schemaVersion: "1.0.0",
-    turnstileAction: "contact",
-    fields: Object.freeze([
-      Object.freeze({
-        id: "name",
-        required: true,
-        maximumLength: 100,
-        inboxRole: "sender",
-      }),
-      Object.freeze({
-        id: "email",
-        required: false,
-        maximumLength: 254,
-        inboxRole: "replyAddress",
-      }),
-      Object.freeze({
-        id: "message",
-        required: true,
-        maximumLength: 2_000,
-        inboxRole: "preview",
-      }),
-    ]),
-  }),
-]);
+const installedCandidate: ReadonlyArray<InstalledPublicFormDefinition> =
+  Object.freeze([
+    Object.freeze({
+      id: "contact",
+      schemaVersion: "1.0.0",
+      turnstileAction: "contact",
+      fields: Object.freeze([
+        Object.freeze({
+          id: "name",
+          required: true,
+          maximumLength: 100,
+          inboxRole: "sender",
+        }),
+        Object.freeze({
+          id: "email",
+          required: false,
+          maximumLength: 254,
+          inboxRole: "replyAddress",
+        }),
+        Object.freeze({
+          id: "message",
+          required: true,
+          maximumLength: 2_000,
+          inboxRole: "preview",
+        }),
+      ]),
+    }),
+  ]);
 
 if (!isInstalledPublicFormList(installedCandidate)) {
   throw new TypeError("installed_public_forms_invalid");

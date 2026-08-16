@@ -171,8 +171,10 @@ summary of each one, never the whole submission.
 
 **Inbox role** — What one form field means in that summary: `sender` for the
 person's name, `replyAddress` for the address to reply to, `preview` for the
-line worth showing. A field with no role appears only when a human opens the
-submission.
+line worth showing. A form may declare each role once. When a form names no
+preview field, the summary previews the first field that is neither the sender
+nor the reply address, so the choice stays the same whatever a visitor sent.
+Every other field appears only when a human opens the submission.
 
 **Reply address** — The address a visitor gave in the field the form marks as
 `replyAddress`. It becomes a reply link only when it holds nothing but an

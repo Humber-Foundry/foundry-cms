@@ -6,6 +6,12 @@ import type { PublicFormDeliveryHealth } from "@humber-foundry/application";
  * Messages shows a single line and Settings shows the detail, so both read
  * the same words from here. This module is browser-safe: it holds no binding,
  * secret or adapter.
+ *
+ * Every sentence here says only what the CMS checked. Two things are known:
+ * how many alerts stopped for good, which the store counted, and what the
+ * sender reports about its own ability to send. Nothing here measures how
+ * fast an alert travels or whether the provider is up, so nothing here says
+ * so.
  */
 
 /**
@@ -24,32 +30,34 @@ export function ownerAlertStopReason(errorCode: string): string {
 }
 
 /**
- * Whether the email service can send an alert at all, in words.
+ * Whether alerts can be sent at all, in the sender's own words.
  *
- * The health record carries this apart from the queue counts: a healthy queue
- * with an unavailable sender still means nothing arrives. Messages may only
- * say the alerts are working when this says the sender is healthy.
+ * This is a separate fact from the queue counts: a queue with nothing in it
+ * and a sender that cannot send still means nothing arrives. The map covers
+ * the whole state union, so a new state fails to compile rather than reading
+ * as good news.
  */
 const senderStates: Readonly<
-  Record<PublicFormDeliveryHealth["adapter"], string | null>
+  Record<PublicFormDeliveryHealth["adapter"], string>
 > = {
-  healthy: null,
-  degraded: "Email alerts about new messages are slower than usual.",
-  unavailable: "Email alerts about new messages are not being sent right now.",
+  healthy: "Alerts can be sent.",
+  degraded: "Alerts can be sent, but not everything is going through.",
+  unavailable:
+    "Alerts cannot be sent. Check this site's email settings with whoever set it up.",
 };
 
 export function ownerAlertSenderState(
   adapter: PublicFormDeliveryHealth["adapter"],
 ): string {
-  return senderStates[adapter] ?? "The email service is working.";
+  return senderStates[adapter];
 }
 
 /**
  * The one line Messages shows the Owner.
  *
- * It never says the alerts are working unless the email service is healthy
- * and every alert arrived. A stopped alert is named first, because that is
- * the one an Owner can send again from Settings.
+ * It says the alerts are working only when no alert stopped and the sender
+ * reports it can send. A stopped alert is named first, because that is the
+ * one an Owner can send again from Settings.
  */
 export function ownerAlertSummary(health: PublicFormDeliveryHealth): string {
   if (health.failed > 0) {
@@ -57,8 +65,11 @@ export function ownerAlertSummary(health: PublicFormDeliveryHealth): string {
       health.failed === 1 ? "" : "s"
     } did not reach you.`;
   }
-  return (
-    senderStates[health.adapter] ??
-    "Email alerts about new messages are working."
-  );
+  if (health.adapter === "unavailable") {
+    return "Email alerts about new messages cannot be sent at the moment.";
+  }
+  if (health.adapter === "degraded") {
+    return "Email alerts about new messages are not all going through.";
+  }
+  return "Email alerts about new messages are working.";
 }

@@ -112,10 +112,11 @@ function isPublicFormFieldDefinition(
 /**
  * Whether an installation's form list is one the CMS can serve.
  *
- * A misspelled `inboxRole` or a repeated field id would otherwise fail
- * silently: the inbox would list every message as "Someone" with no preview
- * and no reply link, and nothing would say why. This guard makes the
- * installation fail to start instead.
+ * A misspelled `inboxRole`, a repeated field id, or two fields claiming one
+ * role would otherwise fail silently: the inbox would list every message as
+ * "Someone" with no reply link, previewing whichever field happened to come
+ * first, and nothing would say why. This guard makes the installation fail to
+ * start instead.
  */
 export function isInstalledPublicFormList(
   value: unknown,
@@ -141,11 +142,20 @@ export function isInstalledPublicFormList(
     }
     formIds.add(form.id);
     const fieldIds = new Set<string>();
+    const declaredRoles = new Set<string>();
     for (const field of form.fields as ReadonlyArray<unknown>) {
       if (!isPublicFormFieldDefinition(field) || fieldIds.has(field.id)) {
         return false;
       }
       fieldIds.add(field.id);
+      // Two fields claiming one role is a mistake with a silent result: the
+      // inbox would take the first and never show the second.
+      if (field.inboxRole !== undefined) {
+        if (declaredRoles.has(field.inboxRole)) {
+          return false;
+        }
+        declaredRoles.add(field.inboxRole);
+      }
     }
   }
   return true;
