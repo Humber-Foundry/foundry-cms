@@ -66,6 +66,35 @@ async function waitFor<Value>(read: () => Value | undefined): Promise<Value> {
   }
 }
 
+/**
+ * Resolves with the `src` and `loading` of the first gallery tile image the
+ * instant it is inserted. A MutationObserver reads the element before the
+ * media route (which nothing serves in this harness) fails its address and the
+ * component swaps the frame for a placeholder, so a read cannot race that
+ * failure. Install it before the render that creates the tile.
+ */
+function firstTileImage(): Promise<{ src: string; loading: string }> {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("condition_not_reached"));
+    }, 5_000);
+    const observer = new MutationObserver(() => {
+      const image = document.querySelector<HTMLImageElement>(
+        ".media-gallery-tile img",
+      );
+      if (image === null) return;
+      clearTimeout(deadline);
+      observer.disconnect();
+      resolve({
+        src: image.getAttribute("src") ?? "",
+        loading: image.getAttribute("loading") ?? "",
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
 describe("photo picker browser acceptance", () => {
   let root: ReturnType<typeof createRoot> | undefined;
 
@@ -102,16 +131,18 @@ describe("photo picker browser acceptance", () => {
   }
 
   it("shows the library as a grid of tiles that load the thumbnail variant", async () => {
+    // Nothing serves the media route here, so the tile's <img> address soon
+    // fails to load and the component blanks the frame. Read the element the
+    // instant it is inserted, before that happens, so the assertion does not
+    // race the failed load.
+    const inserted = firstTileImage();
     const { host } = openPicker(() => Response.json(grant));
+    const tile = await inserted;
 
-    const tile = await waitFor(
-      () => host.querySelector<HTMLImageElement>(".media-gallery-tile img") ?? undefined,
-    );
-
-    expect(tile.getAttribute("src")).toBe(
+    expect(tile.src).toBe(
       "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
     );
-    expect(tile.getAttribute("loading")).toBe("lazy");
+    expect(tile.loading).toBe("lazy");
     const text = host.querySelector(".media-gallery-tile")?.textContent ?? "";
     expect(text).toContain("harbour.jpg");
     expect(text).toContain("1600×900");

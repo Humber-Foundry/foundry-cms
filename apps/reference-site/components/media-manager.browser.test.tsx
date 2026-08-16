@@ -59,6 +59,32 @@ async function waitFor<Value>(read: () => Value | undefined): Promise<Value> {
   }
 }
 
+/**
+ * Resolves with the `src` of each gallery tile image, in order, the instant
+ * `count` of them are present. A MutationObserver reads the elements before
+ * the media route (which nothing serves in this harness) fails their addresses
+ * and the component swaps the frames for placeholders, so a read cannot race
+ * those failures. Install it before the render that creates the tiles.
+ */
+function galleryTileImages(count: number): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("condition_not_reached"));
+    }, 5_000);
+    const observer = new MutationObserver(() => {
+      const images = document.querySelectorAll<HTMLImageElement>(
+        ".media-gallery .media-gallery-tile img",
+      );
+      if (images.length < count) return;
+      clearTimeout(deadline);
+      observer.disconnect();
+      resolve([...images].map((image) => image.getAttribute("src") ?? ""));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
 describe("photo library browser acceptance", () => {
   let root: ReturnType<typeof createRoot> | undefined;
 
@@ -105,23 +131,22 @@ describe("photo library browser acceptance", () => {
   }
 
   it("shows the uploaded photos as a gallery grid of thumbnail tiles", async () => {
+    // Nothing serves the media route here, so each tile's <img> address soon
+    // fails to load and the component blanks the frame. Read both images the
+    // instant the grid renders, before that happens, so the assertion does not
+    // race the failed loads.
+    const rendered = galleryTileImages(2);
     const host = renderLibrary(() =>
       Response.json(grantWith([inUsePhoto, sparePhoto])),
     );
 
-    const tiles = await waitFor(() => {
-      const found = host.querySelectorAll(".media-gallery .media-gallery-tile");
-      return found.length === 2 ? found : undefined;
-    });
-
-    expect(
-      [...tiles].map(
-        (tile) => tile.querySelector("img")?.getAttribute("src") ?? "",
-      ),
-    ).toEqual([
+    expect(await rendered).toEqual([
       "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
       "/api/foundry-cms/media?assetId=asset_spare&libraryToken=signed-media-library&variant=thumbnail",
     ]);
+    const tiles = host.querySelectorAll(
+      ".media-gallery .media-gallery-tile",
+    );
     expect(tiles[0].textContent).toContain("On the page: Top of the page");
     expect(tiles[1].textContent).not.toContain("On the page");
     expect(tiles[1].textContent).toContain("4 KB");
