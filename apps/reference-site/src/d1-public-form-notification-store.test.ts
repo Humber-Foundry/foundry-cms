@@ -248,6 +248,54 @@ describe("D1 public form inbox", () => {
     await expect(store.countUnreadInbox({ siteId })).resolves.toBe(1);
   });
 
+  it("pages two messages that arrived in the same instant without repeating or skipping one", async () => {
+    const acceptanceStore = createD1PublicFormAcceptanceStore(database);
+    const sameInstant = "2026-07-27T20:00:00.000Z";
+    for (const index of [1, 2, 3]) {
+      await acceptanceStore.accept(
+        submissionAt(index, { acceptedAt: sameInstant }),
+      );
+    }
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    const seen: string[] = [];
+    let cursor = null;
+    for (let page = 0; page < 3; page += 1) {
+      const result = await store.listInbox({
+        siteId,
+        limit: 1,
+        olderThanReceiptId: cursor,
+      });
+      seen.push(...result.messages.map((message) => message.receiptId));
+      cursor = result.olderCursor;
+    }
+
+    // The submission ids break the tie, and they run in the same order as the
+    // receipts, so the newest-first page is receipt-03, receipt-02, receipt-01.
+    expect(seen).toEqual(["receipt-03", "receipt-02", "receipt-01"]);
+    expect(cursor).toBeNull();
+  });
+
+  it("opens the newest page when the cursor names no message", async () => {
+    const acceptanceStore = createD1PublicFormAcceptanceStore(database);
+    await acceptanceStore.accept(submissionAt(1));
+    await acceptanceStore.accept(submissionAt(2));
+    const store = createD1PublicFormNotificationStore(database, { inboxPlan });
+
+    await expect(
+      store.listInbox({
+        siteId,
+        limit: 25,
+        olderThanReceiptId: createPublicFormReceiptId("receipt-never-issued"),
+      }),
+    ).resolves.toMatchObject({
+      messages: [
+        expect.objectContaining({ receiptId: "receipt-02" }),
+        expect.objectContaining({ receiptId: "receipt-01" }),
+      ],
+    });
+  });
+
   it("keeps an erased message in the inbox without its payload", async () => {
     await createD1PublicFormAcceptanceStore(database).accept(submissionAt(1));
     await createD1PublicFormPrivacyStore(

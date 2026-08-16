@@ -12,7 +12,6 @@ import { useFormOperation } from "./use-form-operation";
 const outcomeMessages = {
   applied: "Accepted. It is in your inbox now.",
   refused: "That message could not be accepted. Reload and try again.",
-  unconfirmed: "The result is unknown. Reload the page before trying again.",
 } as const;
 
 /**
@@ -35,51 +34,52 @@ export function SpamReviewList({
   message: string;
   onAccept: (receiptId: PublicFormReceiptId) => void;
 }) {
-  if (suspectedSpam.length === 0) {
-    return (
-      <p className="empty-state">
-        Nothing is waiting. Messages that look like spam are held here instead
-        of reaching your inbox.
-      </p>
-    );
-  }
-
+  // Accepting the last held message empties this list, so the sentence that
+  // says what happened has to live outside it. Inside, it would be unmounted
+  // before anyone could read it.
   return (
     <>
       <p role="status" aria-live="polite">
         {message}
       </p>
-      <ul className="message-list">
-        {suspectedSpam.map((submission) => (
-          <li className="message-item" key={submission.receiptId}>
-            <a
-              className="message-open"
-              href={`/dash/forms/${encodeURIComponent(submission.receiptId)}`}
-            >
-              <span className="message-sender">Held for review</span>
-              <span className="message-preview">
-                Open it to read what was sent.
-              </span>
-              <span className="message-meta">
-                {submission.formId} form ·{" "}
-                {formatDashboardMoment(submission.acceptedAt)}
-              </span>
-            </a>
-            {canAccept ? (
-              <button
-                className="copy-button"
-                disabled={pending}
-                onClick={() => onAccept(submission.receiptId)}
-                type="button"
+      {suspectedSpam.length === 0 ? (
+        <p className="empty-state">
+          Nothing is waiting. Messages that look like spam are held here
+          instead of reaching your inbox.
+        </p>
+      ) : (
+        <ul className="message-list">
+          {suspectedSpam.map((submission) => (
+            <li className="message-item" key={submission.receiptId}>
+              <a
+                className="message-open"
+                href={`/dash/forms/${encodeURIComponent(submission.receiptId)}`}
               >
-                Not spam — accept it
-              </button>
-            ) : (
-              <span className="message-note">The owner decides this one</span>
-            )}
-          </li>
-        ))}
-      </ul>
+                <span className="message-sender">Held for review</span>
+                <span className="message-preview">
+                  Open it to read what was sent.
+                </span>
+                <span className="message-meta">
+                  {submission.formId} form ·{" "}
+                  {formatDashboardMoment(submission.acceptedAt)}
+                </span>
+              </a>
+              {canAccept ? (
+                <button
+                  className="copy-button"
+                  disabled={pending}
+                  onClick={() => onAccept(submission.receiptId)}
+                  type="button"
+                >
+                  Not spam — accept it
+                </button>
+              ) : (
+                <span className="message-note">The owner decides this one</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }

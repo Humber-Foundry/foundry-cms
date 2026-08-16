@@ -19,11 +19,14 @@ const failed: FailedPublicFormDelivery = {
   updatedAt: "2026-07-21T20:00:00.000Z",
 };
 
-function render(deliveries: ReadonlyArray<FailedPublicFormDelivery>) {
+function render(
+  deliveries: ReadonlyArray<FailedPublicFormDelivery>,
+  message = "",
+) {
   return renderToStaticMarkup(
     <OwnerNotificationTable
       failedDeliveries={deliveries}
-      message=""
+      message={message}
       onSendAgain={vi.fn()}
       pending={false}
     />,
@@ -54,5 +57,12 @@ describe("owner notification controls", () => {
 
   it("confirms the alerts arrived when none failed", () => {
     expect(render([])).toContain("reached your email");
+  });
+
+  it("still says what happened after the last stopped alert is sent again", () => {
+    const markup = render([], "Sending again.");
+
+    expect(markup).toContain("Sending again.");
+    expect(markup).toContain('role="status"');
   });
 });

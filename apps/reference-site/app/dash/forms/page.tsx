@@ -5,6 +5,7 @@ import {
 
 import { MessageInbox } from "@/components/message-inbox";
 import { SpamReviewControls } from "@/components/spam-review-controls";
+import { ownerAlertSummary } from "@/src/owner-alert-status";
 import { loadPublicFormInbox } from "@/src/public-form-messages-runtime";
 import {
   loadMutationToken,
@@ -87,12 +88,8 @@ export default async function DashboardFormsPage({
 
       {access.membership.role === "owner" ? (
         <p className="dashboard-note">
-          {notificationHealth.failed === 0
-            ? "Email alerts about new messages are working."
-            : `${notificationHealth.failed} email alert${
-                notificationHealth.failed === 1 ? "" : "s"
-              } did not reach you.`}{" "}
-          Every message is saved here even when an alert fails.{" "}
+          {ownerAlertSummary(notificationHealth)} Every message is saved here
+          even when an alert fails.{" "}
           <a href="/dash/settings#email-alerts">See email alerts</a>
         </p>
       ) : null}

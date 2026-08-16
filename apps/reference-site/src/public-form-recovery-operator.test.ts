@@ -31,11 +31,13 @@ const testDatabase = useMigratedTestDatabase({
     "0003_public_forms.sql",
     "0004_public_form_notifications.sql",
     "0006_public_form_privacy.sql",
+    "0026_public_form_inbox.sql",
   ],
   RECOVERY: [
     "0003_public_forms.sql",
     "0004_public_form_notifications.sql",
     "0006_public_form_privacy.sql",
+    "0026_public_form_inbox.sql",
   ],
 });
 const primary = testDatabase.databaseFor("PRIMARY");

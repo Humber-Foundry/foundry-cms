@@ -57,4 +57,14 @@ describe("spam review controls", () => {
       "held here instead of reaching your inbox",
     );
   });
+
+  it("still says what happened after accepting the last held message", () => {
+    const markup = render({
+      message: "Accepted. It is in your inbox now.",
+      suspectedSpam: [],
+    });
+
+    expect(markup).toContain("Accepted. It is in your inbox now.");
+    expect(markup).toContain('role="status"');
+  });
 });

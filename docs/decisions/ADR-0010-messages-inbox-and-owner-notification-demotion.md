@@ -98,6 +98,14 @@ a name and a message. It gains an optional `email` field, declared in the new
 installation-owned `foundry/public-forms.ts` alongside the field roles, so the
 product's own acceptance site can exercise the reply path.
 
+The product owns that file's contract, the way it owns the Site Definition:
+`InstalledPublicFormDefinition` and `isInstalledPublicFormList` live in
+`@humber-foundry/application`, and `foundry/public-forms.ts` throws
+`installed_public_forms_invalid` when its value fails the guard. Without the
+guard a misspelled `inboxRole` or a repeated field id would fail silently —
+every message would list as "Someone" with no preview and no reply link, and
+nothing would say why.
+
 The field is optional and additive, so its `schemaVersion` stays `1.0.0`. A
 submission carries the schema version it was built against, and
 `createPublicFormApplication` rejects a submission whose version differs from
@@ -121,9 +129,16 @@ that reads it had to change.
 ### Owner-notification detail moves to Settings
 
 Messages keeps one line for the Owner: whether the alerts are arriving, and
-the fact that every message is saved here even when an alert fails. An Editor
-sees no alert line, because an Editor can neither open the Settings section
-nor send an alert again. Overview stops naming alerts at all; it lists only
+the fact that every message is saved here even when an alert fails.
+
+That line only says the alerts are working when the CMS has checked both
+things the health record separates: that no alert has stopped, and that the
+email service itself is healthy. A healthy queue with an unavailable sender
+still means nothing arrives, so a line that read only the failure count would
+tell the Owner something the code never checked. `src/owner-alert-status.ts`
+owns those sentences, and Settings reads the sender state from it too. An
+Editor sees no alert line, because an Editor can neither open the Settings
+section nor send an alert again. Overview stops naming alerts at all; it lists only
 unread messages and messages held as spam. The queue counts and the
 "send the alert again" control move to a Settings section named "Email alerts
 about new messages", which is already Owner-only. The delivery machinery,

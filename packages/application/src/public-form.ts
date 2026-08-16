@@ -66,6 +66,91 @@ export type PublicFormDefinition = Readonly<{
   fields: ReadonlyArray<PublicFormFieldDefinition>;
 }>;
 
+/**
+ * The part of a form definition an installation owns.
+ *
+ * The allowed origin and the Turnstile hostname come from the deployment, so
+ * an installation states only the form's identity, its schema version, its
+ * Turnstile action and its fields. The product owns this contract, and
+ * `isInstalledPublicFormList` is the guard an installation's value must pass.
+ */
+export type InstalledPublicFormDefinition = Readonly<{
+  id: string;
+  schemaVersion: string;
+  turnstileAction: string;
+  fields: ReadonlyArray<PublicFormFieldDefinition>;
+}>;
+
+const inboxRoles: ReadonlySet<string> = new Set([
+  "sender",
+  "replyAddress",
+  "preview",
+]);
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
+function isPublicFormFieldDefinition(
+  value: unknown,
+): value is PublicFormFieldDefinition {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const field = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(field.id) &&
+    typeof field.required === "boolean" &&
+    typeof field.maximumLength === "number" &&
+    Number.isInteger(field.maximumLength) &&
+    field.maximumLength > 0 &&
+    (field.inboxRole === undefined ||
+      (typeof field.inboxRole === "string" && inboxRoles.has(field.inboxRole)))
+  );
+}
+
+/**
+ * Whether an installation's form list is one the CMS can serve.
+ *
+ * A misspelled `inboxRole` or a repeated field id would otherwise fail
+ * silently: the inbox would list every message as "Someone" with no preview
+ * and no reply link, and nothing would say why. This guard makes the
+ * installation fail to start instead.
+ */
+export function isInstalledPublicFormList(
+  value: unknown,
+): value is ReadonlyArray<InstalledPublicFormDefinition> {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  const formIds = new Set<string>();
+  for (const candidate of value as ReadonlyArray<unknown>) {
+    if (typeof candidate !== "object" || candidate === null) {
+      return false;
+    }
+    const form = candidate as Record<string, unknown>;
+    if (
+      !isNonEmptyString(form.id) ||
+      !isNonEmptyString(form.schemaVersion) ||
+      !isNonEmptyString(form.turnstileAction) ||
+      !Array.isArray(form.fields) ||
+      form.fields.length === 0 ||
+      formIds.has(form.id)
+    ) {
+      return false;
+    }
+    formIds.add(form.id);
+    const fieldIds = new Set<string>();
+    for (const field of form.fields as ReadonlyArray<unknown>) {
+      if (!isPublicFormFieldDefinition(field) || fieldIds.has(field.id)) {
+        return false;
+      }
+      fieldIds.add(field.id);
+    }
+  }
+  return true;
+}
+
 export type PublicFormSubmissionIdentity = Readonly<{
   siteId: SiteId;
   formId: PublicFormId;

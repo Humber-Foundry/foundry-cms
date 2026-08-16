@@ -7,6 +7,7 @@ import { MemberAccessControls } from "@/components/member-access-controls";
 import { OwnerNotificationControls } from "@/components/owner-notification-controls";
 import { SiteTechnicalDetail } from "@/components/site-technical-detail";
 import { loadMcpConnectionsForDashboard } from "@/src/mcp-dashboard-runtime";
+import { ownerAlertSenderState } from "@/src/owner-alert-status";
 import { loadOwnerNotificationStatus } from "@/src/public-form-messages-runtime";
 import {
   loadMutationToken,
@@ -91,6 +92,12 @@ export default async function DashboardSettingsPage() {
           tell you one arrived, so an alert that fails never loses a message.
         </p>
         <dl className="fact-list">
+          <div>
+            <dt>The email service</dt>
+            <dd>
+              {ownerAlertSenderState(ownerNotifications.health.adapter)}
+            </dd>
+          </div>
           <div>
             <dt>Waiting to send</dt>
             <dd>

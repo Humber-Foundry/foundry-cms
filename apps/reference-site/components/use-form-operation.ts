@@ -13,9 +13,17 @@ import { useState } from "react";
  */
 export type FormOperationOutcome = "applied" | "refused" | "unconfirmed";
 
+/**
+ * What a control says about its own command. An unconfirmed request says the
+ * same thing whatever the command was — the browser never heard back — so
+ * this hook owns that sentence and no control repeats it.
+ */
 export type FormOperationMessages = Readonly<
-  Record<FormOperationOutcome, string>
+  Record<Exclude<FormOperationOutcome, "unconfirmed">, string>
 >;
+
+const unconfirmedMessage =
+  "The result is unknown. Reload the page before trying again.";
 
 export async function applyFormOperation(
   command: unknown,
@@ -53,7 +61,7 @@ export function useFormOperation(
     return report(async () => {
       const outcome = await applyFormOperation(command, csrfToken);
       if (outcome === "applied") router.refresh();
-      return messages[outcome];
+      return outcome === "unconfirmed" ? unconfirmedMessage : messages[outcome];
     });
   }
 

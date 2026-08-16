@@ -62,8 +62,19 @@ describe("public form inbox summary", () => {
     expect(summary.preview.startsWith("first line second line long")).toBe(
       true,
     );
-    expect(summary.preview.length).toBeLessThanOrEqual(161);
+    expect(summary.preview.length).toBe(160);
     expect(summary.preview.endsWith("…")).toBe(true);
+  });
+
+  it("bounds a long sender name too", () => {
+    const summary = summarizePublicFormSubmission({
+      plan,
+      formId: contact,
+      fields: { name: "a".repeat(300), message: "Hello" },
+    });
+
+    expect(summary.senderName?.length).toBe(120);
+    expect(summary.senderName?.endsWith("…")).toBe(true);
   });
 
   it("refuses a reply address that is not a plain email address", () => {

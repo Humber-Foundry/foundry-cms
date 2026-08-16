@@ -7,7 +7,6 @@ import { useFormOperation } from "./use-form-operation";
 const outcomeMessages = {
   applied: "Done.",
   refused: "That did not work. Reload the page and try again.",
-  unconfirmed: "The result is unknown. Reload the page before trying again.",
 } as const;
 
 /**

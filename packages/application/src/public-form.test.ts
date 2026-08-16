@@ -6,6 +6,7 @@ import {
   createPublicFormApplication,
   createPublicFormId,
   createPublicFormReceiptId,
+  isInstalledPublicFormList,
   PublicFormConflictError,
   PublicFormRejectedError,
   PublicFormUnavailableError,
@@ -319,5 +320,82 @@ describe("public form acceptance", () => {
     await expect(
       application.commands.accept(validCommand()),
     ).rejects.toBeInstanceOf(PublicFormConflictError);
+  });
+});
+
+describe("installed public form list", () => {
+  const contactForm = {
+    id: "contact",
+    schemaVersion: "1.0.0",
+    turnstileAction: "contact",
+    fields: [
+      { id: "name", required: true, maximumLength: 100, inboxRole: "sender" },
+      { id: "message", required: true, maximumLength: 2_000 },
+    ],
+  };
+
+  it("accepts a list an installation may serve", () => {
+    expect(isInstalledPublicFormList([contactForm])).toBe(true);
+    expect(isInstalledPublicFormList([])).toBe(true);
+  });
+
+  it("refuses an inbox role the CMS does not know", () => {
+    expect(
+      isInstalledPublicFormList([
+        {
+          ...contactForm,
+          fields: [
+            { id: "name", required: true, maximumLength: 100, inboxRole: "Sender" },
+          ],
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("refuses a form whose field ids repeat, because one would hide the other", () => {
+    expect(
+      isInstalledPublicFormList([
+        {
+          ...contactForm,
+          fields: [
+            { id: "name", required: true, maximumLength: 100 },
+            { id: "name", required: false, maximumLength: 10 },
+          ],
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("refuses two forms with the same id", () => {
+    expect(isInstalledPublicFormList([contactForm, contactForm])).toBe(false);
+  });
+
+  it("refuses a form with nothing to fill in, or a missing identity", () => {
+    expect(isInstalledPublicFormList([{ ...contactForm, fields: [] }])).toBe(
+      false,
+    );
+    expect(isInstalledPublicFormList([{ ...contactForm, id: "" }])).toBe(false);
+    expect(
+      isInstalledPublicFormList([{ ...contactForm, turnstileAction: 1 }]),
+    ).toBe(false);
+  });
+
+  it("refuses a field length that is not a whole number above zero", () => {
+    for (const maximumLength of [0, -1, 1.5, "100"]) {
+      expect(
+        isInstalledPublicFormList([
+          {
+            ...contactForm,
+            fields: [{ id: "name", required: true, maximumLength }],
+          },
+        ]),
+      ).toBe(false);
+    }
+  });
+
+  it("refuses a value that is not a list of forms", () => {
+    for (const value of [null, undefined, {}, "contact", [null], ["contact"]]) {
+      expect(isInstalledPublicFormList(value)).toBe(false);
+    }
   });
 });

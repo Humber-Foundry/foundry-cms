@@ -70,11 +70,20 @@ function singleLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
 }
 
+/**
+ * At most `limit` characters, ellipsis included. The ellipsis replaces the
+ * last character it keeps, so a bounded value never exceeds the limit an
+ * installation was promised.
+ */
 function bounded(value: string, limit: number): string {
-  return value.length <= limit ? value : `${value.slice(0, limit)}…`;
+  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 }
 
-function text(
+/**
+ * One field as a single line, or null when the form has no such field, the
+ * stored value is not text, or it is blank.
+ */
+function singleLineField(
   fields: Readonly<Record<string, unknown>>,
   fieldId: string | undefined,
 ): string | null {
@@ -137,8 +146,8 @@ export function summarizePublicFormSubmission({
   if (form === undefined) {
     return { senderName: null, replyAddress: null, preview: "" };
   }
-  const senderName = text(fields, form.roles.sender);
-  const replyValue = text(fields, form.roles.replyAddress);
+  const senderName = singleLineField(fields, form.roles.sender);
+  const replyValue = singleLineField(fields, form.roles.replyAddress);
   const previewFieldId =
     form.roles.preview ??
     form.fieldOrder.find(
@@ -151,6 +160,9 @@ export function summarizePublicFormSubmission({
       replyValue !== null && isPublicFormReplyAddress(replyValue)
         ? replyValue
         : null,
-    preview: bounded(text(fields, previewFieldId) ?? "", previewLimit),
+    preview: bounded(
+      singleLineField(fields, previewFieldId) ?? "",
+      previewLimit,
+    ),
   };
 }
