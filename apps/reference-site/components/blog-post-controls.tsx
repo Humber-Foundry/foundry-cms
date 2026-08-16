@@ -250,7 +250,7 @@ function PostComposer({
           <label>
             <span>SEO title</span>
             <small className="composer-hint">
-              Leave blank to use the post title and the site name.
+              {seoFieldHints.post.title}
             </small>
             <input
               name="seoTitle"
@@ -262,7 +262,7 @@ function PostComposer({
           <label>
             <span>SEO description</span>
             <small className="composer-hint">
-              Leave blank to use the summary above.
+              {seoFieldHints.post.description}
             </small>
             <textarea
               name="seoDescription"
@@ -282,9 +282,7 @@ function PostComposer({
               onChange={(event) => setKeywords(event.target.value)}
             />
             <small className="composer-error" id="seo-keywords-error">
-              {tooManyKeywords
-                ? `Use at most ${seoKeywordLimit} keywords, separated by commas.`
-                : ""}
+              {tooManyKeywords ? seoFieldHints.tooManyKeywords : ""}
             </small>
           </label>
           <label>

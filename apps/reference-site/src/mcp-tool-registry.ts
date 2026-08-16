@@ -25,7 +25,9 @@ import {
 import { installedSiteDefinition } from "../foundry/site-definition";
 import {
   designContract,
+  campaignShareImageUrlPattern,
   listEditableSiteFields,
+  seoShareImageUrlMaxLength,
   siteDefinitionSchema,
   type RichTextDocument,
   type SeoShareImage,
@@ -640,8 +642,8 @@ const campaignShareImageSchema = {
         url: {
           type: "string",
           minLength: 1,
-          maxLength: 2_000,
-          pattern: "^https://[^\\s/?#]+[^\\s]*$",
+          maxLength: seoShareImageUrlMaxLength,
+          pattern: campaignShareImageUrlPattern,
         },
         alt: { type: "string", maxLength: 300 },
       },

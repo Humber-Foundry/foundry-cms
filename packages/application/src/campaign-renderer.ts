@@ -1,6 +1,8 @@
 import {
   SAFE_RICH_TEXT_LINK_PATTERN,
   absoluteSiteUrl,
+  campaignShareImageUrlPattern,
+  seoShareImageUrlMaxLength,
   validateRichTextDocument,
   visitRichTextBlock,
   type RichTextDocument,
@@ -94,7 +96,10 @@ function validateCampaignShareImage(
   if (url === "") {
     return null;
   }
-  if (!/^https:\/\/[^\s/?#]+[^\s]*$/u.test(url) || url.length > 2_000) {
+  if (
+    !new RegExp(campaignShareImageUrlPattern, "u").test(url) ||
+    url.length > seoShareImageUrlMaxLength
+  ) {
     throw new CampaignValidationError("campaign_share_image_invalid");
   }
   const alt = typeof value.alt === "string" ? value.alt.trim() : "";

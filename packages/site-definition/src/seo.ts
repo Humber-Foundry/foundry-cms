@@ -28,15 +28,32 @@ function firstFilled(...candidates: ReadonlyArray<string>): string {
 /** The most keywords one piece of content may carry. Matches the schema. */
 export const seoKeywordLimit = 12;
 
+/** The longest share image address any surface accepts. Matches the schema. */
+export const seoShareImageUrlMaxLength = 2_000;
+
+/**
+ * The only share image address a campaign accepts, as a JSON Schema pattern.
+ *
+ * An email is read outside the site, so a path would resolve against the
+ * reader's mail host. This is the one copy: the MCP tool schema advertises it
+ * and the campaign renderer enforces it, and a second copy would let the two
+ * drift apart.
+ */
+export const campaignShareImageUrlPattern = "^https://[^\\s/?#]+[^\\s]*$";
+
 /**
  * What the dashboard tells an owner about each SEO field.
  *
- * One copy, read by both the field-group editor and the blog and campaign
- * composers. Two copies of the same sentence drift, and then two owners are
- * told two different things about one field.
+ * One copy, read by the field-group editor and by the blog and campaign
+ * composers. Two copies of one sentence drift, and then two owners are told
+ * two different things about one field.
+ *
+ * The title and description hints name what the blank field falls back to, so
+ * they differ per surface. Everything else is the same wherever it appears.
  */
 export const seoFieldHints = {
   keywords: `Separate keywords with commas. Up to ${seoKeywordLimit}.`,
+  tooManyKeywords: `Use at most ${seoKeywordLimit} keywords, separated by commas.`,
   shareImageUrl:
     "The picture shown when this link is shared. Leave blank to use the " +
     "site's main image.",
@@ -47,6 +64,14 @@ export const seoFieldHints = {
   siteAddress:
     "The address this site serves from, such as https://example.com. Leave " +
     "blank and no canonical or share links are published.",
+  page: {
+    title: "Leave blank to use the site name.",
+    description: "Leave blank to use the site description.",
+  },
+  post: {
+    title: "Leave blank to use the post title and the site name.",
+    description: "Leave blank to use the summary above.",
+  },
 } as const;
 
 /**

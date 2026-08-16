@@ -275,7 +275,7 @@ function editableFieldBindings(
         // one keyword too many deserves to be told that.
         validate: (value) =>
           parseSeoKeywords(value).length > seoKeywordLimit
-            ? `Use at most ${seoKeywordLimit} keywords, separated by commas.`
+            ? seoFieldHints.tooManyKeywords
             : null,
         write: (draft, value) => {
           select(draft).keywords = parseSeoKeywords(value);
@@ -417,8 +417,8 @@ function editableFieldBindings(
       labelPrefix: "Page",
       group: "SEO",
       seo: definition.home.seo,
-      titleHint: "Leave blank to use the site name.",
-      descriptionHint: "Leave blank to use the site description.",
+      titleHint: seoFieldHints.page.title,
+      descriptionHint: seoFieldHints.page.description,
       select: (draft) => draft.home.seo,
     }),
   ];
@@ -661,8 +661,8 @@ function editableFieldBindings(
         group: "Blog",
         seo: post.seo,
         blogPostId: post.id,
-        titleHint: "Leave blank to use the post title and the site name.",
-        descriptionHint: "Leave blank to use the post excerpt.",
+        titleHint: seoFieldHints.post.title,
+        descriptionHint: seoFieldHints.post.description,
         select: (draft) => draft.blog.posts[postIndex]!.seo,
       }),
     );
@@ -770,7 +770,7 @@ export function updateEditableSiteField(
     (binding.field.values !== undefined &&
       !binding.field.values.includes(edit.value)) ||
     (edit.format !== "richText" &&
-      binding.validate?.(edit.value) != null)
+      (binding.validate?.(edit.value) ?? null) !== null)
   ) {
     return null;
   }
@@ -841,8 +841,8 @@ export function applySiteDefinitionEdits(
       }
     }
     if (errors[edit.path] === undefined && edit.format !== "richText") {
-      const failure = bindings.get(edit.path)!.validate?.(edit.value);
-      if (failure !== undefined && failure !== null) {
+      const failure = bindings.get(edit.path)!.validate?.(edit.value) ?? null;
+      if (failure !== null) {
         errors[edit.path] = failure;
       }
     }

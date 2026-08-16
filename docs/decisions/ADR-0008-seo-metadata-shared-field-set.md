@@ -130,11 +130,27 @@ in `site-definition-projection.mjs` fills `canonicalOrigin` with `""`, and every
 SEO block with `keywords: []` and `shareImage: null`. A site therefore renders
 exactly what it rendered before until an owner fills the new fields.
 
-An installation must set `site.canonicalOrigin` in its published content before
-canonical and Open Graph URLs appear. Until it does, the pages still emit a
-title, a description and Open Graph title and description — only the addresses
-are withheld. This is deliberate: no canonical URL is safer than one pointing at
-the wrong host.
+An installation must set its site address before canonical and Open Graph URLs
+appear. An owner sets it in the dashboard as the "Site address" field, which
+writes `site.canonicalOrigin`. Until it is set, the pages still emit a title, a
+description and Open Graph title and description — only the addresses are
+withheld. This is deliberate: no canonical URL is safer than one pointing at the
+wrong host.
+
+The share image the home hero supplies as a last resort carries no description,
+because a media occurrence holds no alt text. The renderer then emits the image
+address with no `og:image:alt`, rather than an empty one. An owner who wants the
+picture described fills the share image fields, which have their own
+description box.
+
+A campaign's preview line reaches the reader as the first paragraph of the
+message. The delivery provider has no separate pre-header field to carry it, so
+this is where an inbox finds it.
+
+In the field-group editor a post's SEO fields sit in the "Blog" group with the
+rest of that post's fields, because that editor groups by destination and the
+"SEO" group belongs to the home page. The owner-facing surface for a post is the
+blog composer, which does have its own "SEO and sharing" section.
 
 `site.canonicalOrigin` and `FOUNDRY_CANONICAL_ORIGIN` are normally the same
 value, but they are not the same setting and nothing enforces agreement. The

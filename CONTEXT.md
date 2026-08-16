@@ -66,7 +66,7 @@ never rewrites the media asset's source object. A selected occurrence revision
 is bound into an immutable content revision before it appears in an exact
 preview; only the Git-published Site Definition is public.
 
-## Search and sharing
+## SEO and sharing
 
 **SEO metadata** — The owner-filled block that decides how one piece of content
 looks in a search result and in a link preview: title, description, keywords and
