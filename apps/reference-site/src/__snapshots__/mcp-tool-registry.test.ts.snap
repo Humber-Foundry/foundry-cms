@@ -71,7 +71,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     },
     "inputSchemaSha256": "06ac212db66698f6f2845585e395be972a74181976aa30c37df1ddfc8406d565",
     "name": "foundry.workspace.get",
-    "outputSchemaSha256": "60b0dd17d0e8fd2e08a811f79cc5d152c5e27742a477e30454acb33a503c06df",
+    "outputSchemaSha256": "1dac686654640f8fdccf6dc4b50b807ade69c01dd3321b4ccc9c52b2eefcdd3f",
   },
   {
     "annotations": {
@@ -99,7 +99,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "14fc6ea95ce6c2f62f55b8a6425d3ca4086feddccc6a3fe2950196c07e07c21b",
+    "inputSchemaSha256": "fa2e8ab508ab659a9931de4e209c903b8c546847eaf987fc176c7085c1533bb5",
     "name": "foundry.design.patch",
     "outputSchemaSha256": "1e72b57f13f709d9304f0ce2fd5448faece9e36de4a302323c26a3f0ef2ddbe0",
   },

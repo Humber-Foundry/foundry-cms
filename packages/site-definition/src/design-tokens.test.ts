@@ -12,16 +12,22 @@ describe("controlled design tokens", () => {
   it("registers exposed typography, colour, spacing, layout, and component variants", () => {
     expect(designContract.tokens).toEqual({
       "typography.heading": expect.objectContaining({
-        values: ["editorial", "modern"],
+        values: ["editorial", "modern", "system", "technical"],
+      }),
+      "typography.body": expect.objectContaining({
+        values: ["modern", "editorial", "system"],
       }),
       "colour.accent": expect.objectContaining({
-        values: ["moss", "clay"],
+        values: ["moss", "clay", "harbour", "indigo", "plum", "graphite"],
+      }),
+      "colour.neutral": expect.objectContaining({
+        values: ["warm", "cool", "bright"],
       }),
       "spacing.section": expect.objectContaining({
-        values: ["relaxed", "compact"],
+        values: ["airy", "relaxed", "compact"],
       }),
       "layout.contentWidth": expect.objectContaining({
-        values: ["standard", "wide"],
+        values: ["narrow", "standard", "wide"],
       }),
     });
     expect(designContract.variants).toEqual({
@@ -41,13 +47,25 @@ describe("controlled design tokens", () => {
           path: "design.typography.heading",
           group: "Design",
           value: "editorial",
-          values: ["editorial", "modern"],
+          values: ["editorial", "modern", "system", "technical"],
+        }),
+        expect.objectContaining({
+          path: "design.typography.body",
+          group: "Design",
+          value: "modern",
+          values: ["modern", "editorial", "system"],
         }),
         expect.objectContaining({
           path: "design.colour.accent",
           group: "Design",
           value: "moss",
-          values: ["moss", "clay"],
+          values: ["moss", "clay", "harbour", "indigo", "plum", "graphite"],
+        }),
+        expect.objectContaining({
+          path: "design.colour.neutral",
+          group: "Design",
+          value: "warm",
+          values: ["warm", "cool", "bright"],
         }),
         expect.objectContaining({
           path: "section_hero.variant",
@@ -62,7 +80,9 @@ describe("controlled design tokens", () => {
   it("applies registered token and component-variant changes immutably", () => {
     const result = applySiteDefinitionEdits(referenceSiteDefinition, [
       { path: "design.typography.heading", value: "modern" },
+      { path: "design.typography.body", value: "editorial" },
       { path: "design.colour.accent", value: "clay" },
+      { path: "design.colour.neutral", value: "bright" },
       { path: "design.spacing.section", value: "compact" },
       { path: "design.layout.contentWidth", value: "wide" },
       { path: "section_hero.variant", value: "focused" },
@@ -72,8 +92,8 @@ describe("controlled design tokens", () => {
       ok: true,
       definition: expect.objectContaining({
         design: {
-          typography: { heading: "modern" },
-          colour: { accent: "clay" },
+          typography: { heading: "modern", body: "editorial" },
+          colour: { accent: "clay", neutral: "bright" },
           spacing: { section: "compact" },
           layout: { contentWidth: "wide" },
         },
@@ -97,7 +117,7 @@ describe("controlled design tokens", () => {
   });
 
   it.each([
-    ["unknown token", "design.typography.body", "modern"],
+    ["unknown token", "design.typography.caption", "modern"],
     ["unknown value", "design.typography.heading", "url(https://bad.example)"],
     ["raw CSS", "design.colour.accent", "color:red"],
     ["unknown class", "section_hero.variant", "hero--attacker"],
@@ -109,9 +129,9 @@ describe("controlled design tokens", () => {
       ok: false,
       errors: {
         [path]:
-          path === "design.typography.body"
-            ? "This field is not in Site Definition 1.4.0."
-            : "Choose a value registered by Site Definition 1.4.0.",
+          path === "design.typography.caption"
+            ? "This field is not in Site Definition 1.5.0."
+            : "Choose a value registered by Site Definition 1.5.0.",
       },
     });
   });

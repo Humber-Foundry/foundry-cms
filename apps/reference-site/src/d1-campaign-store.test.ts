@@ -96,7 +96,7 @@ describe("D1 campaign store", () => {
       },
       siteCanonicalOrigin: "https://example.test",
       rendererVersion: "1111111111111111111111111111111111111111",
-      schemaVersion: "1.4.0",
+      schemaVersion: "1.5.0",
       createId: (kind) =>
         kind === "campaign"
           ? "20000000-0000-4000-8000-000000000001"

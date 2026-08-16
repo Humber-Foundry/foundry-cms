@@ -6,7 +6,6 @@
   --line: #d7d8d0;
   --moss: #1e5c43;
   --moss-dark: #154633;
-  --mint: #d7eadf;
   --sand: #e9e1cf;
   --white: #ffffff;
   --font-sans: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
@@ -16,25 +15,167 @@
   --content-width: 78rem;
 }
 
+/*
+ * The design tokens.
+ *
+ * Every option registered in `designContract` has exactly one rule here. The
+ * Site Definition stores the option's value as a data attribute, so no colour,
+ * font stack or length ever travels through content.
+ *
+ * `apps/reference-site/src/design-stylesheet.test.ts` reads this file and the
+ * contract together and fails if they disagree. Change both in one commit.
+ */
 .site-canvas {
   --design-heading-font: var(--font-serif);
+  --design-body-font: var(--font-sans);
   --design-accent: var(--moss);
-  --design-accent-hover: var(--moss-dark);
+  --design-accent-deep: var(--moss-dark);
   --design-section-padding: clamp(6rem, 12vw, 10rem);
   --design-content-width: var(--content-width);
+
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--design-body-font);
+}
+
+/* Heading font */
+.site-canvas[data-typography-heading="editorial"] {
+  --design-heading-font: Charter, "Source Serif 4", Georgia, serif;
 }
 
 .site-canvas[data-typography-heading="modern"] {
-  --design-heading-font: var(--font-sans);
+  --design-heading-font: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
+}
+
+.site-canvas[data-typography-heading="system"] {
+  --design-heading-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.site-canvas[data-typography-heading="technical"] {
+  --design-heading-font: "IBM Plex Mono", "Source Code Pro", ui-monospace, monospace;
+}
+
+/* Body text font */
+.site-canvas[data-typography-body="modern"] {
+  --design-body-font: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
+}
+
+.site-canvas[data-typography-body="editorial"] {
+  --design-body-font: Charter, "Source Serif 4", Georgia, serif;
+}
+
+.site-canvas[data-typography-body="system"] {
+  --design-body-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Accent colour */
+.site-canvas[data-colour-accent="moss"] {
+  --design-accent: #1e5c43;
+  --design-accent-deep: #154633;
 }
 
 .site-canvas[data-colour-accent="clay"] {
   --design-accent: #9a4f36;
-  --design-accent-hover: #753824;
+  --design-accent-deep: #753824;
+}
+
+.site-canvas[data-colour-accent="harbour"] {
+  --design-accent: #1f4f79;
+  --design-accent-deep: #163a59;
+}
+
+.site-canvas[data-colour-accent="indigo"] {
+  --design-accent: #3b3f83;
+  --design-accent-deep: #2b2e62;
+}
+
+.site-canvas[data-colour-accent="plum"] {
+  --design-accent: #6b3563;
+  --design-accent-deep: #4e2749;
+}
+
+.site-canvas[data-colour-accent="graphite"] {
+  --design-accent: #3a4750;
+  --design-accent-deep: #29333a;
+}
+
+/* Page tone */
+.site-canvas[data-colour-neutral="warm"] {
+  --paper: #f5f3ed;
+  --panel: #e9e1cf;
+  --ink: #17201d;
+  --ink-soft: #4c5853;
+  --line: #d7d8d0;
+}
+
+.site-canvas[data-colour-neutral="cool"] {
+  --paper: #eef1f4;
+  --panel: #dde5ec;
+  --ink: #16202a;
+  --ink-soft: #48555f;
+  --line: #d2d9df;
+}
+
+.site-canvas[data-colour-neutral="bright"] {
+  --paper: #ffffff;
+  --panel: #f1f2f4;
+  --ink: #14171a;
+  --ink-soft: #4b5157;
+  --line: #e2e5e8;
+}
+
+/*
+ * The page tone has to reach past the site's own box. A browser paints the
+ * area beyond the document — the overscroll band, and any space under a short
+ * page — from the root background, which a custom property set further down
+ * the tree cannot change. These rules put the same paper colour on the root
+ * of any document that renders a site canvas: the public site, and the exact
+ * preview route.
+ *
+ * The dashboard is excluded because its own chrome must keep the dashboard
+ * background even though the Design preview renders a site canvas inside it.
+ * The Pages editor is not an exception to that: its canvas lives in an iframe,
+ * whose separate document has no dashboard chrome, so these rules apply there
+ * and give it the site's paper, which is what it should show.
+ */
+html:not(:has(.dashboard)):has(.site-canvas[data-colour-neutral="warm"]) {
+  background: #f5f3ed;
+}
+
+html:not(:has(.dashboard)):has(.site-canvas[data-colour-neutral="cool"]) {
+  background: #eef1f4;
+}
+
+html:not(:has(.dashboard)):has(.site-canvas[data-colour-neutral="bright"]) {
+  background: #ffffff;
+}
+
+/* With the root painted above, the body must not paint the old :root paper
+ * over it in any band the site canvas does not cover. */
+html:not(:has(.dashboard)):has(.site-canvas) body {
+  background: transparent;
+}
+
+/* Space between sections */
+.site-canvas[data-spacing-section="airy"] {
+  --design-section-padding: clamp(8rem, 16vw, 14rem);
+}
+
+.site-canvas[data-spacing-section="relaxed"] {
+  --design-section-padding: clamp(6rem, 12vw, 10rem);
 }
 
 .site-canvas[data-spacing-section="compact"] {
   --design-section-padding: clamp(3.5rem, 7vw, 5rem);
+}
+
+/* Content width */
+.site-canvas[data-layout-content-width="narrow"] {
+  --design-content-width: 56rem;
+}
+
+.site-canvas[data-layout-content-width="standard"] {
+  --design-content-width: 78rem;
 }
 
 .site-canvas[data-layout-content-width="wide"] {
@@ -129,7 +270,7 @@ button:focus-visible {
 }
 
 .button-primary:hover {
-  background: var(--design-accent-hover, var(--moss-dark));
+  background: var(--design-accent-deep, var(--moss-dark));
 }
 
 .not-found {

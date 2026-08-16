@@ -1,9 +1,17 @@
 export const projectedRichTextVersion = "1.0.0";
-export const projectedSiteDefinitionVersion = "1.4.0";
+export const projectedSiteDefinitionVersion = "1.5.0";
+
+const projectedSupportedStoredVersions = Object.freeze([
+  "1.0.0",
+  "1.1.0",
+  "1.2.0",
+  "1.3.0",
+  "1.4.0",
+]);
 
 const projectedDefaultSiteDesign = Object.freeze({
-  typography: Object.freeze({ heading: "editorial" }),
-  colour: Object.freeze({ accent: "moss" }),
+  typography: Object.freeze({ heading: "editorial", body: "modern" }),
+  colour: Object.freeze({ accent: "moss", neutral: "warm" }),
   spacing: Object.freeze({ section: "relaxed" }),
   layout: Object.freeze({ contentWidth: "standard" }),
 });
@@ -78,10 +86,7 @@ export function projectSiteDefinitionSchema(value) {
   }
   if (
     value.definitionVersion !== value.schemaVersion ||
-    (value.schemaVersion !== "1.0.0" &&
-      value.schemaVersion !== "1.1.0" &&
-      value.schemaVersion !== "1.2.0" &&
-      value.schemaVersion !== "1.3.0")
+    !projectedSupportedStoredVersions.includes(value.schemaVersion)
   ) {
     throw new TypeError("site_definition_version_unsupported");
   }
@@ -90,9 +95,27 @@ export function projectSiteDefinitionSchema(value) {
   projected.definitionVersion = projectedSiteDefinitionVersion;
   projected.schemaVersion = projectedSiteDefinitionVersion;
   projected.blog ??= { id: "blog", posts: [] };
+  // The sharing fields arrived with 1.4.0. Fill them first, so a definition
+  // stored before 1.4.0 gains the "not set" values it would have had.
   projectSeoMetadata(projected);
   if (needsDesignProjection) {
-    projected.design ??= projectedDefaultSiteDesign;
+    // A clone, never the frozen constant itself: the design step below writes
+    // into this object, and writing into a frozen one throws.
+    projected.design ??= structuredClone(projectedDefaultSiteDesign);
+  }
+  // Body font and page tone arrived with 1.5.0, after the sharing fields, so
+  // this step runs after the sharing step. Every definition stored before
+  // 1.5.0 kept the sans body text and the warm paper the stylesheet used
+  // before them, so the projected site looks exactly as it did.
+  if (isRecord(projected.design)) {
+    if (isRecord(projected.design.typography)) {
+      projected.design.typography.body ??=
+        projectedDefaultSiteDesign.typography.body;
+    }
+    if (isRecord(projected.design.colour)) {
+      projected.design.colour.neutral ??=
+        projectedDefaultSiteDesign.colour.neutral;
+    }
   }
   projected.home.sections = projected.home.sections.map((section) => {
     if (!isRecord(section) || typeof section.type !== "string") {

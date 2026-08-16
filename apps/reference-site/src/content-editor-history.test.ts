@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  designEditsForDesign,
+  designPresets,
   referenceSiteDefinition,
   serializeRichTextDocument,
   type SiteDefinition,
@@ -59,6 +61,59 @@ describe("content editor history", () => {
       ),
     ).toEqual(expect.objectContaining({ body }));
     expect(missingDiscriminator).toBe(initial);
+  });
+
+  it("applies a preset's whole design as one undoable step", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+    const preset = designPresets.find(({ id }) => id === "gallery")!;
+
+    const applied = contentEditorReducer(initial, {
+      type: "editMany",
+      edits: designEditsForDesign(
+        referenceSiteDefinition.design,
+        preset.design,
+      ),
+    });
+    const undone = contentEditorReducer(applied, { type: "undo" });
+
+    expect(applied.workingDefinition.design).toEqual(preset.design);
+    expect(applied.status).toBe("dirty");
+    expect(applied.past).toHaveLength(1);
+    expect(undone.workingDefinition.design).toEqual(
+      referenceSiteDefinition.design,
+    );
+    expect(undone.status).toBe("saved");
+  });
+
+  it("keeps the draft untouched when any edit in a batch is unregistered", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+
+    const rejected = contentEditorReducer(initial, {
+      type: "editMany",
+      edits: [
+        { path: "design.colour.accent", value: "clay" },
+        { path: "design.colour.accent", value: "not-a-registered-colour" },
+      ],
+    });
+
+    expect(rejected).toBe(initial);
+  });
+
+  it("ignores a batch that changes nothing", () => {
+    const initial = createContentEditorState({
+      definition: referenceSiteDefinition,
+      revision: 4,
+    });
+
+    expect(contentEditorReducer(initial, { type: "editMany", edits: [] })).toBe(
+      initial,
+    );
   });
 
   it("locks mutation controls until a structural conflict is recovered", () => {

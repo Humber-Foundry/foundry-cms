@@ -28,9 +28,12 @@ const variants = {
     showPublicationHistory: true,
   },
   design: {
-    heading: "Design choices",
+    // Names the editing surface for a screen reader. The page's own <h1> is
+    // already "Design", so this says which part of the page it is.
+    heading: "Design controls",
     fieldGroups: designFieldGroups,
     showComposition: false,
+    showDesignDestination: true,
     showPublicationHistory: false,
   },
 } as const;

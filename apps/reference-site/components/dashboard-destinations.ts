@@ -42,7 +42,7 @@ export const siteDestinations: ReadonlyArray<DashboardDestination> = [
   {
     href: "/dash/design",
     label: "Design",
-    description: "Change fonts, colour and spacing",
+    description: "Pick a look, then fine-tune fonts, colours and spacing",
   },
 ];
 

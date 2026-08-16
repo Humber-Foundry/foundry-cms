@@ -214,6 +214,15 @@ export function contentEditorStatusLocked(
 
 export type ContentEditorAction =
   | (SiteDefinitionEdit & Readonly<{ type: "edit" }>)
+  /**
+   * Several field edits as one undoable step. Choosing a preset look changes
+   * every design token at once, and the owner expects one Undo to put the
+   * previous look back rather than six.
+   */
+  | Readonly<{
+      type: "editMany";
+      edits: ReadonlyArray<SiteDefinitionEdit>;
+    }>
   | Readonly<{
       type: "compose";
       definition: SiteDefinition;
@@ -277,6 +286,7 @@ export function contentEditorReducer(
   if (
     contentEditorStatusLocked(state.status) &&
     (action.type === "edit" ||
+      action.type === "editMany" ||
       action.type === "compose" ||
       action.type === "undo" ||
       action.type === "redo")
@@ -300,6 +310,43 @@ export function contentEditorReducer(
         projectionVersion: state.projectionVersion + 1,
         status: "dirty",
         errors: { ...state.errors, [action.path]: "" },
+      };
+    }
+    case "editMany": {
+      if (action.edits.length === 0) {
+        return state;
+      }
+      let workingDefinition: SiteDefinition = state.workingDefinition;
+      for (const edit of action.edits) {
+        const updated = updateEditableSiteField(workingDefinition, edit);
+        // All of the batch or none of it. A half-applied preset look would
+        // leave the site in a design the owner never chose.
+        if (updated === null) {
+          return state;
+        }
+        workingDefinition = updated;
+      }
+      // A batch can land exactly back on the persisted design — choosing the
+      // preset the draft already came from — so the status is computed the way
+      // undo, redo and compose compute it, rather than always saying dirty.
+      return {
+        ...state,
+        workingDefinition,
+        past: [...state.past, state.workingDefinition],
+        future: [],
+        projectionVersion: state.projectionVersion + 1,
+        status: definitionsAreEqual(
+          workingDefinition,
+          state.persistedDefinition,
+        )
+          ? "saved"
+          : "dirty",
+        errors: {
+          ...state.errors,
+          ...Object.fromEntries(
+            action.edits.map(({ path }) => [path, ""]),
+          ),
+        },
       };
     }
     case "compose":

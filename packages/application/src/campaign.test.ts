@@ -134,7 +134,7 @@ function createFixture() {
     channelConfiguration,
     siteCanonicalOrigin: "https://example.test",
     rendererVersion: "1111111111111111111111111111111111111111",
-    schemaVersion: "1.4.0",
+    schemaVersion: "1.5.0",
     clock: () => new Date("2026-07-29T07:00:00.000Z"),
     createId: (kind) =>
       kind === "campaign"
@@ -443,7 +443,7 @@ describe("campaign authoring and rendering", () => {
       channelConfiguration,
       siteCanonicalOrigin: "https://example.test",
       rendererVersion: "1111111111111111111111111111111111111111",
-      schemaVersion: "1.4.0",
+      schemaVersion: "1.5.0",
     });
     await expect(
       otherSiteApplication.commands.createFromPost({
@@ -529,7 +529,7 @@ describe("campaign authoring and rendering", () => {
       channelConfiguration,
       siteCanonicalOrigin: "https://example.test",
       rendererVersion: "2222222222222222222222222222222222222222",
-      schemaVersion: "1.4.0",
+      schemaVersion: "1.5.0",
     });
 
     await expect(
