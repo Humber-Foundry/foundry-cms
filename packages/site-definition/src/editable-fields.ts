@@ -653,7 +653,9 @@ function editableFieldBindings(
     };
     bindPostField("slug", "Post slug");
     bindPostField("title", "Post title");
-    bindPostField("excerpt", "Post excerpt", true);
+    // "Summary" is the word the blog composer puts on this field, and the one
+    // the SEO description hint names. One field, one word, on both surfaces.
+    bindPostField("excerpt", "Post summary", true);
     fields.push(
       ...seoFieldBindings({
         pathPrefix: post.id,

@@ -398,6 +398,39 @@ describe("editing keywords", () => {
   });
 });
 
+describe("choosing a share image with no site address set", () => {
+  it("passes over a path and uses the first absolute fallback", () => {
+    const post = buildPost({
+      seo: {
+        title: "",
+        description: "",
+        keywords: [],
+        // A path cannot be made absolute without the site's address.
+        shareImage: { url: "/api/media/asset_post", alt: "The post picture" },
+      },
+    });
+    const withoutOrigin = buildDefinition(post, "");
+    const definition: SiteDefinition = {
+      ...withoutOrigin,
+      home: {
+        ...withoutOrigin.home,
+        seo: {
+          ...withoutOrigin.home.seo,
+          shareImage: {
+            url: "https://cdn.example.com/card.png",
+            alt: "The site card",
+          },
+        },
+      },
+    };
+
+    expect(resolveBlogPostSeo(definition, post).shareImage).toEqual({
+      url: "https://cdn.example.com/card.png",
+      alt: "The site card",
+    });
+  });
+});
+
 describe("assembling a share image from two boxes", () => {
   it("is no picture when the address is blank, whatever the description says", () => {
     expect(toSeoShareImage("  ", "A harbour")).toBeNull();

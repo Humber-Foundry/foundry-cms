@@ -70,7 +70,7 @@ export const seoFieldHints = {
   },
   post: {
     title: "Leave blank to use the post title and the site name.",
-    description: "Leave blank to use the summary above.",
+    description: "Leave blank to use the post summary.",
   },
 } as const;
 
@@ -136,27 +136,44 @@ function homeHeroShareImage(definition: SiteDefinition): SeoShareImage | null {
 }
 
 /**
- * Resolve a share image to one absolute address. A path needs the site's
- * canonical origin to become absolute, so a path is dropped when no origin is
- * set. An already-absolute address is kept as written.
+ * Resolve one share image candidate to an absolute address, or `null` when it
+ * cannot be one. A path needs the site's canonical origin, so a path resolves
+ * to nothing when no origin is set. An already-absolute address is kept as
+ * written.
+ */
+function absoluteShareImage(
+  definition: SiteDefinition,
+  candidate: SeoShareImage | null,
+): SeoShareImage | null {
+  const url = candidate?.url.trim() ?? "";
+  if (url === "") {
+    return null;
+  }
+  if (!url.startsWith("/")) {
+    return { url, alt: candidate!.alt };
+  }
+  const absolute = canonicalUrlFor(definition, url as `/${string}`);
+  return absolute === null ? null : { url: absolute, alt: candidate!.alt };
+}
+
+/**
+ * The first share image that resolves to an absolute address.
+ *
+ * A candidate that cannot be made absolute is passed over rather than ending
+ * the search, so a site with no address set still shows an absolute fallback
+ * image behind a post whose own image is a path.
  */
 function resolveShareImage(
   definition: SiteDefinition,
   ...candidates: ReadonlyArray<SeoShareImage | null>
 ): SeoShareImage | null {
-  const chosen = candidates.find(
-    (candidate): candidate is SeoShareImage =>
-      candidate !== null && candidate.url.trim() !== "",
-  );
-  if (chosen === undefined) {
-    return null;
+  for (const candidate of candidates) {
+    const resolved = absoluteShareImage(definition, candidate);
+    if (resolved !== null) {
+      return resolved;
+    }
   }
-  const url = chosen.url.trim();
-  if (!url.startsWith("/")) {
-    return { url, alt: chosen.alt };
-  }
-  const absolute = canonicalUrlFor(definition, url as `/${string}`);
-  return absolute === null ? null : { url: absolute, alt: chosen.alt };
+  return null;
 }
 
 /**
