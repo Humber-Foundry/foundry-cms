@@ -96,11 +96,14 @@ picture in the body instead. The preview line stays the first thing in that
 body, because an inbox builds its preview from the first text it finds.
 
 **A listing borrows the site's metadata.** The blog index is a route the product
-generates, not content an owner writes, so it has no SEO block to fill. It takes
-the site name, the site description and the home page's share image. Giving it
-editable fields would ask an owner to write metadata for a page they did not
-write; leaving it with the hand-written title it had before would have been the
-one public route with no canonical URL and no Open Graph tags.
+generates, not content an owner writes, so it has no SEO block to fill. Its title
+is its own heading, "Blog", with the site name after it — the same
+heading-then-site-name shape every page below the home page uses, and different
+from the home page's bare site name so the two routes never share one title. Its
+description is the site description and its share image is the home page's share
+image. Giving it editable fields would ask an owner to write metadata for a page
+they did not write; leaving it with the hand-written title it had before would
+have been the one public route with no canonical URL and no Open Graph tags.
 
 ## What this decision does not cover
 

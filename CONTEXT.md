@@ -82,9 +82,10 @@ fallback is computed at render time and never written back into the content.
 
 **Listing** — A public route that shows other content rather than content an
 owner writes, such as the blog index. A listing has no SEO metadata of its own.
-It borrows the site name, description and share image, so its link preview is
-still right, and no owner is asked to fill a field for a page they did not
-write.
+Its title is its own heading with the site name after it — the same
+heading-then-site-name shape every page below the home page uses — and it
+borrows the site description and share image. Its link preview is still right,
+and no owner is asked to fill a field for a page they did not write.
 
 **Share image** — The picture shown when a page, post or campaign is shared as a
 link. It is an address and an alt text. A page or post may use a path on the
