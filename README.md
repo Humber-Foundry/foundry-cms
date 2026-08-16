@@ -71,6 +71,17 @@ Production installation supplies:
   Worker version-metadata binding (or an exact `FOUNDRY_RENDERER_VERSION`); and
 - an initial Owner invitation created by guided provisioning before handoff.
 
+An installation also sets its site address: the public address the site serves
+from. An owner sets it in the dashboard as the "Site address" field in the SEO
+group, which writes `site.canonicalOrigin` in the published content. It is the
+base for every canonical and Open Graph URL the public pages emit. Leave it empty and
+the pages still carry a title, a description and Open Graph title and
+description, but no addresses — no canonical URL is safer than one naming the
+wrong host. It normally matches `FOUNDRY_CANONICAL_ORIGIN`, but it is a separate
+setting: this one is build-time content, that one is the dashboard's
+request-integrity origin. See
+[ADR-0008](docs/decisions/ADR-0008-seo-metadata-shared-field-set.md).
+
 Apply the checked-in D1 migrations to both the primary and isolated recovery
 databases locally with:
 

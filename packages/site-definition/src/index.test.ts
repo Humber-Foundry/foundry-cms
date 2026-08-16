@@ -31,13 +31,13 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.3.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.3.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.4.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.4.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.3.0",
+      "https://foundrycms.dev/schemas/site-definition/1.4.0",
     );
     expect(
       siteDefinitionSchema.$defs.richTextDocument.$comment,
@@ -128,8 +128,8 @@ describe("reference Site Definition", () => {
     )!;
 
     expect(upgraded).not.toBe(legacy);
-    expect(upgraded.definitionVersion).toBe("1.3.0");
-    expect(upgraded.schemaVersion).toBe("1.3.0");
+    expect(upgraded.definitionVersion).toBe("1.4.0");
+    expect(upgraded.schemaVersion).toBe("1.4.0");
     expect(callToAction).toEqual(
       expect.objectContaining({
         body: {
@@ -391,6 +391,44 @@ describe("reference Site Definition", () => {
         ];
       },
     },
+    {
+      // "//host/x" is a protocol-relative address for another host. It looks
+      // like a path on this site but is not one, so it must not pass as one.
+      name: "a protocol-relative share image address",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.shareImage = {
+          url: "//attacker.example/card.png",
+          alt: "",
+        };
+      },
+    },
+    {
+      name: "an insecure share image address",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.shareImage = {
+          url: "http://attacker.example/card.png",
+          alt: "",
+        };
+      },
+    },
+    {
+      name: "an executable share image address",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.shareImage = {
+          url: "javascript:alert(1)",
+          alt: "",
+        };
+      },
+    },
+    {
+      name: "more keywords than an owner may set",
+      change: (definition: Record<string, any>) => {
+        definition.home.seo.keywords = Array.from(
+          { length: 13 },
+          (_unused, index) => `keyword-${index}`,
+        );
+      },
+    },
   ])("rejects $name", ({ change }) => {
     const malformed = structuredClone(referenceSiteDefinition) as unknown as Record<
       string,
@@ -487,7 +525,10 @@ describe("reference Site Definition", () => {
             slug: "first",
             title: "First",
             excerpt: "First excerpt",
-            seo: { title: "First", description: "First excerpt" },
+            seo: { title: "First", description: "First excerpt",
+              keywords: [],
+              shareImage: null,
+            },
             body: createRichTextDocumentFromPlainText("First body"),
           },
           {
@@ -498,7 +539,10 @@ describe("reference Site Definition", () => {
             slug: "second",
             title: "Second",
             excerpt: "Second excerpt",
-            seo: { title: "Second", description: "Second excerpt" },
+            seo: { title: "Second", description: "Second excerpt",
+              keywords: [],
+              shareImage: null,
+            },
             body: createRichTextDocumentFromPlainText("Second body"),
           },
         ],
@@ -718,9 +762,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.3.0.",
+        "section_missing.title": "This field is not in Site Definition 1.4.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.3.0.",
+        "section_hero.href": "This field is not in Site Definition 1.4.0.",
       },
     });
   });
@@ -734,7 +778,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.3.0.",
+        "This field is not in Site Definition 1.4.0.",
       );
     }
   });

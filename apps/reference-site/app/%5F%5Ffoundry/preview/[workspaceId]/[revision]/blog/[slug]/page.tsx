@@ -43,10 +43,10 @@ async function loadPostPreview(props: BlogPostPreviewProps) {
 export async function generateMetadata(
   props: BlogPostPreviewProps,
 ): Promise<Metadata> {
-  const { post } = await loadPostPreview(props);
+  const { revision, post } = await loadPostPreview(props);
   return {
     robots: { index: false, follow: false },
-    ...blogPostMetadata(post),
+    ...blogPostMetadata(revision.definition, post),
   };
 }
 

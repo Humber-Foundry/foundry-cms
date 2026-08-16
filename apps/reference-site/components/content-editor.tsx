@@ -1890,6 +1890,24 @@ function EditorFieldGroups({
                 const fieldLabel = (
                   <span id={labelId}>{field.label}</span>
                 );
+                // An optional field needs to say what happens when it is left
+                // blank, or the owner cannot tell "empty" from "broken".
+                const fieldHint =
+                  field.hint === undefined ? null : (
+                    <small
+                      className="editor-field-hint"
+                      id={`${field.path}-hint`}
+                    >
+                      {field.hint}
+                    </small>
+                  );
+                // A hint a screen reader never reaches is not a hint. Name it
+                // ahead of the error so the control reads out what the field
+                // is for before what is wrong with it.
+                const fieldDescribedBy =
+                  field.hint === undefined
+                    ? `${field.path}-error`
+                    : `${field.path}-hint ${field.path}-error`;
                 const fieldError = (
                   <small id={`${field.path}-error`}>
                     {errors[field.path] ?? ""}
@@ -1905,12 +1923,13 @@ function EditorFieldGroups({
                       aria-labelledby={labelId}
                     >
                       {fieldLabel}
+                      {fieldHint}
                       <RichTextEditor
                         id={`${field.path}-editor`}
                         disabled={editorLocked}
                         value={field.value}
                         invalid={Boolean(errors[field.path])}
-                        describedBy={`${field.path}-error`}
+                        describedBy={fieldDescribedBy}
                         labelledBy={labelId}
                         onChange={(value) =>
                           edit({
@@ -1930,12 +1949,13 @@ function EditorFieldGroups({
                 return (
                   <label key={field.path} data-field-path={field.path}>
                     {fieldLabel}
+                    {fieldHint}
                     {field.values !== undefined ? (
                       <select
                         disabled={editorLocked}
                         value={field.value}
                         aria-invalid={Boolean(errors[field.path])}
-                        aria-describedby={`${field.path}-error`}
+                        aria-describedby={fieldDescribedBy}
                         onChange={(event) =>
                           edit({
                             path: field.path,
@@ -1956,7 +1976,7 @@ function EditorFieldGroups({
                         disabled={editorLocked}
                         value={field.value}
                         aria-invalid={Boolean(errors[field.path])}
-                        aria-describedby={`${field.path}-error`}
+                        aria-describedby={fieldDescribedBy}
                         onChange={(event) =>
                           edit({
                             path: field.path,
@@ -1970,7 +1990,7 @@ function EditorFieldGroups({
                         disabled={editorLocked}
                         value={field.value}
                         aria-invalid={Boolean(errors[field.path])}
-                        aria-describedby={`${field.path}-error`}
+                        aria-describedby={fieldDescribedBy}
                         onChange={(event) =>
                           edit({
                             path: field.path,

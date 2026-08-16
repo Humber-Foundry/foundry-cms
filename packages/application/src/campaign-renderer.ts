@@ -1,5 +1,8 @@
 import {
   SAFE_RICH_TEXT_LINK_PATTERN,
+  absoluteSiteUrl,
+  campaignShareImageUrlPattern,
+  seoShareImageUrlMaxLength,
   validateRichTextDocument,
   visitRichTextBlock,
   type RichTextDocument,
@@ -73,6 +76,65 @@ export function validateCampaignChannelConfiguration(
   });
 }
 
+/**
+ * Accept only an absolute `https://` share image address.
+ *
+ * An email is read outside the site, so a path such as `/api/media/asset_hero`
+ * would resolve against the reader's mail host and break. Any other scheme is
+ * refused because the address is written straight into the message.
+ */
+function validateCampaignShareImage(
+  value: CampaignEditableInput["shareImage"],
+): CampaignEditableInput["shareImage"] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "object" || typeof value.url !== "string") {
+    throw new CampaignValidationError("campaign_share_image_invalid");
+  }
+  const url = value.url.trim();
+  if (url === "") {
+    return null;
+  }
+  if (
+    !new RegExp(campaignShareImageUrlPattern, "u").test(url) ||
+    url.length > seoShareImageUrlMaxLength
+  ) {
+    throw new CampaignValidationError("campaign_share_image_invalid");
+  }
+  const alt = typeof value.alt === "string" ? value.alt.trim() : "";
+  if (alt.length > 300) {
+    throw new CampaignValidationError("campaign_share_image_invalid");
+  }
+  return Object.freeze({ url, alt });
+}
+
+/**
+ * Carry a post's share image onto a campaign derived from that post.
+ *
+ * A post may name its share image by a path on the site. An email cannot
+ * resolve a path, so the site's own address makes it absolute here. Without
+ * that address the image is dropped, because a path in an email is a broken
+ * picture in every inbox.
+ */
+export function campaignShareImageFromPost(
+  postShareImage: CampaignEditableInput["shareImage"],
+  siteCanonicalOrigin: string,
+): CampaignEditableInput["shareImage"] {
+  if (postShareImage === null) {
+    return null;
+  }
+  const url = postShareImage.url.trim();
+  if (url.startsWith("https://")) {
+    return { url, alt: postShareImage.alt };
+  }
+  if (!url.startsWith("/")) {
+    return null;
+  }
+  const absolute = absoluteSiteUrl(siteCanonicalOrigin, url as `/${string}`);
+  return absolute === null ? null : { url: absolute, alt: postShareImage.alt };
+}
+
 export function validateCampaignInput(
   input: CampaignEditableInput,
   channelConfiguration: CampaignChannelConfiguration,
@@ -86,6 +148,7 @@ export function validateCampaignInput(
     }
     const subject = requireText(input.subject, 200);
     const previewText = requireText(input.previewText, 1_000);
+    const shareImage = validateCampaignShareImage(input.shareImage);
     const callToAction = Object.freeze({
       label: requireText(input.callToAction.label, 200),
       href: requireText(input.callToAction.href, 2_000),
@@ -99,6 +162,7 @@ export function validateCampaignInput(
     return Object.freeze({
       subject,
       previewText,
+      shareImage,
       callToAction,
       emailContent,
       ...channelConfiguration,
@@ -199,11 +263,25 @@ export function renderRichTextPlain(document: RichTextDocument): string {
 }
 
 function renderCampaignBytes(revision: CampaignRevision) {
+  // A revision stored before share images existed has no such field, so it
+  // reads as `undefined` rather than `null`. Treat both as "no image".
+  const shareImage = revision.shareImage ?? null;
   const html = [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
-    `<title>${escapeHtml(revision.subject)}</title></head><body>`,
+    `<title>${escapeHtml(revision.subject)}</title>`,
+    // No Open Graph tag here. These bytes are only ever sent to the delivery
+    // provider as the message body, and a mail client drops the head. The
+    // share image reaches the reader as the picture below.
+    "</head><body>",
+    // The preview line stays the first thing in the body. An inbox builds its
+    // preview from the first text it finds, so nothing may come before it.
     `<p>${escapeHtml(revision.previewText)}</p>`,
+    shareImage === null
+      ? ""
+      : `<img src="${escapeHtml(shareImage.url)}" alt="${escapeHtml(
+          shareImage.alt,
+        )}">`,
     renderRichTextHtml(revision.emailContent),
     `<p><a href="${escapeHtml(revision.callToAction.href)}">${escapeHtml(
       revision.callToAction.label,

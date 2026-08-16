@@ -1591,7 +1591,7 @@ describe("D1 MCP connection store", () => {
            schema_version, renderer_version, current_revision,
            current_content_hash, lifecycle, created_at, updated_at
          ) VALUES (
-           'workspace-live', ?1, 'membership-owner', 'base-sha', '1.3.0',
+           'workspace-live', ?1, 'membership-owner', 'base-sha', '1.4.0',
            'renderer-1', 1, 'content-hash', 'published', ?2, ?2
          )`,
       )
@@ -1607,7 +1607,7 @@ describe("D1 MCP connection store", () => {
            schema_version, renderer_version, production_base, request_hash,
            created_at, created_by
          ) VALUES (
-           'workspace-live', 1, '{}', 'content-hash', '1.3.0',
+           'workspace-live', 1, '{}', 'content-hash', '1.4.0',
            'renderer-1', 'base-sha', 'request-hash', ?1, 'membership-owner'
          )`,
       )
@@ -1622,7 +1622,7 @@ describe("D1 MCP connection store", () => {
            serialization_version, approved_by, approved_at
          ) VALUES (
            'approval-live', 'workspace-live', 1, 'fingerprint', 'site',
-           'channel-hash', 'content-hash', 'design-hash', '1.3.0',
+           'channel-hash', 'content-hash', 'design-hash', '1.4.0',
            'renderer-1', 'base-sha', 'artifact-hash', 'serialization-1',
            'membership-owner', ?1
          )`,

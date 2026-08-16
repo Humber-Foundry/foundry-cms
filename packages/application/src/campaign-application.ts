@@ -1,4 +1,5 @@
 import {
+  campaignShareImageFromPost,
   renderCampaignRevision,
   validateCampaignChannelConfiguration,
   validateCampaignInput,
@@ -64,6 +65,7 @@ export function createCampaignApplication({
   findPostRevision,
   resolveAudience,
   channelConfiguration,
+  siteCanonicalOrigin,
   rendererVersion,
   schemaVersion,
   clock = () => new Date(),
@@ -663,6 +665,10 @@ export function createCampaignApplication({
         input: {
           subject: post.title,
           previewText: post.excerpt,
+          shareImage: campaignShareImageFromPost(
+            post.seo.shareImage,
+            siteCanonicalOrigin,
+          ),
           callToAction: {
             label: "Read more",
             href: `/blog/${post.slug}`,

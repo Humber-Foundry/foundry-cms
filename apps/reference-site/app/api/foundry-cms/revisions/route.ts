@@ -20,6 +20,7 @@ import {
   parseSerializedRichTextDocument,
   RichTextValidationError,
   type PageComposition,
+  type SeoMetadata,
   type SiteDefinition,
   type SiteDefinitionEdit,
 } from "@humber-foundry/site-definition";
@@ -123,6 +124,54 @@ function isBlogMutationOperation(
   );
 }
 
+/**
+ * Read one share image. Absent and null both mean no picture. A present value
+ * must carry both an address and a description; the schema validator then
+ * decides whether the address itself is one this site will publish.
+ */
+function parseSeoShareImage(value: unknown): SeoMetadata["shareImage"] {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof value !== "object" ||
+    typeof candidate.url !== "string" ||
+    typeof candidate.alt !== "string"
+  ) {
+    throw new TypeError("blog_command_invalid");
+  }
+  return { url: candidate.url, alt: candidate.alt };
+}
+
+/**
+ * Read one SEO and sharing block. Every field may be blank or absent, but a
+ * field that is present and the wrong shape is a bad command, not something to
+ * quietly repair: a silently dropped keyword would leave the composer showing
+ * one list and the revision holding another.
+ */
+function parseSeoMetadata(value: unknown): SeoMetadata {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("blog_command_invalid");
+  }
+  const seo = value as Record<string, unknown>;
+  if (
+    typeof seo.title !== "string" ||
+    typeof seo.description !== "string" ||
+    (seo.keywords !== undefined &&
+      (!Array.isArray(seo.keywords) ||
+        seo.keywords.some((keyword) => typeof keyword !== "string")))
+  ) {
+    throw new TypeError("blog_command_invalid");
+  }
+  return {
+    title: seo.title,
+    description: seo.description,
+    keywords: (seo.keywords ?? []) as ReadonlyArray<string>,
+    shareImage: parseSeoShareImage(seo.shareImage),
+  };
+}
+
 function parseBlogMutation(value: unknown): BlogMutationBody | null {
   if (typeof value !== "object" || value === null) {
     return null;
@@ -165,10 +214,6 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
     typeof post.slug !== "string" ||
     typeof post.title !== "string" ||
     typeof post.excerpt !== "string" ||
-    typeof post.seo !== "object" ||
-    post.seo === null ||
-    typeof (post.seo as Record<string, unknown>).title !== "string" ||
-    typeof (post.seo as Record<string, unknown>).description !== "string" ||
     typeof post.body !== "string"
   ) {
     throw new TypeError("blog_command_invalid");
@@ -177,10 +222,7 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
     slug: post.slug,
     title: post.title,
     excerpt: post.excerpt,
-    seo: {
-      title: (post.seo as Record<string, string>).title!,
-      description: (post.seo as Record<string, string>).description!,
-    },
+    seo: parseSeoMetadata(post.seo),
     body: parseSerializedRichTextDocument(
       createSerializedRichTextDocument(post.body),
     ),

@@ -2,6 +2,7 @@ import type {
   BlogPost,
   BlogPostId,
   RichTextDocument,
+  SeoShareImage,
   SiteDefinition,
   SiteId,
 } from "@humber-foundry/site-definition";
@@ -55,9 +56,22 @@ export type CampaignCallToAction = Readonly<{
   href: string;
 }>;
 
+/**
+ * The owner-filled fields of one campaign.
+ *
+ * `subject` and `previewText` are the campaign's meta title and meta
+ * description: the two lines an inbox shows before the message is opened.
+ * `shareImage` is the same field a site page and a blog post carry, so one
+ * drafting tool can fill all three surfaces.
+ *
+ * A campaign share image must be an absolute `https://` address. An email
+ * client has no site to resolve a path against, so a path cannot be used here
+ * even though a page or post accepts one.
+ */
 export type CampaignEditableInput = Readonly<{
   subject: string;
   previewText: string;
+  shareImage: SeoShareImage | null;
   callToAction: CampaignCallToAction;
   emailContent: RichTextDocument;
 }>;
@@ -389,6 +403,12 @@ export type CampaignApplicationDependencies = Readonly<{
     definition: CampaignAudienceDefinition,
   ): Promise<Readonly<{ eligibleSubscriberCount: number }>>;
   channelConfiguration: CampaignChannelConfiguration;
+  /**
+   * The site's public address, used to make a post share image absolute when a
+   * campaign is derived from that post. Empty when the installation has not set
+   * one, and a path share image is then dropped rather than sent broken.
+   */
+  siteCanonicalOrigin: string;
   rendererVersion: string;
   schemaVersion: SiteDefinition["schemaVersion"];
   clock?: () => Date;

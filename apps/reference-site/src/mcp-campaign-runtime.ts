@@ -200,12 +200,14 @@ function bindApplications(
     store: parts.store,
     authorize,
     identifyActor: () => actorId,
-    // MCP never derives a campaign from a post, so the post lookup is unused.
+    // MCP never derives a campaign from a post, so the post lookup and the
+    // site address that would make a post share image absolute are unused.
     findPostRevision: async () => null,
     resolveAudience: parts.resolveAudience,
     channelConfiguration: parts.channelConfiguration,
+    siteCanonicalOrigin: "",
     rendererVersion: parts.rendererVersion,
-    schemaVersion: "1.3.0",
+    schemaVersion: "1.4.0",
   });
   const testDelivery = createCampaignTestDeliveryApplication({
     siteId: parts.siteId,

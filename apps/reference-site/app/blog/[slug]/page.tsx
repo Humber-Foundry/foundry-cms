@@ -28,8 +28,8 @@ async function loadPost(props: BlogPostPageProps) {
 export async function generateMetadata(
   props: BlogPostPageProps,
 ): Promise<Metadata> {
-  const { post } = await loadPost(props);
-  return blogPostMetadata(post);
+  const { definition, post } = await loadPost(props);
+  return blogPostMetadata(definition, post);
 }
 
 export default async function BlogPostPage(props: BlogPostPageProps) {

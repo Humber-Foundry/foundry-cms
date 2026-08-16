@@ -238,6 +238,8 @@ describe("D1 content revision store", () => {
             seo: {
               title: "Raced unpublish | Foundry",
               description: "A verified callback races the draft transition.",
+              keywords: [],
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("Initially live."),
           },
@@ -362,6 +364,8 @@ describe("D1 content revision store", () => {
             title: "Global ID collision | Foundry",
             description:
               "The stable identity already exists outside this draft.",
+            keywords: [],
+            shareImage: null,
           },
           body: createRichTextDocumentFromPlainText("Must conflict."),
         },
@@ -391,6 +395,8 @@ describe("D1 content revision store", () => {
             seo: {
               title: "Missing successor | Foundry",
               description: "The draft post has lost its aggregate.",
+              keywords: [],
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("Original body."),
           },
@@ -485,6 +491,8 @@ describe("D1 content revision store", () => {
         seo: {
           title: "Durable post | Foundry",
           description: "A post whose immutable history is persisted in D1.",
+          keywords: [],
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText("Durable body."),
       },
@@ -513,6 +521,8 @@ describe("D1 content revision store", () => {
           seo: {
             title: "Duplicate durable post | Foundry",
             description: "This duplicate must fail closed.",
+            keywords: [],
+            shareImage: null,
           },
           body: createRichTextDocumentFromPlainText("Duplicate."),
         },
@@ -671,7 +681,7 @@ describe("D1 content revision store", () => {
            artifact_hash, serialization_version, approved_by, approved_at
          ) VALUES (
            'approval_blog_in_progress', ?1, 2, ?2, 'site', 'channel',
-           ?2, ?2, '1.3.0', 'renderer-test-commit',
+           ?2, ?2, '1.4.0', 'renderer-test-commit',
            'published:site_foundry_reference@1.1.0', ?2,
            'foundry.site-publication-artifacts.v2', ?3, ?4
          )`,
@@ -876,7 +886,7 @@ describe("D1 content revision store", () => {
       workspaceId: republishWorkspaceId,
       actorId: editorActorId,
       rendererVersion: "renderer-test-commit",
-      productionBase: "published:site_foundry_reference@1.3.0",
+      productionBase: "published:site_foundry_reference@1.4.0",
       now: () => "2026-07-27T13:10:00.000Z",
     });
     await republishApplication.commands.create({
@@ -1007,7 +1017,7 @@ describe("D1 content revision store", () => {
       workspaceId: absentRecoveryWorkspaceId,
       actorId: editorActorId,
       rendererVersion: "renderer-test-commit",
-      productionBase: "published:site_foundry_reference@1.3.0",
+      productionBase: "published:site_foundry_reference@1.4.0",
       now: () => "2026-07-27T13:40:00.000Z",
     });
     await absentRecoveryApplication.commands.create({
@@ -1119,6 +1129,8 @@ describe("D1 content revision store", () => {
         seo: {
           title: `Post ${index + 1} | Foundry`,
           description: `Excerpt ${index + 1}`,
+          keywords: [],
+          shareImage: null,
         },
         body: createRichTextDocumentFromPlainText(`Body ${index + 1}.`),
       };
@@ -1247,6 +1259,8 @@ describe("D1 content revision store", () => {
       seo: {
         title: "Ordered absence | Foundry",
         description: "Newer verified absence must win.",
+        keywords: [],
+        shareImage: null,
       },
       body: createRichTextDocumentFromPlainText("Publication ordering."),
     };
@@ -1378,6 +1392,8 @@ describe("D1 content revision store", () => {
       seo: {
         title: "Shared render inputs | Foundry",
         description: "The post content remains unchanged.",
+        keywords: [],
+        shareImage: null,
       },
       body: createRichTextDocumentFromPlainText("Unchanged post body."),
     };
@@ -1464,6 +1480,8 @@ describe("D1 content revision store", () => {
             seo: {
               title: "Shared post | Foundry",
               description: "One aggregate shared across workspaces.",
+              keywords: [],
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("Shared body."),
           },
@@ -1587,6 +1605,8 @@ describe("D1 content revision store", () => {
       seo: {
         title: `${title} | Foundry`,
         description: `${title} description.`,
+        keywords: [],
+        shareImage: null,
       },
       body: createRichTextDocumentFromPlainText(`${title} body.`),
     });
@@ -1701,6 +1721,8 @@ describe("D1 content revision store", () => {
             seo: {
               title: "Missing aggregate | Foundry",
               description: "The callback must not silently succeed.",
+              keywords: [],
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("Missing."),
           },
@@ -1739,6 +1761,8 @@ describe("D1 content revision store", () => {
             seo: {
               title: "Missing revision | Foundry",
               description: "The callback must require immutable evidence.",
+              keywords: [],
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText("Missing evidence."),
           },
@@ -1813,6 +1837,8 @@ describe("D1 content revision store", () => {
             seo: {
               title: "Scheduled published title | Foundry",
               description: "The scheduled post crossed Git.",
+              keywords: [],
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText(
               "Scheduled published body.",
@@ -1829,6 +1855,8 @@ describe("D1 content revision store", () => {
             seo: {
               title: "Unrelated published title | Foundry",
               description: "This post has its own successor draft.",
+              keywords: [],
+              shareImage: null,
             },
             body: createRichTextDocumentFromPlainText(
               "Unrelated published body.",
@@ -2202,6 +2230,8 @@ describe("D1 content revision store", () => {
           seo: {
             title: "Unauthorized post | Foundry",
             description: "This must not enter another workspace audit.",
+            keywords: [],
+            shareImage: null,
           },
           body: createRichTextDocumentFromPlainText("Unauthorized."),
         },

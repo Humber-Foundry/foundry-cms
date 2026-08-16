@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 
+import { resolveHomeSeo } from "@humber-foundry/site-definition";
+
 import { SiteRenderer } from "@/components/site-renderer";
+import { publicMetadata } from "@/src/public-metadata";
 import {
   loadRevisionPreview,
   type RevisionPreviewPageProps,
@@ -17,8 +20,10 @@ export async function generateMetadata(
   const revision = await loadRevisionPreview(props);
   return {
     robots: { index: false, follow: false },
-    title: revision.definition.home.seo.title,
-    description: revision.definition.home.seo.description,
+    ...publicMetadata(resolveHomeSeo(revision.definition), {
+      siteName: revision.definition.site.name,
+      kind: "website",
+    }),
   };
 }
 

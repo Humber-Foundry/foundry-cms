@@ -59,6 +59,7 @@ async function source(): Promise<CampaignBulkSource> {
       provenance: { kind: "standalone" },
       subject: "Exact tested update",
       previewText: "The exact tested message.",
+      shareImage: null,
       callToAction: {
         label: "Read",
         href: "https://example.test/read",
@@ -75,7 +76,7 @@ async function source(): Promise<CampaignBulkSource> {
         id: "canonical-consent-and-suppression",
         version: 1,
       },
-      schemaVersion: "1.3.0",
+      schemaVersion: "1.4.0",
       rendererVersion: "1".repeat(40),
       createdAt: "2026-08-01T00:00:00.000Z",
       createdByActorId: "membership-editor",

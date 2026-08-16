@@ -379,6 +379,9 @@ function command(value: unknown): CampaignCommand | null {
   const input = {
     subject: editable.subject,
     previewText: editable.previewText,
+    // The campaign renderer rejects anything that is not an absolute https
+    // address, so this only has to carry the value through.
+    shareImage: editable.shareImage ?? null,
     callToAction: editable.callToAction,
     emailContent: editable.emailContent,
   } as CampaignEditableInput;

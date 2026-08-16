@@ -206,6 +206,8 @@ describe("content revision endpoint", () => {
               seo: {
                 title: "Route post | Foundry",
                 description: "Created through the authenticated route.",
+                keywords: [],
+                shareImage: null,
               },
               body,
             },
@@ -233,6 +235,8 @@ describe("content revision endpoint", () => {
           seo: {
             title: "Route post | Foundry",
             description: "Created through the authenticated route.",
+            keywords: [],
+            shareImage: null,
           },
           body: serializeRichTextDocument(body),
         },
@@ -342,6 +346,8 @@ describe("content revision endpoint", () => {
             seo: {
               title: "Invalid rich text | Foundry",
               description: "The body is not canonical rich text.",
+              keywords: [],
+              shareImage: null,
             },
             body: "{",
           },

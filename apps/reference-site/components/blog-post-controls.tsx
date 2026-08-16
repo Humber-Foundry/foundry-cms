@@ -4,11 +4,17 @@ import { useState } from "react";
 
 import type { ContentRevision } from "@humber-foundry/application";
 import {
+  formatSeoKeywords,
+  parseSeoKeywords,
   parseSerializedRichTextDocument,
+  seoFieldHints,
+  seoKeywordLimit,
   serializeRichTextDocument,
+  toSeoShareImage,
   type BlogPost,
   type BlogPostId,
   type RichTextDocument,
+  type SeoMetadata,
   type SerializedRichTextDocument,
 } from "@humber-foundry/site-definition";
 
@@ -115,13 +121,17 @@ function PostComposer({
   onCancel,
 }: {
   editorId: string;
-  initialPost?: Pick<BlogPost, "title" | "slug" | "excerpt" | "body">;
+  initialPost?: Pick<
+    BlogPost,
+    "title" | "slug" | "excerpt" | "body" | "seo"
+  >;
   busy: boolean;
   saveLabel: string;
   onSave(post: {
     title: string;
     slug: string;
     excerpt: string;
+    seo: SeoMetadata;
     body: SerializedRichTextDocument;
   }): void;
   onCancel?(): void;
@@ -130,6 +140,22 @@ function PostComposer({
   const [slug, setSlug] = useState(initialPost?.slug ?? "");
   const [slugEdited, setSlugEdited] = useState(initialPost !== undefined);
   const [summary, setSummary] = useState(initialPost?.excerpt ?? "");
+  const [seoTitle, setSeoTitle] = useState(initialPost?.seo.title ?? "");
+  const [seoDescription, setSeoDescription] = useState(
+    initialPost?.seo.description ?? "",
+  );
+  const [keywords, setKeywords] = useState(
+    formatSeoKeywords(initialPost?.seo.keywords ?? []),
+  );
+  // The schema refuses a longer list. Say so here, next to the box, rather
+  // than letting the save come back with a generic schema complaint.
+  const tooManyKeywords = parseSeoKeywords(keywords).length > seoKeywordLimit;
+  const [shareImageUrl, setShareImageUrl] = useState(
+    initialPost?.seo.shareImage?.url ?? "",
+  );
+  const [shareImageAlt, setShareImageAlt] = useState(
+    initialPost?.seo.shareImage?.alt ?? "",
+  );
   const [body, setBody] = useState<SerializedRichTextDocument>(() =>
     initialPost === undefined
       ? emptyRichTextBody()
@@ -147,6 +173,12 @@ function PostComposer({
           title: title.trim(),
           slug: effectiveSlug,
           excerpt: blogPostSummary(summary, body, title.trim()),
+          seo: {
+            title: seoTitle.trim(),
+            description: seoDescription.trim(),
+            keywords: parseSeoKeywords(keywords),
+            shareImage: toSeoShareImage(shareImageUrl, shareImageAlt),
+          },
           body,
         });
       }}
@@ -177,7 +209,7 @@ function PostComposer({
         lists and links.
       </p>
       <details className="composer-settings">
-        <summary>Post settings — summary and web address</summary>
+        <summary>Post settings — summary shown in the blog list</summary>
         <div>
           <label>
             <span>Summary — shown in the blog list</span>
@@ -189,6 +221,15 @@ function PostComposer({
               onChange={(event) => setSummary(event.target.value)}
             />
           </label>
+        </div>
+      </details>
+      <details className="composer-settings">
+        <summary>SEO and sharing — how this post looks in search and when shared</summary>
+        <div>
+          {/*
+            The web address leads this section because it is the owner's only
+            control over the post's canonical URL. See ADR-0008.
+          */}
           <label>
             <span>Web address</span>
             <span className="composer-slug">
@@ -206,12 +247,74 @@ function PostComposer({
               />
             </span>
           </label>
+          <label>
+            <span>SEO title</span>
+            <small className="composer-hint">
+              {seoFieldHints.post.title}
+            </small>
+            <input
+              name="seoTitle"
+              maxLength={300}
+              value={seoTitle}
+              onChange={(event) => setSeoTitle(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>SEO description</span>
+            <small className="composer-hint">
+              {seoFieldHints.post.description}
+            </small>
+            <textarea
+              name="seoDescription"
+              maxLength={1000}
+              value={seoDescription}
+              onChange={(event) => setSeoDescription(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Keywords</span>
+            <small className="composer-hint">{seoFieldHints.keywords}</small>
+            <input
+              name="seoKeywords"
+              value={keywords}
+              aria-invalid={tooManyKeywords}
+              aria-describedby="seo-keywords-error"
+              onChange={(event) => setKeywords(event.target.value)}
+            />
+            <small className="composer-error" id="seo-keywords-error">
+              {tooManyKeywords ? seoFieldHints.tooManyKeywords : ""}
+            </small>
+          </label>
+          <label>
+            <span>Share image address</span>
+            <small className="composer-hint">
+              {seoFieldHints.shareImageUrl}
+            </small>
+            <input
+              name="seoShareImageUrl"
+              maxLength={2000}
+              value={shareImageUrl}
+              onChange={(event) => setShareImageUrl(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Share image description</span>
+            <small className="composer-hint">
+              {seoFieldHints.shareImageAlt}
+            </small>
+            <input
+              name="seoShareImageAlt"
+              maxLength={300}
+              value={shareImageAlt}
+              onChange={(event) => setShareImageAlt(event.target.value)}
+            />
+          </label>
         </div>
       </details>
       <ComposerActions
         busy={busy}
         saveLabel={saveLabel}
-        blocked={bodyInvalid}
+        blocked={bodyInvalid || tooManyKeywords}
         onCancel={onCancel}
       />
     </form>
@@ -351,6 +454,7 @@ export function BlogPostControls({
       title: string;
       slug: string;
       excerpt: string;
+      seo: SeoMetadata;
       body: SerializedRichTextDocument;
     }>,
     existingPostId?: string,
@@ -360,19 +464,21 @@ export function BlogPostControls({
       schemaVersion: revision.definition.schemaVersion,
       baseRevision: revision.revision,
     };
-    const seo = { title: post.title, description: post.excerpt };
+    // Blank SEO fields are saved blank on purpose. The renderer fills them
+    // from the post title and summary, so a later edit to either keeps the
+    // search result and the link preview in step.
     void send(
       existingPostId === undefined
         ? {
             operation: "create_blog_post",
             ...shared,
-            post: { id: crypto.randomUUID(), ...post, seo },
+            post: { id: crypto.randomUUID(), ...post },
           }
         : {
             operation: "edit_blog_post",
             ...shared,
             postId: existingPostId,
-            post: { ...post, seo },
+            post,
           },
       existingPostId === undefined ? "create-blog-post" : "edit-blog-post",
     );

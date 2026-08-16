@@ -11,7 +11,9 @@ import {
 } from "@humber-foundry/application";
 import {
   parseSerializedRichTextDocument,
+  seoFieldHints,
   serializeRichTextDocument,
+  toSeoShareImage,
   type SerializedRichTextDocument,
   type BlogPost,
 } from "@humber-foundry/site-definition";
@@ -48,6 +50,7 @@ function EmailComposer({
   onSave(email: {
     subject: string;
     previewText: string;
+    shareImage: CampaignRevision["shareImage"];
     callToAction: { label: string; href: string };
     emailContent: SerializedRichTextDocument;
   }): void;
@@ -62,6 +65,12 @@ function EmailComposer({
   );
   const [ctaHref, setCtaHref] = useState(
     initialRevision?.callToAction.href ?? "",
+  );
+  const [shareImageUrl, setShareImageUrl] = useState(
+    initialRevision?.shareImage?.url ?? "",
+  );
+  const [shareImageAlt, setShareImageAlt] = useState(
+    initialRevision?.shareImage?.alt ?? "",
   );
   const [content, setContent] = useState<SerializedRichTextDocument>(() =>
     initialRevision === undefined
@@ -79,6 +88,7 @@ function EmailComposer({
         onSave({
           subject: subject.trim(),
           previewText: previewText.trim(),
+          shareImage: toSeoShareImage(shareImageUrl, shareImageAlt),
           callToAction: { label: ctaLabel.trim(), href: ctaHref.trim() },
           emailContent: content,
         });
@@ -110,16 +120,53 @@ function EmailComposer({
         them.
       </p>
       <div className="composer-settings-open">
-        <label>
-          <span>Preview line — shown after the subject in inboxes</span>
-          <textarea
-            name="previewText"
-            required
-            maxLength={1000}
-            value={previewText}
-            onChange={(event) => setPreviewText(event.target.value)}
-          />
-        </label>
+        {/*
+          The same SEO and sharing block the page and post editors show, named
+          in the words an email uses. The subject above is this campaign's
+          title, so the section holds the two lines below it and the picture.
+        */}
+        <fieldset className="composer-section">
+          <legend>SEO and sharing — how this email looks in an inbox</legend>
+          <p className="composer-hint">
+            The subject above is the first line an inbox shows.
+          </p>
+          <label>
+            <span>Preview line — shown after the subject in inboxes</span>
+            <textarea
+              name="previewText"
+              required
+              maxLength={1000}
+              value={previewText}
+              onChange={(event) => setPreviewText(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Share image address</span>
+            <small className="composer-hint">
+              {seoFieldHints.campaignShareImageUrl}
+            </small>
+            <input
+              name="shareImageUrl"
+              type="url"
+              maxLength={2000}
+              placeholder="https://…"
+              value={shareImageUrl}
+              onChange={(event) => setShareImageUrl(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Share image description</span>
+            <small className="composer-hint">
+              {seoFieldHints.shareImageAlt}
+            </small>
+            <input
+              name="shareImageAlt"
+              maxLength={300}
+              value={shareImageAlt}
+              onChange={(event) => setShareImageAlt(event.target.value)}
+            />
+          </label>
+        </fieldset>
         <label>
           <span>Button label</span>
           <input

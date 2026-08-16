@@ -25,9 +25,12 @@ import {
 import { installedSiteDefinition } from "../foundry/site-definition";
 import {
   designContract,
+  campaignShareImageUrlPattern,
   listEditableSiteFields,
+  seoShareImageUrlMaxLength,
   siteDefinitionSchema,
   type RichTextDocument,
+  type SeoShareImage,
 } from "@humber-foundry/site-definition";
 
 import { hasExactKeys, isRecord } from "./mcp-http-support";
@@ -625,9 +628,34 @@ const campaignCallToActionSchema = {
   required: ["label", "href"],
 } as const;
 
+/**
+ * A campaign share image must be an absolute https address, because an email
+ * client has no site to resolve a path against.
+ */
+const campaignShareImageSchema = {
+  anyOf: [
+    { type: "null" },
+    {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        url: {
+          type: "string",
+          minLength: 1,
+          maxLength: seoShareImageUrlMaxLength,
+          pattern: campaignShareImageUrlPattern,
+        },
+        alt: { type: "string", maxLength: 300 },
+      },
+      required: ["url", "alt"],
+    },
+  ],
+} as const;
+
 const campaignEditableProperties = {
   subject: { type: "string", minLength: 1, maxLength: 200 },
   previewText: { type: "string", minLength: 1, maxLength: 1_000 },
+  shareImage: campaignShareImageSchema,
   callToAction: campaignCallToActionSchema,
   emailContent: { $ref: "#/$defs/richTextDocument" },
 } as const;
@@ -678,6 +706,7 @@ const campaignDocumentResult = {
     },
     subject: { type: "string", minLength: 1, maxLength: 200 },
     previewText: { type: "string", minLength: 1, maxLength: 1_000 },
+    shareImage: campaignShareImageSchema,
     callToAction: campaignCallToActionSchema,
     emailContent: { $ref: "#/$defs/richTextDocument" },
     schemaVersion: { type: "string" },
@@ -692,6 +721,7 @@ const campaignDocumentResult = {
     "provenance",
     "subject",
     "previewText",
+    "shareImage",
     "callToAction",
     "emailContent",
     "schemaVersion",
@@ -789,14 +819,39 @@ const analyticsResult = {
 
 const localDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
 
+/**
+ * Read an optional share image. Following this file's convention, `null` means
+ * the value was unusable and the tool call is rejected. An absent or explicitly
+ * null share image is valid and reads as `{ shareImage: null }`.
+ */
+function parseCampaignShareImage(
+  value: unknown,
+): Readonly<{ shareImage: SeoShareImage | null }> | null {
+  if (value === undefined || value === null) return { shareImage: null };
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["url", "alt"]) ||
+    typeof value.url !== "string" ||
+    typeof value.alt !== "string"
+  ) {
+    return null;
+  }
+  return { shareImage: { url: value.url, alt: value.alt } };
+}
+
 function parseCampaignEditable(input: unknown): Readonly<{
   subject: string;
   previewText: string;
+  shareImage: SeoShareImage | null;
   callToAction: { label: string; href: string };
   emailContent: RichTextDocument;
 }> | null {
+  if (!isRecord(input)) {
+    return null;
+  }
+  const shareImage = parseCampaignShareImage(input.shareImage);
   if (
-    !isRecord(input) ||
+    shareImage === null ||
     typeof input.subject !== "string" ||
     typeof input.previewText !== "string" ||
     !isRecord(input.callToAction) ||
@@ -810,6 +865,7 @@ function parseCampaignEditable(input: unknown): Readonly<{
   return {
     subject: input.subject,
     previewText: input.previewText,
+    shareImage: shareImage.shareImage,
     callToAction: {
       label: input.callToAction.label,
       href: input.callToAction.href,
@@ -1746,13 +1802,17 @@ export function createMcpToolRegistry(application: McpReadApplication) {
     "foundry.campaign.create": async (principal, input, context) => {
       const editable =
         isRecord(input) &&
-        hasExactKeys(input, [
-          "idempotencyKey",
-          "subject",
-          "previewText",
-          "callToAction",
-          "emailContent",
-        ]) &&
+        hasExactKeys(
+          input,
+          [
+            "idempotencyKey",
+            "subject",
+            "previewText",
+            "callToAction",
+            "emailContent",
+          ],
+          ["shareImage"],
+        ) &&
         validIdempotencyKey(input.idempotencyKey)
           ? parseCampaignEditable(input)
           : null;
@@ -1777,15 +1837,19 @@ export function createMcpToolRegistry(application: McpReadApplication) {
     "foundry.campaign.edit": async (principal, input, context) => {
       const editable =
         isRecord(input) &&
-        hasExactKeys(input, [
-          "campaignId",
-          "expectedVersion",
-          "idempotencyKey",
-          "subject",
-          "previewText",
-          "callToAction",
-          "emailContent",
-        ]) &&
+        hasExactKeys(
+          input,
+          [
+            "campaignId",
+            "expectedVersion",
+            "idempotencyKey",
+            "subject",
+            "previewText",
+            "callToAction",
+            "emailContent",
+          ],
+          ["shareImage"],
+        ) &&
         validIdempotencyKey(input.idempotencyKey) &&
         Number.isSafeInteger(input.expectedVersion) &&
         (input.expectedVersion as number) >= 1

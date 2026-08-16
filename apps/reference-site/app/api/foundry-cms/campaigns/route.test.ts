@@ -186,6 +186,8 @@ describe("campaign endpoint", () => {
       input: {
         subject: "Campaign",
         previewText: "Preview",
+        // A caller that sends no share image gets none, not an absent field.
+        shareImage: null,
         callToAction: { label: "Read", href: "https://example.com" },
         emailContent: { version: "1.0.0", type: "document", children: [] },
       },

@@ -19,6 +19,7 @@
     "id": "site_foundry_reference",
     "name": "Foundry Reference",
     "description": "A representative, client-neutral site powered by a versioned Foundry Site Definition.",
+    "canonicalOrigin": "https://foundry.tinyskiff.xyz",
     "navigation": [
       {
         "id": "nav_work",

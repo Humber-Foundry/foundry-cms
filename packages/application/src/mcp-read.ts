@@ -1,5 +1,6 @@
 import {
   designContract,
+  resolveHomeSeo,
   siteDefinitionSchema,
   type SiteDefinition,
   type SiteId,
@@ -224,7 +225,9 @@ function contentSummaries(
     {
       kind: "page" as const,
       contentId: definition.home.id,
-      title: definition.home.seo.title,
+      // The owner may leave the SEO title blank to ask for the fallback, so
+      // this reads the resolved title rather than the raw field.
+      title: resolveHomeSeo(definition).title,
       revision: null,
       contentHash: "",
       liveGitSha: liveRelease?.gitSha ?? null,
