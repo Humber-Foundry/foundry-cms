@@ -1,4 +1,4 @@
-# ADR-0008: Browser-made media thumbnail variant
+# ADR-0011: Browser-made media thumbnail variant
 
 - **Status:** Accepted
 - **Date:** 2026-08-15
