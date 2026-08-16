@@ -1,5 +1,7 @@
 import {
   isMediaContentType,
+  mediaSourceObjectKeyPattern,
+  mediaThumbnailObjectKeyPattern,
   type MediaSourceStore,
 } from "@humber-foundry/application";
 
@@ -40,7 +42,7 @@ export function createR2MediaSourceStore(
 ): MediaSourceStore {
   return Object.freeze({
     async put(objectKey, source, metadata) {
-      if (!/^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/source$/u.test(objectKey)) {
+      if (!mediaSourceObjectKeyPattern.test(objectKey)) {
         throw new TypeError("media_object_key_invalid");
       }
       const stored = await bucket.put(objectKey, source, {
@@ -62,9 +64,7 @@ export function createR2MediaSourceStore(
       }
     },
     async putVariant(objectKey, variant, metadata) {
-      if (
-        !/^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/thumbnail$/u.test(objectKey)
-      ) {
+      if (!mediaThumbnailObjectKeyPattern.test(objectKey)) {
         throw new TypeError("media_variant_key_invalid");
       }
       const stored = await bucket.put(objectKey, variant, {

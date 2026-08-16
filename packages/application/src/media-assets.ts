@@ -68,6 +68,16 @@ export const mediaThumbnailMaxEdge = 480;
 export const mediaThumbnailMaxByteLength = 512 * 1024;
 
 /**
+ * Where the source object for one asset is stored. Its key is derived from
+ * the site and asset identity, so no extra record is needed to find it.
+ */
+export function mediaSourceObjectKey(
+  asset: Readonly<{ siteId: SiteId; assetId: MediaAssetId }>,
+): string {
+  return `media/${asset.siteId}/${asset.assetId}/source`;
+}
+
+/**
  * Where the thumbnail for one asset is stored. It sits beside the immutable
  * source object and is derived from the same site and asset identity, so no
  * extra record is needed to find it.
@@ -77,6 +87,18 @@ export function mediaThumbnailObjectKey(
 ): string {
   return `media/${asset.siteId}/${asset.assetId}/thumbnail`;
 }
+
+/**
+ * The only key shapes a media store may write. Every store checks an incoming
+ * key against these before it writes, so a caller cannot put an object
+ * anywhere else in the client's private bucket. They live here, beside the
+ * builders above, so the shape is stated once.
+ */
+export const mediaSourceObjectKeyPattern =
+  /^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/source$/u;
+
+export const mediaThumbnailObjectKeyPattern =
+  /^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/thumbnail$/u;
 
 export type MediaCrop = Readonly<{
   x: number;
@@ -578,7 +600,10 @@ export function createMediaAssetApplication({
               });
               return existing;
             }
-            const objectKey = `media/${siteId}/${command.assetId}/source`;
+            const objectKey = mediaSourceObjectKey({
+              siteId,
+              assetId: command.assetId,
+            });
             const asset: MediaAsset = {
               siteId,
               assetId: command.assetId,

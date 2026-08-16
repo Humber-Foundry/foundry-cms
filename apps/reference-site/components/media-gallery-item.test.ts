@@ -81,7 +81,7 @@ describe("media urls", () => {
 });
 
 describe("chosen photo", () => {
-  it("hands the caller the asset identity and both rendered addresses", () => {
+  it("hands the caller the asset identity and one thumbnail address", () => {
     expect(
       chosenPhoto(
         {

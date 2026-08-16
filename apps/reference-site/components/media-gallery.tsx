@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { MediaAsset } from "@humber-foundry/application";
 
@@ -54,6 +54,11 @@ export function MediaGallery({
   const [withoutThumbnail, setWithoutThumbnail] = useState<
     ReadonlySet<string>
   >(new Set());
+  // A tile can also fail for a reason that passes: the capability in its
+  // address expired while the request was in flight, or the connection
+  // dropped. A fresh capability gives every tile a fresh address, so forget
+  // the failures and let them load again.
+  useEffect(() => setWithoutThumbnail(new Set()), [libraryToken]);
   return (
     <ul className="media-gallery">
       {deletingMessage === undefined ? null : (

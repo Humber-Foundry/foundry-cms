@@ -49,7 +49,9 @@ export function thumbnailDimensions(
 /**
  * Draws `file` at thumbnail size and returns the result as a file, or null
  * when this browser cannot produce one. A null result is not an error: the
- * upload still carries the original, and the gallery falls back to it.
+ * upload still carries the original, and the photo is stored without a small
+ * copy. Its gallery tile then shows an empty frame, because the media route
+ * never serves the full-resolution original in a thumbnail's place.
  */
 export async function createThumbnailFile(
   file: File,
