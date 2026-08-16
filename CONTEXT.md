@@ -75,6 +75,12 @@ whole site.
 **Media asset** — A stable, site-scoped identity and metadata record for one
 immutable source image stored in the client's private R2 bucket.
 
+**Thumbnail variant** — A small derived copy of one media asset, stored beside
+its source object and bound to that source's hash. It is presentation data for
+the dashboard gallery and picker; it never replaces the source and is never
+published. An asset may have none, and a request for one it does not have is
+answered as missing; the source is never served in its place.
+
 **Media occurrence** — One stable, draft-workspace-scoped placement of a media
 asset in editable content. Replacing an occurrence changes that placement
 without changing other occurrences or another workspace that uses the same

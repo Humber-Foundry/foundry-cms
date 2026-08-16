@@ -1,4 +1,9 @@
-import type { MediaSourceStore } from "@humber-foundry/application";
+import {
+  isMediaContentType,
+  mediaSourceObjectKeyPattern,
+  mediaThumbnailObjectKeyPattern,
+  type MediaSourceStore,
+} from "@humber-foundry/application";
 
 export interface PrivateMediaBucket {
   put(
@@ -9,6 +14,7 @@ export interface PrivateMediaBucket {
       customMetadata: Readonly<{
         access: "private";
         sourceHash: string;
+        variantOf?: string;
       }>;
       onlyIf: Readonly<{ etagDoesNotMatch: "*" }>;
     }>,
@@ -36,7 +42,7 @@ export function createR2MediaSourceStore(
 ): MediaSourceStore {
   return Object.freeze({
     async put(objectKey, source, metadata) {
-      if (!/^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/source$/u.test(objectKey)) {
+      if (!mediaSourceObjectKeyPattern.test(objectKey)) {
         throw new TypeError("media_object_key_invalid");
       }
       const stored = await bucket.put(objectKey, source, {
@@ -56,6 +62,46 @@ export function createR2MediaSourceStore(
           throw new Error("media_source_identity_conflict");
         }
       }
+    },
+    async putVariant(objectKey, variant, metadata) {
+      if (!mediaThumbnailObjectKeyPattern.test(objectKey)) {
+        throw new TypeError("media_variant_key_invalid");
+      }
+      const stored = await bucket.put(objectKey, variant, {
+        httpMetadata: { contentType: metadata.contentType },
+        customMetadata: {
+          access: "private",
+          sourceHash: metadata.variantHash,
+          variantOf: metadata.variantOf,
+        },
+        onlyIf: { etagDoesNotMatch: "*" },
+      });
+      if (stored === null) {
+        const existing = await bucket.head(objectKey);
+        if (
+          existing?.customMetadata?.sourceHash !== metadata.variantHash ||
+          existing.customMetadata.variantOf !== metadata.variantOf ||
+          existing.httpMetadata?.contentType !== metadata.contentType
+        ) {
+          throw new Error("media_variant_identity_conflict");
+        }
+      }
+    },
+    async getVariant(objectKey, expected) {
+      const object = await bucket.get(objectKey);
+      if (object === null) return null;
+      const contentType = object.httpMetadata?.contentType;
+      // A variant that was not made from this exact source, or that claims a
+      // type the library never writes, reads as missing rather than serving
+      // the wrong bytes.
+      if (
+        object.customMetadata?.variantOf !== expected.variantOf ||
+        contentType === undefined ||
+        !isMediaContentType(contentType)
+      ) {
+        return null;
+      }
+      return { body: object.body, contentType };
     },
     async delete(objectKey) {
       await bucket.delete(objectKey);

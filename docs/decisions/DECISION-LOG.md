@@ -15,3 +15,4 @@
 | [ADR-0008](ADR-0008-seo-metadata-shared-field-set.md) | One SEO and sharing field set, with a derived canonical URL | Accepted | 2026-08-15 |
 | [ADR-0009](ADR-0009-design-presets-and-token-vocabulary.md) | Preset looks are derived, and the token contract owns the palette | Accepted | 2026-08-15 |
 | [ADR-0010](ADR-0010-messages-inbox-and-owner-notification-demotion.md) | Messages is an inbox, and the owner notification is demoted | Accepted | 2026-08-15 |
+| [ADR-0011](ADR-0011-media-thumbnail-variant.md) | Browser-made media thumbnail variant | Accepted | 2026-08-15 |

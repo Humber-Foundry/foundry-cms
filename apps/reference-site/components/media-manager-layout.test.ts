@@ -30,3 +30,76 @@ describe("media manager layout", () => {
     );
   });
 });
+
+describe("photo gallery layout", () => {
+  it("loads a gallery tile from the thumbnail variant, not the original", async () => {
+    const gallery = await readFile(
+      new URL("./media-gallery.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(gallery).toContain("mediaThumbnailUrl(asset.assetId, libraryToken)");
+    expect(gallery).toContain('loading="lazy"');
+    // No page may address the media route by hand and skip the variant.
+    expect(gallery).not.toMatch(/\/api\/foundry-cms\/media\?/u);
+  });
+
+  it("lays the gallery out so its last row is as full as the rows above", async () => {
+    const stylesheet = await readFile(
+      new URL("../app/dash/dashboard.css", import.meta.url),
+      "utf8",
+    );
+
+    expect(stylesheet).toMatch(
+      /\.media-gallery\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*\}/su,
+    );
+    expect(stylesheet).toMatch(
+      /\.media-gallery > li\s*\{[^}]*flex:\s*1 1 [^;]+;[^}]*\}/su,
+    );
+  });
+
+  it("reserves a tile box that matches the frame's shape in the stylesheet", async () => {
+    const [gallery, stylesheet] = await Promise.all([
+      readFile(new URL("./media-gallery.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/dash/dashboard.css", import.meta.url), "utf8"),
+    ]);
+
+    const width = Number(/galleryTileWidth = (\d+)/u.exec(gallery)?.[1]);
+    const height = Number(/galleryTileHeight = (\d+)/u.exec(gallery)?.[1]);
+    const ratio = /\.media-gallery-frame\s*\{[^}]*aspect-ratio:\s*(\d+)\s*\/\s*(\d+);/su.exec(
+      stylesheet,
+    );
+
+    expect(Number.isInteger(width)).toBe(true);
+    expect(Number.isInteger(height)).toBe(true);
+    expect(ratio).not.toBeNull();
+    // A mismatch would make every row shift as its photos arrive.
+    expect(width / height).toBeCloseTo(Number(ratio![1]) / Number(ratio![2]), 5);
+  });
+
+  it("shows an empty frame when a photo has no stored thumbnail", async () => {
+    const gallery = await readFile(
+      new URL("./media-gallery.tsx", import.meta.url),
+      "utf8",
+    );
+
+    // The media route answers 404 rather than serving the original, so the
+    // tile must not be left showing a broken image.
+    expect(gallery).toContain("onError");
+    expect(gallery).toContain("withoutThumbnail");
+  });
+
+  it("keeps the picker dialog inside the window on a phone", async () => {
+    const stylesheet = await readFile(
+      new URL("../app/dash/dashboard.css", import.meta.url),
+      "utf8",
+    );
+
+    expect(stylesheet).toMatch(
+      /\.media-picker\s*\{[^}]*width:\s*min\([^;]*100vw[^;]*;[^}]*\}/su,
+    );
+    expect(stylesheet).toMatch(
+      /\.media-picker\s*\{[^}]*max-height:[^;]+;[^}]*overflow-y:\s*auto;[^}]*\}/su,
+    );
+  });
+});

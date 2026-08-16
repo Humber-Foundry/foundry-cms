@@ -57,6 +57,49 @@ export type MediaAsset = Readonly<{
   createdBy: ContentActorId;
 }>;
 
+/**
+ * The longest edge, in pixels, a stored thumbnail may have. A gallery tile is
+ * far smaller than this, so one thumbnail covers every dashboard grid size
+ * and a retina screen.
+ */
+export const mediaThumbnailMaxEdge = 480;
+
+/** The largest thumbnail the library accepts, in bytes. */
+export const mediaThumbnailMaxByteLength = 512 * 1024;
+
+/**
+ * Where the source object for one asset is stored. Its key is derived from
+ * the site and asset identity, so no extra record is needed to find it.
+ */
+export function mediaSourceObjectKey(
+  asset: Readonly<{ siteId: SiteId; assetId: MediaAssetId }>,
+): string {
+  return `media/${asset.siteId}/${asset.assetId}/source`;
+}
+
+/**
+ * Where the thumbnail for one asset is stored. It sits beside the immutable
+ * source object and is derived from the same site and asset identity, so no
+ * extra record is needed to find it.
+ */
+export function mediaThumbnailObjectKey(
+  asset: Readonly<{ siteId: SiteId; assetId: MediaAssetId }>,
+): string {
+  return `media/${asset.siteId}/${asset.assetId}/thumbnail`;
+}
+
+/**
+ * The only key shapes a media store may write. Every store checks an incoming
+ * key against these before it writes, so a caller cannot put an object
+ * anywhere else in the client's private bucket. They live here, beside the
+ * builders above, so the shape is stated once.
+ */
+export const mediaSourceObjectKeyPattern =
+  /^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/source$/u;
+
+export const mediaThumbnailObjectKeyPattern =
+  /^media\/site_[a-z0-9_]+\/asset_[a-z0-9_]+\/thumbnail$/u;
+
 export type MediaCrop = Readonly<{
   x: number;
   y: number;
@@ -159,6 +202,34 @@ export type MediaSourceStore = Readonly<{
       }>
     | null
   >;
+  /**
+   * Stores a derived object, such as a thumbnail. `variantOf` is the source
+   * hash of the asset this object was made from, so a reader can prove the
+   * variant belongs to the source it is asked to stand in for.
+   */
+  putVariant(
+    objectKey: string,
+    variant: Uint8Array,
+    metadata: Readonly<{
+      contentType: string;
+      variantHash: string;
+      variantOf: string;
+    }>,
+  ): Promise<void>;
+  /**
+   * Reads a derived object. Returns null when the object is absent or was
+   * made from a different source. It never returns the source in its place.
+   */
+  getVariant(
+    objectKey: string,
+    expected: Readonly<{ variantOf: string }>,
+  ): Promise<
+    | Readonly<{
+        body: Uint8Array | ReadableStream<Uint8Array>;
+        contentType: string;
+      }>
+    | null
+  >;
   delete(objectKey: string): Promise<void>;
 }>;
 
@@ -252,6 +323,19 @@ export type MediaAssetStore = Readonly<{
   audit(siteId: SiteId): Promise<ReadonlyArray<MediaAuditEvent>>;
 }>;
 
+/**
+ * A small copy of the uploaded image, made before the upload request. It is
+ * presentation data: the source object never changes, and an upload without
+ * one still succeeds.
+ */
+export type MediaThumbnailUpload = Readonly<{
+  contentType: string;
+  byteLength: number;
+  width: number;
+  height: number;
+  source: Uint8Array;
+}>;
+
 type UploadMediaAssetCommand = Readonly<{
   actorId: ContentActorId;
   assetId: MediaAssetId;
@@ -262,6 +346,7 @@ type UploadMediaAssetCommand = Readonly<{
   height: number;
   source: Uint8Array;
   idempotencyKey: string;
+  thumbnail?: MediaThumbnailUpload;
 }>;
 
 type ReplaceMediaOccurrenceCommand = Readonly<{
@@ -283,15 +368,55 @@ type CropMediaOccurrenceCommand = Readonly<{
   idempotencyKey: string;
 }>;
 
-const allowedContentTypes = new Set<MediaAsset["contentType"]>([
+/** The image types the media library stores and serves. */
+export const mediaContentTypes = [
   "image/jpeg",
   "image/png",
   "image/webp",
-]);
+] as const satisfies ReadonlyArray<MediaAsset["contentType"]>;
+
+const allowedContentTypes = new Set<MediaAsset["contentType"]>(
+  mediaContentTypes,
+);
+
+export function isMediaContentType(value: string): boolean {
+  return allowedContentTypes.has(value as MediaAsset["contentType"]);
+}
 
 function assertIdempotencyKey(value: string): void {
   if (value.trim().length < 8 || value.length > 200) {
     throw new MediaValidationError("idempotencyKey");
+  }
+}
+
+/**
+ * A thumbnail must be a real image the library can serve, no larger than the
+ * thumbnail edge limit, and no larger than the source it stands in for.
+ */
+function assertThumbnail(
+  thumbnail: MediaThumbnailUpload,
+  source: Readonly<{ width: number; height: number }>,
+): void {
+  if (
+    !allowedContentTypes.has(thumbnail.contentType as MediaAsset["contentType"])
+  ) {
+    throw new MediaValidationError("thumbnail");
+  }
+  if (
+    !Number.isSafeInteger(thumbnail.byteLength) ||
+    thumbnail.byteLength <= 0 ||
+    thumbnail.byteLength !== thumbnail.source.byteLength ||
+    thumbnail.byteLength > mediaThumbnailMaxByteLength ||
+    !Number.isSafeInteger(thumbnail.width) ||
+    thumbnail.width <= 0 ||
+    !Number.isSafeInteger(thumbnail.height) ||
+    thumbnail.height <= 0 ||
+    thumbnail.width > mediaThumbnailMaxEdge ||
+    thumbnail.height > mediaThumbnailMaxEdge ||
+    thumbnail.width > source.width ||
+    thumbnail.height > source.height
+  ) {
+    throw new MediaValidationError("thumbnail");
   }
 }
 
@@ -420,6 +545,9 @@ export function createMediaAssetApplication({
         ) {
           throw new MediaValidationError("source");
         }
+        if (command.thumbnail !== undefined) {
+          assertThumbnail(command.thumbnail, command);
+        }
         const sourceHash = await hashSource(command.source);
         const hash = await sha256CanonicalJson({
           actorId: command.actorId,
@@ -472,7 +600,10 @@ export function createMediaAssetApplication({
               });
               return existing;
             }
-            const objectKey = `media/${siteId}/${command.assetId}/source`;
+            const objectKey = mediaSourceObjectKey({
+              siteId,
+              assetId: command.assetId,
+            });
             const asset: MediaAsset = {
               siteId,
               assetId: command.assetId,
@@ -490,6 +621,20 @@ export function createMediaAssetApplication({
               contentType: asset.contentType,
               sourceHash: asset.sourceHash,
             });
+            // The thumbnail is stored only when the source object is first
+            // created, so a later upload can never swap the small copy that
+            // stands in for an existing source.
+            if (command.thumbnail !== undefined) {
+              await sources.putVariant(
+                mediaThumbnailObjectKey(asset),
+                command.thumbnail.source,
+                {
+                  contentType: command.thumbnail.contentType,
+                  variantHash: await hashSource(command.thumbnail.source),
+                  variantOf: asset.sourceHash,
+                },
+              );
+            }
             if (!(await assets.renewClaim(context))) {
               throw new MediaSiteAccessError();
             }
@@ -642,6 +787,7 @@ export function createMediaAssetApplication({
               context,
             );
             await sources.delete(asset.objectKey);
+            await sources.delete(mediaThumbnailObjectKey(asset));
             if (!(await assets.renewClaim(context))) {
               throw new MediaSiteAccessError();
             }
@@ -754,6 +900,18 @@ export function createMediaAssetApplication({
         return sources.get(asset.objectKey, {
           contentType: asset.contentType,
           sourceHash: asset.sourceHash,
+        });
+      },
+      /**
+       * The small copy of this asset, or null when none was stored. Null is
+       * the whole answer: the full-resolution source is a separate query with
+       * its own capability, and no caller may serve it in a thumbnail's place.
+       */
+      async getThumbnailSource(assetId: MediaAssetId) {
+        const asset = await assets.getAsset(siteId, assetId);
+        if (asset === null) throw new MediaSiteAccessError();
+        return sources.getVariant(mediaThumbnailObjectKey(asset), {
+          variantOf: asset.sourceHash,
         });
       },
       async getPublishedSource(assetId: MediaAssetId) {

@@ -9,6 +9,9 @@ import {
   MediaOccurrenceConflictError,
   MediaSiteAccessError,
   MediaValidationError,
+  isMediaContentType,
+  mediaSourceObjectKeyPattern,
+  mediaThumbnailObjectKeyPattern,
   type MediaAsset,
   type MediaAssetId,
   type MediaAssetStore,
@@ -32,14 +35,25 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
       source: Uint8Array;
       sourceHash: string;
       contentType: string;
+      variantOf?: string;
     }>
   >();
   return {
     async put(objectKey, source, metadata) {
+      // Same rules as the R2 store, so a test cannot pass here and fail in a
+      // deployed installation.
+      if (!mediaSourceObjectKeyPattern.test(objectKey)) {
+        throw new TypeError("media_object_key_invalid");
+      }
       const existing = objects.get(objectKey);
       if (existing !== undefined) {
-        if (existing.sourceHash === metadata.sourceHash) return;
-        throw new MediaValidationError("assetId");
+        if (
+          existing.sourceHash === metadata.sourceHash &&
+          existing.contentType === metadata.contentType
+        ) {
+          return;
+        }
+        throw new Error("media_source_identity_conflict");
       }
       objects.set(objectKey, {
         source: source.slice(),
@@ -54,9 +68,44 @@ export function createInMemoryMediaSourceStore(): MediaSourceStore & {
         (object.sourceHash !== expected.sourceHash ||
           object.contentType !== expected.contentType)
       ) {
-        throw new MediaSiteAccessError();
+        throw new Error("media_source_identity_conflict");
       }
       return object === undefined
+        ? null
+        : {
+            body: object.source.slice(),
+            contentType: object.contentType,
+          };
+    },
+    async putVariant(objectKey, variant, metadata) {
+      if (!mediaThumbnailObjectKeyPattern.test(objectKey)) {
+        throw new TypeError("media_variant_key_invalid");
+      }
+      const existing = objects.get(objectKey);
+      if (existing !== undefined) {
+        if (
+          existing.sourceHash === metadata.variantHash &&
+          existing.variantOf === metadata.variantOf &&
+          existing.contentType === metadata.contentType
+        ) {
+          return;
+        }
+        throw new Error("media_variant_identity_conflict");
+      }
+      objects.set(objectKey, {
+        source: variant.slice(),
+        sourceHash: metadata.variantHash,
+        contentType: metadata.contentType,
+        variantOf: metadata.variantOf,
+      });
+    },
+    async getVariant(objectKey, expected) {
+      const object = objects.get(objectKey);
+      // Same rules as the R2 store: a variant made from another source, or
+      // one claiming a type the library never writes, reads as missing.
+      return object === undefined ||
+        object.variantOf !== expected.variantOf ||
+        !isMediaContentType(object.contentType)
         ? null
         : {
             body: object.source.slice(),

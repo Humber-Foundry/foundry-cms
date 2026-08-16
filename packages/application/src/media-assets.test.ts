@@ -15,6 +15,8 @@ import {
   createMediaAssetApplication,
   createMediaAssetId,
   createMediaOccurrenceId,
+  mediaThumbnailMaxEdge,
+  mediaThumbnailObjectKey,
 } from "./index";
 
 const siteA = createSiteId("site_alpha");
@@ -748,10 +750,12 @@ describe("media asset application", () => {
       signalDeleteStarted = resolve;
     });
     let deleteCalls = 0;
+    const deletedKeys: string[] = [];
     const sources = {
       ...baseSources,
       async delete(objectKey: string) {
         deleteCalls += 1;
+        deletedKeys.push(objectKey);
         if (deleteCalls === 1) {
           signalDeleteStarted?.();
           await new Promise<void>((_resolve, reject) => {
@@ -782,7 +786,13 @@ describe("media asset application", () => {
 
     await expect(winner).rejects.toThrow("simulated_worker_failure");
     await expect(duplicate).resolves.toBeUndefined();
-    expect(deleteCalls).toBe(2);
+    // The failed first attempt removed nothing. The duplicate took the lease
+    // and removed both stored objects for the asset.
+    expect(deletedKeys).toEqual([
+      "media/site_alpha/asset_unused/source",
+      "media/site_alpha/asset_unused/source",
+      "media/site_alpha/asset_unused/thumbnail",
+    ]);
   });
 
   it("bounds active-lease reconciliation and returns a retryable conflict", async () => {
@@ -843,5 +853,139 @@ describe("media asset application", () => {
         idempotencyKey: "cross-site-reference",
       }),
     ).rejects.toBeInstanceOf(MediaSiteAccessError);
+  });
+});
+
+describe("media asset thumbnail variant", () => {
+  const thumbnailSource = new Uint8Array([9, 8, 7, 6]);
+
+  function uploadWithThumbnail(
+    application: ReturnType<typeof createMediaAssetApplication>,
+    overrides: Partial<{
+      contentType: string;
+      byteLength: number;
+      width: number;
+      height: number;
+      source: Uint8Array;
+    }> = {},
+  ) {
+    return application.commands.upload({
+      actorId: editor,
+      assetId: assetA,
+      fileName: "hero.png",
+      contentType: "image/png",
+      byteLength: source(assetA).byteLength,
+      width: 1600,
+      height: 900,
+      source: source(assetA),
+      idempotencyKey: "upload-with-thumbnail",
+      thumbnail: {
+        contentType: "image/webp",
+        byteLength: thumbnailSource.byteLength,
+        width: 480,
+        height: 270,
+        source: thumbnailSource,
+        ...overrides,
+      },
+    });
+  }
+
+  it("derives the thumbnail object key from the asset identity", () => {
+    expect(mediaThumbnailObjectKey({ siteId: siteA, assetId: assetA })).toBe(
+      "media/site_alpha/asset_hero/thumbnail",
+    );
+  });
+
+  it("stores an uploaded thumbnail beside the source and serves it back", async () => {
+    const { application, sources } = setup();
+
+    await uploadWithThumbnail(application);
+
+    await expect(
+      sources.readForTest("media/site_alpha/asset_hero/thumbnail"),
+    ).resolves.toEqual(thumbnailSource);
+    const served = await application.queries.getThumbnailSource(assetA);
+    expect(served).not.toBeNull();
+    expect(served?.contentType).toBe("image/webp");
+    expect(served?.body).toEqual(thumbnailSource);
+  });
+
+  it("reports no thumbnail for an asset uploaded without one", async () => {
+    const { application } = setup();
+
+    await upload(application);
+
+    await expect(
+      application.queries.getThumbnailSource(assetA),
+    ).resolves.toBeNull();
+  });
+
+  it("rejects a thumbnail larger than the thumbnail edge limit", async () => {
+    const { application } = setup();
+
+    await expect(
+      uploadWithThumbnail(application, {
+        width: mediaThumbnailMaxEdge + 1,
+        height: 270,
+      }),
+    ).rejects.toBeInstanceOf(MediaValidationError);
+  });
+
+  it("rejects a thumbnail larger than the source it stands in for", async () => {
+    const { application } = setup();
+
+    await expect(
+      uploadWithThumbnail(application, { width: 480, height: 901 }),
+    ).rejects.toBeInstanceOf(MediaValidationError);
+  });
+
+  it("rejects a thumbnail whose declared byte length does not match its bytes", async () => {
+    const { application } = setup();
+
+    await expect(
+      uploadWithThumbnail(application, { byteLength: 99 }),
+    ).rejects.toBeInstanceOf(MediaValidationError);
+  });
+
+  it("rejects a thumbnail in a content type the library does not accept", async () => {
+    const { application } = setup();
+
+    await expect(
+      uploadWithThumbnail(application, { contentType: "image/gif" }),
+    ).rejects.toBeInstanceOf(MediaValidationError);
+  });
+
+  it("removes the thumbnail when the asset is deleted", async () => {
+    const { application, sources } = setup();
+    await uploadWithThumbnail(application);
+
+    await application.commands.delete({
+      actorId: editor,
+      assetId: assetA,
+      idempotencyKey: "delete-with-thumbnail",
+    });
+
+    await expect(
+      sources.readForTest("media/site_alpha/asset_hero/thumbnail"),
+    ).resolves.toBeNull();
+  });
+
+  it("refuses a thumbnail that was stored against a different source", async () => {
+    const { application, sources } = setup();
+    await uploadWithThumbnail(application);
+    await sources.delete("media/site_alpha/asset_hero/thumbnail");
+    await sources.putVariant(
+      "media/site_alpha/asset_hero/thumbnail",
+      thumbnailSource,
+      {
+        contentType: "image/webp",
+        variantHash: "b".repeat(64),
+        variantOf: "c".repeat(64),
+      },
+    );
+
+    await expect(
+      application.queries.getThumbnailSource(assetA),
+    ).resolves.toBeNull();
   });
 });

@@ -151,4 +151,53 @@ describe("human mutation request integrity", () => {
       }),
     ).rejects.toBeInstanceOf(HumanRequestIntegrityError);
   });
+
+  it("keeps the library capability and the per-asset capability apart", async () => {
+    // The gallery's capability names no asset, so it must never open a
+    // full-resolution source; the per-asset capability travels in an image
+    // URL, so it must never open the whole library. Their audiences are the
+    // only thing keeping those two apart.
+    const library = await createHumanCsrfToken({
+      identity,
+      audience: `${audience}:media-library`,
+      secret,
+      now,
+    });
+    const perAsset = await createHumanCsrfToken({
+      identity,
+      audience: `${audience}:media-access`,
+      secret,
+      now,
+      scope: ["asset_hero"],
+    });
+
+    await expect(
+      verifyHumanCsrfToken({
+        token: library,
+        identity,
+        audience: `${audience}:media-library`,
+        secret,
+        now,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      verifyHumanCsrfToken({
+        token: library,
+        identity,
+        audience: `${audience}:media-access`,
+        secret,
+        now,
+        requiredScope: "asset_hero",
+      }),
+    ).rejects.toBeInstanceOf(HumanRequestIntegrityError);
+    await expect(
+      verifyHumanCsrfToken({
+        token: perAsset,
+        identity,
+        audience: `${audience}:media-library`,
+        secret,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(HumanRequestIntegrityError);
+  });
 });
