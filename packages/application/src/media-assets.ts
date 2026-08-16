@@ -196,7 +196,7 @@ export type MediaSourceStore = Readonly<{
   ): Promise<void>;
   /**
    * Reads a derived object. Returns null when the object is absent or was
-   * made from a different source, so a caller can fall back to the source.
+   * made from a different source. It never returns the source in its place.
    */
   getVariant(
     objectKey: string,
@@ -878,8 +878,9 @@ export function createMediaAssetApplication({
         });
       },
       /**
-       * The small copy of this asset, or null when none was stored. A caller
-       * that gets null falls back to the source.
+       * The small copy of this asset, or null when none was stored. Null is
+       * the whole answer: the full-resolution source is a separate query with
+       * its own capability, and no caller may serve it in a thumbnail's place.
        */
       async getThumbnailSource(assetId: MediaAssetId) {
         const asset = await assets.getAsset(siteId, assetId);

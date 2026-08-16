@@ -258,6 +258,49 @@ async function main() {
       .first()
       .waitFor();
 
+    // Upload a photo from inside the picker and pick it in the same step.
+    await page
+      .getByRole("button", { name: "Choose or upload a photo…" })
+      .nth(1)
+      .click();
+    await dialog.waitFor({ state: "visible" });
+    await drawPhoto(page, "quay.png", 1200, 800);
+    const pickerUploaded = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/foundry-cms/media" &&
+        response.status() === 201,
+    );
+    await dialog.locator('input[type="file"]').setInputFiles(
+      await page.evaluate(() => window.__foundryPhoto).then((photo) => ({
+        name: photo.name,
+        mimeType: "image/png",
+        buffer: Buffer.from(photo.bytes),
+      })),
+    );
+    const quay = await (await pickerUploaded).json();
+    // The picker must select it only once a capability that covers it has
+    // arrived, so waiting for the pressed tile also proves the new grant.
+    await dialog
+      .locator('.media-gallery-tile[aria-pressed="true"]', {
+        hasText: "quay.png",
+      })
+      .waitFor();
+    const quayPlaced = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/foundry-cms/media" &&
+        response.status() === 201,
+    );
+    await page.getByRole("button", { name: "Use this photo here" }).click();
+    const quayPlacement = await (await quayPlaced).json();
+    if (quayPlacement.occurrence?.assetId !== quay.assetId) {
+      throw new Error(
+        `media_gallery_picker_upload_not_placed:${JSON.stringify(quayPlacement.occurrence)}`,
+      );
+    }
+    await libraryTile("quay.png").waitFor({ state: "visible" });
+
     // A photo on the page cannot be deleted.
     await tile.click();
     const deleteButton = page.getByRole("button", {
@@ -304,7 +347,8 @@ async function main() {
     process.stdout.write(
       `Photo library browser acceptance passed at ${origin}: ` +
         `uploaded, served a ${thumbnailBytes}-byte thumbnail for a ` +
-        `${sourceBytes}-byte photo, picked it, and deleted an unused one.\n`,
+        `${sourceBytes}-byte photo, picked it, uploaded and picked another ` +
+        `inside the picker, and deleted an unused one.\n`,
     );
   } finally {
     await browser?.close();

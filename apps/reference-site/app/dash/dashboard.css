@@ -2586,9 +2586,9 @@
   line-height: 1.55;
 }
 
-/* A dialog is in the top layer, outside .dashboard, so it cannot inherit the
- * dashboard tokens. These two values repeat --dash-ink and the dashboard
- * line height on purpose. */
+/* The backdrop is not part of the dialog's own box, and browsers disagree on
+ * whether it inherits from the dialog, so it cannot rely on --dash-ink. This
+ * is that colour, #17201d, written out at 45% opacity. */
 .media-picker::backdrop {
   background: rgb(23 32 29 / 45%);
 }

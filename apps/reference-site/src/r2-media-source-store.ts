@@ -92,8 +92,8 @@ export function createR2MediaSourceStore(
       if (object === null) return null;
       const contentType = object.httpMetadata?.contentType;
       // A variant that was not made from this exact source, or that claims a
-      // type the library never writes, is treated as missing so the caller
-      // falls back to the source instead of serving the wrong bytes.
+      // type the library never writes, reads as missing rather than serving
+      // the wrong bytes.
       if (
         object.customMetadata?.variantOf !== expected.variantOf ||
         contentType === undefined ||
