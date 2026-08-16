@@ -176,6 +176,35 @@ async function main() {
 
     // Return to the page editor and enter edit mode.
     await page.goto(`${origin}/dash/pages?workspace=${workspace}`);
+
+    // Record the full-width image section's photo in every saved revision.
+    // Adding the section and choosing the photo are two ordinary page edits,
+    // so each autosaves through the content-revision route on its own debounce.
+    // Watching every save — rather than capturing one — lets the check wait for
+    // the save that carries the chosen photo instead of racing the earlier
+    // add-section save, which still holds the section's default image.
+    const photoBandSaves = [];
+    page.on("response", (response) => {
+      if (
+        response.request().method() !== "POST" ||
+        new URL(response.url()).pathname !== "/api/foundry-cms/revisions" ||
+        response.status() !== 201
+      ) {
+        return;
+      }
+      void response
+        .json()
+        .then((body) => {
+          const section = (body.definition?.home?.sections ?? []).find(
+            (candidate) => candidate.component === "photoBand",
+          );
+          if (section !== undefined) {
+            photoBandSaves.push(section.props?.imageSrc ?? "(none)");
+          }
+        })
+        .catch(() => undefined);
+    });
+
     await page.getByRole("button", { name: "Edit" }).click();
 
     // Add a full-width image section. Adding it selects it, so its fields —
@@ -199,14 +228,6 @@ async function main() {
     await dialog
       .locator(".media-gallery-tile", { hasText: "meadow.png" })
       .click();
-    // The swap is an ordinary page edit, so it saves through the normal
-    // content-revision route — no separate media path.
-    const saved = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname === "/api/foundry-cms/revisions" &&
-        response.status() === 201,
-    );
     await page.getByRole("button", { name: "Use this photo" }).click();
 
     // The chosen photo previews in the field immediately, from the picker's
@@ -215,21 +236,25 @@ async function main() {
       .locator(".change-photo-preview img")
       .waitFor({ state: "visible" });
 
-    // The saved revision stores the photo as its media reference.
-    const savedRevision = await (await saved).json();
-    const sections = savedRevision.definition?.home?.sections ?? [];
-    const placed = sections.find(
-      (section) =>
-        section.component === "photoBand" &&
-        section.props?.imageSrc === `/api/media/${asset.assetId}`,
-    );
-    if (placed === undefined) {
-      throw new Error(
-        `page_photo_reference_not_stored:${JSON.stringify(
-          sections.map((section) => section.props?.imageSrc ?? section.type),
-        )}`,
-      );
+    // The swap is an ordinary page edit, so it saves through the normal
+    // content-revision route — no separate media path. Wait for the save that
+    // carries the chosen photo to land, which proves the swap persisted.
+    const reference = `/api/media/${asset.assetId}`;
+    const deadline = Date.now() + 30_000;
+    while (!photoBandSaves.includes(reference)) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `page_photo_reference_not_stored:${JSON.stringify(photoBandSaves)}`,
+        );
+      }
+      await new Promise((settle) => setTimeout(settle, 200));
     }
+
+    // Let the editor settle so the preview opens the saved swap, not an edit
+    // still in flight: with nothing unsaved the button reads "Preview", not
+    // "Preview last save".
+    const previewButton = page.getByRole("button", { name: "Preview ↗" });
+    await previewButton.waitFor({ state: "visible" });
 
     // Open the exact draft preview and confirm it serves the chosen photo
     // through the authenticated media route.
@@ -242,7 +267,7 @@ async function main() {
       );
       return { preview, response };
     });
-    await page.getByRole("button", { name: /^Preview/ }).click();
+    await previewButton.click();
     const { preview, response } = await previewMedia;
     if (response.status() !== 200) {
       throw new Error(
