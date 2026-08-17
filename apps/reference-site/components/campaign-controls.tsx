@@ -10,7 +10,8 @@ import {
   type RenderedCampaign,
 } from "@humber-foundry/application";
 import {
-  mediaAssetIdFromPublishedPath,
+  mediaAssetIdFromImageAddress,
+  mediaImageSrc,
   parseSerializedRichTextDocument,
   seoFieldHints,
   serializeRichTextDocument,
@@ -33,15 +34,8 @@ import { ComposerActions, emptyRichTextBody } from "./composer";
  * dashboard runs on any host. An external picture is drawn as written.
  */
 function campaignPreviewSrc(url: string): string {
-  try {
-    const path = new URL(
-      url,
-      typeof window === "undefined" ? "http://localhost" : window.location.origin,
-    ).pathname;
-    return mediaAssetIdFromPublishedPath(path) !== null ? path : url;
-  } catch {
-    return url;
-  }
+  const assetId = mediaAssetIdFromImageAddress(url);
+  return assetId === null ? url : mediaImageSrc(assetId);
 }
 
 /** The email body with every image address drawn by its same-origin path. */
