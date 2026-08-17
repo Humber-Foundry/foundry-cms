@@ -63,11 +63,15 @@ sets it with the same `ChangePhotoField` the page and blog editors use.
 
 The existing `shareImage` becomes the campaign's thumbnail — the picture used
 where the campaign is previewed or shared — and is no longer drawn inside the
-email. It is set through the picker too, replacing the typed address. Because the
-share image is not part of the sent message, it does not change the send
-fingerprint; only the header and inline images, which are sent, do. This mirrors
-ADR-0013: the header image is the campaign's `mainImage`, and the share image is
-its `seo.shareImage`.
+email. It is set through the picker too, replacing the typed address. The
+campaign list draws it as a small thumbnail beside each campaign, falling back to
+the header image when no share image is set, so "the thumbnail may default to the
+header image" is satisfied and the thumbnail is always shown on a preview
+surface. Because the share image is not part of the sent message, it does not
+change the send fingerprint; only the header and inline images, which are sent,
+do. This mirrors ADR-0013: the header image is the campaign's `mainImage`, and
+the share image is its `seo.shareImage`, whose card falls back to the main
+image.
 
 ### 2. Inline images are the existing rich-text block
 
@@ -112,6 +116,23 @@ from the public internet the moment the campaign references it, not only after a
 send. The set is read from the same campaign store the authoring runtime uses,
 without a human capability, because it exposes only which assets are referenced,
 never any campaign content.
+
+### 5. Metadata: the composer set is complete; the sender stays configured
+
+The issue asks to "confirm and complete the set" of campaign metadata, naming
+"sender name" and "share image" as examples. The share image is completed above.
+The rest of the composer set — subject, preview line (pre-header), header image,
+share image and the call to action — is now present and picked, not typed.
+
+The **sender name** is deliberately not an owner-editable composer field. A
+campaign's sender is the installation's verified sender identity
+(`senderIdentityId` in the channel configuration), whose name and address come
+from the provider-owned sender record and whose fingerprint binds a send under
+ADR-0002 and ADR-0006. A free-text per-campaign sender would fork that
+delivery-identity model and let an owner send under an unverified name, which the
+bulk-send ownership and fingerprint rules exist to prevent. So the sender is
+confirmed as installation-configured and left out of the composer; changing who a
+campaign sends as is a delivery-identity change, not a content edit.
 
 ### Preview
 

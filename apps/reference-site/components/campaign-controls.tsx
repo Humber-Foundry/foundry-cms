@@ -449,9 +449,21 @@ export function CampaignControls({
         </form>
       )}
       <ul className="post-list">
-        {campaigns.map(({ campaign, revision }) => (
+        {campaigns.map(({ campaign, revision }) => {
+          // The thumbnail shown beside a campaign is its share image, falling
+          // back to the header image, so a preview surface always shows a
+          // picture when the campaign has one.
+          const thumbnail = revision.shareImage ?? revision.headerImage ?? null;
+          return (
           <li key={campaign.id}>
             <div className="post-list-summary">
+              {thumbnail === null ? null : (
+                <img
+                  className="campaign-thumbnail"
+                  src={campaignPreviewSrc(thumbnail.url)}
+                  alt={thumbnail.alt}
+                />
+              )}
               <strong>{revision.subject}</strong>
               <span>{campaignStateLabels[campaign.lifecycleState]}</span>
             </div>
@@ -494,7 +506,8 @@ export function CampaignControls({
               </button>
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
       {previewRevision === null ? null : (
         <section className="email-preview" aria-label="Email preview">

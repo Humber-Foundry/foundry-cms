@@ -305,22 +305,18 @@ async function main() {
       await new Promise((settle) => setTimeout(settle, 200));
     }
 
-    // The save re-renders into the campaign list. Open the preview and confirm
-    // the header and inline photos load from the public media route.
+    // The save re-renders into the campaign list. The list draws the share
+    // image as a thumbnail, falling back to the header image, so the thumbnail
+    // renders on a preview surface too.
+    await page
+      .locator(`img.campaign-thumbnail[src="${shareRef}"]`)
+      .first()
+      .waitFor({ state: "visible" });
+
+    // Open the preview and confirm the header and inline photos are drawn.
     const previewButton = page.getByRole("button", { name: "Preview" });
     await previewButton.first().waitFor({ state: "visible" });
-    const headerServed = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === headerRef &&
-        response.request().method() === "GET",
-    );
-    const inlineServed = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === inlineRef &&
-        response.request().method() === "GET",
-    );
     await previewButton.first().click();
-
     const preview = page.locator("section.email-preview");
     await preview.waitFor({ state: "visible" });
     await preview
@@ -331,14 +327,19 @@ async function main() {
       .first()
       .waitFor({ state: "visible" });
 
-    for (const [name, served] of [
-      ["header", headerServed],
-      ["inline", inlineServed],
+    // The public media route serves every campaign-referenced asset, so the
+    // header, inline and share photos load in an inbox and in the preview.
+    // Fetch each one directly rather than watch for a render request, because
+    // a same-origin photo drawn earlier in the flow may already be cached.
+    for (const [name, ref] of [
+      ["header", headerRef],
+      ["inline", inlineRef],
+      ["share", shareRef],
     ]) {
-      const response = await served;
+      const response = await page.request.get(`${origin}${ref}`);
       if (response.status() !== 200) {
         throw new Error(
-          `campaign_images_preview_media_status:${name}:${response.status()}`,
+          `campaign_images_media_status:${name}:${response.status()}`,
         );
       }
     }
@@ -347,8 +348,9 @@ async function main() {
       `Campaign images browser acceptance passed at ${origin}: set a header ` +
         `image (${headerRef}), a share image (${shareRef}) and an inline image ` +
         `(${inlineRef}) through the shared picker, stored all three in the ` +
-        `saved campaign, and served the header and inline photos to the email ` +
-        `preview through the public media route.\n`,
+        `saved campaign, drew the header and inline photos in the preview and ` +
+        `the share thumbnail in the list, and served all three through the ` +
+        `public media route.\n`,
     );
   } finally {
     await browser?.close();

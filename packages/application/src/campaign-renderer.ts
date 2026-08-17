@@ -79,30 +79,38 @@ export function validateCampaignChannelConfiguration(
   });
 }
 
+const campaignImagePattern = new RegExp(campaignShareImageUrlPattern, "u");
+
 /**
- * Make one campaign image address absolute, or reject it.
+ * Make one campaign image address absolute, or return null if it cannot be sent.
  *
  * An email is read outside the site, so every image in it must be an absolute
  * `https://` address; a path such as `/api/media/asset_hero` would resolve
- * against the reader's mail host and break. When the owner picks a gallery
- * photo through the shared picker, its `/api/media/<assetId>` reference is made
- * absolute against the site's canonical origin here, so one picker fills the
- * campaign the same way it fills a page or a post. An absolute `https://`
- * address is kept as written. Any other value, or a media reference with no
- * canonical origin to resolve it against, is refused because it cannot be sent.
+ * against the reader's mail host and break. There are exactly two accepted
+ * forms, matching ADR-0014: a `/api/media/<assetId>` reference the shared picker
+ * stores, made absolute against the site's canonical origin so one picker fills
+ * the campaign the same way it fills a page or a post; and an absolute `https://`
+ * address, kept as written. Any other value — a bare path, an `http` address, a
+ * media reference with no canonical origin to resolve it against, or one too
+ * long — is refused, because it cannot be sent.
  */
 function absoluteCampaignImageAddress(
   url: string,
   siteCanonicalOrigin: string,
 ): string | null {
   const assetId = mediaAssetIdFromPublishedPath(url);
-  if (assetId !== null) {
-    return absoluteSiteUrl(siteCanonicalOrigin, publishedMediaPath(assetId));
+  const absolute =
+    assetId === null
+      ? url
+      : absoluteSiteUrl(siteCanonicalOrigin, publishedMediaPath(assetId));
+  if (
+    absolute === null ||
+    !campaignImagePattern.test(absolute) ||
+    absolute.length > seoShareImageUrlMaxLength
+  ) {
+    return null;
   }
-  if (url.startsWith("/")) {
-    return absoluteSiteUrl(siteCanonicalOrigin, url as `/${string}`);
-  }
-  return new RegExp(campaignShareImageUrlPattern, "u").test(url) ? url : null;
+  return absolute;
 }
 
 /**
@@ -117,33 +125,29 @@ function validateCampaignImage(
     return null;
   }
   if (typeof value !== "object" || typeof value.url !== "string") {
-    throw new CampaignValidationError("campaign_share_image_invalid");
+    throw new CampaignValidationError("campaign_image_invalid");
   }
   const trimmed = value.url.trim();
   if (trimmed === "") {
     return null;
   }
   const url = absoluteCampaignImageAddress(trimmed, siteCanonicalOrigin);
-  if (
-    url === null ||
-    !new RegExp(campaignShareImageUrlPattern, "u").test(url) ||
-    url.length > seoShareImageUrlMaxLength
-  ) {
-    throw new CampaignValidationError("campaign_share_image_invalid");
+  if (url === null) {
+    throw new CampaignValidationError("campaign_image_invalid");
   }
   const alt = typeof value.alt === "string" ? value.alt.trim() : "";
   if (alt.length > 300) {
-    throw new CampaignValidationError("campaign_share_image_invalid");
+    throw new CampaignValidationError("campaign_image_invalid");
   }
   return Object.freeze({ url, alt });
 }
 
 /**
- * Make every inline body image absolute, refusing any that cannot be. The
+ * Make every inline body image absolute, refusing any that cannot be sent. The
  * rich-text validator has already accepted each `src` as a root-relative path
- * or an `https://` address; a path is a gallery reference the owner placed
- * through the shared picker, so it is made absolute against the site's
- * canonical origin exactly as the header and share images are.
+ * or an `https://` address; the same two-form rule as the header and share
+ * images applies, so a `/api/media/<assetId>` reference is made absolute and any
+ * other path is refused.
  */
 function absoluteEmailContentImages(
   document: RichTextDocument,
@@ -153,17 +157,11 @@ function absoluteEmailContentImages(
     if (block.type !== "image") {
       return block;
     }
-    if (block.src.startsWith("https://")) {
-      return block;
+    const src = absoluteCampaignImageAddress(block.src, siteCanonicalOrigin);
+    if (src === null) {
+      throw new CampaignValidationError("campaign_image_invalid");
     }
-    const absolute = absoluteSiteUrl(
-      siteCanonicalOrigin,
-      block.src as `/${string}`,
-    );
-    if (absolute === null) {
-      throw new CampaignValidationError("campaign_share_image_invalid");
-    }
-    return { ...block, src: absolute };
+    return { ...block, src };
   });
   return { ...document, children };
 }

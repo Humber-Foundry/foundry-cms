@@ -825,6 +825,15 @@
   border-radius: var(--dash-radius);
 }
 
+.campaign-thumbnail {
+  width: 3rem;
+  height: 3rem;
+  object-fit: cover;
+  border-radius: 0.4rem;
+  margin-right: 0.6rem;
+  vertical-align: middle;
+}
+
 .copy-button {
   min-height: 2.75rem;
   flex: 0 0 auto;

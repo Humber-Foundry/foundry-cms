@@ -186,7 +186,7 @@ describe("campaign header image", () => {
         channelConfiguration,
         "",
       ),
-    ).toThrow("campaign_share_image_invalid");
+    ).toThrow("campaign_image_invalid");
   });
 
   it("rejects a header image address with an unsafe scheme", () => {
@@ -200,7 +200,7 @@ describe("campaign header image", () => {
         }),
         channelConfiguration,
       ),
-    ).toThrow("campaign_share_image_invalid");
+    ).toThrow("campaign_image_invalid");
   });
 
   it("keeps the header image out of the plain-text channel", async () => {
@@ -328,7 +328,7 @@ describe("campaign inline body image", () => {
         channelConfiguration,
         "",
       ),
-    ).toThrow("campaign_share_image_invalid");
+    ).toThrow("campaign_image_invalid");
   });
 });
 
