@@ -62,6 +62,7 @@ export default async function DashboardCampaignsPage({
       </div>
       <CampaignControls
         csrfToken={mutationToken}
+        workspaceId={dashboardWorkspace.workspaceId}
         initialCampaigns={campaigns}
         postSources={postArtifacts.flatMap((artifact) => {
           const post = definition.blog.posts.find(

@@ -655,6 +655,7 @@ const campaignShareImageSchema = {
 const campaignEditableProperties = {
   subject: { type: "string", minLength: 1, maxLength: 200 },
   previewText: { type: "string", minLength: 1, maxLength: 1_000 },
+  headerImage: campaignShareImageSchema,
   shareImage: campaignShareImageSchema,
   callToAction: campaignCallToActionSchema,
   emailContent: { $ref: "#/$defs/richTextDocument" },
@@ -706,6 +707,7 @@ const campaignDocumentResult = {
     },
     subject: { type: "string", minLength: 1, maxLength: 200 },
     previewText: { type: "string", minLength: 1, maxLength: 1_000 },
+    headerImage: campaignShareImageSchema,
     shareImage: campaignShareImageSchema,
     callToAction: campaignCallToActionSchema,
     emailContent: { $ref: "#/$defs/richTextDocument" },
@@ -721,6 +723,7 @@ const campaignDocumentResult = {
     "provenance",
     "subject",
     "previewText",
+    "headerImage",
     "shareImage",
     "callToAction",
     "emailContent",
@@ -842,6 +845,7 @@ function parseCampaignShareImage(
 function parseCampaignEditable(input: unknown): Readonly<{
   subject: string;
   previewText: string;
+  headerImage: SeoShareImage | null;
   shareImage: SeoShareImage | null;
   callToAction: { label: string; href: string };
   emailContent: RichTextDocument;
@@ -849,8 +853,10 @@ function parseCampaignEditable(input: unknown): Readonly<{
   if (!isRecord(input)) {
     return null;
   }
+  const headerImage = parseCampaignShareImage(input.headerImage);
   const shareImage = parseCampaignShareImage(input.shareImage);
   if (
+    headerImage === null ||
     shareImage === null ||
     typeof input.subject !== "string" ||
     typeof input.previewText !== "string" ||
@@ -865,6 +871,7 @@ function parseCampaignEditable(input: unknown): Readonly<{
   return {
     subject: input.subject,
     previewText: input.previewText,
+    headerImage: headerImage.shareImage,
     shareImage: shareImage.shareImage,
     callToAction: {
       label: input.callToAction.label,
@@ -1811,7 +1818,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
             "callToAction",
             "emailContent",
           ],
-          ["shareImage"],
+          ["headerImage", "shareImage"],
         ) &&
         validIdempotencyKey(input.idempotencyKey)
           ? parseCampaignEditable(input)
@@ -1848,7 +1855,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
             "callToAction",
             "emailContent",
           ],
-          ["shareImage"],
+          ["headerImage", "shareImage"],
         ) &&
         validIdempotencyKey(input.idempotencyKey) &&
         Number.isSafeInteger(input.expectedVersion) &&

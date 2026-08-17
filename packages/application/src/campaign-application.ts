@@ -318,7 +318,7 @@ export function createCampaignApplication({
   }) {
     let authored;
     try {
-      authored = validateCampaignInput(input, configuredChannel);
+      authored = validateCampaignInput(input, configuredChannel, siteCanonicalOrigin);
     } catch (error) {
       return rejectCommand({
         command,
@@ -665,6 +665,14 @@ export function createCampaignApplication({
         input: {
           subject: post.title,
           previewText: post.excerpt,
+          // The post's own header picture leads the email; its thumbnail
+          // carries over as the campaign's share image. Both are made absolute
+          // against the site's canonical origin, because an email cannot
+          // resolve a path.
+          headerImage: campaignShareImageFromPost(
+            post.mainImage,
+            siteCanonicalOrigin,
+          ),
           shareImage: campaignShareImageFromPost(
             post.seo.shareImage,
             siteCanonicalOrigin,
@@ -706,7 +714,7 @@ export function createCampaignApplication({
           throw new CampaignConflictError();
         }
         currentRevision = await getRevision(campaignId, current.version);
-        authored = validateCampaignInput(input, configuredChannel);
+        authored = validateCampaignInput(input, configuredChannel, siteCanonicalOrigin);
       } catch (error) {
         return rejectCommand({
           command,

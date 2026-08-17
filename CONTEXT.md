@@ -163,6 +163,25 @@ revisions and at most one completed bulk send in v1.
 **Campaign revision** — An immutable snapshot of every send-affecting campaign
 input, including content, sender, audience definition and compliance material.
 
+**Header image** — The picture at the top of the email, chosen through the
+shared media picker. A campaign may have none. Every campaign image is stored as
+an absolute `https://` address, because an email is read outside the site; a
+gallery photo's `/api/media/<assetId>` reference is made absolute against the
+site's canonical origin when it is stored. See ADR-0014.
+
+**Share image** — The campaign's thumbnail, used where the campaign is previewed
+or shared, chosen through the shared media picker. It is not drawn in the sent
+email, and it defaults to the header image where a preview surface needs one.
+
+**Inline campaign image** — A picture placed in the flow of the email body, held
+as a rich-text `image` block and chosen through the shared media picker. It is
+made absolute and drawn in the sent email and the preview.
+
+**Campaign-referenced asset** — A gallery asset a campaign names through its
+header image, share image or an inline body image. The public media route serves
+it, because a campaign image is meant to be seen by every recipient. See
+ADR-0014.
+
 **Derived campaign** — A campaign initially copied from one post revision. The
 source relationship records provenance only; later post edits never mutate the
 campaign.
@@ -371,6 +390,7 @@ The value is never part of the record.
 - [One SEO and sharing field set](docs/decisions/ADR-0008-seo-metadata-shared-field-set.md)
 - [Messages is an inbox](docs/decisions/ADR-0010-messages-inbox-and-owner-notification-demotion.md)
 - [Page-component image fields reference gallery photos](docs/decisions/ADR-0012-page-image-field-media-reference.md)
+- [Campaign images — header, share and inline images](docs/decisions/ADR-0014-campaign-images.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)

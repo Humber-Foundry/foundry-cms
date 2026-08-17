@@ -9,6 +9,7 @@ import {
   MediaAssetConfigurationError,
   loadMediaAssetApplication,
 } from "../../../../src/media-asset-runtime";
+import { listCampaignReferencedMediaAssetIds } from "../../../../src/campaign-runtime";
 import { installedSite } from "@/foundry/site-definition.server";
 
 const publicRendererActorId = createContentActorId(
@@ -23,8 +24,12 @@ export async function GET(
     const assetId = createMediaAssetId((await context.params).assetId);
     const published = await installedSite.application.queries.getPublishedSite();
     // A photo the published site references is public — whether it is placed
-    // as a media occurrence or chosen for a page-component image field.
-    const isPublished = siteDefinitionMediaAssetIds(published).has(assetId);
+    // as a media occurrence or chosen for a page-component image field. A photo
+    // a campaign references is public too, because a campaign image is meant to
+    // be seen by every recipient. See ADR-0014.
+    const isPublished =
+      siteDefinitionMediaAssetIds(published).has(assetId) ||
+      (await listCampaignReferencedMediaAssetIds()).has(assetId);
     if (!isPublished) return new Response(null, { status: 404 });
     const application = await loadMediaAssetApplication(publicRendererActorId);
     const source = await application.queries.getPublishedSource(assetId);

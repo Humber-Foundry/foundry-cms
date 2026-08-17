@@ -108,6 +108,7 @@ describe("D1 campaign store", () => {
       input: {
         subject: "Durable campaign",
         previewText: "Durable preview text.",
+        headerImage: null,
         shareImage: null,
         callToAction: {
           label: "Read more",
@@ -122,6 +123,7 @@ describe("D1 campaign store", () => {
       input: {
         subject: "Durable campaign",
         previewText: "Durable preview text.",
+        headerImage: null,
         shareImage: null,
         callToAction: {
           label: "Read more",
@@ -138,6 +140,7 @@ describe("D1 campaign store", () => {
         input: {
           subject: "Different command input",
           previewText: "Durable preview text.",
+          headerImage: null,
           shareImage: null,
           callToAction: {
             label: "Read more",

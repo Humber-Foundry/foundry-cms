@@ -61,16 +61,22 @@ export type CampaignCallToAction = Readonly<{
  *
  * `subject` and `previewText` are the campaign's meta title and meta
  * description: the two lines an inbox shows before the message is opened.
- * `shareImage` is the same field a site page and a blog post carry, so one
- * drafting tool can fill all three surfaces.
+ * `headerImage` is the picture at the top of the email; `shareImage` is the
+ * thumbnail shown where the campaign is previewed or shared, and it defaults to
+ * the header image. Both are the same address-and-alt shape a site page and a
+ * blog post carry, so one drafting tool can fill every surface. Inline images
+ * live inside `emailContent` as rich-text image blocks.
  *
- * A campaign share image must be an absolute `https://` address. An email
- * client has no site to resolve a path against, so a path cannot be used here
- * even though a page or post accepts one.
+ * Every campaign image address is stored as an absolute `https://` address. An
+ * email client has no site to resolve a path against. When the owner picks a
+ * gallery photo through the shared media picker, its `/api/media/<assetId>`
+ * reference is made absolute against the site's canonical origin before it is
+ * stored, so the email and the preview both load it. See ADR-0014.
  */
 export type CampaignEditableInput = Readonly<{
   subject: string;
   previewText: string;
+  headerImage: SeoShareImage | null;
   shareImage: SeoShareImage | null;
   callToAction: CampaignCallToAction;
   emailContent: RichTextDocument;

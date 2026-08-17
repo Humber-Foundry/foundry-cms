@@ -188,7 +188,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "c3ab28e7cc4a654f88fc92ab11ed222c19d45d5489dfe1475ad1dd8d4c2ae305",
+    "inputSchemaSha256": "77aa33ab52fdefe455f24f06d23b510d0b109d7fcd580f10d9f3fb2b2b2116a8",
     "name": "foundry.campaign.create",
     "outputSchemaSha256": "9046c8ebbca41ee6f6aba013cc82cc825a7158981e0ca0f5c8849dacfd47a8c9",
   },
@@ -203,7 +203,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "5b67d2b8014353e5dfc874dada405dcdb358f40be04be67c7026ffdd99c707c5",
+    "inputSchemaSha256": "7e865fb74748e761e15d2e05af022326e246180eb81ecc28c972c0853147c1df",
     "name": "foundry.campaign.edit",
     "outputSchemaSha256": "9046c8ebbca41ee6f6aba013cc82cc825a7158981e0ca0f5c8849dacfd47a8c9",
   },
@@ -219,7 +219,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     },
     "inputSchemaSha256": "c6302e4bb591ecc151a943905c4e06f1cb313c5b4c2aa581c9b31bde1edde7ad",
     "name": "foundry.campaign.get",
-    "outputSchemaSha256": "38553544cea4d053a6bd3f0dd2ed524624284aec6ebe5b3b96dfce46ef11d62d",
+    "outputSchemaSha256": "d3f77c322c96dbe99434221dd8cf359dc904b19c958ac51924d58a264ce13e37",
   },
   {
     "annotations": {

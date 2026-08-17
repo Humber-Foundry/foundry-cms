@@ -162,8 +162,9 @@ const results: Record<string, unknown> = {
     provenance: { kind: "standalone" },
     subject: "Public campaign copy",
     previewText: "A safe preview",
-    // Filled rather than null, so the emission proves the share-image shape
+    // Filled rather than null, so the emission proves the image shape
     // validates and not only the absent case.
+    headerImage: { url: "https://example.test/header.png", alt: "A header" },
     shareImage: { url: "https://example.test/card.png", alt: "A card" },
     callToAction: { label: "Read", href: "/blog/update" },
     emailContent: { version: "1.0.0", type: "document", children: [] },

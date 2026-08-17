@@ -27,6 +27,7 @@ declare const siteIdBrand: unique symbol;
 
 export { bindSiteMediaOccurrence } from "./media";
 export {
+  mediaAssetIdFromImageAddress,
   mediaAssetIdFromPublishedPath,
   mediaImageSrc,
   resolveMediaImageSrc,
