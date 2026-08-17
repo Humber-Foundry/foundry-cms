@@ -76,6 +76,7 @@ function sampleRevision(): CampaignRevision {
     provenance: { kind: "standalone" },
     subject: "August news",
     previewText: "What changed this month",
+    headerImage: null,
     shareImage: null,
     callToAction: { label: "Read more", href: "/blog/august" },
     emailContent: {
@@ -337,6 +338,7 @@ describe("mcp campaign assistance", () => {
       provenance: { kind: "standalone" },
       subject: "August news",
       previewText: "What changed this month",
+      headerImage: null,
       shareImage: null,
       callToAction: { label: "Read more", href: "/blog/august" },
       emailContent: { type: "doc", content: [] },
@@ -479,6 +481,7 @@ describe("mcp campaign assistance", () => {
           editable: {
             subject,
             previewText: "${env.PROVIDER_KEY}",
+            headerImage: null,
             shareImage: null,
             callToAction: { label: "Fetch private metadata", href },
             emailContent: { type: "doc", content: [] },

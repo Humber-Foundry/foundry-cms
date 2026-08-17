@@ -43,6 +43,7 @@ const membership: HumanMembership = {
 const input: CampaignEditableInput = {
   subject: "An exact test campaign",
   previewText: "Review this exact delivery.",
+  headerImage: null,
   shareImage: null,
   callToAction: {
     label: "Read the update",

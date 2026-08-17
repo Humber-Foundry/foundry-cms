@@ -18,3 +18,4 @@
 | [ADR-0011](ADR-0011-media-thumbnail-variant.md) | Browser-made media thumbnail variant | Accepted | 2026-08-15 |
 | [ADR-0012](ADR-0012-page-image-field-media-reference.md) | Page-component image fields reference gallery photos | Accepted | 2026-08-16 |
 | [ADR-0013](ADR-0013-blog-post-images.md) | Blog post images — main image, thumbnail and inline images | Accepted | 2026-08-16 |
+| [ADR-0014](ADR-0014-campaign-images.md) | Campaign images — header, share and inline images, made absolute and served | Accepted | 2026-08-16 |

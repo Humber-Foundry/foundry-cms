@@ -179,8 +179,9 @@ function campaignDocument(campaign: Campaign, revision: CampaignRevision) {
     provenance: { kind: revision.provenance.kind },
     subject: revision.subject,
     previewText: revision.previewText,
-    // A revision stored before share images existed has no such
+    // A revision stored before campaign images existed has no such
     // field. The result schema requires one, so read it as absent.
+    headerImage: revision.headerImage ?? null,
     shareImage: revision.shareImage ?? null,
     callToAction: revision.callToAction,
     emailContent: revision.emailContent,
@@ -204,6 +205,7 @@ export function createMcpCampaignApplication({
         idempotencyKey: string;
         subject: string;
         previewText: string;
+        headerImage?: CampaignEditableInput["headerImage"];
         shareImage?: CampaignEditableInput["shareImage"];
         callToAction: CampaignCallToAction;
         emailContent: CampaignEditableInput["emailContent"];
@@ -225,6 +227,7 @@ export function createMcpCampaignApplication({
                 editable: {
                   subject: input.subject,
                   previewText: input.previewText,
+                  headerImage: input.headerImage ?? null,
                   shareImage: input.shareImage ?? null,
                   callToAction: input.callToAction,
                   emailContent: input.emailContent,
@@ -246,6 +249,7 @@ export function createMcpCampaignApplication({
         idempotencyKey: string;
         subject: string;
         previewText: string;
+        headerImage?: CampaignEditableInput["headerImage"];
         shareImage?: CampaignEditableInput["shareImage"];
         callToAction: CampaignCallToAction;
         emailContent: CampaignEditableInput["emailContent"];
@@ -269,6 +273,7 @@ export function createMcpCampaignApplication({
                 editable: {
                   subject: input.subject,
                   previewText: input.previewText,
+                  headerImage: input.headerImage ?? null,
                   shareImage: input.shareImage ?? null,
                   callToAction: input.callToAction,
                   emailContent: input.emailContent,

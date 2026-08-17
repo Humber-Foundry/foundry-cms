@@ -28,6 +28,7 @@ const revision: CampaignRevision = {
   provenance: { kind: "standalone" },
   subject: "Exact bulk message",
   previewText: "Exact preview",
+  headerImage: null,
   shareImage: null,
   callToAction: { label: "Read", href: "https://example.test/read" },
   emailContent: createRichTextDocumentFromPlainText("Exact body"),

@@ -86,6 +86,7 @@ const sourcePost: BlogPost = {
 const standaloneInput: CampaignEditableInput = {
   subject: "A standalone campaign",
   previewText: "An introduction with <unsafe> punctuation & symbols.",
+  headerImage: null,
   shareImage: null,
   callToAction: {
     label: "Read the update",

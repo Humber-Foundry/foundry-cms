@@ -98,6 +98,7 @@ describe("campaign controls browser acceptance", () => {
       root!.render(
         createElement(CampaignControls, {
           csrfToken: "csrf",
+          workspaceId: "workspace_000000000000000000000001",
           postSources: [],
           initialCampaigns: [{ campaign, revision }],
         }),

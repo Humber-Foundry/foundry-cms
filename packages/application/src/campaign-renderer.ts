@@ -2,9 +2,12 @@ import {
   SAFE_RICH_TEXT_LINK_PATTERN,
   absoluteSiteUrl,
   campaignShareImageUrlPattern,
+  mediaAssetIdFromPublishedPath,
+  publishedMediaPath,
   seoShareImageUrlMaxLength,
   validateRichTextDocument,
   visitRichTextBlock,
+  type RichTextBlock,
   type RichTextDocument,
   type RichTextLinkMark,
   type RichTextParagraph,
@@ -77,14 +80,38 @@ export function validateCampaignChannelConfiguration(
 }
 
 /**
- * Accept only an absolute `https://` share image address.
+ * Make one campaign image address absolute, or reject it.
  *
- * An email is read outside the site, so a path such as `/api/media/asset_hero`
- * would resolve against the reader's mail host and break. Any other scheme is
- * refused because the address is written straight into the message.
+ * An email is read outside the site, so every image in it must be an absolute
+ * `https://` address; a path such as `/api/media/asset_hero` would resolve
+ * against the reader's mail host and break. When the owner picks a gallery
+ * photo through the shared picker, its `/api/media/<assetId>` reference is made
+ * absolute against the site's canonical origin here, so one picker fills the
+ * campaign the same way it fills a page or a post. An absolute `https://`
+ * address is kept as written. Any other value, or a media reference with no
+ * canonical origin to resolve it against, is refused because it cannot be sent.
  */
-function validateCampaignShareImage(
+function absoluteCampaignImageAddress(
+  url: string,
+  siteCanonicalOrigin: string,
+): string | null {
+  const assetId = mediaAssetIdFromPublishedPath(url);
+  if (assetId !== null) {
+    return absoluteSiteUrl(siteCanonicalOrigin, publishedMediaPath(assetId));
+  }
+  if (url.startsWith("/")) {
+    return absoluteSiteUrl(siteCanonicalOrigin, url as `/${string}`);
+  }
+  return new RegExp(campaignShareImageUrlPattern, "u").test(url) ? url : null;
+}
+
+/**
+ * Validate one campaign header or share image. Both carry the address-and-alt
+ * shape a page and a post use; the address is made absolute here.
+ */
+function validateCampaignImage(
   value: CampaignEditableInput["shareImage"],
+  siteCanonicalOrigin: string,
 ): CampaignEditableInput["shareImage"] {
   if (value === null || value === undefined) {
     return null;
@@ -92,11 +119,13 @@ function validateCampaignShareImage(
   if (typeof value !== "object" || typeof value.url !== "string") {
     throw new CampaignValidationError("campaign_share_image_invalid");
   }
-  const url = value.url.trim();
-  if (url === "") {
+  const trimmed = value.url.trim();
+  if (trimmed === "") {
     return null;
   }
+  const url = absoluteCampaignImageAddress(trimmed, siteCanonicalOrigin);
   if (
+    url === null ||
     !new RegExp(campaignShareImageUrlPattern, "u").test(url) ||
     url.length > seoShareImageUrlMaxLength
   ) {
@@ -107,6 +136,36 @@ function validateCampaignShareImage(
     throw new CampaignValidationError("campaign_share_image_invalid");
   }
   return Object.freeze({ url, alt });
+}
+
+/**
+ * Make every inline body image absolute, refusing any that cannot be. The
+ * rich-text validator has already accepted each `src` as a root-relative path
+ * or an `https://` address; a path is a gallery reference the owner placed
+ * through the shared picker, so it is made absolute against the site's
+ * canonical origin exactly as the header and share images are.
+ */
+function absoluteEmailContentImages(
+  document: RichTextDocument,
+  siteCanonicalOrigin: string,
+): RichTextDocument {
+  const children = document.children.map((block): RichTextBlock => {
+    if (block.type !== "image") {
+      return block;
+    }
+    if (block.src.startsWith("https://")) {
+      return block;
+    }
+    const absolute = absoluteSiteUrl(
+      siteCanonicalOrigin,
+      block.src as `/${string}`,
+    );
+    if (absolute === null) {
+      throw new CampaignValidationError("campaign_share_image_invalid");
+    }
+    return { ...block, src: absolute };
+  });
+  return { ...document, children };
 }
 
 /**
@@ -138,6 +197,7 @@ export function campaignShareImageFromPost(
 export function validateCampaignInput(
   input: CampaignEditableInput,
   channelConfiguration: CampaignChannelConfiguration,
+  siteCanonicalOrigin = "",
 ): CampaignAuthoringInput {
   try {
     if (
@@ -148,7 +208,14 @@ export function validateCampaignInput(
     }
     const subject = requireText(input.subject, 200);
     const previewText = requireText(input.previewText, 1_000);
-    const shareImage = validateCampaignShareImage(input.shareImage);
+    const headerImage = validateCampaignImage(
+      input.headerImage,
+      siteCanonicalOrigin,
+    );
+    const shareImage = validateCampaignImage(
+      input.shareImage,
+      siteCanonicalOrigin,
+    );
     const callToAction = Object.freeze({
       label: requireText(input.callToAction.label, 200),
       href: requireText(input.callToAction.href, 2_000),
@@ -157,11 +224,15 @@ export function validateCampaignInput(
       throw new CampaignValidationError();
     }
     const emailContent = deepFreeze(
-      validateRichTextDocument(structuredClone(input.emailContent)),
+      absoluteEmailContentImages(
+        validateRichTextDocument(structuredClone(input.emailContent)),
+        siteCanonicalOrigin,
+      ),
     );
     return Object.freeze({
       subject,
       previewText,
+      headerImage,
       shareImage,
       callToAction,
       emailContent,
@@ -271,24 +342,25 @@ export function renderRichTextPlain(document: RichTextDocument): string {
 }
 
 function renderCampaignBytes(revision: CampaignRevision) {
-  // A revision stored before share images existed has no such field, so it
-  // reads as `undefined` rather than `null`. Treat both as "no image".
-  const shareImage = revision.shareImage ?? null;
+  // The header image is the picture at the top of the email. A revision stored
+  // before campaign images existed has no such field, so it reads as
+  // `undefined` rather than `null`. Treat both as "no image".
+  const headerImage = revision.headerImage ?? null;
   const html = [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
     `<title>${escapeHtml(revision.subject)}</title>`,
     // No Open Graph tag here. These bytes are only ever sent to the delivery
     // provider as the message body, and a mail client drops the head. The
-    // share image reaches the reader as the picture below.
+    // header image reaches the reader as the picture below.
     "</head><body>",
     // The preview line stays the first thing in the body. An inbox builds its
     // preview from the first text it finds, so nothing may come before it.
     `<p>${escapeHtml(revision.previewText)}</p>`,
-    shareImage === null
+    headerImage === null
       ? ""
-      : `<img src="${escapeHtml(shareImage.url)}" alt="${escapeHtml(
-          shareImage.alt,
+      : `<img src="${escapeHtml(headerImage.url)}" alt="${escapeHtml(
+          headerImage.alt,
         )}">`,
     renderRichTextHtml(revision.emailContent),
     `<p><a href="${escapeHtml(revision.callToAction.href)}">${escapeHtml(

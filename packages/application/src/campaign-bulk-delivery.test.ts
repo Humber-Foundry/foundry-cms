@@ -59,6 +59,7 @@ async function source(): Promise<CampaignBulkSource> {
       provenance: { kind: "standalone" },
       subject: "Exact tested update",
       previewText: "The exact tested message.",
+      headerImage: null,
       shareImage: null,
       callToAction: {
         label: "Read",

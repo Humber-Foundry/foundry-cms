@@ -379,8 +379,10 @@ function command(value: unknown): CampaignCommand | null {
   const input = {
     subject: editable.subject,
     previewText: editable.previewText,
-    // The campaign renderer rejects anything that is not an absolute https
-    // address, so this only has to carry the value through.
+    // The campaign renderer resolves a gallery reference to an absolute
+    // address and rejects anything it cannot send, so this only has to carry
+    // each value through.
+    headerImage: editable.headerImage ?? null,
     shareImage: editable.shareImage ?? null,
     callToAction: editable.callToAction,
     emailContent: editable.emailContent,

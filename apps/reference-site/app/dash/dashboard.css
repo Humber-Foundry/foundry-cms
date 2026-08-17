@@ -803,6 +803,28 @@
   cursor: pointer;
 }
 
+.email-preview-message {
+  margin-bottom: 1rem;
+}
+
+.email-preview-message .campaign-preview-line {
+  color: var(--dash-muted, #5a6b60);
+  font-size: var(--dash-text-small);
+}
+
+.campaign-header-image,
+.email-preview-message .rich-text-image {
+  margin: 0.75rem 0;
+}
+
+.campaign-header-image img,
+.email-preview-message .rich-text-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--dash-radius);
+}
+
 .copy-button {
   min-height: 2.75rem;
   flex: 0 0 auto;

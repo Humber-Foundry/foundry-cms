@@ -26,6 +26,24 @@ export function mediaImageSrc(assetId: string): string {
   return publishedMediaPath(assetId);
 }
 
+/**
+ * The asset id an image address names, whether it is stored as the site path
+ * `/api/media/<assetId>` or as that path made absolute against the site's
+ * canonical origin, `https://example.com/api/media/<assetId>`. A campaign
+ * stores its images absolute so an email can load them, so the served set is
+ * found from the absolute form here; any other address is not a gallery
+ * reference and returns null.
+ */
+export function mediaAssetIdFromImageAddress(address: string): string | null {
+  const direct = mediaAssetIdFromPublishedPath(address);
+  if (direct !== null) return direct;
+  try {
+    return mediaAssetIdFromPublishedPath(new URL(address).pathname);
+  } catch {
+    return null;
+  }
+}
+
 function collectMediaAssetIds(value: unknown, into: Set<string>): void {
   if (typeof value === "string") {
     const assetId = mediaAssetIdFromPublishedPath(value);

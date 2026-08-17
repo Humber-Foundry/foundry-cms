@@ -24,11 +24,13 @@ import {
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
   type CampaignChannelConfiguration,
+  type CampaignRevision,
   type CampaignStore,
   type NewsletterDeliveryAdapter,
   type NewsletterProviderOwnershipEvidence,
 } from "@humber-foundry/application";
 import {
+  mediaAssetIdFromImageAddress,
   type BlogPost,
   type SiteId,
 } from "@humber-foundry/site-definition";
@@ -102,6 +104,57 @@ const localBulkStateStore = createInMemoryCampaignBulkStateStore({
   activeOwners: localBulkActiveOwners,
   activeSubscribers: localBulkActiveSubscribers,
 });
+
+/** Every gallery asset one campaign revision's images reference. */
+function collectCampaignImageAssetIds(
+  revision: CampaignRevision,
+  into: Set<string>,
+): void {
+  for (const image of [revision.headerImage, revision.shareImage]) {
+    if (image === null || image === undefined) continue;
+    const assetId = mediaAssetIdFromImageAddress(image.url);
+    if (assetId !== null) into.add(assetId);
+  }
+  for (const block of revision.emailContent.children) {
+    if (block.type !== "image") continue;
+    const assetId = mediaAssetIdFromImageAddress(block.src);
+    if (assetId !== null) into.add(assetId);
+  }
+}
+
+/**
+ * The gallery assets every stored campaign references through its header image,
+ * share image or an inline body image. A campaign image is meant to be seen by
+ * every recipient, so the public media route serves these assets alongside the
+ * assets the published site references. This reads the same campaign store the
+ * authoring runtime uses, without a human capability, because it exposes only
+ * which assets are referenced, never any campaign content. See ADR-0014.
+ */
+export async function listCampaignReferencedMediaAssetIds(): Promise<
+  ReadonlySet<string>
+> {
+  const siteId = installedSite.application.siteId;
+  let store: CampaignStore = localCampaignStore;
+  if (process.env.NODE_ENV !== "development") {
+    const environment = await loadHumanAccessEnvironment();
+    if (environment.FOUNDRY_DB === undefined) {
+      throw new Error("campaign_database_unavailable");
+    }
+    store = createD1CampaignStore(environment.FOUNDRY_DB);
+  }
+  const campaigns = await store.listCampaigns(siteId);
+  const ids = new Set<string>();
+  for (const campaign of campaigns) {
+    const revision = await store.findRevision({
+      siteId,
+      campaignId: campaign.id,
+      revisionNumber: campaign.version,
+    });
+    if (revision !== null) collectCampaignImageAssetIds(revision, ids);
+  }
+  return ids;
+}
+
 const developmentRendererCommit = "0000000000000000000000000000000000000000";
 const developmentProviderOwnershipEvidence:
   NewsletterProviderOwnershipEvidence = Object.freeze({

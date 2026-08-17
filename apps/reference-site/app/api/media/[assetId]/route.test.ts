@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   published: vi.fn(),
   loadApplication: vi.fn(),
   getPublishedSource: vi.fn(),
+  campaignAssets: vi.fn(),
 }));
 vi.mock("@/foundry/site-definition.server", () => ({
   installedSite: {
@@ -17,12 +18,16 @@ vi.mock("../../../../src/media-asset-runtime", () => ({
   MediaAssetConfigurationError: class extends Error {},
   loadMediaAssetApplication: mocks.loadApplication,
 }));
+vi.mock("../../../../src/campaign-runtime", () => ({
+  listCampaignReferencedMediaAssetIds: mocks.campaignAssets,
+}));
 
 import { GET } from "./route";
 
 describe("published media delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.campaignAssets.mockResolvedValue(new Set<string>());
     mocks.loadApplication.mockResolvedValue({
       queries: { getPublishedSource: mocks.getPublishedSource },
     });
@@ -64,6 +69,18 @@ describe("published media delivery", () => {
     expect(response.status).toBe(404);
     expect(mocks.loadApplication).not.toHaveBeenCalled();
     expect(mocks.getPublishedSource).not.toHaveBeenCalled();
+  });
+
+  it("serves a photo a campaign references, because an email image is public", async () => {
+    mocks.campaignAssets.mockResolvedValue(new Set(["asset_campaign"]));
+
+    const response = await GET(
+      new Request("https://foundry.example/api/media/asset_campaign"),
+      { params: Promise.resolve({ assetId: "asset_campaign" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getPublishedSource).toHaveBeenCalledWith("asset_campaign");
   });
 
   it("serves a photo the published page references through an image field", async () => {

@@ -10,16 +10,51 @@ import {
   type RenderedCampaign,
 } from "@humber-foundry/application";
 import {
+  mediaAssetIdFromPublishedPath,
   parseSerializedRichTextDocument,
   seoFieldHints,
   serializeRichTextDocument,
   toSeoShareImage,
+  type RichTextDocument,
   type SerializedRichTextDocument,
   type BlogPost,
 } from "@humber-foundry/site-definition";
 
 import { RichTextEditor } from "./rich-text-editor";
+import { RichTextRenderer } from "./rich-text-renderer";
+import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
+
+/**
+ * The address the dashboard preview draws for one campaign image. A campaign
+ * stores each image as an absolute address so the sent email can load it. A
+ * gallery photo's address is the site's own `/api/media/<assetId>` route made
+ * absolute; the preview draws it by its same-origin path so it loads while the
+ * dashboard runs on any host. An external picture is drawn as written.
+ */
+function campaignPreviewSrc(url: string): string {
+  try {
+    const path = new URL(
+      url,
+      typeof window === "undefined" ? "http://localhost" : window.location.origin,
+    ).pathname;
+    return mediaAssetIdFromPublishedPath(path) !== null ? path : url;
+  } catch {
+    return url;
+  }
+}
+
+/** The email body with every image address drawn by its same-origin path. */
+function previewEmailContent(document: RichTextDocument): RichTextDocument {
+  return {
+    ...document,
+    children: document.children.map((block) =>
+      block.type === "image"
+        ? { ...block, src: campaignPreviewSrc(block.src) }
+        : block,
+    ),
+  };
+}
 
 /**
  * Plain words for a campaign's lifecycle state. Typed by the union rather
@@ -38,6 +73,7 @@ const campaignStateLabels: Readonly<Record<CampaignLifecycleState, string>> = {
 function EmailComposer({
   heading,
   initialRevision,
+  media,
   busy,
   saveLabel,
   onSave,
@@ -45,11 +81,13 @@ function EmailComposer({
 }: {
   heading: string;
   initialRevision?: CampaignRevision;
+  media: EditorMediaContext;
   busy: boolean;
   saveLabel: string;
   onSave(email: {
     subject: string;
     previewText: string;
+    headerImage: CampaignRevision["headerImage"];
     shareImage: CampaignRevision["shareImage"];
     callToAction: { label: string; href: string };
     emailContent: SerializedRichTextDocument;
@@ -65,6 +103,12 @@ function EmailComposer({
   );
   const [ctaHref, setCtaHref] = useState(
     initialRevision?.callToAction.href ?? "",
+  );
+  const [headerImageUrl, setHeaderImageUrl] = useState(
+    initialRevision?.headerImage?.url ?? "",
+  );
+  const [headerImageAlt, setHeaderImageAlt] = useState(
+    initialRevision?.headerImage?.alt ?? "",
   );
   const [shareImageUrl, setShareImageUrl] = useState(
     initialRevision?.shareImage?.url ?? "",
@@ -88,6 +132,7 @@ function EmailComposer({
         onSave({
           subject: subject.trim(),
           previewText: previewText.trim(),
+          headerImage: toSeoShareImage(headerImageUrl, headerImageAlt),
           shareImage: toSeoShareImage(shareImageUrl, shareImageAlt),
           callToAction: { label: ctaLabel.trim(), href: ctaHref.trim() },
           emailContent: content,
@@ -105,6 +150,26 @@ function EmailComposer({
           onChange={(event) => setSubject(event.target.value)}
         />
       </label>
+      <div className="composer-main-image">
+        <ChangePhotoField
+          label="Header image — shown at the top of the email"
+          value={headerImageUrl}
+          onChange={setHeaderImageUrl}
+          media={media}
+        />
+        <label>
+          <span>Header image description</span>
+          <small className="composer-hint">
+            Describe the picture for people who cannot see it.
+          </small>
+          <input
+            name="headerImageAlt"
+            maxLength={300}
+            value={headerImageAlt}
+            onChange={(event) => setHeaderImageAlt(event.target.value)}
+          />
+        </label>
+      </div>
       <RichTextEditor
         id="campaign-email-content"
         label="Email body"
@@ -112,12 +177,13 @@ function EmailComposer({
         value={content}
         disabled={busy}
         invalid={contentInvalid}
+        media={media}
         onChange={setContent}
         onValidationChange={setContentInvalid}
       />
       <p className="composer-hint" id="campaign-email-content-hint">
-        Write the email here. Formatting and links are kept exactly as you set
-        them.
+        Write the email here. Use the buttons above for headings, links and
+        photos. Formatting is kept exactly as you set it.
       </p>
       <div className="composer-settings-open">
         {/*
@@ -140,20 +206,15 @@ function EmailComposer({
               onChange={(event) => setPreviewText(event.target.value)}
             />
           </label>
-          <label>
-            <span>Share image address</span>
-            <small className="composer-hint">
-              {seoFieldHints.campaignShareImageUrl}
-            </small>
-            <input
-              name="shareImageUrl"
-              type="url"
-              maxLength={2000}
-              placeholder="https://…"
-              value={shareImageUrl}
-              onChange={(event) => setShareImageUrl(event.target.value)}
-            />
-          </label>
+          <ChangePhotoField
+            label="Share image — shown where this email is previewed or shared"
+            value={shareImageUrl}
+            onChange={setShareImageUrl}
+            media={media}
+          />
+          <p className="composer-hint">
+            Leave blank to use the header image.
+          </p>
           <label>
             <span>Share image description</span>
             <small className="composer-hint">
@@ -202,10 +263,12 @@ function EmailComposer({
 
 export function CampaignControls({
   csrfToken,
+  workspaceId,
   postSources,
   initialCampaigns,
 }: {
   csrfToken: string;
+  workspaceId: string;
   postSources: ReadonlyArray<
     Readonly<{
       post: Pick<BlogPost, "id" | "title">;
@@ -225,6 +288,11 @@ export function CampaignControls({
   // The composer opens by itself when there is nothing to list yet.
   const [writingNew, setWritingNew] = useState(initialCampaigns.length === 0);
   const [rendered, setRendered] = useState<RenderedCampaign | null>(null);
+  // The revision whose email is being previewed, so the preview can draw its
+  // header and inline photos through the same-origin media route.
+  const [previewRevision, setPreviewRevision] =
+    useState<CampaignRevision | null>(null);
+  const media: EditorMediaContext = { csrfToken, workspaceId };
 
   async function loadCampaigns(selectedCampaignId?: string) {
     const response = await fetch("/api/foundry-cms/campaigns", {
@@ -304,6 +372,7 @@ export function CampaignControls({
       {writingNew ? (
         <EmailComposer
           heading="New email"
+          media={media}
           busy={busy}
           saveLabel={busy ? "Saving…" : "Save email"}
           onSave={(email) => {
@@ -327,6 +396,7 @@ export function CampaignControls({
           key={`${selected.campaignId}:${selected.revisionNumber}`}
           heading="Edit email"
           initialRevision={selected}
+          media={media}
           busy={busy}
           saveLabel={busy ? "Saving…" : "Save changes"}
           onSave={(email) => {
@@ -393,6 +463,7 @@ export function CampaignControls({
                 onClick={() => {
                   setWritingNew(false);
                   setRendered(null);
+                  setPreviewRevision(null);
                   setSelected(revision);
                 }}
               >
@@ -403,6 +474,7 @@ export function CampaignControls({
                 className="copy-button"
                 disabled={busy}
                 onClick={() => {
+                  setPreviewRevision(revision);
                   void fetch(
                     `/api/foundry-cms/campaigns?campaignId=${encodeURIComponent(
                       campaign.id,
@@ -424,16 +496,39 @@ export function CampaignControls({
           </li>
         ))}
       </ul>
-      {rendered === null ? null : (
+      {previewRevision === null ? null : (
         <section className="email-preview" aria-label="Email preview">
-          <h3>How the email reads</h3>
-          <pre>{rendered.text.bytes}</pre>
-          <details>
-            <summary>Technical details</summary>
-            <p>
-              HTML fingerprint: <code>{rendered.html.fingerprint}</code>
+          <h3>How the email looks</h3>
+          <div className="email-preview-message rendered-rich-text">
+            {previewRevision.headerImage == null ? null : (
+              <figure className="campaign-header-image">
+                <img
+                  src={campaignPreviewSrc(previewRevision.headerImage.url)}
+                  alt={previewRevision.headerImage.alt}
+                />
+              </figure>
+            )}
+            <p className="campaign-preview-line">
+              {previewRevision.previewText}
             </p>
-          </details>
+            <RichTextRenderer
+              document={previewEmailContent(previewRevision.emailContent)}
+            />
+            <p>
+              <a href={previewRevision.callToAction.href}>
+                {previewRevision.callToAction.label}
+              </a>
+            </p>
+          </div>
+          {rendered === null ? null : (
+            <details>
+              <summary>How the email reads, and technical details</summary>
+              <pre>{rendered.text.bytes}</pre>
+              <p>
+                HTML fingerprint: <code>{rendered.html.fingerprint}</code>
+              </p>
+            </details>
+          )}
         </section>
       )}
       {message === "" ? null : <p role="status">{message}</p>}

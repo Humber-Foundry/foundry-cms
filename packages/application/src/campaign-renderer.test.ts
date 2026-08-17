@@ -38,6 +38,7 @@ function buildInput(
   return {
     subject: "A harbour update",
     previewText: "What changed this month.",
+    headerImage: null,
     shareImage: null,
     callToAction: {
       label: "Read the update",
@@ -48,9 +49,12 @@ function buildInput(
   };
 }
 
-function buildRevision(input: CampaignEditableInput): CampaignRevision {
+function buildRevision(
+  input: CampaignEditableInput,
+  siteCanonicalOrigin = "",
+): CampaignRevision {
   return {
-    ...validateCampaignInput(input, channelConfiguration),
+    ...validateCampaignInput(input, channelConfiguration, siteCanonicalOrigin),
     id: createCampaignRevisionId("30000000-0000-4000-8000-000000000001"),
     siteId: createSiteId("site_foundry_reference"),
     campaignId: createCampaignId("20000000-0000-4000-8000-000000000001"),
@@ -63,12 +67,12 @@ function buildRevision(input: CampaignEditableInput): CampaignRevision {
   };
 }
 
-describe("campaign share image", () => {
-  it("renders the share image as a picture in the message body", async () => {
+describe("campaign header image", () => {
+  it("renders the header image as a picture at the top of the message body", async () => {
     const rendered = await renderCampaignRevision(
       buildRevision(
         buildInput({
-          shareImage: {
+          headerImage: {
             url: "https://cdn.example.com/harbour.png",
             alt: "The harbour at dawn",
           },
@@ -86,7 +90,7 @@ describe("campaign share image", () => {
     const rendered = await renderCampaignRevision(
       buildRevision(
         buildInput({
-          shareImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
+          headerImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
         }),
       ),
       2,
@@ -99,7 +103,7 @@ describe("campaign share image", () => {
     const rendered = await renderCampaignRevision(
       buildRevision(
         buildInput({
-          shareImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
+          headerImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
         }),
       ),
       2,
@@ -112,14 +116,14 @@ describe("campaign share image", () => {
     );
   });
 
-  it("renders no image markup when the campaign has no share image", async () => {
+  it("renders no image markup when the campaign has no header image", async () => {
     const rendered = await renderCampaignRevision(buildRevision(buildInput()), 2);
 
     expect(rendered.html.bytes).not.toContain("og:image");
     expect(rendered.html.bytes).not.toContain("<img");
   });
 
-  it("changes the send fingerprint when the share image changes", async () => {
+  it("changes the send fingerprint when the header image changes", async () => {
     const withoutImage = await renderCampaignRevision(
       buildRevision(buildInput()),
       2,
@@ -127,7 +131,7 @@ describe("campaign share image", () => {
     const withImage = await renderCampaignRevision(
       buildRevision(
         buildInput({
-          shareImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
+          headerImage: { url: "https://cdn.example.com/harbour.png", alt: "" },
         }),
       ),
       2,
@@ -138,11 +142,27 @@ describe("campaign share image", () => {
     );
   });
 
-  it("escapes a share image address and its alt text", async () => {
+  it("makes a gallery reference absolute against the site's canonical origin", async () => {
     const rendered = await renderCampaignRevision(
       buildRevision(
         buildInput({
-          shareImage: {
+          headerImage: { url: "/api/media/asset_hero", alt: "The harbour" },
+        }),
+        "https://harbour.example",
+      ),
+      2,
+    );
+
+    expect(rendered.html.bytes).toContain(
+      '<img src="https://harbour.example/api/media/asset_hero" alt="The harbour">',
+    );
+  });
+
+  it("escapes a header image address and its alt text", async () => {
+    const rendered = await renderCampaignRevision(
+      buildRevision(
+        buildInput({
+          headerImage: {
             url: "https://cdn.example.com/a.png?w=1&h=2",
             alt: 'A "wide" harbour',
           },
@@ -157,42 +177,158 @@ describe("campaign share image", () => {
     expect(rendered.html.bytes).toContain("A &quot;wide&quot; harbour");
   });
 
-  it("rejects a share image address that is not absolute https", () => {
+  it("rejects a gallery reference when the site has no canonical origin", () => {
     expect(() =>
       validateCampaignInput(
         buildInput({
-          shareImage: { url: "/api/media/asset_hero", alt: "" },
+          headerImage: { url: "/api/media/asset_hero", alt: "" },
         }),
         channelConfiguration,
+        "",
       ),
     ).toThrow("campaign_share_image_invalid");
   });
 
-  it("rejects a share image address with an unsafe scheme", () => {
+  it("rejects a header image address with an unsafe scheme", () => {
     expect(() =>
       validateCampaignInput(
         buildInput({
-          shareImage: {
+          headerImage: {
             url: "javascript:alert(1)",
             alt: "",
-          } as CampaignEditableInput["shareImage"] & object,
+          } as CampaignEditableInput["headerImage"] & object,
         }),
         channelConfiguration,
       ),
     ).toThrow("campaign_share_image_invalid");
   });
 
-  it("keeps the share image out of the plain-text channel", async () => {
+  it("keeps the header image out of the plain-text channel", async () => {
     const rendered = await renderCampaignRevision(
       buildRevision(
         buildInput({
-          shareImage: { url: "https://cdn.example.com/harbour.png", alt: "x" },
+          headerImage: { url: "https://cdn.example.com/harbour.png", alt: "x" },
         }),
       ),
       2,
     );
 
     expect(rendered.text.bytes).not.toContain("cdn.example.com/harbour.png");
+  });
+});
+
+describe("campaign share image", () => {
+  it("is the thumbnail and does not render in the email body", async () => {
+    const rendered = await renderCampaignRevision(
+      buildRevision(
+        buildInput({
+          shareImage: { url: "https://cdn.example.com/thumb.png", alt: "" },
+        }),
+      ),
+      2,
+    );
+
+    // The share image is used where the campaign is previewed or shared, not
+    // inside the message. Only a header image draws a picture in the body.
+    expect(rendered.html.bytes).not.toContain("<img");
+    expect(rendered.html.bytes).not.toContain("cdn.example.com/thumb.png");
+  });
+
+  it("does not change the send fingerprint, because it is not sent", async () => {
+    const withoutThumb = await renderCampaignRevision(
+      buildRevision(buildInput()),
+      2,
+    );
+    const withThumb = await renderCampaignRevision(
+      buildRevision(
+        buildInput({
+          shareImage: { url: "https://cdn.example.com/thumb.png", alt: "" },
+        }),
+      ),
+      2,
+    );
+
+    expect(withThumb.campaignFingerprint).toBe(withoutThumb.campaignFingerprint);
+  });
+
+  it("makes a gallery reference absolute against the canonical origin", () => {
+    const authored = validateCampaignInput(
+      buildInput({
+        shareImage: { url: "/api/media/asset_card", alt: "Card" },
+      }),
+      channelConfiguration,
+      "https://harbour.example",
+    );
+
+    expect(authored.shareImage).toEqual({
+      url: "https://harbour.example/api/media/asset_card",
+      alt: "Card",
+    });
+  });
+});
+
+describe("campaign inline body image", () => {
+  it("makes a gallery reference in the body absolute for the email", async () => {
+    const authored = validateCampaignInput(
+      buildInput({
+        emailContent: {
+          version: "1.0.0",
+          type: "document",
+          children: [
+            { type: "image", src: "/api/media/asset_body", alt: "In the body" },
+          ],
+        } as CampaignEditableInput["emailContent"],
+      }),
+      channelConfiguration,
+      "https://harbour.example",
+    );
+    const rendered = await renderCampaignRevision(
+      { ...buildRevision(buildInput()), emailContent: authored.emailContent },
+      2,
+    );
+
+    expect(rendered.html.bytes).toContain(
+      '<img src="https://harbour.example/api/media/asset_body" alt="In the body" />',
+    );
+  });
+
+  it("keeps an https body image unchanged", () => {
+    const authored = validateCampaignInput(
+      buildInput({
+        emailContent: {
+          version: "1.0.0",
+          type: "document",
+          children: [
+            { type: "image", src: "https://cdn.example.com/b.png", alt: "" },
+          ],
+        } as CampaignEditableInput["emailContent"],
+      }),
+      channelConfiguration,
+      "https://harbour.example",
+    );
+
+    expect(authored.emailContent.children[0]).toMatchObject({
+      type: "image",
+      src: "https://cdn.example.com/b.png",
+    });
+  });
+
+  it("rejects a body gallery reference when the site has no canonical origin", () => {
+    expect(() =>
+      validateCampaignInput(
+        buildInput({
+          emailContent: {
+            version: "1.0.0",
+            type: "document",
+            children: [
+              { type: "image", src: "/api/media/asset_body", alt: "" },
+            ],
+          } as CampaignEditableInput["emailContent"],
+        }),
+        channelConfiguration,
+        "",
+      ),
+    ).toThrow("campaign_share_image_invalid");
   });
 });
 
