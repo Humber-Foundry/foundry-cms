@@ -141,6 +141,82 @@ async function main() {
     command("npm", ["run", "typecheck"], target, env);
     command("npm", ["run", "build"], target, env);
     command("npm", ["run", "smoke:deployment"], target, env);
+
+    // Exercise the real sync command against the release the installation is
+    // already pinned to. A same-release sync must be a clean no-op that never
+    // touches an installation-owned file, and it must fail closed exactly like
+    // the scaffold when the vendored release is not locked.
+    const syncCommand = join(target, "node_modules/.bin/foundry-reference-site-sync");
+    const syncArguments = [
+      "--target",
+      target,
+      "--descriptor",
+      join(releaseDirectory, "foundation-release.json"),
+      "--descriptor-digest",
+      digest,
+      "--artifacts",
+      join(releaseDirectory, "artifacts"),
+    ];
+    const idempotentReport = execFileSync(syncCommand, syncArguments, {
+      cwd: target,
+      encoding: "utf8",
+      env,
+    });
+    const pinnedAfterSync = JSON.parse(
+      await readFile(join(target, ".foundry-foundation-release.json"), "utf8"),
+    );
+    const siteAfterSync = JSON.parse(
+      await readFile(join(target, "foundry/published-site.json"), "utf8"),
+    );
+    if (
+      !idempotentReport.includes("0 written") ||
+      pinnedAfterSync.version !== descriptor.version ||
+      siteAfterSync.site.navigation.length !== 0 ||
+      siteAfterSync.home.sections.length !== 0 ||
+      JSON.stringify(siteAfterSync).includes("Foundry Reference")
+    ) {
+      throw new Error("foundation_sync_idempotent_check_invalid");
+    }
+
+    // A local override of a framework file must survive the sync when the target
+    // release did not change that file.
+    const overriddenPath = join(target, "next.config.ts");
+    const overriddenBefore = await readFile(overriddenPath, "utf8");
+    await writeFile(
+      overriddenPath,
+      `${overriddenBefore}\n// installation override\n`,
+    );
+    const overrideReport = execFileSync(syncCommand, syncArguments, {
+      cwd: target,
+      encoding: "utf8",
+      env,
+    });
+    const overriddenAfter = await readFile(overriddenPath, "utf8");
+    if (
+      !overriddenAfter.includes("// installation override") ||
+      !overrideReport.includes("next.config.ts") ||
+      !overrideReport.includes("keep")
+    ) {
+      throw new Error("foundation_sync_override_not_preserved");
+    }
+    await writeFile(overriddenPath, overriddenBefore);
+
+    // The sync command refuses to advance when the target release is not the
+    // vendored, locked executable.
+    const beforeTamperLock = await readFile(lockPath, "utf8");
+    const tamperedSyncLock = JSON.parse(beforeTamperLock);
+    tamperedSyncLock.packages["node_modules/@humber-foundry/reference-site"].integrity =
+      `sha512-${Buffer.alloc(64).toString("base64")}`;
+    await writeFile(lockPath, `${JSON.stringify(tamperedSyncLock, null, 2)}\n`);
+    expectCommandFailure(
+      syncCommand,
+      syncArguments,
+      target,
+      env,
+      "foundation_scaffold_executable_not_locked:@humber-foundry/reference-site",
+    );
+    await writeFile(lockPath, beforeTamperLock);
+
     const lock = JSON.parse(await readFile(lockPath, "utf8"));
     if (lock.lockfileVersion !== 3) throw new Error("foundation_release_lockfile_invalid");
     const lockSource = JSON.stringify(lock);
