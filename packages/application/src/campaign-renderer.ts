@@ -220,6 +220,12 @@ function renderRichTextHtml(document: RichTextDocument): string {
           `<ol>${list.children
             .map((item) => `<li>${renderListItemInline(item)}</li>`)
             .join("")}</ol>`,
+        // A body image reaches the email as an <img>. A source that is a path
+        // on the site cannot be resolved by a mail client, the same limit
+        // ADR-0008 records for a path share image; inline images in a campaign
+        // body are otherwise out of this change's scope.
+        image: (image) =>
+          `<img src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt)}" />`,
       }),
     )
     .join("");
@@ -257,6 +263,8 @@ export function renderRichTextPlain(document: RichTextDocument): string {
                 `${index + 1}. ${renderPlainInline(item.children[0]!.children)}`,
             )
             .join("\n"),
+        image: (image) =>
+          image.alt === "" ? image.src : `${image.alt} (${image.src})`,
       }),
     )
     .join("\n\n");

@@ -207,7 +207,7 @@ function bindApplications(
     channelConfiguration: parts.channelConfiguration,
     siteCanonicalOrigin: "",
     rendererVersion: parts.rendererVersion,
-    schemaVersion: "1.5.0",
+    schemaVersion: "1.6.0",
   });
   const testDelivery = createCampaignTestDeliveryApplication({
     siteId: parts.siteId,

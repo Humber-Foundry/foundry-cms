@@ -9,6 +9,7 @@ export type BlogPostRenderModel =
   | Readonly<{
       route: `/blog/${string}`;
       metadata: BlogPost["seo"];
+      mainImage: BlogPost["mainImage"];
       designAttributes: ReturnType<typeof siteDesignAttributes>;
       wordmark: Readonly<{
         label: string;
@@ -37,6 +38,7 @@ export function createBlogPostRenderModel(
   return {
     route,
     metadata: post.seo,
+    mainImage: post.mainImage,
     designAttributes: siteDesignAttributes(definition.design),
     wordmark: {
       label: `${definition.site.name} home`,

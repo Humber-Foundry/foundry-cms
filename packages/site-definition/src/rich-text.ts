@@ -52,11 +52,24 @@ export type RichTextList =
       children: ReadonlyArray<RichTextListItem>;
     }>;
 
+/**
+ * One picture placed in the flow of the body. `src` is a gallery photo's
+ * public media path `/api/media/<assetId>`, another root-relative path, or an
+ * `https` address. `alt` is the owner's description and may be blank for a
+ * decorative picture.
+ */
+export type RichTextImage = Readonly<{
+  type: "image";
+  src: string;
+  alt: string;
+}>;
+
 export type RichTextBlock =
   | RichTextParagraph
   | RichTextHeading
   | RichTextBlockquote
-  | RichTextList;
+  | RichTextList
+  | RichTextImage;
 
 export type RichTextBlockVisitor<Result> = Readonly<{
   paragraph(block: RichTextParagraph): Result;
@@ -64,6 +77,7 @@ export type RichTextBlockVisitor<Result> = Readonly<{
   blockquote(block: RichTextBlockquote): Result;
   bulletList(block: Extract<RichTextList, { type: "bulletList" }>): Result;
   orderedList(block: Extract<RichTextList, { type: "orderedList" }>): Result;
+  image(block: RichTextImage): Result;
 }>;
 
 export function visitRichTextBlock<Result>(
@@ -81,6 +95,8 @@ export function visitRichTextBlock<Result>(
       return visitor.bulletList(block);
     case "orderedList":
       return visitor.orderedList(block);
+    case "image":
+      return visitor.image(block);
   }
 }
 
@@ -176,6 +192,21 @@ function isSafeLink(href: string): boolean {
 
 export function isSafeRichTextLink(href: string): boolean {
   return isSafeLink(href);
+}
+
+/**
+ * An inline image source is safe when it is a safe link that a browser will
+ * actually load a picture from over a secure connection: a root-relative path
+ * such as `/api/media/<assetId>`, or an `https` address. A plain `http`
+ * address is refused because it is mixed content on a published `https` site;
+ * a `mailto:` or a page anchor is a safe link but not an image source, so both
+ * are refused here too.
+ */
+export function isSafeRichTextImageSrc(src: string): boolean {
+  if (!isSafeLink(src)) {
+    return false;
+  }
+  return src.startsWith("/") || src.startsWith("https://");
 }
 
 function validateText(text: RichTextText, path: string) {
@@ -517,6 +548,28 @@ export function validateRichTextDocument(
           );
         });
         break;
+      case "image":
+        assertOnlyKeys(block, ["type", "src", "alt"], path);
+        if (typeof block.src !== "string" || !isSafeRichTextImageSrc(block.src)) {
+          issue(
+            "unsafe_link",
+            `${path}.src`,
+            "Image sources must be a root-relative path or an https address.",
+          );
+        }
+        if (
+          typeof block.alt !== "string" ||
+          /[\r\n]/u.test(block.alt) ||
+          /[\uD800-\uDFFF]/u.test(block.alt) ||
+          block.alt.length > 300
+        ) {
+          issue(
+            "invalid_node",
+            `${path}.alt`,
+            "Image alt text must be a single line of at most 300 characters.",
+          );
+        }
+        break;
       default:
         issue(
           "unsupported_node",
@@ -567,6 +620,9 @@ export function richTextDocumentHasVisibleText(
             inlineChildrenHaveVisibleText(paragraph.children),
           ),
         ),
+      // An image carries a picture, not text. This predicate asks only about
+      // text, so an image alone does not make it true.
+      image: () => false,
     }),
   );
 }
@@ -616,6 +672,8 @@ function canonicalRichTextBlock(node: RichTextBlock): RichTextBlock {
           children: item.children.map(canonicalRichTextParagraph),
         })),
       };
+    case "image":
+      return { type: "image", src: node.src, alt: node.alt };
   }
 }
 
@@ -763,6 +821,30 @@ export function fromTipTapDocument(value: unknown): RichTextDocument {
     switch (block.type) {
       case "paragraph":
         return fromTipTapParagraph(block, path);
+      case "image": {
+        assertOnlyKeys(block, ["type", "attrs"], path);
+        if (!isObject(block.attrs) || typeof block.attrs.src !== "string") {
+          issue("invalid_node", `${path}.attrs.src`, "Expected an image source.");
+        }
+        // TipTap's Image node also carries `title`, `width` and `height`
+        // attributes this contract does not store. They are accepted and
+        // dropped, so the block keeps only its source and alt text; any other
+        // attribute is unsupported.
+        assertOnlyKeys(
+          block.attrs,
+          ["src", "alt", "title", "width", "height"],
+          `${path}.attrs`,
+        );
+        const alt = block.attrs.alt;
+        if (alt !== undefined && alt !== null && typeof alt !== "string") {
+          issue("invalid_node", `${path}.attrs.alt`, "Expected image alt text.");
+        }
+        return {
+          type: "image",
+          src: block.attrs.src,
+          alt: typeof alt === "string" ? alt : "",
+        };
+      }
       case "heading": {
         assertOnlyKeys(block, ["type", "attrs", "content"], path);
         if (
@@ -943,6 +1025,10 @@ export function toTipTapDocument(document: RichTextDocument): JsonObject {
                   content: item.children.map(toTipTapParagraph),
                 })),
               }),
+              image: (image) => ({
+                type: "image",
+                attrs: { src: image.src, alt: image.alt, title: null },
+              }),
             }),
           ),
         }),
@@ -1012,6 +1098,10 @@ export function serializeRichTextToMarkdown(
           .join("\n>\n"),
       bulletList: serializeList,
       orderedList: serializeList,
+      image: (image) =>
+        `![${escapeMarkdownText(image.alt)}](${escapeMarkdownDestination(
+          image.src,
+        )})`,
     }),
   );
   return blocks.length === 0 ? "" : `${blocks.join("\n\n")}\n`;
@@ -1197,6 +1287,22 @@ export function parseRichTextMarkdown(markdown: string): RichTextDocument {
         level: heading[1]!.length as RichTextHeading["level"],
         children: parseMarkdownInline(heading[2]!, path),
       };
+    }
+    // A picture on its own line is the CommonMark image `![alt](src)`. A
+    // paragraph that opens with a literal "!" serializes as "\!", so an
+    // unescaped leading "![" marks an image block and nothing else.
+    if (chunk.startsWith("![")) {
+      const altEnd = findUnescaped(chunk, "](", 2);
+      const srcEnd =
+        altEnd < 0 ? -1 : findUnescaped(chunk, ")", altEnd + 2);
+      if (srcEnd === chunk.length - 1) {
+        const alt = unescapeMarkdown(chunk.slice(2, altEnd), path);
+        const src = unescapeMarkdown(chunk.slice(altEnd + 2, srcEnd), path);
+        if (!isSafeRichTextImageSrc(src)) {
+          issue("unsafe_link", path, "Markdown contains an unsafe image source.");
+        }
+        return { type: "image", src, alt };
+      }
     }
     const lines = chunk.split("\n");
     if (lines.every((line) => line.startsWith("> ") || line === ">")) {

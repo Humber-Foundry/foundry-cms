@@ -241,6 +241,7 @@ describe("D1 content revision store", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText("Initially live."),
           },
         ],
@@ -367,6 +368,7 @@ describe("D1 content revision store", () => {
             keywords: [],
             shareImage: null,
           },
+          mainImage: null,
           body: createRichTextDocumentFromPlainText("Must conflict."),
         },
         idempotencyKey: "d1-global-id-create-command",
@@ -398,6 +400,7 @@ describe("D1 content revision store", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText("Original body."),
           },
         ],
@@ -494,6 +497,7 @@ describe("D1 content revision store", () => {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText("Durable body."),
       },
       idempotencyKey: "d1-blog-create-post",
@@ -524,6 +528,7 @@ describe("D1 content revision store", () => {
             keywords: [],
             shareImage: null,
           },
+          mainImage: null,
           body: createRichTextDocumentFromPlainText("Duplicate."),
         },
         idempotencyKey: "d1-blog-duplicate-post",
@@ -1132,6 +1137,7 @@ describe("D1 content revision store", () => {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText(`Body ${index + 1}.`),
       };
     });
@@ -1262,6 +1268,7 @@ describe("D1 content revision store", () => {
         keywords: [],
         shareImage: null,
       },
+      mainImage: null,
       body: createRichTextDocumentFromPlainText("Publication ordering."),
     };
     const publishedDefinition = {
@@ -1395,6 +1402,7 @@ describe("D1 content revision store", () => {
         keywords: [],
         shareImage: null,
       },
+      mainImage: null,
       body: createRichTextDocumentFromPlainText("Unchanged post body."),
     };
     const definition = {
@@ -1483,6 +1491,7 @@ describe("D1 content revision store", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText("Shared body."),
           },
         ],
@@ -1608,6 +1617,7 @@ describe("D1 content revision store", () => {
         keywords: [],
         shareImage: null,
       },
+      mainImage: null,
       body: createRichTextDocumentFromPlainText(`${title} body.`),
     });
     const definition = {
@@ -1724,6 +1734,7 @@ describe("D1 content revision store", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText("Missing."),
           },
         ],
@@ -1764,6 +1775,7 @@ describe("D1 content revision store", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText("Missing evidence."),
           },
         ],
@@ -1840,6 +1852,7 @@ describe("D1 content revision store", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText(
               "Scheduled published body.",
             ),
@@ -1858,6 +1871,7 @@ describe("D1 content revision store", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText(
               "Unrelated published body.",
             ),
@@ -2233,6 +2247,7 @@ describe("D1 content revision store", () => {
             keywords: [],
             shareImage: null,
           },
+          mainImage: null,
           body: createRichTextDocumentFromPlainText("Unauthorized."),
         },
         idempotencyKey: "d1-unauthorized-blog-post",

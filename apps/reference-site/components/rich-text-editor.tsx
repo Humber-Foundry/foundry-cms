@@ -10,13 +10,17 @@ import {
 
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import Image from "@tiptap/extension-image";
 import {
   isSafeRichTextLink,
+  mediaImageSrc,
   parseSerializedRichTextDocument,
   toTipTapDocument,
   type SerializedRichTextDocument,
 } from "@humber-foundry/site-definition";
 
+import { MediaPicker } from "./media-picker";
+import type { EditorMediaContext } from "./change-photo-field";
 import {
   serializeSupportedTipTapDocument,
   supportedRichTextStarterKitOptions,
@@ -43,6 +47,7 @@ export function RichTextEditor({
   label,
   labelledBy,
   invalid,
+  media,
   onChange,
   onValidationChange = () => undefined,
 }: {
@@ -51,10 +56,17 @@ export function RichTextEditor({
   disabled: boolean;
   describedBy: string;
   invalid: boolean;
+  /**
+   * When set, the toolbar offers "Add photo", which opens the shared media
+   * picker and inserts the chosen photo as an inline image. Left unset, the
+   * editor still draws any image already in the body, but offers no button.
+   */
+  media?: EditorMediaContext;
   onChange(value: SerializedRichTextDocument): void;
   onValidationChange?(invalid: boolean): void;
 } & RichTextEditorAccessibleName) {
   const [validationMessage, setValidationMessage] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const validationMessageId = `${id}-validation`;
   const editorDescribedBy =
     validationMessage === ""
@@ -83,6 +95,7 @@ export function RichTextEditor({
   const editor = useEditor({
     extensions: [
       StarterKit.configure(supportedRichTextStarterKitOptions),
+      Image.configure({ inline: false, allowBase64: false }),
     ],
     content: toTipTapDocument(document),
     editable: !disabled,
@@ -272,10 +285,47 @@ export function RichTextEditor({
         >
           Link
         </button>
+        {media === undefined ? null : (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setPickerOpen(true)}
+          >
+            Add photo
+          </button>
+        )}
       </div>
       <EditorContent editor={editor} />
       {validationMessage === "" ? null : (
         <small id={validationMessageId} role="alert">{validationMessage}</small>
+      )}
+      {media === undefined ? null : (
+        <MediaPicker
+          open={pickerOpen}
+          csrfToken={media.csrfToken}
+          workspaceId={media.workspaceId}
+          onChoose={(photo) => {
+            if (editor === null) {
+              return;
+            }
+            // The picker sets the photo; a separate prompt sets its
+            // description, so alt text can be given per inline image. A
+            // cancelled prompt leaves the image with no description.
+            const description = window.prompt(
+              "Describe this image for people who cannot see it. Leave blank for a decorative image.",
+              "",
+            );
+            editor
+              .chain()
+              .focus()
+              .setImage({
+                src: mediaImageSrc(photo.assetId),
+                alt: description ?? "",
+              })
+              .run();
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
     </div>
   );

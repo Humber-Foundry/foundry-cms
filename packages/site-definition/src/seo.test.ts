@@ -10,6 +10,7 @@ import {
   type SiteDefinition,
 } from "./index";
 import {
+  blogPostThumbnail,
   resolveBlogIndexSeo,
   resolveBlogPostSeo,
   resolveHomeSeo,
@@ -29,6 +30,7 @@ function buildPost(overrides: Partial<BlogPost> = {}): BlogPost {
     title: "Harbour notes",
     excerpt: "Three things we learned rebuilding the launch page.",
     seo: { title: "", description: "", keywords: [], shareImage: null },
+    mainImage: null,
     body: createRichTextDocumentFromPlainText("Body copy."),
     ...overrides,
   };
@@ -139,6 +141,19 @@ describe("resolveBlogPostSeo", () => {
     expect(resolved.shareImage?.url).toBe("https://cdn.example.net/card.png");
   });
 
+  it("falls back to the main image when the post has no share image", () => {
+    const post = buildPost({
+      mainImage: { url: "/api/media/asset_header", alt: "Header" },
+    });
+
+    const resolved = resolveBlogPostSeo(buildDefinition(post), post);
+
+    expect(resolved.shareImage).toEqual({
+      url: "https://example.com/api/media/asset_header",
+      alt: "Header",
+    });
+  });
+
   it("appends the site name when the SEO title is blank", () => {
     const post = buildPost();
 
@@ -190,6 +205,34 @@ describe("resolveBlogPostSeo", () => {
     const resolved = resolveBlogPostSeo(buildDefinition(post, ""), post);
 
     expect(resolved.shareImage).toBeNull();
+  });
+});
+
+describe("blogPostThumbnail", () => {
+  it("uses the post's own share image when it has one", () => {
+    const thumbnail = blogPostThumbnail(
+      buildPost({
+        seo: {
+          title: "",
+          description: "",
+          keywords: [],
+          shareImage: { url: "/api/media/asset_card", alt: "Card" },
+        },
+        mainImage: { url: "/api/media/asset_header", alt: "Header" },
+      }),
+    );
+    expect(thumbnail).toEqual({ url: "/api/media/asset_card", alt: "Card" });
+  });
+
+  it("falls back to the main image when there is no share image", () => {
+    const thumbnail = blogPostThumbnail(
+      buildPost({ mainImage: { url: "/api/media/asset_header", alt: "Header" } }),
+    );
+    expect(thumbnail).toEqual({ url: "/api/media/asset_header", alt: "Header" });
+  });
+
+  it("is null when the post has neither", () => {
+    expect(blogPostThumbnail(buildPost())).toBeNull();
   });
 });
 

@@ -31,13 +31,13 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.5.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.5.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.6.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.6.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.5.0",
+      "https://foundrycms.dev/schemas/site-definition/1.6.0",
     );
     expect(
       siteDefinitionSchema.$defs.richTextDocument.$comment,
@@ -193,8 +193,8 @@ describe("reference Site Definition", () => {
     )!;
 
     expect(upgraded).not.toBe(legacy);
-    expect(upgraded.definitionVersion).toBe("1.5.0");
-    expect(upgraded.schemaVersion).toBe("1.5.0");
+    expect(upgraded.definitionVersion).toBe("1.6.0");
+    expect(upgraded.schemaVersion).toBe("1.6.0");
     expect(callToAction).toEqual(
       expect.objectContaining({
         body: {
@@ -594,6 +594,7 @@ describe("reference Site Definition", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText("First body"),
           },
           {
@@ -608,6 +609,7 @@ describe("reference Site Definition", () => {
               keywords: [],
               shareImage: null,
             },
+            mainImage: null,
             body: createRichTextDocumentFromPlainText("Second body"),
           },
         ],
@@ -827,9 +829,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.5.0.",
+        "section_missing.title": "This field is not in Site Definition 1.6.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.5.0.",
+        "section_hero.href": "This field is not in Site Definition 1.6.0.",
       },
     });
   });
@@ -843,7 +845,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.5.0.",
+        "This field is not in Site Definition 1.6.0.",
       );
     }
   });

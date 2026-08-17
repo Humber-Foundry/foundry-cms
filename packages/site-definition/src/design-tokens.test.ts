@@ -130,8 +130,8 @@ describe("controlled design tokens", () => {
       errors: {
         [path]:
           path === "design.typography.caption"
-            ? "This field is not in Site Definition 1.5.0."
-            : "Choose a value registered by Site Definition 1.5.0.",
+            ? "This field is not in Site Definition 1.6.0."
+            : "Choose a value registered by Site Definition 1.6.0.",
       },
     });
   });

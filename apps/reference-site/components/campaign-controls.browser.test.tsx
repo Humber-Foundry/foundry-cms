@@ -73,7 +73,7 @@ describe("campaign controls browser acceptance", () => {
         id: "canonical-consent-and-suppression",
         version: 1,
       },
-      schemaVersion: "1.5.0",
+      schemaVersion: "1.6.0",
       rendererVersion: "1".repeat(40),
       createdAt: campaign.createdAt,
       createdByActorId: "membership-editor",

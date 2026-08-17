@@ -26,6 +26,7 @@ describe("blog post artifact fingerprint", () => {
         keywords: [],
         shareImage: null,
       },
+      mainImage: null,
       body: createRichTextDocumentFromPlainText("Exact post body."),
     };
     const fingerprint = await createBlogPostArtifactFingerprint({
@@ -37,17 +38,17 @@ describe("blog post artifact fingerprint", () => {
 
     expect(fingerprint).toEqual({
       postId: "00000000-0000-4000-8000-000000000009",
-      postRevisionId: "bc399d01-e8b8-832d-a147-a24473ccf411",
+      postRevisionId: "ba3910c5-f244-8ac9-9568-f0b53b831e2b",
       revision: 1,
       contentHash:
-        "85a9ad9072a60edb557f646b1a1e75b3ef09a03b1a9ff8b53f5f19e74bc8dce9",
-      schemaVersion: "1.5.0",
+        "8a7559c553ea74f71b3db40d2dd622f6e1f905f8c91616867ce0a95739ebae50",
+      schemaVersion: "1.6.0",
       rendererVersion: "renderer-v1",
       serializationVersion: "foundry.post-artifact.v1",
       renderedBytesHash:
-        "e0a676db5ddbc26dba29b13b566427d75cb48981790609176417bf6261f78d8a",
+        "c383a8d9229408105115b7424093f3597749c900a02758ef6bbd925694e75786",
       value:
-        "c8dabbf3e86db9b145408c7a642a564aaafc6fa535bab12d0f788b3c3d5ca4ec",
+        "4e0aa7648a9827e435a05894da54c7f6b45e4bfbff0bd98a3837a9da48c0b3c0",
     });
 
     const changedChrome = await createBlogPostArtifactFingerprint({

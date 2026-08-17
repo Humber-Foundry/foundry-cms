@@ -1,6 +1,9 @@
-import type {
-  BlogPost,
-  SiteDefinition,
+import {
+  blogPostThumbnail,
+  resolveMediaImageSrc,
+  type BlogPost,
+  type MediaImageDelivery,
+  type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
 export function publicBlogPosts(
@@ -15,19 +18,37 @@ export function PublicBlogPostList({
   posts,
   postHref,
   headingTag: Heading,
+  mediaDelivery = "published",
+  mediaAccessToken,
 }: {
   posts: ReadonlyArray<BlogPost>;
   postHref(post: BlogPost): string;
   headingTag: "h2" | "h3";
+  mediaDelivery?: MediaImageDelivery;
+  mediaAccessToken?: string;
 }) {
   return (
     <ul>
-      {posts.map((post) => (
-        <li key={post.id}>
-          <Heading><a href={postHref(post)}>{post.title}</a></Heading>
-          <p>{post.excerpt}</p>
-        </li>
-      ))}
+      {posts.map((post) => {
+        const thumbnail = blogPostThumbnail(post);
+        return (
+          <li key={post.id}>
+            {thumbnail === null ? null : (
+              <img
+                className="post-card-thumbnail"
+                src={resolveMediaImageSrc(
+                  thumbnail.url,
+                  mediaDelivery,
+                  mediaAccessToken,
+                )}
+                alt={thumbnail.alt}
+              />
+            )}
+            <Heading><a href={postHref(post)}>{post.title}</a></Heading>
+            <p>{post.excerpt}</p>
+          </li>
+        );
+      })}
     </ul>
   );
 }

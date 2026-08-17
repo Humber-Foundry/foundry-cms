@@ -73,6 +73,8 @@ export function SiteRenderer({
               posts={posts}
               postHref={(post) => blogPostHref(post.slug)}
               headingTag="h3"
+              mediaDelivery={mediaDelivery}
+              mediaAccessToken={mediaAccessToken}
             />
           </section>
         )}

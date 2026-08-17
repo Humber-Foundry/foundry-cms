@@ -15,10 +15,12 @@ import {
   type BlogPostId,
   type RichTextDocument,
   type SeoMetadata,
+  type SeoShareImage,
   type SerializedRichTextDocument,
 } from "@humber-foundry/site-definition";
 
 import { RichTextEditor } from "./rich-text-editor";
+import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
 import {
   sendContentRevisionAttempt,
@@ -115,6 +117,7 @@ function blogPostSummary(
 function PostComposer({
   editorId,
   initialPost,
+  media,
   busy,
   saveLabel,
   onSave,
@@ -123,8 +126,9 @@ function PostComposer({
   editorId: string;
   initialPost?: Pick<
     BlogPost,
-    "title" | "slug" | "excerpt" | "body" | "seo"
+    "title" | "slug" | "excerpt" | "body" | "seo" | "mainImage"
   >;
+  media: EditorMediaContext;
   busy: boolean;
   saveLabel: string;
   onSave(post: {
@@ -132,6 +136,7 @@ function PostComposer({
     slug: string;
     excerpt: string;
     seo: SeoMetadata;
+    mainImage: SeoShareImage | null;
     body: SerializedRichTextDocument;
   }): void;
   onCancel?(): void;
@@ -156,6 +161,12 @@ function PostComposer({
   const [shareImageAlt, setShareImageAlt] = useState(
     initialPost?.seo.shareImage?.alt ?? "",
   );
+  const [mainImageUrl, setMainImageUrl] = useState(
+    initialPost?.mainImage?.url ?? "",
+  );
+  const [mainImageAlt, setMainImageAlt] = useState(
+    initialPost?.mainImage?.alt ?? "",
+  );
   const [body, setBody] = useState<SerializedRichTextDocument>(() =>
     initialPost === undefined
       ? emptyRichTextBody()
@@ -179,6 +190,7 @@ function PostComposer({
             keywords: parseSeoKeywords(keywords),
             shareImage: toSeoShareImage(shareImageUrl, shareImageAlt),
           },
+          mainImage: toSeoShareImage(mainImageUrl, mainImageAlt),
           body,
         });
       }}
@@ -194,6 +206,26 @@ function PostComposer({
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
+      <div className="composer-main-image">
+        <ChangePhotoField
+          label="Main image — shown large at the top of the post"
+          value={mainImageUrl}
+          onChange={setMainImageUrl}
+          media={media}
+        />
+        <label>
+          <span>Main image description</span>
+          <small className="composer-hint">
+            Describe the picture for people who cannot see it.
+          </small>
+          <input
+            name="mainImageAlt"
+            maxLength={300}
+            value={mainImageAlt}
+            onChange={(event) => setMainImageAlt(event.target.value)}
+          />
+        </label>
+      </div>
       <RichTextEditor
         id={editorId}
         label="Post body"
@@ -201,12 +233,13 @@ function PostComposer({
         value={body}
         disabled={busy}
         invalid={bodyInvalid}
+        media={media}
         onChange={setBody}
         onValidationChange={setBodyInvalid}
       />
       <p className="composer-hint" id={`${editorId}-hint`}>
         Write the post here. Use the buttons above for headings, bold text,
-        lists and links.
+        lists, links and photos.
       </p>
       <details className="composer-settings">
         <summary>Post settings — summary shown in the blog list</summary>
@@ -285,20 +318,15 @@ function PostComposer({
               {tooManyKeywords ? seoFieldHints.tooManyKeywords : ""}
             </small>
           </label>
+          <ChangePhotoField
+            label="Thumbnail — shown in the blog list and when the post is shared"
+            value={shareImageUrl}
+            onChange={setShareImageUrl}
+            media={media}
+          />
+          <p className="composer-hint">{seoFieldHints.shareImageUrl}</p>
           <label>
-            <span>Share image address</span>
-            <small className="composer-hint">
-              {seoFieldHints.shareImageUrl}
-            </small>
-            <input
-              name="seoShareImageUrl"
-              maxLength={2000}
-              value={shareImageUrl}
-              onChange={(event) => setShareImageUrl(event.target.value)}
-            />
-          </label>
-          <label>
-            <span>Share image description</span>
+            <span>Thumbnail description</span>
             <small className="composer-hint">
               {seoFieldHints.shareImageAlt}
             </small>
@@ -455,6 +483,7 @@ export function BlogPostControls({
       slug: string;
       excerpt: string;
       seo: SeoMetadata;
+      mainImage: SeoShareImage | null;
       body: SerializedRichTextDocument;
     }>,
     existingPostId?: string,
@@ -508,6 +537,7 @@ export function BlogPostControls({
       {writingNew ? (
         <PostComposer
           editorId="post-body"
+          media={{ csrfToken: mutationToken, workspaceId: revision.workspaceId }}
           busy={busy || pendingAttempt !== null}
           saveLabel={busy ? "Saving…" : "Save draft"}
           onSave={(post) => savePost(post)}
@@ -526,6 +556,10 @@ export function BlogPostControls({
                 <PostComposer
                   editorId="post-body"
                   initialPost={post}
+                  media={{
+                    csrfToken: mutationToken,
+                    workspaceId: revision.workspaceId,
+                  }}
                   busy={busy || pendingAttempt !== null}
                   saveLabel={busy ? "Saving…" : "Save changes"}
                   onSave={(edited) => savePost(edited, post.id)}

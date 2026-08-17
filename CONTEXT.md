@@ -141,6 +141,20 @@ revisions and at most one live revision.
 **Post revision** — An immutable snapshot of a post's schema-valid fields,
 references and deterministic Markdown representation.
 
+**Main image** — The large picture a post leads with, above its title, chosen
+through the shared media picker and stored as its public media path
+`/api/media/<assetId>` with an alt text. A post may have none. See ADR-0013.
+
+**Thumbnail** — The picture a post shows on its card in a post list and in its
+link preview. It is the post's own share image, and it falls back to the main
+image when no share image is set, so it is never a separate field from the SEO
+share image. A post with neither shows a text-only card.
+
+**Inline image** — A picture placed in the flow of the post body, chosen through
+the shared media picker and held as a rich-text `image` block whose `src` is a
+media reference. It renders in the body on the public post and in the exact
+preview, and serializes to the CommonMark image `![alt](src)`.
+
 ## Newsletter
 
 **Campaign** — A stable email-campaign identity with immutable campaign

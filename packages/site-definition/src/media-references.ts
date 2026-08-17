@@ -43,10 +43,15 @@ function collectMediaAssetIds(value: unknown, into: Set<string>): void {
 
 /**
  * Every gallery media asset the site references: photos placed as media
- * occurrences and photos chosen for a page-component image field. It is the
+ * occurrences, photos chosen for a page-component image field, and the main
+ * image, thumbnail and inline images of every published blog post. It is the
  * set of assets the site is allowed to serve — the public route serves them
  * for the published site, and the authenticated preview capability covers them
  * for the draft.
+ *
+ * Only published posts (`targetVisibility === "public"`) contribute, so an
+ * unpublished post's photos are not made publicly serveable by its presence in
+ * the stored definition. See ADR-0013.
  */
 export function siteDefinitionMediaAssetIds(
   definition: SiteDefinition,
@@ -56,6 +61,12 @@ export function siteDefinitionMediaAssetIds(
     ids.add(occurrence.asset.assetId);
   }
   collectMediaAssetIds(definition.home.sections, ids);
+  for (const post of definition.blog?.posts ?? []) {
+    if (post.targetVisibility !== "public") continue;
+    collectMediaAssetIds(post.mainImage, ids);
+    collectMediaAssetIds(post.seo?.shareImage, ids);
+    collectMediaAssetIds(post.body, ids);
+  }
   return ids;
 }
 

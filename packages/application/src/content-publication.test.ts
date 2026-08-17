@@ -293,6 +293,7 @@ describe("content publication application", () => {
             keywords: [],
             shareImage: null,
           },
+          mainImage: null,
           body: createRichTextDocumentFromPlainText("Exact post body."),
         },
         idempotencyKey: "create-exact-pipeline-post",
