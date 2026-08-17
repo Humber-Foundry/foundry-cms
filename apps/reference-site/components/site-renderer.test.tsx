@@ -31,6 +31,7 @@ describe("SiteRenderer controlled design projection", () => {
         keywords: [],
         shareImage: null,
       },
+      mainImage: null,
       body: createRichTextDocumentFromPlainText("Rendered body."),
     };
     const definition: SiteDefinition = {
@@ -134,6 +135,7 @@ describe("SiteRenderer controlled design projection", () => {
         keywords: [],
         shareImage: null,
       },
+      mainImage: null,
       body: createRichTextDocumentFromPlainText("Unpublished draft body."),
     };
     const definition: SiteDefinition = {
@@ -222,6 +224,7 @@ describe("site renderer media placement", () => {
         keywords: [],
         shareImage: null,
       },
+      mainImage: null,
       body: createRichTextDocumentFromPlainText("Canonical preview."),
     };
     const definition: SiteDefinition = {

@@ -1,5 +1,5 @@
 export const projectedRichTextVersion = "1.0.0";
-export const projectedSiteDefinitionVersion = "1.5.0";
+export const projectedSiteDefinitionVersion = "1.6.0";
 
 const projectedSupportedStoredVersions = Object.freeze([
   "1.0.0",
@@ -7,6 +7,7 @@ const projectedSupportedStoredVersions = Object.freeze([
   "1.2.0",
   "1.3.0",
   "1.4.0",
+  "1.5.0",
 ]);
 
 const projectedDefaultSiteDesign = Object.freeze({
@@ -70,6 +71,24 @@ function projectSeoMetadata(projected) {
   }
 }
 
+/**
+ * Fill the 1.6.0 blog main image on posts stored under an older schema.
+ *
+ * A post written before 1.6.0 has no header image. It projects to `null`,
+ * which means "no main image", so an upgraded post renders exactly as before
+ * until an owner sets one. See ADR-0013.
+ */
+function projectBlogMainImage(projected) {
+  if (!isRecord(projected.blog) || !Array.isArray(projected.blog.posts)) {
+    return;
+  }
+  for (const post of projected.blog.posts) {
+    if (isRecord(post)) {
+      post.mainImage ??= null;
+    }
+  }
+}
+
 export function projectSiteDefinitionSchema(value) {
   if (
     !isRecord(value) ||
@@ -98,6 +117,9 @@ export function projectSiteDefinitionSchema(value) {
   // The sharing fields arrived with 1.4.0. Fill them first, so a definition
   // stored before 1.4.0 gains the "not set" values it would have had.
   projectSeoMetadata(projected);
+  // The blog main image arrived with 1.6.0. A post stored before it gains the
+  // "no main image" value it would have had.
+  projectBlogMainImage(projected);
   if (needsDesignProjection) {
     // A clone, never the frozen constant itself: the design step below writes
     // into this object, and writing into a frozen one throws.

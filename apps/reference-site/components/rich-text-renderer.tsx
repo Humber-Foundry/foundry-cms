@@ -1,5 +1,7 @@
 import {
+  resolveMediaImageSrc,
   visitRichTextBlock,
+  type MediaImageDelivery,
   type RichTextDocument,
   type RichTextLinkMark,
   type RichTextParagraph,
@@ -34,9 +36,13 @@ function Paragraph({ node }: { node: RichTextParagraph }) {
 export function RichTextRenderer({
   document,
   headingOffset = 0,
+  mediaDelivery = "published",
+  mediaAccessToken,
 }: {
   document: RichTextDocument;
   headingOffset?: number;
+  mediaDelivery?: MediaImageDelivery;
+  mediaAccessToken?: string;
 }) {
   return document.children.map((block, blockIndex) =>
     visitRichTextBlock(block, {
@@ -78,6 +84,18 @@ export function RichTextRenderer({
             </li>
           ))}
         </ol>
+      ),
+      image: (image) => (
+        <figure key={blockIndex} className="rich-text-image">
+          <img
+            src={resolveMediaImageSrc(
+              image.src,
+              mediaDelivery,
+              mediaAccessToken,
+            )}
+            alt={image.alt}
+          />
+        </figure>
       ),
     }),
   );

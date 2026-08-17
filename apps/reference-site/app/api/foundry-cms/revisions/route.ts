@@ -224,6 +224,7 @@ function parseBlogMutation(value: unknown): BlogMutationBody | null {
     title: post.title,
     excerpt: post.excerpt,
     seo: parseSeoMetadata(post.seo),
+    mainImage: parseSeoShareImage(post.mainImage),
     body: parseSerializedRichTextDocument(
       createSerializedRichTextDocument(post.body),
     ),

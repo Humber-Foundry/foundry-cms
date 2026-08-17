@@ -46,6 +46,7 @@ export const alternateSiteDefinition = {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText(
           "This post belongs only to the alternate installation.",
         ),

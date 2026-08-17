@@ -141,6 +141,7 @@ describe("D1 blog post operations store", () => {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText("Scheduled body."),
       },
       idempotencyKey: "create-scheduled-blog-post",
@@ -3680,6 +3681,7 @@ describe("D1 blog post operations store", () => {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText(
           "Request identity sibling body.",
         ),
@@ -4130,6 +4132,7 @@ describe("D1 blog post operations store", () => {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText("Sibling live body."),
       },
       idempotencyKey: "create-sibling-live-blog-post",
@@ -4757,6 +4760,7 @@ describe("D1 blog post operations store", () => {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText(
           "Second live archive body.",
         ),

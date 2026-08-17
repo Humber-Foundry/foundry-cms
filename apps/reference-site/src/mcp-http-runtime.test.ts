@@ -278,6 +278,7 @@ function fixture(
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText(
           `Published post ${index + 1}.`,
         ),

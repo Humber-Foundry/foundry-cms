@@ -53,7 +53,7 @@ export function isBlogPostArtifactFingerprint(
     (candidate.revision as number) >= 1 &&
     typeof candidate.contentHash === "string" &&
     /^[a-f0-9]{64}$/u.test(candidate.contentHash) &&
-    candidate.schemaVersion === "1.5.0" &&
+    candidate.schemaVersion === "1.6.0" &&
     typeof candidate.rendererVersion === "string" &&
     candidate.rendererVersion.length > 0 &&
     candidate.serializationVersion ===

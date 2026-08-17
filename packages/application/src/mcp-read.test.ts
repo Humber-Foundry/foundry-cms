@@ -39,6 +39,7 @@ const definitionWithPost = {
           keywords: [],
           shareImage: null,
         },
+        mainImage: null,
         body: createRichTextDocumentFromPlainText("A first post."),
       },
     ],

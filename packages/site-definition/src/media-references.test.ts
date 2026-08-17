@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { referenceSiteDefinition, type SiteDefinition } from "./index";
+import {
+  RICH_TEXT_VERSION,
+  createBlogPostId,
+  referenceSiteDefinition,
+  type BlogPost,
+  type SiteDefinition,
+} from "./index";
 import {
   mediaAssetIdFromPublishedPath,
   mediaImageSrc,
@@ -14,6 +20,42 @@ function withSections(
   return {
     ...referenceSiteDefinition,
     home: { ...referenceSiteDefinition.home, sections },
+  };
+}
+
+function postWithImages(
+  overrides: Partial<BlogPost> = {},
+): BlogPost {
+  return {
+    id: createBlogPostId("11111111-1111-4111-8111-111111111111"),
+    revision: 1,
+    collectionState: "active",
+    targetVisibility: "public",
+    slug: "images",
+    title: "Images",
+    excerpt: "A post with photos.",
+    seo: {
+      title: "",
+      description: "",
+      keywords: [],
+      shareImage: { url: "/api/media/asset_thumbnail", alt: "Card" },
+    },
+    mainImage: { url: "/api/media/asset_main", alt: "Header" },
+    body: {
+      version: RICH_TEXT_VERSION,
+      type: "document",
+      children: [
+        { type: "image", src: "/api/media/asset_inline", alt: "In body" },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+function withPosts(posts: ReadonlyArray<BlogPost>): SiteDefinition {
+  return {
+    ...referenceSiteDefinition,
+    blog: { ...referenceSiteDefinition.blog, posts },
   };
 }
 
@@ -112,6 +154,22 @@ describe("siteDefinitionMediaAssetIds", () => {
       },
     ]);
     expect(siteDefinitionMediaAssetIds(definition).size).toBe(0);
+  });
+
+  it("collects a published post's main image, thumbnail and inline images", () => {
+    const ids = [...siteDefinitionMediaAssetIds(withPosts([postWithImages()]))];
+    expect(ids).toContain("asset_main");
+    expect(ids).toContain("asset_thumbnail");
+    expect(ids).toContain("asset_inline");
+  });
+
+  it("does not serve an unpublished post's photos", () => {
+    const ids = siteDefinitionMediaAssetIds(
+      withPosts([postWithImages({ targetVisibility: "unpublished" })]),
+    );
+    expect(ids.has("asset_main")).toBe(false);
+    expect(ids.has("asset_thumbnail")).toBe(false);
+    expect(ids.has("asset_inline")).toBe(false);
   });
 });
 

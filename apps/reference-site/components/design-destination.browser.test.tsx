@@ -19,7 +19,7 @@ function designRevision(workspaceId: string) {
     definition: referenceSiteDefinition,
     inputs: {
       contentHash: "design-content-hash",
-      schemaVersion: "1.5.0",
+      schemaVersion: "1.6.0",
       rendererVersion: "renderer-design",
       productionBase: "published-design",
     },

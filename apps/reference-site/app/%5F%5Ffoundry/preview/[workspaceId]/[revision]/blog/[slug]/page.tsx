@@ -104,6 +104,10 @@ export default async function BlogPostPreviewPage(
         preview
         homeHref={previewHomeHref}
         blogHref={`${previewHomeHref}#blog_index_title`}
+        mediaDelivery="authenticated"
+        mediaAccessToken={
+          typeof accessToken === "string" ? accessToken : undefined
+        }
       />
     </>
   );

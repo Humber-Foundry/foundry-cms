@@ -105,6 +105,7 @@ export function editBlogPostDefinition(
     title: replacement.title,
     excerpt: replacement.excerpt,
     seo: replacement.seo,
+    mainImage: replacement.mainImage,
     body: replacement.body,
   };
   return requireValid({

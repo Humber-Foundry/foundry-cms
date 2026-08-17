@@ -75,8 +75,8 @@ function fixedBaseRuntimeContentHash(bytes) {
 function previousProjectedContentHash(bytes) {
   const stored = JSON.parse(bytes);
   if (
-    stored.schemaVersion === "1.5.0" ||
-    stored.definitionVersion === "1.5.0"
+    stored.schemaVersion === "1.6.0" ||
+    stored.definitionVersion === "1.6.0"
   ) {
     return null;
   }

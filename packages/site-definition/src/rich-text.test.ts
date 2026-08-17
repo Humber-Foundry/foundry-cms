@@ -1049,3 +1049,92 @@ describe("rich text contract", () => {
     );
   });
 });
+
+describe("inline images", () => {
+  const imageDocument: RichTextDocument = {
+    version: "1.0.0",
+    type: "document",
+    children: [
+      { type: "paragraph", children: [{ type: "text", text: "Before.", marks: [] }] },
+      { type: "image", src: "/api/media/asset_meadow", alt: "A green meadow" },
+      { type: "paragraph", children: [{ type: "text", text: "After.", marks: [] }] },
+    ],
+  };
+
+  it("serializes an image block to the CommonMark image and round-trips", () => {
+    const markdown = serializeRichTextToMarkdown(imageDocument);
+    expect(markdown).toContain("![A green meadow](/api/media/asset_meadow)");
+    expect(parseRichTextMarkdown(markdown)).toEqual(imageDocument);
+    expect(serializeRichTextToMarkdown(parseRichTextMarkdown(markdown))).toBe(
+      markdown,
+    );
+  });
+
+  it("keeps an image through the TipTap round-trip", () => {
+    expect(fromTipTapDocument(toTipTapDocument(imageDocument))).toEqual(
+      imageDocument,
+    );
+  });
+
+  it("accepts an empty alt for a decorative image", () => {
+    const document: RichTextDocument = {
+      version: "1.0.0",
+      type: "document",
+      children: [{ type: "image", src: "/api/media/asset_1", alt: "" }],
+    };
+    expect(serializeRichTextToMarkdown(document)).toBe(
+      "![](/api/media/asset_1)\n",
+    );
+    expect(parseRichTextMarkdown("![](/api/media/asset_1)\n")).toEqual(document);
+  });
+
+  it("rejects an image source that is not a path or web address", () => {
+    expect(() =>
+      validateRichTextDocument({
+        version: "1.0.0",
+        type: "document",
+        children: [
+          { type: "image", src: "mailto:someone@example.com", alt: "" },
+        ],
+      } as unknown as RichTextDocument),
+    ).toThrow(
+      expect.objectContaining<Partial<RichTextValidationError>>({
+        issues: [expect.objectContaining({ code: "unsafe_link" })],
+      }),
+    );
+  });
+
+  it("rejects a plain http image source as mixed content", () => {
+    expect(() =>
+      validateRichTextDocument({
+        version: "1.0.0",
+        type: "document",
+        children: [
+          { type: "image", src: "http://example.com/a.png", alt: "" },
+        ],
+      } as unknown as RichTextDocument),
+    ).toThrow(RichTextValidationError);
+  });
+
+  it("rejects a javascript image source", () => {
+    expect(() =>
+      validateRichTextDocument({
+        version: "1.0.0",
+        type: "document",
+        children: [
+          { type: "image", src: "javascript:alert(1)", alt: "" },
+        ],
+      } as unknown as RichTextDocument),
+    ).toThrow(RichTextValidationError);
+  });
+
+  it("does not count an image alone as visible text", () => {
+    expect(
+      richTextDocumentHasVisibleText({
+        version: "1.0.0",
+        type: "document",
+        children: [{ type: "image", src: "/api/media/asset_1", alt: "Alt" }],
+      }),
+    ).toBe(false);
+  });
+});

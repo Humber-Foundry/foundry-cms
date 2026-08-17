@@ -248,8 +248,24 @@ export function resolveBlogPostSeo(
     shareImage: resolveShareImage(
       definition,
       post.seo.shareImage,
+      post.mainImage,
       definition.home.seo.shareImage,
       homeHeroShareImage(definition),
     ),
   };
+}
+
+/**
+ * The picture a post shows on its own card in a post list — its thumbnail.
+ *
+ * It is the post's own share image, or its main image when no share image is
+ * set, and nothing else: a post with neither shows a text-only card rather
+ * than borrowing the site's picture for every post. The address is kept as the
+ * owner set it — a media path stays a path — because a card renders on the
+ * site, where a path resolves. See ADR-0013.
+ */
+export function blogPostThumbnail(post: BlogPost): SeoShareImage | null {
+  const filled = (image: SeoShareImage | null): SeoShareImage | null =>
+    image !== null && image.url.trim() !== "" ? image : null;
+  return filled(post.seo.shareImage) ?? filled(post.mainImage);
 }

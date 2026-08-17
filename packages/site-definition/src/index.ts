@@ -103,6 +103,13 @@ export type BlogPost = Readonly<{
   title: string;
   excerpt: string;
   seo: SeoMetadata;
+  /**
+   * The large picture the post leads with, chosen through the shared media
+   * picker and stored as its public media path `/api/media/<assetId>`, an
+   * address and an alt text like a share image. `null` means the post has no
+   * header image. See ADR-0013.
+   */
+  mainImage: SeoShareImage | null;
   body: RichTextDocument;
 }>;
 
@@ -205,8 +212,8 @@ export type PageSection =
   | RegisteredPageSection;
 
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.5.0";
-  schemaVersion: "1.5.0";
+  definitionVersion: "1.6.0";
+  schemaVersion: "1.6.0";
   design: SiteDesign;
   site: Readonly<{
     id: SiteId;
@@ -242,6 +249,7 @@ export type StoredSiteDefinitionSchemaVersion =
   | "1.2.0"
   | "1.3.0"
   | "1.4.0"
+  | "1.5.0"
   | SiteDefinitionSchemaVersion;
 
 function isSiteDefinitionRecord(
@@ -280,7 +288,7 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.5.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.6.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
@@ -293,8 +301,8 @@ export const siteDefinitionSchema = {
     "blog",
   ],
   properties: {
-    definitionVersion: { const: "1.5.0" },
-    schemaVersion: { const: "1.5.0" },
+    definitionVersion: { const: "1.6.0" },
+    schemaVersion: { const: "1.6.0" },
     design: {
       type: "object",
       additionalProperties: false,
@@ -542,6 +550,7 @@ export const siteDefinitionSchema = {
         "title",
         "excerpt",
         "seo",
+        "mainImage",
         "body",
       ],
       properties: {
@@ -561,6 +570,20 @@ export const siteDefinitionSchema = {
         title: { $ref: "#/$defs/text" },
         excerpt: { $ref: "#/$defs/text" },
         seo: { $ref: "#/$defs/seoMetadata" },
+        mainImage: {
+          anyOf: [
+            { type: "null" },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["url", "alt"],
+              properties: {
+                url: { $ref: "#/$defs/seoShareImageUrl" },
+                alt: { type: "string", maxLength: 300 },
+              },
+            },
+          ],
+        },
         body: { $ref: "#/$defs/richTextDocument" },
       },
     },
@@ -738,8 +761,31 @@ export const siteDefinitionSchema = {
               { $ref: "#/$defs/richTextBlockquote" },
               { $ref: "#/$defs/richTextBulletList" },
               { $ref: "#/$defs/richTextOrderedList" },
+              { $ref: "#/$defs/richTextImage" },
             ],
           },
+        },
+      },
+    },
+    richTextImage: {
+      $comment:
+        "Image source safety and single-line alt text are enforced by " +
+        "validateRichTextDocument through isSiteDefinition.",
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "src", "alt"],
+      properties: {
+        type: { const: "image" },
+        src: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2_048,
+          pattern: "^(?:/(?!/)[^\\s]*|https://[^\\s/?#]+[^\\s]*)$",
+        },
+        alt: {
+          type: "string",
+          maxLength: 300,
+          pattern: "^[^\\u0000\\r\\n\\uD800-\\uDFFF]*$",
         },
       },
     },
