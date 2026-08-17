@@ -12,6 +12,11 @@ import {
 } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
+import {
+  isTemplatePath,
+  tarEntries,
+} from "../apps/reference-site/scripts/foundation-release-lib.mjs";
+
 const root = resolve(import.meta.dirname, "..");
 const output = join(root, "foundation-release");
 const artifactsDirectory = join(output, "artifacts");
@@ -92,10 +97,16 @@ async function stageReferenceSite(version) {
     );
   }
   await mkdir(join(target, "scripts"), { recursive: true });
-  await cp(
-    join(root, "apps/reference-site/scripts/scaffold-foundation-release.mjs"),
-    join(target, "scripts/scaffold-foundation-release.mjs"),
-  );
+  for (const scriptName of [
+    "foundation-release-lib.mjs",
+    "scaffold-foundation-release.mjs",
+    "sync-foundation-release.mjs",
+  ]) {
+    await cp(
+      join(root, "apps/reference-site/scripts", scriptName),
+      join(target, "scripts", scriptName),
+    );
+  }
   for (const filename of [
     "cloudflare-email.d.ts",
     "custom-worker.ts",
@@ -174,6 +185,7 @@ async function main() {
   };
 
   const artifacts = {};
+  const artifactBytes = {};
   for (const name of packageNames) {
     const stage = stages[name];
     const packageJson = {
@@ -190,7 +202,13 @@ async function main() {
       publishConfig: { access: "public" },
       dependencies: stage.dependencies,
       ...(name === "@humber-foundry/reference-site"
-        ? { bin: { "foundry-reference-site": "scripts/scaffold-foundation-release.mjs" } }
+        ? {
+            bin: {
+              "foundry-reference-site": "scripts/scaffold-foundation-release.mjs",
+              "foundry-reference-site-sync":
+                "scripts/sync-foundation-release.mjs",
+            },
+          }
         : {
             exports: {
               ".": { types: "./src/index.ts", import: "./dist/index.js" },
@@ -205,6 +223,7 @@ async function main() {
     const filename = pack[0]?.filename;
     if (typeof filename !== "string") throw new Error(`foundation_release_pack_failed:${name}`);
     const bytes = await readFile(join(artifactsDirectory, filename));
+    artifactBytes[name] = bytes;
     artifacts[name] = {
       name,
       version,
@@ -213,6 +232,19 @@ async function main() {
       integrity: `sha512-${digest("sha512", bytes, "base64")}`,
       sha256: digest("sha256", bytes),
     };
+  }
+
+  // The framework manifest records every framework path in the packed
+  // reference-site tarball with its sha256, so an installation can be synced to
+  // this release. It is derived from the exact tarball bytes and the shared
+  // `isTemplatePath`, so it lists precisely the paths the scaffold copies and
+  // the sync command reconciles.
+  const frameworkFiles = [...tarEntries(artifactBytes["@humber-foundry/reference-site"])]
+    .filter(([path]) => isTemplatePath(path))
+    .map(([path, entryBytes]) => ({ path, sha256: digest("sha256", entryBytes) }))
+    .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+  if (frameworkFiles.length === 0) {
+    throw new Error("foundation_release_framework_manifest_empty");
   }
 
   const migrationDirectory = join(root, "apps/reference-site/migrations");
@@ -239,6 +271,9 @@ async function main() {
     migrations: {
       latest: basename(migrationNames.at(-1), ".sql").slice(0, 4),
       files: migrations,
+    },
+    framework: {
+      files: frameworkFiles,
     },
     artifacts,
     provenance: {

@@ -9,6 +9,10 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 
 import { OperatorError } from "./operator-errors";
+import {
+  parseFoundationFrameworkManifest,
+  type FoundationFrameworkManifest,
+} from "./foundation-sync";
 
 export const foundationReleaseSchemaVersion =
   "foundry.foundation-release/v1";
@@ -47,6 +51,7 @@ export type FoundationReleaseDescriptor = Readonly<{
     latest: string;
     files: ReadonlyArray<Readonly<{ path: string; sha256: string }>>;
   }>;
+  framework: FoundationFrameworkManifest;
   artifacts: Readonly<Record<FoundationPackageName, FoundationReleaseArtifact>>;
   provenance: Readonly<{
     builderWorkflow: string;
@@ -105,6 +110,7 @@ export function parseFoundationReleaseDescriptor(
       "source",
       "compatibility",
       "migrations",
+      "framework",
       "artifacts",
       "provenance",
     ]) ||
@@ -118,8 +124,13 @@ export function parseFoundationReleaseDescriptor(
   const sourceRecord = parsed.source;
   const compatibility = parsed.compatibility;
   const migrations = parsed.migrations;
+  const framework = parsed.framework;
   const artifacts = parsed.artifacts;
   const provenance = parsed.provenance;
+
+  // Reject a malformed framework manifest before any other cross-field check so
+  // the descriptor is never partly trusted.
+  parseFoundationFrameworkManifest(framework);
   if (
     !isRecord(sourceRecord) ||
     !hasExactKeys(sourceRecord, ["repository", "revision"]) ||

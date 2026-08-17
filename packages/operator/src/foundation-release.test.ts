@@ -50,6 +50,13 @@ function fixture() {
         { path: "apps/reference-site/migrations/0002_second.sql", sha256: "2".repeat(64) },
       ],
     },
+    framework: {
+      files: [
+        { path: "app/layout.tsx", sha256: "3".repeat(64) },
+        { path: "migrations/0001_first.sql", sha256: "1".repeat(64) },
+        { path: "next.config.ts", sha256: "4".repeat(64) },
+      ],
+    },
     artifacts,
     provenance: {
       builderWorkflow:
@@ -118,6 +125,20 @@ describe("foundation release descriptor", () => {
     ).rejects.toThrow(
       /foundation_release_artifact_mismatch:@humber-foundry\/reference-site/u,
     );
+  });
+
+  it("rejects a descriptor whose framework manifest lists a non-framework path", () => {
+    const { descriptor } = fixture();
+    expect(() =>
+      parseFoundationReleaseDescriptor(
+        JSON.stringify({
+          ...descriptor,
+          framework: {
+            files: [{ path: "secret/keys.txt", sha256: "3".repeat(64) }],
+          },
+        }),
+      ),
+    ).toThrow(/foundation_release_framework_invalid/u);
   });
 
   it("binds callers to the exact descriptor bytes", () => {

@@ -18,9 +18,16 @@ Preparation packs `@humber-foundry/operator`, `@humber-foundry/reference-site`,
 `@humber-foundry/application`, and `@humber-foundry/site-definition` at the root version. It
 then generates `foundation-release/foundation-release.json` from the tarball
 bytes and current commit. The descriptor records SHA-512 npm integrity,
-SHA-256, byte size, Node/npm compatibility, every migration checksum, the
-source revision, and workflow provenance. The companion
-`foundation-release.sha256` binds consumers to the exact descriptor bytes.
+SHA-256, byte size, Node/npm compatibility, every migration checksum, a
+framework manifest of every framework path with its SHA-256, the source
+revision, and workflow provenance. The companion `foundation-release.sha256`
+binds consumers to the exact descriptor bytes.
+
+The framework manifest is every path in the packed reference-site tarball that
+the scaffold's `isTemplatePath` classifies as framework source — everything
+under `app/`, `components/`, `src/`, `migrations/`, `public/` and `foundry/`,
+plus the named root config files. It is what lets an installation be synced to a
+newer release without a hand-merge.
 
 Verification creates a new temporary directory outside the workspace. It
 installs the four tarballs, generates a lockfile, rejects workspace links,
@@ -28,6 +35,49 @@ loads the compiled operator, makes the reference-site scaffolder verify every
 tarball before copying, typechecks and builds the site, builds the OpenNext
 Worker, and runs `wrangler deploy --dry-run`. No Cloudflare, GitHub, npm, or
 client credential is read by this verification.
+
+## Sync an installation to a newer release
+
+The scaffold copies a release's framework source into a new installation once,
+create-only; it never updates a file. To bring an existing installation up to a
+newer release, use the sync command. It is the counterpart to the scaffold and
+ships in the reference-site package as the `foundry-reference-site-sync` bin.
+
+First vendor the target release's packages in the installation, so its
+`package-lock.json` names the target — the sync refuses to write until the
+target is the locked executable, exactly as the scaffold does. Then run:
+
+```sh
+foundry-reference-site-sync \
+  --target <installation-directory> \
+  --descriptor <path>/foundation-release.json \
+  --descriptor-digest "$(cat <path>/foundation-release.sha256)" \
+  --artifacts <path>/artifacts
+```
+
+The sync verifies the target's artifacts and descriptor digest with the
+operator, reads the installation's current pin for the release it is on, and
+reconciles every framework path three ways — the installation's current file,
+the pinned old release and the target. For each path it either overwrites a file
+the installation never changed, keeps a local override the target did not
+change, adds a new file, removes an unmodified deletion, or records a **conflict**
+when the file changed both locally and in the target. A conflict leaves the
+installation's file in place and the command **exits non-zero**; pass
+`--accept-conflicts` only after reviewing the reported paths to let the pins
+advance with the conflicts left local for manual resolution. It never touches
+installation-owned paths: everything under `foundry/`, client media under
+`public/` the release does not ship, and any file not in the manifest.
+
+Migrations are additive-only: the sync adds new migrations, keeps every existing
+one byte-for-byte, never deletes a past migration, and fails closed if an
+already-present migration does not match the target's bytes.
+
+The command prints a report of every file written, added, removed, kept as an
+override and every conflict with its path. After a clean, conflict-free sync the
+installation's framework files are byte-identical to the target's template, its
+`.foundry/*` pin files and `package-lock.json` name the target, and typecheck
+and build pass. See
+[ADR-0015](../decisions/ADR-0015-foundation-framework-sync-seam.md).
 
 ## Publication boundary
 

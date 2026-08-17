@@ -382,6 +382,27 @@ link, deleted entry or unexpected signer blocks the chain.
 it, its least authority, how it is rotated and whether its health check passed.
 The value is never part of the record.
 
+**Framework source** — The foundation's code an installation receives from a
+release: everything under `app/`, `components/`, `src/`, `migrations/`,
+`public/` and `foundry/`, plus the named root config files. It is the
+`isTemplatePath` set. The release owns it; the scaffold copies it once and sync
+updates it.
+
+**Installation-owned work** — The files an installation owns and sync never
+touches: everything under `foundry/`, any `public/` file the release does not
+ship (client media), and any file the release does not list. `foundry/` is
+seeded once by the scaffold and owned by the installation thereafter.
+
+**Framework manifest** — The list in a release descriptor of every framework
+path with its sha256. It lets sync tell a local change apart from a foundation
+change. See ADR-0015.
+
+**Foundation sync** — The command that updates an installation's framework
+source to a newer target release, comparing each framework path three ways —
+the installation's current file, the pinned old release and the target — and
+preserving installation-owned work. A conflict fails closed unless the operator
+accepts it; migrations are additive-only. See ADR-0015.
+
 ## Linked domain documents
 
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)
@@ -393,5 +414,6 @@ The value is never part of the record.
 - [Campaign images — header, share and inline images](docs/decisions/ADR-0014-campaign-images.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
+- [The framework/installation-owned seam and three-way foundation sync](docs/decisions/ADR-0015-foundation-framework-sync-seam.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)
 - [Privacy-first aggregate analytics](docs/architecture/privacy-first-aggregate-analytics.md)
