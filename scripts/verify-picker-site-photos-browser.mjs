@@ -209,6 +209,19 @@ async function main() {
       );
     }
 
+    // The inline body picker lists the same site photos, not only uploads: open
+    // the body "Add photo" picker and confirm the built-in tile is offered.
+    await composer.getByRole("button", { name: "Add photo" }).click();
+    const inlineDialog = page.locator("dialog.media-picker[open]");
+    await inlineDialog.waitFor({ state: "visible" });
+    await inlineDialog
+      .locator(".media-gallery-tile-site")
+      .filter({ hasText: "Built-in site image" })
+      .first()
+      .waitFor({ state: "visible" });
+    await inlineDialog.getByRole("button", { name: "Close" }).click();
+    await inlineDialog.waitFor({ state: "hidden" });
+
     process.stdout.write(
       `Picker site photos browser acceptance passed at ${origin}: gave the ` +
         `site a built-in photo, then listed it as a "Built-in site image" tile ` +

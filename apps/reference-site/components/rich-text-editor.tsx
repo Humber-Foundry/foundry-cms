@@ -303,6 +303,7 @@ export function RichTextEditor({
           open={pickerOpen}
           csrfToken={media.csrfToken}
           workspaceId={media.workspaceId}
+          siteImages={media.siteImages}
           onChoose={(photo) => {
             if (editor === null) {
               return;

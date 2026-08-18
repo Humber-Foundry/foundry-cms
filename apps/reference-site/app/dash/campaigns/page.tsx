@@ -64,10 +64,14 @@ export default async function DashboardCampaignsPage({
       <CampaignControls
         csrfToken={mutationToken}
         workspaceId={dashboardWorkspace.workspaceId}
+        // Only site photos an email can load are offered here. A relative
+        // built-in address such as "/logo.svg" cannot be sent in an email
+        // (ADR-0014 needs an absolute address), so the picker lists uploads and
+        // absolute site photos, never a bare path the owner could not send.
         siteImages={siteStaticImageTiles(
           definition,
           contentRevision?.definition,
-        )}
+        ).filter((image) => image.src.startsWith("https://"))}
         initialCampaigns={campaigns}
         postSources={postArtifacts.flatMap((artifact) => {
           const post = definition.blog.posts.find(
