@@ -36,6 +36,7 @@ export function MediaGallery({
   assets,
   occurrences,
   siteImages = [],
+  selectableSiteImages = false,
   usedAssetIds,
   libraryToken,
   selectedAssetId,
@@ -51,6 +52,12 @@ export function MediaGallery({
    * gallery is every photo the site uses, not only the uploaded ones.
    */
   siteImages?: ReadonlyArray<SiteImageTile>;
+  /**
+   * Whether a site photo can be chosen. In the picker it can, so an existing
+   * photo can be placed without re-uploading; on the Photos page these tiles
+   * stay read-only, because a built-in photo is not a library asset to manage.
+   */
+  selectableSiteImages?: boolean;
   /**
    * Gallery assets the published site or the draft references. A tile for one
    * of these shows an "on the page" badge even when it is placed through an
@@ -137,22 +144,42 @@ export function MediaGallery({
           </li>
         );
       })}
-      {siteImages.map((image) => (
+      {siteImages.map((image) => {
         // A photo the site shows that is not a library asset: a built-in image
-        // or an external one. It is not selectable and cannot be deleted here,
-        // because it is not stored in the library — but it is one of the
-        // owner's photos, so it belongs in the gallery.
-        <li key={`site:${image.src}`}>
-          <div className="media-gallery-tile media-gallery-tile-site">
+        // or an external one. It cannot be deleted here, because it is not
+        // stored in the library — but it is one of the owner's photos, so it
+        // belongs in the gallery. In the picker it can be chosen (by its
+        // address); on the Photos page it is shown read-only.
+        const frame = (
+          <>
             <span className="media-gallery-frame">
               <img alt="" loading="lazy" decoding="async" src={image.src} />
             </span>
             <span className="media-gallery-name">{image.name}</span>
             <span className="media-gallery-meta">Built-in site image</span>
             <span className="media-gallery-badge">On the page</span>
-          </div>
-        </li>
-      ))}
+          </>
+        );
+        return (
+          <li key={`site:${image.src}`}>
+            {selectableSiteImages ? (
+              <button
+                type="button"
+                className="media-gallery-tile media-gallery-tile-site"
+                aria-pressed={selectedAssetId === image.src}
+                disabled={disabled}
+                onClick={() => onSelect(image.src)}
+              >
+                {frame}
+              </button>
+            ) : (
+              <div className="media-gallery-tile media-gallery-tile-site">
+                {frame}
+              </div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

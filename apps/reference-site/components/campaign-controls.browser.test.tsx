@@ -99,6 +99,7 @@ describe("campaign controls browser acceptance", () => {
         createElement(CampaignControls, {
           csrfToken: "csrf",
           workspaceId: "workspace_000000000000000000000001",
+          siteImages: [],
           postSources: [],
           initialCampaigns: [{ campaign, revision }],
         }),

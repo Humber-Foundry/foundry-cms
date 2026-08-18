@@ -766,6 +766,7 @@ export function VisualComponentEditor({
           open={photoPickerChoose !== null}
           csrfToken={media.csrfToken}
           workspaceId={media.workspaceId}
+          siteImages={media.siteImages}
           confirmLabel="Use this photo"
           onChoose={(photo) => {
             photoPickerChoose?.(photo);

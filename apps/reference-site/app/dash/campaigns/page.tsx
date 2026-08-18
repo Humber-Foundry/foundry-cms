@@ -11,6 +11,7 @@ import {
   readWorkspaceSearchParams,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
+import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,10 @@ export default async function DashboardCampaignsPage({
       <CampaignControls
         csrfToken={mutationToken}
         workspaceId={dashboardWorkspace.workspaceId}
+        siteImages={siteStaticImageTiles(
+          definition,
+          contentRevision?.definition,
+        )}
         initialCampaigns={campaigns}
         postSources={postArtifacts.flatMap((artifact) => {
           const post = definition.blog.posts.find(

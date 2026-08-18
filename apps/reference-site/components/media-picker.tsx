@@ -8,8 +8,12 @@ import { MediaDropzone } from "./media-dropzone";
 import { MediaGallery } from "./media-gallery";
 import {
   chosenPhoto,
+  chosenSiteImage,
   type ChosenPhoto,
 } from "./media-gallery-item";
+// Type only — erased at compile, so the server-only module is never bundled
+// into this client component.
+import type { SiteImageTile } from "../src/site-used-photos";
 import {
   mediaAccessRefreshDelayMs,
   mediaAccessRequestBody,
@@ -35,6 +39,7 @@ export function MediaPicker({
   open,
   csrfToken,
   workspaceId,
+  siteImages = [],
   title = "Choose or upload a photo",
   confirmLabel = "Use this photo",
   onChoose,
@@ -43,6 +48,12 @@ export function MediaPicker({
   open: boolean;
   csrfToken: string;
   workspaceId: string;
+  /**
+   * The built-in and external photos the site already shows, listed alongside
+   * the uploaded library so an existing photo can be chosen. Empty when the
+   * surface has none.
+   */
+  siteImages?: ReadonlyArray<SiteImageTile>;
   title?: string;
   confirmLabel?: string;
   onChoose(photo: ChosenPhoto): void;
@@ -178,12 +189,27 @@ export function MediaPicker({
     void upload(file);
   }
 
+  // A selection is either an uploaded asset (chosen by its id) or a built-in
+  // site photo (chosen by its address). The two never collide: an asset id is
+  // never an image address.
+  const selectedSiteImage = siteImages.find(
+    (image) => image.src === selectedAsset,
+  );
+  const selectedAssetItem = assets.find(
+    (candidate) => candidate.assetId === selectedAsset,
+  );
+  const selectionReady =
+    selectedSiteImage !== undefined ||
+    (selectedAssetItem !== undefined && libraryToken !== undefined);
+
   function choose() {
-    const asset = assets.find(
-      (candidate) => candidate.assetId === selectedAsset,
-    );
-    if (asset === undefined || libraryToken === undefined) return;
-    onChoose(chosenPhoto(asset, libraryToken));
+    if (selectedSiteImage !== undefined) {
+      onChoose(chosenSiteImage(selectedSiteImage.src, selectedSiteImage.name));
+      closePicker();
+      return;
+    }
+    if (selectedAssetItem === undefined || libraryToken === undefined) return;
+    onChoose(chosenPhoto(selectedAssetItem, libraryToken));
     closePicker();
   }
 
@@ -214,10 +240,12 @@ export function MediaPicker({
         onFiles={acceptFiles}
         onRetry={() => void upload()}
       />
-      {assets.length > 0 ? (
+      {assets.length > 0 || siteImages.length > 0 ? (
         <MediaGallery
           assets={assets}
           occurrences={occurrences}
+          siteImages={siteImages}
+          selectableSiteImages
           libraryToken={libraryToken}
           selectedAssetId={selectedAsset}
           disabled={busy}
@@ -235,7 +263,7 @@ export function MediaPicker({
         <button
           className="button button-primary"
           type="button"
-          disabled={busy || selectedAsset === "" || libraryToken === undefined}
+          disabled={busy || !selectionReady}
           onClick={choose}
         >
           {confirmLabel}
