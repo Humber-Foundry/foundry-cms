@@ -1998,25 +1998,39 @@ function EditorFieldGroups({
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  // Each destination breaks its groups into short cards. Every "Page" field
+  // carries a finer `section` (Site settings, Hero, Services…), so that one
+  // long list becomes one card per area. Groups with no section (Navigation,
+  // Footer, SEO) stay a single card under their own name. Cards keep the
+  // destination's group order, then the order the sections first appear.
+  const cards = groups.flatMap((group) => {
+    const groupFields = workingFields.filter(
+      (field) => field.group === group,
+    );
+    const keysInOrder: string[] = [];
+    for (const field of groupFields) {
+      const key = field.section ?? group;
+      if (!keysInOrder.includes(key)) keysInOrder.push(key);
+    }
+    return keysInOrder.map((key) => ({
+      key,
+      fields: groupFields.filter((field) => (field.section ?? group) === key),
+    }));
+  });
   const fieldGroups = (
       <div className="editor-groups">
-        {groups.map((group) => {
-          const groupFields = workingFields.filter(
-            (field) => field.group === group,
-          );
-          // An empty group is not a section to collapse into — skip it.
-          if (groupFields.length === 0) return null;
-          const open = openGroups.has(group);
+        {cards.map((card) => {
+          const open = openGroups.has(card.key);
           return (
           <fieldset
-            key={group}
+            key={card.key}
             className="editor-group"
             data-open={open ? "true" : "false"}
           >
             {/* On a phone this header is the tap target that shows or hides the
-              * group's fields; on a wide screen it is a plain group label and
-              * the fields stay open. One group needs no header at all. */}
-            {groups.length > 1 ? (
+              * card's fields; on a wide screen it is a plain heading and the
+              * fields stay open. A lone card needs no header at all. */}
+            {cards.length > 1 ? (
               <button
                 type="button"
                 className="editor-group-toggle"
@@ -2024,18 +2038,18 @@ function EditorFieldGroups({
                 onClick={() =>
                   setOpenGroups((current) => {
                     const next = new Set(current);
-                    if (next.has(group)) next.delete(group);
-                    else next.add(group);
+                    if (next.has(card.key)) next.delete(card.key);
+                    else next.add(card.key);
                     return next;
                   })
                 }
               >
-                <span className="editor-group-name">{group}</span>
+                <span className="editor-group-name">{card.key}</span>
                 <span className="editor-group-chevron" aria-hidden="true" />
               </button>
             ) : null}
             <div className="editor-group-fields">
-            {groupFields
+            {card.fields
               .map((field) => {
                 const labelId = `${field.path}-label`;
                 // The schema path stays on the element as data-field-path for
