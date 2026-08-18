@@ -1991,14 +1991,51 @@ function EditorFieldGroups({
   edit(edit: SiteDefinitionEdit): void;
   updateRichTextValidation(source: string, invalid: boolean): void;
 }) {
+  // On a phone each group is a collapsible section, closed by default so the
+  // panel is a short list of section names instead of an endless scroll of
+  // fields. This holds which groups the owner has opened. On a wide screen the
+  // fields are always shown and this is ignored.
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const fieldGroups = (
       <div className="editor-groups">
-        {groups.map((group) => (
-          <fieldset key={group}>
-            {/* One group under its own heading needs no second label. */}
-            {groups.length > 1 ? <legend>{group}</legend> : null}
-            {workingFields
-              .filter((field) => field.group === group)
+        {groups.map((group) => {
+          const groupFields = workingFields.filter(
+            (field) => field.group === group,
+          );
+          // An empty group is not a section to collapse into — skip it.
+          if (groupFields.length === 0) return null;
+          const open = openGroups.has(group);
+          return (
+          <fieldset
+            key={group}
+            className="editor-group"
+            data-open={open ? "true" : "false"}
+          >
+            {/* On a phone this header is the tap target that shows or hides the
+              * group's fields; on a wide screen it is a plain group label and
+              * the fields stay open. One group needs no header at all. */}
+            {groups.length > 1 ? (
+              <button
+                type="button"
+                className="editor-group-toggle"
+                aria-expanded={open}
+                onClick={() =>
+                  setOpenGroups((current) => {
+                    const next = new Set(current);
+                    if (next.has(group)) next.delete(group);
+                    else next.add(group);
+                    return next;
+                  })
+                }
+              >
+                <span className="editor-group-name">{group}</span>
+                <span className="editor-group-chevron" aria-hidden="true" />
+              </button>
+            ) : null}
+            <div className="editor-group-fields">
+            {groupFields
               .map((field) => {
                 const labelId = `${field.path}-label`;
                 // The schema path stays on the element as data-field-path for
@@ -2121,8 +2158,10 @@ function EditorFieldGroups({
                   </label>
                 );
               })}
+            </div>
           </fieldset>
-        ))}
+          );
+        })}
       </div>
   );
   if (!collapsed) {

@@ -1799,6 +1799,78 @@
   font-weight: 700;
 }
 
+/* Collapsible field groups.
+ *
+ * On a wide screen the group header is a plain bold label and the fields are
+ * always shown — the same as the old legend. The phone media query below turns
+ * the header into a tap target and hides the fields until the group is opened,
+ * so the panel is a short list of section names instead of a wall of fields. */
+.editor-group-fields {
+  display: grid;
+  gap: 1rem;
+}
+
+.editor-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: default;
+}
+
+.editor-group-chevron {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  /* Browse mode: the site fills the screen below a slim band that holds the
+   * floating Menu button, so the button no longer sits on top of the site's
+   * own navigation. */
+  .editor-immersive .editor-browse {
+    padding-top: 3.25rem;
+  }
+
+  /* Each group becomes a collapsible section: a tappable header, and fields
+   * that are hidden until the owner opens the group. */
+  .editor-group-toggle {
+    min-height: 2.75rem;
+    color: var(--dash-accent);
+    cursor: pointer;
+  }
+
+  .editor-group-chevron {
+    display: block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 0.15s ease;
+  }
+
+  .editor-group[data-open="true"] .editor-group-chevron {
+    transform: rotate(-135deg);
+  }
+
+  /* Only collapse groups that have a toggle to reopen them. A lone group has
+   * no header, so its fields must stay visible. */
+  .editor-group:has(.editor-group-toggle) .editor-group-fields {
+    display: none;
+  }
+
+  .editor-group[data-open="true"] .editor-group-fields {
+    display: grid;
+  }
+}
+
 .page-settings,
 .publication-history-panel {
   margin-top: var(--dash-panel-gap);
