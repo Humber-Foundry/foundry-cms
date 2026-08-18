@@ -12,3 +12,6 @@ apps/reference-site/cloudflare-env.d.ts
 # Test artifacts
 .vitest-attachments/
 **/__screenshots__/
+
+# Local verification screenshots (not product source)
+.shots/

@@ -41,6 +41,9 @@ import {
   type MediaUploadAttempt,
 } from "./media-upload-attempt";
 import { sendMediaMutationAttempt } from "../src/media-mutation-client";
+// Type only — erased at compile, so the server-only module is never bundled
+// into this client component.
+import type { SiteImageTile } from "../src/site-used-photos";
 
 class MediaMutationRequestError extends Error {
   constructor(
@@ -57,6 +60,8 @@ export function MediaManager({
   workspaceId,
   initialAssets,
   initialOccurrences,
+  siteImages = [],
+  usedAssetIds,
   contentRevision,
   contentStale = false,
   onRevisionSaved = () => undefined,
@@ -67,6 +72,10 @@ export function MediaManager({
   workspaceId: string;
   initialAssets: ReadonlyArray<MediaAsset>;
   initialOccurrences: ReadonlyArray<MediaOccurrenceState>;
+  /** Photos the site shows that are not library assets (built-in/external). */
+  siteImages?: ReadonlyArray<SiteImageTile>;
+  /** Gallery assets the published site or the draft references. */
+  usedAssetIds?: ReadonlySet<string>;
   contentRevision?: ContentRevision;
   contentStale?: boolean;
   onRevisionSaved?(revision: ContentRevision, previewUrl: string): void;
@@ -492,10 +501,10 @@ export function MediaManager({
     >
       <div className="dashboard-section-heading">
         <div>
-          <h2 id="media-heading">Photo library</h2>
+          <h2 id="media-heading">All photos</h2>
           <p>
-            Photos you upload are stored privately here. Select one, then
-            choose where it appears on the page.
+            Every photo your site uses, and every one you have uploaded. Photos
+            are stored privately; drop a new one in to add it to the library.
           </p>
         </div>
       </div>
@@ -503,15 +512,17 @@ export function MediaManager({
         busy={busy}
         uploadingFileName={uploadingFileName}
         uploadPending={uploadPending}
-        chooseLabel="Choose a photo"
+        chooseLabel="Upload a photo"
         onFiles={acceptFiles}
         onRetry={() => void upload()}
       />
-      {assets.length > 0 || deletionFinishing ? (
+      {assets.length > 0 || siteImages.length > 0 || deletionFinishing ? (
         <>
           <MediaGallery
             assets={assets}
             occurrences={occurrences}
+            siteImages={siteImages}
+            usedAssetIds={usedAssetIds}
             libraryToken={mediaLibraryToken}
             selectedAssetId={selectedAsset}
             disabled={busy}

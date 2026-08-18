@@ -153,7 +153,7 @@ async function main() {
 
     // Upload a real photo so the gallery has one to choose.
     await page.goto(`${origin}/dash/media?workspace=${workspace}`);
-    await page.getByRole("heading", { name: "Photos" }).waitFor();
+    await page.getByRole("heading", { name: "Photos", exact: true }).waitFor();
     await drawPhoto(page, "meadow.png", 1400, 1000);
     const uploaded = page.waitForResponse(
       (response) =>
@@ -207,22 +207,29 @@ async function main() {
 
     await page.getByRole("button", { name: "Edit" }).click();
 
-    // Add a full-width image section. Adding it selects it, so its fields —
-    // including the image field — are in front of the owner at once.
+    // Add a full-width image section. Adding it selects it, so its image shows
+    // the in-canvas "Change photo" control at once.
     await page.locator("summary[aria-label='Add section']").click();
     await page.getByRole("button", { name: "Full-width image" }).click();
 
-    // The image field shows a Change photo action, not a raw address to type.
-    const field = page.locator(".change-photo-field");
-    await field.waitFor({ state: "visible" });
-    const changePhoto = field.getByRole("button", { name: "Change photo" });
-    await changePhoto.waitFor({ state: "visible" });
-    if ((await field.locator("input[type=text], input[type=url]").count()) > 0) {
+    // The photo is changed on the image itself, on the canvas — not through a
+    // side-panel field, and never through a raw address to type.
+    if ((await page.locator(".change-photo-field").count()) > 0) {
+      throw new Error("page_photo_field_still_in_side_panel");
+    }
+    const canvas = page.frameLocator(".editor-canvas iframe");
+    const canvasImage = canvas.locator(".canvas-image-field");
+    await canvasImage.first().waitFor({ state: "visible" });
+    if ((await canvas.locator("input[type=text], input[type=url]").count()) > 0) {
       throw new Error("page_photo_field_is_a_raw_address_input");
     }
+    const changePhoto = canvas.getByRole("button", { name: "Change photo" });
+    await changePhoto.first().waitFor({ state: "visible" });
 
-    // Open the shared picker and choose the uploaded photo.
-    await changePhoto.click();
+    // Open the shared picker — it opens in the editor's own document, a
+    // full-screen dialog, not a box trapped inside the canvas — and choose the
+    // uploaded photo.
+    await changePhoto.first().click();
     const dialog = page.locator("dialog.media-picker");
     await dialog.waitFor({ state: "visible" });
     await dialog
@@ -230,10 +237,11 @@ async function main() {
       .click();
     await page.getByRole("button", { name: "Use this photo" }).click();
 
-    // The chosen photo previews in the field immediately, from the picker's
-    // own thumbnail.
-    await field
-      .locator(".change-photo-preview img")
+    // The chosen photo shows on the canvas image at once, from the picker's own
+    // thumbnail, so the owner sees the swap on the page immediately.
+    await canvas
+      .locator(".canvas-image-photo[src*='variant=thumbnail']")
+      .first()
       .waitFor({ state: "visible" });
 
     // The swap is an ordinary page edit, so it saves through the normal
@@ -279,12 +287,26 @@ async function main() {
     );
     await previewImage.first().waitFor({ state: "visible" });
 
+    // The gallery is "all your photos": a photo placed on the page shows there
+    // as "on the page", even when it was placed through an image field rather
+    // than a named occurrence place.
+    await page.goto(`${origin}/dash/media?workspace=${workspace}`);
+    await page.getByRole("heading", { name: "Photos", exact: true }).waitFor();
+    await page
+      .locator("section.media-library .media-gallery-tile", {
+        hasText: "meadow.png",
+      })
+      .locator(".media-gallery-badge", { hasText: "On the page" })
+      .first()
+      .waitFor();
+
     process.stdout.write(
       `Page photo change browser acceptance passed at ${origin}: ` +
-        `added a full-width image section, changed its photo through the ` +
-        `shared picker, stored /api/media/${asset.assetId} in the draft, and ` +
-        `served that photo in the exact preview through the authenticated ` +
-        `media route.\n`,
+        `added a full-width image section, changed its photo on the canvas ` +
+        `through the shared picker, stored /api/media/${asset.assetId} in the ` +
+        `draft, served that photo in the exact preview through the ` +
+        `authenticated media route, and showed it "on the page" in the ` +
+        `gallery.\n`,
     );
   } finally {
     await browser?.close();

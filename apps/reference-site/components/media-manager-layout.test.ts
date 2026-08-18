@@ -44,17 +44,20 @@ describe("photo gallery layout", () => {
     expect(gallery).not.toMatch(/\/api\/foundry-cms\/media\?/u);
   });
 
-  it("lays the gallery out so its last row is as full as the rows above", async () => {
+  it("lays the gallery out as an even grid of uniform tiles", async () => {
     const stylesheet = await readFile(
       new URL("../app/dash/dashboard.css", import.meta.url),
       "utf8",
     );
 
+    // A media grid, like a modern CMS library: columns that reflow with the
+    // width and keep every tile the same shape, rather than a flex row whose
+    // last line stretches its tiles wider than the rows above.
     expect(stylesheet).toMatch(
-      /\.media-gallery\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*\}/su,
+      /\.media-gallery\s*\{[^}]*display:\s*grid;[^}]*\}/su,
     );
     expect(stylesheet).toMatch(
-      /\.media-gallery > li\s*\{[^}]*flex:\s*1 1 [^;]+;[^}]*\}/su,
+      /\.media-gallery\s*\{[^}]*grid-template-columns:\s*repeat\(\s*auto-fill,\s*minmax\([^)]+\)\s*\);[^}]*\}/su,
     );
   });
 

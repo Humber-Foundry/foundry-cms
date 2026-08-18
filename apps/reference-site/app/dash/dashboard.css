@@ -2392,25 +2392,25 @@
  * grow to share the width, so the last row is as full as the rows above it.
  * Both the Photos page and the photo picker render this grid, so a tile
  * looks the same in either place. */
+/* A media grid, like a modern CMS library: even columns that reflow with the
+ * width, every tile the same shape, aligned on a steady rhythm. */
 .media-gallery {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
   gap: var(--dash-gap);
-  margin: 1.25rem 0 0;
+  margin: 1.5rem 0 0;
   padding: 0;
   list-style: none;
 }
 
 .media-gallery > li {
   display: flex;
-  flex: 1 1 11rem;
-  max-width: 16rem;
+  min-width: 0;
 }
 
 .media-gallery-deleting {
-  flex-basis: 100%;
-  max-width: none;
-  padding: 0.85rem 0.5rem;
+  grid-column: 1 / -1;
+  padding: 0.85rem 0.25rem;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
 }
@@ -2418,26 +2418,39 @@
 .media-gallery-tile {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.35rem;
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--dash-line);
   border-radius: var(--dash-radius);
-  padding: 0.45rem 0.45rem 0.6rem;
+  padding: 0.5rem 0.5rem 0.7rem;
   background: var(--dash-surface);
   color: var(--dash-ink);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.media-gallery-tile:not(:disabled):hover {
+  border-color: var(--dash-accent);
+  box-shadow: 0 1px 6px rgb(20 86 61 / 12%);
 }
 
 .media-gallery-tile[aria-pressed="true"] {
   border-color: var(--dash-accent);
+  box-shadow: 0 0 0 1px var(--dash-accent);
   background: var(--dash-accent-tint);
 }
 
 .media-gallery-tile:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* A read-only tile for a photo the site shows that is not a library asset. */
+.media-gallery-tile-site {
+  cursor: default;
 }
 
 /* Photographs are the one place square corners belong. */
@@ -2447,7 +2460,8 @@
   /* One shape for every tile. media-gallery.tsx reserves the same box on the
    * image, so a row does not shift as photos arrive. */
   aspect-ratio: 4 / 3;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.15rem;
+  border-radius: calc(var(--dash-radius) - 0.15rem);
   background: #e6ebe7;
 }
 
@@ -2459,8 +2473,14 @@
   object-fit: cover;
 }
 
+.media-gallery-tile-site .media-gallery-frame img {
+  object-fit: contain;
+  padding: 0.5rem;
+}
+
 .media-gallery-name {
   font-weight: 600;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -2470,6 +2490,14 @@
 }
 
 .media-gallery-badge {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--dash-accent-tint);
   color: var(--dash-accent);
   font-size: var(--dash-text-small);
   font-weight: 600;
@@ -2481,7 +2509,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-  margin-top: 0.75rem;
+  margin-top: 1.25rem;
 }
 
 .media-asset-hint {
@@ -2689,6 +2717,95 @@
 
 .change-photo-button {
   align-self: flex-start;
+}
+
+/* In-canvas photo editing -------------------------------------------------
+ *
+ * A photo on the page canvas carries its own "Change photo" control, the way a
+ * modern block editor does: hover or focus the selected section's image and the
+ * control appears on the image itself. These rules live in the .site-canvas
+ * scope because they render inside the editing canvas, where the dashboard's
+ * --dash-* tokens are out of scope; the values are stated directly. */
+.site-canvas .canvas-image-field {
+  position: relative;
+  display: block;
+}
+
+.site-canvas .canvas-image-field .canvas-image-photo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.site-canvas .canvas-image-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 9rem;
+  border: 1px dashed rgb(255 255 255 / 55%);
+  border-radius: 6px;
+  background: rgb(16 24 29 / 30%);
+  color: inherit;
+  font-size: 0.9rem;
+}
+
+/* The control sits over the image. It is quiet until the owner hovers or
+ * focuses the image, so it never hides the photo it edits. */
+.site-canvas .canvas-image-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0.85rem;
+  border-radius: inherit;
+  opacity: 0;
+  background: linear-gradient(
+    to top,
+    rgb(16 24 29 / 55%),
+    rgb(16 24 29 / 0%) 55%
+  );
+  transition: opacity 140ms ease;
+}
+
+.site-canvas .canvas-image-field:hover .canvas-image-overlay,
+.site-canvas .canvas-image-field:focus-within .canvas-image-overlay,
+.site-canvas .canvas-image-field[data-has-photo="false"] .canvas-image-overlay {
+  opacity: 1;
+}
+
+.site-canvas .canvas-image-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #17201d;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgb(16 24 29 / 35%);
+}
+
+.site-canvas .canvas-image-change:hover {
+  background: #f1f4f1;
+}
+
+.site-canvas .canvas-image-change-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* Touch screens have no hover: keep the control visible on the selected
+ * section's image so a phone shows what a pointer would discover. */
+@media (hover: none) {
+  .site-canvas .canvas-image-overlay {
+    opacity: 1;
+  }
 }
 
 /* Publish menu ------------------------------------------------------------

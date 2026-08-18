@@ -16,6 +16,19 @@ export type InlineTextRenderer = (
   options?: Readonly<{ multiline?: boolean; label?: string }>,
 ) => ReactNode;
 
+/**
+ * Renders one image field editable in place: the photo the field holds, with a
+ * "Change photo" control on the image itself that opens the shared picker and
+ * swaps the photo through the normal draft flow (ADR-0012). The editor supplies
+ * this only while the section is selected; the public site and previews leave it
+ * absent, and renderers draw the plain `<img>`.
+ */
+export type InlineImageRenderer = (
+  path: string,
+  displaySrc: string,
+  options: Readonly<{ alt: string }>,
+) => ReactNode;
+
 export type PageComponentRenderContext = Readonly<{
   section: PageSection;
   definition?: SiteDefinition;
@@ -23,6 +36,7 @@ export type PageComponentRenderContext = Readonly<{
   mediaAccessToken?: string;
   callToActionBody?: ReactNode;
   inlineText?: InlineTextRenderer;
+  inlineImage?: InlineImageRenderer;
   /**
    * True on editing surfaces (the canvas and browse mode), which render
    * inside the authenticated dashboard. Third-party embeds are sandboxed

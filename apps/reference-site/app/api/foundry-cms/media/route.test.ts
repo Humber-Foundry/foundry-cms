@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   getReplacementReceipt: vi.fn(),
   saveMediaOccurrence: vi.fn(),
   loadContentApplication: vi.fn(),
+  requireWorkspaceAccess: vi.fn(),
+  contentWorkspaceIdForActor: vi.fn(),
   getCurrentContent: vi.fn(),
   getContentRevision: vi.fn(),
   isRevisionCurrent: vi.fn(),
@@ -52,6 +54,8 @@ vi.mock("../../../../src/media-asset-runtime", () => ({
 }));
 vi.mock("../../../../src/content-revision-runtime", () => ({
   loadContentRevisionApplication: mocks.loadContentApplication,
+  requireExistingContentWorkspaceAccess: mocks.requireWorkspaceAccess,
+  contentWorkspaceIdForActor: mocks.contentWorkspaceIdForActor,
 }));
 
 import { GET, POST } from "./route";
@@ -107,6 +111,8 @@ describe("media endpoint", () => {
         isRevisionCurrent: mocks.isRevisionCurrent,
       },
     });
+    mocks.requireWorkspaceAccess.mockResolvedValue(undefined);
+    mocks.contentWorkspaceIdForActor.mockResolvedValue("workspace_editor");
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: { home: { media: [] } },
@@ -1079,6 +1085,43 @@ describe("media endpoint", () => {
     expect(response.status).toBe(403);
     expect(mocks.grantAccess).not.toHaveBeenCalled();
   });
+
+  it("grants media access for the caller's own workspace before a draft exists", async () => {
+    // The Photos page is reachable before any draft is started. The workspace
+    // then has no revision to read, but it is the caller's own default
+    // workspace, so the gallery still loads: the grant succeeds and the token
+    // scope falls back to the published site's references.
+    mocks.contentWorkspaceIdForActor.mockResolvedValue("workspace_editor");
+    mocks.getCurrentContent.mockRejectedValueOnce(
+      new ContentWorkspaceAccessError(),
+    );
+    mocks.grantAccess.mockResolvedValue({
+      assets: [{ assetId: "asset_hero" }],
+      occurrences: [],
+      accessGrantedAt: "2026-07-27T12:00:00.000Z",
+    });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/media", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "grant-no-draft-0001",
+        },
+        body: JSON.stringify({
+          operation: "access",
+          workspaceId: "workspace_editor",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.grantAccess).toHaveBeenCalledWith({
+      actorId: "membership-editor",
+      workspaceId: "workspace_editor",
+      idempotencyKey: "grant-no-draft-0001",
+    });
+  });
 });
 
 const onePixelPng = Uint8Array.from(
@@ -1376,6 +1419,8 @@ describe("media capability scope", () => {
         isRevisionCurrent: mocks.isRevisionCurrent,
       },
     });
+    mocks.requireWorkspaceAccess.mockResolvedValue(undefined);
+    mocks.contentWorkspaceIdForActor.mockResolvedValue("workspace_editor");
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: { home: { media: [] } },
