@@ -11,6 +11,9 @@ import {
 } from "./media-gallery-item";
 import type { MediaOccurrenceState } from "./media-manager-state";
 import { placeNameFor } from "./media-places";
+// Type only — erased at compile, so the server-only module is never bundled
+// into this client component.
+import type { SiteImageTile } from "../src/site-used-photos";
 
 /**
  * The photo library as a grid of tiles. The Photos page and the photo picker
@@ -32,6 +35,8 @@ const galleryTileHeight = 132;
 export function MediaGallery({
   assets,
   occurrences,
+  siteImages = [],
+  usedAssetIds,
   libraryToken,
   selectedAssetId,
   disabled = false,
@@ -40,6 +45,18 @@ export function MediaGallery({
 }: {
   assets: ReadonlyArray<MediaAsset>;
   occurrences: ReadonlyArray<MediaOccurrenceState>;
+  /**
+   * Photos the site displays that are not library assets — built-in and
+   * external images. They render as read-only "on the page" tiles so the
+   * gallery is every photo the site uses, not only the uploaded ones.
+   */
+  siteImages?: ReadonlyArray<SiteImageTile>;
+  /**
+   * Gallery assets the published site or the draft references. A tile for one
+   * of these shows an "on the page" badge even when it is placed through an
+   * image field rather than a named occurrence place.
+   */
+  usedAssetIds?: ReadonlySet<string>;
   /** The library capability, or undefined while one is being granted. */
   libraryToken: string | undefined;
   selectedAssetId: string;
@@ -70,6 +87,12 @@ export function MediaGallery({
           asset.assetId,
           placeNameFor,
         );
+        const badge =
+          usedIn.length > 0
+            ? `On the page: ${usedIn.join(" and ")}`
+            : usedAssetIds?.has(asset.assetId)
+              ? "On the page"
+              : null;
         return (
           <li key={asset.assetId}>
             <button
@@ -107,15 +130,29 @@ export function MediaGallery({
               <span className="media-gallery-meta">
                 {asset.width}×{asset.height} · {photoSizeLabel(asset.byteLength)}
               </span>
-              {usedIn.length > 0 ? (
-                <span className="media-gallery-badge">
-                  On the page: {usedIn.join(" and ")}
-                </span>
+              {badge !== null ? (
+                <span className="media-gallery-badge">{badge}</span>
               ) : null}
             </button>
           </li>
         );
       })}
+      {siteImages.map((image) => (
+        // A photo the site shows that is not a library asset: a built-in image
+        // or an external one. It is not selectable and cannot be deleted here,
+        // because it is not stored in the library — but it is one of the
+        // owner's photos, so it belongs in the gallery.
+        <li key={`site:${image.src}`}>
+          <div className="media-gallery-tile media-gallery-tile-site">
+            <span className="media-gallery-frame">
+              <img alt="" loading="lazy" decoding="async" src={image.src} />
+            </span>
+            <span className="media-gallery-name">{image.name}</span>
+            <span className="media-gallery-meta">Built-in site image</span>
+            <span className="media-gallery-badge">On the page</span>
+          </div>
+        </li>
+      ))}
     </ul>
   );
 }

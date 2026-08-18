@@ -21,14 +21,21 @@ import {
 } from "@humber-foundry/site-definition";
 
 import { definitionToPuckData, puckDataToDefinition } from "../src/page-composition-puck";
+import { CanvasImageField, type OpenPhotoPicker } from "./canvas-image-field";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { InlineText } from "./inline-text";
-import type { InlineTextRenderer } from "../foundry/page-component-renderers";
+import type { ChosenPhoto } from "./media-gallery-item";
+import { MediaPicker } from "./media-picker";
+import type {
+  InlineImageRenderer,
+  InlineTextRenderer,
+} from "../foundry/page-component-renderers";
 import { RichTextEditor } from "./rich-text-editor";
 import { SiteSection } from "./site-renderer";
 import {
   asRegisteredPageSection,
   createPuckField,
+  inlineEditedImageFields,
   inlineEditedTextFields,
   installedPageComponentRegistry,
   type InstalledPageComponentRegistration,
@@ -81,10 +88,14 @@ function EditableRegisteredSection({
   definition,
   section,
   disabled,
+  media,
+  openPhotoPicker,
 }: {
   definition: SiteDefinition;
   section: PageSection & Readonly<{ type: "registered" }>;
   disabled: boolean;
+  media: EditorMediaContext | undefined;
+  openPhotoPicker: OpenPhotoPicker;
 }) {
   const dispatch = useVisualPuck((state) => state.dispatch);
   const getSelectorForId = useVisualPuck((state) => state.getSelectorForId);
@@ -149,12 +160,29 @@ function EditableRegisteredSection({
       )
     : undefined;
 
+  // A photo is changed on the image itself, not in the side panel. The control
+  // appears only while the section is selected and the picker's site context is
+  // present; otherwise the section draws its plain photo.
+  const inlineImage: InlineImageRenderer | undefined =
+    isSelected && media !== undefined
+      ? (path, displaySrc, options) => (
+          <CanvasImageField
+            key={path}
+            displaySrc={displaySrc}
+            alt={options.alt}
+            openPhotoPicker={openPhotoPicker}
+            onChange={(next) => commitField(path, next)}
+          />
+        )
+      : undefined;
+
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
       <SiteSection
         section={section}
         definition={definition}
         inlineText={inlineText}
+        inlineImage={inlineImage}
         editingSurface
       />
     </div>
@@ -523,7 +551,12 @@ export function createVisualComponentConfig(
   onValidationChange: (source: string, invalid: boolean) => void = ignoreRichTextValidation,
   getDisabled: () => boolean = () => false,
   getMediaContext: () => EditorMediaContext | undefined = () => undefined,
+  getOpenPhotoPicker: () => OpenPhotoPicker = () => () => undefined,
 ): Config {
+  // A photo is changed on the image itself when the canvas has the picker's
+  // site context, so its field leaves the side panel — one photo, one place to
+  // change it, and no control colliding with the panel's section label.
+  const canvasImageEditing = getMediaContext() !== undefined;
   const components = Object.fromEntries(
     installedPageComponentRegistry.allowedComponents.map((type) => {
       const registration = installedPageComponentRegistry.components[type]!;
@@ -541,6 +574,8 @@ export function createVisualComponentConfig(
       // of text gets exactly one editing surface. Arrays keep their panel
       // controls because items are added, removed and reordered there.
       const inlineCovered = inlineEditedTextFields[type] ?? new Set<string>();
+      const inlineImageCovered =
+        inlineEditedImageFields[type] ?? new Set<string>();
       const fields = {
         id: hiddenField,
         type: hiddenField,
@@ -548,7 +583,8 @@ export function createVisualComponentConfig(
         ...Object.fromEntries(
           Object.entries(registration.fields).map(([key, field]) => [
             key,
-            inlineCovered.has(key)
+            inlineCovered.has(key) ||
+            (canvasImageEditing && inlineImageCovered.has(key))
               ? hiddenField
               : editorField(field, onValidationChange, getMediaContext),
           ]),
@@ -566,7 +602,7 @@ export function createVisualComponentConfig(
               return <RenderedCallToActionSection definition={getDefinition()} section={section} disabled={getDisabled()} onValidationChange={onValidationChange} />;
             }
             if (section.type === "registered") {
-              return <EditableRegisteredSection definition={getDefinition()} section={section} disabled={getDisabled()} />;
+              return <EditableRegisteredSection definition={getDefinition()} section={section} disabled={getDisabled()} media={getMediaContext()} openPhotoPicker={getOpenPhotoPicker()} />;
             }
             return <DesignScopedSection definition={getDefinition()} section={section} />;
           },
@@ -647,6 +683,15 @@ export function VisualComponentEditor({
   validationRef.current = onValidationChange;
   const mediaRef = useRef(media);
   mediaRef.current = media;
+  // The photo picker lives here, in the editor's own document, so it opens as a
+  // full-screen dialog. A "Change photo" control on a canvas image asks to open
+  // it and says what to do with the chosen photo.
+  const [photoPickerChoose, setPhotoPickerChoose] = useState<
+    ((photo: ChosenPhoto) => void) | null
+  >(null);
+  const openPhotoPickerRef = useRef<OpenPhotoPicker>(() => undefined);
+  openPhotoPickerRef.current = (onChoose) =>
+    setPhotoPickerChoose(() => onChoose);
   const config = useMemo(
     () => createVisualComponentConfig(
       () => referencedPageComponentIds(definitionRef.current),
@@ -654,6 +699,7 @@ export function VisualComponentEditor({
       (source, invalid) => validationRef.current(source, invalid),
       () => disabledRef.current,
       () => mediaRef.current,
+      () => openPhotoPickerRef.current,
     ),
     [],
   );
@@ -715,6 +761,19 @@ export function VisualComponentEditor({
           </Puck.Layout>
         </Puck>
       </div>
+      {media !== undefined ? (
+        <MediaPicker
+          open={photoPickerChoose !== null}
+          csrfToken={media.csrfToken}
+          workspaceId={media.workspaceId}
+          confirmLabel="Use this photo"
+          onChoose={(photo) => {
+            photoPickerChoose?.(photo);
+            setPhotoPickerChoose(null);
+          }}
+          onClose={() => setPhotoPickerChoose(null)}
+        />
+      ) : null}
     </section>
   );
 }

@@ -16,6 +16,7 @@ import {
   renderHeroPageComponent,
   renderProofPageComponent,
   renderServicesPageComponent,
+  type InlineImageRenderer,
   type InlineTextRenderer,
   type PageComponentRenderer,
 } from "./page-component-renderers";
@@ -206,6 +207,37 @@ function inlineTextFor(
 }
 
 /**
+ * The renderer's bridge to in-place image editing. When the editor supplies an
+ * inline-image renderer (the section is selected in the canvas), the photo
+ * renders with a "Change photo" control on the image itself; everywhere else it
+ * renders as the plain `<img>` it always was.
+ */
+function imageFor(
+  inlineImage: InlineImageRenderer | undefined,
+  path: string,
+  displaySrc: string,
+  alt: string,
+  imgProps: Readonly<Record<string, string | number>> = {},
+): ReactNode {
+  if (inlineImage !== undefined) {
+    return inlineImage(path, displaySrc, { alt });
+  }
+  return <img src={displaySrc} alt={alt} {...imgProps} />;
+}
+
+/**
+ * The image fields each registered renderer edits in place on the canvas. The
+ * editor hides these from the side panel so a photo has exactly one place it is
+ * changed — the image itself — and the panel never shows a second, colliding
+ * photo control.
+ */
+export const inlineEditedImageFields: Readonly<Record<string, ReadonlySet<string>>> = {
+  imageCopyStory: new Set(["imageSrc"]),
+  photoBand: new Set(["imageSrc"]),
+  attentionStory: new Set(["imageSrc"]),
+};
+
+/**
  * The fields each registered renderer edits in place. The editor hides these
  * from the side panel so every piece of text has exactly one editing surface;
  * array fields stay in the panel because items are added and removed there.
@@ -234,7 +266,7 @@ const installedRegistrations = Object.freeze([
     foundationPageComponentRegistry.components.callToAction!,
     renderCallToActionPageComponent,
   ),
-  installPageComponent(imageCopyStoryComponent, ({ section, mediaDelivery = "published", mediaAccessToken }) => {
+  installPageComponent(imageCopyStoryComponent, ({ section, mediaDelivery = "published", mediaAccessToken, inlineImage }) => {
     const props = registeredProps(imageCopyStoryComponent, section);
     return (
       <section
@@ -244,7 +276,12 @@ const installedRegistrations = Object.freeze([
         aria-labelledby={`${section.id}_title`}
       >
         <figure>
-          <img src={resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken)} alt={props.imageAlt} />
+          {imageFor(
+            inlineImage,
+            "imageSrc",
+            resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken),
+            props.imageAlt,
+          )}
         </figure>
         <div className="story-copy">
           <p className="handwritten-label">{props.eyebrow}</p>
@@ -254,11 +291,16 @@ const installedRegistrations = Object.freeze([
       </section>
     );
   }),
-  installPageComponent(photoBandComponent, ({ section, mediaDelivery = "published", mediaAccessToken }) => {
+  installPageComponent(photoBandComponent, ({ section, mediaDelivery = "published", mediaAccessToken, inlineImage }) => {
     const props = registeredProps(photoBandComponent, section);
     return (
       <figure className="photo-band" id={section.id}>
-        <img src={resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken)} alt={props.imageAlt} />
+        {imageFor(
+          inlineImage,
+          "imageSrc",
+          resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken),
+          props.imageAlt,
+        )}
         <figcaption>{props.caption}</figcaption>
       </figure>
     );
@@ -299,7 +341,7 @@ const installedRegistrations = Object.freeze([
       </section>
     );
   }),
-  installPageComponent(attentionStoryComponent, ({ section, inlineText, mediaDelivery = "published", mediaAccessToken }) => {
+  installPageComponent(attentionStoryComponent, ({ section, inlineText, inlineImage, mediaDelivery = "published", mediaAccessToken }) => {
     const props = registeredProps(attentionStoryComponent, section);
     const t = inlineTextFor(inlineText, attentionStoryComponent);
     return (
@@ -316,7 +358,13 @@ const installedRegistrations = Object.freeze([
               <p>{t("body", props.body)}</p>
             </div>
             <figure className="lh-bare-photo">
-              <img src={resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken)} alt={props.imageAlt} width="1067" height="1600" loading="lazy" />
+              {imageFor(
+                inlineImage,
+                "imageSrc",
+                resolveMediaImageSrc(props.imageSrc, mediaDelivery, mediaAccessToken),
+                props.imageAlt,
+                { width: "1067", height: "1600", loading: "lazy" },
+              )}
             </figure>
           </div>
           <AttentionNotes

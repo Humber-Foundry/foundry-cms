@@ -46,7 +46,11 @@ import {
   MediaAssetConfigurationError,
   loadMediaAssetApplication,
 } from "../../../../src/media-asset-runtime";
-import { loadContentRevisionApplication } from "../../../../src/content-revision-runtime";
+import {
+  contentWorkspaceIdForActor,
+  loadContentRevisionApplication,
+  requireExistingContentWorkspaceAccess,
+} from "../../../../src/content-revision-runtime";
 import { revisionPreviewGatewayUrl } from "../../../../src/content-revision-links";
 import { inspectImageSource } from "../../../../src/image-source-metadata";
 
@@ -489,9 +493,38 @@ export async function POST(request: Request) {
       const workspaceId = createContentWorkspaceId(
         String(body.workspaceId ?? ""),
       );
-      const currentContent = await (
-        await loadContentRevisionApplication(workspaceId, actorId)
-      ).queries.getCurrent();
+      // Every photo the draft references — placed occurrences and
+      // page-component image fields — widens the access token so an
+      // authenticated preview can fetch each one at full resolution (ADR-0012).
+      // The Photos page is reachable before any draft exists, though, so a
+      // workspace with no accessible revision is not an error: the gallery must
+      // still load. The scope then falls back to the published site's own
+      // references. Checking access first also avoids creating an empty draft
+      // workspace as a side effect of reading one.
+      let draftReferencedAssetIds: ReadonlyArray<string>;
+      try {
+        await requireExistingContentWorkspaceAccess(workspaceId, actorId);
+        const currentContent = await (
+          await loadContentRevisionApplication(workspaceId, actorId)
+        ).queries.getCurrent();
+        draftReferencedAssetIds = [
+          ...siteDefinitionMediaAssetIds(currentContent.definition),
+        ];
+      } catch (error) {
+        if (!(error instanceof ContentWorkspaceAccessError)) throw error;
+        // No revision the caller can read. That is expected only for the
+        // caller's own default workspace before a draft exists — the Photos
+        // page is reachable then and its gallery must still load. Any other
+        // inaccessible workspace is refused, so the grant never reads another
+        // member's draft. The token scope then falls back to the published
+        // site's own references.
+        if (workspaceId !== (await contentWorkspaceIdForActor(actorId))) {
+          throw error;
+        }
+        draftReferencedAssetIds = [
+          ...siteDefinitionMediaAssetIds(installedSiteDefinition),
+        ];
+      }
       const { accessGrantedAt, ...catalog } =
         await application.commands.grantAccess({
           actorId,
@@ -501,17 +534,10 @@ export async function POST(request: Request) {
       const capability = await createHumanMediaAccessToken(
         authenticated.identity,
         [
-          ...new Set(
-            [
-              ...catalog.occurrences.map(
-                (occurrence) => occurrence.assetId,
-              ),
-              // Every photo the draft references — placed occurrences and
-              // page-component image fields — so an authenticated preview can
-              // fetch each one at full resolution.
-              ...siteDefinitionMediaAssetIds(currentContent.definition),
-            ],
-          ),
+          ...new Set([
+            ...catalog.occurrences.map((occurrence) => occurrence.assetId),
+            ...draftReferencedAssetIds,
+          ]),
         ],
         accessGrantedAt,
       );

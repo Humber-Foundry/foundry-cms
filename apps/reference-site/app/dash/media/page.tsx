@@ -3,8 +3,13 @@ import { mergeMediaOccurrenceState } from "@/components/media-manager-state";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
+  loadPublishedDefinition,
   readWorkspaceSearchParams,
 } from "@/src/dashboard-page-context";
+import {
+  siteStaticImageTiles,
+  siteUsedAssetIds,
+} from "@/src/site-used-photos";
 
 export const dynamic = "force-dynamic";
 
@@ -23,18 +28,25 @@ export default async function DashboardMediaPage({
     "/dash/media",
   );
   const mutationToken = await loadMutationToken();
+  const publishedDefinition = await loadPublishedDefinition();
+  const draftDefinition = dashboardWorkspace.contentRevision?.definition;
 
   const occurrences = mergeMediaOccurrenceState(
     [],
-    dashboardWorkspace.contentRevision?.definition.home.media ?? [],
+    draftDefinition?.home.media ?? [],
   );
+  // Every photo the site actually shows — built-in images and the photos placed
+  // through the published site or the current draft — so the gallery is "all
+  // your photos", not only the uploaded ones.
+  const siteImages = siteStaticImageTiles(publishedDefinition, draftDefinition);
+  const usedAssetIds = siteUsedAssetIds(publishedDefinition, draftDefinition);
 
   return (
     <main className="dashboard-main" id="main">
       <div className="page-heading">
         <div>
           <h1>Photos</h1>
-          <p>Upload pictures and choose where they appear.</p>
+          <p>Every photo your site uses, in one place. Upload, review and tidy up.</p>
         </div>
       </div>
       <MediaManager
@@ -42,6 +54,8 @@ export default async function DashboardMediaPage({
         workspaceId={dashboardWorkspace.workspaceId}
         initialAssets={[]}
         initialOccurrences={occurrences}
+        siteImages={siteImages}
+        usedAssetIds={usedAssetIds}
         contentRevision={dashboardWorkspace.contentRevision}
         contentStale={dashboardWorkspace.contentStale}
       />

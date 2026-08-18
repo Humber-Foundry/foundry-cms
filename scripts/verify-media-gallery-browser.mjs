@@ -131,6 +131,35 @@ async function main() {
     });
     const page = await context.newPage();
 
+    // The Photos page must load its gallery before any draft exists. This is
+    // the media access grant that issue #130 fixed: with no draft workspace the
+    // grant used to fail and the gallery showed "Private media access could not
+    // be granted. Retrying…" forever. Open Photos with no workspace and confirm
+    // the grant succeeds and that error never appears. The grant is set up
+    // before navigation so its response is never missed, and awaited alongside
+    // the heading so a cold first compile cannot leave a promise dangling.
+    const noDraftGrant = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/foundry-cms/media",
+      { timeout: 60_000 },
+    );
+    await page.goto(`${origin}/dash/media`, { waitUntil: "domcontentloaded" });
+    const [grant] = await Promise.all([
+      noDraftGrant,
+      page
+        .getByRole("heading", { name: "Photos", exact: true })
+        .waitFor({ timeout: 60_000 }),
+    ]);
+    if (grant.status() !== 200) {
+      throw new Error(
+        `media_gallery_no_draft_grant_status:${grant.status()}:${await grant.text()}`,
+      );
+    }
+    if ((await page.getByText("could not be granted").count()) > 0) {
+      throw new Error("media_gallery_no_draft_grant_failed");
+    }
+
     await page.goto(`${origin}/dash`);
     const startWorkspace = page.getByRole("button", {
       name: "Start workspace",
@@ -149,7 +178,7 @@ async function main() {
     const workspace = new URL(page.url()).searchParams.get("workspace");
 
     await page.goto(`${origin}/dash/media?workspace=${workspace}`);
-    await page.getByRole("heading", { name: "Photos" }).waitFor();
+    await page.getByRole("heading", { name: "Photos", exact: true }).waitFor();
 
     // Upload a real photo through the real media route.
     const sourceBytes = await drawPhoto(page, "jetty.png", 1400, 1000);

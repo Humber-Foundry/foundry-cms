@@ -199,7 +199,7 @@ async function main() {
 
     // Upload three distinct photos so the gallery has one for each control.
     await page.goto(`${origin}/dash/media?workspace=${workspace}`);
-    await page.getByRole("heading", { name: "Photos" }).waitFor();
+    await page.getByRole("heading", { name: "Photos", exact: true }).waitFor();
     await drawPhoto(page, "header.png", "#2f6f4f");
     const headerAsset = await uploadDrawnPhoto(page);
     await drawPhoto(page, "share.png", "#6f2f4f");
