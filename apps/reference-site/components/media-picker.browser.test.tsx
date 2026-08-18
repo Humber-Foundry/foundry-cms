@@ -168,6 +168,50 @@ describe("photo picker browser acceptance", () => {
         contentType: "image/jpeg",
         thumbnailUrl:
           "/api/foundry-cms/media?assetId=asset_harbour&libraryToken=signed-media-library&variant=thumbnail",
+        imageSrc: "/api/media/asset_harbour",
+      },
+    ]);
+  });
+
+  it("lists built-in site photos and hands back the one it picked", async () => {
+    const chosen: ChosenPhoto[] = [];
+    vi.stubGlobal("fetch", async () => Response.json(grant));
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    flushSync(() => {
+      root!.render(
+        createElement(MediaPicker, {
+          open: true,
+          csrfToken: "csrf",
+          workspaceId: "workspace_owner",
+          siteImages: [{ src: "/foundry-gathering.svg", name: "foundry-gathering.svg" }],
+          onChoose: (photo: ChosenPhoto) => chosen.push(photo),
+          onClose: () => undefined,
+        }),
+      );
+    });
+    // The built-in photo is a selectable tile, listed alongside the upload.
+    const siteTile = await waitFor(
+      () => host.querySelector<HTMLButtonElement>("button.media-gallery-tile-site") ?? undefined,
+    );
+    expect(siteTile.textContent).toContain("foundry-gathering.svg");
+    expect(siteTile.textContent).toContain("Built-in site image");
+
+    await userEvent.click(siteTile);
+    await userEvent.click(page.getByRole("button", { name: "Use this photo" }));
+
+    // Choosing a built-in photo hands back its own address, not a library
+    // reference, so the caller stores the address the site already shows.
+    expect(chosen).toEqual([
+      {
+        assetId: "",
+        fileName: "foundry-gathering.svg",
+        width: 0,
+        height: 0,
+        contentType: "",
+        thumbnailUrl: "/foundry-gathering.svg",
+        imageSrc: "/foundry-gathering.svg",
       },
     ]);
   });

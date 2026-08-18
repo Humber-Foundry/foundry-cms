@@ -22,6 +22,9 @@ import {
 import { RichTextEditor } from "./rich-text-editor";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
+// Type only — erased at compile, so the server-only module is never bundled
+// into this client component.
+import type { SiteImageTile } from "../src/site-used-photos";
 import {
   sendContentRevisionAttempt,
   type ContentRevisionAttempt,
@@ -382,10 +385,12 @@ function blogPostStanding(
 export function BlogPostControls({
   revision,
   csrfToken,
+  siteImages,
   verifiedPublicPostIds,
 }: {
   revision: ContentRevision;
   csrfToken: string;
+  siteImages: ReadonlyArray<SiteImageTile>;
   verifiedPublicPostIds: ReadonlyArray<BlogPostId>;
 }) {
   const [message, setMessage] = useState("");
@@ -537,7 +542,11 @@ export function BlogPostControls({
       {writingNew ? (
         <PostComposer
           editorId="post-body"
-          media={{ csrfToken: mutationToken, workspaceId: revision.workspaceId }}
+          media={{
+            csrfToken: mutationToken,
+            workspaceId: revision.workspaceId,
+            siteImages,
+          }}
           busy={busy || pendingAttempt !== null}
           saveLabel={busy ? "Saving…" : "Save draft"}
           onSave={(post) => savePost(post)}
@@ -559,6 +568,7 @@ export function BlogPostControls({
                   media={{
                     csrfToken: mutationToken,
                     workspaceId: revision.workspaceId,
+                    siteImages,
                   }}
                   busy={busy || pendingAttempt !== null}
                   saveLabel={busy ? "Saving…" : "Save changes"}

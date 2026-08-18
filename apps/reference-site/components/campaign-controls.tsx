@@ -25,6 +25,9 @@ import { RichTextEditor } from "./rich-text-editor";
 import { RichTextRenderer } from "./rich-text-renderer";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
+// Type only — erased at compile, so the server-only module is never bundled
+// into this client component.
+import type { SiteImageTile } from "../src/site-used-photos";
 
 /**
  * The address the dashboard preview draws for one campaign image. A campaign
@@ -258,11 +261,13 @@ function EmailComposer({
 export function CampaignControls({
   csrfToken,
   workspaceId,
+  siteImages,
   postSources,
   initialCampaigns,
 }: {
   csrfToken: string;
   workspaceId: string;
+  siteImages: ReadonlyArray<SiteImageTile>;
   postSources: ReadonlyArray<
     Readonly<{
       post: Pick<BlogPost, "id" | "title">;
@@ -286,7 +291,7 @@ export function CampaignControls({
   // header and inline photos through the same-origin media route.
   const [previewRevision, setPreviewRevision] =
     useState<CampaignRevision | null>(null);
-  const media: EditorMediaContext = { csrfToken, workspaceId };
+  const media: EditorMediaContext = { csrfToken, workspaceId, siteImages };
 
   async function loadCampaigns(selectedCampaignId?: string) {
     const response = await fetch("/api/foundry-cms/campaigns", {

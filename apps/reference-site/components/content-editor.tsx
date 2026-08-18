@@ -68,6 +68,9 @@ import {
 } from "./publication-history";
 import { SiteRenderer } from "./site-renderer";
 import { VisualComponentEditor } from "./visual-component-editor";
+// Type only — erased at compile, so the server-only module is never bundled
+// into this client component.
+import type { SiteImageTile } from "../src/site-used-photos";
 
 /**
  * Reading mode: in-page anchors work; any click that would leave the editor —
@@ -152,6 +155,7 @@ export function ContentEditor({
   showComposition = true,
   showDesignDestination = false,
   showPublicationHistory = true,
+  siteImages = [],
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
@@ -183,6 +187,11 @@ export function ContentEditor({
    */
   showDesignDestination?: boolean;
   showPublicationHistory?: boolean;
+  /**
+   * Every photo the site already shows, so the canvas photo picker lists
+   * existing photos, not only uploaded ones. Empty on surfaces that pass none.
+   */
+  siteImages?: ReadonlyArray<SiteImageTile>;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -1878,6 +1887,7 @@ export function ContentEditor({
             media={{
               csrfToken: mutationToken,
               workspaceId: initialRevision.workspaceId,
+              siteImages,
             }}
             onValidationChange={updateVisualRichTextValidation}
             panelWhenEmpty={

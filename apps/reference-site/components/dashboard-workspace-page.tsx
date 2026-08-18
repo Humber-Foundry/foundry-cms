@@ -3,8 +3,10 @@ import { WorkspaceEditorSurface } from "./workspace-editor-surface";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
+  loadPublishedDefinition,
   readWorkspaceSearchParams,
 } from "@/src/dashboard-page-context";
+import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 const workspaceDestinations = {
   pages: {
@@ -41,6 +43,14 @@ export async function DashboardWorkspacePage({
   const needsFreshWorkspace =
     schemaRecovery !== undefined || contentRevision === undefined;
   const showStarter = needsFreshWorkspace || previewUrl === undefined;
+  // Every photo the site already shows, so the canvas photo picker lists
+  // existing photos, not only uploaded ones.
+  const publishedDefinition = showStarter
+    ? undefined
+    : await loadPublishedDefinition();
+  const siteImages = showStarter
+    ? []
+    : siteStaticImageTiles(publishedDefinition, contentRevision?.definition);
 
   return (
     <main className="dashboard-main" id="main">
@@ -76,6 +86,7 @@ export async function DashboardWorkspacePage({
           initialContentStale={dashboardWorkspace.contentStale}
           activeWorkspaceUrl={dashboardWorkspace.activeWorkspaceUrl}
           staleRecovery={staleRecovery}
+          siteImages={siteImages}
         />
       )}
     </main>

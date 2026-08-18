@@ -10,6 +10,9 @@ import {
   pageFieldGroups,
 } from "./content-editor";
 import { advanceWorkspaceRevisionHead } from "./workspace-revision";
+// Type only — erased at compile, so the server-only module is never bundled
+// into this client component.
+import type { SiteImageTile } from "../src/site-used-photos";
 
 /**
  * The editing surface Pages and Design share. Both destinations edit the same
@@ -46,6 +49,7 @@ export function WorkspaceEditorSurface({
   initialContentStale,
   activeWorkspaceUrl,
   staleRecovery,
+  siteImages,
 }: {
   variant: keyof typeof variants;
   csrfToken: string;
@@ -54,6 +58,7 @@ export function WorkspaceEditorSurface({
   initialContentStale?: boolean;
   activeWorkspaceUrl: string;
   staleRecovery?: Readonly<{ id: string; sourceWorkspaceId: string }>;
+  siteImages: ReadonlyArray<SiteImageTile>;
 }) {
   const [head, setHead] = useState({
     revision: contentRevision,
@@ -79,6 +84,7 @@ export function WorkspaceEditorSurface({
       initialStale={initialContentStale}
       activeWorkspaceUrl={activeWorkspaceUrl}
       staleRecovery={staleRecovery}
+      siteImages={siteImages}
       {...variants[variant]}
     />
   );

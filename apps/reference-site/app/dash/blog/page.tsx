@@ -7,6 +7,7 @@ import {
   loadPublishedDefinition,
   readWorkspaceSearchParams,
 } from "@/src/dashboard-page-context";
+import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,10 @@ export default async function DashboardBlogPage({
         <BlogPostControls
           revision={contentRevision}
           csrfToken={mutationToken}
+          siteImages={siteStaticImageTiles(
+            definition,
+            contentRevision.definition,
+          )}
           verifiedPublicPostIds={verifiedPublicBlogPostIds(definition)}
         />
       )}

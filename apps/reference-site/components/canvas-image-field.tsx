@@ -3,8 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { registerOverlayPortal } from "@puckeditor/core";
 
-import { mediaImageSrc } from "@humber-foundry/site-definition";
-
 import type { ChosenPhoto } from "./media-gallery-item";
 
 /**
@@ -77,7 +75,7 @@ export function CanvasImageField({
           onClick={() =>
             openPhotoPicker((photo) => {
               setChosen(photo);
-              onChange(mediaImageSrc(photo.assetId));
+              onChange(photo.imageSrc);
             })
           }
         >

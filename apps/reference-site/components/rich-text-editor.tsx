@@ -13,7 +13,6 @@ import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import {
   isSafeRichTextLink,
-  mediaImageSrc,
   parseSerializedRichTextDocument,
   toTipTapDocument,
   type SerializedRichTextDocument,
@@ -304,6 +303,7 @@ export function RichTextEditor({
           open={pickerOpen}
           csrfToken={media.csrfToken}
           workspaceId={media.workspaceId}
+          siteImages={media.siteImages}
           onChoose={(photo) => {
             if (editor === null) {
               return;
@@ -319,7 +319,7 @@ export function RichTextEditor({
               .chain()
               .focus()
               .setImage({
-                src: mediaImageSrc(photo.assetId),
+                src: photo.imageSrc,
                 alt: description ?? "",
               })
               .run();

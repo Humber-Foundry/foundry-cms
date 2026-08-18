@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   chosenPhoto,
+  chosenSiteImage,
   mediaThumbnailUrl,
   photoSizeLabel,
   photoUsageNames,
@@ -101,6 +102,19 @@ describe("chosen photo", () => {
       contentType: "image/jpeg",
       thumbnailUrl:
         "/api/foundry-cms/media?assetId=asset_hero&libraryToken=token&variant=thumbnail",
+      imageSrc: "/api/media/asset_hero",
+    });
+  });
+
+  it("hands back a built-in site photo by its own address", () => {
+    expect(chosenSiteImage("/foundry-gathering.svg", "foundry-gathering.svg")).toEqual({
+      assetId: "",
+      fileName: "foundry-gathering.svg",
+      width: 0,
+      height: 0,
+      contentType: "",
+      thumbnailUrl: "/foundry-gathering.svg",
+      imageSrc: "/foundry-gathering.svg",
     });
   });
 });

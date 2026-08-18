@@ -1,3 +1,5 @@
+import { mediaImageSrc } from "@humber-foundry/site-definition";
+
 import type { MediaOccurrenceState } from "./media-manager-state";
 
 /**
@@ -69,6 +71,12 @@ export function mediaThumbnailUrl(
  * placed on the page, so an address for a photo the caller has not placed
  * yet would be refused. A caller places the photo by its `assetId`, and the
  * placement then renders it.
+ *
+ * `imageSrc` is the one address the caller stores on the page for this photo,
+ * whichever kind it is: a library asset's `/api/media/<assetId>` reference, or
+ * a built-in site photo's own address. The caller writes `imageSrc` and lets
+ * the normal draft, preview and publish flow render it — it never has to know
+ * which kind of photo the owner chose.
  */
 export type ChosenPhoto = Readonly<{
   assetId: string;
@@ -77,6 +85,7 @@ export type ChosenPhoto = Readonly<{
   height: number;
   contentType: string;
   thumbnailUrl: string;
+  imageSrc: string;
 }>;
 
 export function chosenPhoto(
@@ -96,5 +105,24 @@ export function chosenPhoto(
     height: asset.height,
     contentType: asset.contentType,
     thumbnailUrl: mediaThumbnailUrl(asset.assetId, libraryToken),
+    imageSrc: mediaImageSrc(asset.assetId),
+  };
+}
+
+/**
+ * A photo the picker offers that is not a library asset — a built-in or
+ * external image the site already shows. It carries no asset identity, so its
+ * stored address and its thumbnail are both the image's own address; choosing
+ * it places that address on the page unchanged.
+ */
+export function chosenSiteImage(src: string, name: string): ChosenPhoto {
+  return {
+    assetId: "",
+    fileName: name,
+    width: 0,
+    height: 0,
+    contentType: "",
+    thumbnailUrl: src,
+    imageSrc: src,
   };
 }
