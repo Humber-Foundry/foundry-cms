@@ -1297,6 +1297,24 @@
   background: var(--dash-canvas);
 }
 
+/* On a wide screen the controls wrapper is transparent to layout: the top bar
+ * and notes strip lay out as direct children of the immersive column, exactly
+ * as before. The phone media query turns it into a slide-down sheet. */
+.editor-controls {
+  display: contents;
+}
+
+/* Phone-only editor chrome. Hidden on a wide screen, where the top bar and the
+ * side panel are always in view; the phone media query reveals them. */
+.editor-mobile-menu,
+.editor-mobile-close,
+.editor-mobile-scrim,
+.editor-side-scrim,
+.editor-side-handle,
+.editor-panel-open {
+  display: none;
+}
+
 .editor-topbar {
   display: flex;
   flex-wrap: wrap;
@@ -2159,43 +2177,264 @@
     min-height: 2.75rem;
   }
 
-  /* Immersive editor on a phone: the stage stacks and scrolls as one. The
-   * page canvas stays the primary surface — it keeps a usable height and
-   * sticks to the top of the screen, so the editing panel scrolls beneath it
-   * instead of pushing it into a thin strip. */
-  .editor-stage {
-    flex-direction: column;
+  /* Immersive editor on a phone: the page fills the whole screen. The top
+   * controls and the side panel are not in the flow — they are a slide-down
+   * sheet and a slide-up sheet, opened from floating buttons — so the owner
+   * sees and scrolls the real site edge to edge and edits in place. */
+
+  /* The floating button that opens the top controls sheet. */
+  .editor-mobile-menu {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    position: fixed;
+    top: 0.6rem;
+    left: 0.6rem;
+    z-index: 36;
+    min-height: 2.5rem;
+    padding: 0.3rem 0.55rem 0.3rem 0.85rem;
+    border: 1px solid var(--dash-line);
+    border-radius: 999px;
+    background: var(--dash-surface);
+    color: var(--dash-ink);
+    font-size: var(--dash-text-small);
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px -6px rgb(16 24 29 / 40%);
+  }
+
+  /* The save-state dot on the collapsed Menu button: green when saved, amber
+   * while there is unsaved or in-flight work. */
+  .editor-mobile-menu-status {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    background: var(--dash-accent);
+  }
+
+  .editor-mobile-menu-status[data-status="dirty"],
+  .editor-mobile-menu-status[data-status="saving"],
+  .editor-mobile-menu-status[data-status="conflict"],
+  .editor-mobile-menu-status[data-status="stale"] {
+    background: #b8860b;
+  }
+
+  .editor-immersive[data-mobile-controls-open="true"] .editor-mobile-menu,
+  .editor-immersive[data-panel-open="true"] .editor-mobile-menu {
+    display: none;
+  }
+
+  /* The dimmed backdrop behind the top controls sheet. */
+  .editor-mobile-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 37;
+    background: rgb(16 24 29 / 35%);
+  }
+
+  .editor-immersive[data-mobile-controls-open="true"] .editor-mobile-scrim {
+    display: block;
+  }
+
+  /* The top controls become a sheet that slides down from the top. */
+  .editor-controls {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 38;
+    max-height: 85vh;
     overflow-y: auto;
-    overflow-x: clip;
+    background: var(--dash-surface);
+    border-bottom: 1px solid var(--dash-line);
+    box-shadow: 0 14px 26px -14px rgb(16 24 29 / 50%);
+    transform: translateY(-100%);
+    transition: transform 0.18s ease;
+  }
+
+  .editor-immersive[data-mobile-controls-open="true"] .editor-controls {
+    transform: translateY(0);
+  }
+
+  .editor-controls .editor-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    min-height: 0;
+    padding: 1rem;
+  }
+
+  .editor-controls .topbar-grow {
+    display: none;
+  }
+
+  .editor-controls .mode-toggle button {
+    flex: 1;
+  }
+
+  .editor-controls .editor-toolbar-actions {
+    flex-wrap: wrap;
+  }
+
+  .editor-mobile-close {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    align-self: flex-end;
+    min-height: 2.5rem;
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--dash-line);
+    border-radius: 0.5rem;
+    background: var(--dash-surface);
+    color: var(--dash-ink-soft);
+    font-size: var(--dash-text-small);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .editor-controls .editor-notes {
+    min-height: 0;
+    padding: 0.6rem 1rem 0.9rem;
+  }
+
+  .editor-controls .editor-notes p {
+    white-space: normal;
+  }
+
+  /* The stage fills the whole screen: the page is the surface, edge to edge. */
+  .editor-stage {
+    display: block;
+    overflow: visible;
+  }
+
+  .editor-stage .visual-component-editor,
+  .editor-stage .puck-editor-frame,
+  .editor-stage .editor-workbench,
+  .editor-stage .editor-canvas {
+    height: 100%;
   }
 
   .editor-stage .editor-workbench {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .editor-stage .editor-workbench,
-  .editor-stage .editor-side {
-    height: auto;
+    display: block;
+    position: relative;
+    grid-template-columns: none;
   }
 
   .editor-stage .editor-canvas {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    height: 46vh;
-    min-height: 15rem;
-    max-height: 24rem;
+    position: static;
+    min-height: 0;
     overflow: hidden;
-    background: var(--white);
-    border-bottom: 1px solid #dce1dc;
-    box-shadow: 0 8px 14px -10px rgb(16 24 29 / 45%);
   }
 
-  /* The panel's own controls sit below the pinned canvas, so give the first
-   * one air and never let it hide behind the canvas edge. */
+  .editor-stage .editor-canvas [class*="_PuckPreview"] {
+    height: 100% !important;
+    min-height: 0;
+  }
+
+  /* The floating button that opens the side panel to page options and
+   * add-section when no section is selected. */
+  .editor-panel-open {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    position: fixed;
+    right: 0.8rem;
+    bottom: 0.8rem;
+    z-index: 34;
+    min-height: 2.75rem;
+    padding: 0.5rem 1.1rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--dash-accent);
+    color: var(--white);
+    font-size: var(--dash-text-small);
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 8px 18px -8px rgb(16 24 29 / 55%);
+  }
+
+  .visual-component-editor[data-panel-open="true"] .editor-panel-open,
+  .editor-immersive[data-mobile-controls-open="true"] .editor-panel-open {
+    display: none;
+  }
+
+  /* The dimmed backdrop behind the side-panel sheet. */
+  .editor-side-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgb(16 24 29 / 35%);
+  }
+
+  .visual-component-editor[data-panel-open="true"] .editor-side-scrim {
+    display: block;
+  }
+
+  /* The side panel is a sheet that slides up from the bottom. Closed by
+   * default so the page owns the screen; open shows the selected section's
+   * controls, or the page options and add-section when nothing is selected. */
   .editor-stage .editor-side {
-    position: relative;
+    position: fixed;
+    left: 0;
+    right: 0;
+    /* The base panel is sticky with top: 0; clear it so bottom anchors the
+     * sheet — otherwise translateY(100%) leaves a strip showing at the foot. */
+    top: auto;
+    bottom: 0;
+    z-index: 40;
+    height: auto;
+    max-height: 78vh;
+    overflow-y: auto;
+    border-left: 0;
+    border-top: 1px solid var(--dash-line);
+    border-radius: 1rem 1rem 0 0;
+    box-shadow: 0 -14px 26px -14px rgb(16 24 29 / 50%);
+    transform: translateY(100%);
+    transition: transform 0.2s ease;
+  }
+
+  .editor-stage
+    .visual-component-editor[data-panel-open="true"]
+    .editor-side {
+    transform: translateY(0);
+  }
+
+  /* The sheet's grab handle and Done button. */
+  .editor-side-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: sticky;
+    top: 0;
     z-index: 1;
+    padding: 0.9rem 1rem 0.6rem;
+    background: var(--dash-surface);
+    border-bottom: 1px solid var(--dash-line);
+  }
+
+  .editor-side-grip {
+    position: absolute;
+    top: 0.45rem;
+    left: 50%;
+    width: 2.75rem;
+    height: 0.3rem;
+    border-radius: 999px;
+    background: var(--dash-line);
+    transform: translateX(-50%);
+  }
+
+  .editor-side-done {
+    margin-left: auto;
+    min-height: 2.5rem;
+    padding: 0.4rem 1.2rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: var(--dash-accent);
+    color: var(--white);
+    font-size: var(--dash-text-small);
+    font-weight: 600;
+    cursor: pointer;
   }
 
   /* The selected-section bar stacks on a phone: its name on one row, its

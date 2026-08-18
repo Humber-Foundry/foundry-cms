@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createUsePuck,
   Puck,
@@ -644,11 +644,52 @@ function PanelFields() {
   );
 }
 
+/**
+ * Phone only: opens the side panel as a sheet the moment a section is selected,
+ * so a tap on the canvas brings up that section's controls. On a wide screen
+ * the panel is always docked beside the canvas, so opening it changes nothing.
+ */
+function PanelSelectionSync({ onOpen }: { onOpen(): void }) {
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
+  const isSelected = selected !== null;
+  const onOpenRef = useRef(onOpen);
+  onOpenRef.current = onOpen;
+  useEffect(() => {
+    if (isSelected) onOpenRef.current();
+  }, [isSelected]);
+  return null;
+}
+
+/**
+ * The sheet's header on a phone: a grab handle and a Done button. Done clears
+ * the selection and closes the sheet, so the canvas returns to the plain site
+ * and the whole screen is the page again.
+ */
+function PanelSheetHeader({ onClose }: { onClose(): void }) {
+  const dispatch = useVisualPuck((state) => state.dispatch);
+  return (
+    <div className="editor-side-handle">
+      <span className="editor-side-grip" aria-hidden="true" />
+      <button
+        type="button"
+        className="editor-side-done"
+        onClick={() => {
+          dispatch({ type: "setUi", ui: { itemSelector: null } });
+          onClose();
+        }}
+      >
+        Done
+      </button>
+    </div>
+  );
+}
+
 export function VisualComponentEditor({
   definition,
   disabled,
   onChange,
   onValidationChange = ignoreRichTextValidation,
+  onPanelOpenChange,
   iframeEnabled = true,
   panelWhenEmpty,
   media,
@@ -657,6 +698,11 @@ export function VisualComponentEditor({
   disabled: boolean;
   onChange(definition: SiteDefinition): void;
   onValidationChange?(source: string, invalid: boolean): void;
+  /**
+   * Reports the phone side-panel sheet's open state to the host, so the host's
+   * own floating controls can step aside while the sheet is open.
+   */
+  onPanelOpenChange?(open: boolean): void;
   iframeEnabled?: boolean;
   /**
    * What the side panel shows when no section is selected — the page-level
@@ -704,6 +750,17 @@ export function VisualComponentEditor({
     [],
   );
   const [message, setMessage] = useState("");
+  // On a phone the side panel is a sheet that slides up from the bottom, closed
+  // by default so the whole screen is the page. It opens when a section is
+  // selected or when the owner taps the floating page-options button. On a wide
+  // screen the panel is always docked and this flag is ignored.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const openPanel = useCallback(() => setPanelOpen(true), []);
+  const panelChangeRef = useRef(onPanelOpenChange);
+  panelChangeRef.current = onPanelOpenChange;
+  useEffect(() => {
+    panelChangeRef.current?.(panelOpen);
+  }, [panelOpen]);
   const active = useRef(true);
 
   useEffect(() => {
@@ -724,7 +781,11 @@ export function VisualComponentEditor({
   }
 
   return (
-    <section className="visual-component-editor" aria-label="Page editor">
+    <section
+      className="visual-component-editor"
+      aria-label="Page editor"
+      data-panel-open={panelOpen ? "true" : "false"}
+    >
       {message !== "" ? (
         <p className="editor-message" role="status" aria-live="polite">{message}</p>
       ) : null}
@@ -739,6 +800,7 @@ export function VisualComponentEditor({
         >
           <Puck.Layout>
             <PermissionRefresher definition={definition} />
+            <PanelSelectionSync onOpen={openPanel} />
             {/* The page is the editing surface: the live preview dominates,
               * and everything about the selected section sits beside it. */}
             <div className="editor-workbench">
@@ -748,7 +810,14 @@ export function VisualComponentEditor({
               >
                 <Puck.Preview />
               </div>
+              {/* Phone only: taps the dimmed area to close the panel sheet. */}
+              <div
+                className="editor-side-scrim"
+                aria-hidden="true"
+                onClick={() => setPanelOpen(false)}
+              />
               <aside className="editor-side" aria-label="Page settings and selected section">
+                <PanelSheetHeader onClose={() => setPanelOpen(false)} />
                 <SelectedSectionActions
                   disabled={disabled}
                   protectedComponentIds={referencedPageComponentIds(definition)}
@@ -757,6 +826,15 @@ export function VisualComponentEditor({
                 <PanelWhenEmpty>{panelWhenEmpty}</PanelWhenEmpty>
                 <AddSectionMenu disabled={disabled} />
               </aside>
+              {/* Phone only: opens the panel to page options and add-section
+                * when no section is selected. Hidden while the sheet is open. */}
+              <button
+                type="button"
+                className="editor-panel-open"
+                onClick={() => setPanelOpen(true)}
+              >
+                <span aria-hidden="true">☰</span> Page options
+              </button>
             </div>
           </Puck.Layout>
         </Puck>

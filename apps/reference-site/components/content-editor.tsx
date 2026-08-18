@@ -210,6 +210,15 @@ export function ContentEditor({
   // no editing chrome, until the owner deliberately switches to editing.
   const [editorMode, setEditorMode] = useState<"browse" | "edit">("browse");
 
+  // On a phone the top controls are hidden by default so the site fills the
+  // screen; a floating button opens them as a sheet. This flag is that sheet's
+  // open state. On a wide screen the controls are always shown and this is
+  // ignored — the sheet styling only exists in the phone media query.
+  const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
+  // Mirrors the page editor's own side-panel sheet state up here, so the
+  // floating Menu button can hide while that sheet is open (and the reverse).
+  const [editorPanelOpen, setEditorPanelOpen] = useState(false);
+
   // The full-window editor covers the dashboard chrome; anything under the
   // overlay leaves the keyboard and screen-reader order unless made inert.
   useEffect(() => {
@@ -1818,50 +1827,96 @@ export function ContentEditor({
   // mode is the site as itself — no highlights, no chrome in the page — and
   // Edit mode brings the canvas, the selection panel, and in-place text.
   return (
-    <section className="content-editor editor-immersive" aria-label={heading}>
-      <header className="editor-topbar">
-        <a className="topbar-back" href={`/dash${activeWorkspaceQuery}`}>
-          ← Dashboard
-        </a>
-        <h1 className="topbar-title">{heading}</h1>
-        <div className="mode-toggle" role="group" aria-label="Editor mode">
+    <section
+      className="content-editor editor-immersive"
+      aria-label={heading}
+      data-mobile-controls-open={mobileControlsOpen ? "true" : "false"}
+      data-panel-open={editorPanelOpen ? "true" : "false"}
+    >
+      {/* Phone only: a floating button that opens the controls sheet. On a wide
+        * screen it is hidden and the controls below show as a normal top bar. */}
+      <button
+        type="button"
+        className="editor-mobile-menu"
+        aria-expanded={mobileControlsOpen}
+        onClick={() => setMobileControlsOpen((open) => !open)}
+      >
+        <span aria-hidden="true">☰</span> Menu
+        {/* A save-state dot, distinct from the full status chip in the sheet, so
+          * the collapsed button still says at a glance whether work is safe. */}
+        <span
+          className="editor-mobile-menu-status"
+          data-status={state.status}
+          aria-hidden="true"
+        />
+      </button>
+      {/* Phone only: tapping the dimmed area behind the sheet closes it. */}
+      <div
+        className="editor-mobile-scrim"
+        aria-hidden="true"
+        onClick={() => setMobileControlsOpen(false)}
+      />
+      {/* On a wide screen this is `display: contents`, so the top bar and the
+        * notes strip lay out exactly as before. On a phone it becomes the sheet
+        * that the floating Menu button slides down. */}
+      <div className="editor-controls">
+        <header className="editor-topbar">
           <button
             type="button"
-            aria-pressed={editorMode === "browse"}
-            onClick={() => setEditorMode("browse")}
+            className="editor-mobile-close"
+            onClick={() => setMobileControlsOpen(false)}
           >
-            Browse
+            <span aria-hidden="true">✕</span> Close
           </button>
-          <button
-            type="button"
-            aria-pressed={editorMode === "edit"}
-            onClick={() => setEditorMode("edit")}
-          >
-            Edit
-          </button>
-        </div>
-        <div className="topbar-grow" />
-        {statusChip}
-        <div className="editor-toolbar-actions">
-          {historyButtons}
-          {workflowButtons}
-        </div>
-      </header>
-      {/* Always rendered at a stable height: the note's text changes with
-        * the autosave cycle, and mounting it in and out made the canvas jump
-        * on every edit. */}
-      <div className="editor-notes editor-notes-immersive">
-        <p role="status" aria-live="polite" className="editor-message">
-          {message}
-        </p>
-        {state.status === "stale" ? (
-          <p className="editor-message">
-            This draft was made against an older version of the site. Start a
-            fresh workspace to keep editing; these edits stay preserved.
+          <a className="topbar-back" href={`/dash${activeWorkspaceQuery}`}>
+            ← Dashboard
+          </a>
+          <h1 className="topbar-title">{heading}</h1>
+          <div className="mode-toggle" role="group" aria-label="Editor mode">
+            <button
+              type="button"
+              aria-pressed={editorMode === "browse"}
+              onClick={() => {
+                setEditorMode("browse");
+                setMobileControlsOpen(false);
+              }}
+            >
+              Browse
+            </button>
+            <button
+              type="button"
+              aria-pressed={editorMode === "edit"}
+              onClick={() => {
+                setEditorMode("edit");
+                setMobileControlsOpen(false);
+              }}
+            >
+              Edit
+            </button>
+          </div>
+          <div className="topbar-grow" />
+          {statusChip}
+          <div className="editor-toolbar-actions">
+            {historyButtons}
+            {workflowButtons}
+          </div>
+        </header>
+        {/* Always rendered at a stable height: the note's text changes with
+          * the autosave cycle, and mounting it in and out made the canvas jump
+          * on every edit. */}
+        <div className="editor-notes editor-notes-immersive">
+          <p role="status" aria-live="polite" className="editor-message">
+            {message}
           </p>
-        ) : (
-          <p className="editor-publication-note">{publicationNote}</p>
-        )}
+          {state.status === "stale" ? (
+            <p className="editor-message">
+              This draft was made against an older version of the site. Start a
+              fresh workspace to keep editing; these edits stay preserved.
+            </p>
+          ) : (
+            <p className="editor-publication-note">{publicationNote}</p>
+          )}
+        </div>
       </div>
       {conflictsNode}
       {editorMode === "browse" ? (
@@ -1890,6 +1945,7 @@ export function ContentEditor({
               siteImages,
             }}
             onValidationChange={updateVisualRichTextValidation}
+            onPanelOpenChange={setEditorPanelOpen}
             panelWhenEmpty={
               <>
                 {editorBodyNode}
