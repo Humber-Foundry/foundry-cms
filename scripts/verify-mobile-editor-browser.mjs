@@ -164,13 +164,24 @@ try {
     "mobile_editor_side_not_closed",
   );
 
-  // Tapping a section on the canvas opens the sheet to that section's controls.
+  // Tapping a section on the canvas selects it and leaves the canvas alone.
+  // The owner edits the words by typing on the page, so a sheet must never
+  // cover the text they just tapped. The section's controls stay one tap away
+  // behind the Page-options button.
   await editorFrame.getByRole("heading", { name: "Turn a good idea" }).click();
+  await settledRect(
+    page, ".editor-side",
+    (r) => r.top >= VIEWPORT.height - 4,
+    "mobile_editor_sheet_covered_canvas_on_selection",
+  );
+
+  // The selected section's controls are reachable, on demand, from the button.
+  await page.locator(".editor-panel-open").click();
   await page.getByRole("button", { name: "Duplicate section" }).waitFor({ state: "visible" });
   await settledRect(
     page, ".editor-side",
     (r) => r.top <= VIEWPORT.height - 120,
-    "mobile_editor_section_sheet_not_shown",
+    "mobile_editor_section_sheet_not_shown_on_request",
   );
   await page.locator(".editor-side-done").click();
   await settledRect(
@@ -181,8 +192,8 @@ try {
 
   console.log(
     `Mobile editor browser acceptance passed at ${origin}: the page fills a ${VIEWPORT.width}px screen, ` +
-    "the Menu button opens the top controls sheet, and the Page-options button and a section tap each open " +
-    "the side panel as a bottom sheet that Done dismisses.",
+    "the Menu button opens the top controls sheet, selecting a section leaves the canvas clear, and the " +
+    "Page-options button opens the selected section's controls as a bottom sheet that Done dismisses.",
   );
 } catch (error) {
   console.error("MOBILE EDITOR ACCEPTANCE FAILED:", error?.message);
