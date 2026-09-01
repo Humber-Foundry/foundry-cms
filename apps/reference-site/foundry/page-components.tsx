@@ -243,6 +243,10 @@ export const inlineEditedImageFields: Readonly<Record<string, ReadonlySet<string
  * array fields stay in the panel because items are added and removed there.
  */
 export const inlineEditedTextFields: Readonly<Record<string, ReadonlySet<string>>> = {
+  hero: new Set(["eyebrow", "title", "summary"]),
+  services: new Set(["eyebrow", "title", "introduction"]),
+  proof: new Set(["quote", "attribution"]),
+  callToAction: new Set(["eyebrow", "title"]),
   attentionStory: new Set([
     "title", "introduction", "statementBefore", "statementHighlight", "body",
     "attentionLabel", "attentionHint", "quote",

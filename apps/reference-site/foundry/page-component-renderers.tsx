@@ -58,21 +58,36 @@ function occurrenceFor(
   ) ?? null;
 }
 
+/**
+ * Wraps one field's text so it renders editable where it stands when the editor
+ * supplies an inline-text renderer, and as the plain string it always was on
+ * the public site and in previews.
+ */
+function inlineOr(inlineText: InlineTextRenderer | undefined) {
+  return (
+    path: string,
+    value: string,
+    options?: Readonly<{ multiline?: boolean; label?: string }>,
+  ): ReactNode => (inlineText === undefined ? value : inlineText(path, value, options));
+}
+
 export const renderHeroPageComponent: PageComponentRenderer = ({
   section,
   definition,
   mediaDelivery = "published",
   mediaAccessToken,
+  inlineText,
 }) => {
   if (section.type !== "hero") throw new TypeError("hero_page_component_required");
+  const t = inlineOr(inlineText);
   const occurrence = section.id === "section_hero"
     ? occurrenceFor(definition, "occurrence_home_hero")
     : null;
   return (
     <section className="hero" data-component-variant={section.variant} id={sectionAnchor(section)} aria-labelledby={`${section.id}_title`}>
-      <p className="eyebrow">{section.eyebrow}</p>
-      <h1 id={`${section.id}_title`}>{section.title}</h1>
-      <p className="hero-summary">{section.summary}</p>
+      <p className="eyebrow">{t("eyebrow", section.eyebrow, { label: "Eyebrow" })}</p>
+      <h1 id={`${section.id}_title`}>{t("title", section.title, { label: "Title" })}</h1>
+      <p className="hero-summary">{t("summary", section.summary, { multiline: true, label: "Summary" })}</p>
       {occurrence === null ? null : <MediaOccurrence className="site-media site-media-hero" occurrence={occurrence} delivery={mediaDelivery} accessToken={mediaAccessToken} />}
       <div className="action-row">
         <a className="button button-primary" href={section.primaryAction.href}>{section.primaryAction.label}</a>
@@ -87,25 +102,28 @@ export const renderServicesPageComponent: PageComponentRenderer = ({
   definition,
   mediaDelivery = "published",
   mediaAccessToken,
+  inlineText,
 }) => {
   if (section.type !== "services") throw new TypeError("services_page_component_required");
+  const t = inlineOr(inlineText);
   const occurrence = section.id === "section_services"
     ? occurrenceFor(definition, "occurrence_home_detail")
     : null;
   return (
     <section className="services" data-component-variant={section.variant} id={sectionAnchor(section)} aria-labelledby={`${section.id}_title`}>
-      <div className="section-heading"><p className="eyebrow">{section.eyebrow}</p><h2 id={`${section.id}_title`}>{section.title}</h2><p>{section.introduction}</p></div>
+      <div className="section-heading"><p className="eyebrow">{t("eyebrow", section.eyebrow, { label: "Eyebrow" })}</p><h2 id={`${section.id}_title`}>{t("title", section.title, { label: "Title" })}</h2><p>{t("introduction", section.introduction, { multiline: true, label: "Introduction" })}</p></div>
       {occurrence === null ? null : <MediaOccurrence className="site-media site-media-detail" occurrence={occurrence} delivery={mediaDelivery} accessToken={mediaAccessToken} />}
       <ol className="service-list">{section.items.map((item) => <li key={item.id}><span className="service-number" aria-hidden="true">{item.number}</span><div><h3>{item.title}</h3><p>{item.description}</p></div></li>)}</ol>
     </section>
   );
 };
 
-export const renderProofPageComponent: PageComponentRenderer = ({ section }) => {
+export const renderProofPageComponent: PageComponentRenderer = ({ section, inlineText }) => {
   if (section.type !== "proof") throw new TypeError("proof_page_component_required");
+  const t = inlineOr(inlineText);
   return (
     <section className="proof" data-component-variant={section.variant} id={sectionAnchor(section)} aria-label="Foundry principle and outcomes">
-      <figure><blockquote>“{section.quote}”</blockquote><figcaption>{section.attribution}</figcaption></figure>
+      <figure><blockquote>“{t("quote", section.quote, { multiline: true, label: "Quote" })}”</blockquote><figcaption>{t("attribution", section.attribution, { label: "Attribution" })}</figcaption></figure>
       <dl className="metrics">{section.metrics.map((metric) => <div key={metric.id}><dt>{metric.label}</dt><dd>{metric.value}</dd></div>)}</dl>
     </section>
   );
@@ -114,11 +132,13 @@ export const renderProofPageComponent: PageComponentRenderer = ({ section }) => 
 export const renderCallToActionPageComponent: PageComponentRenderer = ({
   section,
   callToActionBody,
+  inlineText,
 }) => {
   if (section.type !== "callToAction") throw new TypeError("call_to_action_page_component_required");
+  const t = inlineOr(inlineText);
   return (
     <section className="contact" data-component-variant={section.variant} id={sectionAnchor(section)} aria-labelledby={`${section.id}_title`}>
-      <p className="eyebrow">{section.eyebrow}</p><h2 id={`${section.id}_title`}>{section.title}</h2>
+      <p className="eyebrow">{t("eyebrow", section.eyebrow, { label: "Eyebrow" })}</p><h2 id={`${section.id}_title`}>{t("title", section.title, { label: "Title" })}</h2>
       <div className="rich-text">{callToActionBody ?? <RichTextRenderer document={section.body} headingOffset={1} />}</div>
       <a className="button button-light" href={section.action.href}>{section.action.label}</a>
     </section>
