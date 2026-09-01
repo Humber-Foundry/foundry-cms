@@ -6,6 +6,13 @@ import {
   verifyNewsletterUnsubscribeToken,
 } from "./newsletter-unsubscribe-token";
 
+// The adapter verifies expiry against the real clock, so a token the test
+// expects to succeed has to stay in the future. A fixed calendar date here
+// passes until that date arrives and then fails for good.
+function stillValid() {
+  return new Date(Date.now() + 60 * 60 * 1000).toISOString();
+}
+
 describe("newsletter unsubscribe tokens", () => {
   it("binds an opaque ledger identity and expiry without exposing an address", async () => {
     const identityKey = "a".repeat(64);
@@ -46,7 +53,7 @@ describe("newsletter unsubscribe tokens", () => {
 
     const url = await adapter.createUnsubscribeUrl({
       identityKey: "b".repeat(64),
-      expiresAt: "2026-08-30T00:00:00.000Z",
+      expiresAt: stillValid(),
     });
     const token = new URL(url).searchParams.get("token");
 
@@ -67,7 +74,7 @@ describe("newsletter unsubscribe tokens", () => {
     });
     const url = await adapter.createUnsubscribeUrl({
       identityKey: "c".repeat(64),
-      expiresAt: "2026-08-30T00:00:00.000Z",
+      expiresAt: stillValid(),
     });
     const parsed = new URL(url);
 
