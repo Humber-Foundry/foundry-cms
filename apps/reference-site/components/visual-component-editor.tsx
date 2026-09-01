@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createUsePuck,
   Puck,
@@ -645,22 +645,6 @@ function PanelFields() {
 }
 
 /**
- * Phone only: opens the side panel as a sheet the moment a section is selected,
- * so a tap on the canvas brings up that section's controls. On a wide screen
- * the panel is always docked beside the canvas, so opening it changes nothing.
- */
-function PanelSelectionSync({ onOpen }: { onOpen(): void }) {
-  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
-  const isSelected = selected !== null;
-  const onOpenRef = useRef(onOpen);
-  onOpenRef.current = onOpen;
-  useEffect(() => {
-    if (isSelected) onOpenRef.current();
-  }, [isSelected]);
-  return null;
-}
-
-/**
  * The sheet's header on a phone: a grab handle and a Done button. Done clears
  * the selection and closes the sheet, so the canvas returns to the plain site
  * and the whole screen is the page again.
@@ -751,11 +735,12 @@ export function VisualComponentEditor({
   );
   const [message, setMessage] = useState("");
   // On a phone the side panel is a sheet that slides up from the bottom, closed
-  // by default so the whole screen is the page. It opens when a section is
-  // selected or when the owner taps the floating page-options button. On a wide
+  // by default so the whole screen is the page. It opens only when the owner
+  // taps the floating page-options button. Selecting a section must never open
+  // it: the owner edits the words by typing on the page itself, and a sheet
+  // that appears on selection covers the text they just tapped. On a wide
   // screen the panel is always docked and this flag is ignored.
   const [panelOpen, setPanelOpen] = useState(false);
-  const openPanel = useCallback(() => setPanelOpen(true), []);
   const panelChangeRef = useRef(onPanelOpenChange);
   panelChangeRef.current = onPanelOpenChange;
   useEffect(() => {
@@ -800,7 +785,6 @@ export function VisualComponentEditor({
         >
           <Puck.Layout>
             <PermissionRefresher definition={definition} />
-            <PanelSelectionSync onOpen={openPanel} />
             {/* The page is the editing surface: the live preview dominates,
               * and everything about the selected section sits beside it. */}
             <div className="editor-workbench">
