@@ -41,6 +41,13 @@ type EditableSiteFieldBase = Readonly<{
   path: string;
   label: string;
   group: "Page" | "Navigation" | "Footer" | "SEO" | "Design" | "Blog";
+  /**
+   * A finer heading inside a group, so the editor can split one long group
+   * into short cards the owner reads by area. The "Page" group uses this to
+   * separate "Site settings" from each content section (Hero, Services, …).
+   * Absent when the group is already short enough to show as one card.
+   */
+  section?: string;
   multiline: boolean;
   values?: ReadonlyArray<string>;
   /**
@@ -105,6 +112,7 @@ type EditableFieldBindingInput = Readonly<{
   path: string;
   label: string;
   group: EditableSiteField["group"];
+  section?: string;
   multiline?: boolean;
   values?: ReadonlyArray<string>;
   optional?: boolean;
@@ -126,6 +134,7 @@ function fieldBinding({
   path,
   label,
   group,
+  section,
   value,
   multiline = false,
   format = "plainText",
@@ -145,6 +154,7 @@ function fieldBinding({
       path,
       label,
       group,
+      ...(section === undefined ? {} : { section }),
       value,
       multiline,
       format,
@@ -196,6 +206,17 @@ export function formatSeoKeywords(
 ): string {
   return keywords.join(", ");
 }
+
+/**
+ * The card heading each content section's fields sit under in the editor. The
+ * key is the section's type; the value is the plain name the owner reads.
+ */
+const contentSectionLabels: Record<string, string> = {
+  hero: "Hero",
+  services: "Services",
+  proof: "Proof",
+  callToAction: "Call to action",
+};
 
 function editableFieldBindings(
   definition: SiteDefinition,
@@ -338,6 +359,7 @@ function editableFieldBindings(
       path: `${definition.site.id}.name`,
       label: "Site name",
       group: "Page",
+      section: "Site settings",
       value: definition.site.name,
       multiline: false,
       write: (draft, value) => {
@@ -348,6 +370,7 @@ function editableFieldBindings(
       path: `${definition.site.id}.description`,
       label: "Site description",
       group: "Page",
+      section: "Site settings",
       value: definition.site.description,
       multiline: true,
       write: (draft, value) => {
@@ -405,6 +428,9 @@ function editableFieldBindings(
   definition.home.sections.forEach((section, sectionIndex) => {
     if (section.type === "registered") return;
     const variant = designContract.variants[section.type];
+    // The card heading the editor shows for every field in this section, so
+    // the owner reads "Hero" or "Services" instead of one long "Page" list.
+    const sectionLabel = contentSectionLabels[section.type] ?? section.type;
     fields.push(
       fieldBinding({
         path: sectionVariantFieldPath(section.id),
@@ -432,6 +458,7 @@ function editableFieldBindings(
           path: `${section.id}.${property}`,
           label,
           group: "Page",
+          section: sectionLabel,
           value,
           multiline,
           write: (draft, nextValue) => {
@@ -454,6 +481,7 @@ function editableFieldBindings(
           path: `${itemId}.label`,
           label,
           group: "Page",
+          section: sectionLabel,
           value,
           multiline: false,
           write: (draft, nextValue) => {
@@ -511,6 +539,7 @@ function editableFieldBindings(
                 path: `${item.id}.${property}`,
                 label,
                 group: "Page",
+                section: sectionLabel,
                 value: item[property],
                 multiline,
                 write: (draft, nextValue) => {
@@ -546,6 +575,7 @@ function editableFieldBindings(
                 path: `${metric.id}.${property}`,
                 label,
                 group: "Page",
+                section: sectionLabel,
                 value: metric[property],
                 multiline: false,
                 write: (draft, nextValue) => {
@@ -572,6 +602,7 @@ function editableFieldBindings(
             path: `${section.id}.body`,
             label: "Call to action body",
             group: "Page",
+            section: sectionLabel,
             value: serializeRichTextDocument(section.body),
             multiline: true,
             format: "richText",

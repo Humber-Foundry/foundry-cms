@@ -533,6 +533,26 @@ describe("reference Site Definition", () => {
     expect(fields.some((field) => field.path.endsWith(".href"))).toBe(false);
   });
 
+  it("labels each Page field with the section card it belongs to", () => {
+    const fields = listEditableSiteFields(referenceSiteDefinition);
+    const sectionOf = (path: string) =>
+      fields.find((field) => field.path === path)?.section;
+
+    // Site-wide settings and each content section carry their own card name,
+    // so the editor splits the long Page list into short cards by area.
+    expect(sectionOf("site_foundry_reference.name")).toBe("Site settings");
+    expect(sectionOf("site_foundry_reference.description")).toBe(
+      "Site settings",
+    );
+    expect(sectionOf("section_hero.title")).toBe("Hero");
+
+    // Fields the owner reaches through their own destination card need no
+    // finer section, so Navigation, Footer and SEO stay one card each.
+    expect(sectionOf("nav_work.label")).toBeUndefined();
+    expect(sectionOf("site_foundry_reference.footer")).toBeUndefined();
+    expect(sectionOf("page_home.seo.title")).toBeUndefined();
+  });
+
   it("applies copy edits without changing the source definition", () => {
     const result = applySiteDefinitionEdits(referenceSiteDefinition, [
       {

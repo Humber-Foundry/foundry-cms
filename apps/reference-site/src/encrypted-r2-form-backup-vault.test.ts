@@ -172,10 +172,17 @@ describe("encrypted R2 form backup vault", () => {
   it("stores ciphertext, authenticates site metadata, and removes expired objects", async () => {
     const bucket = memoryBucket();
     const { backup, recovery } = vaults(bucket);
+    // `readDecrypted` checks the stored expiry against the real clock. A fixed
+    // `createdAt` makes this backup live only until its retention window ends,
+    // so the backup is written now and the deletion clock is derived from it.
+    const createdAt = new Date().toISOString();
+    const afterRetention = new Date(
+      Date.parse(createdAt) + 31 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     const snapshot = {
       version: 1 as const,
       siteId,
-      createdAt: "2026-07-27T00:00:00.000Z",
+      createdAt,
       submissions: [
         {
           site_id: siteId,
@@ -185,7 +192,7 @@ describe("encrypted R2 form backup vault", () => {
           receipt_id: "receipt-48",
           request_hash: "hash-48",
           fields_json: '{"email":"private@example.com"}',
-          accepted_at: "2026-07-27T00:00:00.000Z",
+          accepted_at: createdAt,
           payload_deleted_at: null,
         },
       ],
@@ -216,7 +223,7 @@ describe("encrypted R2 form backup vault", () => {
       recovery.readDecrypted({ backupId: "backup-48", siteId }),
     ).resolves.toEqual(snapshot);
     await expect(
-      backup.deleteExpired({ now: "2026-08-27T00:00:00.000Z" }),
+      backup.deleteExpired({ now: afterRetention }),
     ).resolves.toBe(1);
   });
 

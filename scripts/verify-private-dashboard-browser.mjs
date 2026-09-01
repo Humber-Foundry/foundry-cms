@@ -313,6 +313,11 @@ async function main() {
   try {
     await waitForDashboard(origin, server, logs);
     browser = await chromium.launch({ headless: true });
+    // Runs at a phone width: this test also asserts the dashboard has no
+    // horizontal overflow on a phone. At this width the page editor's top bar
+    // and side panel are slide-in sheets, so the helpers below open the right
+    // sheet before reaching a control. The sheets' own behaviour has a
+    // dedicated test: verify-mobile-editor-browser.mjs.
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
     });
@@ -339,13 +344,49 @@ async function main() {
     }
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
     await page.getByRole("heading", { name: "Pages" }).waitFor();
+
+    // At a phone width the page editor's top bar and side panel are slide-in
+    // sheets. These helpers open the right sheet before reaching a control, the
+    // way the owner does. The Menu button is hidden while the side panel is
+    // open, so opening the Menu closes the panel first.
+    // A sheet is "on screen" only when its top edge is above the fold; a closed
+    // sheet is translated fully off screen but still counts as visible to
+    // Playwright, so position is what the helpers test.
+    const sheetOnScreen = async (selector) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (el === null) return false;
+        return el.getBoundingClientRect().top < 844 - 40;
+      }, selector);
+    const controlsOpen = async () =>
+      (await page.locator(".editor-immersive")
+        .getAttribute("data-mobile-controls-open")) === "true";
+    const closeSidePanel = async () => {
+      if (!(await sheetOnScreen(".editor-side"))) return;
+      await page.locator(".editor-side-done").click({ timeout: 6000 }).catch(() => {});
+      await page.waitForTimeout(300);
+    };
+    const openControls = async () => {
+      await closeSidePanel();
+      if (await controlsOpen()) return;
+      await page.locator(".editor-mobile-menu").click({ timeout: 6000 });
+      await page.waitForTimeout(280);
+    };
+    const openSidePanel = async () => {
+      if (await sheetOnScreen(".editor-side")) return;
+      await page.locator(".editor-panel-open").click({ timeout: 6000 });
+      await page.waitForTimeout(320);
+    };
+
     await waitForEnabled(
       page.getByRole("button", {
         name: "Preview ↗",
       }),
       "private_dashboard_content_editor_not_ready",
     );
+    await openControls();
     await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await openSidePanel();
     const addSection = page.locator(".add-section-menu summary");
     await addSection.click();
     await page.getByRole("button", { name: "Image and copy story" }).click();
@@ -365,10 +406,14 @@ async function main() {
       '.puck-editor-frame input[title="Title"]:visible:not([readonly])',
     );
     for (let attempt = 0; attempt < 20 && (await storyTitle.count()) === 0; attempt += 1) {
+      // Close the panel sheet first: while open it covers the lower canvas, so
+      // the section heading would not be clickable. Tapping the heading then
+      // re-opens the sheet to that section's fields.
+      await closeSidePanel();
       await editorFrame.getByRole("heading", {
         name: "Make room for a better question",
       }).click();
-      await page.waitForTimeout(250);
+      await page.waitForTimeout(300);
     }
     if ((await storyTitle.count()) !== 1) {
       throw new Error(`private_dashboard_custom_title_field_count:${await storyTitle.count()}`);
@@ -385,9 +430,12 @@ async function main() {
     await editorFrame.getByRole("heading", {
       name: editedStoryTitle,
     }).waitFor({ state: "visible" });
+    // Save lives in the Menu sheet at this width; open it (which closes the
+    // side panel) so the control is in reach.
+    await openControls();
     const saveRevision = page.getByRole("button", { name: "Save" });
     if ((await saveRevision.count()) === 1 && await saveRevision.isEnabled()) {
-      await saveRevision.click({ force: true });
+      await saveRevision.click();
     }
     const saved = await savedResponse;
     if (saved.status() !== 201) {
@@ -403,6 +451,8 @@ async function main() {
     await page.locator(
       `.state-label.state-saved[data-revision="${savedRevision}"]`,
     ).waitFor();
+    // Preview is in the Menu sheet too; keep it open for the click.
+    await openControls();
     const [preview] = await Promise.all([
       context.waitForEvent("page"),
       page.getByRole("button", {
@@ -441,6 +491,8 @@ async function main() {
         `private_dashboard_mobile_horizontal_overflow:${JSON.stringify(overflow)}`,
       );
     }
+    // The Dashboard link is in the Menu sheet too.
+    await openControls();
     await page.getByRole("link", { name: "← Dashboard" }).click();
     await page.waitForURL(/\/dash\?workspace=workspace_[a-f0-9]{24}$/u);
     await verifyDesignDestination(page);

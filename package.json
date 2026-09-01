@@ -23,7 +23,7 @@
     "graphify:refresh": "node scripts/graphify-index.mjs refresh",
     "graphify:status": "node scripts/graphify-index.mjs status",
     "test": "vitest run",
-    "test:browser": "vitest run --config vitest.browser.config.ts && node scripts/verify-private-dashboard-browser.mjs && node scripts/verify-media-gallery-browser.mjs && node scripts/verify-page-photo-change-browser.mjs && node scripts/verify-picker-site-photos-browser.mjs && node scripts/verify-blog-post-images-browser.mjs && node scripts/verify-campaign-images-browser.mjs",
+    "test:browser": "vitest run --config vitest.browser.config.ts && node scripts/verify-private-dashboard-browser.mjs && node scripts/verify-mobile-editor-browser.mjs && node scripts/verify-media-gallery-browser.mjs && node scripts/verify-page-photo-change-browser.mjs && node scripts/verify-picker-site-photos-browser.mjs && node scripts/verify-blog-post-images-browser.mjs && node scripts/verify-campaign-images-browser.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project apps/reference-site/tsconfig.json",
     "verify:integrity": "node scripts/verify-repository-integrity.mjs",
