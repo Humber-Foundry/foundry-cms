@@ -41,16 +41,84 @@ import {
   type InstalledPageComponentRegistration,
 } from "../foundry/page-components";
 
-function DesignScopedSection({
+/**
+ * A typed foundation section on the canvas — hero, services, proof. While it is
+ * the selected section its text renders editable in place, the same as a
+ * registered section: click into a sentence and type. Every section on the
+ * canvas edits on the page; the side panel is for what cannot be done there.
+ *
+ * Typed sections carry their fields flat on the Puck props, where a registered
+ * section nests them under `props`, so this commits against the flat object.
+ */
+function EditableTypedSection({
   definition,
   section,
+  puckProps,
+  registration,
+  disabled,
 }: {
   definition: SiteDefinition;
   section: PageSection;
+  puckProps: Record<string, unknown>;
+  registration: InstalledPageComponentRegistration;
+  disabled: boolean;
 }) {
+  const dispatch = useVisualPuck((state) => state.dispatch);
+  const getSelectorForId = useVisualPuck((state) => state.getSelectorForId);
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
+
+  const selector = getSelectorForId(section.id);
+  const isSelected =
+    !disabled &&
+    selector !== undefined &&
+    selected !== null &&
+    selected.index === selector.index &&
+    (selected.zone ?? rootZone) === (selector.zone ?? rootZone);
+
+  // The schema decides what is allowed. A refused value — emptied text, a
+  // malformed destination — reverts in the editor rather than entering the
+  // canvas and breaking the section's render.
+  const commitField = (path: string, next: string): boolean => {
+    const liveSelector = getSelectorForId(section.id);
+    if (liveSelector === undefined) return false;
+    const nextProps = setAtPath(
+      puckProps,
+      path.split("."),
+      next,
+    ) as Record<string, unknown>;
+    const nextSection = puckPropsToSection(registration, section, nextProps);
+    if (!installedPageComponentRegistry.validate(nextSection).ok) return false;
+    dispatch({
+      type: "replace",
+      destinationIndex: liveSelector.index,
+      destinationZone: liveSelector.zone,
+      data: { type: registration.type, props: { ...nextProps, id: section.id } },
+      recordHistory: true,
+    });
+    return true;
+  };
+
+  const inlineText: InlineTextRenderer | undefined = isSelected
+    ? (path, value, options) => (
+        <InlineText
+          key={path}
+          path={path}
+          value={value}
+          multiline={options?.multiline ?? false}
+          label={options?.label ?? path}
+          onCommit={(next) => commitField(path, next)}
+        />
+      )
+    : undefined;
+
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
-      <SiteSection section={section} definition={definition} editingSurface />
+      <SiteSection
+        section={section}
+        definition={definition}
+        editingSurface
+        inlineText={inlineText}
+      />
     </div>
   );
 }
@@ -604,7 +672,15 @@ export function createVisualComponentConfig(
             if (section.type === "registered") {
               return <EditableRegisteredSection definition={getDefinition()} section={section} disabled={getDisabled()} media={getMediaContext()} openPhotoPicker={getOpenPhotoPicker()} />;
             }
-            return <DesignScopedSection definition={getDefinition()} section={section} />;
+            return (
+              <EditableTypedSection
+                definition={getDefinition()}
+                section={section}
+                puckProps={props}
+                registration={registration}
+                disabled={getDisabled()}
+              />
+            );
           },
           resolvePermissions: (data: { props: { id: string } }) => ({
             delete: !getProtectedComponentIds().has(data.props.id),
