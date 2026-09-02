@@ -283,6 +283,7 @@ function RenderedCallToActionSection({
 }) {
   const dispatch = useVisualPuck((state) => state.dispatch);
   const getSelectorForId = useVisualPuck((state) => state.getSelectorForId);
+  const selected = useVisualPuck((state) => state.appState.ui.itemSelector);
   const portalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -290,11 +291,55 @@ function RenderedCallToActionSection({
     return registerOverlayPortal(portalRef.current, { disableDragOnFocus: true });
   }, []);
 
+  const selector = getSelectorForId(section.id);
+  const isSelected =
+    !disabled &&
+    selector !== undefined &&
+    selected !== null &&
+    selected.index === selector.index &&
+    (selected.zone ?? rootZone) === (selector.zone ?? rootZone);
+
+  // The eyebrow and title sit beside the rich-text body as plain text, so they
+  // edit on the page like every other section's words. The body keeps its own
+  // rich-text island below.
+  const commitField = (path: string, next: string): boolean => {
+    const liveSelector = getSelectorForId(section.id);
+    if (liveSelector === undefined) return false;
+    const nextSection = setAtPath(
+      section,
+      path.split("."),
+      next,
+    ) as CallToActionSection;
+    if (!installedPageComponentRegistry.validate(nextSection).ok) return false;
+    dispatch({
+      type: "replace",
+      destinationIndex: liveSelector.index,
+      destinationZone: liveSelector.zone,
+      data: { type: "callToAction", props: { ...nextSection } },
+      recordHistory: true,
+    });
+    return true;
+  };
+
+  const inlineText: InlineTextRenderer | undefined = isSelected
+    ? (path, value, options) => (
+        <InlineText
+          key={path}
+          path={path}
+          value={value}
+          multiline={options?.multiline ?? false}
+          label={options?.label ?? path}
+          onCommit={(next) => commitField(path, next)}
+        />
+      )
+    : undefined;
+
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
       <SiteSection
         section={section}
         definition={definition}
+        inlineText={inlineText}
         callToActionBody={
           <div
             ref={portalRef}

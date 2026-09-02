@@ -45,23 +45,51 @@ function browserRevision(workspaceId: string) {
   } as never;
 }
 
+/**
+ * Finds a field's value wherever the owner edits it. Text the renderer edits in
+ * place lives on the canvas and is deliberately absent from the side panel, so
+ * looking only at panel inputs would miss it.
+ */
 async function waitForEditorValue(
   host: HTMLElement,
   expected: string,
 ): Promise<boolean> {
-  for (let index = 0; index < 50; index += 1) {
-    if (
-      Array.from(
-        host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-          ".editor-groups input, .editor-groups textarea, .editor-side-fields input, .editor-side-fields textarea",
-        ),
-      ).some(({ value }) => value === expected)
-    ) {
-      return true;
-    }
+  // The canvas renders after the panel, so this waits longer than a panel-only
+  // lookup needed: a second is not enough once the value can live on the page.
+  for (let index = 0; index < 200; index += 1) {
+    const inPanel = Array.from(
+      host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+        ".editor-groups input, .editor-groups textarea, .editor-side-fields input, .editor-side-fields textarea",
+      ),
+    ).some(({ value }) => value === expected);
+    if (inPanel) return true;
+    const canvas = host.querySelector("iframe")?.contentDocument;
+    const onPage = Array.from(
+      canvas?.querySelectorAll<HTMLElement>("[data-inline-edit]") ?? [],
+    ).some((element) => element.textContent === expected);
+    if (onPage) return true;
     await new Promise((resolve) => window.setTimeout(resolve, 20));
   }
   return false;
+}
+
+/**
+ * Types into a piece of the page's own text, the way the owner does: the value
+ * commits when the element loses focus.
+ */
+async function editOnPage(
+  canvasDocument: Document,
+  path: string,
+  next: string,
+): Promise<void> {
+  const target = canvasDocument.querySelector<HTMLElement>(
+    `[data-inline-edit="${path}"]`,
+  );
+  expect(target).not.toBeNull();
+  target!.focus();
+  target!.textContent = next;
+  target!.blur();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
 }
 
 async function enterEditMode(host: HTMLElement): Promise<void> {
@@ -850,12 +878,9 @@ describe("visual component editor browser acceptance", () => {
     expect(linkButton).toBeDefined();
     await userEvent.click(linkButton!);
 
-    const callToActionTitle = host.querySelector<HTMLInputElement>(
-      '.editor-side-fields input[title="Title"]',
-    );
-    expect(callToActionTitle).not.toBeNull();
-    await userEvent.fill(
-      callToActionTitle!,
+    await editOnPage(
+      canvasDocument,
+      "title",
       "Unsaved while rich text is invalid",
     );
 
