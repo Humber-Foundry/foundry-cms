@@ -1311,7 +1311,7 @@
 .editor-mobile-scrim,
 .editor-side-scrim,
 .editor-side-handle,
-.editor-panel-open {
+.editor-menu-page-options {
   display: none;
 }
 
@@ -2404,31 +2404,32 @@
     min-height: 0;
   }
 
-  /* The floating button that opens the side panel to page options and
-   * add-section when no section is selected. */
-  .editor-panel-open {
-    display: inline-flex;
+  /* Inside the menu sheet: the way into the page settings sheet. It is a full
+   * row rather than a chip, because it leaves the menu and opens another
+   * surface, which the row-sized tap target and the chevron both signal. */
+  .editor-menu-page-options {
+    display: flex;
     align-items: center;
-    gap: 0.4rem;
-    position: fixed;
-    right: 0.8rem;
-    bottom: 0.8rem;
-    z-index: 34;
+    justify-content: space-between;
+    width: 100%;
     min-height: 2.75rem;
-    padding: 0.5rem 1.1rem;
+    margin-top: 0.15rem;
+    padding: 0.6rem 0.15rem;
     border: 0;
-    border-radius: 999px;
-    background: var(--dash-accent);
-    color: var(--white);
+    border-top: 1px solid var(--dash-line);
+    background: none;
+    color: var(--dash-ink);
     font-size: var(--dash-text-small);
     font-weight: 600;
+    text-align: left;
     cursor: pointer;
-    box-shadow: 0 8px 18px -8px rgb(16 24 29 / 55%);
   }
 
-  .visual-component-editor[data-panel-open="true"] .editor-panel-open,
-  .editor-immersive[data-mobile-controls-open="true"] .editor-panel-open {
-    display: none;
+  .editor-menu-page-options::after {
+    content: "›";
+    color: var(--dash-ink-soft);
+    font-size: 1.2rem;
+    line-height: 1;
   }
 
   /* The dimmed backdrop behind the side-panel sheet. */
