@@ -1822,6 +1822,12 @@ export function ContentEditor({
     );
   }
 
+  // Browsing has no panel, so it can never report one as open. The phone
+  // stylesheet hides the Menu button while the panel sheet is up, so a flag
+  // left true by an earlier edit would hide the Menu with no sheet on screen
+  // to close — the editor with no way back short of a reload.
+  const panelSheetOpen = editorPanelOpen && editorMode === "edit";
+
   // Pages: the editor takes the whole window, the way a visual CMS does. One
   // slim bar carries the workflow; below it the site fills the screen. Browse
   // mode is the site as itself — no highlights, no chrome in the page — and
@@ -1831,7 +1837,7 @@ export function ContentEditor({
       className="content-editor editor-immersive"
       aria-label={heading}
       data-mobile-controls-open={mobileControlsOpen ? "true" : "false"}
-      data-panel-open={editorPanelOpen ? "true" : "false"}
+      data-panel-open={panelSheetOpen ? "true" : "false"}
     >
       {/* Phone only: a floating button that opens the controls sheet. On a wide
         * screen it is hidden and the controls below show as a normal top bar. */}
@@ -1879,6 +1885,8 @@ export function ContentEditor({
               onClick={() => {
                 setEditorMode("browse");
                 setMobileControlsOpen(false);
+                // Leaving Edit takes the panel with it; drop the flag with it.
+                setEditorPanelOpen(false);
               }}
             >
               Browse
