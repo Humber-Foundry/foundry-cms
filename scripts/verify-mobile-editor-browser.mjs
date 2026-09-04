@@ -190,12 +190,38 @@ try {
     (r) => r.top <= VIEWPORT.height - 120,
     "mobile_editor_section_sheet_not_shown_on_request",
   );
+  // Opening the sheet moves focus into it. The control that opened it lives in
+  // the editor menu, and opening the sheet closes that menu, so focus left
+  // behind would sit on a button that has slid off screen.
+  const focusInSheet = await page.evaluate(() => {
+    const panel = document.querySelector(".editor-side");
+    return panel !== null && panel.contains(document.activeElement);
+  });
+  if (!focusInSheet) throw new Error("mobile_editor_sheet_did_not_take_focus");
+
   await page.locator(".editor-side-done").click();
   await settledRect(
     page, ".editor-side",
     (r) => r.top >= VIEWPORT.height - 4,
     "mobile_editor_section_sheet_not_closed",
   );
+
+  // Leaving Edit with the sheet open must not strand the editor. The phone
+  // stylesheet hides Menu while the panel sheet is up, so a flag left true by
+  // an earlier edit hid Menu in Browse, where there is no sheet to close it —
+  // no way back without a reload. Reached by opening the sheet, widening to
+  // where the top bar is in view, switching to Browse, and narrowing again.
+  await openPageOptions(page);
+  await page.setViewportSize({ width: 1000, height: VIEWPORT.height });
+  await page.getByRole("button", { name: "Browse", exact: true }).click();
+  await page.setViewportSize(VIEWPORT);
+  await page.locator(".editor-mobile-menu").waitFor({ state: "visible", timeout: 5000 })
+    .catch(() => { throw new Error("mobile_editor_menu_lost_after_browse"); });
+  // Back into Edit for the checks below.
+  await page.locator(".editor-mobile-menu").click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await editorFrame.getByRole("heading", { name: "Turn a good idea" })
+    .waitFor({ state: "visible" });
 
   // A panel taller than the sheet must scroll rather than squeeze what is in
   // it. Left to shrink, a group compresses while a field inside keeps its own

@@ -835,10 +835,11 @@ export function VisualComponentEditor({
   onChange(definition: SiteDefinition): void;
   onValidationChange?(source: string, invalid: boolean): void;
   /**
-   * The phone side-panel sheet's open state, when the host drives it. The host
-   * owns the one menu that opens the sheet, so it has to be able to open it
-   * from outside this component. Leave it undefined to let the sheet keep its
-   * own state.
+   * The phone side-panel sheet's open state. The host owns the one menu that
+   * opens the sheet, so opening it has to come from outside this component:
+   * everything in here only ever closes the sheet. Left undefined the sheet
+   * keeps its own state and therefore stays shut, which suits a canvas-less
+   * surface or a test that mounts this component on its own.
    */
   panelOpen?: boolean;
   /**
@@ -907,6 +908,22 @@ export function VisualComponentEditor({
     setOwnPanelOpen(open);
     panelChangeRef.current?.(open);
   }, []);
+  // The control that opens this sheet lives in the editor menu, and opening the
+  // sheet closes that menu. Focus would otherwise stay on a button that has
+  // just slid off screen, leaving a keyboard or screen-reader user tabbing
+  // through the page from a place they cannot see. Move it into the sheet.
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!panelOpen) return;
+    const panel = panelRef.current;
+    if (panel === null) return;
+    // Done exists only in the phone sheet, so its being laid out is the test
+    // for "this is a sheet". A docked panel on a wide screen never took focus
+    // and should not start.
+    const done = panel.querySelector<HTMLElement>(".editor-side-done");
+    if (done === null || done.offsetParent === null) return;
+    done.focus({ preventScroll: true });
+  }, [panelOpen]);
   const active = useRef(true);
 
   useEffect(() => {
@@ -961,7 +978,11 @@ export function VisualComponentEditor({
                 aria-hidden="true"
                 onClick={() => setPanelOpen(false)}
               />
-              <aside className="editor-side" aria-label="Page settings and selected section">
+              <aside
+                ref={panelRef}
+                className="editor-side"
+                aria-label="Page settings and selected section"
+              >
                 <PanelSheetHeader onClose={() => setPanelOpen(false)} />
                 <SelectedSectionActions
                   disabled={disabled}
