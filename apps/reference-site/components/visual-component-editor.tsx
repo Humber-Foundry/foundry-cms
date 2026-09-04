@@ -98,18 +98,28 @@ function EditableTypedSection({
     return true;
   };
 
-  const inlineText: InlineTextRenderer | undefined = isSelected
-    ? (path, value, options) => (
-        <InlineText
-          key={path}
-          path={path}
-          value={value}
-          multiline={options?.multiline ?? false}
-          label={options?.label ?? path}
-          onCommit={(next) => commitField(path, next)}
-        />
-      )
-    : undefined;
+  const selectSection = () => {
+    const liveSelector = getSelectorForId(section.id);
+    if (liveSelector === undefined) return;
+    dispatch({
+      type: "setUi",
+      ui: { itemSelector: { index: liveSelector.index, zone: liveSelector.zone } },
+    });
+  };
+
+  // Rendered whether or not the section is selected, so the first click lands
+  // on editable text rather than being spent selecting the section.
+  const inlineText: InlineTextRenderer = (path, value, options) => (
+    <InlineText
+      key={path}
+      path={path}
+      value={value}
+      multiline={options?.multiline ?? false}
+      label={options?.label ?? path}
+      onCommit={(next) => commitField(path, next)}
+      onSelectSection={selectSection}
+    />
+  );
 
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
@@ -215,18 +225,28 @@ function EditableRegisteredSection({
     return true;
   };
 
-  const inlineText: InlineTextRenderer | undefined = isSelected
-    ? (path, value, options) => (
-        <InlineText
-          key={path}
-          path={path}
-          value={value}
-          multiline={options?.multiline ?? false}
-          label={options?.label ?? path}
-          onCommit={(next) => commitField(path, next)}
-        />
-      )
-    : undefined;
+  const selectSection = () => {
+    const liveSelector = getSelectorForId(section.id);
+    if (liveSelector === undefined) return;
+    dispatch({
+      type: "setUi",
+      ui: { itemSelector: { index: liveSelector.index, zone: liveSelector.zone } },
+    });
+  };
+
+  // Rendered whether or not the section is selected, so the first click lands
+  // on editable text rather than being spent selecting the section.
+  const inlineText: InlineTextRenderer = (path, value, options) => (
+    <InlineText
+      key={path}
+      path={path}
+      value={value}
+      multiline={options?.multiline ?? false}
+      label={options?.label ?? path}
+      onCommit={(next) => commitField(path, next)}
+      onSelectSection={selectSection}
+    />
+  );
 
   // A photo is changed on the image itself, not in the side panel. The control
   // appears only while the section is selected and the picker's site context is
@@ -321,18 +341,28 @@ function RenderedCallToActionSection({
     return true;
   };
 
-  const inlineText: InlineTextRenderer | undefined = isSelected
-    ? (path, value, options) => (
-        <InlineText
-          key={path}
-          path={path}
-          value={value}
-          multiline={options?.multiline ?? false}
-          label={options?.label ?? path}
-          onCommit={(next) => commitField(path, next)}
-        />
-      )
-    : undefined;
+  const selectSection = () => {
+    const liveSelector = getSelectorForId(section.id);
+    if (liveSelector === undefined) return;
+    dispatch({
+      type: "setUi",
+      ui: { itemSelector: { index: liveSelector.index, zone: liveSelector.zone } },
+    });
+  };
+
+  // Rendered whether or not the section is selected, so the first click lands
+  // on editable text rather than being spent selecting the section.
+  const inlineText: InlineTextRenderer = (path, value, options) => (
+    <InlineText
+      key={path}
+      path={path}
+      value={value}
+      multiline={options?.multiline ?? false}
+      label={options?.label ?? path}
+      onCommit={(next) => commitField(path, next)}
+      onSelectSection={selectSection}
+    />
+  );
 
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
