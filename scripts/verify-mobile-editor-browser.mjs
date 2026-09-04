@@ -190,10 +190,58 @@ try {
     "mobile_editor_section_sheet_not_closed",
   );
 
+  // A panel taller than the sheet must scroll rather than squeeze what is in
+  // it. Left to shrink, a group compresses while a field inside keeps its own
+  // height: the field paints over the controls below it and the sheet reports
+  // nothing to scroll, so Add section at the foot cannot be reached at all.
+  // The proof section carries the most fields; on a shorter phone its panel is
+  // taller than the sheet.
+  await page.setViewportSize({ width: VIEWPORT.width, height: 700 });
+  await editorFrame
+    .getByText("The best handoff is not a folder of files.", { exact: false })
+    .click();
+  await page.locator(".editor-panel-open").click();
+  await page.getByRole("button", { name: "Duplicate section" }).waitFor({ state: "visible" });
+  const addSection = page.locator(".add-section-menu summary");
+  await addSection.scrollIntoViewIfNeeded();
+  // Polled: the sheet is still settling right after it scrolls, so one sample
+  // can hit whatever was at that point mid-scroll.
+  const uncovered = async () => addSection.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return hit === el || el.contains(hit);
+  });
+  const coveredDeadline = Date.now() + 4000;
+  let addSectionReachable = await uncovered();
+  while (!addSectionReachable && Date.now() < coveredDeadline) {
+    await new Promise((r) => setTimeout(r, 150));
+    await addSection.scrollIntoViewIfNeeded().catch(() => {});
+    addSectionReachable = await uncovered();
+  }
+  if (!addSectionReachable) throw new Error("mobile_editor_add_section_covered");
+  await addSection.click({ timeout: 10_000 });
+  const addSectionOpen = await page.locator(".add-section-menu").evaluate((el) => el.open);
+  if (!addSectionOpen) throw new Error("mobile_editor_add_section_did_not_open");
+
+  // The squeeze is what puts a control out of reach, and it hides itself: a
+  // sheet whose children have been compressed reports nothing to scroll even
+  // though its content is taller than it is.
+  const tallPanel = await page.locator(".editor-side").evaluate((el) => ({
+    clientHeight: el.clientHeight,
+    scrollHeight: el.scrollHeight,
+  }));
+  if (tallPanel.scrollHeight <= tallPanel.clientHeight) {
+    throw new Error(
+      `mobile_editor_tall_panel_squeezed_instead_of_scrolling:${JSON.stringify(tallPanel)}`,
+    );
+  }
+  await page.setViewportSize(VIEWPORT);
+
   console.log(
     `Mobile editor browser acceptance passed at ${origin}: the page fills a ${VIEWPORT.width}px screen, ` +
     "the Menu button opens the top controls sheet, selecting a section leaves the canvas clear, and the " +
-    "Page-options button opens the selected section's controls as a bottom sheet that Done dismisses.",
+    "Page-options button opens the selected section's controls as a bottom sheet that Done dismisses. "
+    + "A panel taller than the sheet scrolls, and Add section at its foot stays reachable.",
   );
 } catch (error) {
   console.error("MOBILE EDITOR ACCEPTANCE FAILED:", error?.message);
