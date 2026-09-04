@@ -2,10 +2,10 @@
 // the editor chrome lives in slide-in sheets.
 //
 // The docked, desktop workflow is covered by verify-private-dashboard-browser.
-// This test drives the phone layout: a floating Menu opens the top controls, a
-// floating Page-options button and a tap on a section each open the side panel
-// as a bottom sheet, and Done closes it. It asserts the sheets actually move on
-// and off screen, not merely that the markup exists.
+// This test drives the phone layout: a floating Menu opens the top controls,
+// Page options inside that menu opens the side panel as a bottom sheet, and
+// Done closes it. It asserts the sheets actually move on and off screen, not
+// merely that the markup exists.
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
@@ -50,6 +50,13 @@ function rectOf(page, selector) {
     const r = el.getBoundingClientRect();
     return { top: r.top, bottom: r.bottom, height: r.height, width: r.width };
   }, selector);
+}
+
+// The editor menu is the one way into the page settings sheet on a phone: tap
+// Menu, then Page options. There is no second floating button.
+async function openPageOptions(page) {
+  await page.locator(".editor-mobile-menu").click();
+  await page.locator(".editor-menu-page-options").click();
 }
 
 /**
@@ -145,8 +152,8 @@ try {
     "mobile_editor_side_not_hidden",
   );
 
-  // The floating Page-options button opens the side sheet with page settings.
-  await page.locator(".editor-panel-open").click();
+  // Menu -> Page options opens the side sheet with page settings.
+  await openPageOptions(page);
   await settledRect(
     page, ".editor-side",
     (r) => r.top <= VIEWPORT.height - 120,
@@ -167,7 +174,7 @@ try {
   // Tapping a section on the canvas selects it and leaves the canvas alone.
   // The owner edits the words by typing on the page, so a sheet must never
   // cover the text they just tapped. The section's controls stay one tap away
-  // behind the Page-options button.
+  // behind Menu -> Page options.
   await editorFrame.getByRole("heading", { name: "Turn a good idea" }).click();
   await settledRect(
     page, ".editor-side",
@@ -175,8 +182,8 @@ try {
     "mobile_editor_sheet_covered_canvas_on_selection",
   );
 
-  // The selected section's controls are reachable, on demand, from the button.
-  await page.locator(".editor-panel-open").click();
+  // The selected section's controls are reachable, on demand, from the menu.
+  await openPageOptions(page);
   await page.getByRole("button", { name: "Duplicate section" }).waitFor({ state: "visible" });
   await settledRect(
     page, ".editor-side",
@@ -200,7 +207,7 @@ try {
   await editorFrame
     .getByText("The best handoff is not a folder of files.", { exact: false })
     .click();
-  await page.locator(".editor-panel-open").click();
+  await openPageOptions(page);
   await page.getByRole("button", { name: "Duplicate section" }).waitFor({ state: "visible" });
   const addSection = page.locator(".add-section-menu summary");
   await addSection.scrollIntoViewIfNeeded();
@@ -239,8 +246,8 @@ try {
 
   console.log(
     `Mobile editor browser acceptance passed at ${origin}: the page fills a ${VIEWPORT.width}px screen, ` +
-    "the Menu button opens the top controls sheet, selecting a section leaves the canvas clear, and the " +
-    "Page-options button opens the selected section's controls as a bottom sheet that Done dismisses. "
+    "the Menu button opens the top controls sheet, selecting a section leaves the canvas clear, and " +
+    "Page options in that one menu opens the selected section's controls as a bottom sheet that Done dismisses. "
     + "A panel taller than the sheet scrolls, and Add section at its foot stays reachable.",
   );
 } catch (error) {

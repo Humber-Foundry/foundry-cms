@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createUsePuck,
   Puck,
@@ -824,6 +824,7 @@ export function VisualComponentEditor({
   disabled,
   onChange,
   onValidationChange = ignoreRichTextValidation,
+  panelOpen: controlledPanelOpen,
   onPanelOpenChange,
   iframeEnabled = true,
   panelWhenEmpty,
@@ -833,6 +834,13 @@ export function VisualComponentEditor({
   disabled: boolean;
   onChange(definition: SiteDefinition): void;
   onValidationChange?(source: string, invalid: boolean): void;
+  /**
+   * The phone side-panel sheet's open state, when the host drives it. The host
+   * owns the one menu that opens the sheet, so it has to be able to open it
+   * from outside this component. Leave it undefined to let the sheet keep its
+   * own state.
+   */
+  panelOpen?: boolean;
   /**
    * Reports the phone side-panel sheet's open state to the host, so the host's
    * own floating controls can step aside while the sheet is open.
@@ -887,16 +895,18 @@ export function VisualComponentEditor({
   const [message, setMessage] = useState("");
   // On a phone the side panel is a sheet that slides up from the bottom, closed
   // by default so the whole screen is the page. It opens only when the owner
-  // taps the floating page-options button. Selecting a section must never open
-  // it: the owner edits the words by typing on the page itself, and a sheet
-  // that appears on selection covers the text they just tapped. On a wide
-  // screen the panel is always docked and this flag is ignored.
-  const [panelOpen, setPanelOpen] = useState(false);
+  // asks for it from the editor menu. Selecting a section must never open it:
+  // the owner edits the words by typing on the page itself, and a sheet that
+  // appears on selection covers the text they just tapped. On a wide screen the
+  // panel is always docked and this flag is ignored.
+  const [ownPanelOpen, setOwnPanelOpen] = useState(false);
+  const panelOpen = controlledPanelOpen ?? ownPanelOpen;
   const panelChangeRef = useRef(onPanelOpenChange);
   panelChangeRef.current = onPanelOpenChange;
-  useEffect(() => {
-    panelChangeRef.current?.(panelOpen);
-  }, [panelOpen]);
+  const setPanelOpen = useCallback((open: boolean) => {
+    setOwnPanelOpen(open);
+    panelChangeRef.current?.(open);
+  }, []);
   const active = useRef(true);
 
   useEffect(() => {
@@ -961,15 +971,6 @@ export function VisualComponentEditor({
                 <PanelWhenEmpty>{panelWhenEmpty}</PanelWhenEmpty>
                 <AddSectionMenu disabled={disabled} />
               </aside>
-              {/* Phone only: opens the panel to page options and add-section
-                * when no section is selected. Hidden while the sheet is open. */}
-              <button
-                type="button"
-                className="editor-panel-open"
-                onClick={() => setPanelOpen(true)}
-              >
-                <span aria-hidden="true">☰</span> Page options
-              </button>
             </div>
           </Puck.Layout>
         </Puck>

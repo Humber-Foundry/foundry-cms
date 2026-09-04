@@ -374,7 +374,9 @@ async function main() {
     };
     const openSidePanel = async () => {
       if (await sheetOnScreen(".editor-side")) return;
-      await page.locator(".editor-panel-open").click({ timeout: 6000 });
+      // On a phone the page settings sheet opens from the one editor menu.
+      await openControls();
+      await page.locator(".editor-menu-page-options").click({ timeout: 6000 });
       await page.waitForTimeout(320);
     };
 

@@ -1894,6 +1894,22 @@ export function ContentEditor({
               Edit
             </button>
           </div>
+          {/* Phone only: the one menu is the only way into the page settings
+            * sheet, so it carries the way in. On a wide screen the panel is
+            * always docked beside the canvas and this button is hidden. There
+            * is nothing to open while browsing. */}
+          {editorMode === "edit" ? (
+            <button
+              type="button"
+              className="editor-menu-page-options"
+              onClick={() => {
+                setEditorPanelOpen(true);
+                setMobileControlsOpen(false);
+              }}
+            >
+              Page options
+            </button>
+          ) : null}
           <div className="topbar-grow" />
           {statusChip}
           <div className="editor-toolbar-actions">
@@ -1945,6 +1961,7 @@ export function ContentEditor({
               siteImages,
             }}
             onValidationChange={updateVisualRichTextValidation}
+            panelOpen={editorPanelOpen}
             onPanelOpenChange={setEditorPanelOpen}
             panelWhenEmpty={
               <>
