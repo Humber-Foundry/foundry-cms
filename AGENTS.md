@@ -44,8 +44,7 @@ reads instead.
 
 Graphify is navigation evidence, not current-state proof. Current source,
 schemas, generated artifacts, executable tests, and runtime behavior remain
-authoritative. The shared graph indexes code only, so agents must still read
-`CONTEXT.md` and relevant ADRs. See `docs/agents/graphify.md`.
+authoritative. See `docs/agents/graphify.md`.
 
 ## Delivery policy
 
