@@ -41,6 +41,28 @@
   white-space: nowrap;
 }
 
+/* The review lists one line per page, so it takes a row of its own instead of
+   squeezing the row that carries the content, schema and renderer values. */
+.preview-review {
+  grid-column: 1 / -1;
+}
+
+/* The review lines are sentences, not hashes, so they wrap and read plainly. */
+.preview-review dd {
+  overflow: visible;
+  font-family: inherit;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.preview-review ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .preview-provenance a {
   font-weight: 700;
 }

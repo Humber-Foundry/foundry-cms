@@ -84,7 +84,10 @@ async function waitForDashboard(origin, child, logs) {
       );
     }
     try {
-      const response = await fetch(`${origin}/dash`, {
+      // The public home page, not `/dash`. A dashboard request creates the
+      // draft workspace, which would spend the fresh-database first visit
+      // this script has to observe from the browser.
+      const response = await fetch(`${origin}/`, {
         redirect: "manual",
       });
       if (response.status === 200) return;
@@ -322,26 +325,36 @@ async function main() {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await page.goto(`${origin}/dash`);
 
-    const startWorkspace = page.getByRole("button", {
-      name: "Start workspace",
-    });
-    await startWorkspace.waitFor({ state: "visible" });
-    const [created] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname ===
-            "/api/foundry-cms/revisions",
-      ),
-      startWorkspace.click(),
-    ]);
-    if (created.status() !== 201) {
-      throw new Error(
-        `private_dashboard_workspace_failed:${created.status()}:${await created.text()}`,
-      );
+    // Blog is the destination the owner reported. This is the very first
+    // request against a fresh database, so the dashboard has to create the
+    // draft workspace on the server and show the posts. A recovery screen
+    // here would mean the owner was asked to start a draft.
+    // Generous timeout: this is the first dashboard request, so the dev server
+    // compiles the route before it answers.
+    await page.goto(`${origin}/dash/blog`, { timeout: 120_000 });
+    // A fresh site has no posts, so Blog opens its composer ready to write.
+    await page.getByRole("heading", { name: "Posts", exact: true }).waitFor();
+    await page.getByRole("textbox", { name: "Title" }).waitFor();
+    if (
+      (await page
+        .getByRole("button", { name: "Start a fresh draft" })
+        .count()) > 0
+    ) {
+      throw new Error("private_dashboard_blog_asked_for_a_workspace");
     }
+
+    // Overview reports that same draft, and it has changed nothing yet.
+    await page.goto(`${origin}/dash`);
+    await page.getByRole("heading", { name: "Your draft" }).waitFor();
+    if (
+      (await page
+        .getByRole("button", { name: "Start a fresh draft" })
+        .count()) > 0
+    ) {
+      throw new Error("private_dashboard_overview_asked_for_a_workspace");
+    }
+    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
     await page.getByRole("heading", { name: "Pages" }).waitFor();
 

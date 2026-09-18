@@ -20,6 +20,7 @@ export * from "./deterministic-hash";
 export * from "./blog-artifacts";
 export * from "./blog-post-operations";
 export * from "./content-publication";
+export * from "./content-change-summary";
 export * from "./public-form-inbox";
 export * from "./public-form-notification";
 export * from "./public-form-privacy";

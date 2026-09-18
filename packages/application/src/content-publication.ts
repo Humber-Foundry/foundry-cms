@@ -1,5 +1,4 @@
 import {
-  homePage,
   isSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
   type SiteDefinition,
@@ -647,20 +646,30 @@ function designProjection(definition: SiteDefinition) {
       id,
       href,
     })),
-    pageId: homePage(definition).id,
-    sections: homePage(definition).sections.map((section) =>
-      section.type === "registered"
-        ? {
-            id: section.id,
-            type: section.type,
-            component: section.component,
-          }
-        : {
-            id: section.id,
-            type: section.type,
-            variant: section.variant,
-          },
-    ),
+    /**
+     * Every page, in the order the definition holds them. A change on any
+     * page, a new page and a removed page all change this projection, so an
+     * approval can never survive a change to a page the approver did not see.
+     * Before issue #160 this covered the home page alone.
+     */
+    pages: definition.pages.map((page) => ({
+      pageId: page.id,
+      slug: page.slug,
+      title: page.title,
+      sections: page.sections.map((section) =>
+        section.type === "registered"
+          ? {
+              id: section.id,
+              type: section.type,
+              component: section.component,
+            }
+          : {
+              id: section.id,
+              type: section.type,
+              variant: section.variant,
+            },
+      ),
+    })),
   };
 }
 

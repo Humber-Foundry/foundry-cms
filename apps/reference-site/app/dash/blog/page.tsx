@@ -5,7 +5,7 @@ import type {
 import type { BlogPostId } from "@humber-foundry/site-definition";
 
 import { BlogPostControls } from "@/components/blog-post-controls";
-import { ContentWorkspaceStarter } from "@/components/content-workspace-starter";
+import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { verifiedPublicBlogPostIds } from "@/components/published-blog-posts";
 import { installedSiteDefinition } from "@/foundry/site-definition";
 import { loadBlogPostOperationsApplication } from "@/src/blog-post-operations-runtime";
@@ -13,7 +13,9 @@ import {
   loadDashboardWorkspace,
   loadMutationToken,
   loadPublishedDefinition,
+  preservedRevisionOf,
   readWorkspaceSearchParams,
+  recoveryReasonOf,
 } from "@/src/dashboard-page-context";
 import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
@@ -80,17 +82,17 @@ export default async function DashboardBlogPage({
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     "/dash/blog",
+    staleRecovery,
   );
   const definition = await loadPublishedDefinition();
   const mutationToken = await loadMutationToken();
 
   const { contentRevision, schemaRecovery } = dashboardWorkspace;
-  // A stale workspace would reject every post change, so Blog offers the same
-  // fresh-start path the editor destinations do instead of dead controls.
+  // The draft workspace always exists. A stale or older-schema workspace would
+  // reject every post change, so Blog offers a fresh start instead of dead
+  // controls.
   const needsFreshWorkspace =
-    schemaRecovery !== undefined ||
-    contentRevision === undefined ||
-    dashboardWorkspace.contentStale === true;
+    schemaRecovery !== undefined || dashboardWorkspace.contentStale;
 
   const { summaries, archivedPosts } = needsFreshWorkspace
     ? { summaries: new Map(), archivedPosts: [] }
@@ -107,19 +109,12 @@ export default async function DashboardBlogPage({
         </div>
       </div>
       {needsFreshWorkspace ? (
-        <ContentWorkspaceStarter
+        <ContentDraftRecovery
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
-          preservedRevision={
-            contentRevision && schemaRecovery
-              ? {
-                  workspaceId: contentRevision.workspaceId,
-                  revision: contentRevision.revision,
-                  schemaVersion: contentRevision.inputs.schemaVersion,
-                }
-              : undefined
-          }
+          preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={schemaRecovery}
+          reason={recoveryReasonOf(dashboardWorkspace)}
         />
       ) : (
         <BlogPostControls

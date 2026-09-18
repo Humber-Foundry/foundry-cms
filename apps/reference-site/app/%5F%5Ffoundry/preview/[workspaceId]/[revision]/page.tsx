@@ -24,6 +24,18 @@ export async function generateMetadata(
   };
 }
 
+/** One line per changed page, so long page names stay readable. */
+function ReviewLines({ lines }: { lines: ReadonlyArray<string> }) {
+  if (lines.length === 0) return <>Nothing</>;
+  return (
+    <ul>
+      {lines.map((line, index) => (
+        <li key={`${index}-${line}`}>{line}</li>
+      ))}
+    </ul>
+  );
+}
+
 export default async function RevisionPreviewPage(
   props: RevisionPreviewPageProps,
 ) {
@@ -65,7 +77,7 @@ export default async function RevisionPreviewPage(
           </div>
         </dl>
         {revision.mcpReview === undefined ? null : (
-          <dl>
+          <dl className="preview-review">
             <div>
               <dt>MCP actor</dt>
               <dd>{revision.mcpReview.actorId}</dd>
@@ -73,13 +85,13 @@ export default async function RevisionPreviewPage(
             <div>
               <dt>Changed content</dt>
               <dd>
-                {revision.mcpReview.changedDocuments.join(", ") || "None"}
+                <ReviewLines lines={revision.mcpReview.changedDocuments} />
               </dd>
             </div>
             <div>
               <dt>Design changes</dt>
               <dd>
-                {revision.mcpReview.designChanges.join(", ") || "None"}
+                <ReviewLines lines={revision.mcpReview.designChanges} />
               </dd>
             </div>
             <div>

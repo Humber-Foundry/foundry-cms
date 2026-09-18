@@ -36,6 +36,16 @@ publishes the same files it published before. See ADR-0017.
 a new revision; it never changes a revision that was previewed, approved,
 published, tested or sent.
 
+**Draft workspace** — One person's private copy of the site, held in D1, where
+every content and design change is made before publication. It has a stable
+id, an owner, and a numbered revision that advances with each accepted save.
+Revision 0 is a copy of the published site, so a workspace at revision 0 holds
+no changes yet. Every authorized person gets one on their first dashboard
+visit; they never have to start it. Owner-facing copy should call it **your
+draft**; "workspace" names the stored record and the API operations. The page
+editor still says "workspace" to the owner in several places, which is a gap
+to close rather than the pattern to copy.
+
 **Rendered artifact** — The immutable output produced from one revision by one
 schema and renderer version for a specific channel.
 
