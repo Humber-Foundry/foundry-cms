@@ -66,7 +66,7 @@ The authorization server supports RFC 7591 Dynamic Client Registration at
 An operator may instead pin an allowlist of clients with `FOUNDRY_MCP_CLIENTS`,
 which turns registration off. OAuth Client ID Metadata Documents are not
 supported, because they would make the server fetch a client-chosen URL; see
-[ADR-0017](../decisions/ADR-0017-mcp-dynamic-client-registration.md).
+[ADR-0018](../decisions/ADR-0018-mcp-dynamic-client-registration.md).
 
 A registration grants nothing. It stores a claimed name and a set of return
 addresses, and creates no connection, actor, scope or token. Redirect URIs use

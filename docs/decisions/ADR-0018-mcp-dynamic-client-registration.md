@@ -1,4 +1,4 @@
-# ADR-0017: Dynamic client registration, and consent is the only grant
+# ADR-0018: Dynamic client registration, and consent is the only grant
 
 - **Status:** Accepted
 - **Date:** 2026-09-18

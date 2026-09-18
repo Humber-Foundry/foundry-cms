@@ -2167,6 +2167,7 @@ function EditorFieldGroups({
                     ) : field.multiline ? (
                       <textarea
                         rows={3}
+                        className="editor-field-textarea"
                         disabled={editorLocked}
                         value={field.value}
                         aria-invalid={Boolean(errors[field.path])}

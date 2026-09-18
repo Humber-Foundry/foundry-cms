@@ -108,7 +108,13 @@ export async function verifyNewsletterUnsubscribeToken({
 const unsubscribeTokenPlaceholder = "{{foundry.unsubscribe.token}}";
 const unsubscribeTokenSentinel = "FOUNDRY_UNSUBSCRIBE_TOKEN";
 
-function unsubscribePlaceholder(baseUrl: string) {
+/**
+ * The unsubscribe address with the token left as a placeholder. It is derived
+ * from the configured address alone. The delivery secret signs a real token
+ * later, at send time, so the compliance footer can be built before the
+ * delivery secret is installed.
+ */
+export function newsletterUnsubscribePlaceholder(baseUrl: string) {
   const parsed = new URL(baseUrl);
   if (
     parsed.protocol !== "https:" ||
@@ -131,7 +137,7 @@ export function createSignedNewsletterDeliveryAdapter({
   unsubscribeUrl: string;
   secret: string;
 }): NewsletterUnsubscribeAdapter {
-  const placeholder = unsubscribePlaceholder(unsubscribeUrl);
+  const placeholder = newsletterUnsubscribePlaceholder(unsubscribeUrl);
   const adapter: NewsletterUnsubscribeAdapter = {
     unsubscribePlaceholder: placeholder,
     async createUnsubscribeUrl({
