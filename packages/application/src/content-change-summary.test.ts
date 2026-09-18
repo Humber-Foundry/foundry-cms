@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createBlogPostId,
+  createRichTextDocumentFromPlainText,
   homePage,
   referenceSiteDefinition,
   type SiteDefinition,
@@ -171,7 +173,7 @@ describe("content change summary", () => {
     ]);
   });
 
-  it("keeps settings that belong to the whole site out of the page list", () => {
+  it("keeps settings that belong to no page out of the page list", () => {
     const summary = createContentChangeSummary({
       base: twoPages,
       draft: {
@@ -181,10 +183,89 @@ describe("content change summary", () => {
     });
 
     expect(summary.pages).toEqual([]);
-    expect(summary.changedDocuments).toEqual(["Whole site — Footer"]);
+    expect(summary.changedDocuments).toEqual(["Site settings — Footer"]);
     expect(summary.publicEffect).toContain(
       "Settings that every page shares change.",
     );
+  });
+
+  it("names a page whose only change is a removed section", () => {
+    const draft: SiteDefinition = {
+      ...twoPages,
+      pages: twoPages.pages.map((page) =>
+        page.id !== "page_about" ? page : { ...page, sections: [] },
+      ),
+    };
+    const summary = createContentChangeSummary({ base: twoPages, draft });
+
+    expect(summary.pages).toEqual([
+      expect.objectContaining({
+        title: "About us",
+        state: "changed",
+        changedFields: ["Hero removed"],
+      }),
+    ]);
+    expect(summary.changedDocuments).toEqual(["About us — Hero removed"]);
+    expect(summary.publicEffect).toContain("The page at /about changes.");
+  });
+
+  it("names a page whose sections only changed order", () => {
+    const home = homePage(twoPages);
+    const draft: SiteDefinition = {
+      ...twoPages,
+      pages: twoPages.pages.map((page) =>
+        page.id !== home.id
+          ? page
+          : { ...page, sections: [...page.sections].reverse() },
+      ),
+    };
+    const summary = createContentChangeSummary({ base: twoPages, draft });
+
+    expect(summary.designChanges).toEqual([
+      `${home.title} — Section order`,
+    ]);
+    expect(summary.changedDocuments).toEqual([]);
+  });
+
+  it("keeps a blog change apart from the settings of the whole site", () => {
+    const withPost: SiteDefinition = {
+      ...twoPages,
+      blog: {
+        ...twoPages.blog,
+        id: "blog",
+        posts: [
+          {
+            id: createBlogPostId("11111111-1111-4111-8111-111111111111"),
+            revision: 1,
+            collectionState: "active",
+            targetVisibility: "public",
+            slug: "first-post",
+            title: "First post",
+            excerpt: "A first published post.",
+            seo: {
+              title: "First post",
+              description: "A first published post.",
+              keywords: [],
+              shareImage: null,
+            },
+            mainImage: null,
+            body: createRichTextDocumentFromPlainText("A first post."),
+          },
+        ],
+      },
+    };
+    const draft: SiteDefinition = {
+      ...withPost,
+      blog: {
+        ...withPost.blog!,
+        posts: [{ ...withPost.blog!.posts[0]!, title: "A new post title" }],
+      },
+    };
+    const summary = createContentChangeSummary({ base: withPost, draft });
+
+    expect(summary.changedDocuments.join(" ")).toContain("Blog — ");
+    expect(summary.changedDocuments.join(" ")).not.toContain("Site settings");
+    expect(summary.publicEffect).toContain("The blog changes.");
   });
 
   it("covers a change, a new page and a removed page together", () => {

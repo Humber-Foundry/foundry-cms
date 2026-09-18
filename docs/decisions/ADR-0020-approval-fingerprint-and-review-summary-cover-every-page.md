@@ -62,16 +62,24 @@ describes a draft to a person. Its result is `ContentChangeSummary`:
   `removed`, and `changedFields` written as the field names the editor shows.
   A created or a removed page lists no fields, because the whole page is the
   change.
-- `changedDocuments` — one short line per page and one for the settings that
-  belong to the whole site, such as `About us — Hero: Hero title`,
-  `About us — new page at /about` and `About us — page removed`.
-- `designChanges` — the same lines for design choices, such as a section layout.
+- `changedDocuments` — one short line per page, one for the blog and one for
+  the settings that belong to no single page, such as
+  `About us — Hero: Hero title`, `About us — new page at /about`,
+  `About us — Hero removed` and `About us — page removed`.
+- `designChanges` — the same lines for design choices, such as a section layout
+  or a new section order.
 - `publicEffect` — what a visitor sees after publication, ending with the
   sentence that says reading the review neither approves nor publishes.
 
-A page is named by its title and its web address, never by its page id. A page
-name and a web address are not editable fields yet, so the summary compares
-them directly and reports them as `Page name` and `Web address`.
+A page is named by its title and its web address, never by its page id. Three
+things a visitor sees are not editable fields, so the summary compares them
+directly: a page name, a web address and the order of a page's sections. They
+are reported as `Page name`, `Web address` and `Section order`.
+
+The summary reads both definitions in both directions. A field the draft no
+longer holds is reported as gone, so a page whose only change is a removed
+section still names that page. A removed section takes its card heading, so one
+gone section is one line and not a list of every field it used to hold.
 
 ## Consequences
 

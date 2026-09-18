@@ -29,8 +29,8 @@ function ReviewLines({ lines }: { lines: ReadonlyArray<string> }) {
   if (lines.length === 0) return <>Nothing</>;
   return (
     <ul>
-      {lines.map((line) => (
-        <li key={line}>{line}</li>
+      {lines.map((line, index) => (
+        <li key={`${index}-${line}`}>{line}</li>
       ))}
     </ul>
   );

@@ -11,7 +11,7 @@ import {
  *
  * `created` and `removed` are structural: the page list itself changed.
  * `changed` means the page still exists and at least one of its fields, its
- * name or its web address is different.
+ * sections, its name or its web address is different.
  */
 export type ContentPageChangeState = "created" | "changed" | "removed";
 
@@ -34,11 +34,11 @@ export type ContentPageChange = Readonly<{
 /**
  * The review summary a person reads before they approve a draft.
  *
- * `changedDocuments` and `designChanges` are short lines of plain words, one
- * per page plus one for the settings that belong to the whole site. They name
- * every changed, created and removed page. `publicEffect` says what a visitor
- * will see after publication, and always ends by saying that reading this
- * review neither approves nor publishes anything.
+ * `changedDocuments` and `designChanges` are short lines of plain words: one
+ * per page, one for the blog and one for the settings that belong to the whole
+ * site. They name every changed, created and removed page. `publicEffect` says
+ * what a visitor will see after publication, and always ends by saying that
+ * reading this review neither approves nor publishes anything.
  */
 export type ContentChangeSummary = Readonly<{
   pages: ReadonlyArray<ContentPageChange>;
@@ -47,11 +47,15 @@ export type ContentChangeSummary = Readonly<{
   publicEffect: string;
 }>;
 
-/** The heading for settings that are not part of one page. */
-const wholeSiteTitle = "Whole site";
+/** The heading for settings that belong to no single page. */
+const siteSettingsTitle = "Site settings";
+/** The heading for the blog, which is a post list and not a page. */
+const blogTitle = "Blog";
 
-const reviewDisclaimer =
-  "This review does not approve or publish anything.";
+const reviewDisclaimer = "This review does not approve or publish anything.";
+
+/** One place to collect what changed under one heading. */
+type ChangeBucket = { content: string[]; design: string[] };
 
 function fieldValueKey(field: EditableSiteField) {
   return JSON.stringify(field.value);
@@ -64,6 +68,15 @@ function fieldName(field: EditableSiteField) {
     : `${field.section}: ${field.label}`;
 }
 
+/**
+ * The name for something the draft no longer holds. A removed section takes
+ * its card heading, so one gone section reads as one line and not as a list of
+ * every field it used to hold.
+ */
+function removedName(field: EditableSiteField) {
+  return `${field.section ?? field.label} removed`;
+}
+
 function uniqueInOrder(values: ReadonlyArray<string>) {
   return [...new Set(values)];
 }
@@ -73,7 +86,21 @@ function summaryLine(title: string, entries: ReadonlyArray<string>) {
 }
 
 function pageTitle(page: SitePage) {
-  return page.title.trim() === "" ? page.slug || "Home page" : page.title;
+  return page.title.trim() === "" ? pagePath(page) : page.title;
+}
+
+function bucket(buckets: Map<string, ChangeBucket>, key: string) {
+  const found = buckets.get(key);
+  if (found !== undefined) return found;
+  const created: ChangeBucket = { content: [], design: [] };
+  buckets.set(key, created);
+  return created;
+}
+
+/** The heading one field belongs under: its page, the blog, or the settings. */
+function bucketKey(field: EditableSiteField) {
+  if (field.group === "Blog") return blogTitle;
+  return field.pageId === undefined ? siteSettingsTitle : `page:${field.pageId}`;
 }
 
 /**
@@ -81,18 +108,19 @@ function pageTitle(page: SitePage) {
  * difference in the words a site owner uses.
  *
  * Every page is covered, not only the home page: a change on any page, a new
- * page and a removed page all appear in the result.
+ * page, a removed page, a removed section and a reordered page all appear in
+ * the result.
  */
 export function createContentChangeSummary(input: {
   base: SiteDefinition;
   draft: SiteDefinition;
 }): ContentChangeSummary {
-  const baseFields = new Map(
-    listEditableSiteFields(input.base).map((field) => [
-      field.path,
-      fieldValueKey(field),
-    ]),
+  const baseFields = listEditableSiteFields(input.base);
+  const draftFields = listEditableSiteFields(input.draft);
+  const baseValues = new Map(
+    baseFields.map((field) => [field.path, fieldValueKey(field)]),
   );
+  const draftPaths = new Set(draftFields.map(({ path }) => path));
   const basePages = new Map(input.base.pages.map((page) => [page.id, page]));
   const draftPages = new Map(input.draft.pages.map((page) => [page.id, page]));
   const createdPageIds = new Set(
@@ -100,48 +128,56 @@ export function createContentChangeSummary(input: {
       .filter((page) => !basePages.has(page.id))
       .map((page) => page.id),
   );
-  const changedFields = listEditableSiteFields(input.draft).filter(
-    (field) =>
-      baseFields.get(field.path) !== fieldValueKey(field) &&
-      // A new page is reported as one whole page, not as a list of every
-      // field it happens to contain.
-      (field.pageId === undefined || !createdPageIds.has(field.pageId)),
-  );
+  const buckets = new Map<string, ChangeBucket>();
 
-  const contentFieldsByPage = new Map<string, string[]>();
-  const designFieldsByPage = new Map<string, string[]>();
-  const wholeSiteContent: string[] = [];
-  const wholeSiteDesign: string[] = [];
-  for (const field of changedFields) {
-    const design = field.group === "Design";
-    if (field.pageId === undefined) {
-      (design ? wholeSiteDesign : wholeSiteContent).push(fieldName(field));
-      continue;
-    }
-    const byPage = design ? designFieldsByPage : contentFieldsByPage;
-    const entries = byPage.get(field.pageId) ?? [];
-    entries.push(fieldName(field));
-    byPage.set(field.pageId, entries);
+  for (const field of draftFields) {
+    // A new page is reported as one whole page, not as a list of every field
+    // it happens to contain.
+    if (field.pageId !== undefined && createdPageIds.has(field.pageId)) continue;
+    if (baseValues.get(field.path) === fieldValueKey(field)) continue;
+    const entries = bucket(buckets, bucketKey(field));
+    (field.group === "Design" ? entries.design : entries.content).push(
+      fieldName(field),
+    );
   }
 
-  // A page name and a web address are not editable fields yet, so compare
-  // them here. Both are visible to a visitor, so both belong in the summary.
+  for (const field of baseFields) {
+    if (draftPaths.has(field.path)) continue;
+    // A removed page is reported as one whole page for the same reason.
+    if (field.pageId !== undefined && !draftPages.has(field.pageId)) continue;
+    // A design choice cannot disappear on its own: it goes when its section
+    // goes, and that section's own fields already say so.
+    if (field.group === "Design") continue;
+    // Something gone is a content change, even when it held a design choice.
+    bucket(buckets, bucketKey(field)).content.push(removedName(field));
+  }
+
+  // A page name, a web address and the order of a page's sections are not
+  // editable fields, so compare them here. A visitor sees all three.
   for (const page of input.draft.pages) {
     const before = basePages.get(page.id);
     if (before === undefined) continue;
-    const entries = contentFieldsByPage.get(page.id) ?? [];
-    if (before.title !== page.title) entries.push("Page name");
-    if (before.slug !== page.slug) entries.push("Web address");
-    if (entries.length > 0) contentFieldsByPage.set(page.id, entries);
+    const entries = bucket(buckets, `page:${page.id}`);
+    if (before.title !== page.title) entries.content.push("Page name");
+    if (before.slug !== page.slug) entries.content.push("Web address");
+    const beforeOrder = before.sections.map(({ id }) => id);
+    const draftOrder = page.sections.map(({ id }) => id);
+    if (
+      beforeOrder.length === draftOrder.length &&
+      beforeOrder.join(",") !== draftOrder.join(",")
+    ) {
+      entries.design.push("Section order");
+    }
   }
 
   const pages: ContentPageChange[] = [];
   for (const page of input.draft.pages) {
     const created = createdPageIds.has(page.id);
-    const fields = uniqueInOrder([
-      ...(contentFieldsByPage.get(page.id) ?? []),
-      ...(designFieldsByPage.get(page.id) ?? []),
-    ]);
+    const entries = buckets.get(`page:${page.id}`) ?? {
+      content: [],
+      design: [],
+    };
+    const fields = uniqueInOrder([...entries.content, ...entries.design]);
     if (!created && fields.length === 0) continue;
     pages.push({
       pageId: page.id,
@@ -173,40 +209,44 @@ export function createContentChangeSummary(input: {
       changedDocuments.push(`${page.title} — page removed`);
       continue;
     }
-    const content = uniqueInOrder(contentFieldsByPage.get(page.pageId) ?? []);
-    const design = uniqueInOrder(designFieldsByPage.get(page.pageId) ?? []);
-    if (content.length > 0) {
-      changedDocuments.push(summaryLine(page.title, content));
+    const entries = buckets.get(`page:${page.pageId}`)!;
+    if (entries.content.length > 0) {
+      changedDocuments.push(
+        summaryLine(page.title, uniqueInOrder(entries.content)),
+      );
     }
-    if (design.length > 0) {
-      designChanges.push(summaryLine(page.title, design));
+    if (entries.design.length > 0) {
+      designChanges.push(summaryLine(page.title, uniqueInOrder(entries.design)));
     }
   }
-  if (wholeSiteContent.length > 0) {
-    changedDocuments.push(
-      summaryLine(wholeSiteTitle, uniqueInOrder(wholeSiteContent)),
-    );
-  }
-  if (wholeSiteDesign.length > 0) {
-    designChanges.push(
-      summaryLine(wholeSiteTitle, uniqueInOrder(wholeSiteDesign)),
-    );
+  for (const title of [blogTitle, siteSettingsTitle]) {
+    const entries = buckets.get(title);
+    if (entries === undefined) continue;
+    if (entries.content.length > 0) {
+      changedDocuments.push(summaryLine(title, uniqueInOrder(entries.content)));
+    }
+    if (entries.design.length > 0) {
+      designChanges.push(summaryLine(title, uniqueInOrder(entries.design)));
+    }
   }
 
-  const created = pages.filter(({ state }) => state === "created");
-  const removed = pages.filter(({ state }) => state === "removed");
   const effects: string[] = [];
-  for (const page of created) {
+  for (const page of pages) {
+    if (page.state !== "created") continue;
     effects.push(`Visitors get a new page at ${page.path}.`);
   }
-  for (const page of removed) {
+  for (const page of pages) {
+    if (page.state !== "removed") continue;
     effects.push(`The page at ${page.path} is gone.`);
   }
   for (const page of pages) {
     if (page.state !== "changed") continue;
     effects.push(`The page at ${page.path} changes.`);
   }
-  if (wholeSiteContent.length > 0 || wholeSiteDesign.length > 0) {
+  if (buckets.has(blogTitle)) {
+    effects.push("The blog changes.");
+  }
+  if (buckets.has(siteSettingsTitle)) {
     effects.push("Settings that every page shares change.");
   }
   if (effects.length === 0) {

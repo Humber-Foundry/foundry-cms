@@ -344,13 +344,25 @@ describe("publication over every page", () => {
     // The same edit also breaks the fingerprint itself, so the approval stays
     // refused even where the revision number is not the guard that fires.
     const later = await application.queries.getCurrent();
-    await expect(
-      createContentApprovalFingerprint(later, "channel-a"),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        value: expect.not.stringMatching(approval.fingerprint.value),
-      }),
+    const laterFingerprint = await createContentApprovalFingerprint(
+      later,
+      "channel-a",
     );
+    expect(laterFingerprint.value).not.toBe(approval.fingerprint.value);
+    // A layout change on the same page is the case the old projection missed.
+    const reorderedDefinition: SiteDefinition = {
+      ...later.definition,
+      pages: later.definition.pages.map((page) =>
+        page.id !== aboutPageId
+          ? page
+          : { ...page, sections: [...page.sections].reverse() },
+      ),
+    };
+    const reordered = await createContentApprovalFingerprint(
+      await revisionWith(later, reorderedDefinition),
+      "channel-a",
+    );
+    expect(reordered.designHash).not.toBe(laterFingerprint.designHash);
   });
 
   it("publishes and restores a two-page revision as the same artifacts", async () => {

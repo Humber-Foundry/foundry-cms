@@ -151,7 +151,7 @@ describe("revision preview page", () => {
       previewId: "preview-mcp-55",
       actorId: "agent-55",
       pages: [],
-      changedDocuments: ["Whole site — Site name"],
+      changedDocuments: ["Site settings — Site name"],
       designChanges: [],
       publicEffect:
         "Settings that every page shares change. " +
