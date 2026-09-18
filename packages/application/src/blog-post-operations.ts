@@ -153,13 +153,19 @@ export type BlogPostOperationalSummary = BlogPostOperationalState &
     latestExecution: BlogPostScheduleExecution | null;
   }>;
 
-/** One archived post, with the display fields the archived list needs. */
+/**
+ * One archived post, with the display fields the archived list needs. A
+ * post that is still `archiving` (its live withdrawal has not finished)
+ * carries the request ID that started it, so the dashboard can offer to
+ * continue or recover access for that exact request.
+ */
 export type ArchivedBlogPostSummary = BlogPostOperationalState &
   Readonly<{
     title: string;
     slug: string;
     excerpt: string;
     archivedAt: string | null;
+    archiveRequestId: string | null;
   }>;
 
 export type BlogPostApprovalEvidence = Readonly<{
@@ -1358,7 +1364,16 @@ export function createBlogPostOperationsApplication({
 }
 
 export function createInMemoryBlogPostOperationsStore(seed: {
-  posts?: ReadonlyArray<BlogPostOperationalState>;
+  /**
+   * Content fields (`title`/`slug`/`excerpt`) are optional and default to
+   * blank, matching the durable D1 store's fallback when a post was archived
+   * before it had a readable content snapshot. Seed them to exercise a
+   * realistic archived-post list.
+   */
+  posts?: ReadonlyArray<
+    BlogPostOperationalState &
+      Partial<Readonly<{ title: string; slug: string; excerpt: string }>>
+  >;
   approvals?: ReadonlyArray<BlogPostApprovalEvidence>;
   humanActorIds?: ReadonlyArray<string>;
   mcpScheduleProposalAccess?: ReadonlyArray<{
@@ -1538,10 +1553,14 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         .map((post) =>
           Object.freeze({
             ...post,
-            title: "",
-            slug: "",
-            excerpt: "",
+            title: post.title ?? "",
+            slug: post.slug ?? "",
+            excerpt: post.excerpt ?? "",
             archivedAt: null,
+            archiveRequestId:
+              archiveRequestIdByPost.get(
+                postKey(post.siteId, post.postId),
+              ) ?? null,
           })
         );
     },
