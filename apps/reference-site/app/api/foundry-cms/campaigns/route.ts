@@ -13,7 +13,10 @@ import {
   type CampaignEditableInput,
 } from "@humber-foundry/application";
 
-import { loadCampaignRequestContext } from "../../../../src/campaign-runtime";
+import {
+  loadCampaignRequestContext,
+  readCampaignDeliveryReadiness,
+} from "../../../../src/campaign-runtime";
 import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
 
 type CampaignCommand =
@@ -108,6 +111,18 @@ const bulkConflictReasons: ReadonlySet<string> = new Set([
 function bulkRejectionStatus(code: string) {
   return bulkConflictReasons.has(code) ? 409 : 400;
 }
+
+/**
+ * The commands that need connected email delivery. Every one of them either
+ * sends a message or approves one, so all of them are refused while delivery
+ * is not configured. Writing, saving and reading a campaign are absent from
+ * this list on purpose: they send nothing.
+ */
+const deliveryActions: ReadonlySet<string> = new Set([
+  "request_test",
+  "confirm_test_receipt",
+  ...bulkActions,
+]);
 
 type BulkAction = (typeof bulkActions)[number];
 type BulkCommand = Extract<CampaignCommand, { action: BulkAction }>;
@@ -406,8 +421,16 @@ function command(value: unknown): CampaignCommand | null {
 export async function GET(request: Request) {
   try {
     const context = await loadCampaignRequestContext(request.headers);
-    const campaignIdValue =
-      new URL(request.url).searchParams.get("campaignId");
+    const parameters = new URL(request.url).searchParams;
+    // The readiness report says whether email delivery is connected and which
+    // named settings are still missing. It never returns a setting's value.
+    if (parameters.get("readiness") === "delivery") {
+      return Response.json(
+        { delivery: await readCampaignDeliveryReadiness(context) },
+        { headers: { "cache-control": "private, no-store" } },
+      );
+    }
+    const campaignIdValue = parameters.get("campaignId");
     if (campaignIdValue === null) {
       const campaigns = await context.application.queries.listCampaigns({
         actor: context.identity,
@@ -541,6 +564,15 @@ export async function POST(request: Request) {
       return Response.json(
         { error: "campaign_command_invalid" },
         { status: 400 },
+      );
+    }
+    // Fail closed: while email delivery is not configured, no command that
+    // sends or approves a message may run. The reason names the state rather
+    // than the missing settings, which the readiness report lists.
+    if (!context.delivery.connected && deliveryActions.has(parsed.action)) {
+      return Response.json(
+        { error: "delivery_not_configured" },
+        { status: 503, headers: { "cache-control": "private, no-store" } },
       );
     }
     let editedCampaignId;

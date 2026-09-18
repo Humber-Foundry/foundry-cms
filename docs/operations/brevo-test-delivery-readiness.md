@@ -36,6 +36,59 @@ Install these values in the client-owned Worker configuration:
   active Owner membership ID to verified delivery address. Runtime resolution
   rejects inactive, non-Owner, or unknown membership IDs.
 
+## Before delivery is connected
+
+An installation that holds none of these values still works as an authoring
+surface. The Newsletter page renders, and a campaign can be written, saved and
+read. Delivery is the only part that is off.
+
+While any named setting above is absent or malformed:
+
+- Every provider adapter stays the fail-closed one. A test request and a bulk
+  send are refused.
+- The campaigns API refuses `request_test`, `confirm_test_receipt`,
+  `authorize_bulk`, `activate_bulk_schedule`, `cancel_bulk_schedule`,
+  `send_bulk_now` and `retry_bulk_send` with `delivery_not_configured` and
+  HTTP 503.
+- The send-artifact publisher reports a failure rather than a commit.
+- A campaign revision written now carries the compliance footer version
+  `not-configured`, because the installation has not named its legal entity,
+  postal address or contact address yet.
+
+A missing `FOUNDRY_DB` is different. It is a database fault, not a missing
+delivery setting, so it still stops the request.
+
+## Delivery readiness report
+
+`GET /api/foundry-cms/campaigns?readiness=delivery` answers whether email
+delivery is connected. The same result is available to server code through
+`readCampaignDeliveryReadiness` in `apps/reference-site/src/campaign-runtime.ts`.
+
+```json
+{
+  "delivery": {
+    "state": "not_configured",
+    "connected": false,
+    "missingSettings": ["FOUNDRY_BREVO_API_KEY"],
+    "providerHealth": null,
+    "setupGuide": "docs/operations/brevo-test-delivery-readiness.md"
+  }
+}
+```
+
+- `state` is `connected`, `not_configured`, or `local_development`.
+- `missingSettings` holds setting **names** only, in the order of the list
+  above. The report never returns a setting value, a provider token or a
+  personal email address.
+- `providerHealth` is `null` unless every setting is installed. It then holds
+  the provider's own `state`, `credential` and `senderIdentity`. A provider
+  that cannot be reached is reported as `unavailable` rather than failing the
+  request.
+
+`connected` means every named setting is installed. It does not mean a test has
+been delivered. Per-campaign test readiness stays with
+`testDelivery.queries.readiness`, described in step 7 of the ceremony below.
+
 The runtime derives the provider-configuration fingerprint from the account
 scope, exact sender ID/address/name mapping, pinned adapter version, and a
 one-way fingerprint of the installation proof key. Rotating the Brevo API

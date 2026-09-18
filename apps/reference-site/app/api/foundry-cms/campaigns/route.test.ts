@@ -26,7 +26,26 @@ const mocks = vi.hoisted(() => ({
   edit: vi.fn(),
   recordRejectedCommand: vi.fn(),
   verifyMutation: vi.fn(),
+  readDeliveryReadiness: vi.fn(),
+  readDeliveryHealth: vi.fn(),
 }));
+const connectedDelivery = {
+  state: "connected",
+  connected: true,
+  missingSettings: [],
+  providerHealth: null,
+  setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
+};
+const notConfiguredDelivery = {
+  state: "not_configured",
+  connected: false,
+  missingSettings: [
+    "FOUNDRY_BREVO_API_KEY",
+    "FOUNDRY_BREVO_SENDERS_JSON",
+  ],
+  providerHealth: null,
+  setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
+};
 const identity = {
   binding: { issuer: "https://access.example", subject: "editor" },
   email: "editor@example.com",
@@ -69,6 +88,7 @@ const bulkDelivery = {
 
 vi.mock("../../../../src/campaign-runtime", () => ({
   loadCampaignRequestContext: mocks.loadContext,
+  readCampaignDeliveryReadiness: mocks.readDeliveryReadiness,
 }));
 vi.mock("../../../../src/human-mutation-runtime", () => ({
   verifyHumanMutation: mocks.verifyMutation,
@@ -89,6 +109,16 @@ describe("campaign endpoint", () => {
       application,
       testDelivery,
       bulkDelivery,
+      delivery: connectedDelivery,
+      readDeliveryHealth: mocks.readDeliveryHealth,
+    });
+    mocks.readDeliveryReadiness.mockResolvedValue({
+      ...connectedDelivery,
+      providerHealth: {
+        state: "healthy",
+        credential: "verified",
+        senderIdentity: "verified",
+      },
     });
     mocks.createStandalone.mockResolvedValue({
       campaign: { id: "20000000-0000-4000-8000-000000000001" },
@@ -730,5 +760,149 @@ describe("campaign endpoint", () => {
       commandName: "campaign.request_test",
     });
     expect(mocks.requestTest).not.toHaveBeenCalled();
+  });
+});
+
+describe("campaign delivery readiness", () => {
+  function post(action: Record<string, unknown>, key: string) {
+    return POST(
+      new Request("https://foundry.example/api/foundry-cms/campaigns", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": key,
+        },
+        body: JSON.stringify(action),
+      }),
+    );
+  }
+
+  const campaignId = "20000000-0000-4000-8000-000000000001";
+
+  it("reports delivery readiness on request", async () => {
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/campaigns?readiness=delivery",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      delivery: {
+        state: "connected",
+        connected: true,
+        missingSettings: [],
+        providerHealth: {
+          state: "healthy",
+          credential: "verified",
+          senderIdentity: "verified",
+        },
+        setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
+      },
+    });
+    expect(mocks.listCampaigns).not.toHaveBeenCalled();
+  });
+
+  it("names the missing settings without any value when not configured", async () => {
+    mocks.readDeliveryReadiness.mockResolvedValue(notConfiguredDelivery);
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/campaigns?readiness=delivery",
+      ),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.delivery.connected).toBe(false);
+    expect(body.delivery.missingSettings).toEqual([
+      "FOUNDRY_BREVO_API_KEY",
+      "FOUNDRY_BREVO_SENDERS_JSON",
+    ]);
+    for (const name of body.delivery.missingSettings) {
+      expect(name).toMatch(/^FOUNDRY_[A-Z0-9_]+$/u);
+    }
+  });
+
+  it("still lists campaigns while delivery is not configured", async () => {
+    mocks.loadContext.mockResolvedValue({
+      identity,
+      application,
+      testDelivery,
+      bulkDelivery,
+      delivery: notConfiguredDelivery,
+      readDeliveryHealth: mocks.readDeliveryHealth,
+    });
+    mocks.listCampaigns.mockResolvedValue([]);
+    const response = await GET(
+      new Request("https://foundry.example/api/foundry-cms/campaigns"),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ campaigns: [] });
+  });
+
+  describe("while delivery is not configured", () => {
+    beforeEach(() => {
+      mocks.loadContext.mockResolvedValue({
+        identity,
+        application,
+        testDelivery,
+        bulkDelivery,
+        delivery: notConfiguredDelivery,
+        readDeliveryHealth: mocks.readDeliveryHealth,
+      });
+    });
+
+    it("keeps composing and saving a campaign working", async () => {
+      const response = await post(
+        {
+          action: "create_standalone",
+          input: {
+            subject: "Spring news",
+            previewText: "What happened this spring",
+            callToAction: { label: "Read", href: "https://example.com" },
+            emailContent: { version: "1.0.0", type: "document", children: [] },
+          },
+        },
+        "campaign-create-while-unconfigured-1",
+      );
+      expect(response.status).toBe(201);
+      expect(mocks.createStandalone).toHaveBeenCalled();
+    });
+
+    it.each([
+      ["request_test", { action: "request_test", campaignId, testRecipientIds: ["owner-primary"] }],
+      ["confirm_test_receipt", { action: "confirm_test_receipt", executionId: "40000000-0000-4000-8000-000000000001" }],
+      ["authorize_bulk", { action: "authorize_bulk", campaignId, testExecutionId: "40000000-0000-4000-8000-000000000001" }],
+      ["cancel_bulk_schedule", { action: "cancel_bulk_schedule", scheduleId: "70000000-0000-4000-8000-000000000001" }],
+      ["send_bulk_now", { action: "send_bulk_now", campaignId, authorizationId: "50000000-0000-4000-8000-000000000001" }],
+      ["retry_bulk_send", { action: "retry_bulk_send", campaignId, operationId: "60000000-0000-4000-8000-000000000001" }],
+    ])("refuses %s with a clear reason", async (name, body) => {
+      const response = await post(body, `campaign-blocked-${name}-1`);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "delivery_not_configured",
+      });
+    });
+
+    it("does not reach any send or test operation", async () => {
+      await post(
+        {
+          action: "request_test",
+          campaignId,
+          testRecipientIds: ["owner-primary"],
+        },
+        "campaign-blocked-no-call-1",
+      );
+      await post(
+        {
+          action: "send_bulk_now",
+          campaignId,
+          authorizationId: "50000000-0000-4000-8000-000000000001",
+        },
+        "campaign-blocked-no-call-2",
+      );
+      expect(mocks.requestTest).not.toHaveBeenCalled();
+      expect(mocks.sendBulkNow).not.toHaveBeenCalled();
+      expect(mocks.executeBulk).not.toHaveBeenCalled();
+      expect(mocks.authorizeBulk).not.toHaveBeenCalled();
+    });
   });
 });
