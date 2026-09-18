@@ -59,6 +59,16 @@ function stopServer(child) {
   }
 }
 
+/**
+ * The nine destinations `DashboardNav` links to — the same list
+ * `verify-dashboard-spacing-browser.mjs` already checks. A dynamic detail
+ * page reached from inside one of these (a single message at
+ * `/dash/forms/[receiptId]`, the MCP redirect at `/dash/review/[previewId]`)
+ * needs seeded data or a live MCP preview to reach, so it is not one of
+ * these nine and is not swept here. Their markup still follows the same
+ * plain-word and `HelpTip` rules; add one once a seeded fixture exists to
+ * open it from.
+ */
 const destinations = [
   ["Overview", "/dash"],
   ["Pages", "/dash/pages"],

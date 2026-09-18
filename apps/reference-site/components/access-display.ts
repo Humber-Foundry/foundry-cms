@@ -1,4 +1,8 @@
-import type { HumanRole, MembershipStatus } from "@humber-foundry/application";
+import type {
+  HumanRole,
+  MembershipStatus,
+  McpConnectionStatus,
+} from "@humber-foundry/application";
 
 /**
  * The plain word for a user's role, everywhere the dashboard shows one. The
@@ -20,5 +24,16 @@ export const membershipStatusDisplayLabel: Readonly<
 > = {
   active: "Active",
   suspended: "Suspended",
+  revoked: "Revoked",
+};
+
+/**
+ * The plain word for an MCP agent connection's status, matching the
+ * capitalized word the revoke action already shows for a revoked row.
+ */
+export const mcpConnectionStatusDisplayLabel: Readonly<
+  Record<McpConnectionStatus, string>
+> = {
+  active: "Active",
   revoked: "Revoked",
 };
