@@ -76,6 +76,11 @@ export async function createDurableCampaignBulkDeliveryApplication(
     authorizeOwner: async () => {
       throw new AccessDeniedError("capability_not_authorized");
     },
+    // The scheduler serves no screen and carries no human actor, so it reads
+    // its work through the store rather than through this human query.
+    authorizeRead: async () => {
+      throw new AccessDeniedError("capability_not_authorized");
+    },
     identifyActor: () => "system:scheduler",
     validateOwnerAuthority: async (ownerActorId) =>
       (await isActiveOwner(ownerActorId)) ?? false,

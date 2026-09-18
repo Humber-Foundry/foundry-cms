@@ -306,6 +306,16 @@ export async function loadCampaignRequestContext(
   application: CampaignApplication;
   testDelivery: CampaignTestDeliveryApplication;
   bulkDelivery: CampaignBulkDeliveryApplication;
+  /**
+   * The test recipients this installation has verified, by membership id only.
+   * A test address is a person's own mailbox, so it is never returned, logged
+   * or shown. `yours` names the signed-in person's own id when they are one of
+   * them, which lets the screen offer "send a test to your own address" without
+   * ever naming an address.
+   */
+  listTestRecipients(): Promise<
+    Readonly<{ ids: ReadonlyArray<string>; yours: string | null }>
+  >;
 }>> {
   const human = await loadHumanAccessRequestContext(requestHeaders);
   if (human.state !== "authorized") {
@@ -541,6 +551,14 @@ export async function loadCampaignRequestContext(
         actor,
         capability: "campaign.bulk.authorize",
       }),
+    // An Editor writes campaigns, so an Editor may read where a campaign has
+    // got to. Reading grants nothing; only `authorizeOwner` above admits the
+    // Owner commands.
+    authorizeRead: (actor) =>
+      human.application.queries.requireCapability({
+        actor,
+        capability: "content.write",
+      }),
     identifyActor: () => human.membership.id,
     validateOwnerAuthority: async (ownerActorId) =>
       (await isActiveOwner(ownerActorId)) ??
@@ -581,6 +599,22 @@ export async function loadCampaignRequestContext(
     delivery,
     readDeliveryHealth: () => testAdapter.health(),
     bulkDelivery,
+    listTestRecipients: async () => {
+      const ownerIds =
+        await human.application.queries.listActiveOwnerIdsForTestDelivery({
+          actor: human.identity,
+        });
+      // An owner without a configured address cannot receive a test, so
+      // offering them would promise a send that always fails.
+      const ids = ownerIds.filter((id) => {
+        const address = testRecipients[id];
+        return typeof address === "string" && address.trim() !== "";
+      });
+      return Object.freeze({
+        ids: Object.freeze(ids),
+        yours: ids.includes(human.membership.id) ? human.membership.id : null,
+      });
+    },
     testDelivery: createCampaignTestDeliveryApplication({
       siteId: installedSite.application.siteId,
       campaignStore: store,

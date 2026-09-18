@@ -210,6 +210,16 @@ function fixture(
       }
       return { id: "membership-owner" };
     },
+    // An Owner or an Editor may read the campaign's state; nobody else may.
+    authorizeRead: async (actor) => {
+      if (
+        actor.binding.subject !== "owner" &&
+        actor.binding.subject !== "editor"
+      ) {
+        throw new CampaignBulkDeliveryError("read_not_authorized");
+      }
+      return { id: `membership-${actor.binding.subject}` };
+    },
     identifyActor: (actor) =>
       actor.binding.subject === "owner"
         ? "membership-owner"
@@ -1590,5 +1600,100 @@ describe("campaign bulk delivery", () => {
     await expect(authorize(foreignOwner.application)).rejects.toMatchObject({
       code: "bulk_test_not_reviewed",
     });
+  });
+
+  it("reports one campaign's bulk state to an Editor without granting anything", async () => {
+    const { application } = fixture();
+
+    await expect(
+      application.queries.campaignState({ actor: editor, campaignId }),
+    ).resolves.toEqual({
+      authorization: null,
+      schedule: null,
+      send: null,
+    });
+
+    const authorized = await authorize(application);
+    await application.commands.activateSchedule({
+      actor: owner,
+      requestId: "bulk-schedule-state-report-0001",
+      campaignId,
+      authorizationId: authorized.authorization.id,
+      resolvedTime: {
+        localDateTime: "2026-08-01T00:10:00",
+        ianaTimeZone: "UTC",
+        utcOffsetChoice: "+00:00",
+        executeAtUtc: "2026-08-01T00:10:00.000Z",
+        timeZoneDatabaseVersion: "2026a",
+      },
+    });
+
+    const reported = await application.queries.campaignState({
+      actor: editor,
+      campaignId,
+    });
+    expect(reported.authorization).toMatchObject({
+      id: authorized.authorization.id,
+      campaignFingerprint: authorized.authorization.campaignFingerprint,
+      state: "active",
+    });
+    expect(reported.schedule).toMatchObject({
+      state: "active",
+      localDateTime: "2026-08-01T00:10:00",
+      ianaTimeZone: "UTC",
+      executeAtUtc: "2026-08-01T00:10:00.000Z",
+    });
+
+    // Reading is not authority: the Editor still cannot take the Owner's step.
+    await expect(
+      application.commands.sendNow({
+        actor: editor,
+        requestId: "bulk-editor-send-after-read-0001",
+        campaignId,
+        authorizationId: authorized.authorization.id,
+      }),
+    ).rejects.toMatchObject({ code: "owner_required" });
+  });
+
+  it("refuses a bulk state report to an actor who may not read the campaign", async () => {
+    const { application } = fixture();
+    const agent: CampaignActor = {
+      binding: { issuer: "https://access.example", subject: "agent" },
+      email: "agent@example.com",
+      nonce: "agent-nonce",
+    };
+
+    await expect(
+      application.queries.campaignState({ actor: agent, campaignId }),
+    ).rejects.toMatchObject({ code: "read_not_authorized" });
+  });
+
+  it("keeps subscriber identities and sent bytes out of the bulk state report", async () => {
+    const { application } = fixture();
+    const authorized = await authorize(application);
+    const sent = await application.commands.sendNow({
+      actor: owner,
+      requestId: "bulk-state-report-send-0001",
+      campaignId,
+      authorizationId: authorized.authorization.id,
+    });
+    await application.scheduler.execute(sent.operation.id);
+
+    const reported = await application.queries.campaignState({
+      actor: owner,
+      campaignId,
+    });
+    expect(reported.send).toMatchObject({
+      id: sent.operation.id,
+      recipientCount: 1,
+    });
+    // The stored operation carries the audience and the exact sent bytes. The
+    // report is a count and a state, so neither can reach a screen.
+    const serialized = JSON.stringify(reported);
+    expect(serialized).not.toContain(recipient.address);
+    expect(serialized).not.toContain(recipient.identityKey);
+    expect(serialized).not.toContain(recipient.subscriberId);
+    expect(reported.send).not.toHaveProperty("audienceSnapshot");
+    expect(reported.send).not.toHaveProperty("sendArtifact");
   });
 });
