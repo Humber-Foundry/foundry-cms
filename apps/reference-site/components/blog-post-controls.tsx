@@ -529,11 +529,145 @@ const blogOperationErrorMessages: Readonly<Record<string, string>> = {
     "The site is already publishing. Try again once it finishes.",
   post_already_archived: "This post is already archived.",
   post_not_archived: "This post is not archived, so it cannot be restored.",
+  archive_request_not_found:
+    "This archive could not be found. Refresh the page and try again.",
+  human_authority_required:
+    "You do not have access to finish this. Ask an owner or editor to help.",
+  archive_publication_mismatch:
+    "The site changed since this archive started. Refresh the page and try again.",
+  archive_withdrawal_draft_conflict:
+    "Another change to this post is in progress. Refresh the page and try again.",
 };
 
 function blogOperationErrorMessage(code: string): string {
   return blogOperationErrorMessages[code] ??
     "The change was not accepted. Refresh and try again.";
+}
+
+function blogOperationErrorCode(body: unknown): string {
+  return typeof body === "object" &&
+    body !== null &&
+    "error" in body &&
+    typeof body.error === "string"
+    ? body.error
+    : "";
+}
+
+export type ArchiveWithdrawalContinuationResult =
+  | Readonly<{ outcome: "continued"; mutationToken: string }>
+  | Readonly<{ outcome: "failed"; message: string; mutationToken: string }>;
+
+/**
+ * Drives a stalled archive withdrawal forward: recovers this person's
+ * access to the withdrawal that was started when the post was archived,
+ * confirms it (the same "a human reviewed this" record every publish
+ * needs), then asks the server to continue it. Each step's honest failure
+ * is reported back; nothing here is retried automatically, so the caller
+ * can offer "try again".
+ */
+export async function continueArchiveWithdrawal({
+  postId,
+  archiveRequestId,
+  mutationToken,
+  fetcher = fetch,
+}: {
+  postId: string;
+  archiveRequestId: string;
+  mutationToken: string;
+  fetcher?: typeof fetch;
+}): Promise<ArchiveWithdrawalContinuationResult> {
+  const recovered = await sendHumanMutationAttempt({
+    url: "/api/foundry-cms/blog-operations",
+    attempt: {
+      body: JSON.stringify({
+        operation: "recover_archive_withdrawal_access",
+        postId,
+        archiveRequestId,
+      }),
+      idempotencyKey: mutationKey("recover-archive-withdrawal-access"),
+    },
+    mutationToken,
+    fetcher,
+  });
+  const withdrawal =
+    typeof recovered.body === "object" &&
+    recovered.body !== null &&
+    "withdrawal" in recovered.body &&
+    typeof recovered.body.withdrawal === "object" &&
+    recovered.body.withdrawal !== null &&
+    "workspaceId" in recovered.body.withdrawal &&
+    "revision" in recovered.body.withdrawal &&
+    typeof recovered.body.withdrawal.workspaceId === "string" &&
+    typeof recovered.body.withdrawal.revision === "number"
+      ? {
+          workspaceId: recovered.body.withdrawal.workspaceId,
+          revision: recovered.body.withdrawal.revision,
+        }
+      : null;
+  if (!recovered.response.ok || withdrawal === null) {
+    return {
+      outcome: "failed",
+      message: blogOperationErrorMessage(
+        blogOperationErrorCode(recovered.body),
+      ),
+      mutationToken: recovered.mutationToken,
+    };
+  }
+
+  const approved = await sendHumanMutationAttempt({
+    url: "/api/foundry-cms/publications",
+    attempt: {
+      body: JSON.stringify({
+        operation: "approve",
+        workspaceId: withdrawal.workspaceId,
+        revision: withdrawal.revision,
+        previewConfirmed: true,
+      }),
+      idempotencyKey: mutationKey("approve-archive-withdrawal"),
+    },
+    mutationToken: recovered.mutationToken,
+    fetcher,
+  });
+  const approvalId =
+    typeof approved.body === "object" &&
+    approved.body !== null &&
+    "id" in approved.body &&
+    typeof approved.body.id === "string"
+      ? approved.body.id
+      : null;
+  if (!approved.response.ok || approvalId === null) {
+    return {
+      outcome: "failed",
+      message:
+        "The site could not confirm this archive step. Refresh the page and try again.",
+      mutationToken: approved.mutationToken,
+    };
+  }
+
+  const continued = await sendHumanMutationAttempt({
+    url: "/api/foundry-cms/blog-operations",
+    attempt: {
+      body: JSON.stringify({
+        operation: "continue_archive_withdrawal",
+        postId,
+        archiveRequestId,
+        withdrawalApprovalId: approvalId,
+      }),
+      idempotencyKey: mutationKey("continue-archive-withdrawal"),
+    },
+    mutationToken: approved.mutationToken,
+    fetcher,
+  });
+  if (!continued.response.ok) {
+    return {
+      outcome: "failed",
+      message: blogOperationErrorMessage(
+        blogOperationErrorCode(continued.body),
+      ),
+      mutationToken: continued.mutationToken,
+    };
+  }
+  return { outcome: "continued", mutationToken: continued.mutationToken };
 }
 
 export function BlogPostControls({
@@ -671,14 +805,9 @@ export function BlogPostControls({
       });
       setMutationToken(result.mutationToken);
       if (!result.response.ok) {
-        const code =
-          typeof result.body === "object" &&
-          result.body !== null &&
-          "error" in result.body &&
-          typeof result.body.error === "string"
-            ? result.body.error
-            : "";
-        setMessage(blogOperationErrorMessage(code));
+        setMessage(
+          blogOperationErrorMessage(blogOperationErrorCode(result.body)),
+        );
         return;
       }
       window.location.assign(
@@ -688,6 +817,40 @@ export function BlogPostControls({
       );
     } catch {
       setMessage("The change could not be confirmed. Check the post, then try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Continues a live post's archive when the step that takes it off the
+   * site has stalled. Reloads on success, exactly like `sendBlogOperation`,
+   * so the reloaded archived-posts list always shows the server's current
+   * state.
+   */
+  async function continueArchive(archiveRequestId: string, postId: string) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await continueArchiveWithdrawal({
+        postId,
+        archiveRequestId,
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (result.outcome === "failed") {
+        setMessage(result.message);
+        return;
+      }
+      window.location.assign(
+        `${window.location.pathname}?workspace=${encodeURIComponent(
+          revision.workspaceId,
+        )}`,
+      );
+    } catch {
+      setMessage(
+        "The change could not be confirmed. Check the post, then try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -1038,10 +1201,46 @@ export function BlogPostControls({
                 {archived.collectionState === "archiving" ? (
                   <p className="composer-hint">
                     Archive pending; the post remains live until this
-                    finishes. This can take a few minutes.
+                    finishes. This can take a few minutes. If it does not
+                    finish, use Continue archiving below.
                   </p>
                 ) : null}
                 <div className="post-list-actions">
+                  {archived.collectionState === "archiving" &&
+                  archived.archiveRequestId !== null ? (
+                    <>
+                      <button
+                        type="button"
+                        className="copy-button"
+                        disabled={busy}
+                        onClick={() => {
+                          void continueArchive(
+                            archived.archiveRequestId!,
+                            archived.postId,
+                          );
+                        }}
+                      >
+                        Continue archiving
+                      </button>
+                      <button
+                        type="button"
+                        className="copy-button"
+                        disabled={busy}
+                        onClick={() => {
+                          void sendBlogOperation(
+                            {
+                              operation: "recover_archive_withdrawal_access",
+                              postId: archived.postId,
+                              archiveRequestId: archived.archiveRequestId,
+                            },
+                            "recover-archive-withdrawal-access",
+                          );
+                        }}
+                      >
+                        Recover access
+                      </button>
+                    </>
+                  ) : null}
                   <button
                     type="button"
                     className="copy-button"
