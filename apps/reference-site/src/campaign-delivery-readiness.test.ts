@@ -116,23 +116,19 @@ describe("campaign delivery readiness settings", () => {
     }
   });
 
-  it("rejects a contact address that is not an https address", () => {
-    expect(
-      listMissingCampaignDeliverySettings({
-        ...configuredEnvironment,
-        FOUNDRY_CAMPAIGN_CONTACT_URL: "http://example.test/contact",
-      }),
-    ).toEqual(["FOUNDRY_CAMPAIGN_CONTACT_URL"]);
+  it("ignores the compliance settings, which are not delivery secrets", () => {
+    // The compliance footer is stored on every campaign revision, so Foundry
+    // never stands in for these. They are required whether or not delivery is
+    // connected, and they are not part of this report.
+    const { FOUNDRY_CAMPAIGN_LEGAL_NAME: _name, ...rest } =
+      configuredEnvironment;
+    expect(listMissingCampaignDeliverySettings(rest)).toEqual([]);
   });
 
-  it("rejects an unsubscribe address that carries a user name or password", () => {
-    expect(
-      listMissingCampaignDeliverySettings({
-        ...configuredEnvironment,
-        FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL:
-          "https://user:secret@example.test/newsletter/unsubscribe",
-      }),
-    ).toEqual(["FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL"]);
+  it("does not require provisioning evidence, which marks an evaluation account", () => {
+    const { FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON: _evidence, ...rest } =
+      configuredEnvironment;
+    expect(listMissingCampaignDeliverySettings(rest)).toEqual([]);
   });
 
   it("rejects malformed or empty sender and recipient mappings", () => {
@@ -154,15 +150,6 @@ describe("campaign delivery readiness settings", () => {
         FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON: "[]",
       }),
     ).toEqual(["FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON"]);
-  });
-
-  it("rejects provisioning evidence that is not a JSON object", () => {
-    expect(
-      listMissingCampaignDeliverySettings({
-        ...configuredEnvironment,
-        FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON: "not json",
-      }),
-    ).toEqual(["FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON"]);
   });
 
   it("returns setting names only, never a configured value", () => {

@@ -31,14 +31,12 @@ const mocks = vi.hoisted(() => ({
 }));
 const connectedDelivery = {
   state: "connected",
-  connected: true,
   missingSettings: [],
   providerHealth: null,
   setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
 };
 const notConfiguredDelivery = {
   state: "not_configured",
-  connected: false,
   missingSettings: [
     "FOUNDRY_BREVO_API_KEY",
     "FOUNDRY_BREVO_SENDERS_JSON",
@@ -789,7 +787,6 @@ describe("campaign delivery readiness", () => {
     expect(await response.json()).toEqual({
       delivery: {
         state: "connected",
-        connected: true,
         missingSettings: [],
         providerHealth: {
           state: "healthy",
@@ -811,7 +808,7 @@ describe("campaign delivery readiness", () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.delivery.connected).toBe(false);
+    expect(body.delivery.state).toBe("not_configured");
     expect(body.delivery.missingSettings).toEqual([
       "FOUNDRY_BREVO_API_KEY",
       "FOUNDRY_BREVO_SENDERS_JSON",

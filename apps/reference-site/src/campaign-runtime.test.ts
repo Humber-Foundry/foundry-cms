@@ -16,10 +16,11 @@ vi.mock("./human-access-environment", () => ({
 
 import {
   loadCampaignRequestContext,
-  notConfiguredComplianceVersion,
   readCampaignDeliveryReadiness,
+  resolveCampaignChannelConfiguration,
 } from "./campaign-runtime";
 import { campaignDeliverySettingNames } from "./campaign-delivery-readiness";
+
 
 /**
  * A database binding that answers every read with nothing. Loading the request
@@ -42,13 +43,12 @@ const identity = {
   nonce: "nonce",
 };
 
-/** Settings the newsletter needs that are not delivery settings. */
-const baseEnvironment = {
-  FOUNDRY_DB: database,
-  FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
-};
-
-const deliveryEnvironment = {
+/**
+ * Settings the newsletter needs that are not delivery secrets. The compliance
+ * footer they build is stored on every campaign revision, so they are required
+ * whether or not delivery is connected.
+ */
+const channelEnvironment = {
   FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID: "sender_primary",
   FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION: "footer-v1",
   FOUNDRY_CAMPAIGN_LEGAL_NAME: "Example Publisher",
@@ -56,18 +56,21 @@ const deliveryEnvironment = {
   FOUNDRY_CAMPAIGN_CONTACT_URL: "https://example.test/contact",
   FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL:
     "https://example.test/newsletter/unsubscribe",
+};
+
+const baseEnvironment = {
+  FOUNDRY_DB: database,
+  FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+  ...channelEnvironment,
+};
+
+const deliveryEnvironment = {
   FOUNDRY_NEWSLETTER_DELIVERY_SECRET: "n".repeat(32),
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET: "s".repeat(32),
   FOUNDRY_BREVO_API_KEY: "example-api-key",
   FOUNDRY_CAMPAIGN_TEST_PROOF_KEY: "example-proof-key",
   FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN: "w".repeat(32),
   FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT: "a".repeat(64),
-  FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON: JSON.stringify({
-    classification: "client_owned",
-    evidenceId: "evidence-1",
-    accountScopeFingerprint: "a".repeat(64),
-    verifiedAt: "2026-01-01T00:00:00.000Z",
-  }),
   FOUNDRY_BREVO_SENDERS_JSON: JSON.stringify({
     sender_primary: {
       id: 1,
@@ -91,7 +94,7 @@ describe("campaign request context without delivery settings", () => {
       membership: { id: "membership-owner" },
       application: {
         queries: {
-          requireCapability: async () => undefined,
+          requireCapability: async () => ({ id: "membership-owner" }),
           listActiveOwnerIdsForTestDelivery: async () => ["membership-owner"],
         },
       },
@@ -113,7 +116,6 @@ describe("campaign request context without delivery settings", () => {
   it("reports delivery as not configured and names every missing setting", async () => {
     const context = await loadCampaignRequestContext(new Headers());
     expect(context.delivery.state).toBe("not_configured");
-    expect(context.delivery.connected).toBe(false);
     expect(context.delivery.missingSettings).toEqual([
       ...campaignDeliverySettingNames,
     ]);
@@ -140,28 +142,19 @@ describe("campaign request context without delivery settings", () => {
     });
   });
 
-  it("marks a campaign written now as not sendable", async () => {
-    const context = await loadCampaignRequestContext(new Headers());
-    // The compliance footer names the state rather than a legal entity that
-    // this installation has not configured yet.
-    expect(notConfiguredComplianceVersion).toBe("not-configured");
-    expect(context.delivery.connected).toBe(false);
-  });
-
   it("still reports not configured when only one setting is absent", async () => {
     const { FOUNDRY_BREVO_API_KEY: _absent, ...rest } = deliveryEnvironment;
     mocks.loadEnvironment.mockResolvedValue({ ...baseEnvironment, ...rest });
     const context = await loadCampaignRequestContext(new Headers());
-    expect(context.delivery.connected).toBe(false);
+    expect(context.delivery.state).toBe("not_configured");
     expect(context.delivery.missingSettings).toEqual([
       "FOUNDRY_BREVO_API_KEY",
     ]);
   });
 
   it("still fails rather than continue when the database is absent", async () => {
-    mocks.loadEnvironment.mockResolvedValue({
-      FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
-    });
+    const { FOUNDRY_DB: _absent, ...rest } = baseEnvironment;
+    mocks.loadEnvironment.mockResolvedValue(rest);
     await expect(
       loadCampaignRequestContext(new Headers()),
     ).rejects.toThrow("campaign_database_unavailable");
@@ -173,7 +166,6 @@ describe("delivery readiness report", () => {
     const readDeliveryHealth = vi.fn();
     const delivery = {
       state: "not_configured" as const,
-      connected: false,
       missingSettings: ["FOUNDRY_BREVO_API_KEY"],
       providerHealth: null,
       setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
@@ -193,7 +185,6 @@ describe("delivery readiness report", () => {
     const readiness = await readCampaignDeliveryReadiness({
       delivery: {
         state: "connected",
-        connected: true,
         missingSettings: [],
         providerHealth: null,
         setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
@@ -201,14 +192,13 @@ describe("delivery readiness report", () => {
       readDeliveryHealth: async () => health,
     });
     expect(readiness.providerHealth).toEqual(health);
-    expect(readiness.connected).toBe(true);
+    expect(readiness.state).toBe("connected");
   });
 
   it("reports the provider as unavailable when the check fails", async () => {
     const readiness = await readCampaignDeliveryReadiness({
       delivery: {
         state: "connected",
-        connected: true,
         missingSettings: [],
         providerHealth: null,
         setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
@@ -222,5 +212,28 @@ describe("delivery readiness report", () => {
       credential: "unknown",
       senderIdentity: "unknown",
     });
+  });
+});
+
+describe("compliance footer without delivery secrets", () => {
+  it("builds the footer from the installation's own settings", () => {
+    // The footer is stored on every campaign revision and is read by whoever
+    // receives the email, so Foundry never stands in for it. It is built the
+    // same way whether or not the delivery secrets are installed.
+    const channel = resolveCampaignChannelConfiguration(channelEnvironment);
+    expect(channel.senderIdentityId).toBe("sender_primary");
+    expect(channel.complianceFooter.version).toBe("footer-v1");
+    expect(channel.complianceFooter.content).toContain("Example Publisher");
+    expect(channel.complianceFooter.content).toContain("1 Example Street");
+    expect(channel.complianceFooter.unsubscribePlaceholder).toBe(
+      "https://example.test/newsletter/unsubscribe" +
+        "?token={{foundry.unsubscribe.token}}",
+    );
+  });
+
+  it("refuses to build a footer the installation has not configured", () => {
+    const { FOUNDRY_CAMPAIGN_LEGAL_NAME: _absent, ...rest } =
+      channelEnvironment;
+    expect(() => resolveCampaignChannelConfiguration(rest)).toThrow();
   });
 });

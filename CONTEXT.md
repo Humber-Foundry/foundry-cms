@@ -193,12 +193,12 @@ subscribers. It contains no frozen addresses.
 resolved for one execution. It is identified and counted in the CMS; ordinary
 agent access never reveals its addresses.
 
-**Delivery readiness** — Whether this installation has installed every setting
-email delivery needs, and the names of the settings it still lacks. It reports
-setting names only, never a setting value, a provider token or a personal email
-address. `connected` means the settings are installed; it does not mean a test
-was delivered. While delivery is not connected, a campaign can still be written
-and saved, and every send and test operation is refused.
+**Delivery readiness** — Whether this installation has installed every delivery
+secret email delivery needs, and the names of the secrets it still lacks. It
+reports setting names only, never a setting value, a provider token or a
+personal email address. Connected means the secrets are installed; it does not
+mean a test was delivered. While delivery is not connected, a campaign can
+still be written and saved, and every send and test operation is refused.
 
 **Test delivery** — A real provider test-send operation for one exact campaign
 fingerprint and explicit test recipients. An on-screen preview is not a test

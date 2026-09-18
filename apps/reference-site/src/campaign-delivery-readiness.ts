@@ -12,45 +12,60 @@ export const campaignDeliverySetupGuide =
 /**
  * How one installation's email delivery is connected.
  *
- * `missingSettings` holds configuration names only. The dashboard renders this
- * result and the campaigns API returns it, so it must never carry a secret
- * value, a provider token or a personal email address.
+ * `missingSettings` holds configuration names only. This result leaves the
+ * server through the campaigns API and is meant to be shown on screen, so it
+ * must never carry a secret value, a provider token or a personal email
+ * address.
  *
  * - `local_development` — delivery is off because the site runs in local
  *   development. Nothing is sent and nothing needs to be installed.
  * - `not_configured` — at least one named setting is absent or invalid.
  * - `connected` — every named setting is installed. `providerHealth` then
  *   reports what the provider itself says about the credential and the sender
- *   identity.
+ *   identity. It stays `null` in the other two states, because there is no
+ *   provider to ask.
+ *
+ * `connected` means the settings are installed. It does not mean a test was
+ * delivered; that stays with per-campaign test readiness.
  */
 export type CampaignDeliveryReadiness = Readonly<{
   state: "connected" | "not_configured" | "local_development";
-  connected: boolean;
   missingSettings: ReadonlyArray<string>;
   providerHealth: NewsletterDeliveryHealth | null;
   setupGuide: string;
 }>;
 
+/** Whether this installation can test or send a newsletter at all. */
+export function isCampaignDeliveryConnected(
+  readiness: CampaignDeliveryReadiness,
+): boolean {
+  return readiness.state === "connected";
+}
+
 /**
- * Every setting an installation must hold before Foundry can render, test and
- * send a newsletter. The order is the order an installer works through the
- * setup document: campaign identity and compliance first, then the two signing
- * secrets, then the provider account.
+ * Every secret and provider setting an installation must hold before Foundry
+ * can test or send a newsletter. The order is the order an installer works
+ * through the setup document: the two signing secrets, then the provider
+ * account.
+ *
+ * The campaign identity and compliance settings are absent from this list on
+ * purpose. They are ordinary configuration rather than delivery secrets, and
+ * the compliance footer they build is stored on every campaign revision, so
+ * Foundry must never stand in for them.
+ *
+ * `FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON` is absent for a different reason.
+ * The runtime treats an absent value as an `evaluation` account rather than a
+ * fault, and per-campaign test readiness already reports that as
+ * `evaluation_only`. Requiring it here would report an installation that sends
+ * today as not configured.
  */
 export const campaignDeliverySettingNames = Object.freeze([
-  "FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID",
-  "FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION",
-  "FOUNDRY_CAMPAIGN_LEGAL_NAME",
-  "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS",
-  "FOUNDRY_CAMPAIGN_CONTACT_URL",
-  "FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL",
   "FOUNDRY_NEWSLETTER_DELIVERY_SECRET",
   "FOUNDRY_SUBSCRIBER_IDENTITY_SECRET",
   "FOUNDRY_BREVO_API_KEY",
   "FOUNDRY_CAMPAIGN_TEST_PROOF_KEY",
   "FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN",
   "FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT",
-  "FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON",
   "FOUNDRY_BREVO_SENDERS_JSON",
   "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON",
 ] as const);
@@ -67,21 +82,6 @@ function isPresent(value: string | undefined): boolean {
  */
 function isLongEnoughSecret(value: string | undefined): boolean {
   return isPresent(value) && value!.length >= 32;
-}
-
-function isAbsoluteHttpsUrl(value: string | undefined): boolean {
-  if (!isPresent(value)) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(value!.trim());
-  } catch {
-    return false;
-  }
-  return (
-    parsed.protocol === "https:" &&
-    parsed.username === "" &&
-    parsed.password === ""
-  );
 }
 
 /** A JSON object with at least one entry, such as the sender mapping. */
@@ -114,18 +114,6 @@ const campaignDeliverySettingChecks: Readonly<
     (environment: HumanAccessEnvironment) => boolean
   >
 > = Object.freeze({
-  FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID: (environment) =>
-    isPresent(environment.FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID),
-  FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION: (environment) =>
-    isPresent(environment.FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION),
-  FOUNDRY_CAMPAIGN_LEGAL_NAME: (environment) =>
-    isPresent(environment.FOUNDRY_CAMPAIGN_LEGAL_NAME),
-  FOUNDRY_CAMPAIGN_POSTAL_ADDRESS: (environment) =>
-    isPresent(environment.FOUNDRY_CAMPAIGN_POSTAL_ADDRESS),
-  FOUNDRY_CAMPAIGN_CONTACT_URL: (environment) =>
-    isAbsoluteHttpsUrl(environment.FOUNDRY_CAMPAIGN_CONTACT_URL),
-  FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: (environment) =>
-    isAbsoluteHttpsUrl(environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL),
   FOUNDRY_NEWSLETTER_DELIVERY_SECRET: (environment) =>
     isLongEnoughSecret(environment.FOUNDRY_NEWSLETTER_DELIVERY_SECRET),
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET: (environment) =>
@@ -141,11 +129,6 @@ const campaignDeliverySettingChecks: Readonly<
     /^[a-f0-9]{64}$/u.test(
       environment.FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT?.trim() ?? "",
     ),
-  // Absent evidence is not an error for the runtime: it classifies the account
-  // as `evaluation`. Delivery still cannot report ready without it, so the
-  // installer is told the setting is missing.
-  FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON: (environment) =>
-    isNonEmptyJsonObject(environment.FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON),
   FOUNDRY_BREVO_SENDERS_JSON: (environment) =>
     isNonEmptyJsonObject(environment.FOUNDRY_BREVO_SENDERS_JSON),
   FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON: (environment) =>

@@ -17,6 +17,7 @@ import {
   loadCampaignRequestContext,
   readCampaignDeliveryReadiness,
 } from "../../../../src/campaign-runtime";
+import { isCampaignDeliveryConnected } from "../../../../src/campaign-delivery-readiness";
 import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
 
 type CampaignCommand =
@@ -569,7 +570,10 @@ export async function POST(request: Request) {
     // Fail closed: while email delivery is not configured, no command that
     // sends or approves a message may run. The reason names the state rather
     // than the missing settings, which the readiness report lists.
-    if (!context.delivery.connected && deliveryActions.has(parsed.action)) {
+    if (
+      !isCampaignDeliveryConnected(context.delivery) &&
+      deliveryActions.has(parsed.action)
+    ) {
       return Response.json(
         { error: "delivery_not_configured" },
         { status: 503, headers: { "cache-control": "private, no-store" } },

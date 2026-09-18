@@ -49,8 +49,8 @@ import {
 } from "./human-access-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import {
-  readNewsletterDeliverySecret,
   readSubscriberIdentityKeySecret,
+  type HumanAccessEnvironment,
 } from "./human-access-configuration";
 import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
 import {
@@ -61,7 +61,7 @@ import {
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
 import { installedSite } from "../foundry/site-definition.server";
 import {
-  createSignedNewsletterDeliveryAdapter,
+  newsletterUnsubscribePlaceholder,
 } from "./newsletter-unsubscribe-token";
 import {
   createBrevoNewsletterDeliveryAdapter,
@@ -187,44 +187,25 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
 });
 
 /**
- * The compliance footer version Foundry stores on a campaign revision that was
- * written while email delivery was not configured. It is deliberately not a
- * real version: the installation has not yet named its legal entity, postal
- * address or contact address, so no revision written under it may be sent.
- */
-export const notConfiguredComplianceVersion = "not-configured";
-
-/**
- * A campaign channel configuration for an installation that has not connected
- * email delivery yet.
+ * The campaign channel configuration for one installation.
  *
- * Writing and saving a campaign must keep working without delivery settings,
- * and the campaign application needs a valid channel configuration to start.
- * This supplies one. The unsubscribe address is built from the installed
- * site's own canonical origin, so it is a real address for this site rather
- * than an invented one. Nothing written under this configuration can be sent,
- * because the campaigns route refuses every test and send while delivery is
- * not connected.
+ * The compliance footer it builds is stored on every campaign revision and is
+ * read by whoever receives the email, so it is always built from the
+ * installation's own settings. Foundry never stands in for it, and it is built
+ * the same way whether or not the delivery secrets are installed.
+ *
+ * The unsubscribe address needs the configured address only. The delivery
+ * secret signs a real token later, at send time.
  */
-function notConfiguredChannelConfiguration(
-  canonicalOrigin: string,
+export function resolveCampaignChannelConfiguration(
+  environment: HumanAccessEnvironment,
 ): CampaignChannelConfiguration {
-  return Object.freeze({
-    senderIdentityId: "sender_primary",
-    complianceFooter: Object.freeze({
-      version: notConfiguredComplianceVersion,
-      content:
-        "Email delivery is not configured for this site. " +
-        "No newsletter can be sent until it is.",
-      unsubscribePlaceholder:
-        `${canonicalOrigin.replace(/\/+$/u, "")}` +
-        "/newsletter/unsubscribe?token={{foundry.unsubscribe.token}}",
-    }),
-    audienceDefinition: Object.freeze({
-      id: "canonical-consent-and-suppression" as const,
-      version: 1 as const,
-    }),
-  });
+  return readCampaignChannelConfiguration(
+    environment,
+    newsletterUnsubscribePlaceholder(
+      environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
+    ),
+  );
 }
 
 /**
@@ -294,15 +275,11 @@ async function d1PostRevision(
   ) ?? null;
 }
 
-export async function loadCampaignRequestContext(
-  requestHeaders: Headers,
-): Promise<Readonly<{
-  identity: Awaited<
-    ReturnType<typeof loadHumanAccessRequestContext>
-  >["identity"];
-  application: CampaignApplication;
-  testDelivery: CampaignTestDeliveryApplication;
-  bulkDelivery: CampaignBulkDeliveryApplication;
+/**
+ * What a caller needs to report delivery readiness: the settings-level answer,
+ * and a way to ask the provider about its own health.
+ */
+export type CampaignDeliveryContext = Readonly<{
   /**
    * Whether email delivery is connected for this installation, and the names
    * of the settings it still needs. It never carries a setting's value.
@@ -310,6 +287,17 @@ export async function loadCampaignRequestContext(
   delivery: CampaignDeliveryReadiness;
   /** What the delivery provider reports about its own credential and sender. */
   readDeliveryHealth: () => Promise<NewsletterDeliveryHealth>;
+}>;
+
+export async function loadCampaignRequestContext(
+  requestHeaders: Headers,
+): Promise<Readonly<CampaignDeliveryContext & {
+  identity: Awaited<
+    ReturnType<typeof loadHumanAccessRequestContext>
+  >["identity"];
+  application: CampaignApplication;
+  testDelivery: CampaignTestDeliveryApplication;
+  bulkDelivery: CampaignBulkDeliveryApplication;
 }>> {
   const human = await loadHumanAccessRequestContext(requestHeaders);
   if (human.state !== "authorized") {
@@ -393,7 +381,6 @@ export async function loadCampaignRequestContext(
   let providerOwnershipEvidence = developmentProviderOwnershipEvidence;
   let delivery: CampaignDeliveryReadiness = Object.freeze({
     state: "local_development" as const,
-    connected: false,
     missingSettings: Object.freeze([]),
     providerHealth: null,
     setupGuide: campaignDeliverySetupGuide,
@@ -411,7 +398,6 @@ export async function loadCampaignRequestContext(
         missingSettings.length === 0
           ? ("connected" as const)
           : ("not_configured" as const),
-      connected: missingSettings.length === 0,
       missingSettings,
       providerHealth: null,
       setupGuide: campaignDeliverySetupGuide,
@@ -430,25 +416,14 @@ export async function loadCampaignRequestContext(
     });
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
-    if (!delivery.connected) {
+    channelConfiguration = resolveCampaignChannelConfiguration(environment);
+    if (delivery.state !== "connected") {
       // Delivery is not configured. Writing and saving a campaign still work,
       // so the Newsletter page renders. Every provider adapter stays the
       // fail-closed one declared above, and the send-artifact publisher fails
       // rather than reporting a commit, so nothing can be sent from here.
-      channelConfiguration = notConfiguredChannelConfiguration(
-        installedSite.definition.site.canonicalOrigin,
-      );
-      subscriberIdentityKeySecret = "newsletter-delivery-not-configured";
       bulkArtifactPublisher = notConfiguredArtifactPublisher;
     } else {
-      const deliveryAdapter = createSignedNewsletterDeliveryAdapter({
-        unsubscribeUrl: environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
-        secret: readNewsletterDeliverySecret(environment),
-      });
-      channelConfiguration = readCampaignChannelConfiguration(
-        environment,
-        deliveryAdapter.unsubscribePlaceholder,
-      );
       subscriberIdentityKeySecret =
         readSubscriberIdentityKeySecret(environment);
       const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
@@ -562,11 +537,20 @@ export async function loadCampaignRequestContext(
       return recipients;
     },
     resolveAudienceByIds: audience.resolveByIds,
-    applyProviderSuppression: createProviderSuppressionRecorder({
-      siteId: installedSite.application.siteId,
-      store: subscriberStore,
-      identityKeySecret: subscriberIdentityKeySecret,
-    }),
+    // A suppression is written under the installation's subscriber identity
+    // secret. Without that secret the fingerprint would not match the same
+    // subscriber later, so this refuses rather than writing one that cannot be
+    // matched.
+    applyProviderSuppression:
+      delivery.state === "not_configured"
+        ? async () => {
+            throw new Error("newsletter_delivery_not_configured");
+          }
+        : createProviderSuppressionRecorder({
+            siteId: installedSite.application.siteId,
+            store: subscriberStore,
+            identityKeySecret: subscriberIdentityKeySecret,
+          }),
     artifactPublisher: bulkArtifactPublisher,
     adapter: bulkAdapter,
     fingerprintKey: bulkFingerprintKey,
@@ -691,12 +675,9 @@ export async function loadCampaignRequestContext(
  * rather than failing the whole request.
  */
 export async function readCampaignDeliveryReadiness(
-  context: Readonly<{
-    delivery: CampaignDeliveryReadiness;
-    readDeliveryHealth: () => Promise<NewsletterDeliveryHealth>;
-  }>,
+  context: CampaignDeliveryContext,
 ): Promise<CampaignDeliveryReadiness> {
-  if (!context.delivery.connected) return context.delivery;
+  if (context.delivery.state !== "connected") return context.delivery;
   let providerHealth: NewsletterDeliveryHealth;
   try {
     providerHealth = await context.readDeliveryHealth();
@@ -710,11 +691,3 @@ export async function readCampaignDeliveryReadiness(
   return Object.freeze({ ...context.delivery, providerHealth });
 }
 
-/** The delivery readiness for one authorized request. */
-export async function loadCampaignDeliveryReadiness(
-  requestHeaders: Headers,
-): Promise<CampaignDeliveryReadiness> {
-  return readCampaignDeliveryReadiness(
-    await loadCampaignRequestContext(requestHeaders),
-  );
-}
