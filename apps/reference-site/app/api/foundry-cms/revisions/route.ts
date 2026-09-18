@@ -24,6 +24,7 @@ import {
   type SeoMetadata,
   type SiteDefinition,
   type SiteDefinitionEdit,
+  homePage,
 } from "@humber-foundry/site-definition";
 
 import { AccessIdentityError } from "../../../../src/access-identity";
@@ -362,7 +363,7 @@ export async function GET(request: Request) {
     });
     const revisionAssetIds = [
       ...new Set(
-        (revision.definition.home.media ?? []).map(
+        (homePage(revision.definition).media ?? []).map(
           (occurrence) => occurrence.asset.assetId,
         ),
       ),

@@ -20,3 +20,4 @@
 | [ADR-0013](ADR-0013-blog-post-images.md) | Blog post images — main image, thumbnail and inline images | Accepted | 2026-08-16 |
 | [ADR-0014](ADR-0014-campaign-images.md) | Campaign images — header, share and inline images, made absolute and served | Accepted | 2026-08-16 |
 | [ADR-0015](ADR-0015-foundation-framework-sync-seam.md) | The framework/installation-owned seam and three-way foundation sync | Accepted | 2026-08-17 |
+| [ADR-0016](ADR-0016-site-definition-page-collection.md) | A page collection replaces the single home page | Accepted | 2026-09-18 |

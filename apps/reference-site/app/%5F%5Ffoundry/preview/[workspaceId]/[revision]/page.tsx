@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { resolveHomeSeo } from "@humber-foundry/site-definition";
+import { homePage, resolvePageSeo } from "@humber-foundry/site-definition";
 
 import { SiteRenderer } from "@/components/site-renderer";
 import { publicMetadata } from "@/src/public-metadata";
@@ -20,10 +20,13 @@ export async function generateMetadata(
   const revision = await loadRevisionPreview(props);
   return {
     robots: { index: false, follow: false },
-    ...publicMetadata(resolveHomeSeo(revision.definition), {
-      siteName: revision.definition.site.name,
-      kind: "website",
-    }),
+    ...publicMetadata(
+      resolvePageSeo(revision.definition, homePage(revision.definition)),
+      {
+        siteName: revision.definition.site.name,
+        kind: "website",
+      },
+    ),
   };
 }
 

@@ -24,6 +24,7 @@ import {
   seoFieldHints,
   seoKeywordLimit,
 } from "./seo";
+import { homePage, homePageIndex } from "./pages";
 
 export type SiteDefinitionEdit =
   | Readonly<{
@@ -176,7 +177,10 @@ function fieldBinding({
  * been written: an image with no address is no image.
  */
 function normalizeSeoShareImages(draft: MutableSiteDefinition): void {
-  const seoBlocks = [draft.home.seo, ...draft.blog.posts.map(({ seo }) => seo)];
+  const seoBlocks = [
+    ...draft.pages.map(({ seo }) => seo),
+    ...draft.blog.posts.map(({ seo }) => seo),
+  ];
   for (const seo of seoBlocks) {
     if (seo.shareImage !== null && seo.shareImage.url.trim() === "") {
       seo.shareImage = null;
@@ -400,13 +404,13 @@ function editableFieldBindings(
       },
     }),
     ...seoFieldBindings({
-      pathPrefix: definition.home.id,
+      pathPrefix: homePage(definition).id,
       labelPrefix: "Page",
       group: "SEO",
-      seo: definition.home.seo,
+      seo: homePage(definition).seo,
       titleHint: seoFieldHints.page.title,
       descriptionHint: seoFieldHints.page.description,
-      select: (draft) => draft.home.seo,
+      select: (draft) => draft.pages[homePageIndex(draft)]!.seo,
     }),
   ];
 
@@ -425,7 +429,7 @@ function editableFieldBindings(
     );
   });
 
-  definition.home.sections.forEach((section, sectionIndex) => {
+  homePage(definition).sections.forEach((section, sectionIndex) => {
     if (section.type === "registered") return;
     const variant = designContract.variants[section.type];
     // The card heading the editor shows for every field in this section, so
@@ -440,7 +444,7 @@ function editableFieldBindings(
         multiline: false,
         values: variant.values,
         write: (draft, value) => {
-          const draftSection = draft.home.sections[
+          const draftSection = draft.pages[homePageIndex(draft)]!.sections[
             sectionIndex
           ] as unknown as Record<string, unknown>;
           draftSection.variant = value;
@@ -462,7 +466,7 @@ function editableFieldBindings(
           value,
           multiline,
           write: (draft, nextValue) => {
-            const draftSection = draft.home.sections[
+            const draftSection = draft.pages[homePageIndex(draft)]!.sections[
               sectionIndex
             ] as unknown as Record<string, unknown>;
             draftSection[property] = nextValue;
@@ -486,7 +490,9 @@ function editableFieldBindings(
           multiline: false,
           write: (draft, nextValue) => {
             write(
-              draft.home.sections[sectionIndex] as unknown as Record<
+              draft.pages[homePageIndex(draft)]!.sections[
+                sectionIndex
+              ] as unknown as Record<
                 string,
                 any
               >,
@@ -543,7 +549,7 @@ function editableFieldBindings(
                 value: item[property],
                 multiline,
                 write: (draft, nextValue) => {
-                  const draftSection = draft.home.sections[
+                  const draftSection = draft.pages[homePageIndex(draft)]!.sections[
                     sectionIndex
                   ] as ServicesSection;
                   (
@@ -579,7 +585,7 @@ function editableFieldBindings(
                 value: metric[property],
                 multiline: false,
                 write: (draft, nextValue) => {
-                  const draftSection = draft.home.sections[
+                  const draftSection = draft.pages[homePageIndex(draft)]!.sections[
                     sectionIndex
                   ] as ProofSection;
                   (
@@ -607,7 +613,7 @@ function editableFieldBindings(
             multiline: true,
             format: "richText",
             write: (draft, value) => {
-              const draftSection = draft.home.sections[
+              const draftSection = draft.pages[homePageIndex(draft)]!.sections[
                 sectionIndex
               ] as unknown as Record<string, unknown>;
               draftSection.body = parseSerializedRichTextDocument(value);

@@ -1,4 +1,10 @@
-import type { BlogPost, SeoShareImage, SiteDefinition } from "./index";
+import type {
+  BlogPost,
+  SeoShareImage,
+  SiteDefinition,
+  SitePage,
+} from "./index";
+import { homePage, homePageSlug } from "./pages";
 
 /** Where the public site serves one media asset. */
 export function publishedMediaPath(assetId: string): `/${string}` {
@@ -127,7 +133,7 @@ function canonicalUrlFor(
  * last-resort share image for any page or post that has none of its own.
  */
 function homeHeroShareImage(definition: SiteDefinition): SeoShareImage | null {
-  const hero = (definition.home.media ?? []).find(
+  const hero = (homePage(definition).media ?? []).find(
     ({ occurrenceId }) => occurrenceId === "occurrence_home_hero",
   );
   return hero === undefined
@@ -193,18 +199,41 @@ function headingWithSiteName(
     : `${written} — ${siteName}`;
 }
 
-export function resolveHomeSeo(definition: SiteDefinition): ResolvedSeo {
+/** Where one page is served: `/` for the home page, `/<slug>` for any other. */
+export function pagePath(page: SitePage): `/${string}` {
+  return page.slug === homePageSlug ? "/" : `/${page.slug}`;
+}
+
+/**
+ * The metadata one page emits, after every blank field has its fallback.
+ *
+ * On the home page the title falls back to the site name alone, with no page
+ * title added, because the site name already names what the home page is
+ * about. On any other page it falls back to the page title followed by the
+ * site name, which is what a blog post already does. The description, the
+ * keywords and the share image follow the same rules on every page.
+ */
+export function resolvePageSeo(
+  definition: SiteDefinition,
+  page: SitePage,
+): ResolvedSeo {
+  const isHomePage = page.slug === homePageSlug;
   return {
-    title: firstFilled(definition.home.seo.title, definition.site.name),
+    title: firstFilled(
+      page.seo.title,
+      isHomePage
+        ? definition.site.name
+        : headingWithSiteName(definition, page.title),
+    ),
     description: firstFilled(
-      definition.home.seo.description,
+      page.seo.description,
       definition.site.description,
     ),
-    canonicalUrl: canonicalUrlFor(definition, "/"),
-    keywords: definition.home.seo.keywords,
+    canonicalUrl: canonicalUrlFor(definition, pagePath(page)),
+    keywords: page.seo.keywords,
     shareImage: resolveShareImage(
       definition,
-      definition.home.seo.shareImage,
+      page.seo.shareImage,
       homeHeroShareImage(definition),
     ),
   };
@@ -223,7 +252,7 @@ export function resolveBlogIndexSeo(definition: SiteDefinition): ResolvedSeo {
     keywords: [],
     shareImage: resolveShareImage(
       definition,
-      definition.home.seo.shareImage,
+      homePage(definition).seo.shareImage,
       homeHeroShareImage(definition),
     ),
   };
@@ -249,7 +278,7 @@ export function resolveBlogPostSeo(
       definition,
       post.seo.shareImage,
       post.mainImage,
-      definition.home.seo.shareImage,
+      homePage(definition).seo.shareImage,
       homeHeroShareImage(definition),
     ),
   };

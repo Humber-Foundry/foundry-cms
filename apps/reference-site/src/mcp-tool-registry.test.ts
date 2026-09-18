@@ -25,7 +25,7 @@ import {
   type McpConnectionPrincipal,
   type McpReadAuditEvent,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import { homePage, referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   createMcpToolRegistry,
@@ -932,7 +932,7 @@ describe("MCP campaign and analytics tool registry", () => {
           const example = schemaExample(variant) as Record<string, unknown>;
           if (kind === "success" && tool.name === "foundry.content.get") {
             (example.result as Record<string, unknown>).document =
-              referenceSiteDefinition.home;
+              homePage(referenceSiteDefinition);
           }
           if (kind === "success" && tool.name === "foundry.workspace.get") {
             const result = example.result as Record<string, unknown>;

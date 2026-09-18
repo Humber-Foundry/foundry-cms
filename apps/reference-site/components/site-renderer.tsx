@@ -1,4 +1,7 @@
-import type { SiteDefinition } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  type SiteDefinition,
+} from "@humber-foundry/site-definition";
 import { siteDesignAttributes } from "@humber-foundry/site-definition";
 import {
   installedPageComponentRegistry,
@@ -55,7 +58,7 @@ export function SiteRenderer({
         blogHref={blogHref}
       />
       <Landmark id="main-content" tabIndex={-1}>
-        {definition.home.sections.map((section) => (
+        {homePage(definition).sections.map((section) => (
           <SiteSection
             key={section.id}
             section={section}

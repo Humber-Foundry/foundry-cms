@@ -42,13 +42,13 @@ describe("blog post artifact fingerprint", () => {
       revision: 1,
       contentHash:
         "8a7559c553ea74f71b3db40d2dd622f6e1f905f8c91616867ce0a95739ebae50",
-      schemaVersion: "1.6.0",
+      schemaVersion: "1.7.0",
       rendererVersion: "renderer-v1",
       serializationVersion: "foundry.post-artifact.v1",
       renderedBytesHash:
-        "c383a8d9229408105115b7424093f3597749c900a02758ef6bbd925694e75786",
+        "b44094512eb53933196d1209b47dff036f35910c0eafb705dadddc087a5e2a39",
       value:
-        "4e0aa7648a9827e435a05894da54c7f6b45e4bfbff0bd98a3837a9da48c0b3c0",
+        "d58017dd1bb2bd2e1f636a9b631847d608615976c5b75b1817179a78087e8546",
     });
 
     const changedChrome = await createBlogPostArtifactFingerprint({

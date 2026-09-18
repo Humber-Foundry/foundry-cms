@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
 import { AccessDeniedError } from "@humber-foundry/application";
+import { homePage } from "@humber-foundry/site-definition";
 
 import { AccessIdentityError } from "@/src/access-identity";
 import { HumanAccessConfigurationError } from "@/src/human-access-configuration";
@@ -50,7 +51,7 @@ export default async function McpPreviewReviewPage({
   });
   const media = await createHumanMediaAccessToken(
     access.identity,
-    (revision.definition.home.media ?? []).map(
+    (homePage(revision.definition).media ?? []).map(
       ({ asset }) => asset.assetId,
     ),
     new Date().toISOString(),

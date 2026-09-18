@@ -146,7 +146,7 @@ async function main() {
       void response
         .json()
         .then((body) => {
-          const section = (body.definition?.home?.sections ?? []).find(
+          const section = (body.definition?.pages?.[0]?.sections ?? []).find(
             (candidate) => candidate.component === "photoBand",
           );
           if (

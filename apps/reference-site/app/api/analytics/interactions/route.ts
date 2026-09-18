@@ -1,4 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { homePage } from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "@/foundry/site-definition";
 import {
@@ -22,8 +23,8 @@ const maximumBodySize = 512;
 /** Public CMS object IDs a browser may report an interaction against. */
 function publicSubjectIds(): ReadonlySet<string> {
   return new Set([
-    installedSiteDefinition.home.id,
-    ...installedSiteDefinition.home.sections.map((section) => section.id),
+    homePage(installedSiteDefinition).id,
+    ...homePage(installedSiteDefinition).sections.map((section) => section.id),
     ...installedSiteDefinition.blog.posts.map((post) => post.id),
   ]);
 }

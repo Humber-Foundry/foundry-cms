@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { resolveHomeSeo } from "@humber-foundry/site-definition";
+import { homePage, resolvePageSeo } from "@humber-foundry/site-definition";
 
 import { SiteRenderer } from "@/components/site-renderer";
 import { installedSite } from "@/foundry/site-definition.server";
@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const definition =
     await installedSite.application.queries.getPublishedSite();
 
-  return publicMetadata(resolveHomeSeo(definition), {
+  return publicMetadata(resolvePageSeo(definition, homePage(definition)), {
     siteName: definition.site.name,
     kind: "website",
   });

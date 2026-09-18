@@ -9,6 +9,7 @@ import {
   unpublishBlogPostDefinition,
   BlogPostSchemaError,
   foundationPageComponentRegistry,
+  homePage,
   isSiteDefinitionWithPageComponents,
   type BlogPost,
   type BlogPostId,
@@ -178,7 +179,7 @@ function compositionWithAuthoritativeVariants(
   edits: ReadonlyArray<SiteDefinitionEdit>,
 ): PageComposition {
   const existingById = new Map(
-    definition.home.sections.map((section) => [section.id, section]),
+    homePage(definition).sections.map((section) => [section.id, section]),
   );
   const variantEdits = new Map(
     edits
