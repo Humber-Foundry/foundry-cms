@@ -6,6 +6,7 @@ import {
   loadPublishedDefinition,
   preservedRevisionOf,
   readWorkspaceSearchParams,
+  recoveryReasonOf,
 } from "@/src/dashboard-page-context";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
 
@@ -73,7 +74,7 @@ export async function DashboardWorkspacePage({
           staleRecovery={staleRecovery}
           preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={schemaRecovery}
-          reason="older-schema"
+          reason={recoveryReasonOf(dashboardWorkspace)}
         />
       ) : (
         <WorkspaceEditorSurface

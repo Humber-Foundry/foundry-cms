@@ -348,9 +348,9 @@ export function ContentDraftRecovery({
             </p>
           ) : (
             <p>
-              Your site was updated after this draft was written, so this draft
-              can no longer be saved. Start a fresh draft to carry on. This
-              draft is kept, and you can still{" "}
+              Your site moved to a newer version after this draft was written,
+              so this draft can no longer be saved. Start a fresh draft to
+              carry on. This draft is kept, and you can still{" "}
               {/* Pages opens this draft in the editor, because only an
                   older-schema draft sends the owner back to this screen. */}
               <a

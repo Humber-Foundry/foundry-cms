@@ -131,7 +131,9 @@ export const openDefaultWorkspaceIdempotencyKey =
  * Creation is idempotent and stays correct when two first requests arrive
  * together. The workspace id is derived from the actor, so both requests aim
  * at one row: the workspace insert ignores a conflict, and revision 0 is only
- * inserted when it is absent. Both requests then read the same revision.
+ * inserted when it is absent. Both requests then read the same revision. The
+ * site-wide blog-post rows written in the same batch can only advance a post
+ * to its next revision, which a copy of the published posts never is.
  */
 export async function openDefaultContentWorkspace(
   actorId: ContentActorId,
@@ -158,8 +160,11 @@ export async function latestContentWorkspaceIdForActor(
   actorId: ContentActorId,
 ): Promise<ContentWorkspaceId | null> {
   if (process.env.NODE_ENV === "development") {
+    // Development only, and it orders by the revision's own `createdAt`. The
+    // production path orders by the workspace's `updated_at` and skips a
+    // workspace that is not open.
     let latest:
-      | Readonly<{ workspaceId: ContentWorkspaceId; updatedAt: string }>
+      | Readonly<{ workspaceId: ContentWorkspaceId; createdAt: string }>
       | undefined;
     for (const [workspaceId, store] of localRuntime
       .__foundryContentRevisionStores!) {
@@ -168,13 +173,13 @@ export async function latestContentWorkspaceIdForActor(
         const current = await store.getCurrent();
         if (
           latest === undefined ||
-          current.createdAt > latest.updatedAt ||
-          (current.createdAt === latest.updatedAt &&
+          current.createdAt > latest.createdAt ||
+          (current.createdAt === latest.createdAt &&
             workspaceId > latest.workspaceId)
         ) {
           latest = {
             workspaceId: createContentWorkspaceId(workspaceId),
-            updatedAt: current.createdAt,
+            createdAt: current.createdAt,
           };
         }
       } catch (error) {

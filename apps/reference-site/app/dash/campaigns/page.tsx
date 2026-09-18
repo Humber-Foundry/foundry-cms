@@ -26,10 +26,12 @@ export default async function DashboardCampaignsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const access = await requireAuthorizedDashboardAccess();
-  const { workspace } = await readWorkspaceSearchParams(searchParams);
+  const { workspace, staleRecovery } =
+    await readWorkspaceSearchParams(searchParams);
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     "/dash/campaigns",
+    staleRecovery,
   );
   const definition = await loadPublishedDefinition();
   const mutationToken = await loadMutationToken();

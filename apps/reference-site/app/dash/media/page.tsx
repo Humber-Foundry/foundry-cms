@@ -24,10 +24,12 @@ export default async function DashboardMediaPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { workspace } = await readWorkspaceSearchParams(searchParams);
+  const { workspace, staleRecovery } =
+    await readWorkspaceSearchParams(searchParams);
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     "/dash/media",
+    staleRecovery,
   );
   const mutationToken = await loadMutationToken();
   const publishedDefinition = await loadPublishedDefinition();

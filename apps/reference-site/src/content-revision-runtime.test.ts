@@ -209,6 +209,36 @@ describe("opening the default draft workspace", () => {
     await expect(revisionRows(first.workspaceId)).resolves.toBe(1);
   });
 
+  it("leaves the site-wide blog posts where they are", async () => {
+    // ADR-0005 allows this write during a page render partly because it
+    // cannot advance a published post. The insert is guarded to accept only
+    // the next revision, and a copy of the published posts never is.
+    const first = await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+    const before = await database
+      .prepare(
+        "SELECT post_id, current_revision, version FROM blog_posts ORDER BY post_id",
+      )
+      .all();
+
+    await openDefaultContentWorkspace(
+      createContentActorId("membership-editor"),
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+
+    const after = await database
+      .prepare(
+        "SELECT post_id, current_revision, version FROM blog_posts ORDER BY post_id",
+      )
+      .all();
+    expect(after.results).toEqual(before.results);
+    await expect(workspaceRows(first.workspaceId)).resolves.toBe(1);
+  });
+
   it("reopens the existing workspace instead of creating a second one", async () => {
     const first = await openDefaultContentWorkspace(
       actorId,

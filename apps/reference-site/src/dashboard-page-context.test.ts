@@ -69,6 +69,7 @@ vi.mock("@/src/content-schema-recovery", () => ({
 import {
   loadDashboardWorkspace,
   readWorkspaceSearchParams,
+  recoveryReasonOf,
 } from "./dashboard-page-context";
 
 const ownWorkspaceId = "workspace_aaaaaaaaaaaaaaaaaaaaaaaa";
@@ -125,7 +126,7 @@ describe("dashboard workspace resolution", () => {
 
   it("creates the draft workspace on a first visit so no destination asks for one", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(null);
-    const workspace = await loadDashboardWorkspace(undefined, "/dash/blog");
+    const workspace = await loadDashboardWorkspace(undefined, "/dash/blog", undefined);
 
     expect(mocks.openDefaultWorkspace).toHaveBeenCalledTimes(1);
     expect(mocks.openDefaultWorkspace).toHaveBeenCalledWith(
@@ -146,28 +147,16 @@ describe("dashboard workspace resolution", () => {
   it("reuses the person's most recent workspace and creates nothing", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(otherWorkspaceId);
     mocks.getCurrent.mockResolvedValue(revisionOf(otherWorkspaceId, 4));
-    const workspace = await loadDashboardWorkspace(undefined, "/dash");
+    const workspace = await loadDashboardWorkspace(undefined, "/dash", undefined);
 
     expect(mocks.openDefaultWorkspace).not.toHaveBeenCalled();
     expect(workspace.workspaceId).toBe(otherWorkspaceId);
     expect(workspace.contentRevision.revision).toBe(4);
   });
 
-  it("opens the workspace through the shared operation, not its own create", async () => {
-    mocks.latestWorkspaceId.mockResolvedValue(null);
-    await loadDashboardWorkspace(undefined, "/dash");
-
-    // Whether that operation is safe for two requests at once is proved
-    // against a real database in content-revision-runtime.test.ts.
-    expect(mocks.openDefaultWorkspace).toHaveBeenCalledTimes(1);
-  });
-
   it("opens a workspace id from the URL when the person can still open it", async () => {
     mocks.getCurrent.mockResolvedValue(revisionOf(otherWorkspaceId, 2));
-    const workspace = await loadDashboardWorkspace(
-      otherWorkspaceId,
-      "/dash/pages",
-    );
+    const workspace = await loadDashboardWorkspace(otherWorkspaceId, "/dash/pages", undefined);
 
     expect(workspace.workspaceId).toBe(otherWorkspaceId);
     expect(workspace.activeWorkspaceUrl).toBe(
@@ -185,7 +174,7 @@ describe("dashboard workspace resolution", () => {
     // Not a missing page. The dead id is swapped for a workspace they can
     // open, so the address bar and every sidebar link stop carrying it.
     await expect(
-      loadDashboardWorkspace(otherWorkspaceId, "/dash/blog"),
+      loadDashboardWorkspace(otherWorkspaceId, "/dash/blog", undefined),
     ).rejects.toThrow(`redirect:/dash/blog?workspace=${ownWorkspaceId}`);
   });
 
@@ -193,7 +182,7 @@ describe("dashboard workspace resolution", () => {
     mocks.latestWorkspaceId.mockResolvedValue(null);
 
     await expect(
-      loadDashboardWorkspace("not-a-workspace", "/dash"),
+      loadDashboardWorkspace("not-a-workspace", "/dash", undefined),
     ).rejects.toThrow(`redirect:/dash?workspace=${ownWorkspaceId}`);
   });
 
@@ -207,6 +196,7 @@ describe("dashboard workspace resolution", () => {
       loadDashboardWorkspace(
         "workspace_cccccccccccccccccccccccc",
         "/dash/design",
+        undefined,
       ),
     ).rejects.toThrow(`redirect:/dash/design?workspace=${otherWorkspaceId}`);
   });
@@ -237,7 +227,7 @@ describe("dashboard workspace resolution", () => {
     );
 
     await expect(
-      loadDashboardWorkspace(otherWorkspaceId, "/dash"),
+      loadDashboardWorkspace(otherWorkspaceId, "/dash", undefined),
     ).rejects.toThrow("some_other_bug");
   });
 
@@ -246,7 +236,7 @@ describe("dashboard workspace resolution", () => {
       new ContentRevisionConfigurationError(),
     );
 
-    await expect(loadDashboardWorkspace(undefined, "/dash")).rejects.toThrow(
+    await expect(loadDashboardWorkspace(undefined, "/dash", undefined)).rejects.toThrow(
       "not_found",
     );
   });
@@ -261,7 +251,7 @@ describe("dashboard workspace resolution", () => {
       { path: "home.hero.title", value: "New title", baseValue: "Old title" },
     ];
     mocks.durableSchemaRecoveryEdits.mockReturnValue(carried);
-    const workspace = await loadDashboardWorkspace(undefined, "/dash/pages");
+    const workspace = await loadDashboardWorkspace(undefined, "/dash/pages", undefined);
 
     expect(workspace.schemaRecovery).toEqual(carried);
     expect(workspace.contentRevision.revision).toBe(5);
@@ -274,7 +264,7 @@ describe("dashboard workspace resolution", () => {
     );
     mocks.getRevision.mockResolvedValue(null);
     await expect(
-      loadDashboardWorkspace(undefined, "/dash/pages"),
+      loadDashboardWorkspace(undefined, "/dash/pages", undefined),
     ).rejects.toThrow("not_found");
   });
 
@@ -284,7 +274,7 @@ describe("dashboard workspace resolution", () => {
       new ContentRevisionConfigurationError(),
     );
     await expect(
-      loadDashboardWorkspace(undefined, "/dash"),
+      loadDashboardWorkspace(undefined, "/dash", undefined),
     ).rejects.toThrow("not_found");
   });
 
@@ -292,9 +282,36 @@ describe("dashboard workspace resolution", () => {
     mocks.latestWorkspaceId.mockResolvedValue(ownWorkspaceId);
     mocks.getCurrent.mockResolvedValue(revisionOf(ownWorkspaceId, 3));
     mocks.isRevisionCurrent.mockResolvedValue(false);
-    const workspace = await loadDashboardWorkspace(undefined, "/dash");
+    const workspace = await loadDashboardWorkspace(undefined, "/dash", undefined);
 
     expect(workspace.contentStale).toBe(true);
+  });
+});
+
+describe("recovery reason", () => {
+  const workspace = {
+    workspaceId: ownWorkspaceId,
+    contentRevision: revisionOf(ownWorkspaceId, 3),
+    previewUrl: "/preview",
+    contentStale: true,
+    activeWorkspaceUrl: "/dash",
+  } as never as Parameters<typeof recoveryReasonOf>[0];
+
+  it("reports an older-schema draft only when edits can be carried across", () => {
+    expect(
+      recoveryReasonOf({
+        ...workspace,
+        schemaRecovery: [
+          { path: "home.title", value: "New", baseValue: "Old" },
+        ],
+      } as never),
+    ).toBe("older-schema");
+  });
+
+  it("reports a draft left behind by the site as site-updated", () => {
+    // Nothing is carried out of the stored draft here, so the screen must not
+    // promise that anything is.
+    expect(recoveryReasonOf(workspace)).toBe("site-updated");
   });
 });
 

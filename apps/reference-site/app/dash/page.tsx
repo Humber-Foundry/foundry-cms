@@ -6,6 +6,7 @@ import {
   loadPublishedDefinition,
   preservedRevisionOf,
   readWorkspaceSearchParams,
+  recoveryReasonOf,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
 
@@ -55,11 +56,7 @@ export default async function DashboardOverviewPage({
           staleRecovery={staleRecovery}
           preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={dashboardWorkspace.schemaRecovery}
-          reason={
-            dashboardWorkspace.schemaRecovery === undefined
-              ? "site-updated"
-              : "older-schema"
-          }
+          reason={recoveryReasonOf(dashboardWorkspace)}
         />
       ) : (
         <section className="panel" aria-labelledby="draft-state">

@@ -148,6 +148,19 @@ export function preservedRevisionOf(contentRevision: ContentRevision) {
 }
 
 /**
+ * Why a draft can no longer be saved, which decides what the recovery screen
+ * promises. Only an older-schema draft carries edits out of the stored draft,
+ * so the two cases must never be reported as one.
+ */
+export function recoveryReasonOf(
+  workspace: DashboardWorkspace,
+): "older-schema" | "site-updated" {
+  return workspace.schemaRecovery === undefined
+    ? "site-updated"
+    : "older-schema";
+}
+
+/**
  * Resolve the workspace and its current revision for an editing route.
  *
  * `requestedWorkspace` comes from the `?workspace=` search parameter. The
@@ -155,9 +168,11 @@ export function preservedRevisionOf(contentRevision: ContentRevision) {
  * destination never has to render a "start a draft" step.
  */
 export async function loadDashboardWorkspace(
-  requestedWorkspace?: string,
-  routePath = "/dash",
-  staleRecovery?: Readonly<{ id: string; sourceWorkspaceId: string }>,
+  requestedWorkspace: string | undefined,
+  routePath: string,
+  // Required, though it is often absent: a destination that forgot it would
+  // strand a person's preserved edits when the redirect below fires.
+  staleRecovery: Readonly<{ id: string; sourceWorkspaceId: string }> | undefined,
 ): Promise<DashboardWorkspace> {
   const access = await requireAuthorizedDashboardAccess();
   const definition = await loadPublishedDefinition();
@@ -269,20 +284,25 @@ export async function readWorkspaceSearchParams(
     return { workspace };
   }
 
+  // The source id is checked on its own, so a real fault inside the access
+  // check below stays visible instead of looking like a bad link.
+  let sourceWorkspaceId: ContentWorkspaceId;
+  try {
+    sourceWorkspaceId = createContentWorkspaceId(requested.recoverFrom);
+  } catch {
+    return { workspace };
+  }
+
   const access = await requireAuthorizedDashboardAccess();
   const actorId = createContentActorId(access.membership.id);
   try {
-    const sourceWorkspaceId = createContentWorkspaceId(requested.recoverFrom);
     await requireExistingContentWorkspaceAccess(sourceWorkspaceId, actorId);
     return {
       workspace,
       staleRecovery: { id: requested.recovery, sourceWorkspaceId },
     };
   } catch (error) {
-    if (
-      error instanceof ContentWorkspaceAccessError ||
-      error instanceof TypeError
-    ) {
+    if (error instanceof ContentWorkspaceAccessError) {
       return { workspace };
     }
     if (error instanceof ContentRevisionConfigurationError) {

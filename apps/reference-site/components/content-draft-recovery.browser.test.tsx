@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ContentDraftRecovery } from "./content-draft-recovery";
 
-const oldDraftWorkspaceId = "workspace_aaaaaaaaaaaaaaaaaaaaaaaa";
+const draftWorkspaceId = "workspace_aaaaaaaaaaaaaaaaaaaaaaaa";
 const preservedRevision = {
-  workspaceId: oldDraftWorkspaceId,
+  workspaceId: draftWorkspaceId,
   revision: 4,
   schemaVersion: "1.6.0",
 } as never;
@@ -60,7 +60,7 @@ describe("content draft recovery screen", () => {
 
     // Nothing is carried out of the stored draft in this case, so the screen
     // must not say anything is.
-    expect(updated).toContain("Your site was updated after this draft");
+    expect(updated).toContain("moved to a newer version after this draft");
     expect(updated).not.toContain("copied across");
   });
 
@@ -76,7 +76,7 @@ describe("content draft recovery screen", () => {
     // link there would be a loop with no way to the draft.
     expect(olderLinks).toEqual([]);
     expect(updatedLinks).toEqual([
-      `/dash/pages?workspace=${oldDraftWorkspaceId}`,
+      `/dash/pages?workspace=${draftWorkspaceId}`,
     ]);
   });
 });

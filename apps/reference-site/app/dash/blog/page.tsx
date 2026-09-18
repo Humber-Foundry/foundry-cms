@@ -15,6 +15,7 @@ import {
   loadPublishedDefinition,
   preservedRevisionOf,
   readWorkspaceSearchParams,
+  recoveryReasonOf,
 } from "@/src/dashboard-page-context";
 import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
@@ -113,9 +114,7 @@ export default async function DashboardBlogPage({
           staleRecovery={staleRecovery}
           preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={schemaRecovery}
-          reason={
-            schemaRecovery === undefined ? "site-updated" : "older-schema"
-          }
+          reason={recoveryReasonOf(dashboardWorkspace)}
         />
       ) : (
         <BlogPostControls
