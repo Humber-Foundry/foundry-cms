@@ -2,11 +2,11 @@ import {
   designContract,
   designTokenFieldPath,
   designTokenValue,
+  homePage,
   sectionVariantFieldPath,
   type DesignOptionPreview,
   type DesignTokenKey,
   type SiteDefinition,
-  homePage,
 } from "@humber-foundry/site-definition";
 
 /**

@@ -1,8 +1,8 @@
-import { homePage } from "@humber-foundry/site-definition";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
 import { AccessDeniedError } from "@humber-foundry/application";
+import { homePage } from "@humber-foundry/site-definition";
 
 import { AccessIdentityError } from "@/src/access-identity";
 import { HumanAccessConfigurationError } from "@/src/human-access-configuration";

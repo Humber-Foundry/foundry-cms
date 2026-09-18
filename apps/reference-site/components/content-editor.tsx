@@ -11,6 +11,7 @@ import {
 
 import type { ContentRevision } from "@humber-foundry/application";
 import {
+  homePage,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
@@ -18,7 +19,6 @@ import {
   updateEditableSiteField,
   type EditableSiteField,
   type SiteDefinitionEdit,
-  homePage,
 } from "@humber-foundry/site-definition";
 
 import {

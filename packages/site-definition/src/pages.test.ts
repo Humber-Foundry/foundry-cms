@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { projectedHomePageSlug } from "./site-definition-projection.mjs";
 import {
   findPageById,
   findPageBySlug,
@@ -44,6 +45,12 @@ describe("site page accessors", () => {
       "dash",
       "newsletter",
     ]);
+  });
+
+  it("keeps the projection's copy of the root slug equal to this one", () => {
+    // site-definition-projection.mjs is plain JavaScript and cannot import
+    // this module, so it holds a second copy of the value.
+    expect(projectedHomePageSlug).toBe(homePageSlug);
   });
 
   it("reads the home page as the page with the root slug", () => {

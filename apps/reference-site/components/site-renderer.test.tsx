@@ -2,10 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
-  homePage,
   applySiteDefinitionEdits,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   type PageSection,
   type SiteDefinition,
@@ -84,7 +84,9 @@ describe("SiteRenderer controlled design projection", () => {
     };
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      pages: [{ ...homePage(referenceSiteDefinition), sections: [storySection] }],
+      pages: [
+        { ...homePage(referenceSiteDefinition), sections: [storySection] },
+      ],
     };
 
     const published = renderToStaticMarkup(
@@ -230,20 +232,22 @@ describe("site renderer media placement", () => {
     };
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        media: [{
-          occurrenceId: "occurrence_home_hero",
-          revision: 1,
-          asset: {
-            assetId: "asset_preview_55",
-            width: 1600,
-            height: 900,
-            contentType: "image/png",
-          },
-          crop: null,
-        }],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [{
+            occurrenceId: "occurrence_home_hero",
+            revision: 1,
+            asset: {
+              assetId: "asset_preview_55",
+              width: 1600,
+              height: 900,
+              contentType: "image/png",
+            },
+            crop: null,
+          }],
+        },
+      ],
       blog: { id: "blog", posts: [post] },
     };
     const previewProps = {
@@ -283,22 +287,24 @@ describe("site renderer media placement", () => {
     } as PageSection;
     const definition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero",
-            revision: 1,
-            asset: {
-              assetId: "asset_hero",
-              width: 1600,
-              height: 900,
-              contentType: "image/png",
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 1,
+              asset: {
+                assetId: "asset_hero",
+                width: 1600,
+                height: 900,
+                contentType: "image/png",
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     } as SiteDefinition;
 
     const canonicalMarkup = renderToStaticMarkup(

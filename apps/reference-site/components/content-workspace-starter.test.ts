@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createContentWorkspaceId } from "@humber-foundry/application";
 import {
-  homePage,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
 } from "@humber-foundry/site-definition";

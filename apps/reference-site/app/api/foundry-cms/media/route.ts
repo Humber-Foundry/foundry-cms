@@ -295,7 +295,9 @@ async function bindOccurrenceToContentRevision({
     },
     crop: occurrence.crop,
   } as const;
-  const currentBinding = (homePage(binding.current.definition).media ?? []).find(
+  const currentBinding = (
+    homePage(binding.current.definition).media ?? []
+  ).find(
     (candidate) =>
       candidate.occurrenceId === boundOccurrence.occurrenceId,
   );
@@ -350,7 +352,9 @@ async function bindOccurrenceToContentRevision({
         contentRevision = current;
         break;
       }
-      const originalBinding = (homePage(binding.base.definition).media ?? []).find(
+      const originalBinding = (
+        homePage(binding.base.definition).media ?? []
+      ).find(
         (candidate) =>
           candidate.occurrenceId === boundOccurrence.occurrenceId,
       );

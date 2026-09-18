@@ -490,7 +490,9 @@ function editableFieldBindings(
           multiline: false,
           write: (draft, nextValue) => {
             write(
-              draft.pages[homePageIndex(draft)]!.sections[sectionIndex] as unknown as Record<
+              draft.pages[homePageIndex(draft)]!.sections[
+                sectionIndex
+              ] as unknown as Record<
                 string,
                 any
               >,

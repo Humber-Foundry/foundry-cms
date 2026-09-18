@@ -1482,7 +1482,9 @@ describe("media capability scope", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        pages: [{ slug: "", media: [{ asset: { assetId: "asset_published" } }] }],
+        pages: [
+          { slug: "", media: [{ asset: { assetId: "asset_published" } }] },
+        ],
       },
     });
 

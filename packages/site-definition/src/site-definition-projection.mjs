@@ -11,8 +11,14 @@ const projectedSupportedStoredVersions = Object.freeze([
   "1.6.0",
 ]);
 
-/** The slug of the home page. The same value as `homePageSlug` in pages.ts. */
-const projectedHomePageSlug = "";
+/**
+ * The slug of the home page.
+ *
+ * This is a second copy of `homePageSlug` in pages.ts, because this file is
+ * plain JavaScript and cannot import TypeScript. It is exported so a test can
+ * pin the two values equal.
+ */
+export const projectedHomePageSlug = "";
 
 const projectedDefaultSiteDesign = Object.freeze({
   typography: Object.freeze({ heading: "editorial", body: "modern" }),
@@ -125,9 +131,13 @@ function projectPageCollection(projected) {
     return;
   }
   const { home } = projected;
-  const siteName = isRecord(projected.site) && typeof projected.site.name === "string"
-    ? projected.site.name
-    : "Home";
+  // A definition with no site name is invalid under every schema version, so
+  // the empty title it projects to is refused by the validator rather than
+  // hidden behind an invented word.
+  const siteName =
+    isRecord(projected.site) && typeof projected.site.name === "string"
+      ? projected.site.name
+      : "";
   const page = {
     id: home.id,
     slug: projectedHomePageSlug,
@@ -142,7 +152,9 @@ function projectPageCollection(projected) {
 
 export function projectSiteDefinitionSchema(value) {
   const storedAsOnePage =
-    isRecord(value) && isRecord(value.home) && Array.isArray(value.home.sections);
+    isRecord(value) &&
+    isRecord(value.home) &&
+    Array.isArray(value.home.sections);
   const storedAsPageCollection =
     isRecord(value) && !isRecord(value.home) && Array.isArray(value.pages);
   if (!storedAsOnePage && !storedAsPageCollection) {

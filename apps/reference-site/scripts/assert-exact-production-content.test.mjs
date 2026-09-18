@@ -3,8 +3,8 @@ import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import {
-  homePage,
   createReferenceSiteDefinition,
+  homePage,
   referenceSiteDefinition,
 } from "@humber-foundry/site-definition";
 
@@ -115,7 +115,7 @@ const previousProjectedContentHash = canonicalHash({
   },
 });
 const runtimePublishedContentHash = canonicalHash(trackedRuntimeDefinition);
-const previousPageShapeContentHash = canonicalHash({
+const contentHashUnderSchema160 = canonicalHash({
   ...trackedRuntimeWithoutPages,
   definitionVersion: "1.6.0",
   schemaVersion: "1.6.0",
@@ -337,11 +337,11 @@ describe("exact production content authorization", () => {
   });
 
   it("authorizes the 1.7 page-collection upgrade against the prior 1.6 hash", async () => {
-    expect(previousPageShapeContentHash).not.toBe(runtimePublishedContentHash);
+    expect(contentHashUnderSchema160).not.toBe(runtimePublishedContentHash);
     const options = inputs({
       readLiveMarker: vi.fn().mockResolvedValue({
         commitSha: liveCommit,
-        contentHash: previousPageShapeContentHash,
+        contentHash: contentHashUnderSchema160,
       }),
       readChangedPaths: vi
         .fn()

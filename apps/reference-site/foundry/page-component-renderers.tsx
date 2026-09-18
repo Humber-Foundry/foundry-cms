@@ -57,7 +57,8 @@ function occurrenceFor(
   definition: SiteDefinition | undefined,
   occurrenceId: string,
 ) {
-  return (definition === undefined ? [] : homePage(definition).media ?? []).find(
+  const media = definition === undefined ? [] : homePage(definition).media ?? [];
+  return media.find(
     (candidate) => candidate.occurrenceId === occurrenceId,
   ) ?? null;
 }

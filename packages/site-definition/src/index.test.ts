@@ -342,22 +342,24 @@ describe("reference Site Definition", () => {
   it("preserves the Git-published media manifest at runtime", () => {
     const published = {
       ...structuredClone(referenceSiteDefinition),
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero",
-            revision: 4,
-            asset: {
-              assetId: "asset_published",
-              width: 1200,
-              height: 800,
-              contentType: "image/png",
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 4,
+              asset: {
+                assetId: "asset_published",
+                width: 1200,
+                height: 800,
+                contentType: "image/png",
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     } satisfies SiteDefinition;
 
     expect(homePage(createReferenceSiteDefinition(published)).media).toEqual(
@@ -1027,15 +1029,48 @@ describe("the 1.6.0 to 1.7.0 projection", () => {
 
   it("keeps the upgraded page content byte for byte", () => {
     const stored = storedAt160();
+    // A 1.6.0 home object carries media, so the fixture must too, or the test
+    // would not notice the projection dropping it.
+    stored.home.media = [
+      {
+        occurrenceId: "occurrence_home_hero",
+        revision: 1,
+        asset: {
+          assetId: "asset_home_hero",
+          width: 1200,
+          height: 630,
+          contentType: "image/jpeg",
+        },
+        crop: null,
+      },
+    ];
+    const storedHome = structuredClone(stored.home);
 
     const page = homePage(upgradeSiteDefinition(stored));
 
-    expect(page.id).toBe(stored.home.id);
     expect(page.slug).toBe(homePageSlug);
-    expect(JSON.stringify(page.seo)).toBe(JSON.stringify(stored.home.seo));
-    expect(JSON.stringify(page.sections)).toBe(
-      JSON.stringify(stored.home.sections),
-    );
+    // Everything the 1.6.0 home object held survives, and nothing else is
+    // added: the page is the old home object plus a slug and a title. Key
+    // order is not compared, because every stored digest sorts keys first.
+    const { slug: _slug, title: _title, ...carried } = page;
+    expect(carried).toStrictEqual(storedHome);
+  });
+
+  it("changes nothing outside the page collection", () => {
+    const stored = storedAt160();
+    const { home: _home, ...outsideThePages } = structuredClone(stored);
+
+    const upgraded = upgradeSiteDefinition(stored) as unknown as Record<
+      string,
+      unknown
+    >;
+    const { pages: _pages, ...upgradedOutsideThePages } = upgraded;
+
+    expect(upgradedOutsideThePages).toStrictEqual({
+      ...outsideThePages,
+      definitionVersion: "1.7.0",
+      schemaVersion: "1.7.0",
+    });
   });
 
   it("titles the upgraded page with the site name", () => {

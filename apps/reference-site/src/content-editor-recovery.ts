@@ -2,6 +2,7 @@ import {
   applyPageComposition,
   createRichTextDocumentFromPlainText,
   createSerializedRichTextDocument,
+  homePage,
   listEditableSiteFields,
   pageCompositionContract,
   serializeRichTextDocument,
@@ -9,7 +10,6 @@ import {
   type PageSection,
   type SiteDefinition,
   type SiteDefinitionEdit,
-  homePage,
 } from "@humber-foundry/site-definition";
 import { canonicalJson } from "@humber-foundry/application";
 import { installedPageComponentRegistry } from "../foundry/page-components";

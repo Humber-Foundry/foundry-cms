@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  homePage,
   createPageComponentRegistry,
   createRegisteredPageComponent,
   foundationPageComponentRegistry,
+  homePage,
   referenceSiteDefinition,
   type PageSection,
   type SiteDefinition,
@@ -58,10 +58,12 @@ describe("Puck page-composition adapter", () => {
     } as const;
     const definition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [...homePage(referenceSiteDefinition).sections, existing],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections, existing],
+        },
+      ],
     } as SiteDefinition;
     const data = definitionToPuckData(definition, registry);
     const source = data.content.at(-1)!;
@@ -119,14 +121,16 @@ describe("Puck page-composition adapter", () => {
     } as const;
     const definition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          ...homePage(referenceSiteDefinition).sections,
-          first,
-          second,
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            ...homePage(referenceSiteDefinition).sections,
+            first,
+            second,
+          ],
+        },
+      ],
     } as SiteDefinition;
     const data = definitionToPuckData(definition, registry);
     const source = data.content.at(-1)!;
@@ -162,13 +166,15 @@ describe("Puck page-composition adapter", () => {
     const hero = homePage(referenceSiteDefinition).sections[0]!;
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          { ...hero, id: "hero" },
-          ...homePage(referenceSiteDefinition).sections.slice(1),
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            { ...hero, id: "hero" },
+            ...homePage(referenceSiteDefinition).sections.slice(1),
+          ],
+        },
+      ],
     };
 
     const result = puckDataToDefinition(
@@ -184,13 +190,15 @@ describe("Puck page-composition adapter", () => {
     const sourceHero = homePage(referenceSiteDefinition).sections[0]!;
     const liveDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          { ...sourceHero, variant: "focused" },
-          ...homePage(referenceSiteDefinition).sections.slice(1),
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            { ...sourceHero, variant: "focused" },
+            ...homePage(referenceSiteDefinition).sections.slice(1),
+          ],
+        },
+      ],
     } as SiteDefinition;
     const hero = homePage(liveDefinition).sections[0]!;
     if (hero.type !== "hero") {
@@ -307,10 +315,12 @@ describe("Puck page-composition adapter", () => {
     const base = {
       ...referenceSiteDefinition,
       site: { ...referenceSiteDefinition.site, navigation: [] },
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [proof, replacedCallToAction],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [proof, replacedCallToAction],
+        },
+      ],
     } as SiteDefinition;
     const result = puckDataToDefinition(base, {
       root: { props: {} },
@@ -429,16 +439,18 @@ describe("Puck page-composition adapter", () => {
   it("only emits a structural command when component identity or order changes", () => {
     const copyEdited = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          {
-            ...homePage(referenceSiteDefinition).sections[0],
-            title: "Changed copy",
-          },
-          ...homePage(referenceSiteDefinition).sections.slice(1),
-        ] as PageSection[],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            {
+              ...homePage(referenceSiteDefinition).sections[0],
+              title: "Changed copy",
+            },
+            ...homePage(referenceSiteDefinition).sections.slice(1),
+          ] as PageSection[],
+        },
+      ],
     };
     expect(
       pageCompositionChanged(referenceSiteDefinition, copyEdited),
@@ -446,10 +458,12 @@ describe("Puck page-composition adapter", () => {
 
     const reordered = {
       ...copyEdited,
-      pages: [{
-        ...homePage(copyEdited),
-        sections: [...homePage(copyEdited).sections].reverse(),
-      }],
+      pages: [
+        {
+          ...homePage(copyEdited),
+          sections: [...homePage(copyEdited).sections].reverse(),
+        },
+      ],
     };
     expect(
       pageCompositionChanged(referenceSiteDefinition, reordered),

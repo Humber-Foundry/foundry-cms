@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  homePage,
   applySiteDefinitionEdits,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   updateEditableSiteField,
   type BlogPost,
@@ -51,22 +51,24 @@ function buildDefinition(
 function withHomeHero(definition: SiteDefinition): SiteDefinition {
   return {
     ...definition,
-    pages: [{
-      ...homePage(definition),
-      media: [
-        {
-          occurrenceId: "occurrence_home_hero",
-          revision: 1,
-          asset: {
-            assetId: "asset_home_hero",
-            width: 1200,
-            height: 630,
-            contentType: "image/jpeg",
+    pages: [
+      {
+        ...homePage(definition),
+        media: [
+          {
+            occurrenceId: "occurrence_home_hero",
+            revision: 1,
+            asset: {
+              assetId: "asset_home_hero",
+              width: 1200,
+              height: 630,
+              contentType: "image/jpeg",
+            },
+            crop: null,
           },
-          crop: null,
-        },
-      ],
-    }],
+        ],
+      },
+    ],
   };
 }
 
@@ -242,10 +244,12 @@ describe("resolvePageSeo", () => {
     const definition = buildDefinition(buildPost());
     const blank = {
       ...definition,
-      pages: [{
-        ...homePage(definition),
-        seo: { title: "", description: "", keywords: [], shareImage: null },
-      }],
+      pages: [
+        {
+          ...homePage(definition),
+          seo: { title: "", description: "", keywords: [], shareImage: null },
+        },
+      ],
     };
 
     const resolved = resolvePageSeo(blank, homePage(blank));
@@ -520,16 +524,18 @@ describe("choosing a share image with no site address set", () => {
     const withoutOrigin = buildDefinition(post, "");
     const definition: SiteDefinition = {
       ...withoutOrigin,
-      pages: [{
-        ...homePage(withoutOrigin),
-        seo: {
-          ...homePage(withoutOrigin).seo,
-          shareImage: {
-            url: "https://cdn.example.com/card.png",
-            alt: "The site card",
+      pages: [
+        {
+          ...homePage(withoutOrigin),
+          seo: {
+            ...homePage(withoutOrigin).seo,
+            shareImage: {
+              url: "https://cdn.example.com/card.png",
+              alt: "The site card",
+            },
           },
         },
-      }],
+      ],
     };
 
     expect(resolveBlogPostSeo(definition, post).shareImage).toEqual({

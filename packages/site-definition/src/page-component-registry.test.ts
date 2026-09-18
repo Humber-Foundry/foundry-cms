@@ -123,17 +123,19 @@ describe("installation-owned page component registry", () => {
   it("validates an installed definition through its registry and fails closed elsewhere", () => {
     const definition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          ...homePage(referenceSiteDefinition).sections,
-          registry.createDefault(
-            "imageCopyStory",
-            "section_story",
-            referenceSiteDefinition,
-          ),
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            ...homePage(referenceSiteDefinition).sections,
+            registry.createDefault(
+              "imageCopyStory",
+              "section_story",
+              referenceSiteDefinition,
+            ),
+          ],
+        },
+      ],
     };
 
     expect(isSiteDefinitionWithPageComponents(definition, registry)).toBe(true);
@@ -141,18 +143,20 @@ describe("installation-owned page component registry", () => {
       isSiteDefinitionWithPageComponents(
         {
           ...definition,
-          pages: [{
-            ...homePage(definition),
-            sections: [
-              ...homePage(definition).sections.slice(0, -1),
-              {
-                id: "section_unknown",
-                type: "registered",
-                component: "notInstalled",
-                props: { title: "Unsafe" },
-              },
-            ],
-          }],
+          pages: [
+            {
+              ...homePage(definition),
+              sections: [
+                ...homePage(definition).sections.slice(0, -1),
+                {
+                  id: "section_unknown",
+                  type: "registered",
+                  component: "notInstalled",
+                  props: { title: "Unsafe" },
+                },
+              ],
+            },
+          ],
         },
         registry,
       ),
@@ -285,10 +289,12 @@ describe("installation-owned page component registry", () => {
     } as const;
     const definition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [...homePage(referenceSiteDefinition).sections, installed],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections, installed],
+        },
+      ],
     };
     const changed = {
       ...installed,

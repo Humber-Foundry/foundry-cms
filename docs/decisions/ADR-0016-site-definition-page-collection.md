@@ -52,8 +52,9 @@ page with that slug could never be reached.
 
 The JSON Schema enforces the slug pattern, the length, the reserved list, and
 that exactly one page carries the root slug. It cannot compare one property
-across array items, so `isSiteDefinition` rejects a duplicate page id and a
+across array items, so `isBaseSiteDefinition` rejects a duplicate page id and a
 duplicate page slug, exactly as it already rejects a duplicate blog post id.
+`isSiteDefinition` runs that check too, through the page-component registry.
 
 ### 3. The 1.6.0 projection
 
@@ -70,7 +71,8 @@ arrived. The earlier steps read whichever shape the stored definition is in.
 ### 4. One home-page accessor
 
 `homePage(definition)` returns the page with the root slug. Every caller that
-still works on one page reads it through this function. `homePageIndex` gives
+still works on one page, and that needs the page itself, reads it through this
+function. Code that only has to compare one slug reads `homePageSlug`. `homePageIndex` gives
 the same page's position for code that writes into a mutable draft, and
 `replacePage` returns a definition with one page swapped.
 
@@ -116,6 +118,11 @@ no special case.
 **Order-based home page: the home page is `pages[0]`.** A reorder in the Pages
 list would silently change which page is served at `/`. The root slug states
 the intent, and the schema can require exactly one page to carry it.
+
+**A branded page id type, like `SiteId` and `BlogPostId`.** The id was a plain
+string before this change, and branding it would touch every caller in tickets
+#153 to #162 at once. It stays a plain string until one of those tickets needs
+the stronger type.
 
 **Change every `definition.home` reader in this ticket.** One change across
 about forty files, with no way to review or revert one area at a time. The

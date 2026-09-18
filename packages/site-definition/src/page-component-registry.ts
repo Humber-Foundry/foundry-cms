@@ -4,6 +4,7 @@ import type {
   SiteDefinition,
 } from "./index";
 import { isBaseSiteDefinition } from "./index";
+import { homePage } from "./pages";
 import { designContract } from "./design-tokens";
 import {
   RICH_TEXT_VERSION,
@@ -423,12 +424,12 @@ function foundationDefault(
   id: string,
   definition?: SiteDefinition,
 ): PageSection {
+  // A default section is scaffolded onto the home page, so it links to a
+  // section of the home page. Ticket #158 gives the editor a selected page.
+  const sections = definition === undefined ? [] : homePage(definition).sections;
   const linkTo = (preferred?: string) => {
     const target =
-      (definition?.pages ?? [])
-        .flatMap((page) => page.sections)
-        .find((section) => section.type === preferred) ??
-      (definition?.pages ?? []).flatMap((page) => page.sections)[0];
+      sections.find((section) => section.type === preferred) ?? sections[0];
     return target === undefined ? "mailto:hello@example.com" as const : `#${target.id}` as const;
   };
   if (type === "hero") {
@@ -455,9 +456,9 @@ function foundationDefault(
       metrics: [{ id: `${id}_metric`, value: "1", label: "Meaningful result" }],
     };
   }
-  const existing = (definition?.pages ?? [])
-    .flatMap((page) => page.sections)
-    .find((section) => section.type === "callToAction");
+  const existing = sections.find(
+    (section) => section.type === "callToAction",
+  );
   const contact = definition?.site.navigation.find((link) => link.href.startsWith("mailto:"));
   return {
     id, type, variant: designContract.variants.callToAction.values[0],

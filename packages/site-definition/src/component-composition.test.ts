@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  homePage,
   applyPageComposition,
   createDefaultPageSection,
+  homePage,
   pageCompositionContract,
   referenceSiteDefinition,
   remapPageSectionNestedIds,
@@ -124,13 +124,15 @@ describe("page component composition", () => {
     }
     const liveDefinition: SiteDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          { ...hero, variant: "focused" },
-          ...homePage(referenceSiteDefinition).sections.slice(1),
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            { ...hero, variant: "focused" },
+            ...homePage(referenceSiteDefinition).sections.slice(1),
+          ],
+        },
+      ],
     };
     const staleComposition = structuredClone(
       toPageComposition(referenceSiteDefinition),
@@ -156,10 +158,12 @@ describe("page component composition", () => {
     const base = {
       ...referenceSiteDefinition,
       site: { ...referenceSiteDefinition.site, navigation: [] },
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [proof, replacedCallToAction],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [proof, replacedCallToAction],
+        },
+      ],
     } as SiteDefinition;
     const callToAction = createDefaultPageSection(
       "callToAction",
@@ -168,10 +172,12 @@ describe("page component composition", () => {
     );
     const withCallToAction = {
       ...base,
-      pages: [{
-        ...homePage(base),
-        sections: [proof, callToAction],
-      }],
+      pages: [
+        {
+          ...homePage(base),
+          sections: [proof, callToAction],
+        },
+      ],
     } as SiteDefinition;
     const hero = createDefaultPageSection(
       "hero",
@@ -199,13 +205,15 @@ describe("page component composition", () => {
     const hero = homePage(referenceSiteDefinition).sections[0]!;
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          { ...hero, id: "hero" },
-          ...homePage(referenceSiteDefinition).sections.slice(1),
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            { ...hero, id: "hero" },
+            ...homePage(referenceSiteDefinition).sections.slice(1),
+          ],
+        },
+      ],
     };
 
     expect(
@@ -224,10 +232,12 @@ describe("page component composition", () => {
         ...referenceSiteDefinition.site,
         navigation: [],
       },
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [proof],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [proof],
+        },
+      ],
     };
     const hero = createDefaultPageSection(
       "hero",
@@ -271,20 +281,22 @@ describe("page component composition", () => {
         ...referenceSiteDefinition.site,
         navigation: [],
       },
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [
-          ...homePage(referenceSiteDefinition).sections.slice(0, 3),
-          {
-            ...existing,
-            action: {
-              ...existing.action,
-              label: "Contact Acme",
-              href: "mailto:studio@acme.example",
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            ...homePage(referenceSiteDefinition).sections.slice(0, 3),
+            {
+              ...existing,
+              action: {
+                ...existing.action,
+                label: "Contact Acme",
+                href: "mailto:studio@acme.example",
+              },
             },
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     } as SiteDefinition;
     const inserted = createDefaultPageSection(
       "callToAction",
@@ -369,23 +381,25 @@ describe("page component composition", () => {
             : link,
         ),
       },
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: homePage(referenceSiteDefinition).sections.map((section) => {
-          if (section.type === "hero") {
-            return {
-              ...section,
-              primaryAction: {
-                ...section.primaryAction,
-                href: "#contact" as const,
-              },
-            };
-          }
-          return section.type === "callToAction"
-            ? { ...section, id: "contact" }
-            : section;
-        }),
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: homePage(referenceSiteDefinition).sections.map((section) => {
+            if (section.type === "hero") {
+              return {
+                ...section,
+                primaryAction: {
+                  ...section.primaryAction,
+                  href: "#contact" as const,
+                },
+              };
+            }
+            return section.type === "callToAction"
+              ? { ...section, id: "contact" }
+              : section;
+          }),
+        },
+      ],
     };
     const composition = {
       ...toPageComposition(definition),

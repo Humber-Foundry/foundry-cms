@@ -9,9 +9,9 @@ import {
   MediaValidationError,
 } from "@humber-foundry/application";
 import {
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
-  homePage,
 } from "@humber-foundry/site-definition";
 import { HumanRequestIntegrityError } from "../../../../src/human-request-integrity";
 

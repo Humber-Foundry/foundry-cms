@@ -207,11 +207,11 @@ export function pagePath(page: SitePage): `/${string}` {
 /**
  * The metadata one page emits, after every blank field has its fallback.
  *
- * The title falls back to the site name on the home page, because the home
- * page is the site. On any other page it falls back to the page title followed
- * by the site name, which is what an owner expects and what a blog post
- * already does. The description, the keywords and the share image follow the
- * same rules on every page.
+ * On the home page the title falls back to the site name alone, with no page
+ * title added, because the site name already names what the home page is
+ * about. On any other page it falls back to the page title followed by the
+ * site name, which is what a blog post already does. The description, the
+ * keywords and the share image follow the same rules on every page.
  */
 export function resolvePageSeo(
   definition: SiteDefinition,

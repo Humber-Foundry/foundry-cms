@@ -27,9 +27,9 @@ import {
 import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   type SiteDefinition,
-  homePage,
 } from "@humber-foundry/site-definition";
 
 import {

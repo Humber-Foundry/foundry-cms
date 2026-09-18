@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  homePage,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   createSiteId,
+  homePage,
   referenceSiteDefinition,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
@@ -54,15 +54,17 @@ const secondSiteDefinition = {
     id: secondSiteId,
     name: "SECOND-SITE-PRIVATE-CANARY",
   },
-  pages: [{
-    ...homePage(definitionWithPost),
-    seo: {
-      ...homePage(definitionWithPost).seo,
-      title: "SECOND-SITE-PRIVATE-CANARY",
-      keywords: [],
-      shareImage: null,
+  pages: [
+    {
+      ...homePage(definitionWithPost),
+      seo: {
+        ...homePage(definitionWithPost).seo,
+        title: "SECOND-SITE-PRIVATE-CANARY",
+        keywords: [],
+        shareImage: null,
+      },
     },
-  }],
+  ],
   blog: {
     ...definitionWithPost.blog,
     posts: definitionWithPost.blog.posts.map((post) => ({

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  homePage,
   designEditsForDesign,
   designPresets,
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
   type SiteDefinition,
@@ -154,10 +154,12 @@ describe("content editor history", () => {
     });
     const definition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [...homePage(referenceSiteDefinition).sections].reverse(),
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     } as SiteDefinition;
     const composed = contentEditorReducer(initial, {
       type: "compose",
@@ -181,10 +183,12 @@ describe("content editor history", () => {
     });
     const changed = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [...homePage(referenceSiteDefinition).sections].reverse(),
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     } as SiteDefinition;
     const dirty = contentEditorReducer(initial, {
       type: "compose",
@@ -231,10 +235,12 @@ describe("content editor history", () => {
     });
     const recovered = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        sections: [...homePage(referenceSiteDefinition).sections].reverse(),
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     } as SiteDefinition;
 
     const next = contentEditorReducer(initial, {
@@ -363,22 +369,24 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero" as const,
-            revision: 1,
-            asset: {
-              assetId: "asset_hero",
-              width: 1600,
-              height: 900,
-              contentType: "image/png" as const,
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero" as const,
+              revision: 1,
+              asset: {
+                assetId: "asset_hero",
+                width: 1600,
+                height: 900,
+                contentType: "image/png" as const,
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -416,14 +424,16 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        sections: homePage(referenceSiteDefinition).sections.map((section) =>
-          section.id === "section_hero"
-            ? { ...section, title: "Concurrent headline" }
-            : section,
-        ),
-      }],
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.map((section) =>
+            section.id === "section_hero"
+              ? { ...section, title: "Concurrent headline" }
+              : section,
+          ),
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -460,12 +470,14 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        sections: homePage(referenceSiteDefinition).sections.filter(
-          (section) => section.id !== "section_hero",
-        ),
-      }],
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.filter(
+            (section) => section.id !== "section_hero",
+          ),
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -498,12 +510,14 @@ describe("content editor history", () => {
     });
     const locallyRemoved = {
       ...structuredClone(referenceSiteDefinition),
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        sections: homePage(referenceSiteDefinition).sections.filter(
-          (section) => section.id !== "section_hero",
-        ),
-      }],
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.filter(
+            (section) => section.id !== "section_hero",
+          ),
+        },
+      ],
     };
     const edited = contentEditorReducer(initial, {
       type: "compose",
@@ -511,14 +525,16 @@ describe("content editor history", () => {
     });
     const incoming = {
       ...structuredClone(referenceSiteDefinition),
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        sections: homePage(referenceSiteDefinition).sections.map((section) =>
-          section.id === "section_hero"
-            ? { ...section, title: "Concurrent headline" }
-            : section,
-        ),
-      }],
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.map((section) =>
+            section.id === "section_hero"
+              ? { ...section, title: "Concurrent headline" }
+              : section,
+          ),
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -548,10 +564,12 @@ describe("content editor history", () => {
     });
     const reordered = {
       ...structuredClone(referenceSiteDefinition),
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        sections: [...homePage(referenceSiteDefinition).sections].reverse(),
-      }],
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     };
     const edited = contentEditorReducer(initial, {
       type: "compose",
@@ -559,27 +577,29 @@ describe("content editor history", () => {
     });
     const incoming = {
       ...structuredClone(referenceSiteDefinition),
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        sections: homePage(referenceSiteDefinition).sections.map((section) =>
-          section.id === "section_services"
-            ? { ...section, title: "Concurrent services title" }
-            : section,
-        ),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero" as const,
-            revision: 1,
-            asset: {
-              assetId: "asset_hero",
-              width: 1600,
-              height: 900,
-              contentType: "image/png" as const,
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.map((section) =>
+            section.id === "section_services"
+              ? { ...section, title: "Concurrent services title" }
+              : section,
+          ),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero" as const,
+              revision: 1,
+              asset: {
+                assetId: "asset_hero",
+                width: 1600,
+                height: 900,
+                contentType: "image/png" as const,
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -612,10 +632,12 @@ describe("content editor history", () => {
       });
       const locallyReordered = {
         ...structuredClone(referenceSiteDefinition),
-        pages: [{
-          ...structuredClone(homePage(referenceSiteDefinition)),
-          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
-        }],
+        pages: [
+          {
+            ...structuredClone(homePage(referenceSiteDefinition)),
+            sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+          },
+        ],
       };
       const edited = contentEditorReducer(initial, {
         type: "compose",
@@ -626,17 +648,21 @@ describe("content editor history", () => {
           ? [
               ...homePage(referenceSiteDefinition).sections,
               {
-                ...structuredClone(homePage(referenceSiteDefinition).sections[0]!),
+                ...structuredClone(
+                  homePage(referenceSiteDefinition).sections[0]!,
+                ),
                 id: "section_concurrent_hero",
               },
             ]
           : homePage(referenceSiteDefinition).sections.slice(1);
       const incoming = {
         ...structuredClone(referenceSiteDefinition),
-        pages: [{
-          ...structuredClone(homePage(referenceSiteDefinition)),
-          sections: incomingSections,
-        }],
+        pages: [
+          {
+            ...structuredClone(homePage(referenceSiteDefinition)),
+            sections: incomingSections,
+          },
+        ],
       } as SiteDefinition;
 
       const synchronized = contentEditorReducer(edited, {
@@ -668,10 +694,12 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      pages: [{
-        ...structuredClone(homePage(referenceSiteDefinition)),
-        media: [],
-      }],
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          media: [],
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(initial, {

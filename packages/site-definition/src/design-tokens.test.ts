@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  homePage,
   applySiteDefinitionEdits,
   designContract,
+  homePage,
   listEditableSiteFields,
   referenceSiteDefinition,
   updateEditableSiteField,

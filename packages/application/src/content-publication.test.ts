@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  homePage,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
   type SiteDefinition,
@@ -612,13 +612,15 @@ describe("content publication application", () => {
     });
     const copyRevision = await revisionWith({
       ...base.definition,
-      pages: [{
-        ...homePage(base.definition),
-        sections: [
-          { ...hero, title: "Copy-only fingerprint change" },
-          ...homePage(base.definition).sections.slice(1),
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(base.definition),
+          sections: [
+            { ...hero, title: "Copy-only fingerprint change" },
+            ...homePage(base.definition).sections.slice(1),
+          ],
+        },
+      ],
     });
     const tokenRevision = await revisionWith({
       ...base.definition,
@@ -629,13 +631,15 @@ describe("content publication application", () => {
     });
     const variantRevision = await revisionWith({
       ...base.definition,
-      pages: [{
-        ...homePage(base.definition),
-        sections: [
-          { ...hero, variant: "focused" },
-          ...homePage(base.definition).sections.slice(1),
-        ],
-      }],
+      pages: [
+        {
+          ...homePage(base.definition),
+          sections: [
+            { ...hero, variant: "focused" },
+            ...homePage(base.definition).sections.slice(1),
+          ],
+        },
+      ],
     });
 
     const [baseFingerprint, copyFingerprint, tokenFingerprint, variantFingerprint] =

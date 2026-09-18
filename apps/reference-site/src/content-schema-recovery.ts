@@ -4,12 +4,12 @@ import {
 import {
   createRichTextDocumentFromPlainText,
   designContract,
+  homePage,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
   type PageSection,
   type SiteDefinition,
-  homePage,
 } from "@humber-foundry/site-definition";
 import { upgradeInstalledSiteDefinition } from "../foundry/site-definition";
 

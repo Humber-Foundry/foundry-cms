@@ -21,8 +21,8 @@ may not be one of the reserved words that already name a route: `__foundry`,
 not. See ADR-0016.
 
 **Home page** — The page with the root slug, an empty string, so it is served
-at `/`. Every site has exactly one. The home page cannot be deleted, and
-`homePage` is the one function that reads it. See ADR-0016.
+at `/`. Every site has exactly one, and it cannot be deleted. Code that needs
+the page itself reads it with `homePage`. See ADR-0016.
 
 **Revision** — An immutable version of one content item. Editing always creates
 a new revision; it never changes a revision that was previewed, approved,

@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import {
-  homePage,
   createDefaultPageSection,
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
   toPageComposition,
@@ -623,7 +623,9 @@ describe("visual component editor browser acceptance", () => {
       (section) =>
         section.type === "registered" &&
         section.component === "imageCopyStory" &&
-        !homePage(installedSiteDefinition).sections.some(({ id }) => id === section.id),
+        !homePage(installedSiteDefinition).sections.some(
+          ({ id }) => id === section.id,
+        ),
     );
     expect(added?.id).toMatch(/^section_image_copy_story_[a-z0-9_]+$/u);
 

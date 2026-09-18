@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { canonicalJson } from "@humber-foundry/application";
 import {
-  homePage,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
 } from "@humber-foundry/site-definition";
@@ -15,24 +15,12 @@ import {
   upgradeSiteDefinitionForCurrentSchema,
 } from "./content-schema-recovery";
 import { applyStructuralRecovery } from "./content-editor-recovery";
-
-/**
- * The same definition in the shape it was stored in before 1.7.0: one `home`
- * object instead of a `pages` collection. A legacy fixture must use the legacy
- * shape, or it never exercises the page-collection projection step.
- */
-function withLegacyHomeShape(definition: any): any {
-  const { pages, ...rest } = definition;
-  const { slug: _slug, title: _title, ...home } = pages[0];
-  return { ...rest, home };
-}
+import { withLegacyHomeShape } from "./test-support/legacy-site-definition-shape";
 
 function legacyDefinition(
   name: string = referenceSiteDefinition.site.name,
 ) {
-  const definition = withLegacyHomeShape(
-    structuredClone(referenceSiteDefinition),
-  );
+  const definition = withLegacyHomeShape(referenceSiteDefinition);
   definition.definitionVersion = "1.0.0";
   definition.schemaVersion = "1.0.0";
   delete definition.design;
@@ -44,9 +32,7 @@ function legacyDefinition(
 }
 
 function storedDesignDefinition(body: string) {
-  const definition = withLegacyHomeShape(
-    structuredClone(referenceSiteDefinition),
-  );
+  const definition = withLegacyHomeShape(referenceSiteDefinition);
   definition.definitionVersion = "1.1.0";
   definition.schemaVersion = "1.1.0";
   const callToAction = definition.home.sections.find(

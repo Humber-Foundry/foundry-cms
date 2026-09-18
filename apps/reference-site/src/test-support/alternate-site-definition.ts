@@ -1,8 +1,8 @@
 import {
   createBlogPostId,
-  homePage,
   createRichTextDocumentFromPlainText,
   createSiteId,
+  homePage,
   referenceSiteDefinition,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";

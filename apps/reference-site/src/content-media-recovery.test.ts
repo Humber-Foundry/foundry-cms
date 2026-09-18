@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { canonicalJson } from "@humber-foundry/application";
-import { homePage, referenceSiteDefinition } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  referenceSiteDefinition,
+} from "@humber-foundry/site-definition";
 
 import { mediaManifestRecoveryPath } from "./content-schema-recovery";
 import { restorePreservedMedia } from "./content-media-recovery";
@@ -32,10 +35,12 @@ describe("content media schema recovery", () => {
     } as const;
     const createdDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        media: [baseOccurrence],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [baseOccurrence],
+        },
+      ],
     };
     const send = vi
       .fn()
@@ -95,22 +100,24 @@ describe("content media schema recovery", () => {
   it("does not overwrite a media binding changed since the legacy base", async () => {
     const createdDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero",
-            revision: 5,
-            asset: {
-              assetId: "asset_newer",
-              width: 1400,
-              height: 900,
-              contentType: "image/webp",
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 5,
+              asset: {
+                assetId: "asset_newer",
+                width: 1400,
+                height: 900,
+                contentType: "image/webp",
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     } as const;
     const legacyTarget = {
       occurrenceId: "occurrence_home_hero",
@@ -204,13 +211,15 @@ describe("content media schema recovery", () => {
           revision: 0,
           definition: {
             ...referenceSiteDefinition,
-            pages: [{
-              ...homePage(referenceSiteDefinition),
-              media: [
-                baseFirst,
-                conflictingDestination,
-              ],
-            }],
+            pages: [
+              {
+                ...homePage(referenceSiteDefinition),
+                media: [
+                  baseFirst,
+                  conflictingDestination,
+                ],
+              },
+            ],
           },
         },
         mutationToken: "csrf-start",
@@ -252,10 +261,12 @@ describe("content media schema recovery", () => {
           revision: 0,
           definition: {
             ...referenceSiteDefinition,
-            pages: [{
-              ...homePage(referenceSiteDefinition),
-              media: [destination],
-            }],
+            pages: [
+              {
+                ...homePage(referenceSiteDefinition),
+                media: [destination],
+              },
+            ],
           },
         },
         mutationToken: "csrf-start",
@@ -315,10 +326,12 @@ describe("content media schema recovery", () => {
           revision: 0,
           definition: {
             ...referenceSiteDefinition,
-            pages: [{
-              ...homePage(referenceSiteDefinition),
-              media: [base, destinationOnly],
-            }],
+            pages: [
+              {
+                ...homePage(referenceSiteDefinition),
+                media: [base, destinationOnly],
+              },
+            ],
           },
         },
         mutationToken: "csrf-start",
@@ -355,10 +368,12 @@ describe("content media schema recovery", () => {
     };
     const createdDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        media: [confirmedReplacement],
-      }],
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [confirmedReplacement],
+        },
+      ],
     };
     const send = vi
       .fn()
@@ -448,10 +463,12 @@ describe("content media schema recovery", () => {
           revision: 1,
           definition: {
             ...referenceSiteDefinition,
-            pages: [{
-              ...homePage(referenceSiteDefinition),
-              media: [destination],
-            }],
+            pages: [
+              {
+                ...homePage(referenceSiteDefinition),
+                media: [destination],
+              },
+            ],
           },
         },
         mutationToken: "csrf-retry",

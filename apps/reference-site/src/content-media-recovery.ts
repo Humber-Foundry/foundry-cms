@@ -1,9 +1,9 @@
 import type { ContentRevision } from "@humber-foundry/application";
 import {
-  type SiteDefinition,
-  type SiteMediaOccurrence,
   homePage,
   replacePage,
+  type SiteDefinition,
+  type SiteMediaOccurrence,
 } from "@humber-foundry/site-definition";
 import { isInstalledSiteDefinition } from "../foundry/site-definition";
 

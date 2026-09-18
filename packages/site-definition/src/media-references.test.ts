@@ -100,22 +100,24 @@ describe("siteDefinitionMediaAssetIds", () => {
   it("collects placed occurrence assets", () => {
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      pages: [{
-        ...homePage(referenceSiteDefinition),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero",
-            revision: 1,
-            asset: {
-              assetId: "asset_hero",
-              width: 1200,
-              height: 630,
-              contentType: "image/jpeg",
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 1,
+              asset: {
+                assetId: "asset_hero",
+                width: 1200,
+                height: 630,
+                contentType: "image/jpeg",
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     };
     expect([...siteDefinitionMediaAssetIds(definition)]).toContain("asset_hero");
   });
