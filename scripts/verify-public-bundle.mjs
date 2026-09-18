@@ -13,11 +13,11 @@ const publicHtml = await readFile(
   resolve(nextRoot, "server/app/index.html"),
   "utf8",
 );
-const dashboardControlsSource = await readFile(
-  resolve(appRoot, "components/dashboard-controls.tsx"),
+const dashboardNavSource = await readFile(
+  resolve(appRoot, "components/dashboard-nav.tsx"),
   "utf8",
 );
-const privateMarkerMatch = dashboardControlsSource.match(
+const privateMarkerMatch = dashboardNavSource.match(
   /DASHBOARD_PRIVATE_BUNDLE_MARKER\s*=\s*"([^"]+)"/,
 );
 

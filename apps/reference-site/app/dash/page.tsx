@@ -1,6 +1,4 @@
 import { ContentWorkspaceStarter } from "@/components/content-workspace-starter";
-import { DashboardControls } from "@/components/dashboard-controls";
-import { OverviewDestinations } from "@/components/overview-destinations";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
   loadDashboardWorkspace,
@@ -42,7 +40,6 @@ export default async function DashboardOverviewPage({
           <h1>{definition.site.name}</h1>
           <p>{definition.site.description}</p>
         </div>
-        <DashboardControls siteId={definition.site.id} />
       </div>
 
       {hasDraft && !needsFreshWorkspace ? (
@@ -110,11 +107,6 @@ export default async function DashboardOverviewPage({
           </ul>
         )}
       </section>
-
-      <OverviewDestinations
-        role={access.membership.role}
-        workspaceId={dashboardWorkspace.workspaceId}
-      />
     </main>
   );
 }
