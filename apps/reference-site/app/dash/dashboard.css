@@ -3884,7 +3884,7 @@ h3.media-places-heading {
 }
 
 .editor-page-choose select {
-  min-height: 2.75rem;
+  min-height: var(--dash-control-height);
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--dash-field-line);
   border-radius: var(--dash-field-radius);
@@ -3932,11 +3932,11 @@ h3.media-places-heading {
 
   .editor-page-choose select {
     flex: 1 1 auto;
-    min-height: 2.75rem;
+    min-height: var(--dash-control-height);
   }
 
   .editor-page-switch-actions .button {
     flex: 1 1 auto;
-    min-height: 2.75rem;
+    min-height: var(--dash-control-height);
   }
 }
