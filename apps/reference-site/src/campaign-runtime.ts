@@ -27,6 +27,7 @@ import {
   type CampaignRevision,
   type CampaignStore,
   type NewsletterDeliveryAdapter,
+  type NewsletterDeliveryHealth,
   type NewsletterProviderOwnershipEvidence,
 } from "@humber-foundry/application";
 import {
@@ -48,14 +49,19 @@ import {
 } from "./human-access-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import {
-  readNewsletterDeliverySecret,
   readSubscriberIdentityKeySecret,
+  type HumanAccessEnvironment,
 } from "./human-access-configuration";
 import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
+import {
+  campaignDeliverySetupGuide,
+  listMissingCampaignDeliverySettings,
+  type CampaignDeliveryReadiness,
+} from "./campaign-delivery-readiness";
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
 import { installedSite } from "../foundry/site-definition.server";
 import {
-  createSignedNewsletterDeliveryAdapter,
+  newsletterUnsubscribePlaceholder,
 } from "./newsletter-unsubscribe-token";
 import {
   createBrevoNewsletterDeliveryAdapter,
@@ -75,6 +81,7 @@ import {
 } from "./campaign-bulk-source";
 import {
   createGitHubContentPublisher,
+  GitHubContentPublisherConfigurationError,
   readGitHubContentPublisherConfiguration,
 } from "./github-content-publisher";
 
@@ -180,6 +187,53 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
   }),
 });
 
+/**
+ * The campaign channel configuration for one installation.
+ *
+ * The compliance footer it builds is stored on every campaign revision and is
+ * read by whoever receives the email, so it is always built from the
+ * installation's own settings. Foundry never stands in for it, and it is built
+ * the same way whether or not the delivery secrets are installed.
+ *
+ * The unsubscribe address needs the configured address only. The delivery
+ * secret signs a real token later, at send time.
+ */
+export function resolveCampaignChannelConfiguration(
+  environment: HumanAccessEnvironment,
+): CampaignChannelConfiguration {
+  let placeholder = "";
+  try {
+    placeholder = newsletterUnsubscribePlaceholder(
+      environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
+    );
+  } catch {
+    // An absent or malformed unsubscribe address is a configuration fault.
+    // Passing the empty address on lets the channel reader name it the same
+    // way it names every other absent compliance setting, rather than raising
+    // a bare URL error.
+    placeholder = "";
+  }
+  return readCampaignChannelConfiguration(environment, placeholder);
+}
+
+/**
+ * The send-artifact publisher used when delivery is not configured. It fails
+ * rather than reporting a commit. The local development publisher reports a
+ * fake commit, which must never stand in for a real one outside development.
+ */
+const notConfiguredArtifactPublisher: CampaignBulkArtifactPublisher =
+  Object.freeze({
+    async publish() {
+      return {
+        outcome: "failed" as const,
+        code: "newsletter_delivery_not_configured",
+      };
+    },
+    async reconcile() {
+      return { outcome: "not_found" as const };
+    },
+  });
+
 async function localPostRevision(
   siteId: SiteId,
   revisionId: string,
@@ -229,9 +283,23 @@ async function d1PostRevision(
   ) ?? null;
 }
 
+/**
+ * What a caller needs to report delivery readiness: the settings-level answer,
+ * and a way to ask the provider about its own health.
+ */
+export type CampaignDeliveryContext = Readonly<{
+  /**
+   * Whether email delivery is connected for this installation, and the names
+   * of the settings it still needs. It never carries a setting's value.
+   */
+  delivery: CampaignDeliveryReadiness;
+  /** What the delivery provider reports about its own credential and sender. */
+  readDeliveryHealth: () => Promise<NewsletterDeliveryHealth>;
+}>;
+
 export async function loadCampaignRequestContext(
   requestHeaders: Headers,
-): Promise<Readonly<{
+): Promise<Readonly<CampaignDeliveryContext & {
   identity: Awaited<
     ReturnType<typeof loadHumanAccessRequestContext>
   >["identity"];
@@ -319,24 +387,32 @@ export async function loadCampaignRequestContext(
     },
   };
   let providerOwnershipEvidence = developmentProviderOwnershipEvidence;
+  let delivery: CampaignDeliveryReadiness = Object.freeze({
+    state: "local_development" as const,
+    missingSettings: Object.freeze([]),
+    providerHealth: null,
+    setupGuide: campaignDeliverySetupGuide,
+  });
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
+    // A missing database is a fault, not a missing delivery setting. Nothing
+    // in the newsletter works without it, so it still stops the request.
     if (environment.FOUNDRY_DB === undefined) {
       throw new Error("campaign_database_unavailable");
     }
-    rendererCommit = resolveContentReleaseInputs(environment).rendererVersion;
-    const deliveryAdapter = createSignedNewsletterDeliveryAdapter({
-      unsubscribeUrl:
-        environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
-      secret: readNewsletterDeliverySecret(environment),
+    const missingSettings = listMissingCampaignDeliverySettings(environment);
+    delivery = Object.freeze({
+      state:
+        missingSettings.length === 0
+          ? ("connected" as const)
+          : ("not_configured" as const),
+      missingSettings,
+      providerHealth: null,
+      setupGuide: campaignDeliverySetupGuide,
     });
-    channelConfiguration = readCampaignChannelConfiguration(
-      environment,
-      deliveryAdapter.unsubscribePlaceholder,
-    );
+    rendererCommit = resolveContentReleaseInputs(environment).rendererVersion;
     store = createD1CampaignStore(environment.FOUNDRY_DB);
     durableDatabase = environment.FOUNDRY_DB;
-    subscriberIdentityKeySecret = readSubscriberIdentityKeySecret(environment);
     bulkStateStore = createD1CampaignBulkStateStore(environment.FOUNDRY_DB);
     testDeliveryStore = createD1CampaignTestDeliveryStore(
       environment.FOUNDRY_DB,
@@ -348,58 +424,72 @@ export async function loadCampaignRequestContext(
     });
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
-    const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
-    const installationProofKey =
-      environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";
-    recipientFingerprintKey = installationProofKey;
-    bulkFingerprintKey = installationProofKey;
-    const webhookAuthenticationToken =
-      environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN?.trim() ?? "";
-    const accountScopeFingerprint =
-      environment.FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT?.trim() ?? "";
-    if (webhookAuthenticationToken.length < 32) {
-      throw new Error("brevo_webhook_authentication_token_invalid");
+    channelConfiguration = resolveCampaignChannelConfiguration(environment);
+    if (delivery.state !== "connected") {
+      // Delivery is not configured. Writing and saving a campaign still work,
+      // so the Newsletter page renders. Every provider adapter stays the
+      // fail-closed one declared above, and the send-artifact publisher fails
+      // rather than reporting a commit, so nothing can be sent from here.
+      bulkArtifactPublisher = notConfiguredArtifactPublisher;
+    } else {
+      subscriberIdentityKeySecret =
+        readSubscriberIdentityKeySecret(environment);
+      const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
+      const installationProofKey =
+        environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY?.trim() ?? "";
+      recipientFingerprintKey = installationProofKey;
+      bulkFingerprintKey = installationProofKey;
+      const accountScopeFingerprint =
+        environment.FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT?.trim() ?? "";
+      providerOwnershipEvidence = readProviderOwnershipEvidence(
+        environment.FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON,
+        accountScopeFingerprint,
+      );
+      const senders = JSON.parse(
+        environment.FOUNDRY_BREVO_SENDERS_JSON ?? "{}",
+      ) as Record<string, { id: number; email: string; name: string }>;
+      bulkSenders = senders;
+      testRecipients = JSON.parse(
+        environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
+      ) as Record<string, string>;
+      const bulkConfiguration = await readBrevoCampaignDeliveryConfiguration(
+        environment,
+        senders,
+      );
+      bulkProviderConfigurationFingerprint =
+        bulkConfiguration.providerConfigurationFingerprint;
+      bulkSenderFingerprints = bulkConfiguration.senderFingerprints;
+      testAdapter = createBrevoNewsletterDeliveryAdapter({
+        apiKey,
+        configurationFingerprint: bulkProviderConfigurationFingerprint,
+        accountScopeFingerprint,
+        installationProofKey,
+        senders,
+        webhookEvidence: createD1BrevoTestWebhookEvidenceStore({
+          database: environment.FOUNDRY_DB,
+          siteId: installedSite.application.siteId,
+        }),
+      });
+      bulkAdapter = createBrevoCampaignBulkDeliveryAdapter({
+        apiKey,
+        providerConfigurationFingerprint: bulkProviderConfigurationFingerprint,
+        senders,
+      });
+      // Git publishing is configured separately from delivery. Without it a
+      // send cannot commit its artifact, so the publisher fails rather than
+      // stopping the Newsletter page from loading. Ticket #165 reports
+      // publishing readiness on screen.
+      try {
+        bulkArtifactPublisher = createGitHubContentPublisher({
+          configuration: readGitHubContentPublisherConfiguration(environment),
+        });
+      } catch (error) {
+        if (!(error instanceof GitHubContentPublisherConfigurationError)) {
+          throw error;
+        }
+        bulkArtifactPublisher = notConfiguredArtifactPublisher;
+      }
     }
-    if (!/^[a-f0-9]{64}$/u.test(accountScopeFingerprint)) {
-      throw new Error("brevo_account_scope_fingerprint_invalid");
-    }
-    providerOwnershipEvidence = readProviderOwnershipEvidence(
-      environment.FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON,
-      accountScopeFingerprint,
-    );
-    const senders = JSON.parse(
-      environment.FOUNDRY_BREVO_SENDERS_JSON ?? "{}",
-    ) as Record<string, { id: number; email: string; name: string }>;
-    bulkSenders = senders;
-    testRecipients = JSON.parse(
-      environment.FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON ?? "{}",
-    ) as Record<string, string>;
-    const bulkConfiguration = await readBrevoCampaignDeliveryConfiguration(
-      environment,
-      senders,
-    );
-    bulkProviderConfigurationFingerprint =
-      bulkConfiguration.providerConfigurationFingerprint;
-    bulkSenderFingerprints = bulkConfiguration.senderFingerprints;
-    testAdapter = createBrevoNewsletterDeliveryAdapter({
-      apiKey,
-      configurationFingerprint: bulkProviderConfigurationFingerprint,
-      accountScopeFingerprint,
-      installationProofKey,
-      senders,
-      webhookEvidence: createD1BrevoTestWebhookEvidenceStore({
-        database: environment.FOUNDRY_DB,
-        siteId: installedSite.application.siteId,
-      }),
-    });
-    bulkAdapter = createBrevoCampaignBulkDeliveryAdapter({
-      apiKey,
-      providerConfigurationFingerprint: bulkProviderConfigurationFingerprint,
-      senders,
-    });
-    bulkArtifactPublisher = createGitHubContentPublisher({
-      configuration: readGitHubContentPublisherConfiguration(environment),
-    });
   }
   const application = createCampaignApplication({
     siteId: installedSite.application.siteId,
@@ -466,11 +556,20 @@ export async function loadCampaignRequestContext(
       return recipients;
     },
     resolveAudienceByIds: audience.resolveByIds,
-    applyProviderSuppression: createProviderSuppressionRecorder({
-      siteId: installedSite.application.siteId,
-      store: subscriberStore,
-      identityKeySecret: subscriberIdentityKeySecret,
-    }),
+    // A suppression is written under the installation's subscriber identity
+    // secret. Without that secret the fingerprint would not match the same
+    // subscriber later, so this refuses rather than writing one that cannot be
+    // matched.
+    applyProviderSuppression:
+      delivery.state === "not_configured"
+        ? async () => {
+            throw new Error("newsletter_delivery_not_configured");
+          }
+        : createProviderSuppressionRecorder({
+            siteId: installedSite.application.siteId,
+            store: subscriberStore,
+            identityKeySecret: subscriberIdentityKeySecret,
+          }),
     artifactPublisher: bulkArtifactPublisher,
     adapter: bulkAdapter,
     fingerprintKey: bulkFingerprintKey,
@@ -479,6 +578,8 @@ export async function loadCampaignRequestContext(
   return {
     identity: human.identity,
     application,
+    delivery,
+    readDeliveryHealth: () => testAdapter.health(),
     bulkDelivery,
     testDelivery: createCampaignTestDeliveryApplication({
       siteId: installedSite.application.siteId,
@@ -580,4 +681,31 @@ export async function loadCampaignRequestContext(
         }),
     }),
   };
+}
+
+/**
+ * Whether email delivery is connected for this installation.
+ *
+ * This is a read-only report for the dashboard and for an agent. It names the
+ * settings that are still missing and never returns a setting's value, a
+ * provider token or a personal email address. When every setting is installed
+ * it also reports what the provider says about its own credential and sender
+ * identity; a provider that cannot be reached is reported as unavailable
+ * rather than failing the whole request.
+ */
+export async function readCampaignDeliveryReadiness(
+  context: CampaignDeliveryContext,
+): Promise<CampaignDeliveryReadiness> {
+  if (context.delivery.state !== "connected") return context.delivery;
+  let providerHealth: NewsletterDeliveryHealth;
+  try {
+    providerHealth = await context.readDeliveryHealth();
+  } catch {
+    providerHealth = Object.freeze({
+      state: "unavailable" as const,
+      credential: "unknown" as const,
+      senderIdentity: "unknown" as const,
+    });
+  }
+  return Object.freeze({ ...context.delivery, providerHealth });
 }

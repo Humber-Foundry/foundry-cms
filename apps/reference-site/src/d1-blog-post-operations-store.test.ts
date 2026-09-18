@@ -3939,6 +3939,7 @@ describe("D1 blog post operations store", () => {
       collectionState: "archived",
       title: "Scheduled post",
       slug: "scheduled-post",
+      archiveRequestId: "list-archived-posts-request",
     });
 
     await expect(store.findOperationalSummary(
