@@ -94,7 +94,7 @@ export async function preparePreservedRevisionRecovery({
   storage = window.localStorage,
   createRecoveryId = () => crypto.randomUUID(),
 }: {
-  preservedRevision: PreservedContentRevision | undefined;
+  preservedRevision: PreservedContentRevision;
   durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
   activeRecovery?: StaleRecoveryPointer;
   readOutbox?: (
@@ -103,9 +103,6 @@ export async function preparePreservedRevisionRecovery({
   storage?: Pick<Storage, "getItem" | "removeItem" | "setItem">;
   createRecoveryId?: () => string;
 }): Promise<StaleRecoveryPointer | undefined> {
-  if (preservedRevision === undefined) {
-    return undefined;
-  }
   const record = await readOutbox(preservedRevision.workspaceId);
   const chainedRecoveryEdits =
     activeRecovery === undefined
@@ -220,19 +217,23 @@ export async function preparePreservedRevisionRecovery({
 }
 
 /**
- * The recovery screen for a draft that can no longer accept changes, because
- * the site moved on after the draft was saved.
+ * The recovery screen for a draft that can no longer be saved, because the
+ * site moved on after the draft was written.
  *
  * This is not a first-visit step. The dashboard creates the draft workspace on
  * the server, so a site owner never has to start one. The screen only appears
  * when the saved draft has to be replaced, and it always starts a separate
  * workspace so the old draft is left intact to copy from.
+ *
+ * `reason` decides what the screen promises. Only `older-schema` carries edits
+ * out of the stored draft, so `site-updated` must not claim that it does.
  */
-export function ContentWorkspaceStarter({
+export function ContentDraftRecovery({
   csrfToken,
   staleRecovery,
   preservedRevision,
   durableRecoveryEdits,
+  reason,
 }: {
   csrfToken: string;
   staleRecovery?: Readonly<{
@@ -241,6 +242,7 @@ export function ContentWorkspaceStarter({
   }>;
   preservedRevision: PreservedContentRevision;
   durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
+  reason: "older-schema" | "site-updated";
 }) {
   const [message, setMessage] = useState("");
   const [starting, setStarting] = useState(false);
@@ -338,11 +340,29 @@ export function ContentWorkspaceStarter({
       <div className="dashboard-section-heading editor-heading">
         <div>
           <h2 id="content-workspace-heading">Start a fresh draft</h2>
+          {reason === "older-schema" ? (
+            <p>
+              This draft was written for an older version of your site, so it
+              can no longer be saved. Start a fresh draft to carry on. The
+              changes that still fit are copied across.
+            </p>
+          ) : (
+            <p>
+              Your site has been published again since this draft was written,
+              so this draft can no longer be saved. Start a fresh draft to
+              carry on.
+            </p>
+          )}
           <p>
-            Your site has changed since this draft was saved, so the draft can
-            no longer be edited. Start a fresh draft to carry on. Your saved
-            changes are copied across where they still fit, and the old draft
-            is kept so you can check it.
+            The old draft is kept.{" "}
+            <a
+              href={`/dash/pages?workspace=${encodeURIComponent(
+                preservedRevision.workspaceId,
+              )}`}
+            >
+              Open the old draft
+            </a>{" "}
+            to copy anything else you need.
           </p>
         </div>
         <button

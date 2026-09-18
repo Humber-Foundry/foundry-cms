@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-26
+- **Amended:** 2026-09-18 by issue #148
 
 ## Context
 
@@ -160,6 +161,38 @@ Foundry sends no permissive credentialed CORS response. Missing, `null`,
 cross-origin or malformed origins, absent or invalid CSRF tokens, and unexpected
 content types fail before command dispatch. Security headers and CSP must keep
 the dashboard and same-origin preview iframe within this boundary.
+
+#### Amendment (issue #148): opening the first draft workspace on a GET
+
+A dashboard `GET` may create the requesting person's own draft workspace and
+its revision 0. Nothing else may be written during a `GET` or `HEAD`.
+
+This is the one exception to "`GET` and `HEAD` remain side-effect free" above.
+The original clause exists so that a cross-site request cannot change what the
+site says. Opening the first draft workspace cannot do that, because:
+
+- It copies the published site into a private draft. It changes no published
+  content and no setting, and nothing reaches the live site without a separate
+  publication.
+- It takes no data from the request. The workspace id is derived from the
+  authenticated person's membership id, so a request cannot name another
+  person's workspace or choose the content.
+- It is idempotent. The workspace row insert ignores a conflict and revision 0
+  is only inserted when absent, so repeating it changes nothing and two
+  requests that arrive together still produce one workspace.
+- It writes no audit event, because revision 0 is not somebody's edit.
+- It is authorized exactly like the `create_default_workspace` API operation:
+  a validated Access assertion resolved to an active membership holding the
+  `dashboard.view` capability.
+
+The practical effect of a forced cross-site `GET` of `/dash`, a `HEAD` probe or
+a link prefetch is therefore limited to creating the draft that the person's own
+next visit would create anyway. No `Origin` check or CSRF token is required for
+it, and none is available before the dashboard has rendered.
+
+Every content change still goes through a mutation method carrying the `Origin`
+and the signed CSRF token. An installation must not extend this exception to
+any other write.
 
 ### Invitation state machine
 

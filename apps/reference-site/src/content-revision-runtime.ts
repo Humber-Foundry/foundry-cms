@@ -4,6 +4,7 @@ import {
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   type ContentActorId,
+  type ContentRevision,
   createContentRevisionApplication,
   createContentWorkspaceId,
   createInMemoryContentRevisionStore,
@@ -122,7 +123,8 @@ export const openDefaultWorkspaceIdempotencyKey =
  * This is the single operation behind both ways of getting a default
  * workspace: the `create_default_workspace` API operation and the dashboard's
  * own first visit. Both therefore run the same authorization checks and write
- * the same rows and the same audit record.
+ * the same rows. Neither writes a revision audit event, because revision 0 is
+ * a copy of the published site rather than somebody's edit.
  *
  * Creation is idempotent and stays correct when two first requests arrive
  * together. The workspace id is derived from the actor, so both requests aim
@@ -133,7 +135,9 @@ export async function openDefaultContentWorkspace(
   actorId: ContentActorId,
   idempotencyKey: string,
   environmentOverride?: HumanAccessEnvironment,
-) {
+): Promise<
+  Readonly<{ workspaceId: ContentWorkspaceId; revision: ContentRevision }>
+> {
   const workspaceId = await contentWorkspaceIdForActor(actorId);
   const application = await loadContentRevisionApplication(
     workspaceId,

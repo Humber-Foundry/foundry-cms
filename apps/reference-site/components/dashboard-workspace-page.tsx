@@ -1,9 +1,10 @@
-import { ContentWorkspaceStarter } from "./content-workspace-starter";
+import { ContentDraftRecovery } from "./content-draft-recovery";
 import { WorkspaceEditorSurface } from "./workspace-editor-surface";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
   loadPublishedDefinition,
+  preservedRevisionOf,
   readWorkspaceSearchParams,
 } from "@/src/dashboard-page-context";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
@@ -40,8 +41,11 @@ export async function DashboardWorkspacePage({
   );
   const mutationToken = await loadMutationToken();
   const { contentRevision, previewUrl, schemaRecovery } = dashboardWorkspace;
-  // The draft workspace always exists, so the only reason to interrupt editing
-  // is a draft that was written for an older version of the site.
+  // The draft workspace always exists, so nothing interrupts a first visit.
+  // Only an older-schema draft sends the owner to the recovery screen here.
+  // A draft that is merely behind the published site stays editable: the
+  // editor below reports that state and offers its own way forward, which
+  // Overview and Blog do not have.
   const showStarter = schemaRecovery !== undefined;
   // Every photo the site already shows, so the canvas photo picker lists
   // existing photos, not only uploaded ones.
@@ -63,15 +67,12 @@ export async function DashboardWorkspacePage({
         </div>
       ) : null}
       {showStarter ? (
-        <ContentWorkspaceStarter
+        <ContentDraftRecovery
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
-          preservedRevision={{
-            workspaceId: contentRevision.workspaceId,
-            revision: contentRevision.revision,
-            schemaVersion: contentRevision.inputs.schemaVersion,
-          }}
+          preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={schemaRecovery}
+          reason="older-schema"
         />
       ) : (
         <WorkspaceEditorSurface

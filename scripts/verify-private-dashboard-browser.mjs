@@ -322,27 +322,15 @@ async function main() {
       viewport: { width: 390, height: 844 },
     });
     const page = await context.newPage();
-    await page.goto(`${origin}/dash`);
 
-    // A site owner must never be asked to start a draft. This is the first
-    // visit to a fresh database, so the dashboard creates the draft workspace
-    // on the server and Overview reports that draft straight away.
-    await page.getByRole("heading", { name: "Your draft" }).waitFor();
-    if (
-      (await page.getByRole("button", { name: "Start workspace" }).count()) > 0
-    ) {
-      throw new Error("private_dashboard_start_workspace_offered");
-    }
-
-    // Blog is the destination the owner reported. Its first click must show
-    // the post list, not a prompt to start a workspace.
-    await page
-      .getByRole("navigation", { name: "Dashboard sections" })
-      .getByRole("link", { name: "Blog", exact: true })
-      .click();
-    await page.waitForURL(/\/dash\/blog(\?|$)/u);
+    // Blog is the destination the owner reported. This is the very first
+    // request against a fresh database, so the dashboard has to create the
+    // draft workspace on the server and show the posts. A recovery screen
+    // here would mean the owner was asked to start a draft.
+    await page.goto(`${origin}/dash/blog`);
+    // A fresh site has no posts, so Blog opens its composer ready to write.
     await page.getByRole("heading", { name: "Posts", exact: true }).waitFor();
-    await page.getByRole("button", { name: "New post" }).waitFor();
+    await page.getByRole("textbox", { name: "Title" }).waitFor();
     if (
       (await page
         .getByRole("button", { name: "Start a fresh draft" })
@@ -351,7 +339,16 @@ async function main() {
       throw new Error("private_dashboard_blog_asked_for_a_workspace");
     }
 
+    // Overview reports that same draft, and it has changed nothing yet.
     await page.goto(`${origin}/dash`);
+    await page.getByRole("heading", { name: "Your draft" }).waitFor();
+    if (
+      (await page
+        .getByRole("button", { name: "Start a fresh draft" })
+        .count()) > 0
+    ) {
+      throw new Error("private_dashboard_overview_asked_for_a_workspace");
+    }
     await page.getByRole("link", { name: "Continue editing" }).click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
     await page.getByRole("heading", { name: "Pages" }).waitFor();

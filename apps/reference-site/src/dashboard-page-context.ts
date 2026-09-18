@@ -1,11 +1,12 @@
 import "server-only";
 
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
 import {
   AccessDeniedError,
+  type ContentActorId,
   type ContentRevision,
   type ContentWorkspaceId,
   ContentRevisionConfigurationError,
@@ -100,19 +101,26 @@ export type DashboardWorkspace = Readonly<{
  * default one, so no destination has to ask a site owner to start a draft.
  */
 async function resolveDashboardWorkspaceId(
-  actorId: ReturnType<typeof createContentActorId>,
+  actorId: ContentActorId,
   requestedWorkspace?: string,
 ): Promise<ContentWorkspaceId> {
+  // A malformed id is a bad link, not a failure worth reporting. Validating it
+  // outside the access check keeps a real fault inside that check visible.
+  let requested: ContentWorkspaceId | undefined;
   if (requestedWorkspace !== undefined) {
     try {
-      const requested = createContentWorkspaceId(requestedWorkspace);
+      requested = createContentWorkspaceId(requestedWorkspace);
+    } catch {
+      requested = undefined;
+    }
+  }
+
+  if (requested !== undefined) {
+    try {
       await requireExistingContentWorkspaceAccess(requested, actorId);
       return requested;
     } catch (error) {
-      if (
-        !(error instanceof TypeError) &&
-        !(error instanceof ContentWorkspaceAccessError)
-      ) {
+      if (!(error instanceof ContentWorkspaceAccessError)) {
         throw error;
       }
     }
@@ -130,6 +138,15 @@ async function resolveDashboardWorkspaceId(
   ).workspaceId;
 }
 
+/** The preserved draft a recovery screen offers to replace. */
+export function preservedRevisionOf(contentRevision: ContentRevision) {
+  return {
+    workspaceId: contentRevision.workspaceId,
+    revision: contentRevision.revision,
+    schemaVersion: contentRevision.inputs.schemaVersion,
+  };
+}
+
 /**
  * Resolve the workspace and its current revision for an editing route.
  *
@@ -145,15 +162,22 @@ export async function loadDashboardWorkspace(
   const definition = await loadPublishedDefinition();
   const actorId = createContentActorId(access.membership.id);
 
-  const workspaceId = await resolveDashboardWorkspaceId(
-    actorId,
-    requestedWorkspace,
-  );
-  const activeWorkspaceUrl = `${routePath}?workspace=${encodeURIComponent(
-    workspaceId,
-  )}`;
-
   try {
+    const workspaceId = await resolveDashboardWorkspaceId(
+      actorId,
+      requestedWorkspace,
+    );
+    const activeWorkspaceUrl = `${routePath}?workspace=${encodeURIComponent(
+      workspaceId,
+    )}`;
+
+    // The URL asked for a workspace this person cannot open. Send them to the
+    // one they did get, so the address bar and every sidebar link stop
+    // carrying the dead id.
+    if (requestedWorkspace !== undefined && requestedWorkspace !== workspaceId) {
+      redirect(activeWorkspaceUrl);
+    }
+
     const contentApplication = await loadContentRevisionApplication(
       workspaceId,
       actorId,
@@ -202,6 +226,11 @@ export async function loadDashboardWorkspace(
  * Read `?workspace=` and `?recovery=`/`?recoverFrom=` from a route's search
  * parameters. The recovery pair is only honoured when both are present and the
  * member can still open the workspace the edits came from.
+ *
+ * A pair that cannot be honoured is dropped rather than reported as a missing
+ * page. Recovery edits are held in the person's own browser, so a stale or
+ * shared link carries a pointer to edits this browser does not have; the
+ * destination still has a workspace to open.
  */
 export async function readWorkspaceSearchParams(
   searchParams: Promise<Record<string, string | string[] | undefined>>,
@@ -222,16 +251,17 @@ export async function readWorkspaceSearchParams(
     return { workspace };
   }
 
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      requested.recovery,
+    )
+  ) {
+    return { workspace };
+  }
+
   const access = await requireAuthorizedDashboardAccess();
   const actorId = createContentActorId(access.membership.id);
   try {
-    if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
-        requested.recovery,
-      )
-    ) {
-      notFound();
-    }
     const sourceWorkspaceId = createContentWorkspaceId(requested.recoverFrom);
     await requireExistingContentWorkspaceAccess(sourceWorkspaceId, actorId);
     return {
@@ -241,9 +271,11 @@ export async function readWorkspaceSearchParams(
   } catch (error) {
     if (
       error instanceof ContentWorkspaceAccessError ||
-      error instanceof ContentRevisionConfigurationError ||
       error instanceof TypeError
     ) {
+      return { workspace };
+    }
+    if (error instanceof ContentRevisionConfigurationError) {
       notFound();
     }
     throw error;

@@ -40,6 +40,9 @@ vi.mock("next/navigation", () => ({
   notFound() {
     throw new Error("not_found");
   },
+  redirect(destination: string) {
+    throw new Error(`redirect:${destination}`);
+  },
 }));
 vi.mock("@/src/human-access-runtime", () => ({
   loadHumanAccessRequestContext: mocks.loadAccess,
@@ -65,7 +68,10 @@ vi.mock("@/src/content-schema-recovery", () => ({
   durableSchemaRecoveryEdits: mocks.durableSchemaRecoveryEdits,
 }));
 
-import { loadDashboardWorkspace } from "./dashboard-page-context";
+import {
+  loadDashboardWorkspace,
+  readWorkspaceSearchParams,
+} from "./dashboard-page-context";
 
 const ownWorkspaceId = "workspace_aaaaaaaaaaaaaaaaaaaaaaaa";
 const otherWorkspaceId = "workspace_bbbbbbbbbbbbbbbbbbbbbbbb";
@@ -150,17 +156,13 @@ describe("dashboard workspace resolution", () => {
     expect(workspace.contentRevision.revision).toBe(4);
   });
 
-  it("resolves one workspace when two first requests arrive together", async () => {
+  it("opens the workspace through the shared operation, not its own create", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(null);
-    const [first, second] = await Promise.all([
-      loadDashboardWorkspace(undefined, "/dash"),
-      loadDashboardWorkspace(undefined, "/dash"),
-    ]);
+    await loadDashboardWorkspace(undefined, "/dash");
 
-    expect(second.workspaceId).toBe(first.workspaceId);
-    expect(second.contentRevision.revision).toBe(
-      first.contentRevision.revision,
-    );
+    // Whether that operation is safe for two requests at once is proved
+    // against a real database in content-revision-runtime.test.ts.
+    expect(mocks.openDefaultWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it("opens a workspace id from the URL when the person can still open it", async () => {
@@ -177,48 +179,60 @@ describe("dashboard workspace resolution", () => {
     expect(mocks.openDefaultWorkspace).not.toHaveBeenCalled();
   });
 
-  it("falls back to the person's own workspace when the URL holds a workspace that is gone", async () => {
+  it("sends a URL holding a workspace that is gone to the person's own draft", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(null);
     mocks.requireExistingAccess.mockRejectedValueOnce(
       new ContentWorkspaceAccessError(),
     );
-    const workspace = await loadDashboardWorkspace(
-      otherWorkspaceId,
-      "/dash/blog",
-    );
 
-    expect(workspace.workspaceId).toBe(ownWorkspaceId);
-    expect(workspace.activeWorkspaceUrl).toBe(
-      `/dash/blog?workspace=${ownWorkspaceId}`,
-    );
-    expect(workspace.contentRevision.revision).toBe(0);
+    // Not a missing page. The dead id is swapped for a workspace they can
+    // open, so the address bar and every sidebar link stop carrying it.
+    await expect(
+      loadDashboardWorkspace(otherWorkspaceId, "/dash/blog"),
+    ).rejects.toThrow(`redirect:/dash/blog?workspace=${ownWorkspaceId}`);
   });
 
-  it("falls back to the person's own workspace when the URL holds a malformed id", async () => {
+  it("sends a URL holding a malformed workspace id to the person's own draft", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(null);
-    const workspace = await loadDashboardWorkspace("not-a-workspace", "/dash");
 
-    expect(workspace.workspaceId).toBe(ownWorkspaceId);
-    expect(workspace.activeWorkspaceUrl).toBe(
-      `/dash?workspace=${ownWorkspaceId}`,
-    );
+    await expect(
+      loadDashboardWorkspace("not-a-workspace", "/dash"),
+    ).rejects.toThrow(`redirect:/dash?workspace=${ownWorkspaceId}`);
   });
 
-  it("never returns a link to a workspace it could not open", async () => {
+  it("sends a URL holding somebody else's workspace to the person's own draft", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(otherWorkspaceId);
     mocks.requireExistingAccess.mockRejectedValueOnce(
       new ContentWorkspaceAccessError(),
     );
-    mocks.getCurrent.mockResolvedValue(revisionOf(otherWorkspaceId, 1));
-    const workspace = await loadDashboardWorkspace(
-      "workspace_cccccccccccccccccccccccc",
-      "/dash/design",
+
+    await expect(
+      loadDashboardWorkspace(
+        "workspace_cccccccccccccccccccccccc",
+        "/dash/design",
+      ),
+    ).rejects.toThrow(`redirect:/dash/design?workspace=${otherWorkspaceId}`);
+  });
+
+  it("keeps a real fault inside the access check visible", async () => {
+    mocks.latestWorkspaceId.mockResolvedValue(null);
+    mocks.requireExistingAccess.mockRejectedValueOnce(
+      new TypeError("some_other_bug"),
     );
 
-    expect(workspace.activeWorkspaceUrl).toBe(
-      `/dash/design?workspace=${otherWorkspaceId}`,
+    await expect(
+      loadDashboardWorkspace(otherWorkspaceId, "/dash"),
+    ).rejects.toThrow("some_other_bug");
+  });
+
+  it("reports a configuration failure while resolving as a not-found page", async () => {
+    mocks.latestWorkspaceId.mockRejectedValue(
+      new ContentRevisionConfigurationError(),
     );
-    expect(workspace.contentRevision.workspaceId).toBe(otherWorkspaceId);
+
+    await expect(loadDashboardWorkspace(undefined, "/dash")).rejects.toThrow(
+      "not_found",
+    );
   });
 
   it("reports the edits to carry across when the draft was written for an older site schema", async () => {
@@ -265,5 +279,76 @@ describe("dashboard workspace resolution", () => {
     const workspace = await loadDashboardWorkspace(undefined, "/dash");
 
     expect(workspace.contentStale).toBe(true);
+  });
+});
+
+describe("dashboard search parameters", () => {
+  const recoveryId = "12345678-1234-4123-8123-123456789abc";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.loadAccess.mockResolvedValue({
+      state: "authorized",
+      identity: { binding: { issuer: "issuer", subject: "subject" } },
+      membership: { id: "membership-owner" },
+    });
+    mocks.requireExistingAccess.mockResolvedValue(undefined);
+  });
+
+  it("honours a recovery pair whose source workspace can still be opened", async () => {
+    await expect(
+      readWorkspaceSearchParams(
+        Promise.resolve({
+          workspace: ownWorkspaceId,
+          recovery: recoveryId,
+          recoverFrom: otherWorkspaceId,
+        }),
+      ),
+    ).resolves.toEqual({
+      workspace: ownWorkspaceId,
+      staleRecovery: { id: recoveryId, sourceWorkspaceId: otherWorkspaceId },
+    });
+  });
+
+  it("drops a recovery pair whose source workspace is gone", async () => {
+    mocks.requireExistingAccess.mockRejectedValue(
+      new ContentWorkspaceAccessError(),
+    );
+
+    // The edits live in this person's own browser, so a stale or shared link
+    // points at edits it does not have. The destination still opens.
+    await expect(
+      readWorkspaceSearchParams(
+        Promise.resolve({
+          workspace: ownWorkspaceId,
+          recovery: recoveryId,
+          recoverFrom: otherWorkspaceId,
+        }),
+      ),
+    ).resolves.toEqual({ workspace: ownWorkspaceId });
+  });
+
+  it("drops a malformed recovery pair without reading the workspace", async () => {
+    await expect(
+      readWorkspaceSearchParams(
+        Promise.resolve({
+          workspace: ownWorkspaceId,
+          recovery: "not-a-uuid",
+          recoverFrom: otherWorkspaceId,
+        }),
+      ),
+    ).resolves.toEqual({ workspace: ownWorkspaceId });
+    expect(mocks.requireExistingAccess).not.toHaveBeenCalled();
+  });
+
+  it("drops a recovery pair naming a malformed source workspace", async () => {
+    await expect(
+      readWorkspaceSearchParams(
+        Promise.resolve({
+          recovery: recoveryId,
+          recoverFrom: "not-a-workspace",
+        }),
+      ),
+    ).resolves.toEqual({ workspace: undefined });
   });
 });

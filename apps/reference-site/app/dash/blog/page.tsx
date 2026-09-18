@@ -1,10 +1,11 @@
 import { BlogPostControls } from "@/components/blog-post-controls";
-import { ContentWorkspaceStarter } from "@/components/content-workspace-starter";
+import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { verifiedPublicBlogPostIds } from "@/components/published-blog-posts";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
   loadPublishedDefinition,
+  preservedRevisionOf,
   readWorkspaceSearchParams,
 } from "@/src/dashboard-page-context";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
@@ -45,15 +46,14 @@ export default async function DashboardBlogPage({
         </div>
       </div>
       {needsFreshWorkspace ? (
-        <ContentWorkspaceStarter
+        <ContentDraftRecovery
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
-          preservedRevision={{
-            workspaceId: contentRevision.workspaceId,
-            revision: contentRevision.revision,
-            schemaVersion: contentRevision.inputs.schemaVersion,
-          }}
+          preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={schemaRecovery}
+          reason={
+            schemaRecovery === undefined ? "site-updated" : "older-schema"
+          }
         />
       ) : (
         <BlogPostControls

@@ -81,6 +81,15 @@ the dashboard gallery and picker; it never replaces the source and is never
 published. An asset may have none, and a request for one it does not have is
 answered as missing; the source is never served in its place.
 
+**Draft workspace** — One person's private copy of the site, held in D1, where
+every content and design change is made before publication. It has a stable
+id, an owner, and a numbered revision that advances with each accepted save.
+Revision 0 is a copy of the published site, so a workspace at revision 0 holds
+no changes yet. Every authorized person gets one on their first dashboard
+visit; they never have to start it. The dashboard calls it **your draft** when
+it speaks to a site owner, and reserves "workspace" for the stored record and
+the API.
+
 **Media occurrence** — One stable, draft-workspace-scoped placement of a media
 asset in editable content. Replacing an occurrence changes that placement
 without changing other occurrences or another workspace that uses the same

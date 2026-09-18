@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 import {
   ContentRevisionConfigurationError,
   createContentActorId,
+  isValidContentMutationIdempotencyKey,
 } from "@humber-foundry/application";
 
 import type { HumanAccessEnvironment } from "./human-access-configuration";
@@ -242,8 +243,8 @@ describe("opening the default draft workspace", () => {
   });
 
   it("uses an idempotency key the application operation accepts", () => {
-    expect(openDefaultWorkspaceIdempotencyKey).toMatch(
-      /^[A-Za-z0-9._:-]{16,128}$/u,
-    );
+    expect(
+      isValidContentMutationIdempotencyKey(openDefaultWorkspaceIdempotencyKey),
+    ).toBe(true);
   });
 });

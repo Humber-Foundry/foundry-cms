@@ -1,9 +1,10 @@
-import { ContentWorkspaceStarter } from "@/components/content-workspace-starter";
+import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
   loadPublishedDefinition,
+  preservedRevisionOf,
   readWorkspaceSearchParams,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
@@ -45,24 +46,33 @@ export default async function DashboardOverviewPage({
       </div>
 
       {needsFreshWorkspace ? (
-        <ContentWorkspaceStarter
+        <ContentDraftRecovery
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
-          preservedRevision={{
-            workspaceId: contentRevision.workspaceId,
-            revision: contentRevision.revision,
-            schemaVersion: contentRevision.inputs.schemaVersion,
-          }}
+          preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={dashboardWorkspace.schemaRecovery}
+          reason={
+            dashboardWorkspace.schemaRecovery === undefined
+              ? "site-updated"
+              : "older-schema"
+          }
         />
       ) : (
         <section className="panel" aria-labelledby="draft-state">
           <h2 id="draft-state">Your draft</h2>
-          <p>
-            You have unpublished changes saved as revision{" "}
-            {contentRevision.revision}. Open Pages to keep editing, or publish
-            when you are happy with the preview.
-          </p>
+          {contentRevision.revision === 0 ? (
+            <p>
+              Your draft is ready and matches your live site. Open Pages to
+              start changing it. Nothing you change reaches the live site until
+              you publish.
+            </p>
+          ) : (
+            <p>
+              You have unpublished changes saved as revision{" "}
+              {contentRevision.revision}. Open Pages to keep editing, or
+              publish when you are happy with the preview.
+            </p>
+          )}
           <p className="panel-actions">
             <a
               className="button button-primary"

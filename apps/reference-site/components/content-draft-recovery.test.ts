@@ -7,7 +7,7 @@ import {
   serializeRichTextDocument,
 } from "@humber-foundry/site-definition";
 
-import { preparePreservedRevisionRecovery } from "./content-workspace-starter";
+import { preparePreservedRevisionRecovery } from "./content-draft-recovery";
 
 const preservedRevision = {
   workspaceId: createContentWorkspaceId("workspace_legacy"),
