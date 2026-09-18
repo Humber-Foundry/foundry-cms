@@ -461,9 +461,18 @@ export async function GET(request: Request) {
       actor: context.identity,
       campaignId,
     });
-    return Response.json({ rendered, testEvidence, testReadiness }, {
-      headers: { "cache-control": "private, no-store" },
+    // What the send step has already produced: the Owner's approval, an active
+    // schedule and the one send operation. The screen states the step from
+    // this; it never assumes a step succeeded because a command returned.
+    const bulkState = await context.bulkDelivery.queries.campaignState({
+      actor: context.identity,
+      campaignId,
     });
+    const testRecipients = await context.listTestRecipients();
+    return Response.json(
+      { rendered, testEvidence, testReadiness, bulkState, testRecipients },
+      { headers: { "cache-control": "private, no-store" } },
+    );
   } catch (error) {
     if (
       error instanceof AccessDeniedError ||

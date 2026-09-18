@@ -8,10 +8,12 @@ import {
   type McpConnectionStore,
   type McpPublicationAuditEvent,
   type McpReadAuditEvent,
+  type McpRegisteredClient,
 } from "@humber-foundry/application";
 import type { SiteId } from "@humber-foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
+import type { McpClientRegistrationMetadata } from "./mcp-client-registration";
 
 type ConnectionRow = Readonly<{
   id: string;
@@ -140,6 +142,17 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       windowStartedAt: string;
       limit: number;
     }): Promise<boolean>;
+    findRegisteredClient(input: {
+      siteId: SiteId;
+      clientId: string;
+    }): Promise<McpRegisteredClient | null>;
+    registerClient(input: {
+      siteId: SiteId;
+      clientId: string;
+      metadata: McpClientRegistrationMetadata;
+      now: string;
+      capacity: number;
+    }): Promise<"registered" | "capacity_reached">;
     listConnections(siteId: SiteId): Promise<
       ReadonlyArray<McpConnectionSummary>
     >;
@@ -845,6 +858,103 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
         revokedAt: row.revoked_at,
         lastUsedAt: row.last_used_at,
       }));
+    },
+    async findRegisteredClient(input) {
+      const row = await database
+        .prepare(
+          `SELECT client_name, redirect_uris_json
+             FROM mcp_registered_clients
+            WHERE site_id = ?1 AND client_id = ?2`,
+        )
+        .bind(input.siteId, input.clientId)
+        .first<{ client_name: string; redirect_uris_json: string }>();
+      if (row === null) return null;
+      const parsed: unknown = JSON.parse(row.redirect_uris_json);
+      if (
+        !Array.isArray(parsed) ||
+        parsed.length < 1 ||
+        parsed.some((value) => typeof value !== "string")
+      ) {
+        throw new TypeError("mcp_registered_client_state_invalid");
+      }
+      return {
+        clientId: input.clientId,
+        name: row.client_name,
+        redirectUris: Object.freeze([...(parsed as ReadonlyArray<string>)]),
+        source: "dynamic",
+      };
+    },
+    async registerClient(input) {
+      // Make room and insert in one batch. A registration no Owner ever
+      // approved holds nothing, so the oldest of those give way first. Without
+      // this, a flood would lock the site out of registering for good. Running
+      // both statements apart would let a concurrent registration take the
+      // slot this one just freed.
+      const [, inserted] = await database.batch([
+        database
+          .prepare(
+            `DELETE FROM mcp_registered_clients
+              WHERE site_id = ?1
+                AND client_id IN (
+                  SELECT candidate.client_id
+                    FROM mcp_registered_clients AS candidate
+                   WHERE candidate.site_id = ?1
+                     AND NOT EXISTS (
+                       SELECT 1 FROM mcp_connections AS connection
+                        WHERE connection.site_id = candidate.site_id
+                          AND connection.oauth_client_id = candidate.client_id
+                     )
+                   ORDER BY candidate.registered_at ASC,
+                            candidate.client_id ASC
+                   LIMIT MAX(
+                     0,
+                     (
+                       SELECT COUNT(*) FROM mcp_registered_clients
+                        WHERE site_id = ?1
+                     ) - ?2 + 1
+                   )
+                )`,
+          )
+          .bind(input.siteId, input.capacity),
+        // Bound how many registrations one site can hold. A registration
+        // grants nothing, so the only risk it carries is unbounded storage.
+        database
+          .prepare(
+            `INSERT INTO mcp_registered_clients (
+               site_id, client_id, client_name, redirect_uris_json,
+               grant_types_json, response_types_json,
+               token_endpoint_auth_method, client_uri, logo_uri,
+               software_id, software_version, requested_scope, registered_at
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+              WHERE (
+                SELECT COUNT(*) FROM mcp_registered_clients WHERE site_id = ?1
+              ) < ?14
+             RETURNING client_id`,
+          )
+          .bind(
+            input.siteId,
+            input.clientId,
+            input.metadata.clientName,
+            JSON.stringify(input.metadata.redirectUris),
+            JSON.stringify(input.metadata.grantTypes),
+            JSON.stringify(input.metadata.responseTypes),
+            input.metadata.tokenEndpointAuthMethod,
+            input.metadata.clientUri,
+            input.metadata.logoUri,
+            input.metadata.softwareId,
+            input.metadata.softwareVersion,
+            input.metadata.scope,
+            input.now,
+            input.capacity,
+          ),
+      ]);
+      // The insert carries RETURNING, so an empty result set means its
+      // capacity guard refused it. Other batch calls in this file read
+      // meta.changes because their statements return no rows.
+      return (inserted?.results ?? []).length === 0
+        ? "capacity_reached"
+        : "registered";
     },
     async findLiveRelease(siteId) {
       const row = await database

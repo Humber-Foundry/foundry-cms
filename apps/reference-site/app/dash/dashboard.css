@@ -3849,6 +3849,78 @@ h3.media-places-heading {
 
 .pages-list-saved {
   margin: 0;
+/* Newsletter sending steps (issue #164) ------------------------------------
+ *
+ * One block, kept together so it merges cleanly beside other work on this
+ * file. It styles the four steps between a written email and a sent one.
+ *
+ * Every control here is at least --dash-control-height tall, which is the 44px
+ * a finger needs on a phone, and no text sits closer than 0.5rem to a border
+ * or another control. Two sizes carry the whole block: the step name at the
+ * body size and the rest at --dash-text-small, with colour doing the rest of
+ * the work so no step needs a label above it.
+ *
+ * The control-height variable belongs with the other .dashboard variables at
+ * the top of this file. It sits here instead so this feature stays one
+ * contiguous block while another open change (#181) edits the same file; move
+ * it up once both have landed. */
+.dashboard {
+  --dash-control-height: 2.75rem;
+}
+
+.send-flow {
+  margin-top: 0.75rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 1rem;
+  background: var(--dash-surface);
+}
+
+.send-flow > h3 {
+  margin: 0 0 0.75rem;
+  font-size: var(--dash-h2);
+}
+
+.send-flow-steps {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style: none;
+}
+
+/* A step carries its state in colour and a marker rather than in a label. */
+.send-step {
+  position: relative;
+  border-left: 2px solid var(--dash-line);
+  padding: 0.25rem 0 0.25rem 0.75rem;
+}
+
+.send-step[data-state="done"] {
+  border-left-color: var(--dash-accent);
+}
+
+.send-step[data-state="now"] {
+  border-left-color: var(--dash-ink);
+}
+
+.send-step-name {
+  margin: 0;
+  font-weight: 600;
+  color: var(--dash-muted);
+}
+
+.send-step[data-state="done"] .send-step-name {
+  color: var(--dash-accent);
+}
+
+.send-step[data-state="now"] .send-step-name {
+  color: var(--dash-ink);
+}
+
+.send-step-need,
+.send-step-reason {
+  margin: 0.5rem 0 0;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
 }
@@ -3946,5 +4018,72 @@ h3.media-places-heading {
   .editor-page-switch-actions .button {
     flex: 1 1 auto;
     min-height: var(--dash-control-height);
+  }
+.send-step .copy-button,
+.send-step .button {
+  min-height: var(--dash-control-height);
+  margin-top: 0.5rem;
+}
+
+.send-step-confirm,
+.send-step-outcome {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.send-step-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--dash-control-height);
+  font-size: var(--dash-text-small);
+  cursor: pointer;
+}
+
+.send-step-check input {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  flex: none;
+}
+
+.send-step-time {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.send-step-time label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: var(--dash-text-small);
+}
+
+.send-step-time input {
+  min-height: var(--dash-control-height);
+  border: 1px solid var(--dash-field-line);
+  border-radius: var(--dash-field-radius);
+  padding: 0 0.5rem;
+  background: var(--dash-field-bg);
+  font: inherit;
+  font-size: var(--dash-text-small);
+}
+
+.send-step button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* On a phone every control takes the full width so none of them is a narrow
+ * target beside another. */
+@media (max-width: 30rem) {
+  .send-step-time,
+  .send-step-time label,
+  .send-step-time input,
+  .send-step-time .copy-button {
+    width: 100%;
   }
 }
