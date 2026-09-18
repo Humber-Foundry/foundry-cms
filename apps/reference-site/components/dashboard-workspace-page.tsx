@@ -1,4 +1,5 @@
 import { ContentWorkspaceStarter } from "./content-workspace-starter";
+import { PagesList } from "./pages-list";
 import { WorkspaceEditorSurface } from "./workspace-editor-surface";
 import {
   loadDashboardWorkspace,
@@ -6,6 +7,13 @@ import {
   loadPublishedDefinition,
   readWorkspaceSearchParams,
 } from "@/src/dashboard-page-context";
+import { formatDashboardMoment } from "@/src/dashboard-time";
+import {
+  editorPageWasNotFound,
+  listEditorPages,
+  readEditorPageId,
+  resolveEditorPage,
+} from "@/src/editor-page-selection";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
 
 const workspaceDestinations = {
@@ -34,6 +42,7 @@ export async function DashboardWorkspacePage({
   const config = workspaceDestinations[destination];
   const { workspace, staleRecovery } =
     await readWorkspaceSearchParams(searchParams);
+  const requestedPageId = readEditorPageId(await searchParams);
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     config.route,
@@ -51,10 +60,21 @@ export async function DashboardWorkspacePage({
   const siteImages = showStarter
     ? []
     : siteStaticImageTiles(publishedDefinition, contentRevision?.definition);
+  // Pages opens on the list of pages. Naming a page in the address opens that
+  // page in the editor, so the address can be shared and reloaded. An address
+  // naming a page the draft no longer holds comes back to the list and says
+  // so, rather than opening a different page without a word.
+  const pageWasNotFound =
+    !showStarter &&
+    editorPageWasNotFound(contentRevision.definition, requestedPageId);
+  const showPagesList =
+    destination === "pages" &&
+    !showStarter &&
+    (requestedPageId === undefined || pageWasNotFound);
 
   return (
     <main className="dashboard-main" id="main">
-      {!config.headingOnlyWhenStarting || showStarter ? (
+      {!config.headingOnlyWhenStarting || showStarter || showPagesList ? (
         <div className="page-heading">
           <div>
             <h1>{config.title}</h1>
@@ -77,11 +97,23 @@ export async function DashboardWorkspacePage({
           }
           durableRecoveryEdits={schemaRecovery}
         />
+      ) : showPagesList ? (
+        <PagesList
+          pages={listEditorPages(contentRevision.definition, publishedDefinition)}
+          workspaceUrl={dashboardWorkspace.activeWorkspaceUrl}
+          lastSaved={formatDashboardMoment(contentRevision.createdAt)}
+          notFoundPageAsked={pageWasNotFound}
+        />
       ) : (
         <WorkspaceEditorSurface
           variant={destination}
           csrfToken={mutationToken}
           contentRevision={contentRevision}
+          selectedPageId={resolveEditorPage(
+            contentRevision.definition,
+            requestedPageId,
+          ).id}
+          pages={listEditorPages(contentRevision.definition)}
           initialPreviewUrl={previewUrl}
           initialContentStale={dashboardWorkspace.contentStale}
           activeWorkspaceUrl={dashboardWorkspace.activeWorkspaceUrl}
