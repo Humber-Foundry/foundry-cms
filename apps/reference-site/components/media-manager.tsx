@@ -9,6 +9,7 @@ import type {
 import { renderedMediaOccurrenceIds } from "@humber-foundry/application";
 import { createMediaOccurrenceId } from "@humber-foundry/application";
 import { requireRenderedMediaOccurrenceId } from "@humber-foundry/application";
+import { homePage } from "@humber-foundry/site-definition";
 
 import { MediaDropzone } from "./media-dropzone";
 import { MediaGallery } from "./media-gallery";
@@ -166,7 +167,9 @@ export function MediaManager({
         if (catalogFence.isCurrent(catalogSnapshot)) {
           const mergedOccurrences = mergeMediaOccurrenceState(
             grantedOccurrences,
-            activeContentRevision?.definition.home.media ?? [],
+            activeContentRevision === undefined
+              ? []
+              : homePage(activeContentRevision.definition).media ?? [],
           );
           setAssets([...grantedAssets]);
           setOccurrences([...mergedOccurrences]);

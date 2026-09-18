@@ -31,6 +31,7 @@ import {
   siteDefinitionSchema,
   type RichTextDocument,
   type SeoShareImage,
+  homePage,
 } from "@humber-foundry/site-definition";
 
 import { hasExactKeys, isRecord } from "./mcp-http-support";
@@ -227,7 +228,7 @@ const richTextContentFieldPaths = contentFields
   .filter(({ format }) => format === "richText")
   .map(({ path }) => path);
 const designVariantContracts =
-  installedSiteDefinition.home.sections.flatMap((section) =>
+  homePage(installedSiteDefinition).sections.flatMap((section) =>
     section.type === "registered"
       ? []
       : [{
@@ -1084,7 +1085,7 @@ const descriptors = {
         },
         document: {
           oneOf: [
-            siteDefinitionSchema.properties.home,
+            siteDefinitionSchema.$defs.sitePage,
             siteDefinitionSchema.$defs.blogPost,
           ],
         },

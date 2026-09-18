@@ -3,6 +3,9 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 import { siteDefinitionValidationKeywords } from "../scripts/site-definition-validation-keywords.mjs";
 import {
+  homePage,
+  homePageSlug,
+  reservedPageSlugs,
   applySiteDefinitionEdits,
   createBlogPostId,
   createReferenceSiteDefinition,
@@ -23,6 +26,25 @@ import {
 } from "./index";
 import publishedSite from "./published-site.json";
 
+/**
+ * The same definition in the shape it was stored in before 1.7.0: one `home`
+ * object instead of a `pages` collection, with no slug and no title, because
+ * neither field existed then.
+ *
+ * A fixture that claims a schema version older than 1.7.0 must use that
+ * version's shape, or it never exercises the page-collection projection step.
+ *
+ * The return type is `any` on purpose. No current type describes an older
+ * schema shape, and every caller feeds it to a reader that takes an unknown
+ * stored value.
+ */
+function withLegacyHomeShape(definition: SiteDefinition): any {
+  const copy = structuredClone(definition);
+  const { pages: _pages, ...rest } = copy as unknown as Record<string, any>;
+  const { slug: _slug, title: _title, ...home } = homePage(copy);
+  return { ...rest, home };
+}
+
 describe("reference Site Definition", () => {
   const ajv = new Ajv2020({ allErrors: true });
   for (const keyword of siteDefinitionValidationKeywords) {
@@ -31,13 +53,13 @@ describe("reference Site Definition", () => {
   const validate = ajv.compile(siteDefinitionSchema);
 
   it("declares stable product and schema versions", () => {
-    expect(referenceSiteDefinition.definitionVersion).toBe("1.6.0");
-    expect(referenceSiteDefinition.schemaVersion).toBe("1.6.0");
+    expect(referenceSiteDefinition.definitionVersion).toBe("1.7.0");
+    expect(referenceSiteDefinition.schemaVersion).toBe("1.7.0");
     expect(siteDefinitionSchema.$schema).toBe(
       "https://json-schema.org/draft/2020-12/schema",
     );
     expect(siteDefinitionSchema.$id).toBe(
-      "https://foundrycms.dev/schemas/site-definition/1.6.0",
+      "https://foundrycms.dev/schemas/site-definition/1.7.0",
     );
     expect(
       siteDefinitionSchema.$defs.richTextDocument.$comment,
@@ -50,7 +72,7 @@ describe("reference Site Definition", () => {
       (section: Record<string, unknown>) =>
         section.type === "callToAction",
     );
-    const runtimeCallToAction = referenceSiteDefinition.home.sections.find(
+    const runtimeCallToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     );
 
@@ -69,14 +91,14 @@ describe("reference Site Definition", () => {
 
   it("does not inject optional media into an already-current definition", () => {
     const current = structuredClone(referenceSiteDefinition);
-    const { media: _media, ...homeWithoutMedia } = current.home;
+    const { media: _media, ...homePageWithoutMedia } = homePage(current);
 
     const loaded = createReferenceSiteDefinition({
       ...current,
-      home: homeWithoutMedia,
+      pages: [homePageWithoutMedia],
     });
 
-    expect(Object.hasOwn(loaded.home, "media")).toBe(false);
+    expect(Object.hasOwn(homePage(loaded), "media")).toBe(false);
     expect(isSiteDefinition(loaded)).toBe(true);
   });
 
@@ -92,7 +114,7 @@ describe("reference Site Definition", () => {
   });
 
   it("uses unique stable identifiers for every page section", () => {
-    const identifiers = referenceSiteDefinition.home.sections.map(
+    const identifiers = homePage(referenceSiteDefinition).sections.map(
       (section) => section.id,
     );
 
@@ -157,9 +179,7 @@ describe("reference Site Definition", () => {
   });
 
   it("gives a stored 1.0 definition with no design block the whole default design", () => {
-    const stored = structuredClone(
-      referenceSiteDefinition,
-    ) as unknown as Record<string, any>;
+    const stored = withLegacyHomeShape(referenceSiteDefinition);
     stored.definitionVersion = "1.0.0";
     stored.schemaVersion = "1.0.0";
     delete stored.design;
@@ -179,22 +199,20 @@ describe("reference Site Definition", () => {
   });
 
   it("projects a preserved 1.0 definition into the current rich-text schema", () => {
-    const legacy = structuredClone(
-      referenceSiteDefinition,
-    ) as unknown as Record<string, any>;
+    const legacy = withLegacyHomeShape(referenceSiteDefinition);
     legacy.definitionVersion = "1.0.0";
     legacy.schemaVersion = "1.0.0";
     legacy.home.sections[3].body =
       "Preserve this legacy draft.\nAcross paragraphs.";
 
     const upgraded = upgradeSiteDefinition(legacy);
-    const callToAction = upgraded.home.sections.find(
+    const callToAction = homePage(upgraded).sections.find(
       (section) => section.type === "callToAction",
     )!;
 
     expect(upgraded).not.toBe(legacy);
-    expect(upgraded.definitionVersion).toBe("1.6.0");
-    expect(upgraded.schemaVersion).toBe("1.6.0");
+    expect(upgraded.definitionVersion).toBe("1.7.0");
+    expect(upgraded.schemaVersion).toBe("1.7.0");
     expect(callToAction).toEqual(
       expect.objectContaining({
         body: {
@@ -317,7 +335,7 @@ describe("reference Site Definition", () => {
       const malformed = structuredClone(
         referenceSiteDefinition,
       ) as unknown as Record<string, any>;
-      const document = malformed.home.sections[3].body;
+      const document = malformed.pages[0].sections[3].body;
       mutate(document);
 
       expect(isSiteDefinition(malformed)).toBe(false);
@@ -330,26 +348,28 @@ describe("reference Site Definition", () => {
   it("preserves the Git-published media manifest at runtime", () => {
     const published = {
       ...structuredClone(referenceSiteDefinition),
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero",
-            revision: 4,
-            asset: {
-              assetId: "asset_published",
-              width: 1200,
-              height: 800,
-              contentType: "image/png",
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 4,
+              asset: {
+                assetId: "asset_published",
+                width: 1200,
+                height: 800,
+                contentType: "image/png",
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      },
+          ],
+        },
+      ],
     } satisfies SiteDefinition;
 
-    expect(createReferenceSiteDefinition(published).home.media).toEqual(
-      published.home.media,
+    expect(homePage(createReferenceSiteDefinition(published)).media).toEqual(
+      homePage(published).media,
     );
   });
 
@@ -358,7 +378,7 @@ describe("reference Site Definition", () => {
       string,
       any
     >;
-    delete legacy.home.media;
+    delete legacy.pages[0].media;
     expect(validate(legacy), validate.errors?.toString()).toBe(true);
   });
 
@@ -372,19 +392,19 @@ describe("reference Site Definition", () => {
     {
       name: "a non-array sections value",
       change: (definition: Record<string, any>) => {
-        definition.home.sections = "hero";
+        definition.pages[0].sections = "hero";
       },
     },
     {
       name: "an unknown nested property",
       change: (definition: Record<string, any>) => {
-        definition.home.seo.injected = true;
+        definition.pages[0].seo.injected = true;
       },
     },
     {
       name: "fields from the wrong section variant",
       change: (definition: Record<string, any>) => {
-        definition.home.sections[0].metrics = [];
+        definition.pages[0].sections[0].metrics = [];
       },
     },
     {
@@ -414,13 +434,13 @@ describe("reference Site Definition", () => {
     {
       name: "a variant registered for a different component",
       change: (definition: Record<string, any>) => {
-        definition.home.sections[0].variant = "cards";
+        definition.pages[0].sections[0].variant = "cards";
       },
     },
     {
       name: "a crop that extends beyond the source",
       change: (definition: Record<string, any>) => {
-        definition.home.media = [{
+        definition.pages[0].media = [{
           occurrenceId: "occurrence_home_hero",
           revision: 1,
           asset: {
@@ -447,7 +467,7 @@ describe("reference Site Definition", () => {
           },
           crop: null,
         };
-        definition.home.media = [
+        definition.pages[0].media = [
           occurrence,
           {
             ...occurrence,
@@ -461,7 +481,7 @@ describe("reference Site Definition", () => {
       // like a path on this site but is not one, so it must not pass as one.
       name: "a protocol-relative share image address",
       change: (definition: Record<string, any>) => {
-        definition.home.seo.shareImage = {
+        definition.pages[0].seo.shareImage = {
           url: "//attacker.example/card.png",
           alt: "",
         };
@@ -470,7 +490,7 @@ describe("reference Site Definition", () => {
     {
       name: "an insecure share image address",
       change: (definition: Record<string, any>) => {
-        definition.home.seo.shareImage = {
+        definition.pages[0].seo.shareImage = {
           url: "http://attacker.example/card.png",
           alt: "",
         };
@@ -479,7 +499,7 @@ describe("reference Site Definition", () => {
     {
       name: "an executable share image address",
       change: (definition: Record<string, any>) => {
-        definition.home.seo.shareImage = {
+        definition.pages[0].seo.shareImage = {
           url: "javascript:alert(1)",
           alt: "",
         };
@@ -488,7 +508,7 @@ describe("reference Site Definition", () => {
     {
       name: "more keywords than an owner may set",
       change: (definition: Record<string, any>) => {
-        definition.home.seo.keywords = Array.from(
+        definition.pages[0].seo.keywords = Array.from(
           { length: 13 },
           (_unused, index) => `keyword-${index}`,
         );
@@ -512,7 +532,7 @@ describe("reference Site Definition", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "page_home.seo.title",
-          value: referenceSiteDefinition.home.seo.title,
+          value: homePage(referenceSiteDefinition).seo.title,
         }),
         expect.objectContaining({
           path: "nav_work.label",
@@ -573,17 +593,17 @@ describe("reference Site Definition", () => {
             expect.objectContaining({ id: "nav_work", label: "Our work" }),
           ]),
         }),
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: expect.arrayContaining([
             expect.objectContaining({
               id: "section_hero",
               title: "A new immutable headline",
             }),
           ]),
-        }),
+        })],
       }),
     });
-    expect(referenceSiteDefinition.home.sections[0]).toEqual(
+    expect(homePage(referenceSiteDefinition).sections[0]).toEqual(
       expect.objectContaining({
         title: "Turn a good idea into something people can use.",
       }),
@@ -687,14 +707,14 @@ describe("reference Site Definition", () => {
     expect(result).toEqual({
       ok: true,
       definition: expect.objectContaining({
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: expect.arrayContaining([
             expect.objectContaining({
               id: "section_contact",
               body,
             }),
           ]),
-        }),
+        })],
       }),
     });
     expect(
@@ -704,7 +724,7 @@ describe("reference Site Definition", () => {
     ).toMatchObject({
       format: "richText",
       value: serializeRichTextDocument(
-        referenceSiteDefinition.home.sections.find(
+        homePage(referenceSiteDefinition).sections.find(
           (section) => section.type === "callToAction",
         )!.body,
       ),
@@ -849,9 +869,9 @@ describe("reference Site Definition", () => {
     ).toEqual({
       ok: false,
       errors: {
-        "section_missing.title": "This field is not in Site Definition 1.6.0.",
+        "section_missing.title": "This field is not in Site Definition 1.7.0.",
         "section_hero.title": "Enter at least one visible character.",
-        "section_hero.href": "This field is not in Site Definition 1.6.0.",
+        "section_hero.href": "This field is not in Site Definition 1.7.0.",
       },
     });
   });
@@ -865,7 +885,7 @@ describe("reference Site Definition", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors)).toEqual(["__proto__"]);
       expect(result.errors["__proto__"]).toBe(
-        "This field is not in Site Definition 1.6.0.",
+        "This field is not in Site Definition 1.7.0.",
       );
     }
   });
@@ -874,10 +894,212 @@ describe("reference Site Definition", () => {
     const duplicate = structuredClone(
       referenceSiteDefinition,
     ) as unknown as Record<string, any>;
-    duplicate.home.sections[1].id = duplicate.home.sections[0].id;
+    duplicate.pages[0].sections[1].id = duplicate.pages[0].sections[0].id;
 
     expect(() =>
       listEditableSiteFields(duplicate as SiteDefinition),
     ).toThrow(DuplicateEditableSiteFieldPathError);
+  });
+});
+
+describe("the page collection", () => {
+  const validate = new Ajv2020({ allErrors: true });
+  for (const keyword of siteDefinitionValidationKeywords) {
+    validate.addKeyword(keyword);
+  }
+  const validateDefinition = validate.compile(siteDefinitionSchema);
+
+  function withPages(
+    pages: ReadonlyArray<Record<string, unknown>>,
+  ): Record<string, unknown> {
+    return {
+      ...(structuredClone(referenceSiteDefinition) as Record<string, unknown>),
+      pages,
+    };
+  }
+
+  function secondPage(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const home = structuredClone(homePage(referenceSiteDefinition)) as Record<
+      string,
+      unknown
+    >;
+    return {
+      ...home,
+      id: "page_about",
+      slug: "about",
+      title: "About us",
+      sections: [],
+      ...overrides,
+    };
+  }
+
+  it("accepts a definition with more than one page", () => {
+    const definition = withPages([
+      structuredClone(homePage(referenceSiteDefinition)),
+      secondPage(),
+    ]);
+
+    expect(
+      validateDefinition(definition),
+      validateDefinition.errors?.toString(),
+    ).toBe(true);
+    expect(isSiteDefinition(definition)).toBe(true);
+  });
+
+  it("rejects a duplicate page id and a duplicate page slug", () => {
+    const home = structuredClone(homePage(referenceSiteDefinition));
+    const duplicateId = withPages([home, secondPage({ id: home.id })]);
+    const duplicateSlug = withPages([
+      home,
+      secondPage(),
+      secondPage({ id: "page_team" }),
+    ]);
+
+    // The JSON Schema cannot compare one property across array items, so the
+    // duplicate check lives in isSiteDefinition.
+    expect(isSiteDefinition(duplicateId)).toBe(false);
+    expect(isSiteDefinition(duplicateSlug)).toBe(false);
+  });
+
+  it("rejects a reserved slug", () => {
+    for (const slug of reservedPageSlugs) {
+      const definition = withPages([
+        structuredClone(homePage(referenceSiteDefinition)),
+        secondPage({ slug }),
+      ]);
+      expect(validateDefinition(definition), slug).toBe(false);
+      expect(isSiteDefinition(definition), slug).toBe(false);
+    }
+  });
+
+  it.each([
+    "About",
+    "about us",
+    "about--us",
+    "-about",
+    "about/team",
+    "about?x=1",
+    "a".repeat(121),
+  ])("rejects the invalid slug %s", (slug) => {
+    const definition = withPages([
+      structuredClone(homePage(referenceSiteDefinition)),
+      secondPage({ slug }),
+    ]);
+
+    expect(validateDefinition(definition)).toBe(false);
+    expect(isSiteDefinition(definition)).toBe(false);
+  });
+
+  it("requires exactly one page with the root slug", () => {
+    const home = structuredClone(homePage(referenceSiteDefinition));
+    expect(validateDefinition(withPages([secondPage()]))).toBe(false);
+    expect(
+      validateDefinition(
+        withPages([home, secondPage({ id: "page_second_home", slug: "" })]),
+      ),
+    ).toBe(false);
+    expect(validateDefinition(withPages([]))).toBe(false);
+  });
+
+  it("requires a page title", () => {
+    const definition = withPages([
+      structuredClone(homePage(referenceSiteDefinition)),
+      secondPage({ title: "" }),
+    ]);
+
+    expect(validateDefinition(definition)).toBe(false);
+  });
+});
+
+describe("the 1.6.0 to 1.7.0 projection", () => {
+  function storedAt160(): Record<string, any> {
+    const stored = withLegacyHomeShape(referenceSiteDefinition);
+    stored.definitionVersion = "1.6.0";
+    stored.schemaVersion = "1.6.0";
+    return stored;
+  }
+
+  it("upgrades one home object into exactly one page", () => {
+    const stored = storedAt160();
+
+    const upgraded = upgradeSiteDefinition(stored);
+
+    expect(upgraded.definitionVersion).toBe("1.7.0");
+    expect(upgraded.schemaVersion).toBe("1.7.0");
+    expect(upgraded.pages).toHaveLength(1);
+    expect(Object.hasOwn(upgraded, "home")).toBe(false);
+    expect(isSiteDefinition(upgraded)).toBe(true);
+  });
+
+  it("keeps the upgraded page content byte for byte", () => {
+    const stored = storedAt160();
+    // A 1.6.0 home object carries media, so the fixture must too, or the test
+    // would not notice the projection dropping it.
+    stored.home.media = [
+      {
+        occurrenceId: "occurrence_home_hero",
+        revision: 1,
+        asset: {
+          assetId: "asset_home_hero",
+          width: 1200,
+          height: 630,
+          contentType: "image/jpeg",
+        },
+        crop: null,
+      },
+    ];
+    const storedHome = structuredClone(stored.home);
+
+    const page = homePage(upgradeSiteDefinition(stored));
+
+    expect(page.slug).toBe(homePageSlug);
+    // Everything the 1.6.0 home object held survives, and nothing else is
+    // added: the page is the old home object plus a slug and a title. Key
+    // order is not compared, because every stored digest sorts keys first.
+    const { slug: _slug, title: _title, ...carried } = page;
+    expect(carried).toStrictEqual(storedHome);
+  });
+
+  it("changes nothing outside the page collection", () => {
+    const stored = storedAt160();
+    const { home: _home, ...outsideThePages } = structuredClone(stored);
+
+    const upgraded = upgradeSiteDefinition(stored) as unknown as Record<
+      string,
+      unknown
+    >;
+    const { pages: _pages, ...upgradedOutsideThePages } = upgraded;
+
+    expect(upgradedOutsideThePages).toStrictEqual({
+      ...outsideThePages,
+      definitionVersion: "1.7.0",
+      schemaVersion: "1.7.0",
+    });
+  });
+
+  it("titles the upgraded page with the site name", () => {
+    const stored = storedAt160();
+
+    expect(homePage(upgradeSiteDefinition(stored)).title).toBe(
+      stored.site.name,
+    );
+  });
+
+  it("leaves a definition already stored at 1.7.0 untouched", () => {
+    const stored = structuredClone(referenceSiteDefinition);
+
+    expect(upgradeSiteDefinition(stored)).toBe(stored);
+  });
+
+  it("refuses a schema version it has no projection for", () => {
+    const stored = storedAt160();
+    stored.definitionVersion = "1.8.0";
+    stored.schemaVersion = "1.8.0";
+
+    expect(() => upgradeSiteDefinition(stored)).toThrow(
+      "site_definition_version_unsupported",
+    );
   });
 });

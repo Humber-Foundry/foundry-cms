@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { withLegacyHomeShape } from "./test-support/legacy-site-definition-shape";
+
 import {
   ContentRevisionConflictError,
   ContentRevisionConfigurationError,
@@ -13,6 +15,7 @@ import {
 import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
 } from "@humber-foundry/site-definition";
 
@@ -189,15 +192,17 @@ describe("D1 content revision store", () => {
     ).resolves.toMatchObject({
       workspaceId: firstWorkspaceId,
       definition: {
-        home: {
-          sections: [
-            expect.objectContaining({
-              id: "section_hero",
-              title: "First workspace",
-            }),
-            ...referenceSiteDefinition.home.sections.slice(1),
-          ],
-        },
+        pages: [
+          {
+            sections: [
+              expect.objectContaining({
+                id: "section_hero",
+                title: "First workspace",
+              }),
+              ...homePage(referenceSiteDefinition).sections.slice(1),
+            ],
+          },
+        ],
       },
     });
     await expect(
@@ -205,15 +210,17 @@ describe("D1 content revision store", () => {
     ).resolves.toMatchObject({
       workspaceId: secondWorkspaceId,
       definition: {
-        home: {
-          sections: [
-            expect.objectContaining({
-              id: "section_hero",
-              title: "Second workspace",
-            }),
-            ...referenceSiteDefinition.home.sections.slice(1),
-          ],
-        },
+        pages: [
+          {
+            sections: [
+              expect.objectContaining({
+                id: "section_hero",
+                title: "Second workspace",
+              }),
+              ...homePage(referenceSiteDefinition).sections.slice(1),
+            ],
+          },
+        ],
       },
     });
   });
@@ -1989,9 +1996,8 @@ describe("D1 content revision store", () => {
   });
 
   it("preserves immutable stored 1.0 revisions without rewriting their fingerprinted definition", async () => {
-    const legacy = structuredClone(
-      referenceSiteDefinition,
-    ) as unknown as Record<string, any>;
+    // A 1.0.0 revision was stored in the pre-1.7.0 shape: one `home` object.
+    const legacy = withLegacyHomeShape(referenceSiteDefinition);
     legacy.definitionVersion = "1.0.0";
     legacy.schemaVersion = "1.0.0";
     delete legacy.design;
@@ -2127,7 +2133,7 @@ describe("D1 content revision store", () => {
     async (faultBoundary) => {
       const restoredDefinition = structuredClone(referenceSiteDefinition);
       (
-        restoredDefinition.home.sections[0] as {
+        homePage(restoredDefinition).sections[0] as {
           title: string;
         }
       ).title = "Historical D1 release";
@@ -2191,13 +2197,13 @@ describe("D1 content revision store", () => {
           revision: 0,
           createdBy: editorActorId,
           definition: expect.objectContaining({
-            home: expect.objectContaining({
+            pages: [expect.objectContaining({
               sections: expect.arrayContaining([
                 expect.objectContaining({
                   title: "Historical D1 release",
                 }),
               ]),
-            }),
+            })],
           }),
         }),
       );

@@ -5,6 +5,7 @@ import {
   applySiteDefinitionEdits,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   type PageSection,
   type SiteDefinition,
@@ -83,7 +84,9 @@ describe("SiteRenderer controlled design projection", () => {
     };
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: { ...referenceSiteDefinition.home, sections: [storySection] },
+      pages: [
+        { ...homePage(referenceSiteDefinition), sections: [storySection] },
+      ],
     };
 
     const published = renderToStaticMarkup(
@@ -229,20 +232,22 @@ describe("site renderer media placement", () => {
     };
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        media: [{
-          occurrenceId: "occurrence_home_hero",
-          revision: 1,
-          asset: {
-            assetId: "asset_preview_55",
-            width: 1600,
-            height: 900,
-            contentType: "image/png",
-          },
-          crop: null,
-        }],
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [{
+            occurrenceId: "occurrence_home_hero",
+            revision: 1,
+            asset: {
+              assetId: "asset_preview_55",
+              width: 1600,
+              height: 900,
+              contentType: "image/png",
+            },
+            crop: null,
+          }],
+        },
+      ],
       blog: { id: "blog", posts: [post] },
     };
     const previewProps = {
@@ -270,7 +275,7 @@ describe("site renderer media placement", () => {
   });
 
   it("does not reuse a canonical occurrence on a duplicated component", () => {
-    const canonical = referenceSiteDefinition.home.sections.find(
+    const canonical = homePage(referenceSiteDefinition).sections.find(
       (section) => section.id === "section_hero",
     );
     if (canonical?.type !== "hero") {
@@ -282,22 +287,24 @@ describe("site renderer media placement", () => {
     } as PageSection;
     const definition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero",
-            revision: 1,
-            asset: {
-              assetId: "asset_hero",
-              width: 1600,
-              height: 900,
-              contentType: "image/png",
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              revision: 1,
+              asset: {
+                assetId: "asset_hero",
+                width: 1600,
+                height: 900,
+                contentType: "image/png",
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      },
+          ],
+        },
+      ],
     } as SiteDefinition;
 
     const canonicalMarkup = renderToStaticMarkup(

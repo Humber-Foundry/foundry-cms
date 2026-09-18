@@ -18,7 +18,10 @@ import {
   mcpPublicationScheduleScope,
   type McpConnectionPrincipal,
 } from "@humber-foundry/application";
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  referenceSiteDefinition,
+} from "@humber-foundry/site-definition";
 
 import { createRequestExecutionContext } from "./mcp-http-support";
 import { createMcpProtocolRuntime } from "./mcp-protocol-runtime";
@@ -75,12 +78,12 @@ const results: Record<string, unknown> = {
   "foundry.content.list": { items: [], nextCursor: null },
   "foundry.content.get": {
     kind: "page",
-    contentId: referenceSiteDefinition.home.id,
+    contentId: homePage(referenceSiteDefinition).id,
     revision: 1,
     contentHash,
     liveGitSha: "a".repeat(40),
     lastModified: observedAt,
-    document: referenceSiteDefinition.home,
+    document: homePage(referenceSiteDefinition),
   },
   "foundry.workspace.open": { ...draftResult, replayed: false },
   "foundry.workspace.get": {
@@ -206,7 +209,7 @@ const inputs: Record<string, unknown> = {
   "foundry.content.list": { kind: null, limit: 10, cursor: null },
   "foundry.content.get": {
     kind: "page",
-    contentId: referenceSiteDefinition.home.id,
+    contentId: homePage(referenceSiteDefinition).id,
   },
   "foundry.workspace.open": { expectedRevision: 0, idempotencyKey },
   "foundry.workspace.get": { workspaceId },

@@ -43,7 +43,7 @@ const revision: CampaignRevision = {
     id: "canonical-consent-and-suppression",
     version: 1,
   },
-  schemaVersion: "1.6.0",
+  schemaVersion: "1.7.0",
   rendererVersion: "1".repeat(40),
   createdAt: "2026-08-01T00:00:00.000Z",
   createdByActorId: "membership-editor",

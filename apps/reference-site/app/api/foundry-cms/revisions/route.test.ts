@@ -9,6 +9,7 @@ import {
   MediaValidationError,
 } from "@humber-foundry/application";
 import {
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
 } from "@humber-foundry/site-definition";
@@ -200,7 +201,7 @@ describe("content revision endpoint", () => {
   });
 
   it("creates a schema-valid post through the authenticated revision boundary", async () => {
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       ({ type }) => type === "callToAction",
     );
     if (callToAction?.type !== "callToAction") {
@@ -405,7 +406,7 @@ describe("content revision endpoint", () => {
         productionBase: "published-a",
       },
     });
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -629,14 +630,17 @@ describe("content revision endpoint", () => {
       revision: 3,
       bookmark: "fresh-d1-bookmark",
       definition: {
-        home: {
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              asset: { assetId: "asset_historical" },
-            },
-          ],
-        },
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                asset: { assetId: "asset_historical" },
+              },
+            ],
+          },
+        ],
       },
     });
     const response = await GET(
@@ -672,14 +676,17 @@ describe("content revision endpoint", () => {
       revision: 2,
       bookmark: "historical-bookmark",
       definition: {
-        home: {
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              asset: { assetId: "asset_historical" },
-            },
-          ],
-        },
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                asset: { assetId: "asset_historical" },
+              },
+            ],
+          },
+        ],
       },
     });
 
@@ -722,14 +729,17 @@ describe("content revision endpoint", () => {
       revision: 2,
       bookmark: "historical-bookmark",
       definition: {
-        home: {
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              asset: { assetId: "asset_historical" },
-            },
-          ],
-        },
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                asset: { assetId: "asset_historical" },
+              },
+            ],
+          },
+        ],
       },
     });
     mocks.verifyMediaAccessToken.mockRejectedValue(
@@ -784,7 +794,7 @@ describe("content revision endpoint", () => {
       workspaceId: "workspace_home",
       revision: 2,
       bookmark: "historical-bookmark",
-      definition: { home: { media: [] } },
+      definition: { pages: [{ slug: "", media: [] }] },
     });
     mocks.grantRevisionAccess.mockRejectedValue(
       new MediaValidationError("idempotencyKey"),

@@ -3854,6 +3854,101 @@ describe("D1 blog post operations store", () => {
     ).rejects.toThrow(/blog_post_archive_record_is_immutable/u);
   });
 
+  it("summarizes a post's active schedule for the dashboard", async () => {
+    const approval = await approveCurrent();
+    const store = createD1BlogPostOperationsStore(database);
+    const app = createBlogPostOperationsApplication({
+      store,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+
+    await expect(store.findOperationalSummary(
+      referenceSiteDefinition.site.id,
+      postId,
+    )).resolves.toMatchObject({
+      activeSchedule: null,
+      latestExecution: null,
+      archiveRequestId: null,
+    });
+
+    const schedule = await app.commands.activateSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      approvalId: approval.id,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "summary-activate-schedule",
+    });
+
+    await expect(store.findOperationalSummary(
+      referenceSiteDefinition.site.id,
+      postId,
+    )).resolves.toMatchObject({
+      workflowState: "scheduled",
+      activeSchedule: { id: schedule.id, state: "active" },
+    });
+
+    await app.commands.cancelSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      scheduleId: schedule.id,
+      idempotencyKey: "summary-cancel-schedule",
+    });
+
+    await expect(store.findOperationalSummary(
+      referenceSiteDefinition.site.id,
+      postId,
+    )).resolves.toMatchObject({
+      workflowState: "approved",
+      activeSchedule: null,
+    });
+  });
+
+  it("lists archived posts with their title and archive-request ID", async () => {
+    const store = createD1BlogPostOperationsStore(database);
+    const post = await store.findPost(
+      referenceSiteDefinition.site.id,
+      postId,
+    );
+
+    await expect(store.listArchivedPosts(referenceSiteDefinition.site.id))
+      .resolves.toEqual([]);
+
+    await store.archive({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      selectedPostRevisionId: post!.postRevisionId,
+      idempotencyKey: "list-archived-posts-request",
+      occurredAt: now,
+    });
+
+    const archived = await store.listArchivedPosts(
+      referenceSiteDefinition.site.id,
+    );
+    expect(archived).toHaveLength(1);
+    expect(archived[0]).toMatchObject({
+      postId,
+      collectionState: "archived",
+      title: "Scheduled post",
+      slug: "scheduled-post",
+    });
+
+    await expect(store.findOperationalSummary(
+      referenceSiteDefinition.site.id,
+      postId,
+    )).resolves.toMatchObject({
+      archiveRequestId: "list-archived-posts-request",
+    });
+  });
+
   it("uses collection state as the authority fence for edit, approval, and publication", async () => {
     const approval = await approveCurrent();
     const operationsStore = createD1BlogPostOperationsStore(database);
