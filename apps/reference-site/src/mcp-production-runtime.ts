@@ -30,6 +30,7 @@ import {
   readHumanMutationConfiguration,
   type HumanAccessEnvironment,
 } from "./human-access-configuration";
+import { isValidMcpRedirectUri } from "./mcp-client-registration";
 import {
   createMcpHttpRuntime,
   createSignedMcpCursorCodec,
@@ -49,8 +50,71 @@ export type McpProductionEnvironment = HumanAccessEnvironment &
   }>;
 
 const resourcePath = "/api/foundry-mcp";
+const tokenPath = `${resourcePath}/oauth/token`;
+const registrationPath = `${resourcePath}/oauth/register`;
+const protectedResourceMetadataPath =
+  `/.well-known/oauth-protected-resource${resourcePath}`;
+const authorizationServerMetadataPath =
+  "/.well-known/oauth-authorization-server";
 const authorizationPath = "/api/foundry-cms/mcp/oauth/authorize";
 const revocationPath = "/api/foundry-cms/mcp-connections/revoke";
+
+/**
+ * Which MCP paths a Cloudflare Access application must let through, and which
+ * it must keep protected.
+ *
+ * An MCP client calls the public paths with no human present and no Access
+ * session. If the Access application covers them, Access answers with its own
+ * sign-in page and the client cannot discover, register or exchange a token.
+ *
+ * The Owner paths must stay behind Access. Consent and revocation are the
+ * human decisions that turn a registration into real access.
+ */
+export const mcpAccessBoundary = Object.freeze({
+  public: Object.freeze([
+    protectedResourceMetadataPath,
+    authorizationServerMetadataPath,
+    registrationPath,
+    tokenPath,
+    resourcePath,
+  ]),
+  ownerProtected: Object.freeze([authorizationPath, revocationPath]),
+});
+
+/**
+ * Report whether the MCP router and the documented Access boundary still agree.
+ * A path the router serves but the boundary does not name would be an
+ * undocumented hole; a named path the router does not serve would be a stale
+ * instruction to the operator.
+ */
+export function checkMcpAccessBoundary(): Readonly<{
+  ok: boolean;
+  unroutedPaths: ReadonlyArray<string>;
+  undocumentedPaths: ReadonlyArray<string>;
+}> {
+  const documented = [
+    ...mcpAccessBoundary.public,
+    ...mcpAccessBoundary.ownerProtected,
+  ];
+  const routed = [
+    resourcePath,
+    tokenPath,
+    registrationPath,
+    authorizationPath,
+    revocationPath,
+    authorizationServerMetadataPath,
+    protectedResourceMetadataPath,
+  ];
+  const unroutedPaths = documented.filter((path) => !routed.includes(path));
+  const undocumentedPaths = routed.filter(
+    (path) => !documented.includes(path),
+  );
+  return {
+    ok: unroutedPaths.length === 0 && undocumentedPaths.length === 0,
+    unroutedPaths,
+    undocumentedPaths,
+  };
+}
 
 function requireSetting(value: string | undefined): string {
   if (value === undefined || value.trim() === "") {
@@ -59,21 +123,16 @@ function requireSetting(value: string | undefined): string {
   return value;
 }
 
-function validRedirectUri(value: string) {
-  try {
-    const url = new URL(value);
-    return (
-      !value.includes("*") &&
-      url.hash === "" &&
-      (url.protocol === "https:" ||
-        (url.protocol === "http:" &&
-          (url.hostname === "127.0.0.1" || url.hostname === "[::1]")))
-    );
-  } catch {
-    return false;
-  }
-}
+const validRedirectUri = isValidMcpRedirectUri;
 
+/**
+ * Read the operator's optional client allowlist.
+ *
+ * An unset or empty `FOUNDRY_MCP_CLIENTS` means the installation accepts
+ * dynamic client registration, which is how claude.ai, ChatGPT and Claude Code
+ * connect with nothing pasted by the Owner. Setting it turns registration off
+ * and restricts authorization to the listed clients.
+ */
 export function readMcpRegisteredClients(
   value: string | undefined,
 ): Readonly<
@@ -82,9 +141,12 @@ export function readMcpRegisteredClients(
     Readonly<{ name: string; redirectUris: ReadonlyArray<string> }>
   >
 > {
+  if (value === undefined || value.trim() === "") {
+    return Object.freeze({});
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(requireSetting(value));
+    parsed = JSON.parse(value);
   } catch {
     throw new HumanAccessConfigurationError();
   }
@@ -125,6 +187,8 @@ export function readMcpRegisteredClients(
       ]),
     });
   }
+  // A present but empty allowlist is a configuration mistake, not a request
+  // for open registration. Unset the variable to allow registration.
   if (Object.keys(clients).length === 0) {
     throw new HumanAccessConfigurationError();
   }
@@ -135,12 +199,12 @@ export function isMcpProductionRequest(request: Request): boolean {
   const pathname = new URL(request.url).pathname;
   return (
     pathname === resourcePath ||
-    pathname === `${resourcePath}/oauth/token` ||
+    pathname === tokenPath ||
+    pathname === registrationPath ||
     pathname === authorizationPath ||
     pathname === revocationPath ||
-    pathname === "/.well-known/oauth-authorization-server" ||
-    pathname ===
-      `/.well-known/oauth-protected-resource${resourcePath}`
+    pathname === authorizationServerMetadataPath ||
+    pathname === protectedResourceMetadataPath
   );
 }
 
@@ -269,6 +333,7 @@ export function createProductionMcpRuntime(
     ),
     defer: (promise) => context?.waitUntil(promise),
     authorizationPath,
+    registrationPath,
     ownerRevocationPath: revocationPath,
     async authenticateOwner(request, intent) {
       const identity = await authenticateCloudflareAccessIdentity({

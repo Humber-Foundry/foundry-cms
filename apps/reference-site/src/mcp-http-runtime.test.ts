@@ -32,6 +32,7 @@ import {
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
+import type { McpClientRegistrationMetadata } from "./mcp-client-registration";
 import {
   createMcpHttpRuntime,
   createSignedMcpCursorCodec,
@@ -77,6 +78,10 @@ function createStore({
   beforeRecordInvocation?: () => Promise<void>;
 } = {}) {
   const connections = new Map<string, McpConnectionGrant>();
+  const registeredClients = new Map<
+    string,
+    { siteId: string; metadata: McpClientRegistrationMetadata }
+  >();
   const codes = new Map<
     string,
     McpAuthorizationGrantInput & { consumed: boolean }
@@ -216,6 +221,25 @@ function createStore({
         },
       };
     },
+    async findRegisteredClient(input) {
+      const client = registeredClients.get(input.clientId);
+      return client === undefined || client.siteId !== input.siteId
+        ? null
+        : {
+            clientId: input.clientId,
+            name: client.metadata.clientName,
+            redirectUris: client.metadata.redirectUris,
+            source: "dynamic",
+          };
+    },
+    async registerClient(input) {
+      if (registeredClients.size >= input.capacity) return "capacity_reached";
+      registeredClients.set(input.clientId, {
+        siteId: input.siteId,
+        metadata: input.metadata,
+      });
+      return "registered";
+    },
     async consumeRateLimit(input) {
       rateLimitCount += 1;
       await beforeConsumeRateLimit?.(rateLimitCount);
@@ -232,6 +256,7 @@ function createStore({
   return {
     store,
     connections,
+    registeredClients,
     audit,
     rateLimitInputs,
     connectionLookupInputs,
@@ -247,6 +272,12 @@ function fixture(
     connectionIds?: ReadonlyArray<string>;
     actorIds?: ReadonlyArray<string>;
     registeredRedirectUris?: ReadonlyArray<string>;
+    environmentClients?: Readonly<
+      Record<
+        string,
+        Readonly<{ name: string; redirectUris: ReadonlyArray<string> }>
+      >
+    >;
     beforeFindCurrentConnection?: (call: number) => Promise<void>;
     beforeConsumeRateLimit?: (call: number) => Promise<void>;
     beforeRecordInvocation?: () => Promise<void>;
@@ -414,7 +445,7 @@ function fixture(
     store: state.store,
     readApplication: application,
     cursors,
-    registeredClients: {
+    registeredClients: options.environmentClients ?? {
       [clientId]: {
         name: "Test MCP Client",
         redirectUris: options.registeredRedirectUris ?? [redirectUri],
@@ -538,6 +569,72 @@ async function authorizeAndExchange(
     connectionId: body.connection_id,
     stepUpToken: body.step_up_token,
   };
+}
+
+/**
+ * Register a client with no pre-registration, approve it as the Owner with
+ * exactly `site.read`, and exchange the code for an access token.
+ */
+async function registerAndAuthorize(
+  runtime: ReturnType<typeof createMcpHttpRuntime>,
+) {
+  const dynamicRedirectUri = "http://127.0.0.1:1/callback";
+  const registered = (await (
+    await runtime.fetch(
+      new Request(`${resourceUri}/oauth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "Dynamically registered client",
+          redirect_uris: [dynamicRedirectUri],
+        }),
+      }),
+    )
+  ).json()) as { client_id: string };
+  const verifier = "d".repeat(64);
+  const parameters = new URLSearchParams({
+    response_type: "code",
+    client_id: registered.client_id,
+    redirect_uri: dynamicRedirectUri,
+    resource: resourceUri,
+    scope: "site.read",
+    state: "dynamic-client-state",
+    code_challenge: await digest(verifier),
+    code_challenge_method: "S256",
+  });
+  const approval = await runtime.fetch(
+    new Request(`${resourceUri}/oauth/authorize`, {
+      method: "POST",
+      headers: {
+        origin: canonicalOrigin,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams([
+        ...parameters,
+        ["csrf_token", "owner-bound-csrf"],
+        ["granted_scope", "site.read"],
+      ]),
+    }),
+  );
+  expect(approval.status).toBe(303);
+  const callback = new URL(approval.headers.get("location")!);
+  const token = await runtime.fetch(
+    new Request(`${resourceUri}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: callback.searchParams.get("code")!,
+        client_id: registered.client_id,
+        redirect_uri: dynamicRedirectUri,
+        resource: resourceUri,
+        code_verifier: verifier,
+      }),
+    }),
+  );
+  expect(token.status).toBe(200);
+  const body = (await token.json()) as { access_token: string };
+  return { accessToken: body.access_token, clientId: registered.client_id };
 }
 
 const initializedSessions = new Map<string, string>();
@@ -700,8 +797,15 @@ describe("production MCP HTTP runtime", () => {
     expect(consentText).toContain(
       "<dt>Current permissions</dt><dd>site.read</dd>",
     );
+    // The scope it already holds cannot be cleared here. The scope it is
+    // asking to add is a control the Owner can clear.
     expect(consentText).toContain(
-      "<dt>Requested permissions</dt><dd>site.read, content.draft</dd>",
+      '<input type="checkbox" checked disabled> Read this site ' +
+        '(<code>site.read</code>) — always included' +
+        '<input type="hidden" name="granted_scope" value="site.read">',
+    );
+    expect(consentText).toContain(
+      '<input type="checkbox" name="granted_scope" value="content.draft" checked>',
     );
     await authorizeAndExchange(runtime, grantedScope, initial);
     const stored = [...connections.values()][0]!;
@@ -864,7 +968,7 @@ describe("production MCP HTTP runtime", () => {
       "form-action 'self'",
     );
     const document = await response.text();
-    expect(document).toContain("Approve read-only connection");
+    expect(document).toContain("Approve this connection");
     expect(document).toContain('name="csrf_token"');
     expect(document).not.toContain(signingSecret);
     expect(connections.size).toBe(0);
@@ -1971,8 +2075,10 @@ describe("production MCP HTTP runtime", () => {
   it.runIf(process.env.RUN_MCP_INSPECTOR === "1")(
     "is discoverable by the pinned official MCP Inspector over Streamable HTTP",
     async () => {
-      const { runtime } = fixture();
-      const { accessToken } = await authorizeAndExchange(runtime);
+      // No client is pre-registered. The token below comes from a dynamic
+      // client registration followed by an Owner consent.
+      const { runtime } = fixture({ environmentClients: {} });
+      const { accessToken } = await registerAndAuthorize(runtime);
       const server = createServer(async (incoming, outgoing) => {
         const chunks: Buffer[] = [];
         for await (const chunk of incoming) {
@@ -2990,5 +3096,785 @@ describe("production MCP HTTP runtime", () => {
         bucketKey.endsWith(":unknown"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("MCP dynamic client registration and authorize compatibility", () => {
+  const openFixture = () => fixture({ environmentClients: {} });
+
+  async function register(
+    runtime: ReturnType<typeof createMcpHttpRuntime>,
+    body: unknown = {
+      client_name: "Example AI client",
+      redirect_uris: ["https://client.example/callback"],
+    },
+  ) {
+    return runtime.fetch(
+      new Request(`${resourceUri}/oauth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  it("advertises a registration endpoint only when no operator allowlist is set", async () => {
+    const open = await openFixture().runtime.fetch(
+      new Request(`${canonicalOrigin}/.well-known/oauth-authorization-server`),
+    );
+    expect(await open.json()).toEqual(
+      expect.objectContaining({
+        registration_endpoint: `${resourceUri}/oauth/register`,
+        code_challenge_methods_supported: ["S256"],
+        token_endpoint_auth_methods_supported: ["none"],
+      }),
+    );
+    const restricted = await fixture().runtime.fetch(
+      new Request(`${canonicalOrigin}/.well-known/oauth-authorization-server`),
+    );
+    expect(await restricted.json()).not.toHaveProperty(
+      "registration_endpoint",
+    );
+  });
+
+  it("registers a public client and returns RFC 7591 metadata without a secret", async () => {
+    const { runtime, registeredClients } = openFixture();
+    const response = await register(runtime, {
+      client_name: "Example AI client",
+      client_uri: "https://client.example",
+      redirect_uris: [
+        "https://client.example/callback",
+        "http://localhost:43119/callback",
+      ],
+      // Real clients send members this server does not use.
+      contacts: ["support@client.example"],
+      tos_uri: "https://client.example/terms",
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toEqual(
+      expect.objectContaining({
+        client_id: expect.stringMatching(/^mcpc_[A-Za-z0-9_-]{43}$/u),
+        client_name: "Example AI client",
+        redirect_uris: [
+          "https://client.example/callback",
+          "http://localhost:43119/callback",
+        ],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    );
+    expect(body).not.toHaveProperty("client_secret");
+    expect(JSON.stringify(body)).not.toContain(signingSecret);
+    expect(registeredClients.size).toBe(1);
+  });
+
+  it("grants nothing on registration until an Owner consents", async () => {
+    const { runtime, connections } = openFixture();
+    const registration = await register(runtime);
+    const { client_id: registeredId } = (await registration.json()) as {
+      client_id: string;
+    };
+    // No connection, actor or scope exists yet.
+    expect(connections.size).toBe(0);
+    // The registered client cannot mint a token from its registration alone.
+    const token = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: "opaque-authorization-code",
+          client_id: registeredId,
+          redirect_uri: "https://client.example/callback",
+          resource: resourceUri,
+          code_verifier: "v".repeat(64),
+        }),
+      }),
+    );
+    expect(token.status).toBe(400);
+    expect(connections.size).toBe(0);
+  });
+
+  it("refuses registration when the operator allowlist is on", async () => {
+    const response = await register(fixture().runtime);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ error: "access_denied" }),
+    );
+  });
+
+  it("refuses an allowlisted installation's unknown client before consent", async () => {
+    const { runtime } = fixture();
+    const consent = new URL(`${resourceUri}/oauth/authorize`);
+    for (const [name, value] of Object.entries({
+      response_type: "code",
+      client_id: "mcpc_not-registered-here",
+      redirect_uri: "https://client.example/callback",
+      resource: resourceUri,
+      scope: "site.read",
+      state: "client-state",
+      code_challenge: await digest("v".repeat(64)),
+      code_challenge_method: "S256",
+    })) {
+      consent.searchParams.set(name, value);
+    }
+    const response = await runtime.fetch(new Request(consent));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects bad registration metadata with the RFC 7591 error codes", async () => {
+    const { runtime } = openFixture();
+    for (const [body, error] of [
+      [{ client_name: "No redirect" }, "invalid_redirect_uri"],
+      [
+        { redirect_uris: ["https://client.example/*"] },
+        "invalid_redirect_uri",
+      ],
+      [
+        { redirect_uris: ["http://remote.example/callback"] },
+        "invalid_redirect_uri",
+      ],
+      [
+        {
+          redirect_uris: ["https://client.example/callback"],
+          token_endpoint_auth_method: "client_secret_post",
+        },
+        "invalid_client_metadata",
+      ],
+      [
+        {
+          redirect_uris: ["https://client.example/callback"],
+          grant_types: ["client_credentials"],
+        },
+        "invalid_client_metadata",
+      ],
+    ] as const) {
+      const response = await register(runtime, body);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual(
+        expect.objectContaining({ error }),
+      );
+    }
+  });
+
+  it("rate limits registration per site and bounds the stored client count", async () => {
+    const limited = fixture({
+      environmentClients: {},
+      allowRateLimit: false,
+    });
+    const refused = await register(limited.runtime);
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("retry-after")).toBe("3600");
+    expect(limited.registeredClients.size).toBe(0);
+    expect(
+      limited.rateLimitInputs.some(
+        ({ bucketKey, limit }) =>
+          bucketKey === "client_registration" && limit === 20,
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a registration body larger than its limit", async () => {
+    const { runtime } = openFixture();
+    const response = await register(runtime, {
+      client_name: "Big",
+      redirect_uris: ["https://client.example/callback"],
+      software_id: "x".repeat(20_000),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ error: "invalid_client_metadata" }),
+    );
+  });
+
+  it("answers a non-POST registration request with 405 and an Allow header", async () => {
+    const response = await openFixture().runtime.fetch(
+      new Request(`${resourceUri}/oauth/register`),
+    );
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("POST");
+  });
+
+  it("connects a newly registered client end to end with no pre-registration", async () => {
+    const { runtime, connections } = openFixture();
+    const registration = await register(runtime);
+    const { client_id: registeredId } = (await registration.json()) as {
+      client_id: string;
+    };
+    const verifier = "v".repeat(64);
+    const consentUrl = new URL(`${resourceUri}/oauth/authorize`);
+    for (const [name, value] of Object.entries({
+      response_type: "code",
+      client_id: registeredId,
+      redirect_uri: "https://client.example/callback",
+      resource: resourceUri,
+      scope: "site.read",
+      state: "client-state",
+      code_challenge: await digest(verifier),
+      code_challenge_method: "S256",
+    })) {
+      consentUrl.searchParams.set(name, value);
+    }
+    const consent = await runtime.fetch(new Request(consentUrl));
+    expect(consent.status).toBe(200);
+    expect(await consent.text()).toContain("Example AI client");
+
+    const approved = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ["response_type", "code"],
+          ["client_id", registeredId],
+          ["redirect_uri", "https://client.example/callback"],
+          ["resource", resourceUri],
+          ["scope", "site.read"],
+          ["state", "client-state"],
+          ["code_challenge", await digest(verifier)],
+          ["code_challenge_method", "S256"],
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+        ]),
+      }),
+    );
+    expect(approved.status).toBe(303);
+    const redirected = new URL(approved.headers.get("location")!);
+    expect(redirected.origin + redirected.pathname).toBe(
+      "https://client.example/callback",
+    );
+    expect(redirected.searchParams.get("state")).toBe("client-state");
+
+    const token = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: redirected.searchParams.get("code")!,
+          client_id: registeredId,
+          redirect_uri: "https://client.example/callback",
+          resource: resourceUri,
+          code_verifier: verifier,
+        }),
+      }),
+    );
+    expect(token.status).toBe(200);
+    const issued = (await token.json()) as { access_token: string };
+    expect(connections.size).toBe(1);
+
+    const initialize = await runtime.fetch(
+      rpcRequest(issued.access_token, {
+        jsonrpc: "2.0",
+        id: "init",
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "example", version: "1.0.0" },
+        },
+      }),
+    );
+    expect(initialize.status).toBe(200);
+    initializedSessions.set(
+      issued.access_token,
+      initialize.headers.get("mcp-session-id")!,
+    );
+    const tools = await runtime.fetch(
+      rpcRequest(issued.access_token, {
+        jsonrpc: "2.0",
+        id: "tools",
+        method: "tools/list",
+        params: {},
+      }),
+    );
+    expect(tools.status).toBe(200);
+    expect((await tools.json()) as Record<string, unknown>).toEqual(
+      expect.objectContaining({
+        result: expect.objectContaining({ tools: expect.any(Array) }),
+      }),
+    );
+  });
+
+  it("shows a registered client name as text and never as markup", async () => {
+    const { runtime } = openFixture();
+    const registration = await register(runtime, {
+      client_name: '<img src=x onerror="alert(1)">',
+      redirect_uris: ["https://client.example/callback"],
+    });
+    const { client_id: registeredId } = (await registration.json()) as {
+      client_id: string;
+    };
+    const consentUrl = new URL(`${resourceUri}/oauth/authorize`);
+    for (const [name, value] of Object.entries({
+      response_type: "code",
+      client_id: registeredId,
+      redirect_uri: "https://client.example/callback",
+      resource: resourceUri,
+      scope: "site.read",
+      state: "client-state",
+      code_challenge: await digest("v".repeat(64)),
+      code_challenge_method: "S256",
+    })) {
+      consentUrl.searchParams.set(name, value);
+    }
+    const page = await (await runtime.fetch(new Request(consentUrl))).text();
+    expect(page).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+    expect(page).not.toContain("<img src=x");
+  });
+});
+
+describe("MCP authorize parameter and scope compatibility", () => {
+  async function consentPage(
+    runtime: ReturnType<typeof createMcpHttpRuntime>,
+    parameters: Record<string, string>,
+  ) {
+    const url = new URL(`${resourceUri}/oauth/authorize`);
+    for (const [name, value] of Object.entries(parameters)) {
+      url.searchParams.set(name, value);
+    }
+    return runtime.fetch(new Request(url));
+  }
+
+  const baseParameters = async () => ({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    resource: resourceUri,
+    scope: "site.read",
+    state: "client-state",
+    code_challenge: await digest("v".repeat(64)),
+    code_challenge_method: "S256",
+  });
+
+  it("ignores authorize parameters it does not use", async () => {
+    const response = await consentPage(fixture().runtime, {
+      ...(await baseParameters()),
+      // Parameters real clients send that this server does not use.
+      code_challenge_methods: "S256",
+      prompt: "consent",
+      nonce: "abc123",
+      login_hint: "owner@example.com",
+      audience: "https://elsewhere.example",
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it("still refuses an altered parameter it does use", async () => {
+    for (const override of [
+      { resource: "https://elsewhere.example/api/foundry-mcp" },
+      { code_challenge_method: "plain" },
+      { response_type: "token" },
+      { redirect_uri: "https://attacker.example/callback" },
+      { scope: "site.read admin.everything" },
+    ]) {
+      const response = await consentPage(fixture().runtime, {
+        ...(await baseParameters()),
+        ...override,
+      });
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it("accepts an authorize request with no scope and no state", async () => {
+    const parameters = await baseParameters();
+    const { scope: _scope, state: _state, ...rest } = parameters;
+    const response = await consentPage(fixture().runtime, rest);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain(
+      '<input type="hidden" name="scope" value="site.read">',
+    );
+  });
+
+  it("offers several scopes on a first authorization and lets the Owner reduce them", async () => {
+    const { runtime, connections } = fixture();
+    const verifier = "v".repeat(64);
+    const parameters = {
+      ...(await baseParameters()),
+      scope: "site.read content.draft design.draft",
+      code_challenge: await digest(verifier),
+    };
+    const page = await (await consentPage(runtime, parameters)).text();
+    for (const scope of ["content.draft", "design.draft"]) {
+      expect(page).toContain(
+        `<input type="checkbox" name="granted_scope" value="${scope}" checked>`,
+      );
+    }
+
+    // The Owner clears design.draft before approving.
+    const approved = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+          ["granted_scope", "content.draft"],
+        ]),
+      }),
+    );
+    expect(approved.status).toBe(303);
+    expect([...connections.values()]).toEqual([
+      expect.objectContaining({ scopes: ["site.read", "content.draft"] }),
+    ]);
+  });
+
+  it("refuses a consent that adds a scope the client never requested", async () => {
+    const { runtime, connections } = fixture();
+    const parameters = {
+      ...(await baseParameters()),
+      scope: "site.read content.draft",
+    };
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+          ["granted_scope", "publication.publish"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(connections.size).toBe(0);
+  });
+
+  it("refuses a consent that drops site.read", async () => {
+    const { runtime, connections } = fixture();
+    const parameters = {
+      ...(await baseParameters()),
+      scope: "site.read content.draft",
+    };
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "content.draft"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(connections.size).toBe(0);
+  });
+});
+
+describe("MCP protocol revision and transport answers", () => {
+  it("accepts every protocol revision current clients negotiate", async () => {
+    const { runtime } = fixture();
+    for (const version of ["2025-03-26", "2025-06-18", "2025-11-25"]) {
+      const { accessToken } = await authorizeAndExchange(runtime);
+      const request = rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: `init-${version}`,
+        method: "initialize",
+        params: {
+          protocolVersion: version,
+          capabilities: {},
+          clientInfo: { name: "example", version: "1.0.0" },
+        },
+      });
+      request.headers.set("mcp-protocol-version", version);
+      const response = await runtime.fetch(request);
+      expect(response.status).toBe(200);
+      // Initialize answers with the revision the client asked for.
+      expect((await response.json()) as Record<string, unknown>).toEqual(
+        expect.objectContaining({
+          result: expect.objectContaining({ protocolVersion: version }),
+        }),
+      );
+    }
+  });
+
+  it("answers an unknown requested revision with the newest revision it serves", async () => {
+    const { runtime } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+    const response = await runtime.fetch(
+      rpcRequest(accessToken, {
+        jsonrpc: "2.0",
+        id: "init-future",
+        method: "initialize",
+        params: {
+          protocolVersion: "2099-01-01",
+          capabilities: {},
+          clientInfo: { name: "example", version: "1.0.0" },
+        },
+      }),
+    );
+    expect((await response.json()) as Record<string, unknown>).toEqual(
+      expect.objectContaining({
+        result: expect.objectContaining({ protocolVersion: "2025-11-25" }),
+      }),
+    );
+  });
+
+  it("refuses an unsupported protocol version header with 400", async () => {
+    const { runtime } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+    const request = rpcRequest(accessToken, {
+      jsonrpc: "2.0",
+      id: "init",
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "example", version: "1.0.0" },
+      },
+    });
+    request.headers.set("mcp-protocol-version", "1999-01-01");
+    const response = await runtime.fetch(request);
+    expect(response.status).toBe(400);
+  });
+
+  it("serves a request that carries no protocol version header", async () => {
+    const { runtime } = fixture();
+    const { accessToken } = await authorizeAndExchange(runtime);
+    const initialize = rpcRequest(accessToken, {
+      jsonrpc: "2.0",
+      id: "init",
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "example", version: "1.0.0" },
+      },
+    });
+    initialize.headers.delete("mcp-protocol-version");
+    const initialized = await runtime.fetch(initialize);
+    expect(initialized.status).toBe(200);
+    const sessionId = initialized.headers.get("mcp-session-id")!;
+    const listing = rpcRequest(
+      accessToken,
+      { jsonrpc: "2.0", id: "tools", method: "tools/list", params: {} },
+      sessionId,
+    );
+    listing.headers.delete("mcp-protocol-version");
+    const tools = await runtime.fetch(listing);
+    expect(tools.status).toBe(200);
+  });
+
+  it("answers GET and DELETE on the MCP endpoint with 405 as the transport requires", async () => {
+    const { runtime } = fixture();
+    for (const method of ["GET", "DELETE"]) {
+      const response = await runtime.fetch(
+        new Request(resourceUri, { method }),
+      );
+      // The transport allows an SSE stream or 405. This server offers no
+      // server-initiated stream, so it answers 405 with an Allow header.
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST");
+    }
+  });
+});
+
+describe("MCP real-client OAuth evidence", () => {
+  /**
+   * Serve the production runtime on a real loopback socket so a client speaks
+   * to it over HTTP, not through an in-process call.
+   */
+  async function serveRuntime(runtime: ReturnType<typeof createMcpHttpRuntime>) {
+    const server = createServer(async (incoming, outgoing) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(incoming.headers)) {
+        if (value !== undefined) {
+          headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+        }
+      }
+      // The runtime is pinned to one canonical origin, so map the loopback
+      // request onto that origin and keep the path and query exactly.
+      const target = new URL(incoming.url ?? "/", canonicalOrigin);
+      const response = await runtime.fetch(
+        new Request(target, {
+          method: incoming.method,
+          headers,
+          body: chunks.length === 0 ? undefined : Buffer.concat(chunks),
+          redirect: "manual",
+        }),
+      );
+      outgoing.writeHead(
+        response.status,
+        Object.fromEntries(response.headers.entries()),
+      );
+      outgoing.end(Buffer.from(await response.arrayBuffer()));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("oauth_fixture_address_unavailable");
+    }
+    return {
+      base: `http://127.0.0.1:${address.port}`,
+      async close() {
+        server.close();
+        await once(server, "close");
+      },
+    };
+  }
+
+  it("lets a scripted OAuth client discover, register, consent and list tools over HTTP", async () => {
+    const { runtime } = fixture({ environmentClients: {} });
+    const served = await serveRuntime(runtime);
+    try {
+      // 1. Protected resource metadata names the authorization server.
+      const resourceMetadata = await (
+        await fetch(
+          `${served.base}/.well-known/oauth-protected-resource/api/foundry-mcp`,
+        )
+      ).json();
+      expect(resourceMetadata).toEqual(
+        expect.objectContaining({
+          resource: resourceUri,
+          authorization_servers: [canonicalOrigin],
+        }),
+      );
+
+      // 2. Authorization server metadata names the registration endpoint.
+      const serverMetadata = (await (
+        await fetch(`${served.base}/.well-known/oauth-authorization-server`)
+      ).json()) as Record<string, string>;
+      expect(serverMetadata.registration_endpoint).toBe(
+        `${resourceUri}/oauth/register`,
+      );
+
+      // 3. Dynamic client registration, with nothing pre-registered.
+      const registered = (await (
+        await fetch(`${served.base}/api/foundry-mcp/oauth/register`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            client_name: "Scripted conformance client",
+            redirect_uris: ["http://127.0.0.1:1/callback"],
+            grant_types: ["authorization_code", "refresh_token"],
+            response_types: ["code"],
+            token_endpoint_auth_method: "none",
+          }),
+        })
+      ).json()) as { client_id: string };
+      expect(registered.client_id).toMatch(/^mcpc_/u);
+
+      // 4. Authorization request with PKCE S256, then Owner consent.
+      const verifier = "s".repeat(64);
+      const parameters = new URLSearchParams({
+        response_type: "code",
+        client_id: registered.client_id,
+        redirect_uri: "http://127.0.0.1:1/callback",
+        resource: resourceUri,
+        scope: "site.read",
+        state: "scripted-client-state",
+        code_challenge: await digest(verifier),
+        code_challenge_method: "S256",
+      });
+      const consentPage = await fetch(
+        `${served.base}/api/foundry-mcp/oauth/authorize?${parameters}`,
+      );
+      expect(consentPage.status).toBe(200);
+      expect(await consentPage.text()).toContain(
+        "Scripted conformance client",
+      );
+      const approval = await fetch(
+        `${served.base}/api/foundry-mcp/oauth/authorize`,
+        {
+          method: "POST",
+          redirect: "manual",
+          headers: {
+            origin: canonicalOrigin,
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams([
+            ...parameters,
+            ["csrf_token", "owner-bound-csrf"],
+            ["granted_scope", "site.read"],
+          ]),
+        },
+      );
+      expect(approval.status).toBe(303);
+      const callback = new URL(approval.headers.get("location")!);
+      expect(callback.searchParams.get("state")).toBe(
+        "scripted-client-state",
+      );
+
+      // 5. Token exchange with the code verifier.
+      const issued = (await (
+        await fetch(`${served.base}/api/foundry-mcp/oauth/token`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code: callback.searchParams.get("code")!,
+            client_id: registered.client_id,
+            redirect_uri: "http://127.0.0.1:1/callback",
+            resource: resourceUri,
+            code_verifier: verifier,
+          }),
+        })
+      ).json()) as { access_token: string; expires_in: number; scope: string };
+      expect(issued.scope).toBe("site.read");
+      expect(issued.expires_in).toBe(300);
+
+      // 6. Initialize and list tools over Streamable HTTP.
+      const rpcHeaders = (sessionId?: string) => ({
+        authorization: `Bearer ${issued.access_token}`,
+        origin: canonicalOrigin,
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "mcp-protocol-version": "2025-11-25",
+        ...(sessionId === undefined ? {} : { "mcp-session-id": sessionId }),
+      });
+      const initialized = await fetch(`${served.base}/api/foundry-mcp`, {
+        method: "POST",
+        headers: rpcHeaders(),
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "init",
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-11-25",
+            capabilities: {},
+            clientInfo: { name: "scripted", version: "1.0.0" },
+          },
+        }),
+      });
+      expect(initialized.status).toBe(200);
+      const listed = (await (
+        await fetch(`${served.base}/api/foundry-mcp`, {
+          method: "POST",
+          headers: rpcHeaders(initialized.headers.get("mcp-session-id")!),
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "tools",
+            method: "tools/list",
+            params: {},
+          }),
+        })
+      ).json()) as { result: { tools: ReadonlyArray<{ name: string }> } };
+      expect(listed.result.tools.length).toBeGreaterThan(0);
+
+      // 7. The transport answer on GET stays spec-correct over the wire.
+      const streamed = await fetch(`${served.base}/api/foundry-mcp`);
+      expect(streamed.status).toBe(405);
+    } finally {
+      await served.close();
+    }
   });
 });

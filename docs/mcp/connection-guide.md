@@ -12,12 +12,15 @@ and its AI use only the permissions you approve, on one site. It does not give
 the agent your dashboard login, Cloudflare account, GitHub account or email
 provider credentials.
 
-Start with the smallest useful permission. Every connection starts with exactly
-**Read site** (`site.read`). A site Owner can later grant **Draft content**
-(`content.draft`) or **Draft design** (`design.draft`) to that same connection
-and site. **Schedule publication** (`publication.schedule`) and **Publish**
-(`publication.publish`) are separate grants. Campaign permissions remain
-unavailable.
+Start with the smallest useful permission. Every connection includes **Read
+site** (`site.read`), which cannot be cleared. A client may also ask for
+**Draft content** (`content.draft`), **Draft design** (`design.draft`),
+**Schedule publication** (`publication.schedule`) or **Publish**
+(`publication.publish`) at the same time. The consent screen shows one control
+per requested permission. Clear anything you do not want; you can approve fewer
+permissions than the client asked for. A site Owner can also add permissions to
+an existing connection later. Removing a permission still means revoking the
+connection.
 
 ## Installation configuration
 
@@ -27,25 +30,51 @@ The shipped Worker serves the site-bound resource at
 authorization-server metadata is at
 `/.well-known/oauth-authorization-server`.
 
+Clients register themselves at `/api/foundry-mcp/oauth/register`, so the Owner
+pastes no token, key or client identifier anywhere. The server advertises that
+address as `registration_endpoint` in its authorization-server metadata.
+
 Before enabling connections, the installation operator must:
 
 - apply every D1 migration in numeric order through
-  `0024_mcp_publication_scopes.sql`. The connection surface itself is defined by
+  `0027_mcp_registered_clients.sql`. The connection surface itself is defined by
   `0017_mcp_readonly_connections.sql`, `0018_mcp_draft_scopes.sql`,
   `0019_mcp_preview_artifacts.sql`, `0020_mcp_mutation_receipts.sql`,
-  `0022_blog_post_scheduling_archive.sql` and
-  `0024_mcp_publication_scopes.sql`, but the sequence is cumulative and no
+  `0022_blog_post_scheduling_archive.sql`,
+  `0024_mcp_publication_scopes.sql` and
+  `0027_mcp_registered_clients.sql`, but the sequence is cumulative and no
   migration in the range may be skipped;
 - set `FOUNDRY_MCP_OAUTH_SIGNING_KEY` as a Worker secret with at least 32
-  random characters;
-- set `FOUNDRY_MCP_CLIENTS` to a non-secret JSON object whose keys are
-  pre-registered client IDs and whose values contain a display `name` and
-  exact `redirectUris`; and
-- keep `/api/foundry-cms/*` behind the installation's existing Cloudflare
-  Access application, because Owner consent and revocation use that protected
-  namespace.
+  random characters; and
+- set the Cloudflare Access application to cover exactly the paths in the table
+  below.
 
-Example client registry:
+### Cloudflare Access boundary
+
+A client calls the public paths with no human present and no Access session. If
+the Access application covers them, Access answers with its own sign-in page and
+the client cannot discover the server, register or exchange a token.
+
+| Path | Cloudflare Access |
+|---|---|
+| `/.well-known/oauth-protected-resource/api/foundry-mcp` | must be outside |
+| `/.well-known/oauth-authorization-server` | must be outside |
+| `/api/foundry-mcp/oauth/register` | must be outside |
+| `/api/foundry-mcp/oauth/token` | must be outside |
+| `/api/foundry-mcp` | must be outside |
+| `/api/foundry-cms/mcp/oauth/authorize` | must stay behind Access |
+| `/api/foundry-cms/mcp-connections/revoke` | must stay behind Access |
+
+The rest of `/api/foundry-cms/*` stays behind Access. `mcpAccessBoundary` in
+`apps/reference-site/src/mcp-production-runtime.ts` holds the same two lists,
+and `checkMcpAccessBoundary()` fails if the router and this table disagree.
+
+### Restricting registration (optional)
+
+`FOUNDRY_MCP_CLIENTS` is optional. Leave it unset to accept dynamic
+registration. Set it to restrict the installation to named clients: only those
+clients may authorize, the registration endpoint answers `403` and
+`registration_endpoint` disappears from the metadata.
 
 ```json
 {
@@ -60,10 +89,16 @@ Example client registry:
 ```
 
 Remote redirects must use HTTPS. Exact loopback redirects are supported for
-installed clients. Wildcards, fragments, an empty registry, missing D1, and a
-missing or short signing secret fail closed with no MCP command execution.
-Neither setting contains an access token; the signing key must still remain a
-Worker secret.
+installed clients, which is how a client on the Owner's own computer receives
+its authorization code. Wildcards, fragments, a present but empty registry,
+missing D1, and a missing or short signing secret fail closed with no MCP
+command execution. Neither setting contains an access token; the signing key
+must still remain a Worker secret.
+
+Registration is bounded: an 8 KiB body, at most 5 redirect URIs, a
+120-character client name, 20 registrations per site per hour, and 500 stored
+clients per site. A registration grants nothing. It creates no connection, no
+permission and no token until an Owner approves the client.
 
 Access tokens last five minutes. The server issues a 30-day rotating refresh
 token; every successful refresh invalidates the presented token and returns a
@@ -74,14 +109,20 @@ per-tool minute buckets return HTTP `429` with `Retry-After` when exhausted.
 
 ## Connect
 
-1. Add the installation's `/api/foundry-mcp` server address to a client that
-   the installation operator has pre-registered.
-2. Start the connection from that client. Your browser opens Foundry.
-3. Confirm the client name, this site's name and the
-   requested permissions. Decline anything you did not expect.
-4. Approve the connection as a site Owner.
+1. Add the installation's `/api/foundry-mcp` server address to your client.
+   There is nothing else to paste.
+2. Start the connection from that client. The client registers itself and your
+   browser opens Foundry. Sign in as a site Owner.
+3. Read the page. It shows the client's claimed name, its client identifier,
+   the exact address it will return to, this site's name and one control per
+   requested permission. The name comes from the client, so treat it as a
+   claim. Decline anything you did not expect.
+4. Clear any permission you do not want, then approve.
 5. Return to the client and ask it to read the site summary. Foundry shows the new
    connection, approved permissions, last use and a **Revoke** button.
+
+Only approving grants access. A client that registered but was never approved
+has no connection, no permission and no token.
 
 The address is not a secret, and it does not contain a token. Do not paste access
 tokens into prompts or settings fields. Authentication happens in the browser.

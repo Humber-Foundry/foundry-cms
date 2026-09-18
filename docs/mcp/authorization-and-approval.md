@@ -14,7 +14,8 @@ The same host may serve multiple installations only when each site has a unique
 canonical path and therefore a distinct RFC 8707 resource identifier. A token
 cannot name multiple resources.
 
-The server implements MCP's stable 2025-11-25 authorization profile:
+The server serves the `2025-03-26`, `2025-06-18` and `2025-11-25` protocol
+revisions and applies the `2025-11-25` authorization profile to all of them:
 
 - It is an OAuth 2.1 resource server and publishes RFC 9728 protected resource
   metadata.
@@ -25,7 +26,13 @@ The server implements MCP's stable 2025-11-25 authorization profile:
   scope.
 - The authorization server publishes RFC 8414 or OIDC discovery metadata and
   supports authorization code with PKCE `S256`.
-- Clients include the exact `resource` in authorization and token requests.
+- Clients include the exact `resource` in authorization and token requests. The
+  authorize endpoint also accepts an absent `resource`, because a `2025-03-26`
+  client does not send one and this server serves exactly one resource. A
+  `resource` naming anything else is refused. The token endpoint still requires
+  it.
+- The authorize endpoint ignores parameters it does not use, and checks exactly
+  every parameter it does use.
 - The resource server verifies issuer, signature, expiry, not-before, audience,
   resource, client/connection binding and current D1 grant on every request.
 - Access tokens are short-lived. Public-client refresh tokens rotate and reuse
@@ -54,12 +61,22 @@ Example protected resource metadata:
 }
 ```
 
-The authorization server supports OAuth Client ID Metadata Documents for
-compatible clients, pre-registration for major clients that require it, and
-Dynamic Client Registration only if a security review and conformance suite
-cover it. Redirect URIs use exact matching. Owner consent is stored per site,
-user, `client_id`, redirect URI and scope set; an existing consent for one
-client never authorizes another.
+The authorization server supports RFC 7591 Dynamic Client Registration at
+`/api/foundry-mcp/oauth/register` and advertises it as `registration_endpoint`.
+An operator may instead pin an allowlist of clients with `FOUNDRY_MCP_CLIENTS`,
+which turns registration off. OAuth Client ID Metadata Documents are not
+supported, because they would make the server fetch a client-chosen URL; see
+[ADR-0017](../decisions/ADR-0017-mcp-dynamic-client-registration.md).
+
+A registration grants nothing. It stores a claimed name and a set of return
+addresses, and creates no connection, actor, scope or token. Redirect URIs use
+exact matching. Owner consent is stored per site, user, `client_id`, redirect
+URI and scope set; an existing consent for one client never authorizes another.
+
+A client may request several scopes on a first authorization. The Owner consent
+screen shows one control per requested scope and the Owner may approve fewer.
+The granted set must stay inside the requested set, must keep `site.read`, and
+on a step-up must keep every scope the connection already holds.
 
 ## Connection and revocation sequence
 

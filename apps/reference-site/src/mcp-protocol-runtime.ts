@@ -4,8 +4,11 @@ import {
   mcpContentDraftScope,
   mcpContractVersion,
   mcpDesignDraftScope,
+  mcpAssumedProtocolVersion,
   mcpInitialScope,
   mcpProtocolVersion,
+  mcpSupportedProtocolVersions,
+  isSupportedMcpProtocolVersion,
   type McpConnectionPrincipal,
   type McpCursorCodec,
   type McpExecutionContext,
@@ -34,7 +37,10 @@ import {
   type McpReadApplication,
 } from "./mcp-tool-registry";
 
-export { mcpProtocolVersion } from "@humber-foundry/application";
+export {
+  mcpProtocolVersion,
+  mcpSupportedProtocolVersions,
+} from "@humber-foundry/application";
 
 const rpcBodyLimitBytes = 256 * 1024;
 const rpcMaximumDepth = 32;
@@ -661,8 +667,15 @@ export function createMcpProtocolRuntime({
       ) {
         return rpcError(rpc.id, -32602, "Invalid initialize parameters");
       }
+      // Answer with the revision the client asked for when this server serves
+      // it. Otherwise answer with the newest revision this server serves and
+      // let the client decide whether it can continue.
       return rpcResult(rpc.id, {
-        protocolVersion: mcpProtocolVersion,
+        protocolVersion: isSupportedMcpProtocolVersion(
+          rpc.params.protocolVersion,
+        )
+          ? rpc.params.protocolVersion
+          : mcpProtocolVersion,
         capabilities: {
           tools: { listChanged: false },
           resources: { subscribe: false, listChanged: false },
@@ -892,10 +905,15 @@ export function createMcpProtocolRuntime({
       ) {
         return jsonResponse({ error: "unsupported_media_type" }, 415);
       }
-      const requestedVersion = request.headers.get("mcp-protocol-version");
+      // An unsupported protocol revision is refused with 400, as the
+      // specification requires. An absent header means the assumed revision
+      // `mcpAssumedProtocolVersion`, which this server also serves, so absence
+      // is not an error: a client on the oldest supported revision sends no
+      // version header because that revision does not define one.
+      const presentedVersion = request.headers.get("mcp-protocol-version");
       if (
-        requestedVersion !== null &&
-        requestedVersion !== mcpProtocolVersion
+        presentedVersion !== null &&
+        !isSupportedMcpProtocolVersion(presentedVersion)
       ) {
         return rpcError(
           null,
@@ -995,8 +1013,7 @@ export function createMcpProtocolRuntime({
           typeof value.error.code === "number" &&
           Number.isInteger(value.error.code) &&
           typeof value.error.message === "string";
-        return (isResultResponse || isErrorResponse) &&
-          requestedVersion === mcpProtocolVersion
+        return isResultResponse || isErrorResponse
           ? new Response(null, { status: 202 })
           : rpcError(
               isRequestId(value.id) ? value.id : null,
@@ -1058,31 +1075,10 @@ export function createMcpProtocolRuntime({
         return new Response(null, { status: 202 });
       }
       if (value.id === undefined) {
-        return value.method === "initialize" ||
-          requestedVersion === mcpProtocolVersion
-          ? new Response(null, { status: 202 })
-          : rpcError(
-              null,
-              -32600,
-              "MCP-Protocol-Version header required",
-              undefined,
-              400,
-            );
+        return new Response(null, { status: 202 });
       }
       if (!isRequestId(value.id)) {
         return rpcError(null, -32600, "Invalid Request");
-      }
-      if (
-        value.method !== "initialize" &&
-        requestedVersion !== mcpProtocolVersion
-      ) {
-        return rpcError(
-          value.id,
-          -32600,
-          "MCP-Protocol-Version header required",
-          undefined,
-          400,
-        );
       }
       const requestKey = activeRequestKey(
         principal,

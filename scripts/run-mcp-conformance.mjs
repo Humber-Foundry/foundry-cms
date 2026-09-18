@@ -12,7 +12,9 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "foundry-mcp-conformance-"
 const reportPath = join(temporaryDirectory, "vitest.json");
 const testFiles = [
   "apps/reference-site/src/analytics-source-adapters.test.ts",
+  "apps/reference-site/src/mcp-client-registration.test.ts",
   "apps/reference-site/src/mcp-http-runtime.test.ts",
+  "apps/reference-site/src/mcp-production-runtime.test.ts",
   "apps/reference-site/src/mcp-protocol-conformance.test.ts",
   "apps/reference-site/src/mcp-tool-registry.test.ts",
   "packages/application/src/content-publication.test.ts",

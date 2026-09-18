@@ -38,6 +38,31 @@ export const mcpSupportedScopes = Object.freeze([
 ] as const);
 export const mcpProtocolVersion = "2025-11-25" as const;
 
+/**
+ * Protocol revisions this server answers, oldest first. The last entry is the
+ * preferred revision the server reports when a client asks for a revision it
+ * does not know. Current clients still negotiate the two earlier revisions, so
+ * refusing them stops a real connection.
+ */
+export const mcpSupportedProtocolVersions = Object.freeze([
+  "2025-03-26",
+  "2025-06-18",
+  mcpProtocolVersion,
+] as const);
+
+/**
+ * The revision to assume when a client sends no `MCP-Protocol-Version` header
+ * after initialization. The specification fixes this default at `2025-03-26`.
+ */
+export const mcpAssumedProtocolVersion = "2025-03-26" as const;
+
+export function isSupportedMcpProtocolVersion(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (mcpSupportedProtocolVersions as ReadonlyArray<string>).includes(value)
+  );
+}
+
 export type McpConnectionStatus = "active" | "revoked";
 
 export type McpConnectionPrincipal = Readonly<{
