@@ -44,8 +44,9 @@ Install these values in the client-owned Worker configuration:
 - `FOUNDRY_CLOUDFLARE_API_TOKEN` — a Cloudflare API token scoped to read the
   deployment status and start the build above.
 - `FOUNDRY_PUBLICATION_SIGNING_SECRET` — an installation-specific secret of at
-  least 32 characters, used to sign the publication record so it cannot be
-  forged.
+  least 32 bytes, used to sign the publication record so it cannot be forged.
+  Plain ASCII text of at least 32 characters meets this; a value with
+  multi-byte characters needs more characters to reach 32 bytes.
 
 Two related settings have a working default and never need to be installed on
 their own: `FOUNDRY_PRODUCTION_BRANCH` defaults to `main`, and
