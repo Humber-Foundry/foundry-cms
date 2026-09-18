@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   createDefaultPageSection,
   referenceSiteDefinition,
   remapPageSectionNestedIds,
@@ -50,7 +51,7 @@ const edit = {
 function legacyComposition(definition: SiteDefinition) {
   return {
     ...toPageComposition(definition),
-    components: definition.home.sections.map((section) => {
+    components: homePage(definition).sections.map((section) => {
       if (section.type !== "callToAction") {
         return section;
       }
@@ -70,7 +71,7 @@ function legacyComposition(definition: SiteDefinition) {
 describe("stale edit recovery", () => {
   it("preserves the rich-text discriminator through durable recovery", () => {
     const storage = createStorage();
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -129,7 +130,7 @@ describe("stale edit recovery", () => {
       [legacyEdit],
     );
     const currentBody = serializeRichTextDocument(
-      referenceSiteDefinition.home.sections.find(
+      homePage(referenceSiteDefinition).sections.find(
         (section) => section.type === "callToAction",
       )!.body,
     );
@@ -156,7 +157,7 @@ describe("stale edit recovery", () => {
   });
 
   it("recognizes serialized rich text when an older chain lost its format", () => {
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -189,7 +190,7 @@ describe("stale edit recovery", () => {
           slotId: "slot_home_sections",
           components: [
             {
-              ...referenceSiteDefinition.home.sections[0],
+              ...homePage(referenceSiteDefinition).sections[0],
               title: "Copy already saved by another attempt",
             },
           ],
@@ -200,8 +201,8 @@ describe("stale edit recovery", () => {
         slotId: "slot_home_sections",
         components: [
           {
-            id: referenceSiteDefinition.home.sections[0]!.id,
-            type: referenceSiteDefinition.home.sections[0]!.type,
+            id: homePage(referenceSiteDefinition).sections[0]!.id,
+            type: homePage(referenceSiteDefinition).sections[0]!.type,
           },
         ],
       }),
@@ -291,7 +292,7 @@ describe("stale edit recovery", () => {
   });
 
   it("preserves rich-text format while chaining recovered edits", () => {
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -514,7 +515,7 @@ describe("stale edit recovery", () => {
       const added = duplicate
         ? remapPageSectionNestedIds({
             ...structuredClone(
-              referenceSiteDefinition.home.sections.find(
+              homePage(referenceSiteDefinition).sections.find(
                 (section) => section.type === "callToAction",
               )!,
             ),
@@ -527,10 +528,10 @@ describe("stale edit recovery", () => {
           );
       const target = {
         ...referenceSiteDefinition,
-        home: {
-          ...referenceSiteDefinition.home,
-          sections: [...referenceSiteDefinition.home.sections, added],
-        },
+        pages: [{
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections, added],
+        }],
       } as SiteDefinition;
       const result = applyStructuralRecovery(referenceSiteDefinition, {
         path: "slot_home_sections",
@@ -543,7 +544,7 @@ describe("stale edit recovery", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(
-          result.definition.home.sections.find(
+          homePage(result.definition).sections.find(
             ({ id }) => id === added.id,
           ),
         ).toEqual(added);
@@ -559,10 +560,10 @@ describe("stale edit recovery", () => {
     );
     const source = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [...referenceSiteDefinition.home.sections, removable],
-      },
+      pages: [{
+        ...homePage(referenceSiteDefinition),
+        sections: [...homePage(referenceSiteDefinition).sections, removable],
+      }],
     } as SiteDefinition;
     const result = applyStructuralRecovery(source, {
       path: "slot_home_sections",
@@ -578,7 +579,7 @@ describe("stale edit recovery", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(
-        result.definition.home.sections.some(
+        homePage(result.definition).sections.some(
           ({ id }) => id === removable.id,
         ),
       ).toBe(false);
@@ -632,16 +633,16 @@ describe("stale edit recovery", () => {
     };
     const concurrent = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
           {
-            ...referenceSiteDefinition.home.sections[0]!,
+            ...homePage(referenceSiteDefinition).sections[0]!,
             title: "Concurrent headline",
           },
-          ...referenceSiteDefinition.home.sections.slice(1),
+          ...homePage(referenceSiteDefinition).sections.slice(1),
         ],
-      },
+      }],
     };
     const storage = createStorage();
     preserveStaleEdits(
@@ -667,10 +668,10 @@ describe("stale edit recovery", () => {
     expect(recovered.recovered).toEqual([edit]);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.definition.home.sections[0]?.id).toBe(
+      expect(homePage(result.definition).sections[0]?.id).toBe(
         "section_contact",
       );
-      const hero = result.definition.home.sections.find(
+      const hero = homePage(result.definition).sections.find(
         ({ id }) => id === "section_hero",
       );
       expect(hero?.type === "hero" ? hero.title : undefined).toBe(
@@ -693,16 +694,16 @@ describe("stale edit recovery", () => {
     };
     const concurrent = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
           {
-            ...referenceSiteDefinition.home.sections[0]!,
+            ...homePage(referenceSiteDefinition).sections[0]!,
             title: "Concurrent headline that must survive",
           },
-          ...referenceSiteDefinition.home.sections.slice(1),
+          ...homePage(referenceSiteDefinition).sections.slice(1),
         ],
-      },
+      }],
     };
 
     expect(applyStructuralRecovery(concurrent, edit)).toEqual({
@@ -727,20 +728,20 @@ describe("stale edit recovery", () => {
     );
     const concurrent = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
-          ...referenceSiteDefinition.home.sections,
+          ...homePage(referenceSiteDefinition).sections,
           concurrentAddition,
         ],
-      },
+      }],
     };
 
     const result = applyStructuralRecovery(concurrent, edit);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.definition.home.sections.map(({ id }) => id)).toEqual([
+      expect(homePage(result.definition).sections.map(({ id }) => id)).toEqual([
         "section_contact",
         "section_proof",
         "section_services",
@@ -764,13 +765,13 @@ describe("stale edit recovery", () => {
     );
     const concurrent = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
-          ...referenceSiteDefinition.home.sections,
+          ...homePage(referenceSiteDefinition).sections,
           concurrentAddition,
         ],
-      },
+      }],
     };
     const plan = planStructuralFirstRecovery(concurrent, [
       {

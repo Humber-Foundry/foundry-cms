@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { canonicalJson } from "@humber-foundry/application";
 import {
+  homePage,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeRichTextDocument,
@@ -15,10 +16,23 @@ import {
 } from "./content-schema-recovery";
 import { applyStructuralRecovery } from "./content-editor-recovery";
 
+/**
+ * The same definition in the shape it was stored in before 1.7.0: one `home`
+ * object instead of a `pages` collection. A legacy fixture must use the legacy
+ * shape, or it never exercises the page-collection projection step.
+ */
+function withLegacyHomeShape(definition: any): any {
+  const { pages, ...rest } = definition;
+  const { slug: _slug, title: _title, ...home } = pages[0];
+  return { ...rest, home };
+}
+
 function legacyDefinition(
   name: string = referenceSiteDefinition.site.name,
 ) {
-  const definition = structuredClone(referenceSiteDefinition) as any;
+  const definition = withLegacyHomeShape(
+    structuredClone(referenceSiteDefinition),
+  );
   definition.definitionVersion = "1.0.0";
   definition.schemaVersion = "1.0.0";
   delete definition.design;
@@ -30,7 +44,9 @@ function legacyDefinition(
 }
 
 function storedDesignDefinition(body: string) {
-  const definition = structuredClone(referenceSiteDefinition) as any;
+  const definition = withLegacyHomeShape(
+    structuredClone(referenceSiteDefinition),
+  );
   definition.definitionVersion = "1.1.0";
   definition.schemaVersion = "1.1.0";
   const callToAction = definition.home.sections.find(
@@ -48,17 +64,17 @@ describe("content schema recovery", () => {
 
     expect(restored).toEqual(
       expect.objectContaining({
-        definitionVersion: "1.6.0",
-        schemaVersion: "1.6.0",
+        definitionVersion: "1.7.0",
+        schemaVersion: "1.7.0",
         design: referenceSiteDefinition.design,
-        home: expect.objectContaining({ media: [] }),
+        pages: [expect.objectContaining({ media: [] })],
         site: expect.objectContaining({
           name: "Restored legacy release",
         }),
       }),
     );
     expect(
-      restored.home.sections.every(
+      homePage(restored).sections.every(
         ({ variant }) => typeof variant === "string",
       ),
     ).toBe(true);
@@ -174,7 +190,7 @@ describe("content schema recovery", () => {
     );
     const [structural] = durableSchemaRecoveryEdits(base, current);
     const destination = structuredClone(referenceSiteDefinition) as any;
-    destination.home.sections.push({
+    destination.pages[0].sections.push({
       id: "section_legacy_extra",
       type: "proof",
       variant: "panel",
@@ -191,7 +207,7 @@ describe("content schema recovery", () => {
     expect(recovered.ok).toBe(true);
     if (recovered.ok) {
       expect(
-        recovered.definition.home.sections.some(
+        homePage(recovered.definition).sections.some(
           ({ id }) => id === "section_legacy_extra",
         ),
       ).toBe(false);

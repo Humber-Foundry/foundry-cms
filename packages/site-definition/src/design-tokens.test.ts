@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   applySiteDefinitionEdits,
   designContract,
   listEditableSiteFields,
@@ -97,7 +98,7 @@ describe("controlled design tokens", () => {
           spacing: { section: "compact" },
           layout: { contentWidth: "wide" },
         },
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: expect.arrayContaining([
             expect.objectContaining({
               id: "section_hero",
@@ -105,13 +106,13 @@ describe("controlled design tokens", () => {
               variant: "focused",
             }),
           ]),
-        }),
+        })],
       }),
     });
     expect(referenceSiteDefinition.design.typography.heading).toBe(
       "editorial",
     );
-    expect(referenceSiteDefinition.home.sections[0].variant).toBe(
+    expect(homePage(referenceSiteDefinition).sections[0].variant).toBe(
       "editorial",
     );
   });
@@ -130,8 +131,8 @@ describe("controlled design tokens", () => {
       errors: {
         [path]:
           path === "design.typography.caption"
-            ? "This field is not in Site Definition 1.6.0."
-            : "Choose a value registered by Site Definition 1.6.0.",
+            ? "This field is not in Site Definition 1.7.0."
+            : "Choose a value registered by Site Definition 1.7.0.",
       },
     });
   });
@@ -153,11 +154,11 @@ describe("controlled design tokens", () => {
       }),
     ).toEqual(
       expect.objectContaining({
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: expect.arrayContaining([
             expect.objectContaining({ id: "section_hero", title: "" }),
           ]),
-        }),
+        })],
       }),
     );
   });

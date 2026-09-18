@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   RICH_TEXT_VERSION,
   createBlogPostId,
   referenceSiteDefinition,
@@ -15,11 +16,11 @@ import {
 } from "./media-references";
 
 function withSections(
-  sections: SiteDefinition["home"]["sections"],
+  sections: SiteDefinition["pages"][number]["sections"],
 ): SiteDefinition {
   return {
     ...referenceSiteDefinition,
-    home: { ...referenceSiteDefinition.home, sections },
+    pages: [{ ...homePage(referenceSiteDefinition), sections }],
   };
 }
 
@@ -99,8 +100,8 @@ describe("siteDefinitionMediaAssetIds", () => {
   it("collects placed occurrence assets", () => {
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         media: [
           {
             occurrenceId: "occurrence_home_hero",
@@ -114,7 +115,7 @@ describe("siteDefinitionMediaAssetIds", () => {
             crop: null,
           },
         ],
-      },
+      }],
     };
     expect([...siteDefinitionMediaAssetIds(definition)]).toContain("asset_hero");
   });

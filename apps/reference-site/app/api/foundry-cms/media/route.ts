@@ -19,7 +19,10 @@ import {
   type MediaThumbnailUpload,
 } from "@humber-foundry/application";
 
-import { siteDefinitionMediaAssetIds } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  siteDefinitionMediaAssetIds,
+} from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "@/foundry/site-definition";
 
@@ -237,7 +240,7 @@ function assertContentOccurrenceMutationSafe(
   workspaceOccurrence: Readonly<{ revision: number }> | null,
 ) {
   const selected = (revision: typeof binding.current) =>
-    (revision.definition.home.media ?? []).find(
+    (homePage(revision.definition).media ?? []).find(
       (candidate) => candidate.occurrenceId === occurrenceId,
     );
   if (
@@ -292,7 +295,7 @@ async function bindOccurrenceToContentRevision({
     },
     crop: occurrence.crop,
   } as const;
-  const currentBinding = (binding.current.definition.home.media ?? []).find(
+  const currentBinding = (homePage(binding.current.definition).media ?? []).find(
     (candidate) =>
       candidate.occurrenceId === boundOccurrence.occurrenceId,
   );
@@ -339,7 +342,7 @@ async function bindOccurrenceToContentRevision({
         throw error;
       }
       const current = await contentApplication.queries.getCurrent();
-      const currentBinding = (current.definition.home.media ?? []).find(
+      const currentBinding = (homePage(current.definition).media ?? []).find(
         (candidate) =>
           candidate.occurrenceId === boundOccurrence.occurrenceId,
       );
@@ -347,7 +350,7 @@ async function bindOccurrenceToContentRevision({
         contentRevision = current;
         break;
       }
-      const originalBinding = (binding.base.definition.home.media ?? []).find(
+      const originalBinding = (homePage(binding.base.definition).media ?? []).find(
         (candidate) =>
           candidate.occurrenceId === boundOccurrence.occurrenceId,
       );
@@ -622,7 +625,7 @@ export async function POST(request: Request) {
         workspaceOccurrence,
       );
       const inheritedOccurrence = (
-        binding.current.definition.home.media ?? []
+        homePage(binding.current.definition).media ?? []
       ).find((candidate) => candidate.occurrenceId === occurrenceId);
       const occurrence = await application.commands.cropOccurrence({
         actorId,

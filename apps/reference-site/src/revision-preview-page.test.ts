@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import { homePage, referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
@@ -68,14 +68,14 @@ describe("revision preview page", () => {
       revision: 3,
       createdAt: "2026-07-27T12:00:00.000Z",
       definition: {
-        home: {
+        pages: [{ slug: "",
           seo: {
             title: "Edited SEO title",
             description: "Edited SEO description",
             keywords: [],
             shareImage: null,
           },
-        },
+        }],
       },
       inputs: {
         contentHash: "content-hash",
@@ -113,7 +113,7 @@ describe("revision preview page", () => {
     const bodyRevision = await loadRevisionPreview(props);
 
     expect(metadataRevision).toBe(bodyRevision);
-    expect(metadataRevision.definition.home.seo).toEqual({
+    expect(homePage(metadataRevision.definition).seo).toEqual({
       title: "Edited SEO title",
       description: "Edited SEO description",
       keywords: [],

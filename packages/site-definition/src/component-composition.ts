@@ -7,6 +7,7 @@ import {
   type PageComponentField,
   type PageComponentRegistry,
 } from "./page-component-registry";
+import { homePage, replacePage } from "./pages";
 
 export type PageComponentType = Exclude<PageSection["type"], "registered">;
 
@@ -59,7 +60,7 @@ export function toPageComposition(
 ): PageComposition {
   return {
     slotId: pageCompositionContract.slot.id,
-    components: definition.home.sections,
+    components: homePage(definition).sections,
   };
 }
 
@@ -74,7 +75,7 @@ export function toPageCompositionIdentity(
 }> {
   return {
     slotId: pageCompositionContract.slot.id,
-    components: definition.home.sections.map((section) => ({
+    components: homePage(definition).sections.map((section) => ({
       id: section.id,
       type: registry.keyFor(section),
     })),
@@ -104,11 +105,11 @@ function validateObjectKeys(
 
 export function referencedPageComponentIds(
   definition: SiteDefinition,
-  sections: ReadonlyArray<PageSection> = definition.home.sections,
+  sections: ReadonlyArray<PageSection> = homePage(definition).sections,
 ): ReadonlySet<string> {
   const referenced = new Set<string>();
   const componentIds = new Set(
-    definition.home.sections.map(({ id }) => id),
+    homePage(definition).sections.map(({ id }) => id),
   );
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
@@ -369,7 +370,7 @@ export function applyPageComposition(
   }
 
   const existingById = new Map(
-    definition.home.sections.map((section) => [section.id, section]),
+    homePage(definition).sections.map((section) => [section.id, section]),
   );
   const submittedIds = new Set(
     value.components.flatMap((candidate) =>
@@ -398,7 +399,10 @@ export function applyPageComposition(
     }
   };
   seedProtectedIds(definition.site);
-  seedProtectedIds({ id: definition.home.id, seo: definition.home.seo });
+  seedProtectedIds({
+    id: homePage(definition).id,
+    seo: homePage(definition).seo,
+  });
   for (const candidate of value.components) {
     if (!isRecord(candidate)) {
       errors[pageCompositionContract.slot.id] =
@@ -445,19 +449,16 @@ export function applyPageComposition(
     }
     const submittedContextSections = [
       ...accepted,
-      ...definition.home.sections.filter(
+      ...homePage(definition).sections.filter(
         ({ id: existingId }) =>
           submittedIds.has(existingId) &&
           !accepted.some(({ id: acceptedId }) => acceptedId === existingId),
       ),
     ];
-    const submittedContext = {
-      ...definition,
-      home: {
-        ...definition.home,
-        sections: submittedContextSections,
-      },
-    } as SiteDefinition;
+    const submittedContext = replacePage(definition, {
+      ...homePage(definition),
+      sections: submittedContextSections,
+    });
     const defaultScaffold =
       existing === undefined &&
       (
@@ -479,7 +480,7 @@ export function applyPageComposition(
     const duplicateScaffold =
       existing === undefined &&
       hasCanonicalDuplicateIds(section) &&
-      [...definition.home.sections, ...accepted]
+      [...homePage(definition).sections, ...accepted]
         .filter((source) => registry.keyFor(source) === componentKey)
         .some((source) =>
           equalProtectedShape(source, section, registry, true, false),
@@ -557,9 +558,9 @@ export function applyPageComposition(
   if (Object.keys(errors).length > 0) {
     return { ok: false, errors };
   }
-  const next = structuredClone(definition) as unknown as {
-    home: { sections: PageSection[] };
+  const next = structuredClone(definition) as SiteDefinition;
+  return {
+    ok: true,
+    definition: replacePage(next, { ...homePage(next), sections: accepted }),
   };
-  next.home.sections = accepted;
-  return { ok: true, definition: next as unknown as SiteDefinition };
 }

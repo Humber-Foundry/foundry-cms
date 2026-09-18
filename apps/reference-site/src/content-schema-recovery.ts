@@ -9,6 +9,7 @@ import {
   toPageComposition,
   type PageSection,
   type SiteDefinition,
+  homePage,
 } from "@humber-foundry/site-definition";
 import { upgradeInstalledSiteDefinition } from "../foundry/site-definition";
 
@@ -108,8 +109,8 @@ export function durableSchemaRecoveryEdits(
   ) satisfies StaleRecoveryEdit[];
   const baseComposition = toPageComposition(base);
   const currentComposition = toPageComposition(current);
-  const baseMedia = canonicalJson(base.home.media ?? []);
-  const currentMedia = canonicalJson(current.home.media ?? []);
+  const baseMedia = canonicalJson(homePage(base).media ?? []);
+  const currentMedia = canonicalJson(homePage(current).media ?? []);
   const mediaEdits =
     baseMedia === currentMedia
       ? []

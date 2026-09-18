@@ -3,6 +3,7 @@ import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import {
+  homePage,
   createReferenceSiteDefinition,
   referenceSiteDefinition,
 } from "@humber-foundry/site-definition";
@@ -20,7 +21,7 @@ const bytes = `${canonicalJson(referenceSiteDefinition)}\n`;
 const currentDefinitionWithoutMedia = structuredClone(
   referenceSiteDefinition,
 );
-delete currentDefinitionWithoutMedia.home.media;
+delete currentDefinitionWithoutMedia.pages[0].media;
 const currentBytesWithoutMedia =
   `${JSON.stringify(currentDefinitionWithoutMedia)}\n`;
 const currentContentHashWithoutMedia = canonicalHash(
@@ -59,6 +60,8 @@ const trackedPublishedBytes = readFileSync(
 );
 const trackedPublishedDefinition = JSON.parse(trackedPublishedBytes);
 const trackedPublishedContentHash = canonicalHash(trackedPublishedDefinition);
+// The tracked file is stored under a schema older than 1.7.0, so it still
+// carries one `home` object rather than a page collection.
 const fixedBaseRuntimeContentHash = canonicalHash({
   ...trackedPublishedDefinition,
   home: {
@@ -80,8 +83,20 @@ const withoutSharingFields = (seo) => {
   const { keywords: _keywords, shareImage: _shareImage, ...previous } = seo;
   return previous;
 };
+/**
+ * The one page of the runtime definition in the pre-1.7.0 `home` shape: no
+ * slug and no title, because neither field existed then.
+ */
+const previousHomeShape = (changeSeo = (seo) => seo) => {
+  const { slug: _slug, title: _title, ...home } = homePage(
+    trackedRuntimeDefinition,
+  );
+  return { ...home, seo: changeSeo(home.seo) };
+};
+const { pages: _projectedPages, ...trackedRuntimeWithoutPages } =
+  trackedRuntimeDefinition;
 const previousProjectedContentHash = canonicalHash({
-  ...trackedRuntimeDefinition,
+  ...trackedRuntimeWithoutPages,
   definitionVersion: "1.3.0",
   schemaVersion: "1.3.0",
   design: {
@@ -90,10 +105,7 @@ const previousProjectedContentHash = canonicalHash({
     colour: previousColour,
   },
   site: previousSite,
-  home: {
-    ...trackedRuntimeDefinition.home,
-    seo: withoutSharingFields(trackedRuntimeDefinition.home.seo),
-  },
+  home: previousHomeShape(withoutSharingFields),
   blog: {
     ...trackedRuntimeDefinition.blog,
     posts: trackedRuntimeDefinition.blog.posts.map((post) => ({
@@ -103,6 +115,12 @@ const previousProjectedContentHash = canonicalHash({
   },
 });
 const runtimePublishedContentHash = canonicalHash(trackedRuntimeDefinition);
+const previousPageShapeContentHash = canonicalHash({
+  ...trackedRuntimeWithoutPages,
+  definitionVersion: "1.6.0",
+  schemaVersion: "1.6.0",
+  home: previousHomeShape(),
+});
 
 function defaultArtifacts() {
   return [
@@ -303,6 +321,27 @@ describe("exact production content authorization", () => {
       readLiveMarker: vi.fn().mockResolvedValue({
         commitSha: liveCommit,
         contentHash: fixedBaseRuntimeContentHash,
+      }),
+      readChangedPaths: vi
+        .fn()
+        .mockReturnValue("apps/reference-site/app/page.tsx\n"),
+      readPublishedContent: vi
+        .fn()
+        .mockReturnValue(trackedPublishedBytes),
+    });
+
+    await expect(
+      assertExactProductionContent(options),
+    ).resolves.toBeUndefined();
+    expect(options.readCommitParents).not.toHaveBeenCalled();
+  });
+
+  it("authorizes the 1.7 page-collection upgrade against the prior 1.6 hash", async () => {
+    expect(previousPageShapeContentHash).not.toBe(runtimePublishedContentHash);
+    const options = inputs({
+      readLiveMarker: vi.fn().mockResolvedValue({
+        commitSha: liveCommit,
+        contentHash: previousPageShapeContentHash,
       }),
       readChangedPaths: vi
         .fn()

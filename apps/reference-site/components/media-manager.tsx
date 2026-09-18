@@ -1,5 +1,7 @@
 "use client";
 
+import { homePage } from "@humber-foundry/site-definition";
+
 import { useEffect, useRef, useState } from "react";
 
 import type {
@@ -166,7 +168,9 @@ export function MediaManager({
         if (catalogFence.isCurrent(catalogSnapshot)) {
           const mergedOccurrences = mergeMediaOccurrenceState(
             grantedOccurrences,
-            activeContentRevision?.definition.home.media ?? [],
+            activeContentRevision === undefined
+              ? []
+              : homePage(activeContentRevision.definition).media ?? [],
           );
           setAssets([...grantedAssets]);
           setOccurrences([...mergedOccurrences]);

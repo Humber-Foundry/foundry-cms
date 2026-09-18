@@ -6,6 +6,7 @@ import {
   type DesignOptionPreview,
   type DesignTokenKey,
   type SiteDefinition,
+  homePage,
 } from "@humber-foundry/site-definition";
 
 /**
@@ -81,7 +82,7 @@ function tokenControl(
 function sectionStyleControls(
   definition: SiteDefinition,
 ): ReadonlyArray<DesignControl> {
-  return definition.home.sections.flatMap((section) => {
+  return homePage(definition).sections.flatMap((section) => {
     if (section.type === "registered") {
       return [];
     }

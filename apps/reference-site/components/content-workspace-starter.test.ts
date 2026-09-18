@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createContentWorkspaceId } from "@humber-foundry/application";
 import {
+  homePage,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeRichTextDocument,
@@ -437,7 +438,7 @@ describe("content workspace schema recovery", () => {
   it("preserves rich-text format through an otherwise unchanged recovery hop", async () => {
     const recoveryId = "12345678-1234-4123-8123-123456789abc";
     const sourceWorkspaceId = "workspace_original";
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {

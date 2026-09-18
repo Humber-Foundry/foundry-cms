@@ -1,5 +1,5 @@
 export const projectedRichTextVersion = "1.0.0";
-export const projectedSiteDefinitionVersion = "1.6.0";
+export const projectedSiteDefinitionVersion = "1.7.0";
 
 const projectedSupportedStoredVersions = Object.freeze([
   "1.0.0",
@@ -8,7 +8,11 @@ const projectedSupportedStoredVersions = Object.freeze([
   "1.3.0",
   "1.4.0",
   "1.5.0",
+  "1.6.0",
 ]);
+
+/** The slug of the home page. The same value as `homePageSlug` in pages.ts. */
+const projectedHomePageSlug = "";
 
 const projectedDefaultSiteDesign = Object.freeze({
   typography: Object.freeze({ heading: "editorial", body: "modern" }),
@@ -26,6 +30,20 @@ const projectedDefaultComponentVariants = Object.freeze({
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The pages of a definition, whichever shape it is stored in.
+ *
+ * A definition stored before 1.7.0 has one `home` object. A definition stored
+ * at 1.7.0 or later has a `pages` array. The steps that fill older fields run
+ * before the page-collection step, so they must read both shapes.
+ */
+function projectedPages(projected) {
+  if (isRecord(projected.home)) {
+    return [projected.home];
+  }
+  return Array.isArray(projected.pages) ? projected.pages.filter(isRecord) : [];
 }
 
 export function projectPlainTextRichTextDocument(value) {
@@ -55,8 +73,10 @@ function projectSeoMetadata(projected) {
     projected.site.canonicalOrigin ??= "";
   }
   const seoBlocks = [];
-  if (isRecord(projected.home) && isRecord(projected.home.seo)) {
-    seoBlocks.push(projected.home.seo);
+  for (const page of projectedPages(projected)) {
+    if (isRecord(page.seo)) {
+      seoBlocks.push(page.seo);
+    }
   }
   if (isRecord(projected.blog) && Array.isArray(projected.blog.posts)) {
     for (const post of projected.blog.posts) {
@@ -89,12 +109,43 @@ function projectBlogMainImage(projected) {
   }
 }
 
+/**
+ * Turn the 1.6.0 `home` object into the 1.7.0 `pages` collection.
+ *
+ * The one page keeps the id, the media, the SEO block and the sections it
+ * already had, byte for byte. It gains the root slug, so it is still served at
+ * `/`, and a title, which the Pages list needs. The title is the site name,
+ * because that is what a blank home SEO title already falls back to, so the
+ * upgraded site renders exactly what it rendered before.
+ *
+ * See ADR-0016.
+ */
+function projectPageCollection(projected) {
+  if (!isRecord(projected.home)) {
+    return;
+  }
+  const { home } = projected;
+  const siteName = isRecord(projected.site) && typeof projected.site.name === "string"
+    ? projected.site.name
+    : "Home";
+  const page = {
+    id: home.id,
+    slug: projectedHomePageSlug,
+    title: siteName,
+    ...(home.media === undefined ? {} : { media: home.media }),
+    seo: home.seo,
+    sections: home.sections,
+  };
+  delete projected.home;
+  projected.pages = [page];
+}
+
 export function projectSiteDefinitionSchema(value) {
-  if (
-    !isRecord(value) ||
-    !isRecord(value.home) ||
-    !Array.isArray(value.home.sections)
-  ) {
+  const storedAsOnePage =
+    isRecord(value) && isRecord(value.home) && Array.isArray(value.home.sections);
+  const storedAsPageCollection =
+    isRecord(value) && !isRecord(value.home) && Array.isArray(value.pages);
+  if (!storedAsOnePage && !storedAsPageCollection) {
     throw new TypeError("site_definition_invalid");
   }
   if (
@@ -139,31 +190,40 @@ export function projectSiteDefinitionSchema(value) {
         projectedDefaultSiteDesign.colour.neutral;
     }
   }
-  projected.home.sections = projected.home.sections.map((section) => {
-    if (!isRecord(section) || typeof section.type !== "string") {
+  for (const page of projectedPages(projected)) {
+    if (!Array.isArray(page.sections)) {
+      throw new TypeError("site_definition_invalid");
+    }
+    page.sections = page.sections.map((section) => {
+      if (!isRecord(section) || typeof section.type !== "string") {
+        return section;
+      }
+      if (
+        needsDesignProjection &&
+        section.type in projectedDefaultComponentVariants
+      ) {
+        section.variant ??=
+          projectedDefaultComponentVariants[section.type];
+      }
+      if (section.type !== "callToAction") {
+        return section;
+      }
+      if (typeof section.body === "string") {
+        return {
+          ...section,
+          body: projectPlainTextRichTextDocument(section.body),
+        };
+      }
+      if (!isRecord(section.body)) {
+        throw new TypeError("site_definition_legacy_rich_text_invalid");
+      }
       return section;
-    }
-    if (
-      needsDesignProjection &&
-      section.type in projectedDefaultComponentVariants
-    ) {
-      section.variant ??=
-        projectedDefaultComponentVariants[section.type];
-    }
-    if (section.type !== "callToAction") {
-      return section;
-    }
-    if (typeof section.body === "string") {
-      return {
-        ...section,
-        body: projectPlainTextRichTextDocument(section.body),
-      };
-    }
-    if (!isRecord(section.body)) {
-      throw new TypeError("site_definition_legacy_rich_text_invalid");
-    }
-    return section;
-  });
+    });
+  }
+  // The page collection arrived with 1.7.0, after every field step above, so
+  // it runs last. Each step above reads whichever shape the definition is
+  // stored in through `projectedPages`.
+  projectPageCollection(projected);
   return projected;
 }
 
@@ -174,9 +234,9 @@ export function projectPublishedSiteDefinition(value) {
   }
   return {
     ...projected,
-    home: {
-      ...projected.home,
-      media: projected.home.media ?? [],
-    },
+    pages: projected.pages.map((page) => ({
+      ...page,
+      media: page.media ?? [],
+    })),
   };
 }

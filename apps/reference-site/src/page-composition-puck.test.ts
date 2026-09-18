@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   createPageComponentRegistry,
   createRegisteredPageComponent,
   foundationPageComponentRegistry,
@@ -57,10 +58,10 @@ describe("Puck page-composition adapter", () => {
     } as const;
     const definition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [...referenceSiteDefinition.home.sections, existing],
-      },
+      pages: [{
+        ...homePage(referenceSiteDefinition),
+        sections: [...homePage(referenceSiteDefinition).sections, existing],
+      }],
     } as SiteDefinition;
     const data = definitionToPuckData(definition, registry);
     const source = data.content.at(-1)!;
@@ -73,7 +74,7 @@ describe("Puck page-composition adapter", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.definition.home.sections.at(-1)).toMatchObject({
+    expect(homePage(result.definition).sections.at(-1)).toMatchObject({
       type: "registered",
       component: "themedStory",
       props: { title: "An installed story", theme: "cool" },
@@ -118,14 +119,14 @@ describe("Puck page-composition adapter", () => {
     } as const;
     const definition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
-          ...referenceSiteDefinition.home.sections,
+          ...homePage(referenceSiteDefinition).sections,
           first,
           second,
         ],
-      },
+      }],
     } as SiteDefinition;
     const data = definitionToPuckData(definition, registry);
     const source = data.content.at(-1)!;
@@ -138,7 +139,7 @@ describe("Puck page-composition adapter", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.definition.home.sections.at(-1)).toMatchObject({
+    expect(homePage(result.definition).sections.at(-1)).toMatchObject({
       type: "registered",
       component: "profileCard",
       props: { profile: { name: "Second", internalId: "id_two" } },
@@ -158,16 +159,16 @@ describe("Puck page-composition adapter", () => {
   });
 
   it("preserves component identifiers allowed by the published schema", () => {
-    const hero = referenceSiteDefinition.home.sections[0]!;
+    const hero = homePage(referenceSiteDefinition).sections[0]!;
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
           { ...hero, id: "hero" },
-          ...referenceSiteDefinition.home.sections.slice(1),
+          ...homePage(referenceSiteDefinition).sections.slice(1),
         ],
-      },
+      }],
     };
 
     const result = puckDataToDefinition(
@@ -180,18 +181,18 @@ describe("Puck page-composition adapter", () => {
 
   it("does not let stale Puck props overwrite the outer variant owner", () => {
     const staleData = definitionToPuckData(referenceSiteDefinition);
-    const sourceHero = referenceSiteDefinition.home.sections[0]!;
+    const sourceHero = homePage(referenceSiteDefinition).sections[0]!;
     const liveDefinition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
           { ...sourceHero, variant: "focused" },
-          ...referenceSiteDefinition.home.sections.slice(1),
+          ...homePage(referenceSiteDefinition).sections.slice(1),
         ],
-      },
+      }],
     } as SiteDefinition;
-    const hero = liveDefinition.home.sections[0]!;
+    const hero = homePage(liveDefinition).sections[0]!;
     if (hero.type !== "hero") {
       throw new Error("expected_hero");
     }
@@ -211,7 +212,7 @@ describe("Puck page-composition adapter", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const recoveredHero = result.definition.home.sections[0]!;
+      const recoveredHero = homePage(result.definition).sections[0]!;
       expect(
         recoveredHero.type === "hero"
           ? [recoveredHero.variant, recoveredHero.title]
@@ -267,9 +268,9 @@ describe("Puck page-composition adapter", () => {
     expect(result).toEqual({
       ok: true,
       definition: expect.objectContaining({
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: [
-            referenceSiteDefinition.home.sections[2],
+            homePage(referenceSiteDefinition).sections[2],
             expect.objectContaining({
               id: "section_hero_puck_generated_duplicate",
               type: "hero",
@@ -279,8 +280,8 @@ describe("Puck page-composition adapter", () => {
                 href: "#section_contact",
               }),
             }),
-            referenceSiteDefinition.home.sections[1],
-            referenceSiteDefinition.home.sections[3],
+            homePage(referenceSiteDefinition).sections[1],
+            homePage(referenceSiteDefinition).sections[3],
             expect.objectContaining({
               id: "section_call_to_action_puck_generated_insert",
               type: "callToAction",
@@ -290,26 +291,26 @@ describe("Puck page-composition adapter", () => {
               }),
             }),
           ],
-        }),
+        })],
       }),
     });
   });
 
   it("projects related components added earlier in the same Puck change", () => {
-    const proof = referenceSiteDefinition.home.sections.find(
+    const proof = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "proof",
     )!;
     const replacedCallToAction =
-      referenceSiteDefinition.home.sections.find(
+      homePage(referenceSiteDefinition).sections.find(
         (section) => section.type === "callToAction",
       )!;
     const base = {
       ...referenceSiteDefinition,
       site: { ...referenceSiteDefinition.site, navigation: [] },
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [proof, replacedCallToAction],
-      },
+      }],
     } as SiteDefinition;
     const result = puckDataToDefinition(base, {
       root: { props: {} },
@@ -340,7 +341,7 @@ describe("Puck page-composition adapter", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const hero = result.definition.home.sections.at(-1);
+      const hero = homePage(result.definition).sections.at(-1);
       expect(
         hero?.type === "hero" ? hero.primaryAction.href : undefined,
       ).toBe("#section_added_contact");
@@ -380,7 +381,7 @@ describe("Puck page-composition adapter", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(
-        result.definition.home.sections.find(
+        homePage(result.definition).sections.find(
           (section) => section.type === "callToAction",
         ),
       ).toEqual(expect.objectContaining({ body }));
@@ -428,16 +429,16 @@ describe("Puck page-composition adapter", () => {
   it("only emits a structural command when component identity or order changes", () => {
     const copyEdited = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         sections: [
           {
-            ...referenceSiteDefinition.home.sections[0],
+            ...homePage(referenceSiteDefinition).sections[0],
             title: "Changed copy",
           },
-          ...referenceSiteDefinition.home.sections.slice(1),
+          ...homePage(referenceSiteDefinition).sections.slice(1),
         ] as PageSection[],
-      },
+      }],
     };
     expect(
       pageCompositionChanged(referenceSiteDefinition, copyEdited),
@@ -445,10 +446,10 @@ describe("Puck page-composition adapter", () => {
 
     const reordered = {
       ...copyEdited,
-      home: {
-        ...copyEdited.home,
-        sections: [...copyEdited.home.sections].reverse(),
-      },
+      pages: [{
+        ...homePage(copyEdited),
+        sections: [...homePage(copyEdited).sections].reverse(),
+      }],
     };
     expect(
       pageCompositionChanged(referenceSiteDefinition, reordered),

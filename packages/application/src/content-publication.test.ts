@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  homePage,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
+  type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
 import {
@@ -82,6 +84,17 @@ async function revisionFixture() {
     idempotencyKey: "save-publish-workspace-0001",
   });
   return { application, saved };
+}
+
+/**
+ * The same definition in the shape it was stored in before 1.7.0: one `home`
+ * object instead of a `pages` collection. A legacy artifact must use the shape
+ * its schema version was stored in.
+ */
+function withLegacyHomeShape(definition: SiteDefinition): any {
+  const { pages, ...rest } = structuredClone(definition) as any;
+  const { slug: _slug, title: _title, ...home } = pages[0];
+  return { ...rest, home };
 }
 
 describe("content publication application", () => {
@@ -543,7 +556,7 @@ describe("content publication application", () => {
     [
       "a cross-component variant",
       (definition: Record<string, any>) => {
-        definition.home.sections[0].variant = "cards";
+        definition.pages[0].sections[0].variant = "cards";
       },
     ],
     [
@@ -583,7 +596,7 @@ describe("content publication application", () => {
 
   it("fingerprints tokens and variants as design while ignoring copy-only changes", async () => {
     const base = revisionApplication.saved;
-    const hero = base.definition.home.sections[0]!;
+    const hero = homePage(base.definition).sections[0]!;
     if (hero.type !== "hero") {
       throw new TypeError("expected_hero_fixture");
     }
@@ -599,13 +612,13 @@ describe("content publication application", () => {
     });
     const copyRevision = await revisionWith({
       ...base.definition,
-      home: {
-        ...base.definition.home,
+      pages: [{
+        ...homePage(base.definition),
         sections: [
           { ...hero, title: "Copy-only fingerprint change" },
-          ...base.definition.home.sections.slice(1),
+          ...homePage(base.definition).sections.slice(1),
         ],
-      },
+      }],
     });
     const tokenRevision = await revisionWith({
       ...base.definition,
@@ -616,13 +629,13 @@ describe("content publication application", () => {
     });
     const variantRevision = await revisionWith({
       ...base.definition,
-      home: {
-        ...base.definition.home,
+      pages: [{
+        ...homePage(base.definition),
         sections: [
           { ...hero, variant: "focused" },
-          ...base.definition.home.sections.slice(1),
+          ...homePage(base.definition).sections.slice(1),
         ],
-      },
+      }],
     });
 
     const [baseFingerprint, copyFingerprint, tokenFingerprint, variantFingerprint] =
@@ -1398,9 +1411,9 @@ describe("content publication application", () => {
 
   it("restores a verified legacy v1 artifact without applying the v2 rich-text manifest contract", async () => {
     const store = createInMemoryContentPublicationStore();
-    const legacyDefinition = structuredClone(
+    const legacyDefinition = withLegacyHomeShape(
       revisionApplication.saved.definition,
-    ) as any;
+    );
     legacyDefinition.definitionVersion = "1.1.0";
     legacyDefinition.schemaVersion = "1.1.0";
     delete legacyDefinition.home.media;
@@ -1603,9 +1616,9 @@ describe("content publication application", () => {
       requestedBy: membershipId,
       idempotencyKey: "publish-ambiguous-before-v2-rollout",
     });
-    const legacyDefinition = structuredClone(
+    const legacyDefinition = withLegacyHomeShape(
       revisionApplication.saved.definition,
-    ) as any;
+    );
     legacyDefinition.definitionVersion = "1.1.0";
     legacyDefinition.schemaVersion = "1.1.0";
     delete legacyDefinition.home.media;

@@ -9,6 +9,8 @@ import {
   type PageComponentRegistry,
   type PageSection,
   type SiteDefinition,
+  homePage,
+  replacePage,
 } from "@humber-foundry/site-definition";
 
 export type PageCompositionPuckData = {
@@ -31,7 +33,7 @@ export function definitionToPuckData(
 ): PageCompositionPuckData {
   return {
     root: { props: {} },
-    content: definition.home.sections.map((section) =>
+    content: homePage(definition).sections.map((section) =>
       section.type === "registered"
         ? {
             type: registry.keyFor(section),
@@ -152,26 +154,23 @@ export function puckDataToDefinition(
       };
     }
     ids.add(id);
-    const existing = definition.home.sections.find(
+    const existing = homePage(definition).sections.find(
       (section) =>
         section.id === id && registry.keyFor(section) === componentType,
     );
-    const submittedContext = {
-      ...definition,
-      home: {
-        ...definition.home,
-        sections: [
-          ...components,
-          ...definition.home.sections.filter(
-            ({ id: existingId }) =>
-              submittedIds.has(existingId) &&
-              !components.some(
-                ({ id: submittedId }) => submittedId === existingId,
-              ),
-          ),
-        ],
-      },
-    } as SiteDefinition;
+    const submittedContext = replacePage(definition, {
+      ...homePage(definition),
+      sections: [
+        ...components,
+        ...homePage(definition).sections.filter(
+          ({ id: existingId }) =>
+            submittedIds.has(existingId) &&
+            !components.some(
+              ({ id: submittedId }) => submittedId === existingId,
+            ),
+        ),
+      ],
+    });
     const base =
       existing ??
       createDefaultPageSection(componentType, id, submittedContext, registry);
@@ -223,7 +222,7 @@ export function puckDataToDefinition(
     // non-editable scaffold from its source component.
     const duplicateSource =
       existing === undefined
-        ? [...definition.home.sections, ...components].find((source) => {
+        ? [...homePage(definition).sections, ...components].find((source) => {
             if (registry.keyFor(source) !== componentType) {
               return false;
             }
@@ -302,10 +301,10 @@ export function pageCompositionChanged(
     JSON.stringify(toPageCompositionIdentity(persisted, registry)) !==
       JSON.stringify(toPageCompositionIdentity(working, registry)) ||
     JSON.stringify(
-      persisted.home.sections.filter(({ type }) => type === "registered"),
+      homePage(persisted).sections.filter(({ type }) => type === "registered"),
     ) !==
       JSON.stringify(
-        working.home.sections.filter(({ type }) => type === "registered"),
+        homePage(working).sections.filter(({ type }) => type === "registered"),
       )
   );
 }

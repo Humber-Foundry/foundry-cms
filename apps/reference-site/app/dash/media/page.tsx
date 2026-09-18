@@ -1,3 +1,4 @@
+import { homePage } from "@humber-foundry/site-definition";
 import { MediaManager } from "@/components/media-manager";
 import { mergeMediaOccurrenceState } from "@/components/media-manager-state";
 import {
@@ -33,7 +34,9 @@ export default async function DashboardMediaPage({
 
   const occurrences = mergeMediaOccurrenceState(
     [],
-    draftDefinition?.home.media ?? [],
+    draftDefinition === undefined
+      ? []
+      : homePage(draftDefinition).media ?? [],
   );
   // Every photo the site actually shows — built-in images and the photos placed
   // through the published site or the current draft — so the gallery is "all

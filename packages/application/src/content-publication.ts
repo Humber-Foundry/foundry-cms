@@ -1,4 +1,5 @@
 import {
+  homePage,
   isSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
   type SiteDefinition,
@@ -646,8 +647,8 @@ function designProjection(definition: SiteDefinition) {
       id,
       href,
     })),
-    pageId: definition.home.id,
-    sections: definition.home.sections.map((section) =>
+    pageId: homePage(definition).id,
+    sections: homePage(definition).sections.map((section) =>
       section.type === "registered"
         ? {
             id: section.id,

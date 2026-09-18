@@ -5,6 +5,8 @@ import {
   updateEditableSiteField,
   type SiteDefinition,
   type SiteDefinitionEdit,
+  homePage,
+  replacePage,
 } from "@humber-foundry/site-definition";
 
 function compositionIdentity(definition: SiteDefinition): string {
@@ -67,22 +69,20 @@ function restoreLocalEditableOwner(
   path: string,
 ): SiteDefinition | null {
   const baseFieldPaths = new Set(
-    listEditableSiteFields({
-      ...working,
-      home: { ...working.home, sections: [] },
-    }).map((field) => field.path),
+    listEditableSiteFields(
+      replacePage(working, { ...homePage(working), sections: [] }),
+    ).map((field) => field.path),
   );
-  const localSectionIndex = working.home.sections.findIndex((section) =>
-    listEditableSiteFields({
-      ...working,
-      home: { ...working.home, sections: [section] },
-    }).some(
+  const localSectionIndex = homePage(working).sections.findIndex((section) =>
+    listEditableSiteFields(
+      replacePage(working, { ...homePage(working), sections: [section] }),
+    ).some(
       (field) => field.path === path && !baseFieldPaths.has(field.path),
     ),
   );
   if (localSectionIndex >= 0) {
-    const localSection = working.home.sections[localSectionIndex]!;
-    const sections = [...definition.home.sections];
+    const localSection = homePage(working).sections[localSectionIndex]!;
+    const sections = [...homePage(definition).sections];
     const incomingIndex = sections.findIndex(
       (section) => section.id === localSection.id,
     );
@@ -95,10 +95,7 @@ function restoreLocalEditableOwner(
         localSection,
       );
     }
-    return {
-      ...definition,
-      home: { ...definition.home, sections },
-    };
+    return replacePage(definition, { ...homePage(definition), sections });
   }
 
   const localNavigationIndex = working.site.navigation.findIndex(
@@ -150,22 +147,19 @@ function mergeExternalRevision(
     ? []
     : listEditableSiteFields(incoming);
   const incomingSections = new Map(
-    incoming.home.sections.map((section) => [
+    homePage(incoming).sections.map((section) => [
       `${section.type}:${section.id}`,
       section,
     ]),
   );
   let merged = compositionChanged
-    ? {
-        ...incoming,
-        home: {
-          ...incoming.home,
-          sections: state.workingDefinition.home.sections.map(
-            (section) =>
-              incomingSections.get(`${section.type}:${section.id}`) ?? section,
-          ),
-        },
-      }
+    ? replacePage(incoming, {
+        ...homePage(incoming),
+        sections: homePage(state.workingDefinition).sections.map(
+          (section) =>
+            incomingSections.get(`${section.type}:${section.id}`) ?? section,
+        ),
+      })
     : incoming;
   for (const field of workingFields) {
     if (!locallyDirtyPaths.has(field.path)) continue;

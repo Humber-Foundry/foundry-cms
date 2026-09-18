@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   applySiteDefinitionEdits,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
@@ -13,7 +14,7 @@ import {
   blogPostThumbnail,
   resolveBlogIndexSeo,
   resolveBlogPostSeo,
-  resolveHomeSeo,
+  resolvePageSeo,
   seoKeywordLimit,
   toSeoShareImage,
 } from "./seo";
@@ -50,8 +51,8 @@ function buildDefinition(
 function withHomeHero(definition: SiteDefinition): SiteDefinition {
   return {
     ...definition,
-    home: {
-      ...definition.home,
+    pages: [{
+      ...homePage(definition),
       media: [
         {
           occurrenceId: "occurrence_home_hero",
@@ -65,7 +66,7 @@ function withHomeHero(definition: SiteDefinition): SiteDefinition {
           crop: null,
         },
       ],
-    },
+    }],
   };
 }
 
@@ -236,25 +237,26 @@ describe("blogPostThumbnail", () => {
   });
 });
 
-describe("resolveHomeSeo", () => {
+describe("resolvePageSeo", () => {
   it("falls back to the site name and description", () => {
     const definition = buildDefinition(buildPost());
     const blank = {
       ...definition,
-      home: {
-        ...definition.home,
+      pages: [{
+        ...homePage(definition),
         seo: { title: "", description: "", keywords: [], shareImage: null },
-      },
+      }],
     };
 
-    const resolved = resolveHomeSeo(blank);
+    const resolved = resolvePageSeo(blank, homePage(blank));
 
     expect(resolved.title).toBe("Foundry Reference");
     expect(resolved.description).toBe(definition.site.description);
   });
 
   it("points the canonical URL at the site root", () => {
-    const resolved = resolveHomeSeo(buildDefinition(buildPost()));
+    const definition = buildDefinition(buildPost());
+    const resolved = resolvePageSeo(definition, homePage(definition));
 
     expect(resolved.canonicalUrl).toBe("https://example.com/");
   });
@@ -262,10 +264,73 @@ describe("resolveHomeSeo", () => {
   it("uses the owner's home SEO values when they are filled", () => {
     const definition = buildDefinition(buildPost());
 
-    const resolved = resolveHomeSeo(definition);
+    const resolved = resolvePageSeo(definition, homePage(definition));
 
-    expect(resolved.title).toBe(definition.home.seo.title);
-    expect(resolved.description).toBe(definition.home.seo.description);
+    expect(resolved.title).toBe(homePage(definition).seo.title);
+    expect(resolved.description).toBe(homePage(definition).seo.description);
+  });
+
+  it("serves a page below the home page at its own slug", () => {
+    const definition = buildDefinition(buildPost());
+    const about = {
+      ...homePage(definition),
+      id: "page_about",
+      slug: "about",
+      title: "About us",
+      seo: { title: "", description: "", keywords: [], shareImage: null },
+    };
+
+    const resolved = resolvePageSeo(
+      { ...definition, pages: [...definition.pages, about] },
+      about,
+    );
+
+    expect(resolved.canonicalUrl).toBe("https://example.com/about");
+    expect(resolved.title).toBe("About us — Foundry Reference");
+    expect(resolved.description).toBe(definition.site.description);
+  });
+
+  it("uses a page's own SEO title with no site name added", () => {
+    const definition = buildDefinition(buildPost());
+    const about = {
+      ...homePage(definition),
+      id: "page_about",
+      slug: "about",
+      title: "About us",
+      seo: {
+        title: "Who we are",
+        description: "",
+        keywords: [],
+        shareImage: null,
+      },
+    };
+
+    expect(
+      resolvePageSeo(
+        { ...definition, pages: [...definition.pages, about] },
+        about,
+      ).title,
+    ).toBe("Who we are");
+  });
+
+  it("falls back to the home hero picture for a page with no share image", () => {
+    const definition = buildDefinition(buildPost());
+    const about = {
+      ...homePage(definition),
+      id: "page_about",
+      slug: "about",
+      title: "About us",
+      seo: { title: "", description: "", keywords: [], shareImage: null },
+    };
+
+    expect(
+      resolvePageSeo(
+        { ...definition, pages: [...definition.pages, about] },
+        about,
+      ).shareImage,
+    ).toEqual(
+      resolvePageSeo(definition, homePage(definition)).shareImage,
+    );
   });
 });
 
@@ -280,7 +345,7 @@ describe("resolveBlogIndexSeo", () => {
 
 describe("editing a share image as two fields", () => {
   const homeSeoPath = (part: string) =>
-    `${referenceSiteDefinition.home.id}.seo.shareImage.${part}`;
+    `${homePage(referenceSiteDefinition).id}.seo.shareImage.${part}`;
 
   it("keeps both parts whichever order the owner's edits arrive in", () => {
     const urlThenAlt = applySiteDefinitionEdits(referenceSiteDefinition, [
@@ -296,10 +361,10 @@ describe("editing a share image as two fields", () => {
     expect(altThenUrl.ok).toBe(true);
     const expected = { url: "/api/media/asset_card", alt: "A boat at anchor" };
     expect(
-      urlThenAlt.ok ? urlThenAlt.definition.home.seo.shareImage : null,
+      urlThenAlt.ok ? homePage(urlThenAlt.definition).seo.shareImage : null,
     ).toEqual(expected);
     expect(
-      altThenUrl.ok ? altThenUrl.definition.home.seo.shareImage : null,
+      altThenUrl.ok ? homePage(altThenUrl.definition).seo.shareImage : null,
     ).toEqual(expected);
   });
 
@@ -316,7 +381,7 @@ describe("editing a share image as two fields", () => {
     ]);
 
     expect(cleared.ok).toBe(true);
-    expect(cleared.ok ? cleared.definition.home.seo.shareImage : "x").toBeNull();
+    expect(cleared.ok ? homePage(cleared.definition).seo.shareImage : "x").toBeNull();
   });
 
   it("does not save alt text on its own", () => {
@@ -325,7 +390,7 @@ describe("editing a share image as two fields", () => {
     ]);
 
     expect(result.ok).toBe(true);
-    expect(result.ok ? result.definition.home.seo.shareImage : "x").toBeNull();
+    expect(result.ok ? homePage(result.definition).seo.shareImage : "x").toBeNull();
   });
 });
 
@@ -342,7 +407,7 @@ describe("editing the canonical origin", () => {
     expect(result.definition.site.canonicalOrigin).toBe(
       "https://harbour.example",
     );
-    expect(resolveHomeSeo(result.definition).canonicalUrl).toBe(
+    expect(resolvePageSeo(result.definition, homePage(result.definition)).canonicalUrl).toBe(
       "https://harbour.example/",
     );
   });
@@ -354,7 +419,7 @@ describe("editing the canonical origin", () => {
 
     expect(result.ok).toBe(true);
     expect(
-      result.ok ? resolveHomeSeo(result.definition).canonicalUrl : "x",
+      result.ok ? resolvePageSeo(result.definition, homePage(result.definition)).canonicalUrl : "x",
     ).toBeNull();
   });
 
@@ -384,7 +449,7 @@ describe("editing the canonical origin", () => {
 });
 
 describe("editing keywords", () => {
-  const path = `${referenceSiteDefinition.home.id}.seo.keywords`;
+  const path = `${homePage(referenceSiteDefinition).id}.seo.keywords`;
 
   it("reads a comma-separated list the way an owner types it", () => {
     const result = applySiteDefinitionEdits(referenceSiteDefinition, [
@@ -392,7 +457,7 @@ describe("editing keywords", () => {
     ]);
 
     expect(result.ok).toBe(true);
-    expect(result.ok ? result.definition.home.seo.keywords : []).toEqual([
+    expect(result.ok ? homePage(result.definition).seo.keywords : []).toEqual([
       "boats",
       "harbour",
     ]);
@@ -455,16 +520,16 @@ describe("choosing a share image with no site address set", () => {
     const withoutOrigin = buildDefinition(post, "");
     const definition: SiteDefinition = {
       ...withoutOrigin,
-      home: {
-        ...withoutOrigin.home,
+      pages: [{
+        ...homePage(withoutOrigin),
         seo: {
-          ...withoutOrigin.home.seo,
+          ...homePage(withoutOrigin).seo,
           shareImage: {
             url: "https://cdn.example.com/card.png",
             alt: "The site card",
           },
         },
-      },
+      }],
     };
 
     expect(resolveBlogPostSeo(definition, post).shareImage).toEqual({

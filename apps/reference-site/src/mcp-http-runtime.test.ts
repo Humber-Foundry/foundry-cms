@@ -29,6 +29,7 @@ import {
   createRichTextDocumentFromPlainText,
   referenceSiteDefinition,
   type SiteDefinition,
+  homePage,
 } from "@humber-foundry/site-definition";
 
 import {
@@ -2263,7 +2264,7 @@ describe("production MCP HTTP runtime", () => {
       "foundry.content.list": { kind: null, limit: 10, cursor: null },
       "foundry.content.get": {
         kind: "page",
-        contentId: referenceSiteDefinition.home.id,
+        contentId: homePage(referenceSiteDefinition).id,
       },
     } as const;
     for (const descriptor of descriptors) {

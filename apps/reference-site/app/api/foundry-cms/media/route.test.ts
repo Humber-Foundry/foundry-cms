@@ -115,11 +115,11 @@ describe("media endpoint", () => {
     mocks.contentWorkspaceIdForActor.mockResolvedValue("workspace_editor");
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
-      definition: { home: { media: [] } },
+      definition: { pages: [{ slug: "", media: [] }] },
     });
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
-      definition: { home: { media: [] } },
+      definition: { pages: [{ slug: "", media: [] }] },
     });
     mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.loadApplication.mockResolvedValue({
@@ -213,7 +213,7 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -227,7 +227,7 @@ describe("media endpoint", () => {
               crop: null,
             },
           ],
-        },
+        }],
       },
     });
 
@@ -338,7 +338,7 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -352,7 +352,7 @@ describe("media endpoint", () => {
               crop: null,
             },
           ],
-        },
+        }],
       },
     });
 
@@ -391,7 +391,7 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -405,7 +405,7 @@ describe("media endpoint", () => {
               crop: completedOccurrence.crop,
             },
           ],
-        },
+        }],
       },
     });
 
@@ -493,7 +493,7 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 2,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -507,13 +507,13 @@ describe("media endpoint", () => {
               crop: null,
             },
           ],
-        },
+        }],
       },
     });
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -527,7 +527,7 @@ describe("media endpoint", () => {
               crop: null,
             },
           ],
-        },
+        }],
       },
     });
     mocks.crop.mockResolvedValue({
@@ -569,7 +569,7 @@ describe("media endpoint", () => {
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -583,13 +583,13 @@ describe("media endpoint", () => {
               crop: null,
             },
           ],
-        },
+        }],
       },
     });
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -603,7 +603,7 @@ describe("media endpoint", () => {
               crop: { x: 0.1, y: 0, width: 0.9, height: 1 },
             },
           ],
-        },
+        }],
       },
     });
 
@@ -646,7 +646,7 @@ describe("media endpoint", () => {
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -660,14 +660,14 @@ describe("media endpoint", () => {
               crop: null,
             },
           ],
-        },
+        }],
       },
     });
     mocks.getCurrentContent
       .mockResolvedValueOnce({
         revision: 2,
         definition: {
-          home: {
+          pages: [{ slug: "",
             media: [
               {
                 occurrenceId: "occurrence_home_hero",
@@ -681,13 +681,13 @@ describe("media endpoint", () => {
                 crop: null,
               },
             ],
-          },
+          }],
         },
       })
       .mockResolvedValueOnce({
         revision: 3,
         definition: {
-          home: {
+          pages: [{ slug: "",
             media: [
               {
                 occurrenceId: "occurrence_home_hero",
@@ -701,7 +701,7 @@ describe("media endpoint", () => {
                 crop: null,
               },
             ],
-          },
+          }],
         },
       });
 
@@ -1021,7 +1021,7 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             {
               occurrenceId: "occurrence_home_hero",
@@ -1030,7 +1030,7 @@ describe("media endpoint", () => {
               crop: null,
             },
           ],
-        },
+        }],
       },
     });
     mocks.grantAccess.mockResolvedValue({
@@ -1423,7 +1423,7 @@ describe("media capability scope", () => {
     mocks.contentWorkspaceIdForActor.mockResolvedValue("workspace_editor");
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
-      definition: { home: { media: [] } },
+      definition: { pages: [{ slug: "", media: [] }] },
     });
     mocks.loadApplication.mockResolvedValue({
       commands: { grantAccess: mocks.grantAccess },
@@ -1482,7 +1482,7 @@ describe("media capability scope", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        home: { media: [{ asset: { assetId: "asset_published" } }] },
+        pages: [{ slug: "", media: [{ asset: { assetId: "asset_published" } }] }],
       },
     });
 

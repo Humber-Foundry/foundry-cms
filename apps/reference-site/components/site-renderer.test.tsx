@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   applySiteDefinitionEdits,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
@@ -83,7 +84,7 @@ describe("SiteRenderer controlled design projection", () => {
     };
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: { ...referenceSiteDefinition.home, sections: [storySection] },
+      pages: [{ ...homePage(referenceSiteDefinition), sections: [storySection] }],
     };
 
     const published = renderToStaticMarkup(
@@ -229,8 +230,8 @@ describe("site renderer media placement", () => {
     };
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         media: [{
           occurrenceId: "occurrence_home_hero",
           revision: 1,
@@ -242,7 +243,7 @@ describe("site renderer media placement", () => {
           },
           crop: null,
         }],
-      },
+      }],
       blog: { id: "blog", posts: [post] },
     };
     const previewProps = {
@@ -270,7 +271,7 @@ describe("site renderer media placement", () => {
   });
 
   it("does not reuse a canonical occurrence on a duplicated component", () => {
-    const canonical = referenceSiteDefinition.home.sections.find(
+    const canonical = homePage(referenceSiteDefinition).sections.find(
       (section) => section.id === "section_hero",
     );
     if (canonical?.type !== "hero") {
@@ -282,8 +283,8 @@ describe("site renderer media placement", () => {
     } as PageSection;
     const definition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
+      pages: [{
+        ...homePage(referenceSiteDefinition),
         media: [
           {
             occurrenceId: "occurrence_home_hero",
@@ -297,7 +298,7 @@ describe("site renderer media placement", () => {
             crop: null,
           },
         ],
-      },
+      }],
     } as SiteDefinition;
 
     const canonicalMarkup = renderToStaticMarkup(

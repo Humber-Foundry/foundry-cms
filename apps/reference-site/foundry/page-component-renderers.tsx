@@ -1,4 +1,8 @@
-import type { PageSection, SiteDefinition } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  type PageSection,
+  type SiteDefinition,
+} from "@humber-foundry/site-definition";
 import type { ReactNode } from "react";
 
 import { MediaOccurrence } from "@/components/media-occurrence";
@@ -53,7 +57,7 @@ function occurrenceFor(
   definition: SiteDefinition | undefined,
   occurrenceId: string,
 ) {
-  return (definition?.home.media ?? []).find(
+  return (definition === undefined ? [] : homePage(definition).media ?? []).find(
     (candidate) => candidate.occurrenceId === occurrenceId,
   ) ?? null;
 }

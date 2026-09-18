@@ -18,6 +18,7 @@ import {
   updateEditableSiteField,
   type EditableSiteField,
   type SiteDefinitionEdit,
+  homePage,
 } from "@humber-foundry/site-definition";
 
 import {
@@ -337,7 +338,7 @@ export function ContentEditor({
               fieldEdits,
               composition.components.filter(
                 (component) =>
-                  !state.persistedDefinition.home.sections.some(
+                  !homePage(state.persistedDefinition).sections.some(
                     ({ id }) => id === component.id,
                   ),
               ),

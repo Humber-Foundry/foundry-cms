@@ -1,5 +1,6 @@
 import type { SiteDefinition } from "./index";
 import { publishedMediaPath } from "./seo";
+import { homePage } from "./pages";
 
 /**
  * A page-component image field holds either a static bundled path
@@ -75,10 +76,10 @@ export function siteDefinitionMediaAssetIds(
   definition: SiteDefinition,
 ): ReadonlySet<string> {
   const ids = new Set<string>();
-  for (const occurrence of definition.home.media ?? []) {
+  for (const occurrence of homePage(definition).media ?? []) {
     ids.add(occurrence.asset.assetId);
   }
-  collectMediaAssetIds(definition.home.sections, ids);
+  collectMediaAssetIds(homePage(definition).sections, ids);
   for (const post of definition.blog?.posts ?? []) {
     if (post.targetVisibility !== "public") continue;
     collectMediaAssetIds(post.mainImage, ids);

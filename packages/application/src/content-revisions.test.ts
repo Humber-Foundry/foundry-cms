@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   createDefaultPageSection,
   createBlogPostId,
   createRichTextDocumentFromPlainText,
@@ -39,7 +40,7 @@ const applicationInputs = {
 
 const commandInputs = {
   workspaceId: applicationInputs.workspaceId,
-  schemaVersion: "1.6.0",
+  schemaVersion: "1.7.0",
 } as const;
 
 async function createWorkspace(
@@ -531,7 +532,7 @@ describe("content revision application", () => {
   it("creates one restored draft from a historical definition across response-loss retries", async () => {
     const historical = structuredClone(referenceSiteDefinition);
     (
-      historical.home.sections[0] as {
+      homePage(historical).sections[0] as {
         title: string;
       }
     ).title = "Historical published headline";
@@ -565,13 +566,13 @@ describe("content revision application", () => {
         revision: 0,
         createdBy: editorActorId,
         definition: expect.objectContaining({
-          home: expect.objectContaining({
+          pages: [expect.objectContaining({
             sections: expect.arrayContaining([
               expect.objectContaining({
                 title: "Historical published headline",
               }),
             ]),
-          }),
+          })],
         }),
       }),
     );
@@ -600,26 +601,26 @@ describe("content revision application", () => {
     });
 
     expect(saved.revision).toBe(1);
-    expect(saved.definition.home.sections[0]).toEqual(
+    expect(homePage(saved.definition).sections[0]).toEqual(
       expect.objectContaining({ title: "A saved headline" }),
     );
     expect(saved.inputs).toEqual({
       contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-      schemaVersion: "1.6.0",
+      schemaVersion: "1.7.0",
       rendererVersion: "renderer-commit-a",
       productionBase: "published:site_foundry_reference@1.1.0",
     });
     expect(Object.isFrozen(saved)).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.6.0",
+        schemaVersion: "1.7.0",
         rendererVersion: "renderer-commit-a",
         productionBase: applicationInputs.productionBase,
       }),
     ).toBe(true);
     expect(
       isContentRevisionRenderableBy(saved, {
-        schemaVersion: "1.6.0",
+        schemaVersion: "1.7.0",
         rendererVersion: "renderer-commit-b",
         productionBase: applicationInputs.productionBase,
       }),
@@ -631,7 +632,7 @@ describe("content revision application", () => {
           inputs: { ...saved.inputs, schemaVersion: "1.0.0" },
         },
         {
-          schemaVersion: "1.6.0",
+          schemaVersion: "1.7.0",
           rendererVersion: "renderer-commit-a",
           productionBase: applicationInputs.productionBase,
         },
@@ -665,7 +666,7 @@ describe("content revision application", () => {
     });
 
     expect(saved.definition.design.colour.accent).toBe("clay");
-    expect(saved.definition.home.sections[0].variant).toBe("focused");
+    expect(homePage(saved.definition).sections[0].variant).toBe("focused");
     expect(saved.inputs.contentHash).not.toBe(initial.inputs.contentHash);
   });
 
@@ -716,7 +717,7 @@ describe("content revision application", () => {
     const composition = {
       ...toPageComposition(referenceSiteDefinition),
       components: [
-        ...referenceSiteDefinition.home.sections,
+        ...homePage(referenceSiteDefinition).sections,
       ] as PageSection[],
     };
     composition.components.splice(
@@ -735,7 +736,7 @@ describe("content revision application", () => {
     });
 
     expect(saved.revision).toBe(1);
-    expect(saved.definition.home.sections.map(({ id }) => id)).toEqual([
+    expect(homePage(saved.definition).sections.map(({ id }) => id)).toEqual([
       "section_new_proof",
       "section_services",
       "section_proof",
@@ -827,10 +828,10 @@ describe("content revision application", () => {
       idempotencyKey: "compose-with-nested-copy",
     });
 
-    expect(saved.definition.home.sections[0]?.id).toBe(
+    expect(homePage(saved.definition).sections[0]?.id).toBe(
       "section_services",
     );
-    const savedHero = saved.definition.home.sections[1]!;
+    const savedHero = homePage(saved.definition).sections[1]!;
     expect(savedHero.type).toBe("hero");
     if (savedHero.type === "hero") {
       expect(savedHero.primaryAction.label).toBe("Start here");
@@ -882,16 +883,16 @@ describe("content revision application", () => {
       idempotencyKey: "compose-with-variants",
     });
 
-    expect(saved.definition.home.sections[0]?.id).toBe(
+    expect(homePage(saved.definition).sections[0]?.id).toBe(
       "section_services",
     );
     expect(
-      saved.definition.home.sections.find(
+      homePage(saved.definition).sections.find(
         ({ id }) => id === "section_hero",
       )?.variant,
     ).toBe("focused");
     expect(
-      saved.definition.home.sections.find(
+      homePage(saved.definition).sections.find(
         ({ id }) => id === "section_added_proof",
       )?.variant,
     ).toBe("plain");
@@ -915,7 +916,7 @@ describe("content revision application", () => {
           slotId: "slot_home_sections",
           components: [
             {
-              ...referenceSiteDefinition.home.sections[0],
+              ...homePage(referenceSiteDefinition).sections[0],
               type: "script",
             },
           ],
@@ -960,19 +961,19 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 1,
       occurrence: {
-        ...first.definition.home.media![0]!,
+        ...homePage(first.definition).media![0]!,
         revision: 2,
         crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
       },
       idempotencyKey: "save-media-hero-0002",
     });
 
-    expect(first.definition.home.media![0]).toMatchObject({
+    expect(homePage(first.definition).media![0]).toMatchObject({
       occurrenceId: "occurrence_home_hero",
       revision: 1,
       crop: null,
     });
-    expect(cropped.definition.home.media![0]).toMatchObject({
+    expect(homePage(cropped.definition).media![0]).toMatchObject({
       revision: 2,
       crop: { x: 0.1, y: 0.2, width: 0.5, height: 0.5 },
     });
@@ -1142,13 +1143,13 @@ describe("content revision application", () => {
     await expect(application.queries.getCurrent()).resolves.toMatchObject({
       revision: 1,
       definition: {
-        home: {
+        pages: [{ slug: "",
           media: [
             expect.objectContaining({
               occurrenceId: "occurrence_home_hero",
             }),
           ],
-        },
+        }],
       },
     });
   });
@@ -1357,7 +1358,7 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: createContentWorkspaceId("workspace_other"),
-        schemaVersion: "1.6.0",
+        schemaVersion: "1.7.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong workspace" }],
         idempotencyKey: "save-section-hero-0007",
@@ -1371,14 +1372,14 @@ describe("content revision application", () => {
       application.commands.save({
         actorId: editorActorId,
         workspaceId: applicationInputs.workspaceId,
-        schemaVersion: "2.0.0" as "1.6.0",
+        schemaVersion: "2.0.0" as "1.7.0",
         baseRevision: 0,
         edits: [{ path: "section_hero.title", value: "Wrong schema" }],
         idempotencyKey: "save-section-hero-0008",
       }),
     ).rejects.toEqual(
       new ContentRevisionValidationError({
-        schemaVersion: "Use Site Definition schema 1.6.0.",
+        schemaVersion: "Use Site Definition schema 1.7.0.",
       }),
     );
   });

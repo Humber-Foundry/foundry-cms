@@ -1,0 +1,107 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  findPageById,
+  findPageBySlug,
+  homePage,
+  homePageIndex,
+  homePageSlug,
+  replacePage,
+  reservedPageSlugs,
+  referenceSiteDefinition,
+  type SiteDefinition,
+  type SitePage,
+} from "./index";
+
+function withExtraPage(
+  definition: SiteDefinition,
+  page: Partial<SitePage>,
+): SiteDefinition {
+  const home = homePage(definition);
+  return {
+    ...definition,
+    pages: [
+      ...definition.pages,
+      {
+        id: "page_about",
+        slug: "about",
+        title: "About",
+        seo: home.seo,
+        sections: [],
+        ...page,
+      },
+    ],
+  };
+}
+
+describe("site page accessors", () => {
+  it("names the root slug and the slugs a page may not take", () => {
+    expect(homePageSlug).toBe("");
+    expect([...reservedPageSlugs]).toStrictEqual([
+      "__foundry",
+      "api",
+      "blog",
+      "dash",
+      "newsletter",
+    ]);
+  });
+
+  it("reads the home page as the page with the root slug", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    expect(homePage(definition).slug).toBe(homePageSlug);
+    expect(homePage(definition).id).toBe("page_home");
+    expect(homePageIndex(definition)).toBe(0);
+  });
+
+  it("reads the home page wherever it sits in the collection", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    const reordered: SiteDefinition = {
+      ...definition,
+      pages: [...definition.pages].reverse(),
+    };
+    expect(homePageIndex(reordered)).toBe(1);
+    expect(homePage(reordered).id).toBe("page_home");
+  });
+
+  it("refuses a definition with no home page", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    const orphaned = {
+      ...definition,
+      pages: definition.pages.filter(({ slug }) => slug !== homePageSlug),
+    } as SiteDefinition;
+    expect(() => homePage(orphaned)).toThrow("site_definition_home_page_absent");
+    expect(() => homePageIndex(orphaned)).toThrow(
+      "site_definition_home_page_absent",
+    );
+  });
+
+  it("finds a page by id and by slug", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    expect(findPageById(definition, "page_about")?.slug).toBe("about");
+    expect(findPageBySlug(definition, "about")?.id).toBe("page_about");
+    expect(findPageBySlug(definition, homePageSlug)?.id).toBe("page_home");
+    expect(findPageById(definition, "page_missing")).toBeUndefined();
+    expect(findPageBySlug(definition, "missing")).toBeUndefined();
+  });
+
+  it("replaces one page and leaves the others as they were", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    const next = replacePage(definition, {
+      ...homePage(definition),
+      title: "Front",
+    });
+    expect(homePage(next).title).toBe("Front");
+    expect(next.pages).toHaveLength(2);
+    expect(next.pages[1]).toStrictEqual(definition.pages[1]);
+    expect(homePage(definition).title).not.toBe("Front");
+  });
+
+  it("refuses to replace a page that is not in the collection", () => {
+    expect(() =>
+      replacePage(referenceSiteDefinition, {
+        ...homePage(referenceSiteDefinition),
+        id: "page_absent",
+      }),
+    ).toThrow("site_definition_page_absent");
+  });
+});

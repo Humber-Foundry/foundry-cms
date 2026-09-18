@@ -2,6 +2,8 @@ import type { ContentRevision } from "@humber-foundry/application";
 import {
   type SiteDefinition,
   type SiteMediaOccurrence,
+  homePage,
+  replacePage,
 } from "@humber-foundry/site-definition";
 import { isInstalledSiteDefinition } from "../foundry/site-definition";
 
@@ -42,14 +44,14 @@ function parseMediaRecoveryManifest(
   definition: SiteDefinition,
 ): ReadonlyArray<SiteMediaOccurrence> {
   const media: unknown = JSON.parse(encoded);
-  const candidate = {
-    ...definition,
-    home: { ...definition.home, media },
-  };
+  const candidate = replacePage(definition, {
+    ...homePage(definition),
+    media: media as ReadonlyArray<SiteMediaOccurrence>,
+  });
   if (!isInstalledSiteDefinition(candidate)) {
     throw new Error("content_media_recovery_invalid");
   }
-  return candidate.home.media ?? [];
+  return homePage(candidate).media ?? [];
 }
 
 function sameCrop(
@@ -151,7 +153,7 @@ export async function restorePreservedMedia({
     edit.value,
     created.definition,
   );
-  const currentMedia = created.definition.home.media ?? [];
+  const currentMedia = homePage(created.definition).media ?? [];
   const baseById = new Map(
     baseMedia.map((occurrence) => [occurrence.occurrenceId, occurrence]),
   );
