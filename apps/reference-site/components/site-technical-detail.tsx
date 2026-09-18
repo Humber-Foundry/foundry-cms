@@ -31,24 +31,26 @@ export function SiteTechnicalDetail({
           <dd>{definition.site.name}</dd>
         </div>
         <div>
-          <dt>Definition version</dt>
-          <dd>
-            <code>v{definition.definitionVersion}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Schema version</dt>
-          <dd>
-            <code>v{definition.schemaVersion}</code>
-          </dd>
-        </div>
-        <div>
           <dt>Editor access</dt>
           <dd>Cloudflare Access with current membership</dd>
         </div>
       </dl>
       <details className="technical-inventory">
-        <summary>Published records and their identifiers</summary>
+        <summary>Version numbers and published records</summary>
+        <dl className="fact-list">
+          <div>
+            <dt>Definition version</dt>
+            <dd>
+              <code>v{definition.definitionVersion}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>Schema version</dt>
+            <dd>
+              <code>v{definition.schemaVersion}</code>
+            </dd>
+          </div>
+        </dl>
         <table>
           <caption>
             Every record in the published Site Definition, with the identifier

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { McpConnectionSummary } from "@humber-foundry/application";
 
+import { mcpConnectionStatusDisplayLabel } from "./access-display";
 import {
   mcpConnectionDisplayName,
   mcpRelativeTime,
@@ -68,7 +69,7 @@ export function McpConnectionTable({
               </ul>
             </span>
             <span role="cell" className="state-label">
-              {connection.status}
+              {mcpConnectionStatusDisplayLabel[connection.status]}
               <small>
                 {connection.lastUsedAt === null ? (
                   "Never used"
