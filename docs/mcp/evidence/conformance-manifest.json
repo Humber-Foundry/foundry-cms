@@ -40,7 +40,7 @@
       },
       {
         "client": "Claude Code",
-        "reason": "Connecting it needs a public HTTPS installation to register against. Not tested. Its documented dynamic registration and localhost callback behaviour was read from https://code.claude.com/docs/en/mcp and is recorded in ADR-0018."
+        "reason": "Connecting it needs a public HTTPS installation to register against. Not tested. Its documented dynamic registration and localhost callback behaviour was read from https://code.claude.com/docs/en/mcp and is recorded in ADR-0019."
       }
     ]
   },

@@ -116,11 +116,13 @@ describe("installation-owned page components", () => {
   it("uses the same real renderer for public and exact-preview projections", () => {
     const definition = registeredComponentFixture();
     const publicMarkup = renderToStaticMarkup(
-      <SiteRenderer definition={definition} />,
+      <SiteRenderer definition={definition} page={homePage(definition)} />,
     );
+    const clonedDefinition = structuredClone(definition);
     const previewMarkup = renderToStaticMarkup(
       <SiteRenderer
-        definition={structuredClone(definition)}
+        definition={clonedDefinition}
+        page={homePage(clonedDefinition)}
         mediaDelivery="authenticated"
         mediaAccessToken="preview-token"
       />,
