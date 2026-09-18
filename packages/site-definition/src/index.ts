@@ -62,7 +62,7 @@ export function createSiteId(value: string): SiteId {
  * - `#anchor` jumps to a section on the home page. This is the original
  *   shorthand, kept exactly as every stored definition already wrote it, and
  *   it always means the home page even when it is read on another page. See
- *   ADR-0019.
+ *   ADR-0020.
  * - `mailto:` opens a mail client addressed to the written address.
  * - `page:<pageId>` opens a page in this site, referenced by its stable id so
  *   a slug rename (#159) does not break the link.
@@ -597,7 +597,7 @@ export const siteDefinitionSchema = {
     },
     href: {
       $comment:
-        "Compatible widening, no schema version step: ADR-0019. The first " +
+        "Compatible widening, no schema version step: ADR-0020. The first " +
         "two patterns are unchanged from 1.7.0, so every stored #anchor and " +
         "mailto: value stays valid, byte for byte. `page:<pageId>` and " +
         "`page:<pageId>#<anchor>` reference a page by its stable id; " +
@@ -1083,7 +1083,7 @@ export function isBaseSiteDefinition(value: unknown): value is SiteDefinition {
     });
     // A `page:` href must name a page that exists. JSON Schema cannot look a
     // value up in another array, so this is a runtime check, the same way
-    // duplicate page ids and slugs are checked above. See ADR-0019.
+    // duplicate page ids and slugs are checked above. See ADR-0020.
     for (const { link } of everySiteLink(definition)) {
       const targetId = siteHrefPageId(link.href);
       if (targetId !== null && !pageIds.has(targetId)) {

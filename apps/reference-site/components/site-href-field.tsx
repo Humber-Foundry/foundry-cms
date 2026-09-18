@@ -23,7 +23,7 @@ type ParsedFieldValue = Readonly<{
  * value means.
  *
  * A bare `#anchor`, written before this picker existed, always named a
- * section on the home page (ADR-0019), so it opens here the same way:
+ * section on the home page (ADR-0020), so it opens here the same way:
  * "A section on a page," the home page, that section.
  */
 function parseFieldValue(

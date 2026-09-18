@@ -1,4 +1,4 @@
-# ADR-0019: A link can target a page, by its id, and this widens `SiteHref` without a schema step
+# ADR-0020: A link can target a page, by its id, and this widens `SiteHref` without a schema step
 
 - **Status:** Accepted
 - **Date:** 2026-09-18

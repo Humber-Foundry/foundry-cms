@@ -18,7 +18,7 @@ export type ParsedSiteHref =
   | Readonly<{ kind: "page"; pageId: string; anchor: string | null }>
   | Readonly<{ kind: "unrecognized" }>;
 
-/** Reads a stored href into the destination it names. See ADR-0019. */
+/** Reads a stored href into the destination it names. See ADR-0020. */
 export function parseSiteHref(href: string): ParsedSiteHref {
   if (href === "blog") {
     return { kind: "blog" };
