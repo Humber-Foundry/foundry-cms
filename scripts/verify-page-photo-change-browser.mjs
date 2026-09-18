@@ -216,6 +216,18 @@ async function main() {
     const changePhoto = canvas.getByRole("button", { name: "Change photo" });
     await changePhoto.first().waitFor({ state: "visible" });
 
+    // Let the add-section autosave land before touching the photo. The
+    // dashboard now creates the draft workspace while it renders, so this is
+    // the first request this run makes to the revision route, and a
+    // development server compiles that route before it answers. Waiting here
+    // keeps that one-off compile out of the swap being measured below.
+    for (let attempt = 0; photoBandSaves.length === 0 && attempt < 300; attempt += 1) {
+      await page.waitForTimeout(100);
+    }
+    if (photoBandSaves.length === 0) {
+      throw new Error("page_photo_add_section_never_saved");
+    }
+
     // Open the shared picker — it opens in the editor's own document, a
     // full-screen dialog, not a box trapped inside the canvas — and choose the
     // uploaded photo.

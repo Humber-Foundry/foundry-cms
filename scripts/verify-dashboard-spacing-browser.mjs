@@ -392,22 +392,13 @@ async function main() {
     ]) {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
-      // Start a private draft workspace once per viewport so Pages, Blog and
-      // Design render their real editing surfaces rather than the "Start
-      // workspace" gate — the same content the owner's own audit measured.
+      // The dashboard creates the draft workspace on the server, so Pages,
+      // Blog and Design render their real editing surfaces straight away —
+      // the same content the owner's own audit measured.
       await page.goto(`${origin}/dash`, { waitUntil: "networkidle" });
-      const startWorkspace = page.getByRole("button", { name: "Start workspace" });
-      if ((await startWorkspace.count()) > 0) {
-        await Promise.all([
-          page.waitForResponse(
-            (response) =>
-              response.request().method() === "POST" &&
-              new URL(response.url()).pathname === "/api/foundry-cms/revisions",
-          ),
-          startWorkspace.click(),
-        ]);
-        await page.waitForTimeout(600);
-      }
+      await page
+        .getByRole("link", { name: /^(Start|Continue) editing$/u })
+        .waitFor({ state: "visible" });
 
       for (const [name, href] of destinations) {
         await checkDestination(page, origin, name, href, viewportLabel);
