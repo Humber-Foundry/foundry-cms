@@ -169,9 +169,10 @@ describe("SiteRenderer controlled design projection", () => {
       />,
     );
 
-    expect(home).toContain(
-      'href="/__foundry/preview/workspace_preview/3?capability=preview-capability#section_services"',
-    );
+    // The preview shows the home page, so its own anchors jump within the
+    // page it is already on instead of reloading the preview address. See
+    // ADR-0019.
+    expect(home).toContain('href="#section_services"');
     expect(home).toContain(
       'href="/__foundry/preview/workspace_preview/3?capability=preview-capability#blog_index_title"',
     );

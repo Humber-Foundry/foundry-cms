@@ -63,6 +63,7 @@ export function SiteRenderer({
         definition={definition}
         homeHref={homeHref}
         blogHref={blogHref}
+        currentPage={page}
       />
       <Landmark id="main-content" tabIndex={-1}>
         {page.sections.map((section) => (

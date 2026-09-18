@@ -5,9 +5,11 @@ import {
   serializeRichTextDocument,
   serializeRichTextToMarkdown,
   type BlogPostId,
+  type PageSection,
   type SeoMetadata,
   type SerializedRichTextDocument,
   type SiteDefinition,
+  type SiteHref,
 } from "./index";
 import {
   designContract,
@@ -22,7 +24,8 @@ import {
   seoFieldHints,
   seoKeywordLimit,
 } from "./seo";
-import { homePageIndex, pageFieldPath } from "./pages";
+import { findPageById, homePageIndex, pageFieldPath } from "./pages";
+import { parseSiteHref } from "./site-href";
 
 export type SiteDefinitionEdit =
   | Readonly<{
@@ -62,6 +65,19 @@ type EditableSiteFieldBase = Readonly<{
   optional: boolean;
   /** One short line telling the owner what happens when they leave it blank. */
   hint?: string;
+  /**
+   * Present only on a field that stores a `SiteHref`. Lists every page the
+   * owner may point this link at, and the anchorable sections on each one, so
+   * the editor can offer a page picker instead of a free-text box. Absent on
+   * every other field.
+   */
+  siteHrefTargets?: ReadonlyArray<
+    Readonly<{
+      id: string;
+      title: string;
+      sections: ReadonlyArray<Readonly<{ id: string; label: string }>>;
+    }>
+  >;
 }>;
 
 export type EditableSiteField =
@@ -123,6 +139,7 @@ type EditableFieldBindingInput = Readonly<{
   values?: ReadonlyArray<string>;
   optional?: boolean;
   hint?: string;
+  siteHrefTargets?: EditableSiteFieldBase["siteHrefTargets"];
   blogPostId?: BlogPostId;
   validate?(value: string): string | null;
   write(definition: MutableSiteDefinition, value: string): void;
@@ -148,6 +165,7 @@ function fieldBinding({
   values,
   optional = false,
   hint,
+  siteHrefTargets,
   blogPostId,
   validate,
   write,
@@ -169,6 +187,7 @@ function fieldBinding({
       ...(pageId === undefined ? {} : { pageId }),
       ...(values === undefined ? {} : { values }),
       ...(hint === undefined ? {} : { hint }),
+      ...(siteHrefTargets === undefined ? {} : { siteHrefTargets }),
     } as EditableSiteField,
     ...(blogPostId === undefined ? {} : { blogPostId }),
     ...(validate === undefined ? {} : { validate }),
@@ -246,6 +265,42 @@ const contentSectionLabels: Record<string, string> = {
   proof: "Proof",
   callToAction: "Call to action",
 };
+
+/**
+ * What the page picker calls one section, so an owner linking to "a section
+ * on a page" reads a name instead of the section's internal id.
+ */
+function anchorSectionLabel(section: PageSection): string {
+  const kind =
+    section.type === "registered"
+      ? section.component
+      : contentSectionLabels[section.type] ?? section.type;
+  const detail =
+    "title" in section && section.title.trim() !== ""
+      ? section.title.trim()
+      : "eyebrow" in section && section.eyebrow.trim() !== ""
+        ? section.eyebrow.trim()
+        : "";
+  return detail === "" ? kind : `${kind} — ${detail}`;
+}
+
+/**
+ * The pages a link may point at, with their anchorable sections, for the
+ * navigation page picker. Every page in field order, home page first, so the
+ * picker lists pages the same way the Pages destination does.
+ */
+function siteHrefPageTargets(
+  pages: ReadonlyArray<{ page: SiteDefinition["pages"][number] }>,
+): EditableSiteFieldBase["siteHrefTargets"] {
+  return pages.map(({ page }) => ({
+    id: page.id,
+    title: page.title,
+    sections: page.sections.map((section) => ({
+      id: section.id,
+      label: anchorSectionLabel(section),
+    })),
+  }));
+}
 
 function editableFieldBindings(
   definition: SiteDefinition,
@@ -465,6 +520,8 @@ function editableFieldBindings(
     ),
   ];
 
+  const navigationHrefTargets = siteHrefPageTargets(pagesInFieldOrder);
+
   definition.site.navigation.forEach((item, index) => {
     fields.push(
       fieldBinding({
@@ -475,6 +532,30 @@ function editableFieldBindings(
         multiline: false,
         write: (draft, value) => {
           draft.site.navigation[index]!.label = value;
+        },
+      }),
+      fieldBinding({
+        path: `${item.id}.href`,
+        label: `Navigation: ${item.label} — link`,
+        group: "Navigation",
+        value: item.href,
+        multiline: false,
+        siteHrefTargets: navigationHrefTargets,
+        // Only a dangling page reference is rejected here, live. An email
+        // address is not: the owner types it one character at a time, and
+        // rejecting every incomplete address would revert the field on every
+        // keystroke but the last. A malformed address still cannot be saved
+        // as a finished edit — `isBaseSiteDefinition`'s schema check refuses
+        // it before publish, the same gate every other field answers to.
+        validate: (value) => {
+          const parsed = parseSiteHref(value);
+          return parsed.kind === "page" &&
+            findPageById(definition, parsed.pageId) === undefined
+            ? "Choose a page that still exists."
+            : null;
+        },
+        write: (draft, value) => {
+          draft.site.navigation[index]!.href = value as SiteHref;
         },
       }),
     );
