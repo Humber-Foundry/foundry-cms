@@ -101,10 +101,33 @@ const collectTightText = (minimumTextGap) => {
   const drawnEdges = (el) => {
     const s = getComputedStyle(el);
     const edges = {};
+    let borderSides = 0;
     for (const side of ["Top", "Right", "Bottom", "Left"]) {
       const width = Number.parseFloat(s[`border${side}Width`]);
-      edges[side.toLowerCase()] =
-        width > 0 && s[`border${side}Style`] !== "none";
+      const hasBorder = width > 0 && s[`border${side}Style`] !== "none";
+      edges[side.toLowerCase()] = hasBorder;
+      if (hasBorder) borderSides += 1;
+    }
+    // A card that already draws a border on three or four sides plus its own
+    // background has proven itself a box — from there every side is part of
+    // that box, including a side whose own border a more specific rule
+    // stripped. This is exactly the #173-regression shape a per-side-only
+    // check misses: Overview's "Your draft" card kept its border and padding
+    // on three sides and lost both on the fourth, so the old check never
+    // looked at that side at all.
+    //
+    // The threshold is three-or-more sides, not "any," so a strip that is
+    // only ever meant to draw one edge — `.editor-toolbar`'s single
+    // `border-bottom`, deliberately flush with its card's left, right and
+    // top edges by negative margin — is left alone rather than flagged for
+    // an inset it was never meant to have.
+    if (borderSides >= 3) {
+      const background = s.backgroundColor;
+      const hasOwnBackground =
+        background !== "rgba(0, 0, 0, 0)" && background !== "transparent";
+      if (hasOwnBackground) {
+        return { top: true, right: true, bottom: true, left: true };
+      }
     }
     return edges;
   };

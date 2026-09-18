@@ -9,6 +9,10 @@ import type {
 } from "@humber-foundry/application";
 import { availableMembershipStatusActions } from "@humber-foundry/application";
 import {
+  membershipStatusDisplayLabel,
+  roleDisplayLabel,
+} from "./access-display";
+import {
   createHumanAccessMutationAttempt,
   isHumanAccessMutationAmbiguousFailure,
   isHumanAccessMutationInProgress,
@@ -209,10 +213,10 @@ export function MemberAccessControls({
           <div className="inventory-row" role="row" key={member.id}>
             <strong role="cell">
               {member.email}
-              <small>{member.role}</small>
+              <small>{roleDisplayLabel[member.role]}</small>
             </strong>
             <span role="cell" className="state-label">
-              {member.status}
+              {membershipStatusDisplayLabel[member.status]}
             </span>
             <div role="cell" className="member-actions">
               {availableMembershipStatusActions(member.status).map(
