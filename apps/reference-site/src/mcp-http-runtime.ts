@@ -2,15 +2,23 @@ import { SignJWT, jwtVerify } from "jose";
 
 import {
   mcpInitialScope,
+  mcpScopeLabels,
   mcpSupportedScopes,
   sha256CanonicalJson,
   type McpConnectionGrant,
   type McpConnectionPrincipal,
   type McpConnectionStore,
   type McpCursorCodec,
+  type McpRegisteredClient,
 } from "@humber-foundry/application";
 import type { SiteId } from "@humber-foundry/site-definition";
 
+import {
+  isValidMcpRedirectUri,
+  mcpClientRegistrationLimits,
+  readMcpClientRegistration,
+  type McpClientRegistrationMetadata,
+} from "./mcp-client-registration";
 import {
   base64UrlEncode,
   createRequestExecutionContext,
@@ -39,6 +47,13 @@ const authorizationCodeLifetimeSeconds = 5 * 60;
 const refreshTokenLifetimeSeconds = 30 * 24 * 60 * 60;
 const oauthBodyLimitBytes = 16 * 1024;
 const rpcTimeoutMs = 10_000;
+
+/** Registrations accepted for one site in one hour. */
+const clientRegistrationsPerHour = 20;
+/** Registered clients kept for one site. A registration grants nothing. */
+const clientRegistrationCapacity = 500;
+const authorizationStateLimit = 512;
+const clientIdLimit = 2_048;
 
 export type McpAuthorizationGrantInput = Readonly<{
   connectionId: string;
@@ -103,6 +118,17 @@ export type McpAuthorizationRuntimeStore = McpConnectionStore &
       windowStartedAt: string;
       limit: number;
     }): Promise<boolean>;
+    findRegisteredClient(input: {
+      siteId: SiteId;
+      clientId: string;
+    }): Promise<McpRegisteredClient | null>;
+    registerClient(input: {
+      siteId: SiteId;
+      clientId: string;
+      metadata: McpClientRegistrationMetadata;
+      now: string;
+      capacity: number;
+    }): Promise<"registered" | "capacity_reached">;
   }>;
 
 type OwnerAuthenticationIntent = Readonly<{
@@ -113,17 +139,19 @@ type OwnerAuthenticationIntent = Readonly<{
 type AuthorizationRequest = Readonly<{
   responseType: "code";
   clientId: string;
-  clientName: string;
   redirectUri: string;
   resource: string;
   scope: string;
   scopes: ReadonlyArray<string>;
   connectionId: string | null;
-  state: string;
+  state: string | null;
   codeChallenge: string;
   codeChallengeMethod: "S256";
   stepUpToken: string | null;
 }>;
+
+type ResolvedAuthorizationRequest = AuthorizationRequest &
+  Readonly<{ clientName: string }>;
 
 function protectedResourceMetadataPath(resourceUri: string) {
   return `/.well-known/oauth-protected-resource${new URL(resourceUri).pathname}`;
@@ -135,6 +163,10 @@ function canonicalScopes(scopes: ReadonlyArray<string>): string {
     .join(" ");
 }
 
+/**
+ * Read a scope string this server issued. Server-issued scope strings are
+ * always canonical, so anything else is a forged or altered token.
+ */
 function readRequestedScopes(value: unknown): ReadonlyArray<string> | null {
   if (typeof value !== "string") return null;
   const requested = value.split(" ").filter(Boolean);
@@ -153,6 +185,69 @@ function readRequestedScopes(value: unknown): ReadonlyArray<string> | null {
   return Object.freeze([...requested]);
 }
 
+/**
+ * Read the scopes a client asks for at the authorize endpoint. A client may
+ * send supported scopes in any order and may repeat none of them. An absent
+ * `scope` parameter means the smallest useful request. The Owner still decides
+ * what is granted on the consent screen, so a large request is not a grant.
+ */
+function readAuthorizationScopes(
+  value: unknown,
+): ReadonlyArray<string> | null {
+  if (value === undefined || value === null || value === "") {
+    return Object.freeze([mcpInitialScope]);
+  }
+  if (typeof value !== "string") return null;
+  const requested = value.split(" ").filter(Boolean);
+  if (
+    requested.length < 1 ||
+    new Set(requested).size !== requested.length ||
+    requested.some(
+      (scope) =>
+        !(mcpSupportedScopes as ReadonlyArray<string>).includes(scope),
+    )
+  ) {
+    return null;
+  }
+  return Object.freeze(
+    mcpSupportedScopes.filter(
+      (scope) => scope === mcpInitialScope || requested.includes(scope),
+    ),
+  );
+}
+
+/**
+ * Read the scopes the Owner ticked on the consent screen. The result must stay
+ * inside what the client asked for and must keep `site.read`.
+ *
+ * An absent field grants the smallest scope set, never the requested set. The
+ * consent screen always submits at least `site.read`, so an absent field means
+ * the submission did not come from that screen.
+ */
+function readGrantedScopes(
+  value: unknown,
+  requested: ReadonlyArray<string>,
+): ReadonlyArray<string> | null {
+  const granted =
+    value === undefined || value === null
+      ? [mcpInitialScope]
+      : typeof value === "string"
+        ? value.split(" ").filter(Boolean)
+        : null;
+  if (
+    granted === null ||
+    granted.length < 1 ||
+    new Set(granted).size !== granted.length ||
+    !granted.includes(mcpInitialScope) ||
+    granted.some((scope) => !requested.includes(scope))
+  ) {
+    return null;
+  }
+  return Object.freeze(
+    mcpSupportedScopes.filter((scope) => granted.includes(scope)),
+  );
+}
+
 export function createMcpHttpRuntime({
   resourceUri,
   authorizationIssuer,
@@ -166,7 +261,10 @@ export function createMcpHttpRuntime({
   registeredClients,
   authenticateOwner,
   authorizationPath = `${new URL(resourceUri).pathname}/oauth/authorize`,
+  registrationPath = `${new URL(resourceUri).pathname}/oauth/register`,
   ownerRevocationPath = "/api/foundry-cms/mcp-connections/revoke",
+  createRegisteredClientId = () =>
+    `mcpc_${base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)))}`,
   createAuthorizationCode = () =>
     base64UrlEncode(crypto.getRandomValues(new Uint8Array(32))),
   createConnectionId = () => crypto.randomUUID(),
@@ -188,6 +286,12 @@ export function createMcpHttpRuntime({
   store: McpAuthorizationRuntimeStore;
   readApplication: McpReadApplication;
   cursors: McpCursorCodec;
+  /**
+   * The operator's optional environment allowlist. When it holds at least one
+   * client, only those clients may authorize and dynamic registration is
+   * refused. When it is empty, any client may register and every registration
+   * still waits for Owner consent.
+   */
   registeredClients: Readonly<
     Record<
       string,
@@ -199,7 +303,9 @@ export function createMcpHttpRuntime({
     intent: OwnerAuthenticationIntent,
   ): Promise<{ membershipId: string; csrfToken?: string }>;
   authorizationPath?: string;
+  registrationPath?: string;
   ownerRevocationPath?: string;
+  createRegisteredClientId?: () => string;
   createAuthorizationCode?: () => string;
   createConnectionId?: () => string;
   createActorId?: () => string;
@@ -370,32 +476,25 @@ export function createMcpHttpRuntime({
     };
   }
 
+  /**
+   * Read the authorize parameters this server uses. Parameters it does not
+   * know are ignored, not refused, because real clients send extra OAuth
+   * parameters. Every parameter it does use is still checked exactly.
+   */
   function readAuthorizationRequest(
     body: unknown,
   ): AuthorizationRequest | null {
-    const scopes = isRecord(body)
-      ? readRequestedScopes(body.scope)
-      : null;
+    if (!isRecord(body)) return null;
+    const scopes = readAuthorizationScopes(body.scope);
     if (
-      !isRecord(body) ||
-      !hasExactKeys(
-        body,
-        [
-          "response_type",
-          "client_id",
-          "redirect_uri",
-          "resource",
-          "scope",
-          "state",
-          "code_challenge",
-          "code_challenge_method",
-        ],
-        ["connection_id", "step_up_token"],
-      ) ||
       body.response_type !== "code" ||
       typeof body.client_id !== "string" ||
-      typeof body.redirect_uri !== "string" ||
-      body.resource !== resourceUri ||
+      body.client_id.length < 1 ||
+      body.client_id.length > clientIdLimit ||
+      !isValidMcpRedirectUri(body.redirect_uri) ||
+      // A 2025-03-26 client sends no resource indicator. This server serves
+      // exactly one resource, so an absent indicator is this resource.
+      (body.resource !== undefined && body.resource !== resourceUri) ||
       scopes === null ||
       (body.connection_id !== undefined &&
         (
@@ -409,37 +508,26 @@ export function createMcpHttpRuntime({
           body.step_up_token.length < 1 ||
           body.step_up_token.length > 4_096
         )) ||
-      (scopes.length > 1 &&
+      // Step-up needs both halves. One without the other is a malformed ask.
+      (body.connection_id === undefined) !==
+        (body.step_up_token === undefined) ||
+      (body.state !== undefined &&
         (
-          typeof body.connection_id !== "string" ||
-          typeof body.step_up_token !== "string"
+          typeof body.state !== "string" ||
+          body.state.length < 1 ||
+          body.state.length > authorizationStateLimit
         )) ||
-      (scopes.length === 1 &&
-        (
-          body.connection_id !== undefined ||
-          body.step_up_token !== undefined
-        )) ||
-      typeof body.state !== "string" ||
-      body.state.length < 8 ||
       typeof body.code_challenge !== "string" ||
       !/^[A-Za-z0-9_-]{43}$/u.test(body.code_challenge) ||
       body.code_challenge_method !== "S256"
     ) {
       return null;
     }
-    const client = registeredClients[body.client_id];
-    if (
-      client === undefined ||
-      !client.redirectUris.includes(body.redirect_uri)
-    ) {
-      return null;
-    }
     return {
       responseType: "code",
       clientId: body.client_id,
-      clientName: client.name,
       redirectUri: body.redirect_uri,
-      resource: body.resource,
+      resource: resourceUri,
       scope: canonicalScopes(scopes),
       scopes,
       connectionId:
@@ -450,10 +538,51 @@ export function createMcpHttpRuntime({
         typeof body.step_up_token === "string"
           ? body.step_up_token
           : null,
-      state: body.state,
+      state: typeof body.state === "string" ? body.state : null,
       codeChallenge: body.code_challenge,
       codeChallengeMethod: "S256",
     };
+  }
+
+  const environmentClientIds = Object.keys(registeredClients);
+  const registrationEnabled = environmentClientIds.length === 0;
+
+  /**
+   * Find the client behind a `client_id`. The operator's environment allowlist
+   * wins. Dynamically registered clients are only consulted when the operator
+   * has not turned the allowlist on.
+   */
+  async function findClient(
+    clientId: string,
+  ): Promise<McpRegisteredClient | null> {
+    const configured = registeredClients[clientId];
+    if (configured !== undefined) {
+      return {
+        clientId,
+        name: configured.name,
+        redirectUris: configured.redirectUris,
+        source: "environment",
+      };
+    }
+    if (!registrationEnabled) return null;
+    return store.findRegisteredClient({ siteId, clientId });
+  }
+
+  /**
+   * Resolve the client and check the redirect URI matches one it registered,
+   * character for character.
+   */
+  async function resolveAuthorizationRequest(
+    authorization: AuthorizationRequest,
+  ): Promise<ResolvedAuthorizationRequest | null> {
+    const client = await findClient(authorization.clientId);
+    if (
+      client === null ||
+      !client.redirectUris.includes(authorization.redirectUri)
+    ) {
+      return null;
+    }
+    return { ...authorization, clientName: client.name };
   }
 
   async function readAuthorizationBody(request: Request) {
@@ -474,9 +603,51 @@ export function createMcpHttpRuntime({
       );
       const csrfToken = form.get("csrf_token");
       form.delete("csrf_token");
-      return { body: Object.fromEntries(form), csrfToken };
+      // The consent screen submits one checkbox per approved scope, so this
+      // field repeats. Join the ticked values into one scope string.
+      const granted = form.getAll("granted_scope");
+      form.delete("granted_scope");
+      return {
+        body: {
+          ...Object.fromEntries(form),
+          ...(granted.length === 0
+            ? {}
+            : { granted_scope: granted.join(" ") }),
+        },
+        csrfToken,
+      };
     }
     throw new TypeError("invalid_request");
+  }
+
+  /**
+   * Verify a step-up and widen the requested scopes.
+   *
+   * A client asking to add one permission sends only that permission. The
+   * scopes on offer are therefore everything the connection already holds plus
+   * everything the client now asks for. The step-up must add at least one
+   * scope; it can never drop one.
+   */
+  function stepUpScopes(
+    authorization: AuthorizationRequest,
+    connection: McpConnectionGrant,
+  ): ReadonlyArray<string> {
+    return Object.freeze(
+      mcpSupportedScopes.filter(
+        (scope) =>
+          connection.scopes.includes(scope) ||
+          authorization.scopes.includes(scope),
+      ),
+    );
+  }
+
+  function withStepUpScopes<T extends AuthorizationRequest>(
+    authorization: T,
+    connection: McpConnectionGrant | null,
+  ): T {
+    if (connection === null) return authorization;
+    const scopes = stepUpScopes(authorization, connection);
+    return { ...authorization, scopes, scope: canonicalScopes(scopes) };
   }
 
   async function verifyStepUpAuthorization(
@@ -491,10 +662,9 @@ export function createMcpHttpRuntime({
       authorization.connectionId === null ||
       authorization.stepUpToken === null
     ) {
-      return {
-        valid: authorization.scopes.length === 1,
-        connection: null,
-      };
+      // A first authorization may ask for several scopes. The Owner decides
+      // which of them to grant on the consent screen.
+      return { valid: true, connection: null };
     }
     try {
       const { payload, protectedHeader } = await jwtVerify(
@@ -534,10 +704,10 @@ export function createMcpHttpRuntime({
         connection.actorId !== payload.sub ||
         connection.clientId !== authorization.clientId ||
         canonicalScopes(connection.scopes) !== canonicalScopes(tokenScopes) ||
-        authorization.scopes.length <= connection.scopes.length ||
-        connection.scopes.some(
-          (scope) => !authorization.scopes.includes(scope),
-        )
+        // A step-up must add something. Asking for only what is already held
+        // is not a step-up.
+        stepUpScopes(authorization, connection).length <=
+          connection.scopes.length
       ) {
         return { valid: false, connection: null };
       }
@@ -548,7 +718,7 @@ export function createMcpHttpRuntime({
   }
 
   function authorizationConsent(
-    authorization: AuthorizationRequest,
+    authorization: ResolvedAuthorizationRequest,
     csrfToken: string,
     stepUpConnection: McpConnectionGrant | null,
   ) {
@@ -558,7 +728,7 @@ export function createMcpHttpRuntime({
       redirect_uri: authorization.redirectUri,
       resource: authorization.resource,
       scope: authorization.scope,
-      state: authorization.state,
+      ...(authorization.state === null ? {} : { state: authorization.state }),
       code_challenge: authorization.codeChallenge,
       code_challenge_method: authorization.codeChallengeMethod,
       csrf_token: csrfToken,
@@ -575,6 +745,20 @@ export function createMcpHttpRuntime({
           `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
       )
       .join("\n");
+    // Scopes the connection already holds cannot be dropped here. Removing a
+    // scope still requires revoking the connection.
+    const fixedScopes = new Set<string>([
+      mcpInitialScope,
+      ...(stepUpConnection?.scopes ?? []),
+    ]);
+    const choices = authorization.scopes
+      .map((scope) => {
+        const label = `${escapeHtml(mcpScopeLabels[scope] ?? scope)} (<code>${escapeHtml(scope)}</code>)`;
+        return fixedScopes.has(scope)
+          ? `<li><input type="checkbox" checked disabled> ${label} — always included<input type="hidden" name="granted_scope" value="${escapeHtml(scope)}"></li>`
+          : `<li><label><input type="checkbox" name="granted_scope" value="${escapeHtml(scope)}" checked> ${label}</label></li>`;
+      })
+      .join("\n        ");
     const connectionDetails =
       stepUpConnection === null
         ? ""
@@ -593,16 +777,30 @@ export function createMcpHttpRuntime({
       <h1>Connect ${escapeHtml(authorization.clientName)}</h1>
       <p>${
         stepUpConnection === null
-          ? "Grant this explicitly scoped connection access to"
+          ? "Grant this connection access to"
           : "Add permissions to this exact existing connection for"
       } ${escapeHtml(siteName)}.</p>
-      <dl>${connectionDetails}<dt>Requested permissions</dt><dd>${escapeHtml(authorization.scopes.join(", "))}</dd></dl>
+      <p>The client name above comes from the client. Treat it as a claim, not
+      as proof. Approve only a client you started yourself.</p>
+      <dl>${connectionDetails}<dt>Client identifier</dt><dd>${escapeHtml(authorization.clientId)}</dd><dt>Return address</dt><dd>${escapeHtml(authorization.redirectUri)}</dd></dl>
       <form method="post" action="${escapeHtml(authorizationPath)}">
         ${fields}
+        <fieldset>
+          <legend>Permissions to approve</legend>
+          <p>Clear any permission you do not want. You can approve fewer
+          permissions than the client asked for.${
+            stepUpConnection === null
+              ? ""
+              : " Keep at least one new permission ticked, or there is nothing to add."
+          }</p>
+          <ul>
+        ${choices}
+          </ul>
+        </fieldset>
         <button type="submit">${
-          authorization.scopes.length === 1
-            ? "Approve read-only connection"
-            : "Approve scope step-up"
+          stepUpConnection === null
+            ? "Approve this connection"
+            : "Approve added permissions"
         }</button>
       </form>
     </main>
@@ -623,9 +821,13 @@ export function createMcpHttpRuntime({
 
   async function handleAuthorization(request: Request) {
     if (request.method === "GET") {
-      const authorization = readAuthorizationRequest(
+      const parameters = readAuthorizationRequest(
         Object.fromEntries(new URL(request.url).searchParams),
       );
+      const authorization =
+        parameters === null
+          ? null
+          : await resolveAuthorizationRequest(parameters);
       if (authorization === null) {
         return jsonResponse({ error: "invalid_request" }, 400);
       }
@@ -641,7 +843,7 @@ export function createMcpHttpRuntime({
         return owner.csrfToken === undefined
           ? jsonResponse({ error: "access_denied" }, 403)
           : authorizationConsent(
-              authorization,
+              withStepUpScopes(authorization, stepUp.connection),
               owner.csrfToken,
               stepUp.connection,
             );
@@ -663,12 +865,33 @@ export function createMcpHttpRuntime({
     } catch {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
-    const authorization = readAuthorizationRequest(parsed.body);
+    const parameters = readAuthorizationRequest(parsed.body);
+    const authorization =
+      parameters === null
+        ? null
+        : await resolveAuthorizationRequest(parameters);
     if (authorization === null) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
     const stepUp = await verifyStepUpAuthorization(authorization);
     if (!stepUp.valid) {
+      return jsonResponse({ error: "invalid_request" }, 400);
+    }
+    // The Owner may approve fewer permissions than the client asked for.
+    const offered = withStepUpScopes(authorization, stepUp.connection);
+    const granted = readGrantedScopes(
+      isRecord(parsed.body) ? parsed.body.granted_scope : undefined,
+      offered.scopes,
+    );
+    if (
+      granted === null ||
+      // A step-up may only add. Dropping a held scope needs a revocation.
+      (stepUp.connection !== null &&
+        (granted.length <= stepUp.connection.scopes.length ||
+          stepUp.connection.scopes.some(
+            (scope) => !granted.includes(scope),
+          )))
+    ) {
       return jsonResponse({ error: "invalid_request" }, 400);
     }
     let owner;
@@ -699,10 +922,10 @@ export function createMcpHttpRuntime({
         clientId: authorization.clientId,
         redirectUri: authorization.redirectUri,
         resource: authorization.resource,
-        scope: authorization.scope,
+        scope: canonicalScopes(granted),
         connectionId: authorization.connectionId,
       }),
-      scopes: authorization.scopes,
+      scopes: granted,
       ...(authorization.connectionId === null
         ? {}
         : {
@@ -712,7 +935,9 @@ export function createMcpHttpRuntime({
     });
     const redirect = new URL(authorization.redirectUri);
     redirect.searchParams.set("code", code);
-    redirect.searchParams.set("state", authorization.state);
+    if (authorization.state !== null) {
+      redirect.searchParams.set("state", authorization.state);
+    }
     return new Response(null, {
       status: 303,
       headers: {
@@ -792,7 +1017,14 @@ export function createMcpHttpRuntime({
       return jsonResponse({ error: "invalid_request" }, 400);
     }
     const clientId = form.get("client_id");
-    if (form.get("resource") !== resourceUri || clientId === null) {
+    const requestedResource = form.get("resource");
+    // A 2025-03-26 client sends no resource indicator, at the authorize
+    // endpoint or here. This server serves exactly one resource, so an absent
+    // indicator is this resource. A different one is refused.
+    if (
+      (requestedResource !== null && requestedResource !== resourceUri) ||
+      clientId === null
+    ) {
       return jsonResponse({ error: "invalid_grant" }, 400);
     }
     const observedAt = now();
@@ -874,6 +1106,130 @@ export function createMcpHttpRuntime({
         connectionRedirectUri,
       ),
     });
+  }
+
+  function registrationError(
+    error: string,
+    description: string,
+    status = 400,
+    headers: Record<string, string> = {},
+  ) {
+    return jsonResponse(
+      { error, error_description: description },
+      status,
+      headers,
+    );
+  }
+
+  /**
+   * RFC 7591 dynamic client registration.
+   *
+   * A registration is a name and a set of return addresses. It grants nothing:
+   * no connection row, no actor, no scope and no token exist until an Owner
+   * approves the client on the consent screen behind human sign-in. This
+   * endpoint must stay outside the installation's Cloudflare Access
+   * application, because a client calls it with no human present.
+   */
+  async function handleClientRegistration(request: Request) {
+    if (!registrationEnabled) {
+      return registrationError(
+        "access_denied",
+        "This installation registers clients from its operator allowlist only.",
+        403,
+      );
+    }
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "method_not_allowed" }, 405, {
+        allow: "POST",
+      });
+    }
+    if (!readsJsonMediaType(request)) {
+      return registrationError(
+        "invalid_client_metadata",
+        "The registration request must be application/json.",
+      );
+    }
+    const observedAt = now();
+    let body: unknown;
+    try {
+      body = JSON.parse(
+        await readBoundedText(
+          request,
+          mcpClientRegistrationLimits.maxBodyBytes,
+        ),
+      );
+    } catch {
+      return registrationError(
+        "invalid_client_metadata",
+        "The registration request must be a JSON object within the size limit.",
+      );
+    }
+    const registration = readMcpClientRegistration(body);
+    if (!registration.ok) {
+      return registrationError(registration.error, registration.description);
+    }
+    // Spend the site's hourly budget only on a registration that would
+    // otherwise be stored. A malformed request must not exhaust it.
+    const allowed = await store.consumeRateLimit({
+      siteId,
+      bucketKey: "client_registration",
+      windowStartedAt: new Date(
+        Math.floor(observedAt.getTime() / 3_600_000) * 3_600_000,
+      ).toISOString(),
+      limit: clientRegistrationsPerHour,
+    });
+    if (!allowed) {
+      return registrationError(
+        "temporarily_unavailable",
+        "This site has reached its client registration limit for this hour.",
+        429,
+        { "retry-after": "3600" },
+      );
+    }
+    const clientId = createRegisteredClientId();
+    const outcome = await store.registerClient({
+      siteId,
+      clientId,
+      metadata: registration.metadata,
+      now: observedAt.toISOString(),
+      capacity: clientRegistrationCapacity,
+    });
+    if (outcome === "capacity_reached") {
+      return registrationError(
+        "temporarily_unavailable",
+        "This site is holding the maximum number of registered clients.",
+        429,
+        { "retry-after": "3600" },
+      );
+    }
+    return jsonResponse(
+      {
+        client_id: clientId,
+        client_id_issued_at: Math.floor(observedAt.getTime() / 1_000),
+        client_name: registration.metadata.clientName,
+        redirect_uris: registration.metadata.redirectUris,
+        grant_types: registration.metadata.grantTypes,
+        response_types: registration.metadata.responseTypes,
+        token_endpoint_auth_method:
+          registration.metadata.tokenEndpointAuthMethod,
+        ...(registration.metadata.clientUri === null
+          ? {}
+          : { client_uri: registration.metadata.clientUri }),
+        ...(registration.metadata.logoUri === null
+          ? {}
+          : { logo_uri: registration.metadata.logoUri }),
+        ...(registration.metadata.softwareId === null
+          ? {}
+          : { software_id: registration.metadata.softwareId }),
+        ...(registration.metadata.softwareVersion === null
+          ? {}
+          : { software_version: registration.metadata.softwareVersion }),
+        ...(registration.metadata.scope === null
+          ? {}
+          : { scope: registration.metadata.scope }),
+      },
+      201,
+    );
   }
 
   async function handleOwnerRevocation(request: Request) {
@@ -1027,6 +1383,12 @@ export function createMcpHttpRuntime({
           issuer: authorizationIssuer,
           authorization_endpoint: `${canonicalOrigin}${authorizationPath}`,
           token_endpoint: `${resourceUri}/oauth/token`,
+          ...(registrationEnabled
+            ? {
+                registration_endpoint:
+                  `${canonicalOrigin}${registrationPath}`,
+              }
+            : {}),
           response_types_supported: ["code"],
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
@@ -1039,6 +1401,12 @@ export function createMcpHttpRuntime({
         url.pathname === authorizationPath
       ) {
         return handleAuthorization(request);
+      }
+      if (
+        url.origin === canonicalOrigin &&
+        url.pathname === registrationPath
+      ) {
+        return handleClientRegistration(request);
       }
       if (
         url.origin === canonicalOrigin &&
