@@ -49,7 +49,9 @@ export default async function DashboardLayout({
         </a>
         <div className="dashboard-header-meta">
           <span className="signed-in-as">
-            {access.membership.email} · {access.membership.role}
+            <span className="signed-in-as-email">{access.membership.email}</span>
+            {" · "}
+            <span className="signed-in-as-role">{access.membership.role}</span>
           </span>
           <a href="/">View public site ↗</a>
         </div>

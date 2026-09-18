@@ -44,20 +44,22 @@ describe("photo gallery layout", () => {
     expect(gallery).not.toMatch(/\/api\/foundry-cms\/media\?/u);
   });
 
-  it("lays the gallery out as an even grid of uniform tiles", async () => {
+  it("lays the gallery out as a wrapping list of fixed-size tiles", async () => {
     const stylesheet = await readFile(
       new URL("../app/dash/dashboard.css", import.meta.url),
       "utf8",
     );
 
-    // A media grid, like a modern CMS library: columns that reflow with the
-    // width and keep every tile the same shape, rather than a flex row whose
-    // last line stretches its tiles wider than the rows above.
+    // A CSS grid with a fixed column count leaves the last row ragged
+    // whenever the photo count does not divide evenly by that count
+    // (issue #173). A wrapping list of tiles at one fixed size has no
+    // column tracks to break: a short last row just holds fewer tiles,
+    // and no tile grows to fill the gap.
     expect(stylesheet).toMatch(
-      /\.media-gallery\s*\{[^}]*display:\s*grid;[^}]*\}/su,
+      /\.media-gallery\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*\}/su,
     );
     expect(stylesheet).toMatch(
-      /\.media-gallery\s*\{[^}]*grid-template-columns:\s*repeat\(\s*auto-fill,\s*minmax\([^)]+\)\s*\);[^}]*\}/su,
+      /\.media-gallery > li\s*\{[^}]*flex:\s*0 0 [^;]+;[^}]*width:\s*[^;]+;[^}]*\}/su,
     );
   });
 
