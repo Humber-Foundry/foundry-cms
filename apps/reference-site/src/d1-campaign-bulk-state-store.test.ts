@@ -292,6 +292,70 @@ describe("D1 campaign bulk state store", () => {
     ).rejects.toMatchObject({ code: "bulk_idempotency_key_reused" });
   });
 
+  it("reads back one campaign's active authorization, schedule and send", async () => {
+    const store = createD1CampaignBulkStateStore(
+      database as unknown as D1DatabaseBinding,
+    );
+
+    await expect(
+      store.findCampaignBulkState({ siteId, campaignId }),
+    ).resolves.toEqual({
+      authorization: null,
+      schedule: null,
+      operation: null,
+    });
+
+    const saved = await store.saveAuthorization({
+      requestId: "bulk-owner-authorization-52",
+      inputHash: "1".repeat(64),
+      authorization: authorization(),
+    });
+    await store.activateSchedule({
+      requestId: "bulk-owner-schedule-52",
+      inputHash: "3".repeat(64),
+      schedule: {
+        id: "70000000-0000-4000-8000-000000000052",
+        siteId,
+        campaignId,
+        authorizationId: saved.value.id,
+        localDateTime: "2026-08-01T01:00:00",
+        ianaTimeZone: "UTC",
+        utcOffsetChoice: "+00:00",
+        executeAtUtc: "2026-08-01T01:00:00.000Z",
+        timeZoneDatabaseVersion: "2026a",
+        activatedBy: "membership-owner",
+        state: "active",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    });
+
+    const read = await store.findCampaignBulkState({ siteId, campaignId });
+    expect(read.authorization).toMatchObject({
+      id: saved.value.id,
+      state: "active",
+      ownerActorId: "membership-owner",
+    });
+    expect(read.schedule).toMatchObject({
+      id: "70000000-0000-4000-8000-000000000052",
+      state: "active",
+      executeAtUtc: "2026-08-01T01:00:00.000Z",
+    });
+    expect(read.operation).toBeNull();
+
+    // Another installation's campaign is never reported here.
+    await expect(
+      store.findCampaignBulkState({
+        siteId: createSiteId("site_other"),
+        campaignId,
+      }),
+    ).resolves.toEqual({
+      authorization: null,
+      schedule: null,
+      operation: null,
+    });
+  });
+
   it("rechecks active suppressions in the same write that opens the provider attempt", async () => {
     const store = createD1CampaignBulkStateStore(
       database as unknown as D1DatabaseBinding,

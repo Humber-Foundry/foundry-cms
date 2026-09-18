@@ -38,6 +38,7 @@ describe("D1 MCP connection store", () => {
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
       "0024_mcp_publication_scopes.sql",
+      "0027_mcp_registered_clients.sql",
     ],
     { compatibilityDate: "2026-07-26" },
   );
@@ -1726,6 +1727,173 @@ describe("D1 MCP connection store", () => {
         )
         .first(),
     ).resolves.toBeNull();
+  });
+
+  it("stores a registered client and finds it by its client identifier", async () => {
+    const store = createD1McpConnectionStore(database);
+    const metadata = {
+      clientName: "Example AI client",
+      redirectUris: ["https://client.example/callback"],
+      grantTypes: ["authorization_code", "refresh_token"],
+      responseTypes: ["code"] as const,
+      tokenEndpointAuthMethod: "none" as const,
+      clientUri: null,
+      logoUri: null,
+      softwareId: null,
+      softwareVersion: null,
+      scope: null,
+    };
+    expect(
+      await store.registerClient({
+        siteId: referenceSiteDefinition.site.id,
+        clientId: "mcpc_example",
+        metadata,
+        now: "2026-07-29T18:00:00.000Z",
+        capacity: 3,
+      }),
+    ).toBe("registered");
+    expect(
+      await store.findRegisteredClient({
+        siteId: referenceSiteDefinition.site.id,
+        clientId: "mcpc_example",
+      }),
+    ).toEqual({
+      clientId: "mcpc_example",
+      name: "Example AI client",
+      redirectUris: ["https://client.example/callback"],
+      source: "dynamic",
+    });
+    // A registration is site-scoped and holds no permission of its own.
+    expect(
+      await store.findRegisteredClient({
+        siteId: "site_other" as typeof referenceSiteDefinition.site.id,
+        clientId: "mcpc_example",
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses to change registered client metadata after it is stored", async () => {
+    const store = createD1McpConnectionStore(database);
+    await store.registerClient({
+      siteId: referenceSiteDefinition.site.id,
+      clientId: "mcpc_immutable",
+      metadata: {
+        clientName: "First name",
+        redirectUris: ["https://client.example/callback"],
+        grantTypes: ["authorization_code"],
+        responseTypes: ["code"],
+        tokenEndpointAuthMethod: "none",
+        clientUri: null,
+        logoUri: null,
+        softwareId: null,
+        softwareVersion: null,
+        scope: null,
+      },
+      now: "2026-07-29T18:00:00.000Z",
+      capacity: 3,
+    });
+    await expect(
+      database
+        .prepare(
+          `UPDATE mcp_registered_clients SET client_name = 'Second name'
+            WHERE client_id = 'mcpc_immutable'`,
+        )
+        .run(),
+    ).rejects.toThrow(/mcp_registered_client_metadata_is_immutable/u);
+  });
+
+  it("evicts the oldest unapproved registration instead of locking the site out", async () => {
+    const store = createD1McpConnectionStore(database);
+    const siteId = referenceSiteDefinition.site.id;
+    const register = (clientId: string, now: string) =>
+      store.registerClient({
+        siteId,
+        clientId,
+        metadata: {
+          clientName: clientId,
+          redirectUris: [`https://client.example/${clientId}`],
+          grantTypes: ["authorization_code"],
+          responseTypes: ["code"],
+          tokenEndpointAuthMethod: "none",
+          clientUri: null,
+          logoUri: null,
+          softwareId: null,
+          softwareVersion: null,
+          scope: null,
+        },
+        now,
+        capacity: 2,
+      });
+
+    expect(await register("mcpc_first", "2026-07-29T18:00:00.000Z")).toBe(
+      "registered",
+    );
+    expect(await register("mcpc_second", "2026-07-29T18:01:00.000Z")).toBe(
+      "registered",
+    );
+    // At capacity. The oldest registration no Owner approved gives way.
+    expect(await register("mcpc_third", "2026-07-29T18:02:00.000Z")).toBe(
+      "registered",
+    );
+    expect(
+      await store.findRegisteredClient({ siteId, clientId: "mcpc_first" }),
+    ).toBeNull();
+    // Exactly one registration gives way. The newer ones both stay.
+    expect(
+      await store.findRegisteredClient({ siteId, clientId: "mcpc_second" }),
+    ).not.toBeNull();
+    expect(
+      await store.findRegisteredClient({ siteId, clientId: "mcpc_third" }),
+    ).not.toBeNull();
+  });
+
+  it("never evicts a registration an Owner approved", async () => {
+    const store = createD1McpConnectionStore(database);
+    const siteId = referenceSiteDefinition.site.id;
+    const register = (clientId: string, now: string) =>
+      store.registerClient({
+        siteId,
+        clientId,
+        metadata: {
+          clientName: clientId,
+          redirectUris: [`https://client.example/${clientId}`],
+          grantTypes: ["authorization_code"],
+          responseTypes: ["code"],
+          tokenEndpointAuthMethod: "none",
+          clientUri: null,
+          logoUri: null,
+          softwareId: null,
+          softwareVersion: null,
+          scope: null,
+        },
+        now,
+        capacity: 1,
+      });
+
+    await register("mcpc_approved", "2026-07-29T18:00:00.000Z");
+    // An Owner approved this client, so a connection row exists for it.
+    await store.createAuthorizationGrant({
+      connectionId: "connection-approved",
+      actorId: "actor-approved",
+      siteId,
+      clientId: "mcpc_approved",
+      redirectUri: "https://client.example/mcpc_approved",
+      ownerMembershipId: "membership-owner",
+      codeHash: "code-hash-approved",
+      codeChallenge: "challenge-approved",
+      expiresAt: "2026-07-29T18:05:00.000Z",
+      now: "2026-07-29T18:00:00.000Z",
+      inputHash: "input-hash-approved",
+    });
+
+    // The site is at capacity and the only registration is an approved one,
+    // so the site is told it is full rather than losing that client.
+    expect(await register("mcpc_new", "2026-07-29T18:01:00.000Z")).toBe(
+      "capacity_reached",
+    );
+    expect(
+      await store.findRegisteredClient({ siteId, clientId: "mcpc_approved" }),
+    ).not.toBeNull();
   });
 });
 
