@@ -34,7 +34,9 @@ import {
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
-import type { McpClientRegistrationMetadata } from "./mcp-client-registration";
+import type {
+  McpClientRegistrationMetadata,
+} from "./mcp-client-registration";
 import {
   createMcpHttpRuntime,
   createSignedMcpCursorCodec,

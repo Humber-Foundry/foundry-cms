@@ -949,6 +949,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
             input.capacity,
           ),
       ]);
+      // The insert carries RETURNING, so an empty result set means its
+      // capacity guard refused it. Other batch calls in this file read
+      // meta.changes because their statements return no rows.
       return (inserted?.results ?? []).length === 0
         ? "capacity_reached"
         : "registered";

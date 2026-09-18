@@ -1838,6 +1838,10 @@ describe("D1 MCP connection store", () => {
     expect(
       await store.findRegisteredClient({ siteId, clientId: "mcpc_first" }),
     ).toBeNull();
+    // Exactly one registration gives way. The newer ones both stay.
+    expect(
+      await store.findRegisteredClient({ siteId, clientId: "mcpc_second" }),
+    ).not.toBeNull();
     expect(
       await store.findRegisteredClient({ siteId, clientId: "mcpc_third" }),
     ).not.toBeNull();
@@ -1891,7 +1895,6 @@ describe("D1 MCP connection store", () => {
       await store.findRegisteredClient({ siteId, clientId: "mcpc_approved" }),
     ).not.toBeNull();
   });
-
 });
 
 it("upgrades the exact pre-blog schema without rewriting applied migrations", async () => {
