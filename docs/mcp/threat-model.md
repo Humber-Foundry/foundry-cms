@@ -53,6 +53,9 @@ for published content.
 | Revocation lag | Unexpired token remains useful after Owner revokes connection | D1 connection status checked on every command; revoke D1 first; cache only non-authoritative metadata | Previously valid token fails on first post-revocation call |
 | Dependency ambiguity | Git accepted commit but response timed out, causing duplicate publish | Durable publish ID, compare-and-swap base, commit trailers, reconcile before retry, one publication lease | Fault injection after Git acceptance yields one commit/build |
 | Supply-chain/schema drift | SDK/spec update silently changes validation or tool behavior | Pin SDK; generated schema snapshots; protocol matrix; dependency review; fail closed on unsupported revision | CI diff requires review and supported-version suite passes |
+| Registration flood | Anyone who can reach `/api/foundry-mcp/oauth/register` writes registrations until storage or the endpoint is exhausted | 8 KiB body limit; at most 5 redirect URIs; bounded name and URI lengths; 20 registrations per site per hour in `mcp_rate_limit_buckets`; 500 stored clients per site enforced inside the insert statement, which first removes the oldest registrations no Owner approved so a flood cannot lock the site out for good; the hourly budget is spent only on a well-formed registration; operator may set `FOUNDRY_MCP_CLIENTS` to turn registration off | Rate-limited registration returns 429 with `Retry-After` and stores nothing; oversized body and over-long metadata return 400 |
+| Registration mistaken for access | A registered client is treated as connected, or an Owner reads a registered name as proof of identity | A registration writes only `mcp_registered_clients`; no connection, actor, scope or token exists until Owner consent behind human sign-in; registered metadata is immutable by database trigger; the name is escaped and the consent screen states it is a claim, beside the client identifier and exact return address | A registered client cannot exchange a token; a script-shaped client name appears escaped and never as markup |
+| Consent scope inflation | A consent submission grants a scope the client never requested, or drops a scope a connection already holds | Granted set must be inside the requested set and must keep `site.read`; a step-up must keep every scope the connection already holds; removal still requires revocation | Consent adding an unrequested scope and consent dropping `site.read` are both refused with no connection written |
 
 ## Data-flow restrictions
 
@@ -88,6 +91,17 @@ for published content.
 - A compromised authorized MCP client can read and mutate everything its scopes
   permit until revocation. Owners should grant only needed scopes, review last
   use and revoke unused connections.
+- With dynamic registration on, anyone who can reach the registration endpoint
+  can create an inert client record and then send an Owner a link to the consent
+  screen. The Owner is the control: the screen names the client, its identifier
+  and its exact return address, and states that the name is a claim. An Owner
+  who approves a client they did not start has granted that client access. The
+  operator can remove this path entirely by setting `FOUNDRY_MCP_CLIENTS`.
+- A dynamically registered client may use the `localhost` name in its redirect
+  URI, which installed clients such as Claude Code document. A name can be made
+  to resolve somewhere other than the Owner's own computer. The Owner sees the
+  exact return address on the consent screen. The operator allowlist does not
+  accept the name and takes the literal loopback address only.
 - A malicious model can produce poor but schema-valid content. Canonical human
   preview and approval are the quality and intent boundary for publication.
 - A compromised client-owned Cloudflare or GitHub account exceeds the MCP trust

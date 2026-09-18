@@ -72,6 +72,10 @@ export default async function DashboardCampaignsPage({
           contentRevision.definition,
         ).filter((image) => image.src.startsWith("https://"))}
         initialCampaigns={campaigns}
+        // The steps say whose step each one is. The server still decides every
+        // command; this only lets the screen explain an Owner-only step to an
+        // Editor instead of refusing it after the fact.
+        role={access.membership.role}
         postSources={postArtifacts.flatMap((artifact) => {
           const post = definition.blog.posts.find(
             ({ id }) => id === artifact.postId,

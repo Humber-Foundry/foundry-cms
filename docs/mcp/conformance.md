@@ -36,8 +36,13 @@ account.
 
 ## Protocol and schema suite
 
-- Negotiate MCP `2025-11-25`; reject unsupported versions with a clear protocol
-  error and test explicitly supported older versions if any.
+- Negotiate MCP `2025-03-26`, `2025-06-18` and `2025-11-25`; answer `initialize`
+  with the revision the client asked for when it is one of these, and otherwise
+  with `2025-11-25`. Reject an unsupported `MCP-Protocol-Version` header with
+  HTTP `400`. Accept a request with no version header, which means the assumed
+  `2025-03-26` revision.
+- Answer HTTP GET and DELETE on the MCP endpoint with `405` and `Allow: POST`,
+  because this server offers no server-initiated SSE stream.
 - Verify Streamable HTTP headers, Origin policy, content types, session
   lifecycle, cancellation, pagination, honest `listChanged` declarations and
   reinitialization with a replacement token after scope step-up.
@@ -61,8 +66,16 @@ account.
 
 - Discover RFC 9728 metadata from the `WWW-Authenticate` challenge and verify
   exact `resource`.
-- Complete authorization code + PKCE S256 with client metadata, pre-registered
-  client and any supported dynamic registration path.
+- Complete authorization code + PKCE S256 for a dynamically registered client
+  and for an operator-allowlisted client.
+- Prove a registration grants nothing: a registered client cannot exchange a
+  token, and no connection exists until an Owner consents.
+- Prove registration is bounded and rate limited, and that an operator allowlist
+  turns it off and removes `registration_endpoint` from the metadata.
+- Prove the Owner can approve fewer scopes than requested, cannot approve a
+  scope that was not requested, and cannot drop `site.read`.
+- Prove the authorize endpoint ignores unknown parameters and still refuses an
+  altered parameter it does use.
 - Reject missing PKCE support, wrong verifier, reused code, state mismatch,
   non-exact redirect URI, expired code and untrusted client metadata.
 - Reject access tokens with wrong issuer, signature, algorithm, expiry,

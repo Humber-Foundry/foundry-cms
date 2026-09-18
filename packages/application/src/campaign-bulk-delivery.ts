@@ -456,6 +456,61 @@ export type CampaignBulkStateStore = Readonly<{
     providerMessageIds: ReadonlyArray<string>;
     now: string;
   }): Promise<CampaignBulkSendOperation | null>;
+  /**
+   * One campaign's current bulk rows, read only.
+   *
+   * Each part is at most one row. The database holds one active authorization
+   * and one active schedule per campaign, and one send operation per campaign,
+   * so a screen that asks "what step is this campaign on" needs exactly this
+   * and nothing wider.
+   */
+  findCampaignBulkState(input: {
+    siteId: SiteId;
+    campaignId: CampaignId;
+  }): Promise<
+    Readonly<{
+      authorization: CampaignBulkAuthorization | null;
+      schedule: CampaignBulkSchedule | null;
+      operation: CampaignBulkSendOperation | null;
+    }>
+  >;
+}>;
+
+/**
+ * What a screen may know about one campaign's bulk state.
+ *
+ * This is a deliberately narrow copy of the stored rows rather than the rows
+ * themselves. A stored send operation carries the audience snapshot, every
+ * recipient address in it, and the exact bytes that were sent. None of that may
+ * reach a dashboard, so this names only states, times, counts and the
+ * fingerprint the human has to act on. Widening it means deciding again, in
+ * one place, that the new field is safe to show.
+ */
+export type CampaignBulkStateReport = Readonly<{
+  authorization: Readonly<{
+    id: string;
+    campaignFingerprint: string;
+    testExecutionId: string;
+    state: CampaignBulkAuthorization["state"];
+    authorizedAt: string;
+  }> | null;
+  schedule: Readonly<{
+    id: string;
+    state: CampaignBulkSchedule["state"];
+    localDateTime: string;
+    ianaTimeZone: string;
+    utcOffsetChoice: string;
+    executeAtUtc: string;
+  }> | null;
+  sendOperation: Readonly<{
+    id: string;
+    state: CampaignBulkSendOperation["state"];
+    attempt: number;
+    scheduledInstant: string | null;
+    recipientCount: number | null;
+    detail: string | null;
+    updatedAt: string;
+  }> | null;
 }>;
 
 export type CampaignBulkSource = Readonly<{
@@ -514,6 +569,17 @@ export type CampaignBulkDeliveryApplication = Readonly<{
     ingestVerifiedEvent(
       event: VerifiedCampaignDeliveryEvent,
     ): Promise<"recorded" | "duplicate">;
+  }>;
+  queries: Readonly<{
+    /**
+     * Report one campaign's bulk state for a screen. This reads; it grants
+     * nothing. An Editor may read it, because the Newsletter screen has to
+     * explain the step an Editor cannot take.
+     */
+    campaignState(input: {
+      actor: CampaignActor;
+      campaignId: CampaignId;
+    }): Promise<CampaignBulkStateReport>;
   }>;
   scheduler: Readonly<{
     claimDue(): Promise<CampaignBulkSendOperation | null>;
@@ -708,6 +774,7 @@ export function createCampaignBulkDeliveryApplication({
   store,
   loadSource,
   authorizeOwner,
+  authorizeRead,
   identifyActor,
   validateOwnerAuthority,
   resolveAudience,
@@ -727,6 +794,13 @@ export function createCampaignBulkDeliveryApplication({
     testExecutionId: string,
   ): Promise<CampaignBulkSource>;
   authorizeOwner(actor: CampaignActor): Promise<Readonly<{ id: string }>>;
+  /**
+   * Admit an actor who may read this campaign's bulk state. It is separate
+   * from `authorizeOwner` because reading is not authority: an Editor has to
+   * see that a send is scheduled, and why the send step is not theirs, without
+   * gaining any way to take it.
+   */
+  authorizeRead(actor: CampaignActor): Promise<unknown>;
   identifyActor(actor: CampaignActor): string;
   validateOwnerAuthority(ownerActorId: string): Promise<boolean>;
   resolveAudience(
@@ -1539,6 +1613,55 @@ export function createCampaignBulkDeliveryApplication({
           });
         }
         return result;
+      },
+    }),
+    queries: Object.freeze({
+      async campaignState({
+        actor,
+        campaignId,
+      }: {
+        actor: CampaignActor;
+        campaignId: CampaignId;
+      }): Promise<CampaignBulkStateReport> {
+        await authorizeRead(actor);
+        const state = await store.findCampaignBulkState({ siteId, campaignId });
+        return Object.freeze({
+          authorization:
+            state.authorization === null
+              ? null
+              : Object.freeze({
+                  id: state.authorization.id,
+                  campaignFingerprint: state.authorization.campaignFingerprint,
+                  testExecutionId: state.authorization.testExecutionId,
+                  state: state.authorization.state,
+                  authorizedAt: state.authorization.authorizedAt,
+                }),
+          schedule:
+            state.schedule === null
+              ? null
+              : Object.freeze({
+                  id: state.schedule.id,
+                  state: state.schedule.state,
+                  localDateTime: state.schedule.localDateTime,
+                  ianaTimeZone: state.schedule.ianaTimeZone,
+                  utcOffsetChoice: state.schedule.utcOffsetChoice,
+                  executeAtUtc: state.schedule.executeAtUtc,
+                }),
+          sendOperation:
+            state.operation === null
+              ? null
+              : Object.freeze({
+                  id: state.operation.id,
+                  state: state.operation.state,
+                  attempt: state.operation.attempt,
+                  scheduledInstant: state.operation.scheduledInstant,
+                  // A count, never who is in it.
+                  recipientCount:
+                    state.operation.audienceSnapshot?.recipientCount ?? null,
+                  detail: state.operation.detail,
+                  updatedAt: state.operation.updatedAt,
+                }),
+        });
       },
     }),
     scheduler: Object.freeze({
