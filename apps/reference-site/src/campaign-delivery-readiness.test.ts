@@ -18,7 +18,7 @@ const configuredEnvironment: HumanAccessEnvironment = Object.freeze({
   FOUNDRY_NEWSLETTER_DELIVERY_SECRET: "n".repeat(32),
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET: "s".repeat(32),
   FOUNDRY_BREVO_API_KEY: "example-api-key",
-  FOUNDRY_CAMPAIGN_TEST_PROOF_KEY: "example-proof-key",
+  FOUNDRY_CAMPAIGN_TEST_PROOF_KEY: "p".repeat(32),
   FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN: "w".repeat(32),
   FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT: "a".repeat(64),
   FOUNDRY_BREVO_PROVISIONING_EVIDENCE_JSON: JSON.stringify({
@@ -94,6 +94,17 @@ describe("campaign delivery readiness settings", () => {
         FOUNDRY_NEWSLETTER_DELIVERY_SECRET: "n".repeat(31),
       }),
     ).toEqual(["FOUNDRY_NEWSLETTER_DELIVERY_SECRET"]);
+  });
+
+  it("rejects a proof key shorter than 32 characters", () => {
+    // The Brevo adapter refuses it, so reporting it as installed would move
+    // the failure to the page instead of the readiness report.
+    expect(
+      listMissingCampaignDeliverySettings({
+        ...configuredEnvironment,
+        FOUNDRY_CAMPAIGN_TEST_PROOF_KEY: "p".repeat(31),
+      }),
+    ).toEqual(["FOUNDRY_CAMPAIGN_TEST_PROOF_KEY"]);
   });
 
   it("rejects a subscriber identity secret shorter than 32 characters", () => {

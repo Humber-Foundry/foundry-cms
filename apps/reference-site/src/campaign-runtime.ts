@@ -81,6 +81,7 @@ import {
 } from "./campaign-bulk-source";
 import {
   createGitHubContentPublisher,
+  GitHubContentPublisherConfigurationError,
   readGitHubContentPublisherConfiguration,
 } from "./github-content-publisher";
 
@@ -200,12 +201,19 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
 export function resolveCampaignChannelConfiguration(
   environment: HumanAccessEnvironment,
 ): CampaignChannelConfiguration {
-  return readCampaignChannelConfiguration(
-    environment,
-    newsletterUnsubscribePlaceholder(
+  let placeholder = "";
+  try {
+    placeholder = newsletterUnsubscribePlaceholder(
       environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
-    ),
-  );
+    );
+  } catch {
+    // An absent or malformed unsubscribe address is a configuration fault.
+    // Passing the empty address on lets the channel reader name it the same
+    // way it names every other absent compliance setting, rather than raising
+    // a bare URL error.
+    placeholder = "";
+  }
+  return readCampaignChannelConfiguration(environment, placeholder);
 }
 
 /**
@@ -467,9 +475,20 @@ export async function loadCampaignRequestContext(
         providerConfigurationFingerprint: bulkProviderConfigurationFingerprint,
         senders,
       });
-      bulkArtifactPublisher = createGitHubContentPublisher({
-        configuration: readGitHubContentPublisherConfiguration(environment),
-      });
+      // Git publishing is configured separately from delivery. Without it a
+      // send cannot commit its artifact, so the publisher fails rather than
+      // stopping the Newsletter page from loading. Ticket #165 reports
+      // publishing readiness on screen.
+      try {
+        bulkArtifactPublisher = createGitHubContentPublisher({
+          configuration: readGitHubContentPublisherConfiguration(environment),
+        });
+      } catch (error) {
+        if (!(error instanceof GitHubContentPublisherConfigurationError)) {
+          throw error;
+        }
+        bulkArtifactPublisher = notConfiguredArtifactPublisher;
+      }
     }
   }
   const application = createCampaignApplication({

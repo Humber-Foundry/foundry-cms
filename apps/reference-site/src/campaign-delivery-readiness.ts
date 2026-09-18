@@ -30,17 +30,10 @@ export const campaignDeliverySetupGuide =
  */
 export type CampaignDeliveryReadiness = Readonly<{
   state: "connected" | "not_configured" | "local_development";
-  missingSettings: ReadonlyArray<string>;
+  missingSettings: ReadonlyArray<CampaignDeliverySettingName>;
   providerHealth: NewsletterDeliveryHealth | null;
   setupGuide: string;
 }>;
-
-/** Whether this installation can test or send a newsletter at all. */
-export function isCampaignDeliveryConnected(
-  readiness: CampaignDeliveryReadiness,
-): boolean {
-  return readiness.state === "connected";
-}
 
 /**
  * Every secret and provider setting an installation must hold before Foundry
@@ -69,6 +62,10 @@ export const campaignDeliverySettingNames = Object.freeze([
   "FOUNDRY_BREVO_SENDERS_JSON",
   "FOUNDRY_CAMPAIGN_TEST_RECIPIENTS_JSON",
 ] as const);
+
+/** One named delivery setting. */
+export type CampaignDeliverySettingName =
+  (typeof campaignDeliverySettingNames)[number];
 
 function isPresent(value: string | undefined): boolean {
   return value !== undefined && value.trim() !== "";
@@ -110,7 +107,7 @@ function isNonEmptyJsonObject(value: string | undefined): boolean {
  */
 const campaignDeliverySettingChecks: Readonly<
   Record<
-    (typeof campaignDeliverySettingNames)[number],
+    CampaignDeliverySettingName,
     (environment: HumanAccessEnvironment) => boolean
   >
 > = Object.freeze({
@@ -120,8 +117,13 @@ const campaignDeliverySettingChecks: Readonly<
     isLongEnoughSecret(environment.FOUNDRY_SUBSCRIBER_IDENTITY_SECRET),
   FOUNDRY_BREVO_API_KEY: (environment) =>
     isPresent(environment.FOUNDRY_BREVO_API_KEY),
+  // The Brevo adapter refuses a proof key shorter than 32 characters, and the
+  // runtime trims it before handing it over, so the trimmed length is what
+  // decides. A looser rule here would report delivery as connected and then
+  // fail when the adapter is built.
   FOUNDRY_CAMPAIGN_TEST_PROOF_KEY: (environment) =>
-    isPresent(environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY),
+    isPresent(environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY) &&
+    environment.FOUNDRY_CAMPAIGN_TEST_PROOF_KEY!.trim().length >= 32,
   FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN: (environment) =>
     isPresent(environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN) &&
     environment.FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN!.trim().length >= 32,
@@ -141,7 +143,7 @@ const campaignDeliverySettingChecks: Readonly<
  */
 export function listMissingCampaignDeliverySettings(
   environment: HumanAccessEnvironment,
-): ReadonlyArray<string> {
+): ReadonlyArray<CampaignDeliverySettingName> {
   return Object.freeze(
     campaignDeliverySettingNames.filter(
       (name) => !campaignDeliverySettingChecks[name](environment),

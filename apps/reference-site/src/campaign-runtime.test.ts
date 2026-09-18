@@ -68,7 +68,7 @@ const deliveryEnvironment = {
   FOUNDRY_NEWSLETTER_DELIVERY_SECRET: "n".repeat(32),
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET: "s".repeat(32),
   FOUNDRY_BREVO_API_KEY: "example-api-key",
-  FOUNDRY_CAMPAIGN_TEST_PROOF_KEY: "example-proof-key",
+  FOUNDRY_CAMPAIGN_TEST_PROOF_KEY: "p".repeat(32),
   FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN: "w".repeat(32),
   FOUNDRY_BREVO_ACCOUNT_SCOPE_FINGERPRINT: "a".repeat(64),
   FOUNDRY_BREVO_SENDERS_JSON: JSON.stringify({
@@ -152,6 +152,18 @@ describe("campaign request context without delivery settings", () => {
     ]);
   });
 
+  it("loads when delivery is installed but Git publishing is not", async () => {
+    // Git publishing is configured separately. A send cannot commit its
+    // artifact without it, but the Newsletter page must still load.
+    mocks.loadEnvironment.mockResolvedValue({
+      ...baseEnvironment,
+      ...deliveryEnvironment,
+    });
+    const context = await loadCampaignRequestContext(new Headers());
+    expect(context.delivery.state).toBe("connected");
+    expect(context.application).toBeDefined();
+  });
+
   it("still fails rather than continue when the database is absent", async () => {
     const { FOUNDRY_DB: _absent, ...rest } = baseEnvironment;
     mocks.loadEnvironment.mockResolvedValue(rest);
@@ -166,7 +178,7 @@ describe("delivery readiness report", () => {
     const readDeliveryHealth = vi.fn();
     const delivery = {
       state: "not_configured" as const,
-      missingSettings: ["FOUNDRY_BREVO_API_KEY"],
+      missingSettings: ["FOUNDRY_BREVO_API_KEY" as const],
       providerHealth: null,
       setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
     };
@@ -234,6 +246,24 @@ describe("compliance footer without delivery secrets", () => {
   it("refuses to build a footer the installation has not configured", () => {
     const { FOUNDRY_CAMPAIGN_LEGAL_NAME: _absent, ...rest } =
       channelEnvironment;
-    expect(() => resolveCampaignChannelConfiguration(rest)).toThrow();
+    expect(() => resolveCampaignChannelConfiguration(rest)).toThrow(
+      "campaign_channel_not_configured",
+    );
+  });
+
+  it("names an absent unsubscribe address like any other absent setting", () => {
+    // An empty address must raise the named configuration error, not a bare
+    // URL error from the address parser.
+    const { FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: _absent, ...rest } =
+      channelEnvironment;
+    expect(() => resolveCampaignChannelConfiguration(rest)).toThrow(
+      "campaign_channel_not_configured",
+    );
+    expect(() =>
+      resolveCampaignChannelConfiguration({
+        ...channelEnvironment,
+        FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: "not a url",
+      }),
+    ).toThrow("campaign_channel_not_configured");
   });
 });

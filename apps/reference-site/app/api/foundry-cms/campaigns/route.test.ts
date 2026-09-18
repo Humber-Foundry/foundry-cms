@@ -868,7 +868,6 @@ describe("campaign delivery readiness", () => {
       ["request_test", { action: "request_test", campaignId, testRecipientIds: ["owner-primary"] }],
       ["confirm_test_receipt", { action: "confirm_test_receipt", executionId: "40000000-0000-4000-8000-000000000001" }],
       ["authorize_bulk", { action: "authorize_bulk", campaignId, testExecutionId: "40000000-0000-4000-8000-000000000001" }],
-      ["cancel_bulk_schedule", { action: "cancel_bulk_schedule", scheduleId: "70000000-0000-4000-8000-000000000001" }],
       ["send_bulk_now", { action: "send_bulk_now", campaignId, authorizationId: "50000000-0000-4000-8000-000000000001" }],
       ["retry_bulk_send", { action: "retry_bulk_send", campaignId, operationId: "60000000-0000-4000-8000-000000000001" }],
     ])("refuses %s with a clear reason", async (name, body) => {
@@ -877,6 +876,49 @@ describe("campaign delivery readiness", () => {
       expect(await response.json()).toEqual({
         error: "delivery_not_configured",
       });
+    });
+
+    it("still lets an Owner cancel a scheduled send", async () => {
+      // Cancelling stops a send. An Owner needs it exactly when delivery has
+      // stopped working, so it must not be refused.
+      mocks.cancelBulkSchedule.mockResolvedValue({
+        schedule: { id: "70000000-0000-4000-8000-000000000001" },
+        replayed: false,
+      });
+      const response = await post(
+        {
+          action: "cancel_bulk_schedule",
+          scheduleId: "70000000-0000-4000-8000-000000000001",
+        },
+        "campaign-cancel-while-unconfigured-1",
+      );
+      expect(response.status).toBe(201);
+      expect(mocks.cancelBulkSchedule).toHaveBeenCalled();
+    });
+
+    it("refuses any action that is not on the allowed list", async () => {
+      // The gate is an allowlist, so an action absent from it is refused
+      // rather than permitted by omission.
+      const response = await post(
+        {
+          action: "activate_bulk_schedule",
+          campaignId,
+          authorizationId: "50000000-0000-4000-8000-000000000001",
+          resolvedTime: {
+            localDateTime: "2026-01-01T09:00",
+            ianaTimeZone: "America/Vancouver",
+            utcOffsetChoice: "-08:00",
+            executeAtUtc: "2026-01-01T17:00:00.000Z",
+            timeZoneDatabaseVersion: "2026a",
+          },
+        },
+        "campaign-blocked-activate-1",
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "delivery_not_configured",
+      });
+      expect(mocks.activateBulkSchedule).not.toHaveBeenCalled();
     });
 
     it("does not reach any send or test operation", async () => {

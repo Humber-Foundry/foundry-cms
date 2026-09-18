@@ -13,7 +13,7 @@ Install these values in the client-owned Worker configuration:
 - `FOUNDRY_BREVO_API_KEY` — a client-created Worker secret with the narrow
   Brevo authority required by the newsletter adapter.
 - `FOUNDRY_CAMPAIGN_TEST_PROOF_KEY` — a stable, installation-specific Worker
-  secret used only to bind the durable pre-send intent to the exact execution,
+  secret of at least 32 characters, used only to bind the durable pre-send intent to the exact execution,
   provider campaign, configuration, and recipient set. Rotate it separately
   from the Brevo credential and only after open test operations are resolved.
 - `FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN` — a random, installation-specific Worker

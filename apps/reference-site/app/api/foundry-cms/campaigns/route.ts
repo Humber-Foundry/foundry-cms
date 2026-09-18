@@ -17,7 +17,6 @@ import {
   loadCampaignRequestContext,
   readCampaignDeliveryReadiness,
 } from "../../../../src/campaign-runtime";
-import { isCampaignDeliveryConnected } from "../../../../src/campaign-delivery-readiness";
 import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
 
 type CampaignCommand =
@@ -114,16 +113,23 @@ function bulkRejectionStatus(code: string) {
 }
 
 /**
- * The commands that need connected email delivery. Every one of them either
- * sends a message or approves one, so all of them are refused while delivery
- * is not configured. Writing, saving and reading a campaign are absent from
- * this list on purpose: they send nothing.
+ * The commands that may still run while email delivery is not configured.
+ * None of them sends a message or approves one.
+ *
+ * The set is an allowlist rather than a list of blocked actions, so a new
+ * action is refused until it is listed here deliberately. A blocked list would
+ * let a new send action through by omission.
+ *
+ * Cancelling a schedule is on the list because it stops a send. An Owner needs
+ * it exactly when delivery has stopped working, so refusing it would leave an
+ * already-scheduled send with no way to call it off.
  */
-const deliveryActions: ReadonlySet<string> = new Set([
-  "request_test",
-  "confirm_test_receipt",
-  ...bulkActions,
-]);
+const actionsAllowedWithoutDelivery = Object.freeze([
+  "create_standalone",
+  "create_from_post",
+  "edit",
+  "cancel_bulk_schedule",
+] as const) satisfies ReadonlyArray<CampaignCommand["action"]>;
 
 type BulkAction = (typeof bulkActions)[number];
 type BulkCommand = Extract<CampaignCommand, { action: BulkAction }>;
@@ -567,12 +573,14 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    // Fail closed: while email delivery is not configured, no command that
-    // sends or approves a message may run. The reason names the state rather
-    // than the missing settings, which the readiness report lists.
+    // Fail closed: while email delivery is not configured, only the commands
+    // that send nothing may run. The reason names the state rather than the
+    // missing settings, which the readiness report lists.
     if (
-      !isCampaignDeliveryConnected(context.delivery) &&
-      deliveryActions.has(parsed.action)
+      context.delivery.state === "not_configured" &&
+      !(actionsAllowedWithoutDelivery as ReadonlyArray<string>).includes(
+        parsed.action,
+      )
     ) {
       return Response.json(
         { error: "delivery_not_configured" },
