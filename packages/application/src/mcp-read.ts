@@ -36,7 +36,56 @@ export const mcpSupportedScopes = Object.freeze([
   mcpCampaignTestScope,
   mcpAnalyticsReadScope,
 ] as const);
+/** The words shown to a site Owner for each scope on the consent screen. */
+export const mcpScopeLabels: Readonly<Record<string, string>> = Object.freeze({
+  [mcpInitialScope]: "Read this site",
+  [mcpContentDraftScope]: "Draft content",
+  [mcpDesignDraftScope]: "Draft design",
+  [mcpPublicationScheduleScope]: "Schedule publication",
+  [mcpPublicationPublishScope]: "Publish approved work",
+  [mcpCampaignDraftScope]: "Draft newsletter campaigns",
+  [mcpCampaignTestScope]: "Send a campaign test to verified addresses",
+  [mcpAnalyticsReadScope]: "Read aggregate analytics",
+});
+
+/**
+ * A client that may start an authorization. `environment` clients come from the
+ * operator's allowlist. `dynamic` clients registered themselves under RFC 7591.
+ * Neither kind holds any permission; only an Owner's consent grants one.
+ */
+export type McpRegisteredClient = Readonly<{
+  clientId: string;
+  name: string;
+  redirectUris: ReadonlyArray<string>;
+  source: "environment" | "dynamic";
+}>;
+
 export const mcpProtocolVersion = "2025-11-25" as const;
+
+/**
+ * Protocol revisions this server answers, oldest first. The last entry is the
+ * preferred revision the server reports when a client asks for a revision it
+ * does not know. Current clients still negotiate the two earlier revisions, so
+ * refusing them stops a real connection.
+ */
+export const mcpSupportedProtocolVersions = Object.freeze([
+  "2025-03-26",
+  "2025-06-18",
+  mcpProtocolVersion,
+] as const);
+
+/**
+ * The revision to assume when a client sends no `MCP-Protocol-Version` header
+ * after initialization. The specification fixes this default at `2025-03-26`.
+ */
+export const mcpAssumedProtocolVersion = "2025-03-26" as const;
+
+export function isSupportedMcpProtocolVersion(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (mcpSupportedProtocolVersions as ReadonlyArray<string>).includes(value)
+  );
+}
 
 export type McpConnectionStatus = "active" | "revoked";
 
