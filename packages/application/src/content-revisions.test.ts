@@ -23,7 +23,7 @@ import {
   createContentRevisionApplication,
   createInMemoryMediaContentCoordinator,
   createInMemoryContentRevisionStore,
-  compositionWithAuthoritativeVariants,
+  compositionWithStoredSectionStyles,
   isContentRevisionRenderableBy,
 } from "./content-revisions";
 
@@ -1439,7 +1439,7 @@ describe("section style reconciliation per page", () => {
   };
 
   it("takes the composition's style when the save does not edit that field", () => {
-    const result = compositionWithAuthoritativeVariants(
+    const result = compositionWithStoredSectionStyles(
       home,
       restyledComposition(),
       [{ path: `${heroId}.title`, value: "A new title" }],
@@ -1454,7 +1454,7 @@ describe("section style reconciliation per page", () => {
   it("keeps the stored style when the save also edits that field", () => {
     // The field edit is the single writer of a section style. It is applied
     // after the composition, so the composition carries the stored value.
-    const result = compositionWithAuthoritativeVariants(
+    const result = compositionWithStoredSectionStyles(
       home,
       restyledComposition(),
       [{ path: `${heroId}.variant`, value: "focused" }],
@@ -1466,14 +1466,14 @@ describe("section style reconciliation per page", () => {
   });
 
   it("reads a second page's style edit at that page's own field path", () => {
-    const withPageId = compositionWithAuthoritativeVariants(
+    const withPageId = compositionWithStoredSectionStyles(
       secondPage,
       restyledComposition(),
       [{ path: `page_about.${heroId}.variant`, value: "focused" }],
     );
     // A home page path names no page, so it must not match a field of the
     // page below it, even though both pages hold a section with this id.
-    const withHomePath = compositionWithAuthoritativeVariants(
+    const withHomePath = compositionWithStoredSectionStyles(
       secondPage,
       restyledComposition(),
       [{ path: `${heroId}.variant`, value: "focused" }],

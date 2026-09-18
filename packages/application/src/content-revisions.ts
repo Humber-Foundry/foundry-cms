@@ -177,7 +177,7 @@ type BlogPostAggregateState = Readonly<{
 }>;
 
 /**
- * Keep the stored section style unless this save also edits that style.
+ * Keep each section's stored style unless this save also edits that style.
  *
  * `page` is the page the composition belongs to. A section style is an
  * editable field of its page, so its field path carries the page id on every
@@ -188,7 +188,7 @@ type BlogPostAggregateState = Readonly<{
  * composes a page other than the home page. Until then the one caller inside
  * this module passes the home page.
  */
-export function compositionWithAuthoritativeVariants(
+export function compositionWithStoredSectionStyles(
   page: SitePage,
   composition: PageComposition,
   edits: ReadonlyArray<SiteDefinitionEdit>,
@@ -985,7 +985,7 @@ export function createContentRevisionApplication({
                   baseDefinition,
                   // A composition still applies to the home page. Ticket #158
                   // passes the page the editor has open instead.
-                  compositionWithAuthoritativeVariants(
+                  compositionWithStoredSectionStyles(
                     homePage(baseDefinition),
                     command.composition,
                     command.edits,
