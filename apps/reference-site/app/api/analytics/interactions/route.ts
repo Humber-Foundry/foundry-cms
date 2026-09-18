@@ -1,5 +1,4 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { homePage } from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "@/foundry/site-definition";
 import {
@@ -20,13 +19,20 @@ export const dynamic = "force-dynamic";
 
 const maximumBodySize = 512;
 
-/** Public CMS object IDs a browser may report an interaction against. */
+/**
+ * Public CMS object IDs a browser may report an interaction against. Every
+ * page contributes its own id and its own sections' ids, not only the home
+ * page, so a form or call-to-action on any page can be counted. See
+ * ADR-0026.
+ */
 function publicSubjectIds(): ReadonlySet<string> {
-  return new Set([
-    homePage(installedSiteDefinition).id,
-    ...homePage(installedSiteDefinition).sections.map((section) => section.id),
-    ...installedSiteDefinition.blog.posts.map((post) => post.id),
-  ]);
+  const ids = new Set<string>();
+  for (const page of installedSiteDefinition.pages) {
+    ids.add(page.id);
+    for (const section of page.sections) ids.add(section.id);
+  }
+  for (const post of installedSiteDefinition.blog.posts) ids.add(post.id);
+  return ids;
 }
 
 function noContent() {

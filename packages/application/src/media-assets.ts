@@ -27,6 +27,12 @@ export function createMediaOccurrenceId(value: string): MediaOccurrenceId {
   return value as MediaOccurrenceId;
 }
 
+/**
+ * The two occurrence ids the reference media manager screen offers today,
+ * before any page but the home page has its own media editor. This list
+ * names only what that one screen shows; it is not the full set of ids the
+ * write path accepts. See `requirePageMediaOccurrenceId` and ADR-0026.
+ */
 export const renderedMediaOccurrenceIds = [
   "occurrence_home_hero",
   "occurrence_home_detail",
@@ -41,6 +47,28 @@ export function requireRenderedMediaOccurrenceId(
     throw new MediaValidationError("occurrenceId");
   }
   return value as RenderedMediaOccurrenceId;
+}
+
+/** A page's hero or detail media occurrence id, home page or any other. */
+export type PageMediaOccurrenceId = `occurrence_${string}_${"hero" | "detail"}`;
+
+const pageMediaOccurrenceIdPattern = /^occurrence_[a-z][a-z0-9_]*_(?:hero|detail)$/u;
+
+/**
+ * Accepts any page's hero or detail occurrence id, not only the home page's
+ * two. This is the write-path boundary `replaceOccurrence` and
+ * `cropOccurrence` check, opened by ADR-0026 so a media occurrence can be
+ * saved for any page. It does not check that the id names a page that
+ * actually exists — the site definition schema and `isBaseSiteDefinition` own
+ * that check when the occurrence is placed into a page's `media` list.
+ */
+export function requirePageMediaOccurrenceId(
+  value: MediaOccurrenceId,
+): PageMediaOccurrenceId {
+  if (!pageMediaOccurrenceIdPattern.test(value)) {
+    throw new MediaValidationError("occurrenceId");
+  }
+  return value as PageMediaOccurrenceId;
 }
 
 export type MediaAsset = Readonly<{
@@ -649,7 +677,7 @@ export function createMediaAssetApplication({
         command: ReplaceMediaOccurrenceCommand,
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
-        requireRenderedMediaOccurrenceId(command.occurrenceId);
+        requirePageMediaOccurrenceId(command.occurrenceId);
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
         const context = mutationContext(command.idempotencyKey, hash);
@@ -699,7 +727,7 @@ export function createMediaAssetApplication({
         command: CropMediaOccurrenceCommand,
       ): Promise<MediaOccurrenceRevision> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
-        requireRenderedMediaOccurrenceId(command.occurrenceId);
+        requirePageMediaOccurrenceId(command.occurrenceId);
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
         const context = mutationContext(command.idempotencyKey, hash);
@@ -871,7 +899,7 @@ export function createMediaAssetApplication({
         command: ReplaceMediaOccurrenceCommand,
       ): Promise<MediaOccurrenceRevision | null> {
         if (command.actorId !== actorId) throw new MediaSiteAccessError();
-        requireRenderedMediaOccurrenceId(command.occurrenceId);
+        requirePageMediaOccurrenceId(command.occurrenceId);
         assertIdempotencyKey(command.idempotencyKey);
         const hash = await sha256CanonicalJson(command);
         const replay = await replayMutation(

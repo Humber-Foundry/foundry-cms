@@ -101,6 +101,32 @@ export function pageFieldPath(page: SitePage, pathInPage: string): string {
   return page.slug === homePageSlug ? pathInPage : `${page.id}.${pathInPage}`;
 }
 
+/** The two media places every page may fill: a hero photo and a detail photo. */
+export const pageMediaSlots = ["hero", "detail"] as const;
+export type PageMediaSlot = (typeof pageMediaSlots)[number];
+
+/**
+ * The media occurrence id for one slot on one page.
+ *
+ * The home page keeps its two existing ids unchanged: `occurrence_home_hero`
+ * and `occurrence_home_detail`. They were stored, published and referenced by
+ * stored drafts before a site could have more than one page, so they carry no
+ * page id, for the same reason `pageFieldPath` gives the home page no prefix.
+ * See ADR-0017 and ADR-0026.
+ *
+ * Every other page's occurrence id is built from its own page id:
+ * `occurrence_<pageId>_hero` or `occurrence_<pageId>_detail`. A page id never
+ * changes, so a slug rename moves nothing this id names.
+ */
+export function pageMediaOccurrenceId(
+  page: SitePage,
+  slot: PageMediaSlot,
+): `occurrence_${string}_${PageMediaSlot}` {
+  return page.slug === homePageSlug
+    ? `occurrence_home_${slot}`
+    : `occurrence_${page.id}_${slot}`;
+}
+
 /**
  * The same definition with one page swapped for a new version of itself.
  *
