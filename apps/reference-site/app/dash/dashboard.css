@@ -289,25 +289,21 @@
 
 /* Destination and attention lists ---------------------------------------- */
 
-.destination-list,
 .attention-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.destination-list li,
 .attention-list li {
   padding-block: 0.85rem;
   border-top: 1px solid var(--dash-line);
 }
 
-.destination-list li:first-child,
 .attention-list li:first-child {
   border-top: 0;
 }
 
-.destination-list a,
 .attention-list a {
   display: inline-block;
   min-height: 1.5rem;
@@ -317,14 +313,8 @@
   text-underline-offset: 0.3rem;
 }
 
-.destination-list a:hover,
 .attention-list a:hover {
   text-decoration: underline;
-}
-
-.destination-list span {
-  display: block;
-  color: var(--dash-ink-soft);
 }
 
 /* Facts ------------------------------------------------------------------
@@ -879,20 +869,6 @@
 
 .copy-button:hover {
   border-color: var(--moss);
-}
-
-.copy-control {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 0.45rem;
-  justify-items: end;
-}
-
-.copy-status {
-  max-width: 15rem;
-  color: #8a352f;
-  font-size: var(--dash-text-small);
-  text-align: right;
 }
 
 .access-invite-form {
@@ -2141,14 +2117,6 @@
     flex-direction: row;
     border-right: 0;
     border-bottom: 1px solid #dce1dc;
-  }
-
-      .copy-control {
-    justify-items: start;
-  }
-
-  .copy-status {
-    text-align: left;
   }
 
   .status-grid,
