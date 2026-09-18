@@ -102,9 +102,10 @@ every content and design change is made before publication. It has a stable
 id, an owner, and a numbered revision that advances with each accepted save.
 Revision 0 is a copy of the published site, so a workspace at revision 0 holds
 no changes yet. Every authorized person gets one on their first dashboard
-visit; they never have to start it. The dashboard calls it **your draft** when
-it speaks to a site owner, and reserves "workspace" for the stored record and
-the API.
+visit; they never have to start it. Owner-facing copy should call it **your
+draft**; "workspace" names the stored record and the API operations. The page
+editor still says "workspace" to the owner in several places, which is a gap
+to close rather than the pattern to copy.
 
 **Media occurrence** — One stable, draft-workspace-scoped placement of a media
 asset in editable content. Replacing an occurrence changes that placement

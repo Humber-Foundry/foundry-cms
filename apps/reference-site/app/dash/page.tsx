@@ -25,7 +25,11 @@ export default async function DashboardOverviewPage({
   const definition = await loadPublishedDefinition();
   const { workspace, staleRecovery } =
     await readWorkspaceSearchParams(searchParams);
-  const dashboardWorkspace = await loadDashboardWorkspace(workspace, "/dash");
+  const dashboardWorkspace = await loadDashboardWorkspace(
+    workspace,
+    "/dash",
+    staleRecovery,
+  );
   const mutationToken = await loadMutationToken();
   const messages = await loadMessagesAttention(access);
 
@@ -80,7 +84,9 @@ export default async function DashboardOverviewPage({
                 dashboardWorkspace.workspaceId,
               )}`}
             >
-              Continue editing
+              {contentRevision.revision === 0
+                ? "Start editing"
+                : "Continue editing"}
             </a>
           </p>
         </section>

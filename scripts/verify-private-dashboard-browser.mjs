@@ -84,7 +84,10 @@ async function waitForDashboard(origin, child, logs) {
       );
     }
     try {
-      const response = await fetch(`${origin}/dash`, {
+      // The public home page, not `/dash`. A dashboard request creates the
+      // draft workspace, which would spend the fresh-database first visit
+      // this script has to observe from the browser.
+      const response = await fetch(`${origin}/`, {
         redirect: "manual",
       });
       if (response.status === 200) return;
@@ -327,7 +330,9 @@ async function main() {
     // request against a fresh database, so the dashboard has to create the
     // draft workspace on the server and show the posts. A recovery screen
     // here would mean the owner was asked to start a draft.
-    await page.goto(`${origin}/dash/blog`);
+    // Generous timeout: this is the first dashboard request, so the dev server
+    // compiles the route before it answers.
+    await page.goto(`${origin}/dash/blog`, { timeout: 120_000 });
     // A fresh site has no posts, so Blog opens its composer ready to write.
     await page.getByRole("heading", { name: "Posts", exact: true }).waitFor();
     await page.getByRole("textbox", { name: "Title" }).waitFor();
@@ -349,7 +354,7 @@ async function main() {
     ) {
       throw new Error("private_dashboard_overview_asked_for_a_workspace");
     }
-    await page.getByRole("link", { name: "Continue editing" }).click();
+    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
     await page.getByRole("heading", { name: "Pages" }).waitFor();
 

@@ -8,7 +8,6 @@ import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 const mocks = vi.hoisted(() => ({
   createMutationToken: vi.fn(),
-  defaultWorkspaceId: vi.fn(),
   durableSchemaRecoveryEdits: vi.fn(),
   getCurrent: vi.fn(),
   getPublishedSite: vi.fn(),
@@ -51,7 +50,6 @@ vi.mock("@/src/human-mutation-runtime", () => ({
   createHumanMutationToken: mocks.createMutationToken,
 }));
 vi.mock("@/src/content-revision-runtime", () => ({
-  contentWorkspaceIdForActor: mocks.defaultWorkspaceId,
   latestContentWorkspaceIdForActor: mocks.latestWorkspaceId,
   loadContentRevisionApplication: mocks.loadApplication,
   openDefaultContentWorkspace: mocks.openDefaultWorkspace,
@@ -109,7 +107,6 @@ describe("dashboard workspace resolution", () => {
       (workspaceId: string, revision: number) =>
         `/__foundry/preview/${workspaceId}/${revision}`,
     );
-    mocks.defaultWorkspaceId.mockResolvedValue(ownWorkspaceId);
     mocks.isRevisionCurrent.mockResolvedValue(true);
     mocks.loadApplication.mockResolvedValue({
       queries: {
@@ -212,6 +209,25 @@ describe("dashboard workspace resolution", () => {
         "/dash/design",
       ),
     ).rejects.toThrow(`redirect:/dash/design?workspace=${otherWorkspaceId}`);
+  });
+
+  it("carries a recovery in progress through the redirect", async () => {
+    mocks.latestWorkspaceId.mockResolvedValue(null);
+    mocks.requireExistingAccess.mockRejectedValueOnce(
+      new ContentWorkspaceAccessError(),
+    );
+
+    // Dropping the pointer would strand the preserved edits in the browser.
+    await expect(
+      loadDashboardWorkspace(otherWorkspaceId, "/dash/pages", {
+        id: "12345678-1234-4123-8123-123456789abc",
+        sourceWorkspaceId: otherWorkspaceId,
+      }),
+    ).rejects.toThrow(
+      `redirect:/dash/pages?workspace=${ownWorkspaceId}` +
+        "&recovery=12345678-1234-4123-8123-123456789abc" +
+        `&recoverFrom=${otherWorkspaceId}`,
+    );
   });
 
   it("keeps a real fault inside the access check visible", async () => {

@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   getRevisionWithBookmark: vi.fn(),
   isRevisionCurrent: vi.fn(),
   verifyMutation: vi.fn(),
+  openDefaultWorkspace: vi.fn(),
 }));
 vi.mock("../../../../src/human-access-runtime", () => ({
   authorizeAuthenticatedHumanIdentity: mocks.authorize,
@@ -51,26 +52,7 @@ vi.mock("../../../../src/content-revision-runtime", () => ({
   contentWorkspaceIdForActor: async () => "workspace_default",
   contentWorkspaceIdForMutation: async () => "workspace_created",
   loadContentRevisionApplication: mocks.loadApplication,
-  // Stands in for the shared open operation. The real one has its own tests
-  // against a migrated database; here it only has to reach the same
-  // application command with the request's own idempotency key.
-  openDefaultContentWorkspace: async (
-    actorId: string,
-    idempotencyKey: string,
-  ) => {
-    const application = await mocks.loadApplication(
-      "workspace_default",
-      actorId,
-    );
-    return {
-      workspaceId: "workspace_default",
-      revision: await application.commands.create({
-        actorId,
-        workspaceId: "workspace_default",
-        idempotencyKey,
-      }),
-    };
-  },
+  openDefaultContentWorkspace: mocks.openDefaultWorkspace,
   openDefaultWorkspaceIdempotencyKey: "dashboard-open-default-workspace",
   requireExistingContentWorkspaceAccess: mocks.requireExistingAccess,
 }));
@@ -584,16 +566,21 @@ describe("content revision endpoint", () => {
     );
   });
 
-  it("creates the actor's stable default workspace through POST", async () => {
-    mocks.create.mockResolvedValue({
+  it("opens the actor's default workspace through the shared operation", async () => {
+    // The dashboard's own first visit calls this same function, so the two
+    // ways of getting a default workspace cannot drift apart.
+    mocks.openDefaultWorkspace.mockResolvedValue({
       workspaceId: "workspace_default",
-      revision: 0,
-      definition: { schemaVersion: "1.2.0" },
-      inputs: {
-        contentHash: "abc",
-        schemaVersion: "1.2.0",
-        rendererVersion: "renderer-a",
-        productionBase: "published-a",
+      revision: {
+        workspaceId: "workspace_default",
+        revision: 0,
+        definition: { schemaVersion: "1.2.0" },
+        inputs: {
+          contentHash: "abc",
+          schemaVersion: "1.2.0",
+          rendererVersion: "renderer-a",
+          productionBase: "published-a",
+        },
       },
     });
 
@@ -605,10 +592,15 @@ describe("content revision endpoint", () => {
     );
 
     expect(response.status).toBe(201);
-    expect(mocks.create).toHaveBeenCalledWith({
-      actorId: "membership-editor",
+    expect(mocks.openDefaultWorkspace).toHaveBeenCalledWith(
+      "membership-editor",
+      "workspace-default-0001",
+    );
+    // The request's own key is used, not the dashboard's fixed one.
+    expect(mocks.create).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
       workspaceId: "workspace_default",
-      idempotencyKey: "workspace-default-0001",
+      revision: 0,
     });
   });
 

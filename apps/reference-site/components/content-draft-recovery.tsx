@@ -335,35 +335,34 @@ export function ContentDraftRecovery({
   return (
     <section
       className="content-editor"
-      aria-labelledby="content-workspace-heading"
+      aria-labelledby="content-draft-recovery-heading"
     >
       <div className="dashboard-section-heading editor-heading">
         <div>
-          <h2 id="content-workspace-heading">Start a fresh draft</h2>
+          <h2 id="content-draft-recovery-heading">Start a fresh draft</h2>
           {reason === "older-schema" ? (
             <p>
               This draft was written for an older version of your site, so it
               can no longer be saved. Start a fresh draft to carry on. The
-              changes that still fit are copied across.
+              changes that still fit are copied across, and this draft is kept.
             </p>
           ) : (
             <p>
-              Your site has been published again since this draft was written,
-              so this draft can no longer be saved. Start a fresh draft to
-              carry on.
+              Your site was updated after this draft was written, so this draft
+              can no longer be saved. Start a fresh draft to carry on. This
+              draft is kept, and you can still{" "}
+              {/* Pages opens this draft in the editor, because only an
+                  older-schema draft sends the owner back to this screen. */}
+              <a
+                href={`/dash/pages?workspace=${encodeURIComponent(
+                  preservedRevision.workspaceId,
+                )}`}
+              >
+                open it in Pages
+              </a>{" "}
+              to copy anything you need.
             </p>
           )}
-          <p>
-            The old draft is kept.{" "}
-            <a
-              href={`/dash/pages?workspace=${encodeURIComponent(
-                preservedRevision.workspaceId,
-              )}`}
-            >
-              Open the old draft
-            </a>{" "}
-            to copy anything else you need.
-          </p>
         </div>
         <button
           type="button"

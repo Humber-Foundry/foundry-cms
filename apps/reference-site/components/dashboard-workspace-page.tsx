@@ -38,6 +38,7 @@ export async function DashboardWorkspacePage({
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     config.route,
+    staleRecovery,
   );
   const mutationToken = await loadMutationToken();
   const { contentRevision, previewUrl, schemaRecovery } = dashboardWorkspace;

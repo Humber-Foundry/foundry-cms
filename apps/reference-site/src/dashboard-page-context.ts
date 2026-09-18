@@ -157,6 +157,7 @@ export function preservedRevisionOf(contentRevision: ContentRevision) {
 export async function loadDashboardWorkspace(
   requestedWorkspace?: string,
   routePath = "/dash",
+  staleRecovery?: Readonly<{ id: string; sourceWorkspaceId: string }>,
 ): Promise<DashboardWorkspace> {
   const access = await requireAuthorizedDashboardAccess();
   const definition = await loadPublishedDefinition();
@@ -173,9 +174,18 @@ export async function loadDashboardWorkspace(
 
     // The URL asked for a workspace this person cannot open. Send them to the
     // one they did get, so the address bar and every sidebar link stop
-    // carrying the dead id.
-    if (requestedWorkspace !== undefined && requestedWorkspace !== workspaceId) {
-      redirect(activeWorkspaceUrl);
+    // carrying the dead id. A recovery in progress travels with them, or its
+    // preserved edits would be stranded in the browser.
+    if (
+      requestedWorkspace !== undefined &&
+      requestedWorkspace !== workspaceId
+    ) {
+      const destination = new URLSearchParams({ workspace: workspaceId });
+      if (staleRecovery !== undefined) {
+        destination.set("recovery", staleRecovery.id);
+        destination.set("recoverFrom", staleRecovery.sourceWorkspaceId);
+      }
+      redirect(`${routePath}?${destination.toString()}`);
     }
 
     const contentApplication = await loadContentRevisionApplication(
@@ -210,8 +220,8 @@ export async function loadDashboardWorkspace(
       activeWorkspaceUrl,
     };
   } catch (error) {
-    // The workspace existed a moment ago, so reaching either of these means
-    // the installation is broken rather than that the owner has no draft.
+    // Either error here is an installation fault, not a person without a
+    // draft: every path above either opens a workspace or creates one.
     if (
       error instanceof ContentWorkspaceAccessError ||
       error instanceof ContentRevisionConfigurationError

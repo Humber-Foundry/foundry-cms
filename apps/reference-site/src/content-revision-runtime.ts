@@ -122,9 +122,11 @@ export const openDefaultWorkspaceIdempotencyKey =
  *
  * This is the single operation behind both ways of getting a default
  * workspace: the `create_default_workspace` API operation and the dashboard's
- * own first visit. Both therefore run the same authorization checks and write
+ * own first visit. Both therefore apply the same capability check and write
  * the same rows. Neither writes a revision audit event, because revision 0 is
- * a copy of the published site rather than somebody's edit.
+ * a copy of the published site rather than somebody's edit. The API operation
+ * additionally checks request integrity, which a page render cannot; ADR-0005
+ * records why that is allowed for this one write.
  *
  * Creation is idempotent and stays correct when two first requests arrive
  * together. The workspace id is derived from the actor, so both requests aim

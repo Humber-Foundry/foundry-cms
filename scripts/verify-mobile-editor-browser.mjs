@@ -103,9 +103,9 @@ try {
   const page = await context.newPage();
   await page.goto(`${origin}/dash`);
 
-  // The dashboard creates the draft workspace on the server during this first
-  // visit, so Overview links straight into the page editor.
-  await page.getByRole("link", { name: "Continue editing" }).click();
+  // The dashboard creates the draft workspace on the server, so Overview
+  // links straight into the page editor.
+  await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
   await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
   await page.getByRole("heading", { name: "Pages" }).waitFor();
 

@@ -161,9 +161,9 @@ async function main() {
     }
 
     await page.goto(`${origin}/dash`);
-    // The dashboard creates the draft workspace on the server during
-    // this first visit, so Overview links straight into the editor.
-    await page.getByRole("link", { name: "Continue editing" }).click();
+    // The dashboard creates the draft workspace on the server, so Overview
+    // links straight into the page editor.
+    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
     const workspace = new URL(page.url()).searchParams.get("workspace");
 

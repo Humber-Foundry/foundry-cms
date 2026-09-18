@@ -6,6 +6,7 @@ import {
   ContentRevisionConfigurationError,
   ContentRevisionStaleError,
   ContentWorkspaceAccessError,
+  type ContentRevision,
   MediaSiteAccessError,
   MediaValidationError,
   createContentActorId,
@@ -724,7 +725,7 @@ export async function POST(request: Request) {
       // API operation and the dashboard's own first visit create it the same
       // way. A `create_workspace` request asks for a separate workspace, whose
       // id comes from the request's own idempotency key.
-      let created;
+      let created: ContentRevision;
       if (operation === "create_default_workspace") {
         created = (
           await openDefaultContentWorkspace(actorId, idempotencyKey)

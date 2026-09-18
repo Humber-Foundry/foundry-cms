@@ -164,8 +164,12 @@ the dashboard and same-origin preview iframe within this boundary.
 
 #### Amendment (issue #148): opening the first draft workspace on a GET
 
-A dashboard `GET` may create the requesting person's own draft workspace and
-its revision 0. Nothing else may be written during a `GET` or `HEAD`.
+A dashboard `GET` may open the requesting person's own draft workspace, which
+creates it when they do not have one. That operation writes the workspace row,
+its revision 0, and the derived blog-post rows that project the already
+published posts into the new workspace. Every one of those inserts ignores a
+row that is already there. No other operation may be reached from a `GET` or a
+`HEAD`.
 
 This is the one exception to "`GET` and `HEAD` remain side-effect free" above.
 The original clause exists so that a cross-site request cannot change what the

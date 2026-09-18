@@ -81,6 +81,7 @@ export default async function DashboardBlogPage({
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     "/dash/blog",
+    staleRecovery,
   );
   const definition = await loadPublishedDefinition();
   const mutationToken = await loadMutationToken();
