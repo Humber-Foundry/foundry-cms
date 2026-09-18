@@ -70,6 +70,22 @@ describe("production MCP configuration", () => {
     );
   });
 
+  it("keeps the operator allowlist on literal loopback addresses only", () => {
+    // A dynamically registered client may use the localhost name, because
+    // that is what installed clients document. An operator writes the
+    // allowlist by hand and must write the literal address.
+    expect(() =>
+      readMcpRegisteredClients(
+        JSON.stringify({
+          "https://client.example/metadata.json": {
+            name: "Desktop client",
+            redirectUris: ["http://localhost:43119/callback"],
+          },
+        }),
+      ),
+    ).toThrow(HumanAccessConfigurationError);
+  });
+
   it("treats an unset client allowlist as open dynamic registration", () => {
     expect(readMcpRegisteredClients(undefined)).toEqual({});
     expect(readMcpRegisteredClients("")).toEqual({});

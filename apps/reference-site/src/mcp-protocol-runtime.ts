@@ -4,7 +4,6 @@ import {
   mcpContentDraftScope,
   mcpContractVersion,
   mcpDesignDraftScope,
-  mcpAssumedProtocolVersion,
   mcpInitialScope,
   mcpProtocolVersion,
   mcpSupportedProtocolVersions,
@@ -38,6 +37,7 @@ import {
 } from "./mcp-tool-registry";
 
 export {
+  mcpAssumedProtocolVersion,
   mcpProtocolVersion,
   mcpSupportedProtocolVersions,
 } from "@humber-foundry/application";

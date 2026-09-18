@@ -90,10 +90,13 @@ clients may authorize, the registration endpoint answers `403` and
 
 Remote redirects must use HTTPS. Exact loopback redirects are supported for
 installed clients, which is how a client on the Owner's own computer receives
-its authorization code. Wildcards, fragments, a present but empty registry,
-missing D1, and a missing or short signing secret fail closed with no MCP
-command execution. Neither setting contains an access token; the signing key
-must still remain a Worker secret.
+its authorization code. A client that registers itself may use
+`http://127.0.0.1`, `http://[::1]` or `http://localhost`. This allowlist takes
+the literal addresses only, not the `localhost` name.
+
+Wildcards, fragments, a present but empty registry, missing D1, and a missing or
+short signing secret fail closed with no MCP command execution. Neither setting
+contains an access token; the signing key must still remain a Worker secret.
 
 Registration is bounded: an 8 KiB body, at most 5 redirect URIs, a
 120-character client name, 20 registrations per site per hour, and 500 stored

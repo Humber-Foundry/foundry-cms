@@ -36,6 +36,30 @@ export const mcpSupportedScopes = Object.freeze([
   mcpCampaignTestScope,
   mcpAnalyticsReadScope,
 ] as const);
+/** The words shown to a site Owner for each scope on the consent screen. */
+export const mcpScopeLabels: Readonly<Record<string, string>> = Object.freeze({
+  [mcpInitialScope]: "Read this site",
+  [mcpContentDraftScope]: "Draft content",
+  [mcpDesignDraftScope]: "Draft design",
+  [mcpPublicationScheduleScope]: "Schedule publication",
+  [mcpPublicationPublishScope]: "Publish approved work",
+  [mcpCampaignDraftScope]: "Draft newsletter campaigns",
+  [mcpCampaignTestScope]: "Send a campaign test to verified addresses",
+  [mcpAnalyticsReadScope]: "Read aggregate analytics",
+});
+
+/**
+ * A client that may start an authorization. `environment` clients come from the
+ * operator's allowlist. `dynamic` clients registered themselves under RFC 7591.
+ * Neither kind holds any permission; only an Owner's consent grants one.
+ */
+export type McpRegisteredClient = Readonly<{
+  clientId: string;
+  name: string;
+  redirectUris: ReadonlyArray<string>;
+  source: "environment" | "dynamic";
+}>;
+
 export const mcpProtocolVersion = "2025-11-25" as const;
 
 /**

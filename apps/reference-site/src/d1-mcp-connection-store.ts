@@ -8,12 +8,12 @@ import {
   type McpConnectionStore,
   type McpPublicationAuditEvent,
   type McpReadAuditEvent,
+  type McpRegisteredClient,
 } from "@humber-foundry/application";
 import type { SiteId } from "@humber-foundry/site-definition";
 
 import type { D1DatabaseBinding } from "./d1-human-access-store";
 import type { McpClientRegistrationMetadata } from "./mcp-client-registration";
-import type { McpRegisteredClient } from "./mcp-http-runtime";
 
 type ConnectionRow = Readonly<{
   id: string;
@@ -885,6 +885,34 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
       };
     },
     async registerClient(input) {
+      // Make room before inserting. A registration no Owner ever approved
+      // holds nothing, so the oldest of those give way first. Without this a
+      // flood of registrations would lock the site out of registering forever.
+      await database
+        .prepare(
+          `DELETE FROM mcp_registered_clients
+            WHERE site_id = ?1
+              AND client_id IN (
+                SELECT candidate.client_id
+                  FROM mcp_registered_clients AS candidate
+                 WHERE candidate.site_id = ?1
+                   AND NOT EXISTS (
+                     SELECT 1 FROM mcp_connections AS connection
+                      WHERE connection.site_id = candidate.site_id
+                        AND connection.oauth_client_id = candidate.client_id
+                   )
+                 ORDER BY candidate.registered_at ASC, candidate.client_id ASC
+                 LIMIT MAX(
+                   0,
+                   (
+                     SELECT COUNT(*) FROM mcp_registered_clients
+                      WHERE site_id = ?1
+                   ) - ?2 + 1
+                 )
+              )`,
+        )
+        .bind(input.siteId, input.capacity)
+        .run();
       // Bound how many registrations one site can hold. A registration grants
       // nothing, so the only risk it carries is unbounded storage.
       const inserted = await database

@@ -342,6 +342,15 @@ a revision a human already approved. It may not approve its own work, supply
 its own approval evidence, publish or schedule anything a human has not
 approved, or send bulk email.
 
+**Registered client** — The software an MCP agent runs in, recorded by name,
+client identifier and exact return addresses. A client registers itself, or an
+operator pins it in an allowlist. A registered client is not an MCP agent and
+holds no permission: it is only allowed to ask.
+
+**Consent screen** — The page, behind human sign-in, where a site Owner reads
+what a registered client is asking for and approves or reduces it. Approving
+creates the MCP agent. It is the only place a permission is granted.
+
 **Integration** — A narrowly scoped non-human adapter or callback identity. It
 reports external facts or performs requested provider operations; it does not
 originate human authorization.

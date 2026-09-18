@@ -499,6 +499,9 @@ async function authorize(
         redirect_uri: redirectUri,
         resource: resourceUri,
         scope,
+        // The Owner's consent is what grants. It is always explicit, so this
+        // helper states it rather than relying on a default.
+        granted_scope: scope,
         ...(stepUp === undefined
           ? {}
           : {
@@ -3876,5 +3879,205 @@ describe("MCP real-client OAuth evidence", () => {
     } finally {
       await served.close();
     }
+  });
+});
+
+describe("MCP older-client and step-up compatibility", () => {
+  it("exchanges a code for a client that sends no resource indicator", async () => {
+    // A 2025-03-26 client sends no resource indicator anywhere. It must be
+    // able to finish the exchange it was allowed to start.
+    const { runtime } = fixture();
+    const verifier = "v".repeat(64);
+    const approved = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ["response_type", "code"],
+          ["client_id", clientId],
+          ["redirect_uri", redirectUri],
+          ["scope", "site.read"],
+          ["state", "older-client-state"],
+          ["code_challenge", await digest(verifier)],
+          ["code_challenge_method", "S256"],
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+        ]),
+      }),
+    );
+    expect(approved.status).toBe(303);
+    const callback = new URL(approved.headers.get("location")!);
+    const token = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: callback.searchParams.get("code")!,
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          code_verifier: verifier,
+        }),
+      }),
+    );
+    expect(token.status).toBe(200);
+    expect((await token.json()) as Record<string, unknown>).toEqual(
+      expect.objectContaining({ scope: "site.read", expires_in: 300 }),
+    );
+  });
+
+  it("refuses a token request that names a different resource", async () => {
+    const { runtime } = fixture();
+    const token = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: "opaque-authorization-code",
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          resource: "https://elsewhere.example/api/foundry-mcp",
+          code_verifier: "v".repeat(64),
+        }),
+      }),
+    );
+    expect(token.status).toBe(400);
+  });
+
+  it("steps up without making the client re-request the scopes it holds", async () => {
+    const { runtime, connections } = fixture();
+    // Start with two scopes so the step-up request can omit one of them.
+    const initial = await authorizeAndExchange(
+      runtime,
+      "site.read content.draft",
+    );
+    const verifier = "u".repeat(64);
+    const parameters = {
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      resource: resourceUri,
+      // The client asks only for the one new permission.
+      scope: "design.draft",
+      connection_id: initial.connectionId,
+      step_up_token: initial.stepUpToken,
+      state: "step-up-state",
+      code_challenge: await digest(verifier),
+      code_challenge_method: "S256",
+    };
+    const consentUrl = new URL(`${resourceUri}/oauth/authorize`);
+    for (const [name, value] of Object.entries(parameters)) {
+      consentUrl.searchParams.set(name, value);
+    }
+    const consent = await runtime.fetch(new Request(consentUrl));
+    expect(consent.status).toBe(200);
+    const page = await consent.text();
+    // The held scopes are shown and fixed; the new one is a clearable control.
+    for (const held of ["site.read", "content.draft"]) {
+      expect(page).toContain(
+        `<input type="hidden" name="granted_scope" value="${held}">`,
+      );
+    }
+    expect(page).toContain(
+      '<input type="checkbox" name="granted_scope" value="design.draft" checked>',
+    );
+
+    const approved = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+          ["granted_scope", "content.draft"],
+          ["granted_scope", "design.draft"],
+        ]),
+      }),
+    );
+    expect(approved.status).toBe(303);
+    expect([...connections.values()]).toEqual([
+      expect.objectContaining({
+        connectionId: initial.connectionId,
+        scopes: ["site.read", "content.draft", "design.draft"],
+      }),
+    ]);
+  });
+
+  it("refuses a step-up consent that drops a scope the connection holds", async () => {
+    const { runtime, connections } = fixture();
+    const initial = await authorizeAndExchange(
+      runtime,
+      "site.read content.draft",
+    );
+    const verifier = "u".repeat(64);
+    const parameters = {
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      resource: resourceUri,
+      scope: "design.draft",
+      connection_id: initial.connectionId,
+      step_up_token: initial.stepUpToken,
+      state: "step-up-state",
+      code_challenge: await digest(verifier),
+      code_challenge_method: "S256",
+    };
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+          ["granted_scope", "design.draft"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect([...connections.values()]).toEqual([
+      expect.objectContaining({ scopes: ["site.read", "content.draft"] }),
+    ]);
+  });
+
+  it("grants the smallest scope set when a consent submits no granted_scope", async () => {
+    const { runtime, connections } = fixture();
+    const verifier = "v".repeat(64);
+    const approved = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ["response_type", "code"],
+          ["client_id", clientId],
+          ["redirect_uri", redirectUri],
+          ["resource", resourceUri],
+          ["scope", "site.read content.draft publication.publish"],
+          ["state", "client-state"],
+          ["code_challenge", await digest(verifier)],
+          ["code_challenge_method", "S256"],
+          ["csrf_token", "owner-bound-csrf"],
+        ]),
+      }),
+    );
+    expect(approved.status).toBe(303);
+    // An absent field never grants everything the client asked for.
+    expect([...connections.values()]).toEqual([
+      expect.objectContaining({ scopes: ["site.read"] }),
+    ]);
   });
 });

@@ -70,7 +70,14 @@ non-human identity is created, and it is unchanged by this decision.
 
 Registration is bounded: 8 KiB of body, at most 5 redirect URIs, a 120-character
 client name, 20 registrations per site per hour, and 500 stored clients per
-site. The per-hour limit uses the existing `mcp_rate_limit_buckets` table.
+site. The per-hour limit uses the existing `mcp_rate_limit_buckets` table and is
+spent only on a registration that would otherwise be stored, so a malformed
+request cannot exhaust it.
+
+The stored-client limit removes the oldest registrations no Owner ever approved
+before it refuses. Without that, one flood would lock a site out of registering
+any new client for good, and an unapproved registration holds nothing worth
+keeping. A registration an Owner did approve is never removed this way.
 
 Registered metadata is immutable. A database trigger refuses any update, so what
 the Owner consented to cannot be changed afterwards.
@@ -93,10 +100,29 @@ parameter it does use is still checked exactly: `response_type` must be `code`,
 client registered character for character, and `resource` must be this
 resource's canonical URI when it is present.
 
-`resource` may be absent. A `2025-03-26` client does not send it, and this
-server serves exactly one resource, so an absent indicator is that resource.
-`state` may also be absent and is echoed only when the client sent it; PKCE,
-not `state`, is what binds the exchange.
+`resource` may be absent, at the authorize endpoint and at the token endpoint.
+A `2025-03-26` client does not send it, and this server serves exactly one
+resource, so an absent indicator is that resource. A `resource` naming anything
+else is refused at both endpoints. Accepting it at authorize but requiring it at
+the token endpoint would let an older client pass consent and then fail the
+exchange.
+
+`state` may also be absent and is echoed only when the client sent it. Its
+earlier minimum length of 8 characters is removed. `state` is opaque to this
+server, which only echoes it, and PKCE is what binds the exchange. A length rule
+here protects nobody and can refuse a working client.
+
+### 3a. Loopback redirect URIs
+
+A dynamically registered client may use `http://127.0.0.1`, `http://[::1]` or
+`http://localhost`, because Claude Code documents `http://localhost:PORT/callback`
+and refusing that name would stop it connecting.
+
+The operator allowlist stays stricter and does not accept the `localhost` name.
+RFC 8252 section 8.3 prefers the literal address because a name can be made to
+resolve elsewhere, and an operator writing the list by hand can write the
+literal address. This keeps the allowlist exactly as strict as it was before
+this change.
 
 ### 4. The Owner decides the scopes, and can reduce them.
 
@@ -105,9 +131,16 @@ shows one control per requested scope, ticked by default, and the Owner can
 clear any of them. `site.read` is always included and cannot be cleared.
 
 The granted set must be inside the requested set. A consent that adds a scope
-the client did not request is refused. On a step-up, the granted set must also
-keep every scope the connection already holds; removing a scope still requires
-revoking the connection.
+the client did not request is refused. A consent that sends no scopes at all
+grants `site.read` only; it never falls back to the requested set, because the
+consent screen always submits at least `site.read` and an absent field therefore
+means the submission did not come from that screen.
+
+On a step-up, the scopes on offer are everything the connection already holds
+plus everything the client now asks for. A client asking to add one permission
+sends only that permission, so the server widens the set rather than refusing.
+The granted set must keep every scope the connection already holds and must add
+at least one; removing a scope still requires revoking the connection.
 
 ### 5. Three protocol revisions are served.
 

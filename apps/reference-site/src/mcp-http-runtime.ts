@@ -2,12 +2,14 @@ import { SignJWT, jwtVerify } from "jose";
 
 import {
   mcpInitialScope,
+  mcpScopeLabels,
   mcpSupportedScopes,
   sha256CanonicalJson,
   type McpConnectionGrant,
   type McpConnectionPrincipal,
   type McpConnectionStore,
   type McpCursorCodec,
+  type McpRegisteredClient,
 } from "@humber-foundry/application";
 import type { SiteId } from "@humber-foundry/site-definition";
 
@@ -53,24 +55,6 @@ const clientRegistrationCapacity = 500;
 const authorizationStateLimit = 512;
 const clientIdLimit = 2_048;
 
-/** Plain words shown to the Owner for each scope on the consent screen. */
-const scopeLabels: Readonly<Record<string, string>> = Object.freeze({
-  "site.read": "Read this site",
-  "content.draft": "Draft content",
-  "design.draft": "Draft design",
-  "publication.schedule": "Schedule publication",
-  "publication.publish": "Publish approved work",
-  "campaign.draft": "Draft newsletter campaigns",
-  "campaign.test": "Send a campaign test to verified addresses",
-  "analytics.read": "Read aggregate analytics",
-});
-
-export type McpRegisteredClient = Readonly<{
-  clientId: string;
-  name: string;
-  redirectUris: ReadonlyArray<string>;
-  source: "environment" | "dynamic";
-}>;
 
 export type McpAuthorizationGrantInput = Readonly<{
   connectionId: string;
@@ -236,6 +220,10 @@ function readAuthorizationScopes(
 /**
  * Read the scopes the Owner ticked on the consent screen. The result must stay
  * inside what the client asked for and must keep `site.read`.
+ *
+ * An absent field grants the smallest scope set, never the requested set. The
+ * consent screen always submits at least `site.read`, so an absent field means
+ * the submission did not come from that screen.
  */
 function readGrantedScopes(
   value: unknown,
@@ -243,7 +231,7 @@ function readGrantedScopes(
 ): ReadonlyArray<string> | null {
   const granted =
     value === undefined || value === null
-      ? requested
+      ? [mcpInitialScope]
       : typeof value === "string"
         ? value.split(" ").filter(Boolean)
         : null;
@@ -633,6 +621,36 @@ export function createMcpHttpRuntime({
     throw new TypeError("invalid_request");
   }
 
+  /**
+   * Verify a step-up and widen the requested scopes.
+   *
+   * A client asking to add one permission sends only that permission. The
+   * scopes on offer are therefore everything the connection already holds plus
+   * everything the client now asks for. The step-up must add at least one
+   * scope; it can never drop one.
+   */
+  function stepUpScopes(
+    authorization: AuthorizationRequest,
+    connection: McpConnectionGrant,
+  ): ReadonlyArray<string> {
+    return Object.freeze(
+      mcpSupportedScopes.filter(
+        (scope) =>
+          connection.scopes.includes(scope) ||
+          authorization.scopes.includes(scope),
+      ),
+    );
+  }
+
+  function withStepUpScopes<T extends AuthorizationRequest>(
+    authorization: T,
+    connection: McpConnectionGrant | null,
+  ): T {
+    if (connection === null) return authorization;
+    const scopes = stepUpScopes(authorization, connection);
+    return { ...authorization, scopes, scope: canonicalScopes(scopes) };
+  }
+
   async function verifyStepUpAuthorization(
     authorization: AuthorizationRequest,
   ): Promise<
@@ -687,10 +705,10 @@ export function createMcpHttpRuntime({
         connection.actorId !== payload.sub ||
         connection.clientId !== authorization.clientId ||
         canonicalScopes(connection.scopes) !== canonicalScopes(tokenScopes) ||
-        authorization.scopes.length <= connection.scopes.length ||
-        connection.scopes.some(
-          (scope) => !authorization.scopes.includes(scope),
-        )
+        // A step-up must add something. Asking for only what is already held
+        // is not a step-up.
+        stepUpScopes(authorization, connection).length <=
+          connection.scopes.length
       ) {
         return { valid: false, connection: null };
       }
@@ -736,7 +754,7 @@ export function createMcpHttpRuntime({
     ]);
     const choices = authorization.scopes
       .map((scope) => {
-        const label = `${escapeHtml(scopeLabels[scope] ?? scope)} (<code>${escapeHtml(scope)}</code>)`;
+        const label = `${escapeHtml(mcpScopeLabels[scope] ?? scope)} (<code>${escapeHtml(scope)}</code>)`;
         return fixedScopes.has(scope)
           ? `<li><input type="checkbox" checked disabled> ${label} — always included<input type="hidden" name="granted_scope" value="${escapeHtml(scope)}"></li>`
           : `<li><label><input type="checkbox" name="granted_scope" value="${escapeHtml(scope)}" checked> ${label}</label></li>`;
@@ -822,7 +840,7 @@ export function createMcpHttpRuntime({
         return owner.csrfToken === undefined
           ? jsonResponse({ error: "access_denied" }, 403)
           : authorizationConsent(
-              authorization,
+              withStepUpScopes(authorization, stepUp.connection),
               owner.csrfToken,
               stepUp.connection,
             );
@@ -857,9 +875,10 @@ export function createMcpHttpRuntime({
       return jsonResponse({ error: "invalid_request" }, 400);
     }
     // The Owner may approve fewer permissions than the client asked for.
+    const offered = withStepUpScopes(authorization, stepUp.connection);
     const granted = readGrantedScopes(
       isRecord(parsed.body) ? parsed.body.granted_scope : undefined,
-      authorization.scopes,
+      offered.scopes,
     );
     if (
       granted === null ||
@@ -995,7 +1014,14 @@ export function createMcpHttpRuntime({
       return jsonResponse({ error: "invalid_request" }, 400);
     }
     const clientId = form.get("client_id");
-    if (form.get("resource") !== resourceUri || clientId === null) {
+    const requestedResource = form.get("resource");
+    // A 2025-03-26 client sends no resource indicator, at the authorize
+    // endpoint or here. This server serves exactly one resource, so an absent
+    // indicator is this resource. A different one is refused.
+    if (
+      (requestedResource !== null && requestedResource !== resourceUri) ||
+      clientId === null
+    ) {
       return jsonResponse({ error: "invalid_grant" }, 400);
     }
     const observedAt = now();
@@ -1117,23 +1143,6 @@ export function createMcpHttpRuntime({
       );
     }
     const observedAt = now();
-    const windowStartedAt = new Date(
-      Math.floor(observedAt.getTime() / 3_600_000) * 3_600_000,
-    ).toISOString();
-    const allowed = await store.consumeRateLimit({
-      siteId,
-      bucketKey: "client_registration",
-      windowStartedAt,
-      limit: clientRegistrationsPerHour,
-    });
-    if (!allowed) {
-      return registrationError(
-        "temporarily_unavailable",
-        "This site has reached its client registration limit for this hour.",
-        429,
-        { "retry-after": "3600" },
-      );
-    }
     let body: unknown;
     try {
       body = JSON.parse(
@@ -1151,6 +1160,24 @@ export function createMcpHttpRuntime({
     const registration = readMcpClientRegistration(body);
     if (!registration.ok) {
       return registrationError(registration.error, registration.description);
+    }
+    // Spend the site's hourly budget only on a registration that would
+    // otherwise be stored. A malformed request must not exhaust it.
+    const allowed = await store.consumeRateLimit({
+      siteId,
+      bucketKey: "client_registration",
+      windowStartedAt: new Date(
+        Math.floor(observedAt.getTime() / 3_600_000) * 3_600_000,
+      ).toISOString(),
+      limit: clientRegistrationsPerHour,
+    });
+    if (!allowed) {
+      return registrationError(
+        "temporarily_unavailable",
+        "This site has reached its client registration limit for this hour.",
+        429,
+        { "retry-after": "3600" },
+      );
     }
     const clientId = createRegisteredClientId();
     const outcome = await store.registerClient({

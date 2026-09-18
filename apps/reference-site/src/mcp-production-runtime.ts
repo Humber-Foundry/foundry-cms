@@ -123,7 +123,19 @@ function requireSetting(value: string | undefined): string {
   return value;
 }
 
-const validRedirectUri = isValidMcpRedirectUri;
+/**
+ * A redirect URI an operator may pin in the allowlist.
+ *
+ * This is stricter than the rule for a dynamically registered client: it does
+ * not accept the `localhost` name. An operator writes these by hand and can
+ * write the literal loopback address, which RFC 8252 section 8.3 prefers
+ * because a name can be made to resolve elsewhere.
+ */
+function validRedirectUri(value: string) {
+  return (
+    isValidMcpRedirectUri(value) && new URL(value).hostname !== "localhost"
+  );
+}
 
 /**
  * Read the operator's optional client allowlist.
