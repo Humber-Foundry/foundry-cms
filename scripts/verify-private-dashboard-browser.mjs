@@ -345,6 +345,14 @@ async function main() {
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
     await page.getByRole("heading", { name: "Pages" }).waitFor();
 
+    // Pages opens on the list of every page. The owner opens one from the
+    // list, and the address then names the page it opened.
+    await page.locator(".pages-list-row").first().click();
+    await page.waitForURL(
+      /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
+    );
+    await page.getByRole("heading", { name: "Pages" }).waitFor();
+
     // At a phone width the page editor's top bar and side panel are slide-in
     // sheets. These helpers open the right sheet before reaching a control, the
     // way the owner does. The Menu button is hidden while the side panel is
