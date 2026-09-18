@@ -502,7 +502,7 @@ export type CampaignBulkStateReport = Readonly<{
     utcOffsetChoice: string;
     executeAtUtc: string;
   }> | null;
-  send: Readonly<{
+  sendOperation: Readonly<{
     id: string;
     state: CampaignBulkSendOperation["state"];
     attempt: number;
@@ -1647,7 +1647,7 @@ export function createCampaignBulkDeliveryApplication({
                   utcOffsetChoice: state.schedule.utcOffsetChoice,
                   executeAtUtc: state.schedule.executeAtUtc,
                 }),
-          send:
+          sendOperation:
             state.operation === null
               ? null
               : Object.freeze({

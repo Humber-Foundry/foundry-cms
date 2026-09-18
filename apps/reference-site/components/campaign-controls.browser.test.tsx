@@ -180,6 +180,8 @@ describe("campaign controls browser acceptance", () => {
       testedFingerprint: null as string | null,
       readiness: "live_test_required",
       authorizationId: null as string | null,
+      schedule: null as Record<string, unknown> | null,
+      sendOperation: null as Record<string, unknown> | null,
     };
 
     function report() {
@@ -236,8 +238,8 @@ describe("campaign controls browser acceptance", () => {
                   state: "active",
                   authorizedAt: "2026-09-01T02:00:00.000Z",
                 },
-          schedule: null,
-          send: null,
+          schedule: state.schedule,
+          sendOperation: state.sendOperation,
         },
         testRecipients: {
           ids: ["membership-owner"],
@@ -386,6 +388,63 @@ describe("campaign controls browser acceptance", () => {
       "You changed the email after the last test, so that test no longer counts.",
     );
     expect(buttonNamed(host, "Send a test email")).toBeDefined();
+  });
+
+  it("keeps a scheduled send cancellable and a failed send retryable after an edit", async () => {
+    // The server still holds the schedule and the send operation, so the
+    // screen must keep showing them. Testing the approval first would hide the
+    // controls exactly when they are needed.
+    const scheduled = {
+      id: "70000000-0000-4000-8000-000000000001",
+      state: "active",
+      localDateTime: "2026-09-25T09:00:00",
+      ianaTimeZone: "America/Vancouver",
+      utcOffsetChoice: "-07:00",
+      executeAtUtc: "2026-09-25T16:00:00.000Z",
+    };
+    const failed = {
+      id: "60000000-0000-4000-8000-000000000001",
+      state: "failed",
+      attempt: 1,
+      scheduledInstant: null,
+      recipientCount: 128,
+      detail: "provider_timeout",
+      updatedAt: "2026-09-18T11:00:00.000Z",
+    };
+    const server = fakeNewsletterServer();
+    // The email was changed after it was approved, so no confirmed test covers
+    // it any more.
+    server.state.testedFingerprint = "fingerprint-one";
+    server.state.campaignFingerprint = "fingerprint-two";
+    server.state.readiness = "ready";
+    server.state.schedule = scheduled;
+    const host = mount(server.campaign, server.revision, "owner");
+
+    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Call this send off")).toBeDefined(),
+    );
+    expect(host.textContent).toContain("2026-09-25 at 09:00:00");
+    await userEvent.click(buttonNamed(host, "Call this send off")!);
+    expect(server.commands).toContainEqual({
+      action: "cancel_bulk_schedule",
+      scheduleId: scheduled.id,
+    });
+
+    // The same rule holds for a send that failed.
+    server.state.schedule = null;
+    server.state.sendOperation = failed;
+    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
+    await vi.waitFor(() =>
+      expect(buttonNamed(host, "Try the send again")).toBeDefined(),
+    );
+    expect(host.textContent).toContain("Reason: provider_timeout");
+    await userEvent.click(buttonNamed(host, "Try the send again")!);
+    expect(server.commands).toContainEqual({
+      action: "retry_bulk_send",
+      campaignId: server.campaign.id,
+      operationId: failed.id,
+    });
   });
 
   it("tells an Editor which steps belong to the site owner", async () => {

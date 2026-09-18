@@ -13,17 +13,17 @@
  * the person a rejected command.
  */
 
+/** The resolved time a schedule command carries. */
+export type SendTime = Readonly<{
+  localDateTime: string;
+  ianaTimeZone: string;
+  utcOffsetChoice: string;
+  executeAtUtc: string;
+  timeZoneDatabaseVersion: string;
+}>;
+
 export type ResolvedSendTime =
-  | Readonly<{
-      outcome: "resolved";
-      time: Readonly<{
-        localDateTime: string;
-        ianaTimeZone: string;
-        utcOffsetChoice: string;
-        executeAtUtc: string;
-        timeZoneDatabaseVersion: string;
-      }>;
-    }>
+  | Readonly<{ outcome: "resolved"; time: SendTime }>
   | Readonly<{ outcome: "not_a_time" }>
   | Readonly<{ outcome: "unknown_time_zone" }>
   | Readonly<{ outcome: "no_such_time" }>

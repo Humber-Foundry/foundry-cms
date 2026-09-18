@@ -131,7 +131,7 @@ describe("campaign endpoint", () => {
     mocks.campaignBulkState.mockResolvedValue({
       authorization: null,
       schedule: null,
-      send: null,
+      sendOperation: null,
     });
     mocks.listTestRecipients.mockResolvedValue({
       ids: ["membership-owner"],
@@ -203,7 +203,7 @@ describe("campaign endpoint", () => {
         authorizedAt: "2026-09-01T02:00:00.000Z",
       },
       schedule: null,
-      send: null,
+      sendOperation: null,
     });
     mocks.listTestRecipients.mockResolvedValue({
       ids: ["membership-owner"],

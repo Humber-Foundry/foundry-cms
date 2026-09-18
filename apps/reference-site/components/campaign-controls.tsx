@@ -6,10 +6,12 @@ import {
   type BlogPostArtifactFingerprint,
   type Campaign,
   type CampaignBulkStateReport,
+  type CampaignId,
   type CampaignLifecycleState,
   type CampaignRevision,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryEvidence,
+  type HumanRole,
   type RenderedCampaign,
 } from "@humber-foundry/application";
 import {
@@ -28,7 +30,11 @@ import { RichTextEditor } from "./rich-text-editor";
 import { RichTextRenderer } from "./rich-text-renderer";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
-import { browserTimeZone, resolveSendTime } from "./schedule-send-time";
+import {
+  browserTimeZone,
+  resolveSendTime,
+  type SendTime,
+} from "./schedule-send-time";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
 import type { SiteImageTile } from "../src/site-used-photos";
@@ -164,6 +170,43 @@ function testCoversCurrentEmail(report: CampaignSendReport): boolean {
 function testConfirmed(report: CampaignSendReport): boolean {
   return testCoversCurrentEmail(report) && report.testReadiness.state === "ready";
 }
+
+/**
+ * Every command the sending steps can send.
+ *
+ * Naming them is what keeps a step from sending a shape the route will refuse:
+ * a missing or misspelt field fails the build here rather than returning a
+ * refusal to the person who pressed the button.
+ */
+type SendFlowCommand =
+  | Readonly<{
+      action: "request_test";
+      campaignId: CampaignId;
+      testRecipientIds: ReadonlyArray<string>;
+    }>
+  | Readonly<{ action: "confirm_test_receipt"; executionId: string }>
+  | Readonly<{
+      action: "authorize_bulk";
+      campaignId: CampaignId;
+      testExecutionId: string;
+    }>
+  | Readonly<{
+      action: "activate_bulk_schedule";
+      campaignId: CampaignId;
+      authorizationId: string;
+      resolvedTime: SendTime;
+    }>
+  | Readonly<{ action: "cancel_bulk_schedule"; scheduleId: string }>
+  | Readonly<{
+      action: "send_bulk_now";
+      campaignId: CampaignId;
+      authorizationId: string;
+    }>
+  | Readonly<{
+      action: "retry_bulk_send";
+      campaignId: CampaignId;
+      operationId: string;
+    }>;
 
 /** One step in the list, with what it still needs and what to do about it. */
 function SendStep({
@@ -408,9 +451,9 @@ function CampaignSendFlow({
 }: {
   report: CampaignSendReport;
   delivery: DeliveryReadiness | null;
-  role: "owner" | "editor";
+  role: HumanRole;
   busy: boolean;
-  onCommand(command: unknown): void;
+  onCommand(command: SendFlowCommand): void;
   onEdit(): void;
 }) {
   const [reviewed, setReviewed] = useState(false);
@@ -418,11 +461,14 @@ function CampaignSendFlow({
   const [timeProblem, setTimeProblem] = useState("");
 
   const campaignId = report.rendered.campaignId;
+  // The one delivered test the server named. Both the confirmation and the
+  // approval act on this exact execution, never on a test chosen here.
+  const testEvidence = report.testEvidence;
   const notConnected = delivery?.state === "not_configured";
   const tested = testCoversCurrentEmail(report);
   const confirmed = testConfirmed(report);
   const isOwner = role === "owner";
-  const { authorization, schedule, send } = report.bulkState;
+  const { authorization, schedule, sendOperation } = report.bulkState;
   const testRecipientIds =
     report.testRecipients.yours === null
       ? report.testRecipients.ids
@@ -449,7 +495,12 @@ function CampaignSendFlow({
     if (report.testReadiness.state === "provider_unhealthy") {
       return "The email provider is not answering right now.";
     }
-    return "Send a test to your own verified address, then read it.";
+    // Only a site owner holds a verified test address, so an Editor's test
+    // lands in the owner's inbox. Say so rather than promising a copy that
+    // never arrives.
+    return report.testRecipients.yours === null
+      ? "Send a test to the site owner's verified address. They read it."
+      : "Send a test to your own verified address, then read it.";
   }
 
   function confirmNeed(): string {
@@ -464,35 +515,58 @@ function CampaignSendFlow({
     return "Open the test email in your inbox and read it right through.";
   }
 
-  function sendNeed(): string {
-    if (!isOwner) {
-      return (
-        "Only the site owner can send an email to subscribers. Ask them to " +
-        "finish this step."
-      );
+  /**
+   * What the send step is on, decided once and used for both the sentence and
+   * the controls.
+   *
+   * A send operation or an active schedule is reported before anything else,
+   * because the server still holds it. Editing the email invalidates the
+   * approval, and if the screen tested the approval first, the edit would hide
+   * the very controls that call a scheduled send off or retry a failed one.
+   */
+  function sendStage() {
+    if (!isOwner) return "not_yours" as const;
+    if (sendOperation !== null) {
+      if (sendOperation.state === "sent") return "sent" as const;
+      return sendOperation.state === "failed" || sendOperation.state === "blocked"
+        ? ("failed" as const)
+        : ("sending" as const);
     }
-    if (notConnected) return "Email is not connected yet.";
-    if (!confirmed) return "Send a test and confirm it arrived first.";
-    if (send !== null) {
-      if (send.state === "sent") {
-        return `Sent to ${send.recipientCount ?? 0} people.`;
-      }
-      return send.state === "failed" || send.state === "blocked"
-        ? "The send did not finish. Nobody else will be sent to until you " +
-            "try again."
-        : "The send is under way.";
-    }
-    if (schedule !== null) return "This email is set to send at the time below.";
-    if (authorization === null) {
-      return "Approve this email, then send it now or pick a time.";
-    }
-    return "Send it now, or pick a time to send it.";
+    if (schedule !== null) return "scheduled" as const;
+    if (notConnected) return "not_connected" as const;
+    if (!confirmed) return "needs_test" as const;
+    return authorization === null
+      ? ("needs_approval" as const)
+      : ("ready" as const);
   }
 
+  const stage = sendStage();
+
+  const sendNeeds: Readonly<Record<ReturnType<typeof sendStage>, string>> = {
+    not_yours:
+      "Only the site owner can send an email to subscribers. Ask them to " +
+      "finish this step.",
+    sent: `Sent to ${sendOperation?.recipientCount ?? 0} people.`,
+    failed:
+      "The send did not finish. Nobody else will be sent to until you try " +
+      "again.",
+    sending: "The send is under way.",
+    scheduled: "This email is set to send at the time below.",
+    not_connected:
+      "Email is not connected yet, so nothing can be sent from here. Step 2 " +
+      "says where the steps to connect it are written down.",
+    needs_test: "Send a test and confirm it arrived first.",
+    needs_approval: "Approve this email, then send it now or pick a time.",
+    ready: "Send it now, or pick a time to send it.",
+  };
+
   function sendStepState(): "done" | "now" | "later" {
-    if (send?.state === "sent") return "done";
-    if (!confirmed || !isOwner) return "later";
-    return "now";
+    if (stage === "sent") return "done";
+    return stage === "not_yours" ||
+      stage === "needs_test" ||
+      stage === "not_connected"
+      ? "later"
+      : "now";
   }
 
   function scheduleThisEmail() {
@@ -545,7 +619,11 @@ function CampaignSendFlow({
 
         <SendStep
           number={2}
-          name="Send a test to yourself"
+          name={
+            report.testRecipients.yours === null
+              ? "Send a test to the site owner"
+              : "Send a test to yourself"
+          }
           state={tested ? "done" : "now"}
           need={testNeed()}
         >
@@ -565,6 +643,15 @@ function CampaignSendFlow({
               Send a test email
             </button>
           )}
+          {notConnected && delivery !== null ? (
+            // Naming the guide gives the person who can fix it somewhere to
+            // start. The settings themselves belong to the connection state
+            // ticket (#165), so this stays a pointer.
+            <p className="send-step-reason">
+              The steps to connect it are in{" "}
+              <code>{delivery.setupGuide}</code>.
+            </p>
+          ) : null}
           {notConnected || testRecipientIds.length > 0 ? null : (
             <p className="send-step-need">
               There is no verified test address on file, so a test cannot go
@@ -579,7 +666,7 @@ function CampaignSendFlow({
           state={confirmed ? "done" : tested && isOwner ? "now" : "later"}
           need={confirmNeed()}
         >
-          {confirmed || !tested || !isOwner ? null : (
+          {confirmed || !tested || !isOwner || testEvidence === null ? null : (
             <div className="send-step-confirm">
               <label className="send-step-check">
                 <input
@@ -599,7 +686,7 @@ function CampaignSendFlow({
                     action: "confirm_test_receipt",
                     // The server named this exact delivered test. Confirming
                     // any other one would approve content nobody read.
-                    executionId: report.testEvidence!.executionId,
+                    executionId: testEvidence.executionId,
                   })
                 }
               >
@@ -613,23 +700,26 @@ function CampaignSendFlow({
           number={4}
           name="Send it, or pick a time"
           state={sendStepState()}
-          need={sendNeed()}
+          need={sendNeeds[stage]}
         >
-          {!isOwner || !confirmed ? null : send !== null ? (
+          {sendOperation !== null ? (
             <div className="send-step-outcome">
-              {send.detail === null ? null : (
-                <p className="send-step-reason">Reason: {send.detail}</p>
+              {sendOperation.detail === null ? null : (
+                <p className="send-step-reason">Reason: {sendOperation.detail}</p>
               )}
-              {send.state === "failed" || send.state === "blocked" ? (
+              {stage === "failed" ? (
                 <button
                   type="button"
                   className="copy-button"
-                  disabled={busy}
+                  // Retrying reaches the provider, so it needs a connected
+                  // installation. Calling a send off does not, which is why
+                  // the schedule below stays cancellable either way.
+                  disabled={busy || notConnected}
                   onClick={() =>
                     onCommand({
                       action: "retry_bulk_send",
                       campaignId,
-                      operationId: send.id,
+                      operationId: sendOperation.id,
                     })
                   }
                 >
@@ -657,22 +747,26 @@ function CampaignSendFlow({
                 Call this send off
               </button>
             </div>
-          ) : authorization === null ? (
-            <button
-              type="button"
-              className="button button-primary"
-              disabled={busy || notConnected}
-              onClick={() =>
-                onCommand({
-                  action: "authorize_bulk",
-                  campaignId,
-                  testExecutionId: report.testEvidence!.executionId,
-                })
-              }
-            >
-              Approve this email for sending
-            </button>
-          ) : (
+          ) : stage === "not_yours" ||
+            stage === "needs_test" ||
+            stage === "not_connected" ? null : stage === "needs_approval" ? (
+            testEvidence === null ? null : (
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={busy || notConnected}
+                onClick={() =>
+                  onCommand({
+                    action: "authorize_bulk",
+                    campaignId,
+                    testExecutionId: testEvidence.executionId,
+                  })
+                }
+              >
+                Approve this email for sending
+              </button>
+            )
+          ) : authorization === null ? null : (
             <div className="send-step-outcome">
               <button
                 type="button"
@@ -734,7 +828,7 @@ export function CampaignControls({
    * screen uses it only to say whose step a step is; the server decides every
    * command on its own.
    */
-  role: "owner" | "editor";
+  role: HumanRole;
   siteImages: ReadonlyArray<SiteImageTile>;
   postSources: ReadonlyArray<
     Readonly<{
@@ -858,7 +952,7 @@ export function CampaignControls({
    * refusal can mean the state moved underneath this screen. Nothing on the
    * steps is drawn from the fact that a request returned.
    */
-  async function runStep(command: { action: string } & Record<string, unknown>) {
+  async function runStep(command: SendFlowCommand) {
     if (flowCampaignId === null) return;
     setBusy(true);
     setMessage("");
@@ -1083,9 +1177,7 @@ export function CampaignControls({
                 role={role}
                 busy={busy}
                 onCommand={(sendCommand) => {
-                  void runStep(
-                    sendCommand as { action: string } & Record<string, unknown>,
-                  );
+                  void runStep(sendCommand);
                 }}
                 onEdit={() => {
                   setWritingNew(false);

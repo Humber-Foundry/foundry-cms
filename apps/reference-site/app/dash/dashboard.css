@@ -3658,7 +3658,12 @@ div.media-gallery-tile-site {
  * a finger needs on a phone, and no text sits closer than 0.5rem to a border
  * or another control. Two sizes carry the whole block: the step name at the
  * body size and the rest at --dash-text-small, with colour doing the rest of
- * the work so no step needs a label above it. */
+ * the work so no step needs a label above it.
+ *
+ * The control-height variable belongs with the other .dashboard variables at
+ * the top of this file. It sits here instead so this feature stays one
+ * contiguous block while another change edits the same file; move it up once
+ * both have landed. */
 .dashboard {
   --dash-control-height: 2.75rem;
 }

@@ -1610,7 +1610,7 @@ describe("campaign bulk delivery", () => {
     ).resolves.toEqual({
       authorization: null,
       schedule: null,
-      send: null,
+      sendOperation: null,
     });
 
     const authorized = await authorize(application);
@@ -1683,7 +1683,7 @@ describe("campaign bulk delivery", () => {
       actor: owner,
       campaignId,
     });
-    expect(reported.send).toMatchObject({
+    expect(reported.sendOperation).toMatchObject({
       id: sent.operation.id,
       recipientCount: 1,
     });
@@ -1693,7 +1693,7 @@ describe("campaign bulk delivery", () => {
     expect(serialized).not.toContain(recipient.address);
     expect(serialized).not.toContain(recipient.identityKey);
     expect(serialized).not.toContain(recipient.subscriberId);
-    expect(reported.send).not.toHaveProperty("audienceSnapshot");
-    expect(reported.send).not.toHaveProperty("sendArtifact");
+    expect(reported.sendOperation).not.toHaveProperty("audienceSnapshot");
+    expect(reported.sendOperation).not.toHaveProperty("sendArtifact");
   });
 });
