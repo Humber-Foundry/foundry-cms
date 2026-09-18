@@ -28,6 +28,7 @@ import {
 import { RichTextEditor } from "./rich-text-editor";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
+import { PublishingConnectionStatus } from "./connection-status";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
 import type { SiteImageTile } from "../src/site-used-photos";
@@ -1116,6 +1117,7 @@ export function BlogPostControls({
           </a>
         </p>
       ) : null}
+      <PublishingConnectionStatus />
       {writingNew ? (
         <PostComposer
           editorId="post-body"

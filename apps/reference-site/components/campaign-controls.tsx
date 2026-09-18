@@ -30,6 +30,7 @@ import { RichTextEditor } from "./rich-text-editor";
 import { RichTextRenderer } from "./rich-text-renderer";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
+import { ConnectionStatus } from "./connection-status";
 import {
   browserTimeZone,
   resolveSendTime,
@@ -96,9 +97,15 @@ type CampaignSendReport = Readonly<{
   }>;
 }>;
 
-/** Whether this installation has email delivery connected. */
+/**
+ * Whether this installation has email delivery connected. This is the same
+ * shape the campaigns API returns from `readCampaignDeliveryReadiness`
+ * (`campaign-runtime.ts`); it also carries `providerHealth`, which this
+ * screen does not read.
+ */
 type DeliveryReadiness = Readonly<{
   state: "connected" | "not_configured" | "local_development";
+  missingSettings: ReadonlyArray<string>;
   setupGuide: string;
 }>;
 
@@ -550,15 +557,12 @@ function CampaignSendFlow({
   const stage = sendStage();
 
   /**
-   * Where the steps to connect email are written down. Naming the guide gives
-   * the person who can fix it somewhere to start. The settings themselves
-   * belong to the connection state ticket (#165), so this stays a pointer.
+   * The shared connection-status line: whether email is connected, which
+   * settings are missing, and where the setup steps are written down.
    */
   const setupGuideNote =
     notConnected && delivery !== null ? (
-      <p className="send-step-reason">
-        The steps to connect it are in <code>{delivery.setupGuide}</code>.
-      </p>
+      <ConnectionStatus kind="email" readiness={delivery} />
     ) : null;
 
   const sendNeeds: Readonly<Record<ReturnType<typeof sendStage>, string>> = {

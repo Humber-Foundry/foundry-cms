@@ -27,6 +27,11 @@ import {
   listContentRevisionContributors,
 } from "./d1-content-revision-store";
 import {
+  contentPublicationSetupGuide,
+  listMissingContentPublicationSettings,
+  type ContentPublicationReadiness,
+} from "./content-publication-readiness";
+import {
   createGitHubContentPublisher,
   readGitHubContentPublisherConfiguration,
 } from "./github-content-publisher";
@@ -205,4 +210,35 @@ export async function loadContentPublicationRestoreApplication(
     actorId,
     sourcePublication,
   );
+}
+
+/**
+ * Whether site publishing is connected for this installation.
+ *
+ * This is a read-only report for the dashboard and for an agent, in the same
+ * spirit as `readCampaignDeliveryReadiness` in `campaign-runtime.ts`. It
+ * names the settings that are still missing and never returns a setting's
+ * value, a token or a key. `connected` means the settings
+ * `readGitHubContentPublisherConfiguration` needs are present; it does not
+ * mean GitHub or Cloudflare were reached, because this check makes no
+ * network call.
+ */
+export async function readContentPublicationReadiness(): Promise<ContentPublicationReadiness> {
+  if (process.env.NODE_ENV === "development") {
+    return Object.freeze({
+      state: "local_development" as const,
+      missingSettings: Object.freeze([]),
+      setupGuide: contentPublicationSetupGuide,
+    });
+  }
+  const environment = await loadHumanAccessEnvironment();
+  const missingSettings = listMissingContentPublicationSettings(environment);
+  return Object.freeze({
+    state:
+      missingSettings.length === 0
+        ? ("connected" as const)
+        : ("not_configured" as const),
+    missingSettings,
+    setupGuide: contentPublicationSetupGuide,
+  });
 }

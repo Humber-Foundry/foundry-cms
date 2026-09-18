@@ -684,6 +684,25 @@
   font-weight: 400;
 }
 
+/* Whether email or publishing is connected. Colour carries the difference
+ * between the three states; a connected line reads in the accent colour, a
+ * missing one stays in the same soft ink as an ordinary hint but keeps the
+ * ordinary reading order, and local development sits between the two. */
+.connection-status {
+  margin: 0.5rem 0 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+  font-weight: 400;
+}
+
+.connection-status-connected {
+  color: var(--dash-accent);
+}
+
+.connection-status-missing {
+  color: var(--dash-ink);
+}
+
 .composer-settings {
   border: 1px solid var(--dash-line);
   border-radius: var(--dash-radius);
