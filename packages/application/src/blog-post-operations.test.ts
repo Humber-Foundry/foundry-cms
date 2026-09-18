@@ -1435,4 +1435,80 @@ describe("blog post operations", () => {
       new BlogPostOperationError("approval_stale"),
     );
   });
+
+  it("summarizes a post's active schedule and clears it on cancellation", async () => {
+    const { app, store } = application();
+    const before = await store.findOperationalSummary(
+      "foundry-site",
+      "post-scheduled-release",
+    );
+    expect(before).toMatchObject({
+      activeSchedule: null,
+      latestExecution: null,
+      archiveRequestId: null,
+    });
+
+    const schedule = await app.commands.activateSchedule({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      approvalId,
+      resolvedTime: resolvedTime(
+        "2026-11-01T01:30:00",
+        "-07:00",
+        "2026-11-01T08:30:00.000Z",
+      ),
+      idempotencyKey: "activate-for-summary-0001",
+    });
+    const scheduled = await store.findOperationalSummary(
+      "foundry-site",
+      "post-scheduled-release",
+    );
+    expect(scheduled?.activeSchedule).toMatchObject({
+      id: schedule.id,
+      state: "active",
+    });
+
+    await app.commands.cancelSchedule({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      scheduleId: schedule.id,
+      idempotencyKey: "cancel-for-summary-0001",
+    });
+    const cancelled = await store.findOperationalSummary(
+      "foundry-site",
+      "post-scheduled-release",
+    );
+    expect(cancelled?.activeSchedule).toBeNull();
+  });
+
+  it("lists an archived post and records its archive-request ID", async () => {
+    const { app, store } = application();
+
+    await expect(store.listArchivedPosts("foundry-site")).resolves.toEqual(
+      [],
+    );
+
+    await app.commands.archive({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      selectedPostRevisionId: "post-revision-7",
+      idempotencyKey: "archive-for-summary-0001",
+    });
+
+    const archived = await store.listArchivedPosts("foundry-site");
+    expect(archived).toHaveLength(1);
+    expect(archived[0]).toMatchObject({
+      postId: "post-scheduled-release",
+      collectionState: "archived",
+    });
+
+    const summary = await store.findOperationalSummary(
+      "foundry-site",
+      "post-scheduled-release",
+    );
+    expect(summary?.archiveRequestId).toBe("archive-for-summary-0001");
+  });
 });
