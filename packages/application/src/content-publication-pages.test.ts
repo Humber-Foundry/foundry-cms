@@ -216,7 +216,7 @@ describe("approval fingerprint over every page", () => {
    * The design projection changed shape once, at issue #160, so it could carry
    * every page. A definition with only the home page therefore gets a new
    * design hash, and every approval open at the upgrade becomes stale and must
-   * be made again. ADR-0019 records that step. Changing this projection again
+   * be made again. ADR-0020 records that step. Changing this projection again
    * repeats that cost, so a later change needs its own decision record.
    */
   it("gives a home-page-only definition a new design hash after issue #160", async () => {
