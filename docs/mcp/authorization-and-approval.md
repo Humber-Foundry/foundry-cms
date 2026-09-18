@@ -27,10 +27,10 @@ revisions and applies the `2025-11-25` authorization profile to all of them:
 - The authorization server publishes RFC 8414 or OIDC discovery metadata and
   supports authorization code with PKCE `S256`.
 - Clients include the exact `resource` in authorization and token requests. The
-  authorize endpoint also accepts an absent `resource`, because a `2025-03-26`
-  client does not send one and this server serves exactly one resource. A
-  `resource` naming anything else is refused. The token endpoint still requires
-  it.
+  authorize endpoint and the token endpoint both also accept an absent
+  `resource`, because a `2025-03-26` client does not send one and this server
+  serves exactly one resource. A `resource` naming anything else is refused at
+  both endpoints.
 - The authorize endpoint ignores parameters it does not use, and checks exactly
   every parameter it does use.
 - The resource server verifies issuer, signature, expiry, not-before, audience,

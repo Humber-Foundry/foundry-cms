@@ -19,6 +19,8 @@ import { promisify } from "node:util";
 import {
   createInMemoryPublishedSiteRepository,
   createMcpReadApplication,
+  mcpAssumedProtocolVersion,
+  mcpSupportedProtocolVersions,
   createPublishedSiteBundle,
   createSiteApplication,
   type McpConnectionGrant,
@@ -3583,7 +3585,8 @@ describe("MCP authorize parameter and scope compatibility", () => {
 describe("MCP protocol revision and transport answers", () => {
   it("accepts every protocol revision current clients negotiate", async () => {
     const { runtime } = fixture();
-    for (const version of ["2025-03-26", "2025-06-18", "2025-11-25"]) {
+    expect(mcpSupportedProtocolVersions).toContain(mcpAssumedProtocolVersion);
+    for (const version of mcpSupportedProtocolVersions) {
       const { accessToken } = await authorizeAndExchange(runtime);
       const request = rpcRequest(accessToken, {
         jsonrpc: "2.0",

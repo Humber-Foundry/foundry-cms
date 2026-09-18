@@ -55,7 +55,6 @@ const clientRegistrationCapacity = 500;
 const authorizationStateLimit = 512;
 const clientIdLimit = 2_048;
 
-
 export type McpAuthorizationGrantInput = Readonly<{
   connectionId: string;
   actorId: string;
@@ -789,7 +788,11 @@ export function createMcpHttpRuntime({
         <fieldset>
           <legend>Permissions to approve</legend>
           <p>Clear any permission you do not want. You can approve fewer
-          permissions than the client asked for.</p>
+          permissions than the client asked for.${
+            stepUpConnection === null
+              ? ""
+              : " Keep at least one new permission ticked, or there is nothing to add."
+          }</p>
           <ul>
         ${choices}
           </ul>
@@ -1111,7 +1114,11 @@ export function createMcpHttpRuntime({
     status = 400,
     headers: Record<string, string> = {},
   ) {
-    return jsonResponse({ error, error_description: description }, status, headers);
+    return jsonResponse(
+      { error, error_description: description },
+      status,
+      headers,
+    );
   }
 
   /**

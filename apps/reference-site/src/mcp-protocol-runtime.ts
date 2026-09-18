@@ -37,7 +37,6 @@ import {
 } from "./mcp-tool-registry";
 
 export {
-  mcpAssumedProtocolVersion,
   mcpProtocolVersion,
   mcpSupportedProtocolVersions,
 } from "@humber-foundry/application";

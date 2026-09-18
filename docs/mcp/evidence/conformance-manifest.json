@@ -2,19 +2,23 @@
   "artifactVersion": 2,
   "contractVersion": "foundry.mcp.v1",
   "protocolVersion": "2025-11-25",
-  "supportedProtocolVersions": ["2025-03-26", "2025-06-18", "2025-11-25"],
+  "supportedProtocolVersions": [
+    "2025-03-26",
+    "2025-06-18",
+    "2025-11-25"
+  ],
   "inspector": {
     "package": "@modelcontextprotocol/inspector",
     "version": "2.1.0",
     "command": "npm run verify:mcp:inspector",
-    "evidence": "The pinned official CLI initializes the production Streamable HTTP runtime fixture and performs tools/list over a bound session. Its access token is obtained through RFC 7591 dynamic client registration followed by an Owner consent, with no client pre-registered.",
-    "boundary": "Deterministic loopback fixture only; no live client, external account, or production installation is claimed."
+    "evidence": "The pinned official CLI initializes the production Streamable HTTP runtime fixture and performs tools/list over a bound session. The bearer token it presents was produced by the test harness through RFC 7591 dynamic client registration followed by an Owner consent, with no client pre-registered, and is then placed in the Inspector's configuration as a static Authorization header.",
+    "boundary": "Deterministic loopback fixture only; no live client, external account, or production installation is claimed. The Inspector's own OAuth client is NOT exercised: it cannot complete an Owner consent without a browser. The registration, PKCE authorize, consent and token-exchange steps are proved instead by the scripted OAuth client below, which speaks HTTP to the same runtime."
   },
   "realClientsTested": {
     "tested": [
       {
         "client": "@modelcontextprotocol/inspector 2.1.0 CLI (official MCP Inspector)",
-        "how": "Runs against the production HTTP runtime on a loopback socket. Its bearer token comes from dynamic client registration plus Owner consent, not from a pre-registered client.",
+        "how": "Runs against the production HTTP runtime on a loopback socket. Its bearer token comes from dynamic client registration plus Owner consent, not from a pre-registered client. The token is injected as a static header; the Inspector's own OAuth client does not run, because completing an Owner consent needs a browser.",
         "evidence": "apps/reference-site/src/mcp-http-runtime.test.ts::is discoverable by the pinned official MCP Inspector over Streamable HTTP",
         "command": "npm run verify:mcp:inspector"
       },
@@ -89,7 +93,9 @@
       "apps/reference-site/src/mcp-client-registration.test.ts::rejects a redirect URI that is not exactly matchable",
       "apps/reference-site/src/mcp-client-registration.test.ts::rejects a confidential client, an unsupported grant and an unsupported response type",
       "apps/reference-site/src/mcp-production-runtime.test.ts::treats an unset client allowlist as open dynamic registration",
-      "apps/reference-site/src/mcp-production-runtime.test.ts::names every MCP path on one side of the Cloudflare Access boundary"
+      "apps/reference-site/src/mcp-production-runtime.test.ts::names every MCP path on one side of the Cloudflare Access boundary",
+      "apps/reference-site/src/d1-mcp-connection-store.test.ts::stores a registered client and finds it by its client identifier",
+      "apps/reference-site/src/d1-mcp-connection-store.test.ts::refuses to change registered client metadata after it is stored"
     ],
     "authorizationAndParity": [
       "packages/application/src/mcp-read.test.ts::conceals cross-site reads and records a safe denial",
@@ -134,7 +140,9 @@
         "apps/reference-site/src/mcp-http-runtime.test.ts::rate limits registration per site and bounds the stored client count",
         "apps/reference-site/src/mcp-http-runtime.test.ts::refuses a registration body larger than its limit",
         "apps/reference-site/src/mcp-client-registration.test.ts::bounds the number of redirect URIs",
-        "apps/reference-site/src/mcp-client-registration.test.ts::bounds the client name and keeps it as untrusted text"
+        "apps/reference-site/src/mcp-client-registration.test.ts::bounds the client name and keeps it as untrusted text",
+        "apps/reference-site/src/d1-mcp-connection-store.test.ts::evicts the oldest unapproved registration instead of locking the site out",
+        "apps/reference-site/src/d1-mcp-connection-store.test.ts::never evicts a registration an Owner approved"
       ],
       "repudiation": "packages/application/src/content-publication.test.ts::joins one MCP actor and approval through audit identity to attributed Git trailers",
       "schemaDrift": [
