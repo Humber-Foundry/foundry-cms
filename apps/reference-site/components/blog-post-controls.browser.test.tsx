@@ -53,6 +53,22 @@ function stalledArchivedPost(): ArchivedBlogPostSummary {
   };
 }
 
+/** Waits for `read` to return a truthy value, so no test depends on a fixed delay. */
+async function waitFor(read: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    if (read()) return;
+    if (Date.now() > deadline) throw new Error("condition_not_reached");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function confirmButton(): HTMLButtonElement | undefined {
+  return Array.from(
+    document.querySelectorAll<HTMLButtonElement>("button"),
+  ).find((button) => button.textContent === "Confirm and continue archiving");
+}
+
 describe("blog post controls browser acceptance", () => {
   let root: ReturnType<typeof createRoot> | undefined;
 
@@ -81,7 +97,7 @@ describe("blog post controls browser acceptance", () => {
     return host;
   }
 
-  it("shows a stalled archive in plain words with its next actions", async () => {
+  it("shows a stalled archive in plain words, with confirm disabled until previewed", async () => {
     render([stalledArchivedPost()]);
 
     await expect
@@ -90,24 +106,109 @@ describe("blog post controls browser acceptance", () => {
     await expect
       .element(
         page.getByText(
-          "Archive pending; the post remains live until this finishes. This can take a few minutes. If it does not finish, use Continue archiving below.",
+          "Preview the site without this post before you can confirm. This shows what visitors will see once the post is fully off the site.",
         ),
       )
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole("button", { name: "Continue archiving" }))
+      .element(
+        page.getByRole("button", {
+          name: "Preview the site without this post ↗",
+        }),
+      )
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Recover access" }))
       .toBeInTheDocument();
+    expect(confirmButton()?.disabled).toBe(true);
     // Restoring is only offered once a post has finished archiving.
-    const restoreButtons = document.querySelectorAll<HTMLButtonElement>(
-      "button",
-    );
-    const restore = Array.from(restoreButtons).find(
-      (button) => button.textContent === "Restore as draft",
-    );
+    const restore = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Restore as draft");
     expect(restore?.disabled).toBe(true);
+  });
+
+  it("enables confirm only after the withdrawal preview was opened in this session", async () => {
+    const submitted: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal("open", vi.fn(() => null));
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        submitted.push({ url, body: String(init?.body) });
+        if (url === "/api/foundry-cms/blog-operations") {
+          return Response.json({
+            archiveRequestId: "archive-request-0001",
+            withdrawal: { workspaceId: "workspace_withdrawal_1", revision: 9 },
+          });
+        }
+        return Response.json({
+          previewUrl:
+            "/__foundry/preview/workspace_withdrawal_1/9?capability=x",
+        });
+      },
+    );
+
+    render([stalledArchivedPost()]);
+
+    expect(confirmButton()?.disabled).toBe(true);
+
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Preview the site without this post ↗",
+      }),
+    );
+
+    await waitFor(() => confirmButton()?.disabled === false);
+
+    expect(submitted).toHaveLength(2);
+    expect(submitted[0]!.url).toBe("/api/foundry-cms/blog-operations");
+    expect(JSON.parse(submitted[0]!.body)).toMatchObject({
+      operation: "recover_archive_withdrawal_access",
+      postId: "post-tide-notes",
+      archiveRequestId: "archive-request-0001",
+    });
+    expect(submitted[1]!.url).toBe("/api/foundry-cms/revisions");
+    expect(JSON.parse(submitted[1]!.body)).toMatchObject({
+      operation: "open_preview",
+      workspaceId: "workspace_withdrawal_1",
+      revision: 9,
+    });
+    // The preview hint is gone once a preview for this exact withdrawal has
+    // been opened.
+    expect(
+      Array.from(document.querySelectorAll("p")).some(
+        (paragraph) =>
+          paragraph.textContent ===
+          "Preview the site without this post before you can confirm. This shows what visitors will see once the post is fully off the site.",
+      ),
+    ).toBe(false);
+  });
+
+  it("reports the server's reason in place when the preview cannot be opened, and confirm stays disabled", async () => {
+    vi.stubGlobal("open", vi.fn(() => null));
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        Response.json({ error: "human_authority_required" }, { status: 422 }),
+    );
+
+    render([stalledArchivedPost()]);
+
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Preview the site without this post ↗",
+      }),
+    );
+
+    await expect
+      .element(
+        page.getByText(
+          "You do not have access to finish this. Ask an owner or editor to help.",
+        ),
+      )
+      .toBeInTheDocument();
+    expect(confirmButton()?.disabled).toBe(true);
   });
 
   it("reports the server's reason in place when recovering access fails", async () => {
@@ -148,20 +249,53 @@ describe("blog post controls browser acceptance", () => {
     });
   });
 
-  it("reports the server's reason in place when continuing a stalled withdrawal fails", async () => {
+  it("never sends an approve request before the withdrawal preview was opened, and reports a confirm failure in place", async () => {
+    vi.stubGlobal("open", vi.fn(() => null));
+    let call = 0;
+    const submitted: Array<{ url: string; body: string }> = [];
     vi.stubGlobal(
       "fetch",
-      async () =>
-        Response.json({ error: "archive_request_not_found" }, {
-          status: 422,
-        }),
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        submitted.push({ url, body: String(init?.body) });
+        call += 1;
+        if (call === 1) {
+          return Response.json({
+            archiveRequestId: "archive-request-0001",
+            withdrawal: { workspaceId: "workspace_withdrawal_1", revision: 9 },
+          });
+        }
+        if (call === 2) {
+          return Response.json({
+            previewUrl:
+              "/__foundry/preview/workspace_withdrawal_1/9?capability=x",
+          });
+        }
+        if (call === 3) {
+          return Response.json({ id: "approval-withdrawal-1" });
+        }
+        return Response.json(
+          { error: "archive_request_not_found" },
+          { status: 422 },
+        );
+      },
     );
 
     render([stalledArchivedPost()]);
 
     await userEvent.click(
-      page.getByRole("button", { name: "Continue archiving" }),
+      page.getByRole("button", {
+        name: "Preview the site without this post ↗",
+      }),
     );
+    await waitFor(() => confirmButton()?.disabled === false);
+
+    // No approve request has gone out merely from opening the preview.
+    expect(
+      submitted.some((request) => request.url === "/api/foundry-cms/publications"),
+    ).toBe(false);
+
+    await userEvent.click(confirmButton()!);
 
     await expect
       .element(
@@ -170,9 +304,24 @@ describe("blog post controls browser acceptance", () => {
         ),
       )
       .toBeInTheDocument();
+    expect(submitted).toHaveLength(4);
+    expect(submitted[2]!.url).toBe("/api/foundry-cms/publications");
+    expect(JSON.parse(submitted[2]!.body)).toMatchObject({
+      operation: "approve",
+      workspaceId: "workspace_withdrawal_1",
+      revision: 9,
+      previewConfirmed: true,
+    });
+    expect(submitted[3]!.url).toBe("/api/foundry-cms/blog-operations");
+    expect(JSON.parse(submitted[3]!.body)).toMatchObject({
+      operation: "continue_archive_withdrawal",
+      postId: "post-tide-notes",
+      archiveRequestId: "archive-request-0001",
+      withdrawalApprovalId: "approval-withdrawal-1",
+    });
   });
 
-  it("does not offer to continue or recover access once a post has fully archived", async () => {
+  it("does not offer to preview, confirm, or recover access once a post has fully archived", async () => {
     render([
       {
         ...stalledArchivedPost(),
@@ -187,7 +336,8 @@ describe("blog post controls browser acceptance", () => {
     const buttonLabels = Array.from(
       document.querySelectorAll<HTMLButtonElement>("button"),
     ).map((button) => button.textContent);
-    expect(buttonLabels).not.toContain("Continue archiving");
+    expect(buttonLabels).not.toContain("Preview the site without this post ↗");
+    expect(buttonLabels).not.toContain("Confirm and continue archiving");
     expect(buttonLabels).not.toContain("Recover access");
   });
 });

@@ -553,19 +553,33 @@ function blogOperationErrorCode(body: unknown): string {
     : "";
 }
 
+export type ArchiveWithdrawalLocation = Readonly<{
+  workspaceId: string;
+  revision: number;
+}>;
+
+export type ArchiveWithdrawalPreviewResult =
+  | Readonly<{
+      outcome: "opened";
+      withdrawal: ArchiveWithdrawalLocation;
+      previewUrl: string;
+      mutationToken: string;
+    }>
+  | Readonly<{ outcome: "failed"; message: string; mutationToken: string }>;
+
 export type ArchiveWithdrawalContinuationResult =
   | Readonly<{ outcome: "continued"; mutationToken: string }>
   | Readonly<{ outcome: "failed"; message: string; mutationToken: string }>;
 
 /**
- * Drives a stalled archive withdrawal forward: recovers this person's
- * access to the withdrawal that was started when the post was archived,
- * confirms it (the same "a human reviewed this" record every publish
- * needs), then asks the server to continue it. Each step's honest failure
- * is reported back; nothing here is retried automatically, so the caller
- * can offer "try again".
+ * Recovers this person's access to the withdrawal that was started when a
+ * live post was archived, then opens the exact preview of that withdrawal
+ * revision — the site as it will look once this post is off it. This is
+ * the honest "a human reviewed this" step: nothing here submits an
+ * approval, it only finds and shows the preview so a person can actually
+ * look at it before confirming.
  */
-export async function continueArchiveWithdrawal({
+export async function openArchiveWithdrawalPreview({
   postId,
   archiveRequestId,
   mutationToken,
@@ -575,7 +589,7 @@ export async function continueArchiveWithdrawal({
   archiveRequestId: string;
   mutationToken: string;
   fetcher?: typeof fetch;
-}): Promise<ArchiveWithdrawalContinuationResult> {
+}): Promise<ArchiveWithdrawalPreviewResult> {
   const recovered = await sendHumanMutationAttempt({
     url: "/api/foundry-cms/blog-operations",
     attempt: {
@@ -589,7 +603,7 @@ export async function continueArchiveWithdrawal({
     mutationToken,
     fetcher,
   });
-  const withdrawal =
+  const withdrawal: ArchiveWithdrawalLocation | null =
     typeof recovered.body === "object" &&
     recovered.body !== null &&
     "withdrawal" in recovered.body &&
@@ -614,6 +628,61 @@ export async function continueArchiveWithdrawal({
     };
   }
 
+  const opened = await sendContentRevisionAttempt({
+    attempt: {
+      body: JSON.stringify({
+        operation: "open_preview",
+        workspaceId: withdrawal.workspaceId,
+        revision: withdrawal.revision,
+      }),
+      idempotencyKey: mutationKey("open-archive-withdrawal-preview"),
+    },
+    mutationToken: recovered.mutationToken,
+    fetcher,
+  });
+  const previewUrl =
+    typeof opened.body === "object" &&
+    opened.body !== null &&
+    "previewUrl" in opened.body &&
+    typeof opened.body.previewUrl === "string"
+      ? opened.body.previewUrl
+      : null;
+  if (!opened.response.ok || previewUrl === null) {
+    return {
+      outcome: "failed",
+      message: "The preview could not be opened. Try again.",
+      mutationToken: opened.mutationToken,
+    };
+  }
+  return {
+    outcome: "opened",
+    withdrawal,
+    previewUrl,
+    mutationToken: opened.mutationToken,
+  };
+}
+
+/**
+ * Confirms the withdrawal revision a person already previewed in this
+ * session (the same "a human reviewed this" record every publish needs),
+ * then asks the server to continue the stalled withdrawal. Only call this
+ * with a `withdrawal` location `openArchiveWithdrawalPreview` actually
+ * returned in this session — the caller is responsible for that gate, this
+ * function does not re-check that a preview happened.
+ */
+export async function confirmArchiveWithdrawal({
+  postId,
+  archiveRequestId,
+  withdrawal,
+  mutationToken,
+  fetcher = fetch,
+}: {
+  postId: string;
+  archiveRequestId: string;
+  withdrawal: ArchiveWithdrawalLocation;
+  mutationToken: string;
+  fetcher?: typeof fetch;
+}): Promise<ArchiveWithdrawalContinuationResult> {
   const approved = await sendHumanMutationAttempt({
     url: "/api/foundry-cms/publications",
     attempt: {
@@ -625,7 +694,7 @@ export async function continueArchiveWithdrawal({
       }),
       idempotencyKey: mutationKey("approve-archive-withdrawal"),
     },
-    mutationToken: recovered.mutationToken,
+    mutationToken,
     fetcher,
   });
   const approvalId =
@@ -704,6 +773,14 @@ export function BlogPostControls({
   const [previewedRevision, setPreviewedRevision] = useState<number | null>(
     null,
   );
+  // The exact withdrawal revision (a separate workspace from `revision`,
+  // one per stalled archive) this browser session has opened a preview
+  // for, keyed by post ID. Confirming a stalled archive asserts the same
+  // "a human inspected the preview" claim scheduling does, so it is only
+  // enabled once this session actually opened that withdrawal's preview.
+  const [withdrawalPreviews, setWithdrawalPreviews] = useState<
+    ReadonlyMap<string, ArchiveWithdrawalLocation>
+  >(new Map());
 
   async function send(body: unknown, operation: string) {
     const attempt =
@@ -823,18 +900,65 @@ export function BlogPostControls({
   }
 
   /**
-   * Continues a live post's archive when the step that takes it off the
-   * site has stalled. Reloads on success, exactly like `sendBlogOperation`,
-   * so the reloaded archived-posts list always shows the server's current
-   * state.
+   * Opens the exact preview of a stalled archive's withdrawal revision —
+   * the site without this post — in a new tab, so a person can actually
+   * look at it before confirming. Records the previewed withdrawal so
+   * "Confirm and continue archiving" only enables for this exact one.
    */
-  async function continueArchive(archiveRequestId: string, postId: string) {
+  async function previewArchiveWithdrawal(archived: ArchivedBlogPostSummary) {
+    if (archived.archiveRequestId === null) return;
+    const popup = window.open("", "_blank");
+    if (popup !== null) popup.opener = null;
     setBusy(true);
     setMessage("");
     try {
-      const result = await continueArchiveWithdrawal({
-        postId,
-        archiveRequestId,
+      const result = await openArchiveWithdrawalPreview({
+        postId: archived.postId,
+        archiveRequestId: archived.archiveRequestId,
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (result.outcome === "failed") {
+        popup?.close();
+        setMessage(result.message);
+        return;
+      }
+      setWithdrawalPreviews((previous) => {
+        const next = new Map(previous);
+        next.set(archived.postId, result.withdrawal);
+        return next;
+      });
+      if (popup === null) {
+        window.open(result.previewUrl, "_blank", "noopener,noreferrer");
+      } else {
+        popup.location.href = result.previewUrl;
+      }
+    } catch {
+      popup?.close();
+      setMessage("The preview could not be opened. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Confirms and continues a stalled archive's withdrawal. Only meaningful
+   * once this session has previewed that exact withdrawal — the button
+   * that calls this is disabled until then. Reloads on success, exactly
+   * like `sendBlogOperation`, so the reloaded archived-posts list always
+   * shows the server's current state.
+   */
+  async function confirmContinueArchive(archived: ArchivedBlogPostSummary) {
+    if (archived.archiveRequestId === null) return;
+    const withdrawal = withdrawalPreviews.get(archived.postId);
+    if (withdrawal === undefined) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await confirmArchiveWithdrawal({
+        postId: archived.postId,
+        archiveRequestId: archived.archiveRequestId,
+        withdrawal,
         mutationToken,
       });
       setMutationToken(result.mutationToken);
@@ -1201,8 +1325,17 @@ export function BlogPostControls({
                 {archived.collectionState === "archiving" ? (
                   <p className="composer-hint">
                     Archive pending; the post remains live until this
-                    finishes. This can take a few minutes. If it does not
-                    finish, use Continue archiving below.
+                    finishes. This can take a few minutes. Preview the site
+                    without this post, then confirm to finish taking it off
+                    the site.
+                  </p>
+                ) : null}
+                {archived.collectionState === "archiving" &&
+                withdrawalPreviews.get(archived.postId) === undefined ? (
+                  <p className="composer-hint">
+                    Preview the site without this post before you can
+                    confirm. This shows what visitors will see once the
+                    post is fully off the site.
                   </p>
                 ) : null}
                 <div className="post-list-actions">
@@ -1214,13 +1347,24 @@ export function BlogPostControls({
                         className="copy-button"
                         disabled={busy}
                         onClick={() => {
-                          void continueArchive(
-                            archived.archiveRequestId!,
-                            archived.postId,
-                          );
+                          void previewArchiveWithdrawal(archived);
                         }}
                       >
-                        Continue archiving
+                        Preview the site without this post ↗
+                      </button>
+                      <button
+                        type="button"
+                        className="copy-button"
+                        disabled={
+                          busy ||
+                          withdrawalPreviews.get(archived.postId) ===
+                            undefined
+                        }
+                        onClick={() => {
+                          void confirmContinueArchive(archived);
+                        }}
+                      >
+                        Confirm and continue archiving
                       </button>
                       <button
                         type="button"

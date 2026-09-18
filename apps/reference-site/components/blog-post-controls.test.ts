@@ -12,8 +12,9 @@ import {
   blogPostExecutionFailureNote,
   blogPostLifecycleAction,
   blogPostScheduleStanding,
-  continueArchiveWithdrawal,
+  confirmArchiveWithdrawal,
   formatLocalScheduleTime,
+  openArchiveWithdrawalPreview,
 } from "./blog-post-controls";
 
 describe("blog post lifecycle controls", () => {
@@ -231,13 +232,13 @@ describe("blog execution failure note", () => {
   });
 });
 
-describe("continueArchiveWithdrawal", () => {
-  function jsonBody(call: unknown[]): Record<string, unknown> {
-    const init = call[1] as { body: string };
-    return JSON.parse(init.body) as Record<string, unknown>;
-  }
+function jsonBody(call: unknown[]): Record<string, unknown> {
+  const init = call[1] as { body: string };
+  return JSON.parse(init.body) as Record<string, unknown>;
+}
 
-  it("recovers access, confirms the withdrawal draft, and continues it", async () => {
+describe("openArchiveWithdrawalPreview", () => {
+  it("recovers access and opens the exact preview of the withdrawal revision", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -246,12 +247,13 @@ describe("continueArchiveWithdrawal", () => {
           withdrawal: { workspaceId: "workspace_withdrawal", revision: 3 },
         }),
       )
-      .mockResolvedValueOnce(Response.json({ id: "approval-withdrawal-1" }))
       .mockResolvedValueOnce(
-        Response.json({ archiveRequestId: "archive-0001" }, { status: 202 }),
+        Response.json({
+          previewUrl: "/__foundry/preview/workspace_withdrawal/3?capability=x",
+        }),
       );
 
-    const result = await continueArchiveWithdrawal({
+    const result = await openArchiveWithdrawalPreview({
       postId: "post-0001",
       archiveRequestId: "archive-0001",
       mutationToken: "csrf-token",
@@ -259,10 +261,12 @@ describe("continueArchiveWithdrawal", () => {
     });
 
     expect(result).toEqual({
-      outcome: "continued",
+      outcome: "opened",
+      withdrawal: { workspaceId: "workspace_withdrawal", revision: 3 },
+      previewUrl: "/__foundry/preview/workspace_withdrawal/3?capability=x",
       mutationToken: "csrf-token",
     });
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     const [recoverUrl] = fetcher.mock.calls[0]!;
     expect(recoverUrl).toBe("/api/foundry-cms/blog-operations");
     expect(jsonBody(fetcher.mock.calls[0]!)).toMatchObject({
@@ -270,30 +274,23 @@ describe("continueArchiveWithdrawal", () => {
       postId: "post-0001",
       archiveRequestId: "archive-0001",
     });
-    const [approveUrl] = fetcher.mock.calls[1]!;
-    expect(approveUrl).toBe("/api/foundry-cms/publications");
+    const [previewUrl] = fetcher.mock.calls[1]!;
+    expect(previewUrl).toBe("/api/foundry-cms/revisions");
     expect(jsonBody(fetcher.mock.calls[1]!)).toMatchObject({
-      operation: "approve",
+      operation: "open_preview",
       workspaceId: "workspace_withdrawal",
       revision: 3,
-      previewConfirmed: true,
-    });
-    expect(jsonBody(fetcher.mock.calls[2]!)).toMatchObject({
-      operation: "continue_archive_withdrawal",
-      postId: "post-0001",
-      archiveRequestId: "archive-0001",
-      withdrawalApprovalId: "approval-withdrawal-1",
     });
   });
 
-  it("reports a plain-words failure when access cannot be recovered", async () => {
+  it("reports a plain-words failure and never opens a preview when access cannot be recovered", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         Response.json({ error: "human_authority_required" }, { status: 422 }),
       );
 
-    const result = await continueArchiveWithdrawal({
+    const result = await openArchiveWithdrawalPreview({
       postId: "post-0001",
       archiveRequestId: "archive-0001",
       mutationToken: "csrf-token",
@@ -309,7 +306,7 @@ describe("continueArchiveWithdrawal", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("reports a failure and stops when the withdrawal cannot be confirmed", async () => {
+  it("reports a failure when the preview itself could not be opened", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -319,15 +316,83 @@ describe("continueArchiveWithdrawal", () => {
         }),
       )
       .mockResolvedValueOnce(
+        Response.json({ error: "preview_unavailable" }, { status: 409 }),
+      );
+
+    const result = await openArchiveWithdrawalPreview({
+      postId: "post-0001",
+      archiveRequestId: "archive-0001",
+      mutationToken: "csrf-token",
+      fetcher,
+    });
+
+    expect(result).toEqual({
+      outcome: "failed",
+      message: "The preview could not be opened. Try again.",
+      mutationToken: "csrf-token",
+    });
+  });
+});
+
+describe("confirmArchiveWithdrawal", () => {
+  const withdrawal = { workspaceId: "workspace_withdrawal", revision: 3 };
+
+  it("never sends an approve request until it is called with an already-opened preview's withdrawal location", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ id: "approval-withdrawal-1" }))
+      .mockResolvedValueOnce(
+        Response.json({ archiveRequestId: "archive-0001" }, { status: 202 }),
+      );
+
+    const result = await confirmArchiveWithdrawal({
+      postId: "post-0001",
+      archiveRequestId: "archive-0001",
+      withdrawal,
+      mutationToken: "csrf-token",
+      fetcher,
+    });
+
+    expect(result).toEqual({
+      outcome: "continued",
+      mutationToken: "csrf-token",
+    });
+    // Exactly the two steps that confirm and continue — no separate
+    // recover-access request; the caller is responsible for only reaching
+    // this function once a preview of `withdrawal` was already opened.
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [approveUrl] = fetcher.mock.calls[0]!;
+    expect(approveUrl).toBe("/api/foundry-cms/publications");
+    expect(jsonBody(fetcher.mock.calls[0]!)).toMatchObject({
+      operation: "approve",
+      workspaceId: "workspace_withdrawal",
+      revision: 3,
+      previewConfirmed: true,
+    });
+    const [continueUrl] = fetcher.mock.calls[1]!;
+    expect(continueUrl).toBe("/api/foundry-cms/blog-operations");
+    expect(jsonBody(fetcher.mock.calls[1]!)).toMatchObject({
+      operation: "continue_archive_withdrawal",
+      postId: "post-0001",
+      archiveRequestId: "archive-0001",
+      withdrawalApprovalId: "approval-withdrawal-1",
+    });
+  });
+
+  it("reports a failure and stops when the withdrawal cannot be confirmed", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
         Response.json(
           { error: "preview_confirmation_required" },
           { status: 422 },
         ),
       );
 
-    const result = await continueArchiveWithdrawal({
+    const result = await confirmArchiveWithdrawal({
       postId: "post-0001",
       archiveRequestId: "archive-0001",
+      withdrawal,
       mutationToken: "csrf-token",
       fetcher,
     });
@@ -338,18 +403,12 @@ describe("continueArchiveWithdrawal", () => {
         "The site could not confirm this archive step. Refresh the page and try again.",
       mutationToken: "csrf-token",
     });
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("reports the server's exact reason when continuing the withdrawal is rejected", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json({
-          archiveRequestId: "archive-0001",
-          withdrawal: { workspaceId: "workspace_withdrawal", revision: 3 },
-        }),
-      )
       .mockResolvedValueOnce(Response.json({ id: "approval-withdrawal-1" }))
       .mockResolvedValueOnce(
         Response.json(
@@ -358,9 +417,10 @@ describe("continueArchiveWithdrawal", () => {
         ),
       );
 
-    const result = await continueArchiveWithdrawal({
+    const result = await confirmArchiveWithdrawal({
       postId: "post-0001",
       archiveRequestId: "archive-0001",
+      withdrawal,
       mutationToken: "csrf-token",
       fetcher,
     });
