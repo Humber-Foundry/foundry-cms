@@ -20,13 +20,17 @@ export function PagesList({
   pages: ReadonlyArray<EditorPageSummary>;
   /** The Pages address with the workspace it already carries. */
   workspaceUrl: string;
-  /** When the draft was last saved, already written for a reader. */
+  /**
+   * When the draft was last saved, already written for a reader. This is one
+   * time for the whole draft: a save writes every page together, so the CMS
+   * holds no separate time for one page.
+   */
   lastSaved?: string;
   /** `true` when the address asked for a page this draft no longer holds. */
   notFoundPageAsked?: boolean;
 }) {
   return (
-    <section className="panel pages-list" aria-label="Your pages">
+    <section className="pages-list" aria-label="Your pages">
       {notFoundPageAsked ? (
         <p className="dashboard-note" role="status">
           That page is not in this draft any more. Here are the pages it has.
@@ -55,8 +59,7 @@ export function PagesList({
       </ul>
       {lastSaved === undefined ? null : (
         <p className="pages-list-saved">
-          You last saved this draft on {lastSaved}. Saving keeps every page
-          together, so this is the time for the whole draft, not for one page.
+          You last saved this draft on {lastSaved}.
         </p>
       )}
     </section>

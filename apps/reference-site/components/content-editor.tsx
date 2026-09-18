@@ -1843,7 +1843,9 @@ export function ContentEditor({
     pages.length === 0 ? null : (
       <div className="editor-page-switcher">
         <label className="editor-page-choose">
-          <span>Page</span>
+          {/* "Editing", not "Page": the screen is already headed Pages, and
+            * this says which one of them the owner has open. */}
+          <span>Editing</span>
           <select
             value={selectedPage.id}
             onChange={(event) => openPage(event.target.value)}

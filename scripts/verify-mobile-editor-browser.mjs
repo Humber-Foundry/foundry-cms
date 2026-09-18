@@ -141,7 +141,7 @@ try {
   // The way to another page rides in the same sheet, so it is reachable at
   // this width without any second menu.
   await page
-    .getByLabel("Page", { exact: true })
+    .getByLabel("Editing", { exact: true })
     .waitFor({ state: "visible" });
   await page.getByRole("link", { name: "All pages" }).waitFor({ state: "visible" });
   await settledRect(

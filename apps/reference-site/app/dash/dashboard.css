@@ -3663,6 +3663,13 @@ div.media-gallery-tile-site {
   gap: 1rem;
 }
 
+/* The page heading already draws the rule under itself, so the generic rule
+ * for a section would draw a second one with an empty strip between them. */
+.dashboard-main > section.pages-list {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .pages-list-rows {
   overflow: hidden;
   margin: 0;
