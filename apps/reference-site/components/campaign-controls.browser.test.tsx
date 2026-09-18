@@ -466,6 +466,30 @@ describe("campaign controls browser acceptance", () => {
     expect(buttonNamed(host, "Send it now")).toBeUndefined();
   });
 
+  it("shows an Editor a scheduled send without offering to call it off", async () => {
+    const server = fakeNewsletterServer();
+    server.state.schedule = {
+      id: "70000000-0000-4000-8000-000000000001",
+      state: "active",
+      localDateTime: "2026-09-25T09:00:00",
+      ianaTimeZone: "America/Vancouver",
+      utcOffsetChoice: "-07:00",
+      executeAtUtc: "2026-09-25T16:00:00.000Z",
+    };
+    const host = mount(server.campaign, server.revision, "editor");
+
+    await userEvent.click(page.getByRole("button", { name: "Sending steps" }));
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain("2026-09-25 at 09:00:00"),
+    );
+
+    // An Editor reads the true state and is offered no control over it.
+    expect(host.textContent).toContain(
+      "Only the site owner can start, change or call off a send.",
+    );
+    expect(buttonNamed(host, "Call this send off")).toBeUndefined();
+  });
+
   it("keeps the test and send steps shut while email is not connected", async () => {
     const server = fakeNewsletterServer({ deliveryState: "not_configured" });
     const host = mount(server.campaign, server.revision, "owner");
@@ -480,6 +504,10 @@ describe("campaign controls browser acceptance", () => {
     );
     expect(host.textContent).toContain(
       "Email is not connected yet, so no test can go out.",
+    );
+    // The person who can fix it is told where the steps are written down.
+    expect(host.textContent).toContain(
+      "docs/operations/brevo-test-delivery-readiness.md",
     );
     expect(server.commands).toHaveLength(0);
   });

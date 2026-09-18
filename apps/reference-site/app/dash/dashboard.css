@@ -3662,8 +3662,8 @@ div.media-gallery-tile-site {
  *
  * The control-height variable belongs with the other .dashboard variables at
  * the top of this file. It sits here instead so this feature stays one
- * contiguous block while another change edits the same file; move it up once
- * both have landed. */
+ * contiguous block while another open change (#181) edits the same file; move
+ * it up once both have landed. */
 .dashboard {
   --dash-control-height: 2.75rem;
 }

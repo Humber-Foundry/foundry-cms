@@ -525,14 +525,18 @@ function CampaignSendFlow({
    * the very controls that call a scheduled send off or retry a failed one.
    */
   function sendStage() {
-    if (!isOwner) return "not_yours" as const;
     if (sendOperation !== null) {
       if (sendOperation.state === "sent") return "sent" as const;
-      return sendOperation.state === "failed" || sendOperation.state === "blocked"
+      if (sendOperation.state === "ambiguous") return "uncertain" as const;
+      return sendOperation.state === "failed" ||
+        sendOperation.state === "blocked"
         ? ("failed" as const)
         : ("sending" as const);
     }
     if (schedule !== null) return "scheduled" as const;
+    // Whose step it is comes after what is true. An Editor who cannot act
+    // still has to read what this campaign is doing.
+    if (!isOwner) return "not_yours" as const;
     if (notConnected) return "not_connected" as const;
     if (!confirmed) return "needs_test" as const;
     return authorization === null
@@ -541,6 +545,18 @@ function CampaignSendFlow({
   }
 
   const stage = sendStage();
+
+  /**
+   * Where the steps to connect email are written down. Naming the guide gives
+   * the person who can fix it somewhere to start. The settings themselves
+   * belong to the connection state ticket (#165), so this stays a pointer.
+   */
+  const setupGuideNote =
+    notConnected && delivery !== null ? (
+      <p className="send-step-reason">
+        The steps to connect it are in <code>{delivery.setupGuide}</code>.
+      </p>
+    ) : null;
 
   const sendNeeds: Readonly<Record<ReturnType<typeof sendStage>, string>> = {
     not_yours:
@@ -551,6 +567,13 @@ function CampaignSendFlow({
       "The send did not finish. Nobody else will be sent to until you try " +
       "again.",
     sending: "The send is under way.",
+    // The provider gave an answer nobody can act on. Sending again could
+    // deliver the email twice, so this offers no retry until the provider's
+    // own record has been read back.
+    uncertain:
+      "The email provider's answer was uncertain, so nobody knows yet " +
+      "whether this went out. Do not send it again. It is being checked " +
+      "against the provider's own record.",
     scheduled: "This email is set to send at the time below.",
     not_connected:
       "Email is not connected yet, so nothing can be sent from here. Step 2 " +
@@ -643,15 +666,7 @@ function CampaignSendFlow({
               Send a test email
             </button>
           )}
-          {notConnected && delivery !== null ? (
-            // Naming the guide gives the person who can fix it somewhere to
-            // start. The settings themselves belong to the connection state
-            // ticket (#165), so this stays a pointer.
-            <p className="send-step-reason">
-              The steps to connect it are in{" "}
-              <code>{delivery.setupGuide}</code>.
-            </p>
-          ) : null}
+          {setupGuideNote}
           {notConnected || testRecipientIds.length > 0 ? null : (
             <p className="send-step-need">
               There is no verified test address on file, so a test cannot go
@@ -702,12 +717,27 @@ function CampaignSendFlow({
           state={sendStepState()}
           need={sendNeeds[stage]}
         >
+          {/*
+            An Editor reads the state but is offered no control, because only
+            an Owner may send, schedule, cancel or retry. The server refuses
+            them either way; showing a button an Editor cannot use would only
+            promise something this screen cannot deliver.
+          */}
+          {!isOwner ? (
+            <p className="send-step-reason">
+              Only the site owner can start, change or call off a send.
+            </p>
+          ) : null}
           {sendOperation !== null ? (
             <div className="send-step-outcome">
               {sendOperation.detail === null ? null : (
                 <p className="send-step-reason">Reason: {sendOperation.detail}</p>
               )}
-              {stage === "failed" ? (
+              <p className="send-step-reason">
+                Attempt {sendOperation.attempt}, last changed{" "}
+                {sendOperation.updatedAt.replace("T", " at ").slice(0, 19)}.
+              </p>
+              {stage === "failed" && isOwner ? (
                 <button
                   type="button"
                   className="copy-button"
@@ -733,23 +763,33 @@ function CampaignSendFlow({
                 Set to send on {schedule.localDateTime.replace("T", " at ")} (
                 {schedule.ianaTimeZone}).
               </p>
-              <button
-                type="button"
-                className="copy-button"
-                disabled={busy}
-                onClick={() =>
-                  onCommand({
-                    action: "cancel_bulk_schedule",
-                    scheduleId: schedule.id,
-                  })
-                }
-              >
-                Call this send off
-              </button>
+              {confirmed ? null : (
+                <p className="send-step-reason">
+                  You changed the email after this send was set up. Call it off
+                  if you do not want the earlier version to go out.
+                </p>
+              )}
+              {isOwner ? (
+                <button
+                  type="button"
+                  className="copy-button"
+                  onClick={() =>
+                    onCommand({
+                      action: "cancel_bulk_schedule",
+                      scheduleId: schedule.id,
+                    })
+                  }
+                  disabled={busy}
+                >
+                  Call this send off
+                </button>
+              ) : null}
             </div>
           ) : stage === "not_yours" ||
             stage === "needs_test" ||
-            stage === "not_connected" ? null : stage === "needs_approval" ? (
+            stage === "not_connected" ? (
+            setupGuideNote
+          ) : stage === "needs_approval" ? (
             testEvidence === null ? null : (
               <button
                 type="button"
