@@ -61,6 +61,7 @@ import {
 } from "../src/content-editor-persistence";
 import { pageCompositionChanged } from "../src/page-composition-puck";
 import { DesignDestination } from "./design-destination";
+import { HelpTip } from "./help-tip";
 import { RichTextEditor } from "./rich-text-editor";
 import {
   PublicationHistory,
@@ -1490,7 +1491,8 @@ export function ContentEditor({
           : "Saved. Preview your draft, then publish it.";
 
   // The chip answers one question — is my work safe? — in plain words. The
-  // revision number stays available to tests and support as data, not copy.
+  // revision number stays available to tests and support as data, and to
+  // anyone who opens the help tip, but it is never the chip's own copy.
   const statusChipLabels: Record<typeof state.status, string> = {
     saved: "Saved",
     saving: "Saving…",
@@ -1502,9 +1504,12 @@ export function ContentEditor({
     <span
       className={`state-label state-${state.status}`}
       data-revision={state.persistedRevision}
-      title={`Draft revision ${state.persistedRevision}`}
     >
       {statusChipLabels[state.status]}
+      <HelpTip label="What's a revision number?">
+        Revision {state.persistedRevision}. Every save creates a new
+        revision, so support can find this exact version of your work.
+      </HelpTip>
     </span>
   );
 

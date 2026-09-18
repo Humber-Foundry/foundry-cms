@@ -24,4 +24,5 @@
 | [ADR-0017](ADR-0017-page-scoped-editable-field-paths.md) | A field path carries its page id, and the home page keeps its old paths | Accepted | 2026-09-18 |
 | [ADR-0018](ADR-0018-public-page-routes.md) | One route serves every page below the home page | Accepted | 2026-09-18 |
 | [ADR-0019](ADR-0019-mcp-dynamic-client-registration.md) | Dynamic client registration, and consent is the only grant | Accepted | 2026-09-18 |
-| [ADR-0020](ADR-0020-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
+| [ADR-0020](ADR-0020-dashboard-help-tip-toggletip.md) | The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip | Accepted | 2026-09-18 |
+| [ADR-0023](ADR-0023-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
