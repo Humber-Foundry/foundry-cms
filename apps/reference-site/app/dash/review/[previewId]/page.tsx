@@ -15,7 +15,7 @@ import { createRevisionPreviewCapability } from "@/src/preview-capability-runtim
 export const dynamic = "force-dynamic";
 export const metadata = {
   robots: { index: false, follow: false },
-  title: "MCP draft review",
+  title: "Draft review",
 };
 
 export default async function McpPreviewReviewPage({
