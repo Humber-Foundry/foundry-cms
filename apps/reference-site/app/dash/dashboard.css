@@ -143,11 +143,16 @@
 
 /* Each destination separates its sections with space and a rule, so a long
  * page still reads as distinct jobs rather than one column of text. The
- * editor card is excluded: it is the page's single surface and carries its
- * own border on all four sides, so the divider would double the top line
- * and, being more specific, would strip the card's own top border and
- * padding. */
-.dashboard-main > section:not(.content-editor) {
+ * editor card and `.panel` are excluded: each is a complete box with its own
+ * border on all four sides, so the divider would double the top line and,
+ * being more specific, would strip the card's own top border and padding —
+ * leaving its top edge bare while its other three sides kept their own
+ * padding and border (issue #173 regression: the "Your draft" card on
+ * Overview lost its top padding and border this way, while its bottom,
+ * left and right stayed correct). Sibling margin collapse between the page
+ * heading and a `.panel` first section still gives the same gap a plain
+ * first section gets, so `.panel` needs no extra rule of its own. */
+.dashboard-main > section:not(.content-editor):not(.panel) {
   margin-top: var(--dash-panel-gap);
   padding-top: var(--dash-panel-gap);
   border-top: 1px solid var(--dash-line);
@@ -157,8 +162,10 @@
  * rules — the heading's own bottom border, then this section's top border —
  * with nothing but empty space between them. The heading's border is
  * already the one seam a destination needs, so the first section drops its
- * own border and keeps only a plain gap. */
-.page-heading + section:not(.content-editor) {
+ * own border and keeps only a plain gap. A card (`.panel`, like the editor
+ * card above) keeps its own border on every side instead — see the
+ * exclusion note above. */
+.page-heading + section:not(.content-editor):not(.panel) {
   margin-top: var(--dash-gap);
   padding-top: 0;
   border-top: 0;
