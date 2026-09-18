@@ -102,6 +102,7 @@ export default async function RevisionPreviewPage(
       </aside>
       <SiteRenderer
         definition={revision.definition}
+        page={homePage(revision.definition)}
         mediaDelivery="authenticated"
         mediaAccessToken={
           typeof accessToken === "string" ? accessToken : undefined

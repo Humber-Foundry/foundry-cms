@@ -22,5 +22,5 @@ export default async function PublicHomePage() {
   const definition =
     await installedSite.application.queries.getPublishedSite();
 
-  return <SiteRenderer definition={definition} />;
+  return <SiteRenderer definition={definition} page={homePage(definition)} />;
 }
