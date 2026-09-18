@@ -1,3 +1,5 @@
+import { Fragment } from "react";
+
 import { notFound } from "next/navigation";
 
 import { mcpSupportedScopes } from "@humber-foundry/application";
@@ -35,14 +37,19 @@ function ClientSteps({ instructions }: { instructions: McpClientInstructions }) 
         ))}
       </ol>
       <p className="agent-client-sources">
+        {/* Each link stays a direct child of this paragraph, with the
+            surrounding sentence as its sibling text, so it counts as a link
+            inline in a sentence — exempt from the standalone minimum tap
+            target under WCAG 2.2 SC 2.5.8 — rather than a standalone control
+            with nothing else in its own parent element. */}
         Steps for {instructions.client}, read from{" "}
         {instructions.sourceUrls.map((url, index) => (
-          <span key={url}>
+          <Fragment key={url}>
             {index > 0 ? ", " : ""}
             <a href={url} target="_blank" rel="noreferrer">
               {new URL(url).hostname}
             </a>
-          </span>
+          </Fragment>
         ))}{" "}
         on {mcpClientInstructionsSourcesReadOn}. Foundry has not tested a live
         connection against {instructions.client}, so treat these as steps to
