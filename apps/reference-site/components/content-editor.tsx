@@ -1950,7 +1950,11 @@ export function ContentEditor({
           onClickCapture={(event) => blockBrowseNavigation(event)}
           onAuxClickCapture={(event) => blockBrowseNavigation(event)}
         >
-          <SiteRenderer definition={state.workingDefinition} editingSurface />
+          <SiteRenderer
+            definition={state.workingDefinition}
+            page={homePage(state.workingDefinition)}
+            editingSurface
+          />
         </div>
       ) : (
         <div className="editor-stage">

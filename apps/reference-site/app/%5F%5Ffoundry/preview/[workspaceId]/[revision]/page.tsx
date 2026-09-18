@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
-import { homePage, resolvePageSeo } from "@humber-foundry/site-definition";
+import { homePage } from "@humber-foundry/site-definition";
 
 import { SiteRenderer } from "@/components/site-renderer";
-import { publicMetadata } from "@/src/public-metadata";
+import { pageRouteMetadata } from "@/src/public-page";
 import {
   loadRevisionPreview,
   type RevisionPreviewPageProps,
@@ -20,13 +20,7 @@ export async function generateMetadata(
   const revision = await loadRevisionPreview(props);
   return {
     robots: { index: false, follow: false },
-    ...publicMetadata(
-      resolvePageSeo(revision.definition, homePage(revision.definition)),
-      {
-        siteName: revision.definition.site.name,
-        kind: "website",
-      },
-    ),
+    ...pageRouteMetadata(revision.definition, homePage(revision.definition)),
   };
 }
 
@@ -102,6 +96,7 @@ export default async function RevisionPreviewPage(
       </aside>
       <SiteRenderer
         definition={revision.definition}
+        page={homePage(revision.definition)}
         mediaDelivery="authenticated"
         mediaAccessToken={
           typeof accessToken === "string" ? accessToken : undefined
