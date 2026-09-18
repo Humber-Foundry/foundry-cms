@@ -453,6 +453,49 @@ the installation's current file, the pinned old release and the target — and
 preserving installation-owned work. A conflict fails closed unless the operator
 accepts it; migrations are additive-only. See ADR-0015.
 
+## Owner-facing words
+
+The dashboard is written for a site owner, not a developer. Where this
+glossary's own term would read as jargon on screen, the dashboard shows a
+plain word instead, or explains the term with the shared help control
+(`components/help-tip.tsx`) rather than showing it bare. This section names
+that mapping so new dashboard copy stays consistent.
+
+**Draft** — The dashboard's word for what this glossary calls a content
+item's unpublished revision. The internal `workspaceId` and revision number
+never appear as ordinary page copy; the dashboard says "unpublished changes"
+or "your draft" instead.
+
+**Owner / Editor** — The two roles a user can hold, shown capitalized
+wherever a role appears (`Owner`, `Editor`), never as the internal lowercase
+value.
+
+**Active / Suspended / Revoked** — The three states a user's access can be
+in, shown capitalized (`Active`, `Suspended`, `Revoked`), matching the
+capitalized action buttons that change them (Activate, Suspend, Revoke).
+
+**Revision** — Kept as a word, because support and an agent both refer to an
+exact revision number. The dashboard never shows a bare number; a help tip
+explains what it identifies wherever one appears.
+
+**Content ID** — The dashboard's word for a fingerprint shown on screen
+(what this glossary calls a **Fingerprint**). The exact digest stays visible
+next to it, with a help tip, because it is what proves an approved draft was
+not changed before it went out.
+
+**Commit / Build / Approval** — The publish-pipeline identifiers (a Git
+commit, a Cloudflare deployment, an approval fingerprint) kept in "Published
+history" for support and developers, with one help tip on the section
+explaining what each is for.
+
+**Receipt** — The dashboard's word for a form submission's identifier. Kept
+as a word, with a help tip, because it is what a visitor or support quotes
+to find one exact message again.
+
+**Definition version / Schema version** — Kept as words, inside the "Site
+details" disclosure in Settings only. They never appear on an ordinary
+editing page.
+
 ## Linked domain documents
 
 - [Blog and newsletter publishing lifecycle](docs/domain/blog-newsletter-publishing-lifecycle.md)

@@ -12,6 +12,7 @@ import {
   loadContentPublicationHistory,
   restoreContentPublication,
 } from "../src/content-publication-client";
+import { HelpTip } from "./help-tip";
 
 export type PublicationRecord = ContentPublication;
 
@@ -124,7 +125,17 @@ export function PublicationHistory({
       aria-labelledby="publication-history-heading"
     >
       <div>
-        <h3 id="publication-history-heading">Published history</h3>
+        <h3 id="publication-history-heading">
+          Published history
+          <HelpTip label="What do these technical records mean?">
+            These are technical records of each publish, kept for support and
+            developers. Revision is which saved version of your content was
+            published. Commit is where the change was saved in the site's
+            history. Content and Approval prove exactly which draft was
+            approved. Build is the site rebuild that made it live. You do not
+            need any of them for ordinary publishing.
+          </HelpTip>
+        </h3>
         <p>
           Every publish is recorded here, with its build evidence. Restoring
           an older published version creates a new draft — nothing goes live

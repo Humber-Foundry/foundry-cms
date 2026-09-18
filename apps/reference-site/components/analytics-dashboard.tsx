@@ -6,6 +6,7 @@ import type {
 } from "@humber-foundry/application";
 
 import type { AnalyticsDashboardData } from "../src/analytics-dashboard-runtime";
+import { HelpTip } from "./help-tip";
 
 /**
  * Presents the aggregate projection. Every number arrives with its source,
@@ -41,6 +42,13 @@ const unavailableLabels: Readonly<Record<string, string>> = {
   source_unavailable: "Source unavailable",
   outside_retention: "Outside the retained window",
   not_supported: "Provider does not support this",
+};
+
+const sourceStatusLabels: Readonly<Record<string, string>> = {
+  healthy: "Working normally",
+  delayed: "Running behind",
+  partial: "Reporting partly",
+  unavailable: "Not reporting",
 };
 
 const metricLabels: Readonly<Record<string, string>> = {
@@ -168,7 +176,7 @@ function SourceHealthTable({
             {source.sourceName} · {source.source}
           </strong>
           <span role="cell" className="state-label">
-            {source.status}
+            {sourceStatusLabels[source.status] ?? source.status}
             {source.errorCode === null ? "" : ` (${source.errorCode})`}
             {source.nextRetryAt === null
               ? ""
@@ -369,7 +377,15 @@ export function AnalyticsDashboard({
         ))
       )}
 
-      <h3>Data health</h3>
+      <h3>
+        Data health
+        <HelpTip label="What is Data health?">
+          Whether each provider that feeds your numbers is reporting
+          normally. A provider running behind or not reporting does not
+          change numbers already shown — it only means the newest ones are
+          still on the way.
+        </HelpTip>
+      </h3>
       <SourceHealthTable sources={health.sources} />
       {health.disagreements.length === 0 ? null : (
         <div className="analytics-warning" role="note">

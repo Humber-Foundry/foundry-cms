@@ -69,8 +69,7 @@ export default async function DashboardOverviewPage({
             </p>
           ) : (
             <p>
-              You have unpublished changes saved as revision{" "}
-              {contentRevision.revision}. Open Pages to keep editing, or
+              You have unpublished changes. Open Pages to keep editing, or
               publish when you are happy with the preview.
             </p>
           )}

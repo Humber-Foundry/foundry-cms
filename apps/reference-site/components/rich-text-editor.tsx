@@ -101,6 +101,13 @@ export function RichTextEditor({
     editorProps: {
       attributes: {
         id,
+        // TipTap's editable surface is a contenteditable div with no role of
+        // its own, so a screen reader treats it as generic text — a role
+        // that does not support aria-invalid or aria-describedby. Naming it
+        // a multiline textbox is what makes those two attributes valid, and
+        // it is also the correct role for what this control actually is.
+        role: "textbox",
+        "aria-multiline": "true",
         ...editorAccessibleName,
         "aria-describedby": editorDescribedBy,
         "aria-invalid": String(invalid || validationMessage !== ""),
@@ -150,6 +157,8 @@ export function RichTextEditor({
         attributes: {
           ...editor.options.editorProps.attributes,
           id,
+          role: "textbox",
+          "aria-multiline": "true",
           ...editorAccessibleName,
           "aria-describedby": editorDescribedBy,
           "aria-invalid": String(invalid || validationMessage !== ""),
