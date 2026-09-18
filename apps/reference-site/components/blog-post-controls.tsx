@@ -1317,7 +1317,9 @@ export function BlogPostControls({
             {archivedPosts.map((archived) => (
               <li key={archived.postId}>
                 <div className="post-list-summary">
-                  <strong>{archived.title === "" ? archived.postId : archived.title}</strong>
+                  <strong>
+                    {archived.title === "" ? "Untitled post" : archived.title}
+                  </strong>
                   <span>
                     {archived.collectionState === "archiving"
                       ? "Archiving — coming off the site"

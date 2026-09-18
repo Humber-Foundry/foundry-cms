@@ -46,9 +46,8 @@ export default async function DashboardOverviewPage({
         <section className="panel" aria-labelledby="draft-state">
           <h2 id="draft-state">Your draft</h2>
           <p>
-            You have unpublished changes saved as revision{" "}
-            {dashboardWorkspace.contentRevision?.revision}. Open Pages to keep
-            editing, or publish when you are happy with the preview.
+            You have unpublished changes. Open Pages to keep editing, or
+            publish when you are happy with the preview.
           </p>
           <p className="panel-actions">
             <a
