@@ -8,6 +8,7 @@ import {
   createSiteId,
   referenceSiteDefinition,
   toPageComposition,
+  type PageComposition,
   type PageSection,
 } from "@humber-foundry/site-definition";
 
@@ -22,6 +23,7 @@ import {
   createContentRevisionApplication,
   createInMemoryMediaContentCoordinator,
   createInMemoryContentRevisionStore,
+  compositionWithAuthoritativeVariants,
   isContentRevisionRenderableBy,
 } from "./content-revisions";
 
@@ -1406,5 +1408,80 @@ describe("content revision application", () => {
     await expect(application.queries.getCurrent()).rejects.toBeInstanceOf(
       ContentWorkspaceAccessError,
     );
+  });
+});
+
+describe("section style reconciliation per page", () => {
+  const home = homePage(referenceSiteDefinition);
+  const hero = home.sections[0]!;
+  const heroId = hero.id;
+  const storedHeroVariant = hero.variant;
+
+  /** The same page, one level below the home page, with the same section ids. */
+  const secondPage = {
+    ...structuredClone(home),
+    id: "page_about",
+    slug: "about",
+    title: "About",
+  };
+
+  /** The page's composition with the hero section given another style. */
+  const restyledComposition = (): PageComposition => {
+    const composition = toPageComposition(referenceSiteDefinition);
+    return {
+      ...composition,
+      components: composition.components.map((component) =>
+        component.type === "hero"
+          ? { ...component, variant: "focused" as const }
+          : component,
+      ),
+    };
+  };
+
+  it("takes the composition's style when the save does not edit that field", () => {
+    const result = compositionWithAuthoritativeVariants(
+      home,
+      restyledComposition(),
+      [{ path: `${heroId}.title`, value: "A new title" }],
+    );
+
+    expect(result.components[0]).toMatchObject({
+      id: heroId,
+      variant: "focused",
+    });
+  });
+
+  it("keeps the stored style when the save also edits that field", () => {
+    // The field edit is the single writer of a section style. It is applied
+    // after the composition, so the composition carries the stored value.
+    const result = compositionWithAuthoritativeVariants(
+      home,
+      restyledComposition(),
+      [{ path: `${heroId}.variant`, value: "focused" }],
+    );
+
+    expect(result.components[0]).toMatchObject({
+      variant: storedHeroVariant,
+    });
+  });
+
+  it("reads a second page's style edit at that page's own field path", () => {
+    const withPageId = compositionWithAuthoritativeVariants(
+      secondPage,
+      restyledComposition(),
+      [{ path: `page_about.${heroId}.variant`, value: "focused" }],
+    );
+    // A home page path names no page, so it must not match a field of the
+    // page below it, even though both pages hold a section with this id.
+    const withHomePath = compositionWithAuthoritativeVariants(
+      secondPage,
+      restyledComposition(),
+      [{ path: `${heroId}.variant`, value: "focused" }],
+    );
+
+    expect(withPageId.components[0]).toMatchObject({
+      variant: storedHeroVariant,
+    });
+    expect(withHomePath.components[0]).toMatchObject({ variant: "focused" });
   });
 });

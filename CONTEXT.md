@@ -25,6 +25,13 @@ ADR-0016.
 at `/`. Every site has exactly one, and it cannot be deleted. Code that needs
 the page itself reads it with `homePage`. See ADR-0016.
 
+**Field path** — The name of one editable field, such as
+`section_contact.body`. A published rich-text file, a stored draft edit and the
+MCP `content.patch` field list are all named after it. A field of a page below
+the home page starts with that page's id, so two pages may hold sections with
+the same id. A home page field has no prefix, so an installation that upgrades
+publishes the same files it published before. See ADR-0017.
+
 **Revision** — An immutable version of one content item. Editing always creates
 a new revision; it never changes a revision that was previewed, approved,
 published, tested or sent.
@@ -432,5 +439,6 @@ accepts it; migrations are additive-only. See ADR-0015.
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [The framework/installation-owned seam and three-way foundation sync](docs/decisions/ADR-0015-foundation-framework-sync-seam.md)
 - [A page collection replaces the single home page](docs/decisions/ADR-0016-site-definition-page-collection.md)
+- [A field path carries its page id](docs/decisions/ADR-0017-page-scoped-editable-field-paths.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)
 - [Privacy-first aggregate analytics](docs/architecture/privacy-first-aggregate-analytics.md)

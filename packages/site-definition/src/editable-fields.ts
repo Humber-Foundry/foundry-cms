@@ -24,7 +24,7 @@ import {
   seoFieldHints,
   seoKeywordLimit,
 } from "./seo";
-import { homePage, homePageIndex } from "./pages";
+import { homePageIndex, pageFieldPath } from "./pages";
 
 export type SiteDefinitionEdit =
   | Readonly<{
@@ -50,6 +50,12 @@ type EditableSiteFieldBase = Readonly<{
    */
   section?: string;
   multiline: boolean;
+  /**
+   * The id of the page this field belongs to, absent when the field belongs
+   * to the whole site or to a blog post. The editor reads it to show one
+   * page's fields, and a caller reads it to tell two pages' fields apart.
+   */
+  pageId?: string;
   values?: ReadonlyArray<string>;
   /**
    * `true` when the owner may leave this field blank. A blank optional field
@@ -115,6 +121,7 @@ type EditableFieldBindingInput = Readonly<{
   group: EditableSiteField["group"];
   section?: string;
   multiline?: boolean;
+  pageId?: string;
   values?: ReadonlyArray<string>;
   optional?: boolean;
   hint?: string;
@@ -139,6 +146,7 @@ function fieldBinding({
   value,
   multiline = false,
   format = "plainText",
+  pageId,
   values,
   optional = false,
   hint,
@@ -160,6 +168,7 @@ function fieldBinding({
       multiline,
       format,
       optional,
+      ...(pageId === undefined ? {} : { pageId }),
       ...(values === undefined ? {} : { values }),
       ...(hint === undefined ? {} : { hint }),
     } as EditableSiteField,
@@ -227,7 +236,7 @@ function editableFieldBindings(
 ): EditableFieldBinding[] {
   /**
    * The one SEO and sharing field set, bound for whichever surface asks.
-   * The home page and every blog post get identical fields, so an owner
+   * Every page and every blog post gets identical fields, so an owner
    * learns the panel once and a drafting agent has one target.
    */
   const seoFieldBindings = ({
@@ -238,6 +247,7 @@ function editableFieldBindings(
     titleHint,
     descriptionHint,
     blogPostId,
+    pageId,
     select,
   }: {
     pathPrefix: string;
@@ -247,9 +257,14 @@ function editableFieldBindings(
     titleHint: string;
     descriptionHint: string;
     blogPostId?: BlogPostId;
+    pageId?: string;
     select(draft: MutableSiteDefinition): DeepMutable<SeoMetadata>;
   }): EditableFieldBinding[] => {
-    const shared = { group, ...(blogPostId === undefined ? {} : { blogPostId }) };
+    const shared = {
+      group,
+      ...(blogPostId === undefined ? {} : { blogPostId }),
+      ...(pageId === undefined ? {} : { pageId }),
+    };
     /**
      * A share image is one thing to an owner and two fields on screen. Each
      * field writes its own part and leaves the other alone, so the pair
@@ -357,6 +372,21 @@ function editableFieldBindings(
       },
     }),
   );
+  /**
+   * Every page, with its position in `pages`, home page first.
+   *
+   * A write needs the position, because it writes into a mutable copy of the
+   * same definition. The home page comes first so that a single-page site
+   * yields exactly the field list, in exactly the order, it yielded before a
+   * site could hold more than one page.
+   */
+  const homeIndex = homePageIndex(definition);
+  const pagesInFieldOrder = [
+    { page: definition.pages[homeIndex]!, index: homeIndex },
+    ...definition.pages.flatMap((page, index) =>
+      index === homeIndex ? [] : [{ page, index }],
+    ),
+  ];
   const fields: EditableFieldBinding[] = [
     ...designTokenBindings,
     fieldBinding({
@@ -403,15 +433,20 @@ function editableFieldBindings(
         draft.site.footer = value;
       },
     }),
-    ...seoFieldBindings({
-      pathPrefix: homePage(definition).id,
-      labelPrefix: "Page",
-      group: "SEO",
-      seo: homePage(definition).seo,
-      titleHint: seoFieldHints.page.title,
-      descriptionHint: seoFieldHints.page.description,
-      select: (draft) => draft.pages[homePageIndex(draft)]!.seo,
-    }),
+    // A page's SEO paths already start with its page id, on the home page as
+    // well as on every other page, so one rule covers them all.
+    ...pagesInFieldOrder.flatMap(({ page, index }) =>
+      seoFieldBindings({
+        pathPrefix: page.id,
+        labelPrefix: "Page",
+        group: "SEO",
+        pageId: page.id,
+        seo: page.seo,
+        titleHint: seoFieldHints.page.title,
+        descriptionHint: seoFieldHints.page.description,
+        select: (draft) => draft.pages[index]!.seo,
+      }),
+    ),
   ];
 
   definition.site.navigation.forEach((item, index) => {
@@ -429,7 +464,20 @@ function editableFieldBindings(
     );
   });
 
-  homePage(definition).sections.forEach((section, sectionIndex) => {
+  /**
+   * Every content section of every page, home page first, each one carrying
+   * the page it belongs to and that page's position in `pages`.
+   */
+  const pageSections = pagesInFieldOrder.flatMap(({ page, index }) =>
+    page.sections.map((section, sectionIndex) => ({
+      page,
+      pageIndex: index,
+      section,
+      sectionIndex,
+    })),
+  );
+
+  pageSections.forEach(({ page, pageIndex, section, sectionIndex }) => {
     if (section.type === "registered") return;
     const variant = designContract.variants[section.type];
     // The card heading the editor shows for every field in this section, so
@@ -437,14 +485,15 @@ function editableFieldBindings(
     const sectionLabel = contentSectionLabels[section.type] ?? section.type;
     fields.push(
       fieldBinding({
-        path: sectionVariantFieldPath(section.id),
+        path: pageFieldPath(page, sectionVariantFieldPath(section.id)),
         label: variant.label,
         group: "Design",
+        pageId: page.id,
         value: section.variant,
         multiline: false,
         values: variant.values,
         write: (draft, value) => {
-          const draftSection = draft.pages[homePageIndex(draft)]!.sections[
+          const draftSection = draft.pages[pageIndex]!.sections[
             sectionIndex
           ] as unknown as Record<string, unknown>;
           draftSection.variant = value;
@@ -459,14 +508,15 @@ function editableFieldBindings(
     ) => {
       fields.push(
         fieldBinding({
-          path: `${section.id}.${property}`,
+          path: pageFieldPath(page, `${section.id}.${property}`),
           label,
           group: "Page",
+          pageId: page.id,
           section: sectionLabel,
           value,
           multiline,
           write: (draft, nextValue) => {
-            const draftSection = draft.pages[homePageIndex(draft)]!.sections[
+            const draftSection = draft.pages[pageIndex]!.sections[
               sectionIndex
             ] as unknown as Record<string, unknown>;
             draftSection[property] = nextValue;
@@ -482,15 +532,16 @@ function editableFieldBindings(
     ) => {
       fields.push(
         fieldBinding({
-          path: `${itemId}.label`,
+          path: pageFieldPath(page, `${itemId}.label`),
           label,
           group: "Page",
+          pageId: page.id,
           section: sectionLabel,
           value,
           multiline: false,
           write: (draft, nextValue) => {
             write(
-              draft.pages[homePageIndex(draft)]!.sections[
+              draft.pages[pageIndex]!.sections[
                 sectionIndex
               ] as unknown as Record<
                 string,
@@ -542,14 +593,15 @@ function editableFieldBindings(
           ] as const) {
             fields.push(
               fieldBinding({
-                path: `${item.id}.${property}`,
+                path: pageFieldPath(page, `${item.id}.${property}`),
                 label,
                 group: "Page",
+                pageId: page.id,
                 section: sectionLabel,
                 value: item[property],
                 multiline,
                 write: (draft, nextValue) => {
-                  const draftSection = draft.pages[homePageIndex(draft)]!.sections[
+                  const draftSection = draft.pages[pageIndex]!.sections[
                     sectionIndex
                   ] as ServicesSection;
                   (
@@ -578,14 +630,15 @@ function editableFieldBindings(
           ] as const) {
             fields.push(
               fieldBinding({
-                path: `${metric.id}.${property}`,
+                path: pageFieldPath(page, `${metric.id}.${property}`),
                 label,
                 group: "Page",
+                pageId: page.id,
                 section: sectionLabel,
                 value: metric[property],
                 multiline: false,
                 write: (draft, nextValue) => {
-                  const draftSection = draft.pages[homePageIndex(draft)]!.sections[
+                  const draftSection = draft.pages[pageIndex]!.sections[
                     sectionIndex
                   ] as ProofSection;
                   (
@@ -605,15 +658,16 @@ function editableFieldBindings(
         bindSectionField("title", "Call to action title", section.title);
         fields.push(
           fieldBinding({
-            path: `${section.id}.body`,
+            path: pageFieldPath(page, `${section.id}.body`),
             label: "Call to action body",
             group: "Page",
+            pageId: page.id,
             section: sectionLabel,
             value: serializeRichTextDocument(section.body),
             multiline: true,
             format: "richText",
             write: (draft, value) => {
-              const draftSection = draft.pages[homePageIndex(draft)]!.sections[
+              const draftSection = draft.pages[pageIndex]!.sections[
                 sectionIndex
               ] as unknown as Record<string, unknown>;
               draftSection.body = parseSerializedRichTextDocument(value);
