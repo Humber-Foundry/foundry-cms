@@ -30,12 +30,11 @@ export default async function DashboardBlogPage({
   const mutationToken = await loadMutationToken();
 
   const { contentRevision, schemaRecovery } = dashboardWorkspace;
-  // A stale workspace would reject every post change, so Blog offers the same
-  // fresh-start path the editor destinations do instead of dead controls.
+  // The draft workspace always exists. A stale or older-schema workspace would
+  // reject every post change, so Blog offers a fresh start instead of dead
+  // controls.
   const needsFreshWorkspace =
-    schemaRecovery !== undefined ||
-    contentRevision === undefined ||
-    dashboardWorkspace.contentStale === true;
+    schemaRecovery !== undefined || dashboardWorkspace.contentStale;
 
   return (
     <main className="dashboard-main" id="main">
@@ -49,15 +48,11 @@ export default async function DashboardBlogPage({
         <ContentWorkspaceStarter
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
-          preservedRevision={
-            contentRevision && schemaRecovery
-              ? {
-                  workspaceId: contentRevision.workspaceId,
-                  revision: contentRevision.revision,
-                  schemaVersion: contentRevision.inputs.schemaVersion,
-                }
-              : undefined
-          }
+          preservedRevision={{
+            workspaceId: contentRevision.workspaceId,
+            revision: contentRevision.revision,
+            schemaVersion: contentRevision.inputs.schemaVersion,
+          }}
           durableRecoveryEdits={schemaRecovery}
         />
       ) : (

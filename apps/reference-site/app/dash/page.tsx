@@ -28,10 +28,12 @@ export default async function DashboardOverviewPage({
   const mutationToken = await loadMutationToken();
   const messages = await loadMessagesAttention(access);
 
-  const hasDraft = dashboardWorkspace.contentRevision !== undefined;
+  // The draft workspace always exists, so Overview reports the draft. It only
+  // offers a fresh start when this draft can no longer accept changes.
+  const { contentRevision } = dashboardWorkspace;
   const needsFreshWorkspace =
     dashboardWorkspace.schemaRecovery !== undefined ||
-    dashboardWorkspace.contentStale === true;
+    dashboardWorkspace.contentStale;
 
   return (
     <main className="dashboard-main" id="main">
@@ -42,13 +44,24 @@ export default async function DashboardOverviewPage({
         </div>
       </div>
 
-      {hasDraft && !needsFreshWorkspace ? (
+      {needsFreshWorkspace ? (
+        <ContentWorkspaceStarter
+          csrfToken={mutationToken}
+          staleRecovery={staleRecovery}
+          preservedRevision={{
+            workspaceId: contentRevision.workspaceId,
+            revision: contentRevision.revision,
+            schemaVersion: contentRevision.inputs.schemaVersion,
+          }}
+          durableRecoveryEdits={dashboardWorkspace.schemaRecovery}
+        />
+      ) : (
         <section className="panel" aria-labelledby="draft-state">
           <h2 id="draft-state">Your draft</h2>
           <p>
             You have unpublished changes saved as revision{" "}
-            {dashboardWorkspace.contentRevision?.revision}. Open Pages to keep
-            editing, or publish when you are happy with the preview.
+            {contentRevision.revision}. Open Pages to keep editing, or publish
+            when you are happy with the preview.
           </p>
           <p className="panel-actions">
             <a
@@ -61,22 +74,6 @@ export default async function DashboardOverviewPage({
             </a>
           </p>
         </section>
-      ) : (
-        <ContentWorkspaceStarter
-          csrfToken={mutationToken}
-          staleRecovery={staleRecovery}
-          preservedRevision={
-            needsFreshWorkspace && dashboardWorkspace.contentRevision
-              ? {
-                  workspaceId: dashboardWorkspace.contentRevision.workspaceId,
-                  revision: dashboardWorkspace.contentRevision.revision,
-                  schemaVersion:
-                    dashboardWorkspace.contentRevision.inputs.schemaVersion,
-                }
-              : undefined
-          }
-          durableRecoveryEdits={dashboardWorkspace.schemaRecovery}
-        />
       )}
 
       <section aria-labelledby="attention">

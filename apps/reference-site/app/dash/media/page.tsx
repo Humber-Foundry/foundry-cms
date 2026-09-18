@@ -29,11 +29,11 @@ export default async function DashboardMediaPage({
   );
   const mutationToken = await loadMutationToken();
   const publishedDefinition = await loadPublishedDefinition();
-  const draftDefinition = dashboardWorkspace.contentRevision?.definition;
+  const draftDefinition = dashboardWorkspace.contentRevision.definition;
 
   const occurrences = mergeMediaOccurrenceState(
     [],
-    draftDefinition?.home.media ?? [],
+    draftDefinition.home.media ?? [],
   );
   // Every photo the site actually shows — built-in images and the photos placed
   // through the published site or the current draft — so the gallery is "all

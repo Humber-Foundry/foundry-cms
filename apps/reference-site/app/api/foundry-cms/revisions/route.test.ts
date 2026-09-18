@@ -50,6 +50,27 @@ vi.mock("../../../../src/content-revision-runtime", () => ({
   contentWorkspaceIdForActor: async () => "workspace_default",
   contentWorkspaceIdForMutation: async () => "workspace_created",
   loadContentRevisionApplication: mocks.loadApplication,
+  // Stands in for the shared open operation. The real one has its own tests
+  // against a migrated database; here it only has to reach the same
+  // application command with the request's own idempotency key.
+  openDefaultContentWorkspace: async (
+    actorId: string,
+    idempotencyKey: string,
+  ) => {
+    const application = await mocks.loadApplication(
+      "workspace_default",
+      actorId,
+    );
+    return {
+      workspaceId: "workspace_default",
+      revision: await application.commands.create({
+        actorId,
+        workspaceId: "workspace_default",
+        idempotencyKey,
+      }),
+    };
+  },
+  openDefaultWorkspaceIdempotencyKey: "dashboard-open-default-workspace",
   requireExistingContentWorkspaceAccess: mocks.requireExistingAccess,
 }));
 vi.mock("../../../../src/media-asset-runtime", () => ({

@@ -39,16 +39,13 @@ export default async function DashboardCampaignsPage({
   ).application.queries.listCampaigns({ actor: access.identity });
 
   const { contentRevision } = dashboardWorkspace;
-  const postArtifacts =
-    contentRevision === undefined
-      ? []
-      : await createBlogPostArtifactFingerprints({
-          definition: contentRevision.definition,
-          inputs: {
-            ...contentRevision.inputs,
-            schemaVersion: contentRevision.definition.schemaVersion,
-          },
-        });
+  const postArtifacts = await createBlogPostArtifactFingerprints({
+    definition: contentRevision.definition,
+    inputs: {
+      ...contentRevision.inputs,
+      schemaVersion: contentRevision.definition.schemaVersion,
+    },
+  });
 
   return (
     <main className="dashboard-main" id="main">
@@ -70,7 +67,7 @@ export default async function DashboardCampaignsPage({
         // absolute site photos, never a bare path the owner could not send.
         siteImages={siteStaticImageTiles(
           definition,
-          contentRevision?.definition,
+          contentRevision.definition,
         ).filter((image) => image.src.startsWith("https://"))}
         initialCampaigns={campaigns}
         postSources={postArtifacts.flatMap((artifact) => {

@@ -20,9 +20,10 @@ import { HumanAccessConfigurationError } from "@/src/human-access-configuration"
 import { loadHumanAccessRequestContext } from "@/src/human-access-runtime";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
 import {
-  contentWorkspaceIdForActor,
   latestContentWorkspaceIdForActor,
   loadContentRevisionApplication,
+  openDefaultContentWorkspace,
+  openDefaultWorkspaceIdempotencyKey,
   requireExistingContentWorkspaceAccess,
 } from "@/src/content-revision-runtime";
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
@@ -75,12 +76,12 @@ export const loadMutationToken = cache(async (): Promise<string> => {
 });
 
 export type DashboardWorkspace = Readonly<{
-  /** The workspace the owner is editing, whether or not it holds a revision. */
+  /** The workspace the owner is editing. It always exists. */
   workspaceId: ContentWorkspaceId;
-  /** Absent until the owner starts a draft workspace. */
-  contentRevision?: ContentRevision;
-  previewUrl?: string;
-  contentStale?: boolean;
+  /** The workspace's current revision. A workspace always has one. */
+  contentRevision: ContentRevision;
+  previewUrl: string;
+  contentStale: boolean;
   /**
    * Set when the draft was written against an older site schema. The owner has
    * to start a fresh workspace; these edits are what can be carried across.
@@ -91,12 +92,50 @@ export type DashboardWorkspace = Readonly<{
 }>;
 
 /**
+ * Pick the workspace an editing route should open, and make sure it exists.
+ *
+ * A workspace id in `?workspace=` is only used when the person can still open
+ * it. A stale or shared link therefore falls back to their own workspace
+ * instead of a 404. When they have no workspace at all, this creates their
+ * default one, so no destination has to ask a site owner to start a draft.
+ */
+async function resolveDashboardWorkspaceId(
+  actorId: ReturnType<typeof createContentActorId>,
+  requestedWorkspace?: string,
+): Promise<ContentWorkspaceId> {
+  if (requestedWorkspace !== undefined) {
+    try {
+      const requested = createContentWorkspaceId(requestedWorkspace);
+      await requireExistingContentWorkspaceAccess(requested, actorId);
+      return requested;
+    } catch (error) {
+      if (
+        !(error instanceof TypeError) &&
+        !(error instanceof ContentWorkspaceAccessError)
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  const latest = await latestContentWorkspaceIdForActor(actorId);
+  if (latest !== null) {
+    return latest;
+  }
+  return (
+    await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+    )
+  ).workspaceId;
+}
+
+/**
  * Resolve the workspace and its current revision for an editing route.
  *
- * `requestedWorkspace` comes from the `?workspace=` search parameter. When it
- * is absent the owner gets their most recent workspace, and a missing workspace
- * is reported as "no draft yet" rather than a 404 — that is the state the
- * "Start a draft" call to action exists for.
+ * `requestedWorkspace` comes from the `?workspace=` search parameter. The
+ * returned workspace always exists and always holds a revision, so a
+ * destination never has to render a "start a draft" step.
  */
 export async function loadDashboardWorkspace(
   requestedWorkspace?: string,
@@ -105,25 +144,16 @@ export async function loadDashboardWorkspace(
   const access = await requireAuthorizedDashboardAccess();
   const definition = await loadPublishedDefinition();
   const actorId = createContentActorId(access.membership.id);
-  const hasRequestedWorkspace = requestedWorkspace !== undefined;
 
-  let workspaceId: ContentWorkspaceId;
-  try {
-    workspaceId =
-      requestedWorkspace === undefined
-        ? ((await latestContentWorkspaceIdForActor(actorId)) ??
-          (await contentWorkspaceIdForActor(actorId)))
-        : createContentWorkspaceId(requestedWorkspace);
-  } catch {
-    notFound();
-  }
-
+  const workspaceId = await resolveDashboardWorkspaceId(
+    actorId,
+    requestedWorkspace,
+  );
   const activeWorkspaceUrl = `${routePath}?workspace=${encodeURIComponent(
     workspaceId,
   )}`;
 
   try {
-    await requireExistingContentWorkspaceAccess(workspaceId, actorId);
     const contentApplication = await loadContentRevisionApplication(
       workspaceId,
       actorId,
@@ -156,12 +186,8 @@ export async function loadDashboardWorkspace(
       activeWorkspaceUrl,
     };
   } catch (error) {
-    if (
-      error instanceof ContentWorkspaceAccessError &&
-      !hasRequestedWorkspace
-    ) {
-      return { workspaceId, activeWorkspaceUrl };
-    }
+    // The workspace existed a moment ago, so reaching either of these means
+    // the installation is broken rather than that the owner has no draft.
     if (
       error instanceof ContentWorkspaceAccessError ||
       error instanceof ContentRevisionConfigurationError

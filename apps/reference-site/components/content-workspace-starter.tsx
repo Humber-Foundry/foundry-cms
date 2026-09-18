@@ -83,14 +83,6 @@ function hasIdentityOnlyStructuralBase(edit: StaleRecoveryEdit): boolean {
   }
 }
 
-export function workspaceCreationOperation(
-  preservedRevision: PreservedContentRevision | undefined,
-): "create_default_workspace" | "create_workspace" {
-  return preservedRevision === undefined
-    ? "create_default_workspace"
-    : "create_workspace";
-}
-
 export async function preparePreservedRevisionRecovery({
   preservedRevision,
   durableRecoveryEdits = [],
@@ -227,6 +219,15 @@ export async function preparePreservedRevisionRecovery({
   return recovery;
 }
 
+/**
+ * The recovery screen for a draft that can no longer accept changes, because
+ * the site moved on after the draft was saved.
+ *
+ * This is not a first-visit step. The dashboard creates the draft workspace on
+ * the server, so a site owner never has to start one. The screen only appears
+ * when the saved draft has to be replaced, and it always starts a separate
+ * workspace so the old draft is left intact to copy from.
+ */
 export function ContentWorkspaceStarter({
   csrfToken,
   staleRecovery,
@@ -238,7 +239,7 @@ export function ContentWorkspaceStarter({
     id: string;
     sourceWorkspaceId: string;
   }>;
-  preservedRevision?: PreservedContentRevision;
+  preservedRevision: PreservedContentRevision;
   durableRecoveryEdits?: ReadonlyArray<StaleRecoveryEdit>;
 }) {
   const [message, setMessage] = useState("");
@@ -254,9 +255,9 @@ export function ContentWorkspaceStarter({
 
   async function startWorkspace() {
     pendingAttempt.current ??= {
-      body: JSON.stringify({
-        operation: workspaceCreationOperation(preservedRevision),
-      }),
+      // Always a separate workspace: reopening the default one would return
+      // the same draft that cannot accept changes.
+      body: JSON.stringify({ operation: "create_workspace" }),
       idempotencyKey: crypto.randomUUID(),
     };
     setStarting(true);
@@ -324,9 +325,7 @@ export function ContentWorkspaceStarter({
     } catch {
       setStarting(false);
       setMessage(
-        preservedRevision === undefined
-          ? "The workspace could not be confirmed. Retry to check the same request."
-          : "The fresh workspace could not be confirmed without preserving browser edits. Retry, or copy the edits from the preserved workspace before leaving it.",
+        "The fresh draft could not be confirmed and your unsaved changes were not copied. Try again, or copy the changes out of the old draft before you leave it.",
       );
     }
   }
@@ -338,19 +337,13 @@ export function ContentWorkspaceStarter({
     >
       <div className="dashboard-section-heading editor-heading">
         <div>
-          <h2 id="content-workspace-heading">Content editor</h2>
-          {preservedRevision === undefined ? (
-            <p>
-              Start a private draft workspace from the current published site.
-            </p>
-          ) : (
-            <p>
-              Workspace <code>{preservedRevision.workspaceId}</code> revision{" "}
-              {preservedRevision.revision} is preserved under Site Definition{" "}
-              {preservedRevision.schemaVersion}. Start a fresh workspace to
-              edit the current schema.
-            </p>
-          )}
+          <h2 id="content-workspace-heading">Start a fresh draft</h2>
+          <p>
+            Your site has changed since this draft was saved, so the draft can
+            no longer be edited. Start a fresh draft to carry on. Your saved
+            changes are copied across where they still fit, and the old draft
+            is kept so you can check it.
+          </p>
         </div>
         <button
           type="button"
@@ -358,11 +351,7 @@ export function ContentWorkspaceStarter({
           disabled={starting}
           onClick={startWorkspace}
         >
-          {starting
-            ? "Starting…"
-            : preservedRevision === undefined
-              ? "Start workspace"
-              : "Start fresh workspace"}
+          {starting ? "Starting…" : "Start a fresh draft"}
         </button>
       </div>
       <p role="status" aria-live="polite" className="editor-message">

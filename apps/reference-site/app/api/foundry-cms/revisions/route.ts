@@ -31,6 +31,7 @@ import {
   contentWorkspaceIdForActor,
   contentWorkspaceIdForMutation,
   loadContentRevisionApplication,
+  openDefaultContentWorkspace,
   requireExistingContentWorkspaceAccess,
 } from "../../../../src/content-revision-runtime";
 import {
@@ -718,19 +719,30 @@ export async function POST(request: Request) {
       });
     }
     if (operation !== undefined) {
-      const workspaceId =
-        operation === "create_default_workspace"
-          ? await contentWorkspaceIdForActor(actorId)
-          : await contentWorkspaceIdForMutation(actorId, idempotencyKey);
-      const application = await loadContentRevisionApplication(
-        workspaceId,
-        actorId,
-      );
-      const created = await application.commands.create({
-        actorId,
-        workspaceId,
-        idempotencyKey,
-      });
+      // The default workspace goes through the shared open operation, so this
+      // API operation and the dashboard's own first visit create it the same
+      // way. A `create_workspace` request asks for a separate workspace, whose
+      // id comes from the request's own idempotency key.
+      let created;
+      if (operation === "create_default_workspace") {
+        created = (
+          await openDefaultContentWorkspace(actorId, idempotencyKey)
+        ).revision;
+      } else {
+        const workspaceId = await contentWorkspaceIdForMutation(
+          actorId,
+          idempotencyKey,
+        );
+        const application = await loadContentRevisionApplication(
+          workspaceId,
+          actorId,
+        );
+        created = await application.commands.create({
+          actorId,
+          workspaceId,
+          idempotencyKey,
+        });
+      }
       return Response.json(
         {
           ...created,

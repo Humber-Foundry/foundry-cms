@@ -7,10 +7,7 @@ import {
   serializeRichTextDocument,
 } from "@humber-foundry/site-definition";
 
-import {
-  preparePreservedRevisionRecovery,
-  workspaceCreationOperation,
-} from "./content-workspace-starter";
+import { preparePreservedRevisionRecovery } from "./content-workspace-starter";
 
 const preservedRevision = {
   workspaceId: createContentWorkspaceId("workspace_legacy"),
@@ -19,15 +16,6 @@ const preservedRevision = {
 } as const;
 
 describe("content workspace schema recovery", () => {
-  it("creates a unique workspace instead of reopening the legacy default", () => {
-    expect(workspaceCreationOperation(preservedRevision)).toBe(
-      "create_workspace",
-    );
-    expect(workspaceCreationOperation(undefined)).toBe(
-      "create_default_workspace",
-    );
-  });
-
   it("forwards pending legacy outbox edits into the fresh workspace recovery", async () => {
     const setItem = vi.fn();
     await expect(

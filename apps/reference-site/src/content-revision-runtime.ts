@@ -103,6 +103,51 @@ export async function contentWorkspaceIdForMutation(
   return contentWorkspaceIdFromSeed(`${actorId}:${idempotencyKey}`);
 }
 
+/**
+ * The idempotency key the dashboard uses when it opens the default workspace
+ * for somebody who does not have one yet.
+ *
+ * `create` never stores or compares this key. A default workspace is created
+ * once because its id is derived from the actor and the inserts ignore a row
+ * that is already there. The key only has to pass the application's format
+ * check, so one fixed value keeps a first visit free of per-request state.
+ */
+export const openDefaultWorkspaceIdempotencyKey =
+  "dashboard-open-default-workspace";
+
+/**
+ * Open the actor's own draft workspace, and create it when this is their first
+ * visit.
+ *
+ * This is the single operation behind both ways of getting a default
+ * workspace: the `create_default_workspace` API operation and the dashboard's
+ * own first visit. Both therefore run the same authorization checks and write
+ * the same rows and the same audit record.
+ *
+ * Creation is idempotent and stays correct when two first requests arrive
+ * together. The workspace id is derived from the actor, so both requests aim
+ * at one row: the workspace insert ignores a conflict, and revision 0 is only
+ * inserted when it is absent. Both requests then read the same revision.
+ */
+export async function openDefaultContentWorkspace(
+  actorId: ContentActorId,
+  idempotencyKey: string,
+  environmentOverride?: HumanAccessEnvironment,
+) {
+  const workspaceId = await contentWorkspaceIdForActor(actorId);
+  const application = await loadContentRevisionApplication(
+    workspaceId,
+    actorId,
+    environmentOverride,
+  );
+  const revision = await application.commands.create({
+    actorId,
+    workspaceId,
+    idempotencyKey,
+  });
+  return { workspaceId, revision };
+}
+
 export async function latestContentWorkspaceIdForActor(
   actorId: ContentActorId,
 ): Promise<ContentWorkspaceId | null> {

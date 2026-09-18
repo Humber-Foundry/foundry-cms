@@ -103,17 +103,9 @@ try {
   const page = await context.newPage();
   await page.goto(`${origin}/dash`);
 
-  const startWorkspace = page.getByRole("button", { name: "Start workspace" });
-  await startWorkspace.waitFor({ state: "visible" });
-  const [created] = await Promise.all([
-    page.waitForResponse((r) =>
-      r.request().method() === "POST" &&
-      new URL(r.url()).pathname === "/api/foundry-cms/revisions"),
-    startWorkspace.click(),
-  ]);
-  if (created.status() !== 201) {
-    throw new Error(`mobile_editor_workspace_failed:${created.status()}`);
-  }
+  // The dashboard creates the draft workspace on the server during this first
+  // visit, so Overview links straight into the page editor.
+  await page.getByRole("link", { name: "Continue editing" }).click();
   await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
   await page.getByRole("heading", { name: "Pages" }).waitFor();
 

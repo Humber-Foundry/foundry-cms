@@ -40,9 +40,9 @@ export async function DashboardWorkspacePage({
   );
   const mutationToken = await loadMutationToken();
   const { contentRevision, previewUrl, schemaRecovery } = dashboardWorkspace;
-  const needsFreshWorkspace =
-    schemaRecovery !== undefined || contentRevision === undefined;
-  const showStarter = needsFreshWorkspace || previewUrl === undefined;
+  // The draft workspace always exists, so the only reason to interrupt editing
+  // is a draft that was written for an older version of the site.
+  const showStarter = schemaRecovery !== undefined;
   // Every photo the site already shows, so the canvas photo picker lists
   // existing photos, not only uploaded ones.
   const publishedDefinition = showStarter
@@ -50,7 +50,7 @@ export async function DashboardWorkspacePage({
     : await loadPublishedDefinition();
   const siteImages = showStarter
     ? []
-    : siteStaticImageTiles(publishedDefinition, contentRevision?.definition);
+    : siteStaticImageTiles(publishedDefinition, contentRevision.definition);
 
   return (
     <main className="dashboard-main" id="main">
@@ -66,15 +66,11 @@ export async function DashboardWorkspacePage({
         <ContentWorkspaceStarter
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
-          preservedRevision={
-            contentRevision && schemaRecovery
-              ? {
-                  workspaceId: contentRevision.workspaceId,
-                  revision: contentRevision.revision,
-                  schemaVersion: contentRevision.inputs.schemaVersion,
-                }
-              : undefined
-          }
+          preservedRevision={{
+            workspaceId: contentRevision.workspaceId,
+            revision: contentRevision.revision,
+            schemaVersion: contentRevision.inputs.schemaVersion,
+          }}
           durableRecoveryEdits={schemaRecovery}
         />
       ) : (
