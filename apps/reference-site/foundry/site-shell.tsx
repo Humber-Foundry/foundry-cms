@@ -1,6 +1,5 @@
 import {
-  homePageSlug,
-  pagePath,
+  defaultPageHref,
   resolveSiteHref,
   type PageHrefBuilder,
   type SiteDefinition,
@@ -26,8 +25,7 @@ export function SiteHeader({
    */
   pageHref?: PageHrefBuilder;
 }) {
-  const resolvePageHref: PageHrefBuilder = (page) =>
-    page.slug === homePageSlug ? homeHref : (pageHref ?? pagePath)(page);
+  const resolvePageHref = defaultPageHref(homeHref, pageHref);
   return (
     <header className="lh-site-header">
       <a className="lh-skip-link" href="#main-content">Skip to main content</a>

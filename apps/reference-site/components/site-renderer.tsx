@@ -1,5 +1,7 @@
 import {
+  defaultPageHref,
   homePageSlug,
+  type PageHrefBuilder,
   type SiteDefinition,
   type SitePage,
 } from "@humber-foundry/site-definition";
@@ -37,6 +39,7 @@ export function SiteRenderer({
   blogPostHref = (slug) => `/blog/${slug}`,
   homeHref = "/",
   blogHref = "/blog",
+  pageHref,
   editingSurface = false,
 }: {
   definition: SiteDefinition;
@@ -47,6 +50,13 @@ export function SiteRenderer({
   blogPostHref?: (slug: string) => string;
   homeHref?: string;
   blogHref?: string;
+  /**
+   * Builds the public path of any page other than the home page, for a link
+   * that targets one. Defaults to `pagePath`. A revision preview (#156)
+   * passes its own builder here, so a page-scoped link resolves inside the
+   * preview the same way `homeHref` already lets a home-page link do.
+   */
+  pageHref?: PageHrefBuilder;
   /** Set inside the editor: embeds sandbox and the main landmark defers. */
   editingSurface?: boolean;
 }) {
@@ -57,6 +67,10 @@ export function SiteRenderer({
   // one page. It stays there and does not repeat on every other page.
   const isHomePage = page.slug === homePageSlug;
   const posts = isHomePage ? publicBlogPosts(definition) : [];
+  // The one page-href builder every link on this render resolves through:
+  // `SiteHeader`'s navigation, and every hero or call-to-action button below.
+  // Neither prints a raw stored href; both call `resolveSiteHref` with this.
+  const resolvePageHref = defaultPageHref(homeHref, pageHref);
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
       <SiteHeader
@@ -64,6 +78,7 @@ export function SiteRenderer({
         homeHref={homeHref}
         blogHref={blogHref}
         currentPage={page}
+        pageHref={pageHref}
       />
       <Landmark id="main-content" tabIndex={-1}>
         {page.sections.map((section) => (
@@ -74,6 +89,9 @@ export function SiteRenderer({
             mediaDelivery={mediaDelivery}
             mediaAccessToken={mediaAccessToken}
             editingSurface={editingSurface}
+            currentPage={page}
+            pageHref={resolvePageHref}
+            blogHref={blogHref}
           />
         ))}
         {posts.length === 0 ? null : (
