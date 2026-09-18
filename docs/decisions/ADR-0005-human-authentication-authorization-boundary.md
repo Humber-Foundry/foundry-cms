@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-26
+- **Amended:** 2026-09-18 by issue #148
 
 ## Context
 
@@ -160,6 +161,58 @@ Foundry sends no permissive credentialed CORS response. Missing, `null`,
 cross-origin or malformed origins, absent or invalid CSRF tokens, and unexpected
 content types fail before command dispatch. Security headers and CSP must keep
 the dashboard and same-origin preview iframe within this boundary.
+
+#### Amendment (issue #148): opening the first draft workspace on a GET
+
+A dashboard `GET` may open the requesting person's own draft workspace, which
+creates it when they do not have one. No other operation may be reached from a
+`GET` or a `HEAD`.
+
+That operation writes exactly five tables, in one batch:
+
+- the workspace row, which ignores a workspace that is already there;
+- its revision 0, which is inserted only when that revision is absent;
+- the blog-post revision rows for the published posts. These are content
+  addressed: the key is derived from the site, post, post revision and content
+  hash, not from the workspace, so two people opening a workspace produce the
+  same key and the second insert is ignored;
+- the blog render artifacts for those posts, keyed by workspace, revision and
+  post, which ignore a row that is already there; and
+- the site-wide blog-post rows, keyed by site and post rather than by
+  workspace. This is the one statement that can update an existing row, so it
+  is guarded: it only advances a post when the incoming revision is the next
+  one after the stored revision. A copy of the already published posts is never
+  the next revision, so opening a workspace cannot advance them.
+
+None of these rows is published content. Publication reads approved content
+and writes Git, which no `GET` can reach.
+
+This is the one exception to "`GET` and `HEAD` remain side-effect free" above.
+The original clause exists so that a cross-site request cannot change what the
+site says. Opening the first draft workspace cannot do that, because:
+
+- It copies the published site into a private draft. It changes no published
+  content and no setting, and nothing reaches the live site without a separate
+  publication.
+- It takes no data from the request. The workspace id is derived from the
+  authenticated person's membership id, so a request cannot name another
+  person's workspace or choose the content.
+- It is idempotent. The workspace row insert ignores a conflict and revision 0
+  is only inserted when absent, so repeating it changes nothing and two
+  requests that arrive together still produce one workspace.
+- It writes no audit event, because revision 0 is not somebody's edit.
+- It is authorized exactly like the `create_default_workspace` API operation:
+  a validated Access assertion resolved to an active membership holding the
+  `dashboard.view` capability.
+
+The practical effect of a forced cross-site `GET` of `/dash`, a `HEAD` probe or
+a link prefetch is therefore limited to creating the draft that the person's own
+next visit would create anyway. No `Origin` check or CSRF token is required for
+it, and none is available before the dashboard has rendered.
+
+Every content change still goes through a mutation method carrying the `Origin`
+and the signed CSRF token. An installation must not extend this exception to
+any other write.
 
 ### Invitation state machine
 

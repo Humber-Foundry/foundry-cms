@@ -302,6 +302,17 @@ function siteHrefPageTargets(
   }));
 }
 
+/**
+ * The plain name the owner reads for one section, in the editor and in a
+ * review summary. An installation-defined section has no owner-facing name of
+ * its own, so it reads as "Section".
+ */
+export function pageSectionLabel(section: PageSection): string {
+  return section.type === "registered"
+    ? "Section"
+    : contentSectionLabels[section.type] ?? section.type;
+}
+
 function editableFieldBindings(
   definition: SiteDefinition,
 ): EditableFieldBinding[] {

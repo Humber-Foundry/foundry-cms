@@ -4,6 +4,7 @@ import {
   ContentRevisionConfigurationError,
   ContentWorkspaceAccessError,
   type ContentActorId,
+  type ContentRevision,
   createContentRevisionApplication,
   createContentWorkspaceId,
   createInMemoryContentRevisionStore,
@@ -103,12 +104,67 @@ export async function contentWorkspaceIdForMutation(
   return contentWorkspaceIdFromSeed(`${actorId}:${idempotencyKey}`);
 }
 
+/**
+ * The idempotency key the dashboard uses when it opens the default workspace
+ * for somebody who does not have one yet.
+ *
+ * `create` never stores or compares this key. A default workspace is created
+ * once because its id is derived from the actor and the inserts ignore a row
+ * that is already there. The key only has to pass the application's format
+ * check, so one fixed value keeps a first visit free of per-request state.
+ */
+export const openDefaultWorkspaceIdempotencyKey =
+  "dashboard-open-default-workspace";
+
+/**
+ * Open the actor's own draft workspace, and create it when this is their first
+ * visit.
+ *
+ * This is the single operation behind both ways of getting a default
+ * workspace: the `create_default_workspace` API operation and the dashboard's
+ * own first visit. Both therefore apply the same capability check and write
+ * the same rows. Neither writes a revision audit event, because revision 0 is
+ * a copy of the published site rather than somebody's edit. The API operation
+ * additionally checks request integrity, which a page render cannot; ADR-0005
+ * records why that is allowed for this one write.
+ *
+ * Creation is idempotent and stays correct when two first requests arrive
+ * together. The workspace id is derived from the actor, so both requests aim
+ * at one row: the workspace insert ignores a conflict, and revision 0 is only
+ * inserted when it is absent. Both requests then read the same revision. The
+ * site-wide blog-post rows written in the same batch can only advance a post
+ * to its next revision, which a copy of the published posts never is.
+ */
+export async function openDefaultContentWorkspace(
+  actorId: ContentActorId,
+  idempotencyKey: string,
+  environmentOverride?: HumanAccessEnvironment,
+): Promise<
+  Readonly<{ workspaceId: ContentWorkspaceId; revision: ContentRevision }>
+> {
+  const workspaceId = await contentWorkspaceIdForActor(actorId);
+  const application = await loadContentRevisionApplication(
+    workspaceId,
+    actorId,
+    environmentOverride,
+  );
+  const revision = await application.commands.create({
+    actorId,
+    workspaceId,
+    idempotencyKey,
+  });
+  return { workspaceId, revision };
+}
+
 export async function latestContentWorkspaceIdForActor(
   actorId: ContentActorId,
 ): Promise<ContentWorkspaceId | null> {
   if (process.env.NODE_ENV === "development") {
+    // Development only, and it orders by the revision's own `createdAt`. The
+    // production path orders by the workspace's `updated_at` and skips a
+    // workspace that is not open.
     let latest:
-      | Readonly<{ workspaceId: ContentWorkspaceId; updatedAt: string }>
+      | Readonly<{ workspaceId: ContentWorkspaceId; createdAt: string }>
       | undefined;
     for (const [workspaceId, store] of localRuntime
       .__foundryContentRevisionStores!) {
@@ -117,13 +173,13 @@ export async function latestContentWorkspaceIdForActor(
         const current = await store.getCurrent();
         if (
           latest === undefined ||
-          current.createdAt > latest.updatedAt ||
-          (current.createdAt === latest.updatedAt &&
+          current.createdAt > latest.createdAt ||
+          (current.createdAt === latest.createdAt &&
             workspaceId > latest.workspaceId)
         ) {
           latest = {
             workspaceId: createContentWorkspaceId(workspaceId),
-            updatedAt: current.createdAt,
+            createdAt: current.createdAt,
           };
         }
       } catch (error) {
