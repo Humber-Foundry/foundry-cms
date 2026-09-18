@@ -6,6 +6,20 @@ import { useEffect, useState } from "react";
 export type ConnectionKind = "email" | "publishing";
 
 /**
+ * Where this public repository's own documents are read from, so a setup
+ * guide's path can become a real link. One constant, so an installation that
+ * forks or mirrors this repository changes its documentation address in one
+ * place.
+ */
+const documentationBaseAddress =
+  "https://github.com/Humber-Foundry/foundry-cms/blob/main/";
+
+const setupLinkLabel: Readonly<Record<ConnectionKind, string>> = {
+  email: "How to connect email",
+  publishing: "How to connect publishing",
+};
+
+/**
  * How one installation's email delivery or site publishing is connected.
  * This is the shape both `CampaignDeliveryReadiness`
  * (`campaign-delivery-readiness.ts`) and `ContentPublicationReadiness`
@@ -90,7 +104,13 @@ export function ConnectionStatus({
       {readiness.missingSettings.length > 0 ? (
         <> Missing: {readiness.missingSettings.join(", ")}.</>
       ) : null}{" "}
-      The steps to connect it are in <code>{readiness.setupGuide}</code>.
+      <a
+        href={`${documentationBaseAddress}${readiness.setupGuide}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {setupLinkLabel[kind]}
+      </a>
     </p>
   );
 }

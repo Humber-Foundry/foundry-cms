@@ -505,10 +505,17 @@ describe("campaign controls browser acceptance", () => {
     expect(host.textContent).toContain(
       "Email is not connected yet, so no test can go out.",
     );
-    // The person who can fix it is told where the steps are written down.
-    expect(host.textContent).toContain(
-      "docs/operations/brevo-test-delivery-readiness.md",
+    // The person who can fix it gets a real link to the setup document, not
+    // a bare repository path they cannot open.
+    const setupLink = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>("a"),
+    ).find((link) => link.textContent === "How to connect email");
+    expect(setupLink).toBeDefined();
+    expect(setupLink!.getAttribute("href")).toBe(
+      "https://github.com/Humber-Foundry/foundry-cms/blob/main/" +
+        "docs/operations/brevo-test-delivery-readiness.md",
     );
+    expect(setupLink!.target).toBe("_blank");
     expect(server.commands).toHaveLength(0);
   });
 });
