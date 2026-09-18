@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+import { homePage } from "@humber-foundry/site-definition";
+
 import { SiteRenderer } from "../components/site-renderer";
 import { verifiedPublicBlogPostIds } from "../components/published-blog-posts";
 import { findPublicBlogPost } from "./blog-post-page";
@@ -28,9 +30,11 @@ describe("installation-owned Site Definition", () => {
 
     expect(installation.siteId).toBe("site_alternate_installation");
     expect(published).toBe(alternateSiteDefinition);
-    expect(renderToStaticMarkup(<SiteRenderer definition={published} />)).toContain(
-      "Alternate installation",
-    );
+    expect(
+      renderToStaticMarkup(
+        <SiteRenderer definition={published} page={homePage(published)} />,
+      ),
+    ).toContain("Alternate installation");
     expect(findPublicBlogPost(published, "alternate-installation-post")?.id).toBe(
       "10000000-0000-4000-8000-000000000102",
     );

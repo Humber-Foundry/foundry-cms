@@ -1,4 +1,4 @@
-# ADR-0018: The address names the page being edited, and one module answers which page it is
+# ADR-0019: The address names the page being edited, and one module answers which page it is
 
 - **Status:** Accepted
 - **Date:** 2026-09-18
