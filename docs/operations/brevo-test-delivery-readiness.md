@@ -13,9 +13,10 @@ Install these values in the client-owned Worker configuration:
 - `FOUNDRY_BREVO_API_KEY` — a client-created Worker secret with the narrow
   Brevo authority required by the newsletter adapter.
 - `FOUNDRY_CAMPAIGN_TEST_PROOF_KEY` — a stable, installation-specific Worker
-  secret of at least 32 characters, used only to bind the durable pre-send intent to the exact execution,
-  provider campaign, configuration, and recipient set. Rotate it separately
-  from the Brevo credential and only after open test operations are resolved.
+  secret of at least 32 characters, used only to bind the durable pre-send
+  intent to the exact execution, provider campaign, configuration, and
+  recipient set. Rotate it separately from the Brevo credential and only after
+  open test operations are resolved.
 - `FOUNDRY_BREVO_WEBHOOK_AUTH_TOKEN` — a random, installation-specific Worker
   secret of at least 32 characters. Configure the same value as the bearer
   token on Brevo's transactional webhook. Rotate the Brevo webhook and Worker
@@ -54,8 +55,12 @@ While any of them is absent or malformed:
   send are refused.
 - The campaigns API at `/api/foundry-cms/campaigns` refuses `request_test`,
   `confirm_test_receipt`, `authorize_bulk`, `activate_bulk_schedule`,
-  `cancel_bulk_schedule`, `send_bulk_now` and `retry_bulk_send` with
-  `delivery_not_configured` and HTTP 503.
+  `send_bulk_now` and `retry_bulk_send` with `delivery_not_configured` and
+  HTTP 503. It accepts only the commands that send nothing, so a command added
+  later is refused until it is allowed deliberately.
+- `cancel_bulk_schedule` stays available. Cancelling stops a send, and an Owner
+  needs it exactly when delivery has stopped working. Without it an
+  already-scheduled send could not be called off.
 - The send-artifact publisher reports a failure rather than a commit.
 - Recording a provider suppression is refused, because the fingerprint would
   not match the same subscriber once the real subscriber identity secret is
@@ -80,8 +85,9 @@ account-scope fingerprint, so it also fails closed.
 ## Delivery readiness report
 
 `GET /api/foundry-cms/campaigns?readiness=delivery` answers whether email
-delivery is connected. The same result is available to server code through
-`readCampaignDeliveryReadiness` in `apps/reference-site/src/campaign-runtime.ts`.
+delivery is connected. Server code reads the same result through
+`readCampaignDeliveryReadiness` in
+`apps/reference-site/src/campaign-runtime.ts`.
 
 ```json
 {

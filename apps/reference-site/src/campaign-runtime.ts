@@ -709,4 +709,3 @@ export async function readCampaignDeliveryReadiness(
   }
   return Object.freeze({ ...context.delivery, providerHealth });
 }
-
