@@ -1,4 +1,4 @@
-# ADR-0019: The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip
+# ADR-0020: The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip
 
 - **Status:** Accepted
 - **Date:** 2026-09-18
