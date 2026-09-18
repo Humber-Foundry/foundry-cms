@@ -35,6 +35,11 @@ ahead of a dynamic one at the same level, so this refusal is a second guard,
 not the only one. `src/public-page.test.ts` proves it against every reserved
 slug.
 
+`src/public-page.ts` also holds `pageRouteMetadata`, the `resolvePageSeo` +
+`publicMetadata` pairing every page route needs. The public home route
+(`app/page.tsx`) and the preview route now call it too, in place of the same
+three lines each wrote inline, so the pairing exists once.
+
 ### 2. `SiteRenderer` takes a page
 
 `SiteRenderer` no longer calls `homePage(definition)`. It takes `page` as a
@@ -57,7 +62,19 @@ one criterion the ticket does state — the home page's output is unchanged —
 because leaving the list unconditional would have started repeating it under
 every page's sections instead, which is a visible change no ticket asked for.
 
-### 4. No sitemap or other metadata route exists yet
+### 4. No `generateStaticParams`, matching the existing blog post route
+
+The ticket's "What to build" section says a page renders "statically where
+possible." `app/blog/[slug]/page.tsx` is the one dynamic route this
+installation already has, and it declares no `generateStaticParams`: a
+published site's content changes without a rebuild, so which slugs exist is
+not know at build time, and the route reads `installedSite.application
+.queries.getPublishedSite()` on every request instead. `app/[slug]/page.tsx`
+follows the same shape for the same reason. Adding `generateStaticParams`
+here, without adding it to the blog post route too, would make one dynamic
+route behave differently from its sibling for no stated reason.
+
+### 5. No sitemap or other metadata route exists yet
 
 The ticket's acceptance criteria ask that "the sitemap and any metadata
 routes list every page." No `sitemap.ts`, `robots.ts`, or other Next.js
@@ -67,7 +84,7 @@ through `resolvePageSeo`, so every page's own `<title>`, description, and
 Open Graph tags are already correct. There is no separate sitemap file to
 update. If one is added later, it must enumerate `definition.pages`.
 
-### 5. No sync-manifest change is needed
+### 6. No sync-manifest change is needed
 
 `apps/reference-site/scripts/foundation-release-lib.mjs` classifies every
 path under `app/` as framework source automatically (`isTemplatePath`). A new
