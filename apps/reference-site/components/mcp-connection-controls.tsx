@@ -68,7 +68,7 @@ export function McpConnectionTable({
               </ul>
             </span>
             <span role="cell" className="state-label">
-              {connection.status}
+              {connection.status === "active" ? "Active" : "Revoked"}
               <small>
                 {connection.lastUsedAt === null ? (
                   "Never used"

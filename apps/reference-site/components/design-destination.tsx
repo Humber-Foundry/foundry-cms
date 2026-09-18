@@ -287,7 +287,13 @@ export function DesignDestination({
             page. Nothing reaches the live site until you publish.
           </p>
         </div>
-        <div className="design-preview-window" ref={previewScale.ref}>
+        <div
+          className="design-preview-window"
+          ref={previewScale.ref}
+          tabIndex={0}
+          role="region"
+          aria-label="Site preview, scrollable"
+        >
           <div
             className="design-preview-page"
             style={

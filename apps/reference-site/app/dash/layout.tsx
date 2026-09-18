@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { roleDisplayLabel } from "@/components/access-display";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { InvitationActivation } from "@/components/invitation-activation";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
@@ -53,7 +54,9 @@ export default async function DashboardLayout({
             <span className="signed-in-as-dot" aria-hidden="true">
               ·
             </span>
-            <span className="signed-in-as-role">{access.membership.role}</span>
+            <span className="signed-in-as-role">
+              {roleDisplayLabel[access.membership.role]}
+            </span>
           </span>
           <a href="/">View public site ↗</a>
         </div>

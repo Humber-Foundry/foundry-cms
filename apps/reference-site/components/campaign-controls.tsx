@@ -25,6 +25,7 @@ import { RichTextEditor } from "./rich-text-editor";
 import { RichTextRenderer } from "./rich-text-renderer";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
 import { ComposerActions, emptyRichTextBody } from "./composer";
+import { HelpTip } from "./help-tip";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
 import type { SiteImageTile } from "../src/site-used-photos";
@@ -540,7 +541,11 @@ export function CampaignControls({
               <summary>How the email reads, and technical details</summary>
               <pre>{rendered.text.bytes}</pre>
               <p>
-                HTML fingerprint: <code>{rendered.html.fingerprint}</code>
+                Content ID: <code>{rendered.html.fingerprint}</code>
+                <HelpTip label="What's a Content ID?">
+                  A code that proves this email's exact content, so support
+                  can confirm nothing changed after it was approved.
+                </HelpTip>
               </p>
             </details>
           )}
