@@ -32,14 +32,17 @@ describe("published media delivery", () => {
       queries: { getPublishedSource: mocks.getPublishedSource },
     });
     mocks.published.mockResolvedValue({
-      pages: [{ slug: "",
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero",
-            asset: { assetId: "asset_published" },
-          },
-        ],
-      }],
+      pages: [
+        {
+          slug: "",
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero",
+              asset: { assetId: "asset_published" },
+            },
+          ],
+        },
+      ],
     });
     mocks.getPublishedSource.mockResolvedValue({
       body: new Uint8Array([1, 2, 3]),
@@ -85,21 +88,24 @@ describe("published media delivery", () => {
 
   it("serves a photo the published page references through an image field", async () => {
     mocks.published.mockResolvedValue({
-      pages: [{ slug: "",
-        media: [],
-        sections: [
-          {
-            id: "section_story",
-            type: "registered",
-            component: "photoBand",
-            props: {
-              imageSrc: "/api/media/asset_page_photo",
-              imageAlt: "Alt",
-              caption: "Caption",
+      pages: [
+        {
+          slug: "",
+          media: [],
+          sections: [
+            {
+              id: "section_story",
+              type: "registered",
+              component: "photoBand",
+              props: {
+                imageSrc: "/api/media/asset_page_photo",
+                imageAlt: "Alt",
+                caption: "Caption",
+              },
             },
-          },
-        ],
-      }],
+          ],
+        },
+      ],
     });
 
     const response = await GET(

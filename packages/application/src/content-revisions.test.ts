@@ -1143,13 +1143,16 @@ describe("content revision application", () => {
     await expect(application.queries.getCurrent()).resolves.toMatchObject({
       revision: 1,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            expect.objectContaining({
-              occurrenceId: "occurrence_home_hero",
-            }),
-          ],
-        }],
+        pages: [
+          {
+            slug: "",
+            media: [
+              expect.objectContaining({
+                occurrenceId: "occurrence_home_hero",
+              }),
+            ],
+          },
+        ],
       },
     });
   });

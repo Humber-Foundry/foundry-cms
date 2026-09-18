@@ -609,14 +609,17 @@ describe("content revision endpoint", () => {
       revision: 3,
       bookmark: "fresh-d1-bookmark",
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              asset: { assetId: "asset_historical" },
-            },
-          ],
-        }],
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                asset: { assetId: "asset_historical" },
+              },
+            ],
+          },
+        ],
       },
     });
     const response = await GET(
@@ -652,14 +655,17 @@ describe("content revision endpoint", () => {
       revision: 2,
       bookmark: "historical-bookmark",
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              asset: { assetId: "asset_historical" },
-            },
-          ],
-        }],
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                asset: { assetId: "asset_historical" },
+              },
+            ],
+          },
+        ],
       },
     });
 
@@ -702,14 +708,17 @@ describe("content revision endpoint", () => {
       revision: 2,
       bookmark: "historical-bookmark",
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              asset: { assetId: "asset_historical" },
-            },
-          ],
-        }],
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                asset: { assetId: "asset_historical" },
+              },
+            ],
+          },
+        ],
       },
     });
     mocks.verifyMediaAccessToken.mockRejectedValue(

@@ -68,14 +68,17 @@ describe("revision preview page", () => {
       revision: 3,
       createdAt: "2026-07-27T12:00:00.000Z",
       definition: {
-        pages: [{ slug: "",
-          seo: {
-            title: "Edited SEO title",
-            description: "Edited SEO description",
-            keywords: [],
-            shareImage: null,
+        pages: [
+          {
+            slug: "",
+            seo: {
+              title: "Edited SEO title",
+              description: "Edited SEO description",
+              keywords: [],
+              shareImage: null,
+            },
           },
-        }],
+        ],
       },
       inputs: {
         contentHash: "content-hash",

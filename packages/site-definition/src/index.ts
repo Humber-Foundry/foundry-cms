@@ -412,9 +412,9 @@ export const siteDefinitionSchema = {
     pages: {
       $comment:
         "Exactly one page carries the root slug. That page is the home page, " +
-        "and `homePage` in pages.ts is the one reader of it. Duplicate page " +
-        "ids and duplicate slugs are rejected by isBaseSiteDefinition, " +
-        "because JSON Schema cannot compare one property across array items.",
+        "and `homePage` in pages.ts returns it. Duplicate page ids and " +
+        "duplicate slugs are rejected by isBaseSiteDefinition, because JSON " +
+        "Schema cannot compare one property across array items.",
       type: "array",
       minItems: 1,
       items: { $ref: "#/$defs/sitePage" },

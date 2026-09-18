@@ -88,12 +88,20 @@ async function revisionFixture() {
 
 /**
  * The same definition in the shape it was stored in before 1.7.0: one `home`
- * object instead of a `pages` collection. A legacy artifact must use the shape
- * its schema version was stored in.
+ * object instead of a `pages` collection, with no slug and no title, because
+ * neither field existed then.
+ *
+ * A fixture that claims a schema version older than 1.7.0 must use that
+ * version's shape, or it never exercises the page-collection projection step.
+ *
+ * The return type is `any` on purpose. No current type describes an older
+ * schema shape, and every caller feeds it to a reader that takes an unknown
+ * stored value.
  */
 function withLegacyHomeShape(definition: SiteDefinition): any {
-  const { pages, ...rest } = structuredClone(definition) as any;
-  const { slug: _slug, title: _title, ...home } = pages[0];
+  const copy = structuredClone(definition);
+  const { pages: _pages, ...rest } = copy as unknown as Record<string, any>;
+  const { slug: _slug, title: _title, ...home } = homePage(copy);
   return { ...rest, home };
 }
 

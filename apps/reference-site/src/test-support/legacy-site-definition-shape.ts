@@ -10,10 +10,11 @@ import {
  *
  * A fixture that claims a schema version older than 1.7.0 must use that
  * version's shape, or it never exercises the page-collection projection step.
+ *
+ * The return type is `any` on purpose. No current type describes an older
+ * schema shape, and every caller feeds it to a reader that takes an unknown
+ * stored value.
  */
-// The return type is `any` on purpose. The result is a definition in an older
-// schema shape, which no current type describes, and every caller feeds it to
-// a reader that takes an unknown stored value.
 export function withLegacyHomeShape(definition: SiteDefinition): any {
   const copy = structuredClone(definition);
   const { pages: _pages, ...rest } = copy as unknown as Record<string, any>;

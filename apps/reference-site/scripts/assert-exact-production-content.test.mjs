@@ -336,7 +336,7 @@ describe("exact production content authorization", () => {
     expect(options.readCommitParents).not.toHaveBeenCalled();
   });
 
-  it("authorizes the 1.7 page-collection upgrade against the prior 1.6 hash", async () => {
+  it("authorizes the 1.7 page-collection upgrade against the 1.6 hash", async () => {
     expect(contentHashUnderSchema160).not.toBe(runtimePublishedContentHash);
     const options = inputs({
       readLiveMarker: vi.fn().mockResolvedValue({

@@ -15,10 +15,11 @@ field path still finds it after a rename. A page is not a blog post: a post
 lives in the blog collection and is listed at `/blog`. See ADR-0016.
 
 **Slug** — The part of a page's public address that names the page. A page is
-served at `/<slug>`. A slug is lowercase words joined by single hyphens, and it
-may not be one of the reserved words that already name a route: `__foundry`,
-`api`, `blog`, `dash`, `newsletter`. A slug may be changed; the page id may
-not. See ADR-0016.
+served at `/<slug>`. A slug is lowercase words joined by single hyphens, or the
+root slug, which is an empty string and belongs to the home page. A slug may
+not be one of the reserved words that already name a route: `__foundry`, `api`,
+`blog`, `dash`, `newsletter`. A slug may be changed; the page id may not. See
+ADR-0016.
 
 **Home page** — The page with the root slug, an empty string, so it is served
 at `/`. Every site has exactly one, and it cannot be deleted. Code that needs

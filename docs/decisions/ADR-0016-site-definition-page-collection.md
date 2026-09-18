@@ -72,9 +72,10 @@ arrived. The earlier steps read whichever shape the stored definition is in.
 
 `homePage(definition)` returns the page with the root slug. Every caller that
 still works on one page, and that needs the page itself, reads it through this
-function. Code that only has to compare one slug reads `homePageSlug`. `homePageIndex` gives
-the same page's position for code that writes into a mutable draft, and
-`replacePage` returns a definition with one page swapped.
+function. Code that only has to compare one slug reads `homePageSlug`.
+
+`homePageIndex` gives the same page's position, for code that writes into a
+mutable draft. `replacePage` returns a definition with one page swapped.
 
 `findPageById` and `findPageBySlug` are the general readers.
 

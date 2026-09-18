@@ -213,21 +213,24 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 2,
-              asset: {
-                assetId: "asset_replacement",
-                width: 1600,
-                height: 900,
-                contentType: "image/png",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 2,
+                asset: {
+                  assetId: "asset_replacement",
+                  width: 1600,
+                  height: 900,
+                  contentType: "image/png",
+                },
+                crop: null,
               },
-              crop: null,
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
 
@@ -338,21 +341,24 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 1,
-              asset: {
-                assetId: "asset_replacement",
-                width: 1600,
-                height: 900,
-                contentType: "image/png",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 1,
+                asset: {
+                  assetId: "asset_replacement",
+                  width: 1600,
+                  height: 900,
+                  contentType: "image/png",
+                },
+                crop: null,
               },
-              crop: null,
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
 
@@ -391,21 +397,24 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 2,
-              asset: {
-                assetId: "asset_replacement",
-                width: 1600,
-                height: 900,
-                contentType: "image/png",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 2,
+                asset: {
+                  assetId: "asset_replacement",
+                  width: 1600,
+                  height: 900,
+                  contentType: "image/png",
+                },
+                crop: completedOccurrence.crop,
               },
-              crop: completedOccurrence.crop,
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
 
@@ -493,41 +502,47 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 2,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 8,
-              asset: {
-                assetId: "asset_replacement",
-                width: 1600,
-                height: 900,
-                contentType: "image/png",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 8,
+                asset: {
+                  assetId: "asset_replacement",
+                  width: 1600,
+                  height: 900,
+                  contentType: "image/png",
+                },
+                crop: null,
               },
-              crop: null,
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 8,
-              asset: {
-                assetId: "asset_replacement",
-                width: 1600,
-                height: 900,
-                contentType: "image/png",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 8,
+                asset: {
+                  assetId: "asset_replacement",
+                  width: 1600,
+                  height: 900,
+                  contentType: "image/png",
+                },
+                crop: null,
               },
-              crop: null,
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
     mocks.crop.mockResolvedValue({
@@ -569,41 +584,47 @@ describe("media endpoint", () => {
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 2,
-              asset: {
-                assetId: "asset_inherited",
-                width: 800,
-                height: 600,
-                contentType: "image/png",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 2,
+                asset: {
+                  assetId: "asset_inherited",
+                  width: 800,
+                  height: 600,
+                  contentType: "image/png",
+                },
+                crop: null,
               },
-              crop: null,
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 3,
-              asset: {
-                assetId: "asset_newer",
-                width: 1200,
-                height: 800,
-                contentType: "image/webp",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 3,
+                asset: {
+                  assetId: "asset_newer",
+                  width: 1200,
+                  height: 800,
+                  contentType: "image/webp",
+                },
+                crop: { x: 0.1, y: 0, width: 0.9, height: 1 },
               },
-              crop: { x: 0.1, y: 0, width: 0.9, height: 1 },
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
 
@@ -646,62 +667,71 @@ describe("media endpoint", () => {
     mocks.getContentRevision.mockResolvedValue({
       revision: 2,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 2,
-              asset: {
-                assetId: "asset_inherited",
-                width: 800,
-                height: 600,
-                contentType: "image/png",
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 2,
+                asset: {
+                  assetId: "asset_inherited",
+                  width: 800,
+                  height: 600,
+                  contentType: "image/png",
+                },
+                crop: null,
               },
-              crop: null,
-            },
-          ],
-        }],
+            ],
+          },
+        ],
       },
     });
     mocks.getCurrentContent
       .mockResolvedValueOnce({
         revision: 2,
         definition: {
-          pages: [{ slug: "",
-            media: [
-              {
-                occurrenceId: "occurrence_home_hero",
-                revision: 2,
-                asset: {
-                  assetId: "asset_inherited",
-                  width: 800,
-                  height: 600,
-                  contentType: "image/png",
+          pages: [
+            {
+              slug: "",
+              media: [
+                {
+                  occurrenceId: "occurrence_home_hero",
+                  revision: 2,
+                  asset: {
+                    assetId: "asset_inherited",
+                    width: 800,
+                    height: 600,
+                    contentType: "image/png",
+                  },
+                  crop: null,
                 },
-                crop: null,
-              },
-            ],
-          }],
+              ],
+            },
+          ],
         },
       })
       .mockResolvedValueOnce({
         revision: 3,
         definition: {
-          pages: [{ slug: "",
-            media: [
-              {
-                occurrenceId: "occurrence_home_hero",
-                revision: 2,
-                asset: {
-                  assetId: "asset_inherited",
-                  width: 800,
-                  height: 600,
-                  contentType: "image/png",
+          pages: [
+            {
+              slug: "",
+              media: [
+                {
+                  occurrenceId: "occurrence_home_hero",
+                  revision: 2,
+                  asset: {
+                    assetId: "asset_inherited",
+                    width: 800,
+                    height: 600,
+                    contentType: "image/png",
+                  },
+                  crop: null,
                 },
-                crop: null,
-              },
-            ],
-          }],
+              ],
+            },
+          ],
         },
       });
 
@@ -1021,16 +1051,19 @@ describe("media endpoint", () => {
     mocks.getCurrentContent.mockResolvedValue({
       revision: 3,
       definition: {
-        pages: [{ slug: "",
-          media: [
-            {
-              occurrenceId: "occurrence_home_hero",
-              revision: 0,
-              asset: { assetId: "asset_inherited" },
-              crop: null,
-            },
-          ],
-        }],
+        pages: [
+          {
+            slug: "",
+            media: [
+              {
+                occurrenceId: "occurrence_home_hero",
+                revision: 0,
+                asset: { assetId: "asset_inherited" },
+                crop: null,
+              },
+            ],
+          },
+        ],
       },
     });
     mocks.grantAccess.mockResolvedValue({
