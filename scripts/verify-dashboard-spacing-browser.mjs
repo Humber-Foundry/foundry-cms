@@ -254,6 +254,73 @@ const destinations = [
   ["Settings", "/dash/settings"],
 ];
 
+/**
+ * Opens the Pages editor's page-settings panel — the "Site description" /
+ * "Page SEO description" fields #173 names — and runs the same spacing
+ * checks inside it. The panel is a slide-up sheet on a phone rather than a
+ * fixed sidebar, so the two viewports open it differently.
+ */
+async function checkPagesSettingsPanel(page, origin, viewportLabel) {
+  await page.goto(`${origin}/dash/pages`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+
+  if (viewportLabel === "phone") {
+    await page.locator(".editor-mobile-menu").click({ timeout: 8000 });
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: "Edit", exact: true }).click({ timeout: 8000 });
+    await page.waitForTimeout(500);
+    await page.locator(".editor-mobile-menu").click({ timeout: 8000 });
+    await page.waitForTimeout(300);
+    await page.locator(".editor-menu-page-options").click({ timeout: 8000 });
+    await page.waitForTimeout(500);
+  } else {
+    await page.getByRole("button", { name: "Edit", exact: true }).click({ timeout: 8000 });
+    await page.waitForTimeout(500);
+  }
+
+  // "Site settings" is the field group that holds Site description; open it
+  // so its fields are actually laid out and measurable.
+  const siteSettings = page.getByRole("button", { name: "Site settings" });
+  if ((await siteSettings.count()) > 0) {
+    await siteSettings.click({ timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
+
+  const tight = await page.evaluate(collectTightText, minimumTextGap);
+  if (tight.length > 0) {
+    throw new Error(
+      `dashboard_spacing_tight_text:${viewportLabel}:PagesPanel:${JSON.stringify(tight)}`,
+    );
+  }
+
+  // The panel's left and right insets must match — #173's "13px left, 16px
+  // right" defect.
+  const insets = await page.evaluate(() => {
+    const panel = document.querySelector(".editor-side-page") || document.querySelector(".editor-side");
+    if (panel === null) return null;
+    const fields = Array.from(panel.querySelectorAll("label, .editor-field")).filter(
+      (field) => field.getBoundingClientRect().width > 10,
+    );
+    const pr = panel.getBoundingClientRect();
+    return fields.map((field) => {
+      const fr = field.getBoundingClientRect();
+      return {
+        left: Math.round(fr.left - pr.left),
+        right: Math.round(pr.right - fr.right),
+      };
+    });
+  });
+  if (insets !== null) {
+    for (const { left, right } of insets) {
+      if (Math.abs(left - right) > 2) {
+        throw new Error(
+          `dashboard_spacing_asymmetric_panel_inset:${viewportLabel}:left=${left}:right=${right}`,
+        );
+      }
+    }
+  }
+}
+
 async function checkDestination(page, origin, name, href, viewportLabel) {
   await page.goto(`${origin}${href}`, {
     waitUntil: "networkidle",
@@ -345,6 +412,7 @@ async function main() {
       for (const [name, href] of destinations) {
         await checkDestination(page, origin, name, href, viewportLabel);
       }
+      await checkPagesSettingsPanel(page, origin, viewportLabel);
       await context.close();
     }
 
