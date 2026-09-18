@@ -50,7 +50,10 @@ function activePost(
 }
 
 function application(
-  post = activePost(),
+  post:
+    & BlogPostOperationalState
+    & Partial<Readonly<{ title: string; slug: string; excerpt: string }>> =
+    activePost(),
   approvedPostRevisionId = post.postRevisionId,
   approvedPostId = post.postId,
 ) {
@@ -1500,11 +1503,9 @@ describe("blog post operations", () => {
 
     const archived = await store.listArchivedPosts("foundry-site");
     expect(archived).toHaveLength(1);
-    // This in-memory store has no post-content snapshot to read a title,
-    // slug or excerpt from — only the durable D1 store does (see
-    // d1-blog-post-operations-store.test.ts, "lists archived posts with
-    // their title..."). Asserting the exact blank values here, rather than
-    // a partial match, keeps that gap visible instead of silent.
+    // A post seeded with no title, slug or excerpt shows blank text
+    // fields, the same fallback the durable D1 store uses for a post
+    // archived before it had a readable content snapshot.
     expect(archived[0]).toMatchObject({
       postId: "post-scheduled-release",
       collectionState: "archived",
@@ -1512,6 +1513,7 @@ describe("blog post operations", () => {
       slug: "",
       excerpt: "",
       archivedAt: null,
+      archiveRequestId: "archive-for-summary-0001",
     });
 
     const summary = await store.findOperationalSummary(
@@ -1519,5 +1521,59 @@ describe("blog post operations", () => {
       "post-scheduled-release",
     );
     expect(summary?.archiveRequestId).toBe("archive-for-summary-0001");
+  });
+
+  it("lists an archived post's title, slug and excerpt when seeded, matching the D1 store's shape", async () => {
+    const { app, store } = application({
+      ...activePost(),
+      title: "Autumn tides",
+      slug: "autumn-tides",
+      excerpt: "What changed this season.",
+    });
+
+    await app.commands.archive({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      selectedPostRevisionId: "post-revision-7",
+      idempotencyKey: "archive-for-content-0001",
+    });
+
+    const archived = await store.listArchivedPosts("foundry-site");
+    expect(archived).toHaveLength(1);
+    expect(archived[0]).toMatchObject({
+      title: "Autumn tides",
+      slug: "autumn-tides",
+      excerpt: "What changed this season.",
+      archiveRequestId: "archive-for-content-0001",
+    });
+  });
+
+  it("clears the archive-request ID from the archived list once a post is restored", async () => {
+    const { app, store } = application();
+
+    await app.commands.archive({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      selectedPostRevisionId: "post-revision-7",
+      idempotencyKey: "archive-for-restore-0001",
+    });
+    await app.commands.restore({
+      actorId,
+      siteId: "foundry-site",
+      postId: "post-scheduled-release",
+      selectedPostRevisionId: "post-revision-7",
+      provenance: {
+        workspaceId,
+        contentRevision: 8,
+        restoredPostRevisionId: "post-revision-8",
+      },
+      idempotencyKey: "restore-for-archive-list-0001",
+    });
+
+    await expect(store.listArchivedPosts("foundry-site")).resolves.toEqual(
+      [],
+    );
   });
 });

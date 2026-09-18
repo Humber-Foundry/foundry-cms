@@ -554,7 +554,7 @@ export function createD1BlogPostOperationsStore(
                     THEN NULL
                     ELSE live_revision.revision_id
                   END AS live_revision_id,
-                  post.version, state.archived_at,
+                  post.version, state.archived_at, state.archive_request_id,
                   COALESCE(selected.snapshot_json, revision.snapshot_json)
                     AS snapshot_json
            FROM blog_post_collection_states AS state
@@ -585,6 +585,7 @@ export function createD1BlogPostOperationsStore(
           live_revision_id: string | null;
           version: number;
           archived_at: string | null;
+          archive_request_id: string | null;
           snapshot_json: string;
         }>();
       return rows.results.map((row) => {
@@ -616,6 +617,7 @@ export function createD1BlogPostOperationsStore(
           liveRevisionId: row.live_revision_id,
           version: row.version,
           archivedAt: row.archived_at,
+          archiveRequestId: row.archive_request_id,
           ...snapshot,
         };
       });
