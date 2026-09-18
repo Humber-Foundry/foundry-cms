@@ -280,6 +280,13 @@ async function main() {
       .click();
     await choosePhoto(page, "thumb.png");
 
+    // Mark this document so the reload below can be recognised. A saved post
+    // reloads Blog at the address it is already on, so the address alone
+    // cannot say whether the new document has arrived yet.
+    await page.evaluate(() => {
+      window.__foundryDocumentBeforeSave = true;
+    });
+
     // Save the draft. This is the one content-revision write that carries the
     // whole post.
     await composer.getByRole("button", { name: /^Save draft/u }).click();
@@ -304,7 +311,15 @@ async function main() {
 
     // A successful save reloads the blog list itself (window.location.assign),
     // so wait for that reload rather than starting a second navigation that
-    // would race it. The post then lists with its Preview action.
+    // would race it. The reload lands on the address the page is already on,
+    // so wait for the marked document to be replaced: waiting on the address
+    // would return at once and leave the clicks below hitting a document that
+    // is on its way out. The post then lists with its Preview action.
+    await page.waitForFunction(
+      () => window.__foundryDocumentBeforeSave === undefined,
+      undefined,
+      { timeout: 30_000 },
+    );
     await page.waitForURL(
       /\/dash\/blog\?workspace=workspace_[a-f0-9]{24}$/u,
       { timeout: 30_000 },
