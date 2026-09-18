@@ -1,3 +1,4 @@
+import { homePage } from "@humber-foundry/site-definition";
 import {
   addUtcDays,
   addUtcSeconds,
@@ -215,7 +216,7 @@ export function currentRouteHistory(): ReadonlyArray<PublishedRouteHistoryEntry>
   return [
     {
       path: "/",
-      contentId: installedSiteDefinition.home.id,
+      contentId: homePage(installedSiteDefinition).id,
       fromUtc: "1970-01-01T00:00:00.000Z",
       toUtc: null,
     },

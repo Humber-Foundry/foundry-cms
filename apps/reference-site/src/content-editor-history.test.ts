@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   designEditsForDesign,
   designPresets,
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
   type SiteDefinition,
@@ -20,7 +21,7 @@ describe("content editor history", () => {
       definition: referenceSiteDefinition,
       revision: 4,
     });
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -56,7 +57,7 @@ describe("content editor history", () => {
     });
 
     expect(
-      edited.workingDefinition.home.sections.find(
+      homePage(edited.workingDefinition).sections.find(
         (section) => section.id === callToAction.id,
       ),
     ).toEqual(expect.objectContaining({ body }));
@@ -141,7 +142,7 @@ describe("content editor history", () => {
     expect(undone.persistedRevision).toBe(4);
     expect(undone.workingDefinition).toEqual(referenceSiteDefinition);
     expect(redone.persistedRevision).toBe(4);
-    expect(redone.workingDefinition.home.sections[0]).toEqual(
+    expect(homePage(redone.workingDefinition).sections[0]).toEqual(
       expect.objectContaining({ title: "Working headline" }),
     );
   });
@@ -153,10 +154,12 @@ describe("content editor history", () => {
     });
     const definition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [...referenceSiteDefinition.home.sections].reverse(),
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     } as SiteDefinition;
     const composed = contentEditorReducer(initial, {
       type: "compose",
@@ -164,7 +167,7 @@ describe("content editor history", () => {
     });
     const undone = contentEditorReducer(composed, { type: "undo" });
 
-    expect(composed.workingDefinition.home.sections[0]?.id).toBe(
+    expect(homePage(composed.workingDefinition).sections[0]?.id).toBe(
       "section_contact",
     );
     expect(composed.projectionVersion).toBe(initial.projectionVersion);
@@ -180,10 +183,12 @@ describe("content editor history", () => {
     });
     const changed = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [...referenceSiteDefinition.home.sections].reverse(),
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     } as SiteDefinition;
     const dirty = contentEditorReducer(initial, {
       type: "compose",
@@ -230,10 +235,12 @@ describe("content editor history", () => {
     });
     const recovered = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [...referenceSiteDefinition.home.sections].reverse(),
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     } as SiteDefinition;
 
     const next = contentEditorReducer(initial, {
@@ -263,7 +270,7 @@ describe("content editor history", () => {
     const undone = contentEditorReducer(saved, { type: "undo" });
 
     expect(undone.persistedRevision).toBe(5);
-    expect(undone.persistedDefinition.home.sections[0]).toEqual(
+    expect(homePage(undone.persistedDefinition).sections[0]).toEqual(
       expect.objectContaining({ title: "Saved headline" }),
     );
     expect(undone.workingDefinition).toEqual(referenceSiteDefinition);
@@ -362,22 +369,24 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero" as const,
-            revision: 1,
-            asset: {
-              assetId: "asset_hero",
-              width: 1600,
-              height: 900,
-              contentType: "image/png" as const,
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero" as const,
+              revision: 1,
+              asset: {
+                assetId: "asset_hero",
+                width: 1600,
+                height: 900,
+                contentType: "image/png" as const,
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      },
+          ],
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -387,10 +396,10 @@ describe("content editor history", () => {
     });
 
     expect(synchronized.persistedRevision).toBe(2);
-    expect(synchronized.workingDefinition.home.media).toEqual(
-      definition.home.media,
+    expect(homePage(synchronized.workingDefinition).media).toEqual(
+      homePage(definition).media,
     );
-    expect(synchronized.workingDefinition.home.sections[0]).toMatchObject({
+    expect(homePage(synchronized.workingDefinition).sections[0]).toMatchObject({
       title: "Unsaved headline",
     });
     expect(synchronized.workingDefinition.site.footer).toBe(
@@ -415,14 +424,16 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        sections: referenceSiteDefinition.home.sections.map((section) =>
-          section.id === "section_hero"
-            ? { ...section, title: "Concurrent headline" }
-            : section,
-        ),
-      },
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.map((section) =>
+            section.id === "section_hero"
+              ? { ...section, title: "Concurrent headline" }
+              : section,
+          ),
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -433,7 +444,7 @@ describe("content editor history", () => {
 
     expect(synchronized.persistedDefinition).toEqual(incoming);
     expect(synchronized.persistedRevision).toBe(2);
-    expect(synchronized.workingDefinition.home.sections[0]).toEqual(
+    expect(homePage(synchronized.workingDefinition).sections[0]).toEqual(
       expect.objectContaining({ title: "Local headline" }),
     );
     expect(synchronized.status).toBe("conflict");
@@ -459,12 +470,14 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        sections: referenceSiteDefinition.home.sections.filter(
-          (section) => section.id !== "section_hero",
-        ),
-      },
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.filter(
+            (section) => section.id !== "section_hero",
+          ),
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -475,11 +488,11 @@ describe("content editor history", () => {
 
     expect(synchronized.status).toBe("conflict");
     expect(
-      synchronized.persistedDefinition.home.sections.some(
+      homePage(synchronized.persistedDefinition).sections.some(
         (section) => section.id === "section_hero",
       ),
     ).toBe(false);
-    expect(synchronized.workingDefinition.home.sections[0]).toEqual(
+    expect(homePage(synchronized.workingDefinition).sections[0]).toEqual(
       expect.objectContaining({
         id: "section_hero",
         title: "Local headline",
@@ -497,12 +510,14 @@ describe("content editor history", () => {
     });
     const locallyRemoved = {
       ...structuredClone(referenceSiteDefinition),
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        sections: referenceSiteDefinition.home.sections.filter(
-          (section) => section.id !== "section_hero",
-        ),
-      },
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.filter(
+            (section) => section.id !== "section_hero",
+          ),
+        },
+      ],
     };
     const edited = contentEditorReducer(initial, {
       type: "compose",
@@ -510,14 +525,16 @@ describe("content editor history", () => {
     });
     const incoming = {
       ...structuredClone(referenceSiteDefinition),
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        sections: referenceSiteDefinition.home.sections.map((section) =>
-          section.id === "section_hero"
-            ? { ...section, title: "Concurrent headline" }
-            : section,
-        ),
-      },
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.map((section) =>
+            section.id === "section_hero"
+              ? { ...section, title: "Concurrent headline" }
+              : section,
+          ),
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -528,11 +545,11 @@ describe("content editor history", () => {
 
     expect(synchronized.status).toBe("conflict");
     expect(
-      synchronized.workingDefinition.home.sections.some(
+      homePage(synchronized.workingDefinition).sections.some(
         (section) => section.id === "section_hero",
       ),
     ).toBe(false);
-    expect(synchronized.persistedDefinition.home.sections[0]).toEqual(
+    expect(homePage(synchronized.persistedDefinition).sections[0]).toEqual(
       expect.objectContaining({
         id: "section_hero",
         title: "Concurrent headline",
@@ -547,10 +564,12 @@ describe("content editor history", () => {
     });
     const reordered = {
       ...structuredClone(referenceSiteDefinition),
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        sections: [...referenceSiteDefinition.home.sections].reverse(),
-      },
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+        },
+      ],
     };
     const edited = contentEditorReducer(initial, {
       type: "compose",
@@ -558,27 +577,29 @@ describe("content editor history", () => {
     });
     const incoming = {
       ...structuredClone(referenceSiteDefinition),
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        sections: referenceSiteDefinition.home.sections.map((section) =>
-          section.id === "section_services"
-            ? { ...section, title: "Concurrent services title" }
-            : section,
-        ),
-        media: [
-          {
-            occurrenceId: "occurrence_home_hero" as const,
-            revision: 1,
-            asset: {
-              assetId: "asset_hero",
-              width: 1600,
-              height: 900,
-              contentType: "image/png" as const,
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          sections: homePage(referenceSiteDefinition).sections.map((section) =>
+            section.id === "section_services"
+              ? { ...section, title: "Concurrent services title" }
+              : section,
+          ),
+          media: [
+            {
+              occurrenceId: "occurrence_home_hero" as const,
+              revision: 1,
+              asset: {
+                assetId: "asset_hero",
+                width: 1600,
+                height: 900,
+                contentType: "image/png" as const,
+              },
+              crop: null,
             },
-            crop: null,
-          },
-        ],
-      },
+          ],
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(edited, {
@@ -588,13 +609,13 @@ describe("content editor history", () => {
     });
 
     expect(
-      synchronized.workingDefinition.home.sections.map(({ id }) => id),
-    ).toEqual(reordered.home.sections.map(({ id }) => id));
-    expect(synchronized.workingDefinition.home.media).toEqual(
-      incoming.home.media,
+      homePage(synchronized.workingDefinition).sections.map(({ id }) => id),
+    ).toEqual(homePage(reordered).sections.map(({ id }) => id));
+    expect(homePage(synchronized.workingDefinition).media).toEqual(
+      homePage(incoming).media,
     );
     expect(
-      synchronized.workingDefinition.home.sections.find(
+      homePage(synchronized.workingDefinition).sections.find(
         ({ id }) => id === "section_services",
       ),
     ).toMatchObject({ title: "Concurrent services title" });
@@ -611,10 +632,12 @@ describe("content editor history", () => {
       });
       const locallyReordered = {
         ...structuredClone(referenceSiteDefinition),
-        home: {
-          ...structuredClone(referenceSiteDefinition.home),
-          sections: [...referenceSiteDefinition.home.sections].reverse(),
-        },
+        pages: [
+          {
+            ...structuredClone(homePage(referenceSiteDefinition)),
+            sections: [...homePage(referenceSiteDefinition).sections].reverse(),
+          },
+        ],
       };
       const edited = contentEditorReducer(initial, {
         type: "compose",
@@ -623,19 +646,23 @@ describe("content editor history", () => {
       const incomingSections =
         incomingChange === "addition"
           ? [
-              ...referenceSiteDefinition.home.sections,
+              ...homePage(referenceSiteDefinition).sections,
               {
-                ...structuredClone(referenceSiteDefinition.home.sections[0]!),
+                ...structuredClone(
+                  homePage(referenceSiteDefinition).sections[0]!,
+                ),
                 id: "section_concurrent_hero",
               },
             ]
-          : referenceSiteDefinition.home.sections.slice(1);
+          : homePage(referenceSiteDefinition).sections.slice(1);
       const incoming = {
         ...structuredClone(referenceSiteDefinition),
-        home: {
-          ...structuredClone(referenceSiteDefinition.home),
-          sections: incomingSections,
-        },
+        pages: [
+          {
+            ...structuredClone(homePage(referenceSiteDefinition)),
+            sections: incomingSections,
+          },
+        ],
       } as SiteDefinition;
 
       const synchronized = contentEditorReducer(edited, {
@@ -667,10 +694,12 @@ describe("content editor history", () => {
         ...structuredClone(referenceSiteDefinition.site),
         footer: "Concurrent footer",
       },
-      home: {
-        ...structuredClone(referenceSiteDefinition.home),
-        media: [],
-      },
+      pages: [
+        {
+          ...structuredClone(homePage(referenceSiteDefinition)),
+          media: [],
+        },
+      ],
     };
 
     const synchronized = contentEditorReducer(initial, {

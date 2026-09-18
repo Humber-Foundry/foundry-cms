@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { referenceSiteDefinition } from "@humber-foundry/site-definition";
+import { homePage, referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { sectionAnchor } from "./section-anchor";
 
 describe("section anchors", () => {
   it("uses each stable section identifier as its public anchor", () => {
-    for (const section of referenceSiteDefinition.home.sections) {
+    for (const section of homePage(referenceSiteDefinition).sections) {
       expect(sectionAnchor(section)).toBe(section.id);
     }
   });
 
   it("keeps navigation targets within the stable section identifiers", () => {
     const anchors = new Set(
-      referenceSiteDefinition.home.sections.map(sectionAnchor),
+      homePage(referenceSiteDefinition).sections.map(sectionAnchor),
     );
-    const hero = referenceSiteDefinition.home.sections.find(
+    const hero = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "hero",
     );
     const links = [

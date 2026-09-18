@@ -2,6 +2,7 @@ import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   createSiteId,
+  homePage,
   referenceSiteDefinition,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
@@ -19,16 +20,18 @@ export const alternateSiteDefinition = {
     name: "Alternate installation",
     description: "Content owned by a second Foundry installation.",
   },
-  home: {
-    ...referenceSiteDefinition.home,
-    id: "alternate_home",
-    seo: {
-      title: "Alternate installation home",
-      description: "A second installation acceptance fixture.",
-      keywords: [],
-      shareImage: null,
+  pages: [
+    {
+      ...homePage(referenceSiteDefinition),
+      id: "alternate_home",
+      seo: {
+        title: "Alternate installation home",
+        description: "A second installation acceptance fixture.",
+        keywords: [],
+        shareImage: null,
+      },
     },
-  },
+  ],
   blog: {
     id: "blog",
     posts: [

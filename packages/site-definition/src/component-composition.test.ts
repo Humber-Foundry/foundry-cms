@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyPageComposition,
   createDefaultPageSection,
+  homePage,
   pageCompositionContract,
   referenceSiteDefinition,
   remapPageSectionNestedIds,
@@ -44,7 +45,7 @@ describe("page component composition", () => {
       "section_second_contact",
     );
     const hero = structuredClone(
-      source.home.sections.find((section) => section.type === "hero")!,
+      homePage(source).sections.find((section) => section.type === "hero")!,
     );
     const duplicateHero = {
       ...structuredClone(hero),
@@ -62,10 +63,10 @@ describe("page component composition", () => {
     const result = applyPageComposition(source, {
       slotId: "slot_home_sections",
       components: [
-        source.home.sections[2],
+        homePage(source).sections[2],
         duplicateHero,
-        source.home.sections[1],
-        source.home.sections[3],
+        homePage(source).sections[1],
+        homePage(source).sections[3],
         added,
       ],
     });
@@ -73,19 +74,19 @@ describe("page component composition", () => {
     expect(result).toEqual({
       ok: true,
       definition: expect.objectContaining({
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: [
-            source.home.sections[2],
+            homePage(source).sections[2],
             duplicateHero,
-            source.home.sections[1],
-            source.home.sections[3],
+            homePage(source).sections[1],
+            homePage(source).sections[3],
             added,
           ],
-        }),
+        })],
       }),
     });
     expect(source).toBe(referenceSiteDefinition);
-    expect(source.home.sections.map(({ id }) => id)).toEqual([
+    expect(homePage(source).sections.map(({ id }) => id)).toEqual([
       "section_hero",
       "section_services",
       "section_proof",
@@ -107,7 +108,7 @@ describe("page component composition", () => {
     const result = applyPageComposition(referenceSiteDefinition, {
       slotId: "slot_home_sections",
       components: [
-        ...referenceSiteDefinition.home.sections,
+        ...homePage(referenceSiteDefinition).sections,
         first,
         duplicate,
       ],
@@ -117,19 +118,21 @@ describe("page component composition", () => {
   });
 
   it("rejects a stale composition variant for an existing component", () => {
-    const hero = referenceSiteDefinition.home.sections[0]!;
+    const hero = homePage(referenceSiteDefinition).sections[0]!;
     if (hero.type !== "hero") {
       throw new Error("expected_hero_fixture");
     }
     const liveDefinition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [
-          { ...hero, variant: "focused" },
-          ...referenceSiteDefinition.home.sections.slice(1),
-        ],
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            { ...hero, variant: "focused" },
+            ...homePage(referenceSiteDefinition).sections.slice(1),
+          ],
+        },
+      ],
     };
     const staleComposition = structuredClone(
       toPageComposition(referenceSiteDefinition),
@@ -145,20 +148,22 @@ describe("page component composition", () => {
   });
 
   it("derives new component scaffolding from earlier additions in one command", () => {
-    const proof = referenceSiteDefinition.home.sections.find(
+    const proof = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "proof",
     )!;
     const replacedCallToAction =
-      referenceSiteDefinition.home.sections.find(
+      homePage(referenceSiteDefinition).sections.find(
         (section) => section.type === "callToAction",
       )!;
     const base = {
       ...referenceSiteDefinition,
       site: { ...referenceSiteDefinition.site, navigation: [] },
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [proof, replacedCallToAction],
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [proof, replacedCallToAction],
+        },
+      ],
     } as SiteDefinition;
     const callToAction = createDefaultPageSection(
       "callToAction",
@@ -167,10 +172,12 @@ describe("page component composition", () => {
     );
     const withCallToAction = {
       ...base,
-      home: {
-        ...base.home,
-        sections: [proof, callToAction],
-      },
+      pages: [
+        {
+          ...homePage(base),
+          sections: [proof, callToAction],
+        },
+      ],
     } as SiteDefinition;
     const hero = createDefaultPageSection(
       "hero",
@@ -190,21 +197,23 @@ describe("page component composition", () => {
   it("round-trips the canonical slot payload with stable component identifiers", () => {
     expect(toPageComposition(referenceSiteDefinition)).toEqual({
       slotId: "slot_home_sections",
-      components: referenceSiteDefinition.home.sections,
+      components: homePage(referenceSiteDefinition).sections,
     });
   });
 
   it("accepts component identifiers allowed by the published Site Definition schema", () => {
-    const hero = referenceSiteDefinition.home.sections[0]!;
+    const hero = homePage(referenceSiteDefinition).sections[0]!;
     const definition: SiteDefinition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [
-          { ...hero, id: "hero" },
-          ...referenceSiteDefinition.home.sections.slice(1),
-        ],
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            { ...hero, id: "hero" },
+            ...homePage(referenceSiteDefinition).sections.slice(1),
+          ],
+        },
+      ],
     };
 
     expect(
@@ -216,17 +225,19 @@ describe("page component composition", () => {
   });
 
   it("derives inserted Hero links from the active Site Definition", () => {
-    const proof = referenceSiteDefinition.home.sections[2];
+    const proof = homePage(referenceSiteDefinition).sections[2];
     const clientDefinition = {
       ...referenceSiteDefinition,
       site: {
         ...referenceSiteDefinition.site,
         navigation: [],
       },
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [proof],
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [proof],
+        },
+      ],
     };
     const hero = createDefaultPageSection(
       "hero",
@@ -252,15 +263,15 @@ describe("page component composition", () => {
     ).toEqual({
       ok: true,
       definition: expect.objectContaining({
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: [hero, proof],
-        }),
+        })],
       }),
     });
   });
 
   it("derives an inserted call-to-action destination from the active Site Definition", () => {
-    const existing = referenceSiteDefinition.home.sections[3];
+    const existing = homePage(referenceSiteDefinition).sections[3];
     if (existing.type !== "callToAction") {
       throw new Error("expected_call_to_action_fixture");
     }
@@ -270,20 +281,22 @@ describe("page component composition", () => {
         ...referenceSiteDefinition.site,
         navigation: [],
       },
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [
-          ...referenceSiteDefinition.home.sections.slice(0, 3),
-          {
-            ...existing,
-            action: {
-              ...existing.action,
-              label: "Contact Acme",
-              href: "mailto:studio@acme.example",
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            ...homePage(referenceSiteDefinition).sections.slice(0, 3),
+            {
+              ...existing,
+              action: {
+                ...existing.action,
+                label: "Contact Acme",
+                href: "mailto:studio@acme.example",
+              },
             },
-          },
-        ],
-      },
+          ],
+        },
+      ],
     } as SiteDefinition;
     const inserted = createDefaultPageSection(
       "callToAction",
@@ -302,7 +315,7 @@ describe("page component composition", () => {
     expect(
       applyPageComposition(clientDefinition, {
         slotId: "slot_home_sections",
-        components: [...clientDefinition.home.sections, inserted],
+        components: [...homePage(clientDefinition).sections, inserted],
       }).ok,
     ).toBe(true);
   });
@@ -341,7 +354,7 @@ describe("page component composition", () => {
   it("keeps components referenced by protected links outside removal", () => {
     const composition = {
       ...toPageComposition(referenceSiteDefinition),
-      components: referenceSiteDefinition.home.sections.filter(
+      components: homePage(referenceSiteDefinition).sections.filter(
         ({ id }) => id !== "section_contact",
       ),
     };
@@ -368,27 +381,29 @@ describe("page component composition", () => {
             : link,
         ),
       },
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: referenceSiteDefinition.home.sections.map((section) => {
-          if (section.type === "hero") {
-            return {
-              ...section,
-              primaryAction: {
-                ...section.primaryAction,
-                href: "#contact" as const,
-              },
-            };
-          }
-          return section.type === "callToAction"
-            ? { ...section, id: "contact" }
-            : section;
-        }),
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: homePage(referenceSiteDefinition).sections.map((section) => {
+            if (section.type === "hero") {
+              return {
+                ...section,
+                primaryAction: {
+                  ...section.primaryAction,
+                  href: "#contact" as const,
+                },
+              };
+            }
+            return section.type === "callToAction"
+              ? { ...section, id: "contact" }
+              : section;
+          }),
+        },
+      ],
     };
     const composition = {
       ...toPageComposition(definition),
-      components: definition.home.sections.filter(
+      components: homePage(definition).sections.filter(
         ({ id }) => id !== "contact",
       ),
     };
@@ -438,7 +453,7 @@ describe("page component composition", () => {
     ).toEqual({
       ok: true,
       definition: expect.objectContaining({
-        home: expect.objectContaining({
+        pages: [expect.objectContaining({
           sections: expect.arrayContaining([
             expect.objectContaining({
               id: "section_hero",
@@ -449,7 +464,7 @@ describe("page component composition", () => {
               }),
             }),
           ]),
-        }),
+        })],
       }),
     });
   });

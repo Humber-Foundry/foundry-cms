@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  homePage,
   createPageComponentRegistry,
   createRegisteredPageComponent,
   foundationPageComponentRegistry,
@@ -75,7 +76,7 @@ describe("installation-owned page component registry", () => {
       expect(registration.editableFields.length).toBeGreaterThan(0);
     }
     const invalidHero = {
-      ...referenceSiteDefinition.home.sections[0],
+      ...homePage(referenceSiteDefinition).sections[0],
       primaryAction: {
         id: "hero_action",
         label: "Unsafe",
@@ -122,17 +123,19 @@ describe("installation-owned page component registry", () => {
   it("validates an installed definition through its registry and fails closed elsewhere", () => {
     const definition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [
-          ...referenceSiteDefinition.home.sections,
-          registry.createDefault(
-            "imageCopyStory",
-            "section_story",
-            referenceSiteDefinition,
-          ),
-        ],
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [
+            ...homePage(referenceSiteDefinition).sections,
+            registry.createDefault(
+              "imageCopyStory",
+              "section_story",
+              referenceSiteDefinition,
+            ),
+          ],
+        },
+      ],
     };
 
     expect(isSiteDefinitionWithPageComponents(definition, registry)).toBe(true);
@@ -140,18 +143,20 @@ describe("installation-owned page component registry", () => {
       isSiteDefinitionWithPageComponents(
         {
           ...definition,
-          home: {
-            ...definition.home,
-            sections: [
-              ...definition.home.sections.slice(0, -1),
-              {
-                id: "section_unknown",
-                type: "registered",
-                component: "notInstalled",
-                props: { title: "Unsafe" },
-              },
-            ],
-          },
+          pages: [
+            {
+              ...homePage(definition),
+              sections: [
+                ...homePage(definition).sections.slice(0, -1),
+                {
+                  id: "section_unknown",
+                  type: "registered",
+                  component: "notInstalled",
+                  props: { title: "Unsafe" },
+                },
+              ],
+            },
+          ],
         },
         registry,
       ),
@@ -218,7 +223,7 @@ describe("installation-owned page component registry", () => {
       referenceSiteDefinition,
       {
         ...toPageComposition(referenceSiteDefinition),
-        components: [...referenceSiteDefinition.home.sections, initial],
+        components: [...homePage(referenceSiteDefinition).sections, initial],
       },
       themedRegistry,
     );
@@ -233,7 +238,7 @@ describe("installation-owned page component registry", () => {
       {
         ...toPageComposition(inserted.definition),
         components: [
-          ...inserted.definition.home.sections.slice(0, -1),
+          ...homePage(inserted.definition).sections.slice(0, -1),
           changedTheme,
         ],
       },
@@ -284,10 +289,12 @@ describe("installation-owned page component registry", () => {
     } as const;
     const definition = {
       ...referenceSiteDefinition,
-      home: {
-        ...referenceSiteDefinition.home,
-        sections: [...referenceSiteDefinition.home.sections, installed],
-      },
+      pages: [
+        {
+          ...homePage(referenceSiteDefinition),
+          sections: [...homePage(referenceSiteDefinition).sections, installed],
+        },
+      ],
     };
     const changed = {
       ...installed,
@@ -300,7 +307,7 @@ describe("installation-owned page component registry", () => {
       definition,
       {
         ...toPageComposition(definition),
-        components: [...definition.home.sections.slice(0, -1), changed],
+        components: [...homePage(definition).sections.slice(0, -1), changed],
       },
       profileRegistry,
     )).toMatchObject({
@@ -323,7 +330,7 @@ describe("installation-owned page component registry", () => {
       referenceSiteDefinition,
       {
         ...toPageComposition(referenceSiteDefinition),
-        components: [first, ...referenceSiteDefinition.home.sections],
+        components: [first, ...homePage(referenceSiteDefinition).sections],
       },
       registry,
     );
@@ -341,7 +348,7 @@ describe("installation-owned page component registry", () => {
         ...toPageComposition(inserted.definition),
         components: [
           duplicate,
-          ...inserted.definition.home.sections.filter(
+          ...homePage(inserted.definition).sections.filter(
             ({ id }) => id !== "section_story",
           ),
         ],
@@ -350,12 +357,12 @@ describe("installation-owned page component registry", () => {
     );
     expect(changed.ok).toBe(true);
     if (!changed.ok) return;
-    expect(changed.definition.home.sections[0]).toMatchObject({
+    expect(homePage(changed.definition).sections[0]).toMatchObject({
       id: "section_story_copy",
       type: "registered",
       component: "imageCopyStory",
       props: { title: "A copied story" },
     });
-    expect(changed.definition.home.sections.some(({ id }) => id === "section_story")).toBe(false);
+    expect(homePage(changed.definition).sections.some(({ id }) => id === "section_story")).toBe(false);
   });
 });

@@ -6,6 +6,7 @@ import { page, userEvent } from "vitest/browser";
 
 import {
   createDefaultPageSection,
+  homePage,
   referenceSiteDefinition,
   serializeRichTextDocument,
   toPageComposition,
@@ -175,7 +176,7 @@ describe("visual component editor browser acceptance", () => {
     document.body.append(host);
     const root = createRoot(host);
     mounted.push(root);
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -251,7 +252,7 @@ describe("visual component editor browser acceptance", () => {
     document.body.append(host);
     const root = createRoot(host);
     mounted.push(root);
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -309,7 +310,7 @@ describe("visual component editor browser acceptance", () => {
     document.body.append(host);
     const root = createRoot(host);
     mounted.push(root);
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {
@@ -464,7 +465,7 @@ describe("visual component editor browser acceptance", () => {
     for (
       let index = 0;
       index < 30 &&
-      !latest.home.sections.some(
+      !homePage(latest).sections.some(
         (section) =>
           section.type === "callToAction" &&
           JSON.stringify(section.body).includes("Caret edit."),
@@ -475,7 +476,7 @@ describe("visual component editor browser acceptance", () => {
     }
 
     expect(
-      latest.home.sections.find(
+      homePage(latest).sections.find(
         (section) => section.type === "callToAction",
       ),
     ).toEqual(
@@ -572,14 +573,14 @@ describe("visual component editor browser acceptance", () => {
     proofButton!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 100));
 
-    expect(latest.home.sections).toHaveLength(
-      referenceSiteDefinition.home.sections.length + 1,
+    expect(homePage(latest).sections).toHaveLength(
+      homePage(referenceSiteDefinition).sections.length + 1,
     );
     expect(
-      latest.home.sections.some(
+      homePage(latest).sections.some(
         (section) =>
           section.type === "proof" &&
-          !referenceSiteDefinition.home.sections.some(
+          !homePage(referenceSiteDefinition).sections.some(
             ({ id }) => id === section.id,
           ) &&
           /^section_proof_[a-z0-9_]+$/u.test(section.id),
@@ -618,11 +619,13 @@ describe("visual component editor browser acceptance", () => {
     expect(addStory).toBeDefined();
     addStory!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 100));
-    const added = latest.home.sections.find(
+    const added = homePage(latest).sections.find(
       (section) =>
         section.type === "registered" &&
         section.component === "imageCopyStory" &&
-        !installedSiteDefinition.home.sections.some(({ id }) => id === section.id),
+        !homePage(installedSiteDefinition).sections.some(
+          ({ id }) => id === section.id,
+        ),
     );
     expect(added?.id).toMatch(/^section_image_copy_story_[a-z0-9_]+$/u);
 
@@ -636,7 +639,7 @@ describe("visual component editor browser acceptance", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 100));
     expect(host.textContent).toContain("A visible custom component edit");
     expect(
-      latest.home.sections.some(
+      homePage(latest).sections.some(
         (section) =>
           section.type === "registered" &&
           section.props.title === "A visible custom component edit",
@@ -647,7 +650,7 @@ describe("visual component editor browser acceptance", () => {
     await page.getByRole("button", { name: "Duplicate section" }).click();
     await new Promise((resolve) => window.setTimeout(resolve, 100));
     expect(
-      latest.home.sections.filter(
+      homePage(latest).sections.filter(
         (section) =>
           section.type === "registered" &&
           section.component === "imageCopyStory",
@@ -655,10 +658,10 @@ describe("visual component editor browser acceptance", () => {
     ).toHaveLength(2);
 
     // Reordering the selected section changes the page order.
-    const beforeOrder = latest.home.sections.map(({ id }) => id).join(",");
+    const beforeOrder = homePage(latest).sections.map(({ id }) => id).join(",");
     await page.getByRole("button", { name: "Move section down" }).click();
     await new Promise((resolve) => window.setTimeout(resolve, 100));
-    expect(latest.home.sections.map(({ id }) => id).join(",")).not.toBe(
+    expect(homePage(latest).sections.map(({ id }) => id).join(",")).not.toBe(
       beforeOrder,
     );
 
@@ -666,7 +669,7 @@ describe("visual component editor browser acceptance", () => {
     await page.getByRole("button", { name: "Remove section" }).click();
     await new Promise((resolve) => window.setTimeout(resolve, 100));
     expect(
-      latest.home.sections.filter(
+      homePage(latest).sections.filter(
         (section) =>
           section.type === "registered" &&
           section.component === "imageCopyStory",
@@ -1167,7 +1170,7 @@ describe("visual component editor browser acceptance", () => {
           value: JSON.stringify({
             ...toPageComposition(referenceSiteDefinition),
             components: [
-              ...referenceSiteDefinition.home.sections,
+              ...homePage(referenceSiteDefinition).sections,
               addedProof,
             ],
           }),
@@ -1241,7 +1244,7 @@ describe("visual component editor browser acceptance", () => {
             value: JSON.stringify({
               ...toPageComposition(referenceSiteDefinition),
               components: [
-                ...referenceSiteDefinition.home.sections,
+                ...homePage(referenceSiteDefinition).sections,
                 addedProof,
               ],
             }),
@@ -1505,7 +1508,7 @@ describe("visual component editor browser acceptance", () => {
 
   it("preserves an incompatible rich-text recovery conflict when use-my-value is rejected", async () => {
     const workspaceId = "workspace_browser_invalid_rich_text_recovery";
-    const callToAction = referenceSiteDefinition.home.sections.find(
+    const callToAction = homePage(referenceSiteDefinition).sections.find(
       (section) => section.type === "callToAction",
     )!;
     if (callToAction.type !== "callToAction") {

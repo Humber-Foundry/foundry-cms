@@ -2,6 +2,7 @@ import {
   applyPageComposition,
   createRichTextDocumentFromPlainText,
   createSerializedRichTextDocument,
+  homePage,
   listEditableSiteFields,
   pageCompositionContract,
   serializeRichTextDocument,
@@ -217,7 +218,7 @@ export function applyStructuralRecovery(
         ),
       );
       baseIds = new Set(baseById.keys());
-      for (const current of definition.home.sections) {
+      for (const current of homePage(definition).sections) {
         const base = baseById.get(current.id);
         if (
           base !== undefined &&
@@ -228,12 +229,12 @@ export function applyStructuralRecovery(
         }
       }
     } else if (
-      definition.home.sections.some(({ id }) => !targetIds.has(id))
+      homePage(definition).sections.some(({ id }) => !targetIds.has(id))
     ) {
       return { ok: false };
     }
     const currentById = new Map(
-      definition.home.sections.map((section) => [section.id, section]),
+      homePage(definition).sections.map((section) => [section.id, section]),
     );
     const mergedComposition = {
       ...composition,
@@ -253,7 +254,7 @@ export function applyStructuralRecovery(
         }),
         ...(baseIds === null
           ? []
-          : definition.home.sections.filter(
+          : homePage(definition).sections.filter(
               ({ id }) => !baseIds.has(id) && !targetIds.has(id),
             )),
       ],
