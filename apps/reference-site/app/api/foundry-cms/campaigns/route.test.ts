@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
   verifyMutation: vi.fn(),
   readDeliveryReadiness: vi.fn(),
   readDeliveryHealth: vi.fn(),
+  campaignBulkState: vi.fn(),
+  listTestRecipients: vi.fn(),
 }));
 const connectedDelivery = {
   state: "connected",
@@ -79,6 +81,9 @@ const bulkDelivery = {
     sendNow: mocks.sendBulkNow,
     retrySend: mocks.retryBulkSend,
   },
+  queries: {
+    campaignState: mocks.campaignBulkState,
+  },
   scheduler: {
     execute: mocks.executeBulk,
   },
@@ -109,6 +114,7 @@ describe("campaign endpoint", () => {
       bulkDelivery,
       delivery: connectedDelivery,
       readDeliveryHealth: mocks.readDeliveryHealth,
+      listTestRecipients: mocks.listTestRecipients,
     });
     mocks.readDeliveryReadiness.mockResolvedValue({
       ...connectedDelivery,
@@ -122,6 +128,15 @@ describe("campaign endpoint", () => {
       campaign: { id: "20000000-0000-4000-8000-000000000001" },
     });
     mocks.currentEvidence.mockResolvedValue(null);
+    mocks.campaignBulkState.mockResolvedValue({
+      authorization: null,
+      schedule: null,
+      sendOperation: null,
+    });
+    mocks.listTestRecipients.mockResolvedValue({
+      ids: ["membership-owner"],
+      yours: null,
+    });
     mocks.readiness.mockResolvedValue({
       state: "evaluation_only",
       testDeliveryReady: false,
@@ -164,6 +179,58 @@ describe("campaign endpoint", () => {
     );
     expect(response.status).toBe(200);
     expect(mocks.listCampaigns).toHaveBeenCalledWith({ actor: identity });
+  });
+
+  it("reports one campaign's send state and its verified test recipients", async () => {
+    mocks.render.mockResolvedValue({
+      campaignId: "20000000-0000-4000-8000-000000000001",
+      campaignFingerprint: "fingerprint-one",
+    });
+    mocks.currentEvidence.mockResolvedValue({
+      executionId: "40000000-0000-4000-8000-000000000001",
+      campaignFingerprint: "fingerprint-one",
+    });
+    mocks.readiness.mockResolvedValue({
+      state: "ready",
+      testDeliveryReady: true,
+    });
+    mocks.campaignBulkState.mockResolvedValue({
+      authorization: {
+        id: "50000000-0000-4000-8000-000000000001",
+        campaignFingerprint: "fingerprint-one",
+        testExecutionId: "40000000-0000-4000-8000-000000000001",
+        state: "active",
+        authorizedAt: "2026-09-01T02:00:00.000Z",
+      },
+      schedule: null,
+      sendOperation: null,
+    });
+    mocks.listTestRecipients.mockResolvedValue({
+      ids: ["membership-owner"],
+      yours: "membership-owner",
+    });
+
+    const response = await GET(
+      new Request(
+        "https://foundry.example/api/foundry-cms/campaigns" +
+          "?campaignId=20000000-0000-4000-8000-000000000001",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.bulkState.authorization).toMatchObject({ state: "active" });
+    // Membership ids only. A test address is a person's own mailbox and never
+    // leaves the server.
+    expect(body.testRecipients).toEqual({
+      ids: ["membership-owner"],
+      yours: "membership-owner",
+    });
+    expect(JSON.stringify(body)).not.toContain("@");
+    expect(mocks.campaignBulkState).toHaveBeenCalledWith({
+      actor: identity,
+      campaignId: "20000000-0000-4000-8000-000000000001",
+    });
   });
 
   it("reports renderer drift explicitly instead of serving mislabeled artifacts", async () => {
@@ -826,6 +893,7 @@ describe("campaign delivery readiness", () => {
       bulkDelivery,
       delivery: notConfiguredDelivery,
       readDeliveryHealth: mocks.readDeliveryHealth,
+      listTestRecipients: mocks.listTestRecipients,
     });
     mocks.listCampaigns.mockResolvedValue([]);
     const response = await GET(

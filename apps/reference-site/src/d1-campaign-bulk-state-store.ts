@@ -1162,6 +1162,39 @@ export function createD1CampaignBulkStateStore(
       }
       throw new CampaignBulkDeliveryError("bulk_delivery_event_unmatched");
     },
+    async findCampaignBulkState({ siteId, campaignId }) {
+      // Each part is at most one row: two partial unique indexes keep one
+      // active authorization and one active schedule per campaign, and one
+      // more keeps a single send operation per campaign.
+      const [authorization, schedule, operation] = await Promise.all([
+        database
+          .prepare(
+            `${authorizationProjection}
+             WHERE site_id = ?1 AND campaign_id = ?2 AND state = 'active'`,
+          )
+          .bind(siteId, campaignId)
+          .first<AuthorizationRow>(),
+        database
+          .prepare(
+            `${scheduleProjection}
+             WHERE site_id = ?1 AND campaign_id = ?2 AND state = 'active'`,
+          )
+          .bind(siteId, campaignId)
+          .first<ScheduleRow>(),
+        database
+          .prepare(
+            `${operationProjection} WHERE site_id = ?1 AND campaign_id = ?2`,
+          )
+          .bind(siteId, campaignId)
+          .first<OperationRow>(),
+      ]);
+      return Object.freeze({
+        authorization:
+          authorization === null ? null : toAuthorization(authorization),
+        schedule: schedule === null ? null : toSchedule(schedule),
+        operation: operation === null ? null : toOperation(operation),
+      });
+    },
     async confirmProviderAcceptance({
       siteId,
       operationId,

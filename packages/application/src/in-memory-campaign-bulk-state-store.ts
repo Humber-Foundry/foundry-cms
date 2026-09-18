@@ -541,6 +541,23 @@ export function createInMemoryCampaignBulkStateStore({
       events.set(event.eventId, event);
       return "recorded";
     },
+    async findCampaignBulkState({ campaignId }) {
+      const forCampaign = <T extends { campaignId: CampaignId }>(
+        rows: Map<string, T>,
+        keep: (row: T) => boolean,
+      ) =>
+        [...rows.values()].find(
+          (row) => row.campaignId === campaignId && keep(row),
+        ) ?? null;
+      return Object.freeze({
+        authorization: forCampaign(
+          authorizations,
+          ({ state }) => state === "active",
+        ),
+        schedule: forCampaign(schedules, ({ state }) => state === "active"),
+        operation: forCampaign(operations, () => true),
+      });
+    },
     async confirmProviderAcceptance({
       operationId,
       providerCampaignId,
