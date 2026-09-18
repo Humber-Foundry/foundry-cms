@@ -8,6 +8,7 @@ import {
 } from "@humber-foundry/application";
 
 import { FormSubmissionControls } from "@/components/form-submission-controls";
+import { HelpTip } from "@/components/help-tip";
 import { formatDashboardMoment } from "@/src/dashboard-time";
 import { loadHumanAccessRequestContext } from "@/src/human-access-runtime";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
@@ -62,6 +63,10 @@ export default async function FormSubmissionPage({
         {submission.formId} form ·{" "}
         {formatDashboardMoment(submission.acceptedAt)} · receipt{" "}
         {submission.receiptId}
+        <HelpTip label="What's a receipt?">
+          The code that identifies this one message, so you or support can
+          find it again exactly.
+        </HelpTip>
       </p>
       {submission.classification === "suspected_spam" ? (
         <p role="status">
