@@ -35,6 +35,7 @@ import {
   createMcpHttpRuntime,
   createSignedMcpCursorCodec,
 } from "./mcp-http-runtime";
+import { mcpResourcePath } from "./mcp-resource-path";
 import {
   createHumanCsrfToken,
   verifyHumanCsrfToken,
@@ -49,7 +50,7 @@ export type McpProductionEnvironment = HumanAccessEnvironment &
     FOUNDRY_SITE_TIME_ZONE?: string;
   }>;
 
-const resourcePath = "/api/foundry-mcp";
+const resourcePath = mcpResourcePath;
 const tokenPath = `${resourcePath}/oauth/token`;
 const registrationPath = `${resourcePath}/oauth/register`;
 const protectedResourceMetadataPath =
