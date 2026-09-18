@@ -40,7 +40,7 @@ describe("SiteRenderer controlled design projection", () => {
       blog: { id: "blog", posts: [postDefinition] },
     };
     const home = renderToStaticMarkup(
-      <SiteRenderer definition={definition} />,
+      <SiteRenderer definition={definition} page={homePage(definition)} />,
     );
     const post = renderToStaticMarkup(
       <BlogPostRenderer
@@ -54,15 +54,17 @@ describe("SiteRenderer controlled design projection", () => {
     expect(post).toContain("<h1>Renderer post</h1>");
     expect(post).toContain("Rendered body.");
 
+    const unpublishedDefinition: SiteDefinition = {
+      ...definition,
+      blog: {
+        ...definition.blog,
+        posts: [{ ...postDefinition, targetVisibility: "unpublished" }],
+      },
+    };
     const unpublished = renderToStaticMarkup(
       <SiteRenderer
-        definition={{
-          ...definition,
-          blog: {
-            ...definition.blog,
-            posts: [{ ...postDefinition, targetVisibility: "unpublished" }],
-          },
-        }}
+        definition={unpublishedDefinition}
+        page={homePage(unpublishedDefinition)}
       />,
     );
     expect(unpublished).not.toContain("/blog/renderer-post");
@@ -152,6 +154,7 @@ describe("SiteRenderer controlled design projection", () => {
     const home = renderToStaticMarkup(
       <SiteRenderer
         definition={definition}
+        page={homePage(definition)}
         homeHref={previewHome}
         blogHref={previewBlog}
       />,
@@ -192,10 +195,17 @@ describe("SiteRenderer controlled design projection", () => {
     }
 
     const first = renderToStaticMarkup(
-      <SiteRenderer definition={result.definition} />,
+      <SiteRenderer
+        definition={result.definition}
+        page={homePage(result.definition)}
+      />,
     );
+    const clonedDefinition = structuredClone(result.definition);
     const second = renderToStaticMarkup(
-      <SiteRenderer definition={structuredClone(result.definition)} />,
+      <SiteRenderer
+        definition={clonedDefinition}
+        page={homePage(clonedDefinition)}
+      />,
     );
 
     expect(first).toBe(second);
@@ -252,6 +262,7 @@ describe("site renderer media placement", () => {
     };
     const previewProps = {
       definition,
+      page: homePage(definition),
       mediaDelivery: "authenticated" as const,
       mediaAccessToken: "media-token-55",
       blogPostHref: (slug: string) =>

@@ -16,6 +16,7 @@ import {
   designFontStack,
   designNeutralPalette,
   designPresets,
+  homePage,
   matchDesignPreset,
   type DesignOptionPreview,
   type SiteDefinition,
@@ -308,7 +309,11 @@ export function DesignDestination({
             aria-hidden="true"
             inert
           >
-            <SiteRenderer definition={definition} editingSurface />
+            <SiteRenderer
+              definition={definition}
+              page={homePage(definition)}
+              editingSurface
+            />
           </div>
         </div>
       </div>

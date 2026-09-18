@@ -22,4 +22,5 @@
 | [ADR-0015](ADR-0015-foundation-framework-sync-seam.md) | The framework/installation-owned seam and three-way foundation sync | Accepted | 2026-08-17 |
 | [ADR-0016](ADR-0016-site-definition-page-collection.md) | A page collection replaces the single home page | Accepted | 2026-09-18 |
 | [ADR-0017](ADR-0017-page-scoped-editable-field-paths.md) | A field path carries its page id, and the home page keeps its old paths | Accepted | 2026-09-18 |
-| [ADR-0018](ADR-0018-dashboard-help-tip-toggletip.md) | The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip | Accepted | 2026-09-18 |
+| [ADR-0018](ADR-0018-public-page-routes.md) | One route serves every page below the home page | Accepted | 2026-09-18 |
+| [ADR-0019](ADR-0019-dashboard-help-tip-toggletip.md) | The dashboard help control is a keyboard- and touch-reachable toggletip, not a hover tooltip | Accepted | 2026-09-18 |

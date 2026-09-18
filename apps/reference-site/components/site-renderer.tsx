@@ -1,6 +1,7 @@
 import {
-  homePage,
+  homePageSlug,
   type SiteDefinition,
+  type SitePage,
 } from "@humber-foundry/site-definition";
 import { siteDesignAttributes } from "@humber-foundry/site-definition";
 import {
@@ -30,6 +31,7 @@ export function SiteSection(context: PageComponentRenderContext) {
 
 export function SiteRenderer({
   definition,
+  page,
   mediaDelivery = "published",
   mediaAccessToken,
   blogPostHref = (slug) => `/blog/${slug}`,
@@ -38,6 +40,8 @@ export function SiteRenderer({
   editingSurface = false,
 }: {
   definition: SiteDefinition;
+  /** The page this route serves. The home page keeps its old output. */
+  page: SitePage;
   mediaDelivery?: "authenticated" | "published";
   mediaAccessToken?: string;
   blogPostHref?: (slug: string) => string;
@@ -49,7 +53,10 @@ export function SiteRenderer({
   // Inside the editor the host page owns the main landmark; the site's
   // wrapper becomes a plain region so landmarks do not nest.
   const Landmark = editingSurface ? "div" : "main";
-  const posts = publicBlogPosts(definition);
+  // The "Latest posts" list is home-page furniture, written when a site held
+  // one page. It stays there and does not repeat on every other page.
+  const isHomePage = page.slug === homePageSlug;
+  const posts = isHomePage ? publicBlogPosts(definition) : [];
   return (
     <div className="site-canvas" {...siteDesignAttributes(definition.design)}>
       <SiteHeader
@@ -58,7 +65,7 @@ export function SiteRenderer({
         blogHref={blogHref}
       />
       <Landmark id="main-content" tabIndex={-1}>
-        {homePage(definition).sections.map((section) => (
+        {page.sections.map((section) => (
           <SiteSection
             key={section.id}
             section={section}
