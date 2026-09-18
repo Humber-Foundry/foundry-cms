@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { HelpTip } from "./help-tip";
+
 /** What is connected: email delivery, or site publishing. */
 export type ConnectionKind = "email" | "publishing";
 
@@ -50,11 +52,14 @@ const notConnectedSentence: Readonly<Record<ConnectionKind, string>> = {
   publishing: "Publishing is not connected yet.",
 };
 
+const helpTipLabel = "What does connected mean?";
+
 /**
  * "Connected" here means the settings a send or a publish needs are present.
- * Neither report calls the provider to prove a working connection, so this
- * note stays next to every "connected" line rather than only in the setup
- * document.
+ * Neither report calls the provider to prove a working connection. This
+ * ticket shows the plain "connected" line by default and keeps the fuller
+ * explanation behind a `HelpTip` (#149), rather than printing the full
+ * sentence on every one of the five screens that render it.
  */
 const connectedMeaning: Readonly<Record<ConnectionKind, string>> = {
   email:
@@ -93,7 +98,8 @@ export function ConnectionStatus({
   if (readiness.state === "connected") {
     return (
       <p className="connection-status connection-status-connected">
-        {connectedSentence[kind]} {connectedMeaning[kind]}
+        {connectedSentence[kind]}{" "}
+        <HelpTip label={helpTipLabel}>{connectedMeaning[kind]}</HelpTip>
       </p>
     );
   }
