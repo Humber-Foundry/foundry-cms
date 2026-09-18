@@ -4,6 +4,7 @@ import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   createSiteId,
+  homePage,
   referenceSiteDefinition,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
@@ -53,15 +54,17 @@ const secondSiteDefinition = {
     id: secondSiteId,
     name: "SECOND-SITE-PRIVATE-CANARY",
   },
-  home: {
-    ...definitionWithPost.home,
-    seo: {
-      ...definitionWithPost.home.seo,
-      title: "SECOND-SITE-PRIVATE-CANARY",
-      keywords: [],
-      shareImage: null,
+  pages: [
+    {
+      ...homePage(definitionWithPost),
+      seo: {
+        ...homePage(definitionWithPost).seo,
+        title: "SECOND-SITE-PRIVATE-CANARY",
+        keywords: [],
+        shareImage: null,
+      },
     },
-  },
+  ],
   blog: {
     ...definitionWithPost.blog,
     posts: definitionWithPost.blog.posts.map((post) => ({
@@ -201,7 +204,7 @@ describe("site-scoped MCP read application", () => {
     });
     expect(first.result.items).toEqual([
       expect.objectContaining({
-        contentId: referenceSiteDefinition.home.id,
+        contentId: homePage(referenceSiteDefinition).id,
         kind: "page",
       }),
     ]);
@@ -275,7 +278,7 @@ describe("site-scoped MCP read application", () => {
       (app: ReadApplication, actor = principal) =>
         app.getContent(actor, {
           kind: "page",
-          contentId: referenceSiteDefinition.home.id,
+          contentId: homePage(referenceSiteDefinition).id,
         }),
     ];
     const dimensions: ReadonlyArray<Partial<McpConnectionGrant>> = [
@@ -407,11 +410,11 @@ describe("site-scoped MCP read application", () => {
     );
     const secondPage = await second.getContent(secondActor, {
       kind: "page",
-      contentId: secondSiteDefinition.home.id,
+      contentId: homePage(secondSiteDefinition).id,
     });
     const firstPageById = await first.getContent(firstActor, {
       kind: "page",
-      contentId: definitionWithPost.home.id,
+      contentId: homePage(definitionWithPost).id,
     });
     expect(secondPage.result.contentId).toBe(firstPageById.result.contentId);
     expect(JSON.stringify(secondPage)).toContain("SECOND-SITE-PRIVATE-CANARY");

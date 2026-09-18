@@ -1,6 +1,7 @@
 import {
   designContract,
-  resolveHomeSeo,
+  homePage,
+  resolvePageSeo,
   siteDefinitionSchema,
   type SiteDefinition,
   type SiteId,
@@ -200,7 +201,7 @@ type PublishedContentDocument =
       contentHash: string;
       liveGitSha: string | null;
       lastModified: string | null;
-      document: SiteDefinition["home"];
+      document: SiteDefinition["pages"][number];
     }>
   | Readonly<{
       kind: "post";
@@ -224,10 +225,10 @@ function contentSummaries(
   const summaries = [
     {
       kind: "page" as const,
-      contentId: definition.home.id,
+      contentId: homePage(definition).id,
       // The owner may leave the SEO title blank to ask for the fallback, so
       // this reads the resolved title rather than the raw field.
-      title: resolveHomeSeo(definition).title,
+      title: resolvePageSeo(definition, homePage(definition)).title,
       revision: null,
       contentHash: "",
       liveGitSha: liveRelease?.gitSha ?? null,
@@ -256,7 +257,7 @@ function contentDocument(
   }> | null,
 ): PublishedContentDocument | null {
   if (kind === "page") {
-    return definition.home.id === contentId
+    return homePage(definition).id === contentId
       ? {
           kind,
           contentId,
@@ -264,7 +265,7 @@ function contentDocument(
           contentHash: "",
           liveGitSha: liveRelease?.gitSha ?? null,
           lastModified: liveRelease?.observedAt ?? null,
-          document: definition.home,
+          document: homePage(definition),
         }
       : null;
   }
@@ -753,7 +754,7 @@ export function createMcpReadApplication({
               allItemsWithDocuments.map(async (item) => {
                 const document =
                   item.kind === "page"
-                    ? definition.home
+                    ? homePage(definition)
                     : definition.blog.posts.find(
                         (post) => post.id === item.contentId,
                       );

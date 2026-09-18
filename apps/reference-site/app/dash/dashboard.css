@@ -289,25 +289,21 @@
 
 /* Destination and attention lists ---------------------------------------- */
 
-.destination-list,
 .attention-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.destination-list li,
 .attention-list li {
   padding-block: 0.85rem;
   border-top: 1px solid var(--dash-line);
 }
 
-.destination-list li:first-child,
 .attention-list li:first-child {
   border-top: 0;
 }
 
-.destination-list a,
 .attention-list a {
   display: inline-block;
   min-height: 1.5rem;
@@ -317,14 +313,8 @@
   text-underline-offset: 0.3rem;
 }
 
-.destination-list a:hover,
 .attention-list a:hover {
   text-decoration: underline;
-}
-
-.destination-list span {
-  display: block;
-  color: var(--dash-ink-soft);
 }
 
 /* Facts ------------------------------------------------------------------
@@ -879,20 +869,6 @@
 
 .copy-button:hover {
   border-color: var(--moss);
-}
-
-.copy-control {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 0.45rem;
-  justify-items: end;
-}
-
-.copy-status {
-  max-width: 15rem;
-  color: #8a352f;
-  font-size: var(--dash-text-small);
-  text-align: right;
 }
 
 .access-invite-form {
@@ -2118,6 +2094,57 @@
   width: fit-content;
 }
 
+/* Connected agents ---------------------------------------------------------
+ *
+ * Four columns (client, permissions, state, action), so this overrides the
+ * three-column base grid the same way the analytics table does. */
+.mcp-connections .inventory-row {
+  grid-template-columns: 1.4fr 1.6fr 0.9fr 0.7fr;
+}
+
+.mcp-connections .inventory-row strong {
+  overflow-wrap: anywhere;
+}
+
+.mcp-scope-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.3rem;
+}
+
+/* Sits below the bordered table instead of inside its `role="table"` box, so
+ * it is never mistaken for a row and never touches the table's own border. */
+.inventory-empty {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.revoke-confirm-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  padding: 1.25rem;
+  background: var(--dash-surface);
+  color: var(--dash-ink);
+  font-family: var(--dash-font);
+  font-size: var(--dash-text);
+  line-height: 1.55;
+}
+
+.revoke-confirm-dialog::backdrop {
+  background: rgb(23 32 29 / 45%);
+}
+
+.revoke-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
 @media (max-width: 760px) {
   .dashboard-header {
     align-items: flex-start;
@@ -2143,14 +2170,6 @@
     border-bottom: 1px solid #dce1dc;
   }
 
-      .copy-control {
-    justify-items: start;
-  }
-
-  .copy-status {
-    text-align: left;
-  }
-
   .status-grid,
   .editor-groups {
     grid-template-columns: 1fr;
@@ -2160,6 +2179,13 @@
     grid-template-columns: 1fr;
     gap: 0.35rem;
     padding-block: 1rem;
+  }
+
+  /* The four-column override above `@media` has higher specificity than the
+   * one-column rule right above this, so it must be repeated here to still
+   * collapse to one column at this width. */
+  .mcp-connections .inventory-row {
+    grid-template-columns: 1fr;
   }
 
   .inventory-head {

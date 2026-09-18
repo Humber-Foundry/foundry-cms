@@ -20,6 +20,12 @@ import {
 } from "./site-definition-projection.mjs";
 import validateSiteDefinition from "./site-definition-validator.mjs";
 import { isSiteDefinitionWithPageComponents } from "./page-component-registry";
+import {
+  homePageSlug,
+  pageSlugMaxLength,
+  pageSlugPattern,
+  reservedPageSlugs,
+} from "./pages";
 
 export * from "./rich-text";
 
@@ -212,9 +218,28 @@ export type PageSection =
   | CallToActionSection
   | RegisteredPageSection;
 
+/**
+ * One page of the site.
+ *
+ * A page is served at `/<slug>`. The home page has the root slug, an empty
+ * string, so it is served at `/`. `id` never changes once a page is created,
+ * so a renamed slug keeps every link and every stored field path working.
+ *
+ * See ADR-0016.
+ */
+export type SitePage = Readonly<{
+  id: string;
+  slug: string;
+  /** What the Pages list calls this page, and its SEO title fallback. */
+  title: string;
+  media?: ReadonlyArray<SiteMediaOccurrence>;
+  seo: SeoMetadata;
+  sections: ReadonlyArray<PageSection>;
+}>;
+
 export type SiteDefinition = Readonly<{
-  definitionVersion: "1.6.0";
-  schemaVersion: "1.6.0";
+  definitionVersion: "1.7.0";
+  schemaVersion: "1.7.0";
   design: SiteDesign;
   site: Readonly<{
     id: SiteId;
@@ -231,12 +256,11 @@ export type SiteDefinition = Readonly<{
     navigation: ReadonlyArray<SiteLink>;
     footer: string;
   }>;
-  home: Readonly<{
-    id: string;
-    media?: ReadonlyArray<SiteMediaOccurrence>;
-    seo: SeoMetadata;
-    sections: ReadonlyArray<PageSection>;
-  }>;
+  /**
+   * Every page of the site. Exactly one of them has the root slug: that one is
+   * the home page. Read it with `homePage`.
+   */
+  pages: ReadonlyArray<SitePage>;
   blog: Readonly<{
     id: "blog";
     posts: ReadonlyArray<BlogPost>;
@@ -251,6 +275,7 @@ export type StoredSiteDefinitionSchemaVersion =
   | "1.3.0"
   | "1.4.0"
   | "1.5.0"
+  | "1.6.0"
   | SiteDefinitionSchemaVersion;
 
 function isSiteDefinitionRecord(
@@ -263,19 +288,23 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
   const upgraded = projectSiteDefinitionSchema(value);
   if (
     !isSiteDefinitionRecord(upgraded) ||
-    !isSiteDefinitionRecord(upgraded.home) ||
-    !Array.isArray(upgraded.home.sections) ||
+    !Array.isArray(upgraded.pages) ||
     !isSiteDefinitionRecord(upgraded.blog) ||
     !Array.isArray(upgraded.blog.posts)
   ) {
     throw new TypeError("site_definition_invalid");
   }
-  for (const section of upgraded.home.sections) {
-    if (
-      isSiteDefinitionRecord(section) &&
-      section.type === "callToAction"
-    ) {
-      validateRichTextDocument(section.body as RichTextDocument);
+  for (const page of upgraded.pages) {
+    if (!isSiteDefinitionRecord(page) || !Array.isArray(page.sections)) {
+      throw new TypeError("site_definition_invalid");
+    }
+    for (const section of page.sections) {
+      if (
+        isSiteDefinitionRecord(section) &&
+        section.type === "callToAction"
+      ) {
+        validateRichTextDocument(section.body as RichTextDocument);
+      }
     }
   }
   for (const post of upgraded.blog.posts) {
@@ -289,7 +318,7 @@ export function upgradeSiteDefinition(value: unknown): SiteDefinition {
 
 export const siteDefinitionSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://foundrycms.dev/schemas/site-definition/1.6.0",
+  $id: "https://foundrycms.dev/schemas/site-definition/1.7.0",
   title: "Foundry CMS Site Definition",
   type: "object",
   additionalProperties: false,
@@ -298,12 +327,12 @@ export const siteDefinitionSchema = {
     "schemaVersion",
     "design",
     "site",
-    "home",
+    "pages",
     "blog",
   ],
   properties: {
-    definitionVersion: { const: "1.6.0" },
-    schemaVersion: { const: "1.6.0" },
+    definitionVersion: { const: "1.7.0" },
+    schemaVersion: { const: "1.7.0" },
     design: {
       type: "object",
       additionalProperties: false,
@@ -380,12 +409,59 @@ export const siteDefinitionSchema = {
         footer: { $ref: "#/$defs/text" },
       },
     },
-    home: {
+    pages: {
+      $comment:
+        "Exactly one page carries the root slug. That page is the home page, " +
+        "and `homePage` in pages.ts returns it. Duplicate page ids and " +
+        "duplicate slugs are rejected by isBaseSiteDefinition, because JSON " +
+        "Schema cannot compare one property across array items.",
+      type: "array",
+      minItems: 1,
+      items: { $ref: "#/$defs/sitePage" },
+      contains: {
+        type: "object",
+        properties: { slug: { const: homePageSlug } },
+        required: ["slug"],
+      },
+      minContains: 1,
+      maxContains: 1,
+    },
+    blog: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "seo", "sections"],
+      required: ["id", "posts"],
+      properties: {
+        id: { const: "blog" },
+        posts: {
+          type: "array",
+          items: { $ref: "#/$defs/blogPost" },
+        },
+      },
+    },
+  },
+  $defs: {
+    id: {
+      type: "string",
+      pattern: "^[a-z][a-z0-9_]*$",
+    },
+    pageSlug: {
+      $comment:
+        "The empty root slug is the home page, served at `/`. Every other " +
+        "page is served at `/<slug>`. A reserved slug names a route the " +
+        "installation already serves, so a page could never be reached there.",
+      type: "string",
+      maxLength: pageSlugMaxLength,
+      pattern: pageSlugPattern,
+      not: { enum: [...reservedPageSlugs] },
+    },
+    sitePage: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "slug", "title", "seo", "sections"],
       properties: {
         id: { $ref: "#/$defs/id" },
+        slug: { $ref: "#/$defs/pageSlug" },
+        title: { $ref: "#/$defs/text" },
         media: {
           type: "array",
           items: { $ref: "#/$defs/mediaOccurrence" },
@@ -428,24 +504,6 @@ export const siteDefinitionSchema = {
           },
         },
       },
-    },
-    blog: {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "posts"],
-      properties: {
-        id: { const: "blog" },
-        posts: {
-          type: "array",
-          items: { $ref: "#/$defs/blogPost" },
-        },
-      },
-    },
-  },
-  $defs: {
-    id: {
-      type: "string",
-      pattern: "^[a-z][a-z0-9_]*$",
     },
     siteId: {
       type: "string",
@@ -978,8 +1036,19 @@ export function isBaseSiteDefinition(value: unknown): value is SiteDefinition {
   if (!validateSiteDefinition(value)) return false;
   try {
     const definition = value as SiteDefinition;
-    definition.home.sections.forEach((section) => {
-      if (section.type === "callToAction") validateRichTextDocument(section.body);
+    const pageIds = new Set<string>();
+    const pageSlugs = new Set<string>();
+    definition.pages.forEach((page) => {
+      if (pageIds.has(page.id) || pageSlugs.has(page.slug)) {
+        throw new TypeError("site_page_identity_duplicate");
+      }
+      pageIds.add(page.id);
+      pageSlugs.add(page.slug);
+      page.sections.forEach((section) => {
+        if (section.type === "callToAction") {
+          validateRichTextDocument(section.body);
+        }
+      });
     });
     const postIds = new Set<string>();
     const postSlugs = new Set<string>();
@@ -1016,6 +1085,7 @@ export const referenceSiteDefinition = createReferenceSiteDefinition(
   publishedSite,
 );
 
+export * from "./pages";
 export * from "./editable-fields";
 export * from "./component-composition";
 export * from "./page-component-registry";

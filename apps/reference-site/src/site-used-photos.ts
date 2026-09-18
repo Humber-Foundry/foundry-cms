@@ -1,6 +1,9 @@
 import "server-only";
 
-import type { SiteDefinition } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  type SiteDefinition,
+} from "@humber-foundry/site-definition";
 import {
   mediaAssetIdFromPublishedPath,
   siteDefinitionMediaAssetIds,
@@ -18,7 +21,7 @@ export type SiteImageTile = Readonly<{ src: string; name: string }>;
 
 function imageAddressesOf(definition: SiteDefinition): ReadonlySet<string> {
   const found = new Set<string>();
-  for (const section of definition.home.sections) {
+  for (const section of homePage(definition).sections) {
     if (section.type !== "registered") continue;
     const registration =
       installedPageComponentRegistry.components[section.component];

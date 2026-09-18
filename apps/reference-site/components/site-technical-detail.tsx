@@ -1,4 +1,7 @@
-import type { SiteDefinition } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  type SiteDefinition,
+} from "@humber-foundry/site-definition";
 
 /**
  * The technical record of the installation: which version of the definition and
@@ -62,11 +65,11 @@ export function SiteTechnicalDetail({
             <tr>
               <th scope="row">Home page</th>
               <td>
-                <code>{definition.home.id}</code>
+                <code>{homePage(definition).id}</code>
               </td>
               <td>Published</td>
             </tr>
-            {definition.home.sections.map((section) => (
+            {homePage(definition).sections.map((section) => (
               <tr key={section.id}>
                 <th scope="row">{section.type}</th>
                 <td>

@@ -9,6 +9,22 @@ machines live in the linked domain documents.
 **Content item** — A stable editorial identity whose revisions may change over
 time. A content item is not itself a draft file or a published version.
 
+**Page** — One page of a site, holding its own title, SEO block, media and
+sections. A page has a stable id that never changes, so a link or a stored
+field path still finds it after a rename. A page is not a blog post: a post
+lives in the blog collection and is listed at `/blog`. See ADR-0016.
+
+**Slug** — The part of a page's public address that names the page. A page is
+served at `/<slug>`. A slug is lowercase words joined by single hyphens, or the
+root slug, which is an empty string and belongs to the home page. A slug may
+not be one of the reserved words that already name a route: `__foundry`, `api`,
+`blog`, `dash`, `newsletter`. A slug may be changed; the page id may not. See
+ADR-0016.
+
+**Home page** — The page with the root slug, an empty string, so it is served
+at `/`. Every site has exactly one, and it cannot be deleted. Code that needs
+the page itself reads it with `homePage`. See ADR-0016.
+
 **Revision** — An immutable version of one content item. Editing always creates
 a new revision; it never changes a revision that was previewed, approved,
 published, tested or sent.
@@ -423,5 +439,6 @@ accepts it; migrations are additive-only. See ADR-0015.
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [The framework/installation-owned seam and three-way foundation sync](docs/decisions/ADR-0015-foundation-framework-sync-seam.md)
+- [A page collection replaces the single home page](docs/decisions/ADR-0016-site-definition-page-collection.md)
 - [Guided per-client provisioning and operator CLI](docs/architecture/guided-client-provisioning.md)
 - [Privacy-first aggregate analytics](docs/architecture/privacy-first-aggregate-analytics.md)

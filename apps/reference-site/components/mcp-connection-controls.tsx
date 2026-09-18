@@ -1,9 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { McpConnectionSummary } from "@humber-foundry/application";
+
+import {
+  mcpConnectionDisplayName,
+  mcpRelativeTime,
+  mcpScopeDisplay,
+} from "../src/mcp-connection-display";
 
 export function McpConnectionTable({
   connections,
@@ -15,39 +21,65 @@ export function McpConnectionTable({
   onRevoke(connection: McpConnectionSummary): void;
 }) {
   return (
-    <div
-      className="inventory-table"
-      role="table"
-      aria-label="Agent connections"
-    >
-      <div className="inventory-row inventory-head" role="row">
-        <span role="columnheader">Client</span>
-        <span role="columnheader">Permission</span>
-        <span role="columnheader">State</span>
-        <span role="columnheader">Action</span>
-      </div>
-      {connections.length === 0 ? (
-        <p>No agent connections have been authorized.</p>
-      ) : (
-        connections.map((connection) => (
+    <div className="mcp-connections">
+      <div
+        className="inventory-table"
+        role="table"
+        aria-label="Agent connections"
+      >
+        <div className="inventory-row inventory-head" role="row">
+          <span role="columnheader">Client</span>
+          <span role="columnheader">Permissions</span>
+          <span role="columnheader">State</span>
+          <span role="columnheader">Action</span>
+        </div>
+        {connections.map((connection) => (
           <div
             className="inventory-row"
             role="row"
             key={connection.connectionId}
           >
-            <strong role="cell">
-              {connection.clientId}
+            <strong role="cell" title={connection.clientId}>
+              {mcpConnectionDisplayName(connection.clientId)}
               <small>
-                Created {new Date(connection.createdAt).toLocaleString()}
+                Created{" "}
+                <time dateTime={connection.createdAt}>
+                  {mcpRelativeTime(connection.createdAt)}
+                </time>
               </small>
             </strong>
-            <span role="cell">{connection.scopes.join(", ")}</span>
+            <span role="cell">
+              <ul className="mcp-scope-list">
+                {connection.scopes.map((scope) => {
+                  const display = mcpScopeDisplay(scope);
+                  return (
+                    <li key={scope}>
+                      {display.phrase}
+                      {display.known ? null : (
+                        <small>
+                          {" "}
+                          Unrecognized permission. Shown as sent by the
+                          server.
+                        </small>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </span>
             <span role="cell" className="state-label">
               {connection.status}
               <small>
-                {connection.lastUsedAt === null
-                  ? "Never used"
-                  : `Last used ${new Date(connection.lastUsedAt).toLocaleString()}`}
+                {connection.lastUsedAt === null ? (
+                  "Never used"
+                ) : (
+                  <>
+                    Last used{" "}
+                    <time dateTime={connection.lastUsedAt}>
+                      {mcpRelativeTime(connection.lastUsedAt)}
+                    </time>
+                  </>
+                )}
               </small>
             </span>
             <div role="cell">
@@ -66,9 +98,67 @@ export function McpConnectionTable({
               )}
             </div>
           </div>
-        ))
-      )}
+        ))}
+      </div>
+      {connections.length === 0 ? (
+        <p className="inventory-empty">
+          No agent connections have been authorized.
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Asks whether to revoke one connection. A native <dialog> gives it its own
+ * modal backdrop, focus handling and Escape key, matching the pattern the
+ * photo picker uses, so revoke never falls back to the browser's own
+ * `window.confirm`.
+ */
+function RevokeConfirmDialog({
+  connection,
+  onConfirm,
+  onCancel,
+}: {
+  connection: McpConnectionSummary | null;
+  onConfirm(): void;
+  onCancel(): void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const element = dialog.current;
+    if (element === null) return;
+    if (connection !== null && !element.open) element.showModal();
+    if (connection === null && element.open) element.close();
+  }, [connection]);
+
+  return (
+    <dialog
+      className="revoke-confirm-dialog"
+      ref={dialog}
+      aria-labelledby="revoke-confirm-title"
+      onClose={onCancel}
+      onCancel={onCancel}
+    >
+      {connection === null ? null : (
+        <>
+          <h2 id="revoke-confirm-title">Revoke this connection?</h2>
+          <p>
+            {mcpConnectionDisplayName(connection.clientId)} will lose access.
+            Its next MCP request will fail.
+          </p>
+          <div className="revoke-confirm-actions">
+            <button type="button" onClick={onCancel}>
+              Cancel
+            </button>
+            <button type="button" onClick={onConfirm}>
+              Revoke
+            </button>
+          </div>
+        </>
+      )}
+    </dialog>
   );
 }
 
@@ -82,15 +172,12 @@ export function McpConnectionControls({
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [confirming, setConfirming] = useState<McpConnectionSummary | null>(
+    null,
+  );
 
   async function revoke(connection: McpConnectionSummary) {
-    if (
-      !window.confirm(
-        `Revoke ${connection.clientId}? Its next MCP request will fail.`,
-      )
-    ) {
-      return;
-    }
+    setConfirming(null);
     setPendingId(connection.connectionId);
     setMessage("");
     try {
@@ -133,7 +220,14 @@ export function McpConnectionControls({
       <McpConnectionTable
         connections={connections}
         pendingId={pendingId}
-        onRevoke={revoke}
+        onRevoke={setConfirming}
+      />
+      <RevokeConfirmDialog
+        connection={confirming}
+        onConfirm={() => {
+          if (confirming !== null) void revoke(confirming);
+        }}
+        onCancel={() => setConfirming(null)}
       />
     </>
   );

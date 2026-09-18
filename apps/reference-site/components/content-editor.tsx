@@ -11,6 +11,7 @@ import {
 
 import type { ContentRevision } from "@humber-foundry/application";
 import {
+  homePage,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
@@ -337,7 +338,7 @@ export function ContentEditor({
               fieldEdits,
               composition.components.filter(
                 (component) =>
-                  !state.persistedDefinition.home.sections.some(
+                  !homePage(state.persistedDefinition).sections.some(
                     ({ id }) => id === component.id,
                   ),
               ),

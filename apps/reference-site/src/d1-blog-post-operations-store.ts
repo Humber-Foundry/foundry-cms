@@ -3,9 +3,11 @@ import {
   createBlogPostOperationsApplication,
   createContentApprovalId,
   createContentWorkspaceId,
+  type ArchivedBlogPostSummary,
   type BlogPostApprovalEvidence,
   type BlogPostArchiveResult,
   type BlogPostOperationalState,
+  type BlogPostOperationalSummary,
   type BlogPostOperationsStore,
   type BlogPostSchedule,
   type BlogPostScheduleExecution,
@@ -15,7 +17,7 @@ import {
   type RestoredBlogPostDraft,
 } from "@humber-foundry/application";
 import type { BlogPostId, SiteId } from "@humber-foundry/site-definition";
-import type { SiteDefinition } from "@humber-foundry/site-definition";
+import type { BlogPost, SiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   prepareAcceptedBlogPostAudit,
@@ -481,6 +483,142 @@ export function createD1BlogPostOperationsStore(
             liveRevisionId: row.live_revision_id,
             version: row.version,
           };
+    },
+    async findOperationalSummary(siteId, postId): Promise<BlogPostOperationalSummary | null> {
+      const post = await store.findPost(siteId, postId);
+      if (post === null) {
+        return null;
+      }
+      const [archiveRow, scheduleRow, executionRow] = await Promise.all([
+        database
+          .prepare(
+            `SELECT archive_request_id
+             FROM blog_post_collection_states
+             WHERE site_id = ?1 AND post_id = ?2`,
+          )
+          .bind(siteId, postId)
+          .first<{ archive_request_id: string | null }>(),
+        database
+          .prepare(
+            `SELECT id, site_id, post_id, workspace_id, content_revision,
+                    post_revision_id, approval_id, approval_fingerprint,
+                    authority_post_revision_id, authority_version,
+                    local_date_time, iana_time_zone, utc_offset_choice,
+                    execute_at_utc, time_zone_database_version, created_by,
+                    activated_by, activation_audit_id, activated_at, state,
+                    detail
+             FROM blog_post_schedules
+             WHERE site_id = ?1 AND post_id = ?2 AND state = 'active'
+             LIMIT 1`,
+          )
+          .bind(siteId, postId)
+          .first<ScheduleRow>(),
+        database
+          .prepare(
+            `SELECT execution.execution_id, execution.schedule_id,
+                    execution.publication_idempotency_key,
+                    execution.scheduled_instant, execution.attempt,
+                    execution.attempt_actor_id, execution.attempt_request_id,
+                    execution.lease_token, execution.lease_expires_at,
+                    execution.outcome_request_id,
+                    execution.outcome_response_json,
+                    execution.state, execution.detail,
+                    execution.claimed_at, execution.updated_at
+             FROM blog_post_schedule_executions AS execution
+             JOIN blog_post_schedules AS schedule
+               ON schedule.id = execution.schedule_id
+             WHERE schedule.site_id = ?1 AND schedule.post_id = ?2
+             ORDER BY execution.claimed_at DESC
+             LIMIT 1`,
+          )
+          .bind(siteId, postId)
+          .first<ExecutionRow>(),
+      ]);
+      return {
+        ...post,
+        archiveRequestId: archiveRow?.archive_request_id ?? null,
+        activeSchedule:
+          scheduleRow === null ? null : scheduleFromRow(scheduleRow),
+        latestExecution:
+          executionRow === null ? null : executionFromRow(executionRow),
+      };
+    },
+    async listArchivedPosts(siteId): Promise<ReadonlyArray<ArchivedBlogPostSummary>> {
+      const rows = await database
+        .prepare(
+          `SELECT post.site_id, post.post_id,
+                  revision.workspace_id, revision.content_revision,
+                  post.current_revision, post.current_revision_id,
+                  state.collection_state, state.workflow_state,
+                  CASE WHEN post.live_revision IS NULL
+                    THEN NULL
+                    ELSE live_revision.revision_id
+                  END AS live_revision_id,
+                  post.version, state.archived_at,
+                  COALESCE(selected.snapshot_json, revision.snapshot_json)
+                    AS snapshot_json
+           FROM blog_post_collection_states AS state
+           JOIN blog_posts AS post
+             ON post.site_id = state.site_id AND post.post_id = state.post_id
+           JOIN blog_post_revisions AS revision
+             ON revision.revision_id = post.current_revision_id
+           LEFT JOIN blog_post_revisions AS live_revision
+             ON live_revision.site_id = post.site_id
+            AND live_revision.post_id = post.post_id
+            AND live_revision.revision = post.live_revision
+           LEFT JOIN blog_post_revisions AS selected
+             ON selected.revision_id = state.selected_post_revision_id
+           WHERE state.site_id = ?1
+             AND state.collection_state IN ('archiving', 'archived')
+           ORDER BY state.archived_at DESC, post.post_id ASC`,
+        )
+        .bind(siteId)
+        .all<{
+          site_id: string;
+          post_id: string;
+          workspace_id: string;
+          content_revision: number;
+          current_revision: number;
+          current_revision_id: string;
+          collection_state: BlogPostOperationalState["collectionState"];
+          workflow_state: BlogPostOperationalState["workflowState"];
+          live_revision_id: string | null;
+          version: number;
+          archived_at: string | null;
+          snapshot_json: string;
+        }>();
+      return rows.results.map((row) => {
+        let snapshot: Pick<BlogPost, "title" | "slug" | "excerpt"> = {
+          title: "",
+          slug: "",
+          excerpt: "",
+        };
+        try {
+          const parsed = JSON.parse(row.snapshot_json) as BlogPost;
+          snapshot = {
+            title: parsed.title,
+            slug: parsed.slug,
+            excerpt: parsed.excerpt,
+          };
+        } catch {
+          // A post archived before snapshots existed shows blank text
+          // fields rather than failing the whole list.
+        }
+        return {
+          siteId: row.site_id,
+          postId: row.post_id,
+          workspaceId: createContentWorkspaceId(row.workspace_id),
+          contentRevision: row.content_revision,
+          postRevision: row.current_revision,
+          postRevisionId: row.current_revision_id,
+          collectionState: row.collection_state,
+          workflowState: row.workflow_state,
+          liveRevisionId: row.live_revision_id,
+          version: row.version,
+          archivedAt: row.archived_at,
+          ...snapshot,
+        };
+      });
     },
     async findApproval(approvalId) {
       const row = await database

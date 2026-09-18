@@ -139,6 +139,29 @@ export type RestoredBlogPostDraft = BlogPostOperationalState &
     sourcePostRevisionId: string;
   }>;
 
+/**
+ * Everything the dashboard needs to show one post's schedule, archive and
+ * retry controls without a second round trip: the post's operational state,
+ * its active schedule (if any), its most recent execution attempt (if any),
+ * and the request ID that started its current archive, if it is archiving or
+ * archived.
+ */
+export type BlogPostOperationalSummary = BlogPostOperationalState &
+  Readonly<{
+    archiveRequestId: string | null;
+    activeSchedule: BlogPostSchedule | null;
+    latestExecution: BlogPostScheduleExecution | null;
+  }>;
+
+/** One archived post, with the display fields the archived list needs. */
+export type ArchivedBlogPostSummary = BlogPostOperationalState &
+  Readonly<{
+    title: string;
+    slug: string;
+    excerpt: string;
+    archivedAt: string | null;
+  }>;
+
 export type BlogPostApprovalEvidence = Readonly<{
   id: ContentApprovalId;
   siteId: SiteId | string;
@@ -166,6 +189,19 @@ export type BlogPostOperationsStore = Readonly<{
     siteId: SiteId | string,
     postId: BlogPostId | string,
   ): Promise<BlogPostOperationalState | null>;
+  /**
+   * The post's operational state plus its active schedule, most recent
+   * execution and current archive-request ID, in one read, for the
+   * dashboard's post list.
+   */
+  findOperationalSummary(
+    siteId: SiteId | string,
+    postId: BlogPostId | string,
+  ): Promise<BlogPostOperationalSummary | null>;
+  /** Every post that is archiving or archived for this site, newest first. */
+  listArchivedPosts(
+    siteId: SiteId | string,
+  ): Promise<ReadonlyArray<ArchivedBlogPostSummary>>;
   findApproval(
     approvalId: ContentApprovalId,
   ): Promise<BlogPostApprovalEvidence | null>;
@@ -732,6 +768,15 @@ export function createBlogPostOperationsApplication({
         requestId: string;
       }) {
         return store.findScheduleCancellationByRequest(input);
+      },
+      getPostSummary(
+        siteId: SiteId | string,
+        postId: BlogPostId | string,
+      ) {
+        return store.findOperationalSummary(siteId, postId);
+      },
+      listArchivedPosts(siteId: SiteId | string) {
+        return store.listArchivedPosts(siteId);
       },
     }),
     commands: Object.freeze({
@@ -1423,6 +1468,7 @@ export function createInMemoryBlogPostOperationsStore(seed: {
     Readonly<{ workspaceId: ContentWorkspaceId; contentRevision: number }>
   >();
   const withdrawalPublications = new Map<string, string>();
+  const archiveRequestIdByPost = new Map<string, string>();
   const revisionHistory = new Map<string, Set<string>>();
   const restoreProvenance: Array<Parameters<
     BlogPostOperationsStore["recordRestoreProvenance"]
@@ -1448,6 +1494,56 @@ export function createInMemoryBlogPostOperationsStore(seed: {
   } = {
     async findPost(siteId, postId) {
       return posts.get(postKey(siteId, postId)) ?? null;
+    },
+    async findOperationalSummary(siteId, postId) {
+      const post = posts.get(postKey(siteId, postId));
+      if (post === undefined) {
+        return null;
+      }
+      const activeSchedule = [...schedules.values()].find(
+        (schedule) =>
+          schedule.siteId === siteId &&
+          schedule.postId === postId &&
+          schedule.state === "active",
+      ) ?? null;
+      const scheduleIdsForPost = new Set(
+        [...schedules.values()]
+          .filter(
+            (schedule) =>
+              schedule.siteId === siteId && schedule.postId === postId,
+          )
+          .map((schedule) => schedule.id),
+      );
+      const latestExecution =
+        [...executions.values()]
+          .filter((execution) => scheduleIdsForPost.has(execution.scheduleId))
+          .sort((left, right) =>
+            right.claimedAt.localeCompare(left.claimedAt)
+          )
+          .map(publicExecution)[0] ?? null;
+      return Object.freeze({
+        ...post,
+        archiveRequestId:
+          archiveRequestIdByPost.get(postKey(siteId, postId)) ?? null,
+        activeSchedule,
+        latestExecution,
+      });
+    },
+    async listArchivedPosts(siteId) {
+      return [...posts.values()]
+        .filter(
+          (post) =>
+            post.siteId === siteId && post.collectionState !== "active",
+        )
+        .map((post) =>
+          Object.freeze({
+            ...post,
+            title: "",
+            slug: "",
+            excerpt: "",
+            archivedAt: null,
+          })
+        );
     },
     async findApproval(approvalId) {
       return approvals.get(approvalId) ?? null;
@@ -2063,6 +2159,7 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         version: post.version + 1,
       };
       posts.set(key, updated);
+      archiveRequestIdByPost.set(key, input.idempotencyKey);
       const result = Object.freeze({
         ...updated,
         selectedPostRevisionId: input.selectedPostRevisionId,
@@ -2225,6 +2322,7 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         sourcePostRevisionId: input.selectedPostRevisionId,
       });
       posts.set(key, restored);
+      archiveRequestIdByPost.delete(key);
       const history = revisionHistory.get(key) ?? new Set<string>();
       history.add(input.provenance.restoredPostRevisionId);
       revisionHistory.set(key, history);

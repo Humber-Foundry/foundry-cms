@@ -54,12 +54,15 @@ describe("MCP human review route", () => {
         revision: 4,
         bookmark: "bookmark-55",
         definition: {
-          home: {
-            media: [
-              { asset: { assetId: "asset-55" } },
-              { asset: { assetId: "asset-56" } },
-            ],
-          },
+          pages: [
+            {
+              slug: "",
+              media: [
+                { asset: { assetId: "asset-55" } },
+                { asset: { assetId: "asset-56" } },
+              ],
+            },
+          ],
         },
       },
       review: {},

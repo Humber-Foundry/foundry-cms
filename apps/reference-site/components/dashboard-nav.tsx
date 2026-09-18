@@ -9,6 +9,15 @@ import {
   type DashboardDestination,
 } from "./dashboard-destinations";
 
+/**
+ * A marker string that must appear in the dashboard's own client bundle and
+ * must never appear in a public route's bundle. `scripts/verify-public-bundle.mjs`
+ * checks both. This navigation renders on every dashboard page, so it is
+ * the marker's home.
+ */
+export const DASHBOARD_PRIVATE_BUNDLE_MARKER =
+  "FOUNDRY_DASHBOARD_PRIVATE_CLIENT_BOUNDARY";
+
 function isCurrent(pathname: string, href: string): boolean {
   return href === "/dash" ? pathname === "/dash" : pathname.startsWith(href);
 }
@@ -65,7 +74,11 @@ export function DashboardNav({ role }: { role: "owner" | "editor" }) {
   ];
 
   return (
-    <nav className="dashboard-nav" aria-label="Dashboard sections">
+    <nav
+      className="dashboard-nav"
+      aria-label="Dashboard sections"
+      data-private-boundary={DASHBOARD_PRIVATE_BUNDLE_MARKER}
+    >
       {groups
         .filter(({ destinations }) => destinations.length > 0)
         .map(({ name, destinations }) => (

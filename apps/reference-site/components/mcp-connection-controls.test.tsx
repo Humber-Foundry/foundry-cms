@@ -41,10 +41,88 @@ describe("Owner MCP connection inventory", () => {
       />,
     );
 
-    expect(markup).toContain("https://client.example/metadata.json");
-    expect(markup).toContain("https://revoked.example/metadata.json");
-    expect(markup).toContain("site.read");
+    // The full client URL stays available for inspection (as a title
+    // attribute), but the plain display name is what the owner reads.
+    expect(markup).toContain('title="https://client.example/metadata.json"');
+    expect(markup).toContain("client.example");
+    expect(markup).toContain('title="https://revoked.example/metadata.json"');
+    expect(markup).toContain("revoked.example");
+    // The raw scope is replaced by its plain phrase.
+    expect(markup).toContain("Read the site");
+    expect(markup).not.toContain(">site.read<");
     expect(markup.match(/>Revoke</gu)).toHaveLength(1);
     expect(markup).toContain(">Revoked</span>");
+  });
+
+  it("shows an unrecognized scope as its raw string with help text", () => {
+    const markup = renderToStaticMarkup(
+      <McpConnectionTable
+        connections={[connection({ scopes: ["future.scope"] })]}
+        pendingId={null}
+        onRevoke={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("future.scope");
+    expect(markup).toContain("Unrecognized permission");
+  });
+
+  it("keeps every non-row child outside the table role", () => {
+    const markup = renderToStaticMarkup(
+      <McpConnectionTable
+        connections={[]}
+        pendingId={null}
+        onRevoke={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("No agent connections have been authorized.");
+    // Walk every <div ...> and </div> tag with a depth counter starting at
+    // the div carrying role="table", so the extracted slice is that div's
+    // own balanced content — not just up to the first nested closing tag.
+    const openIndex = markup.indexOf('role="table"');
+    const containerStart = markup.lastIndexOf("<div", openIndex);
+    const tagPattern = /<div\b[^>]*>|<\/div>/gu;
+    tagPattern.lastIndex = containerStart;
+    let depth = 0;
+    let containerEnd = -1;
+    for (let match = tagPattern.exec(markup); match !== null; match = tagPattern.exec(markup)) {
+      if (match[0].startsWith("</div")) {
+        depth -= 1;
+        if (depth === 0) {
+          containerEnd = match.index;
+          break;
+        }
+      } else {
+        depth += 1;
+      }
+    }
+    expect(containerEnd).toBeGreaterThan(containerStart);
+    const tableBody = markup.slice(containerStart, containerEnd);
+
+    // Only role="row" children sit inside the table's own box; the empty
+    // message is a sibling paragraph rendered after it closes.
+    expect(tableBody).not.toContain("<p");
+    expect(markup.indexOf("No agent connections have been authorized.")).toBeGreaterThan(
+      containerEnd,
+    );
+  });
+
+  it("reads timestamps as relative time instead of an absolute clock string", () => {
+    const markup = renderToStaticMarkup(
+      <McpConnectionTable
+        connections={[
+          connection({
+            createdAt: "2020-01-01T00:00:00.000Z",
+            lastUsedAt: "2020-06-01T00:00:00.000Z",
+          }),
+        ]}
+        pendingId={null}
+        onRevoke={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("ago");
+    expect(markup).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2,4}/u);
   });
 });
