@@ -1,4 +1,4 @@
-# ADR-0020: One shared component reports whether email and publishing are connected
+# ADR-0021: One shared component reports whether email and publishing are connected
 
 - **Status:** Accepted
 - **Date:** 2026-09-18

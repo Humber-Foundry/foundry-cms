@@ -230,7 +230,7 @@ public origin, the Cloudflare deployment, and the publication signing
 secret), and the names of the settings it still lacks. It reports setting
 names only, never a setting value, a token or a key. Connected means the
 settings are installed; it does not mean GitHub or Cloudflare were reached —
-this check makes no network call. See ADR-0020.
+this check makes no network call. See ADR-0021.
 
 **Test delivery** — A real provider test-send operation for one exact campaign
 fingerprint and explicit test recipients. An on-screen preview is not a test
