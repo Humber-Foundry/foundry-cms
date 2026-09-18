@@ -3935,6 +3935,14 @@ h3.media-places-heading {
     min-height: var(--dash-control-height);
   }
 
+  /* A full-height row in the sheet, so it is a tap target and not a word. */
+  .editor-page-all {
+    display: flex;
+    flex: 1 1 100%;
+    align-items: center;
+    min-height: var(--dash-control-height);
+  }
+
   .editor-page-switch-actions .button {
     flex: 1 1 auto;
     min-height: var(--dash-control-height);

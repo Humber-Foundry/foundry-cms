@@ -138,8 +138,8 @@ try {
   await menu.click();
   await page.getByRole("button", { name: "Edit", exact: true }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Undo" }).waitFor({ state: "visible" });
-  // The way to another page rides in the same sheet, so it is reachable at
-  // this width without any second menu.
+  // The way to another page is inside the same sheet, so it is reachable at
+  // this width without a second menu.
   await page
     .getByLabel("Editing", { exact: true })
     .waitFor({ state: "visible" });

@@ -9,7 +9,6 @@ import {
 } from "@/src/dashboard-page-context";
 import { formatDashboardMoment } from "@/src/dashboard-time";
 import {
-  editorPageWasNotFound,
   listEditorPages,
   readEditorPageId,
   resolveEditorPage,
@@ -64,13 +63,13 @@ export async function DashboardWorkspacePage({
   // page in the editor, so the address can be shared and reloaded. An address
   // naming a page the draft no longer holds comes back to the list and says
   // so, rather than opening a different page without a word.
-  const pageWasNotFound =
-    !showStarter &&
-    editorPageWasNotFound(contentRevision.definition, requestedPageId);
+  const selection = showStarter
+    ? undefined
+    : resolveEditorPage(contentRevision.definition, requestedPageId);
   const showPagesList =
     destination === "pages" &&
-    !showStarter &&
-    (requestedPageId === undefined || pageWasNotFound);
+    selection !== undefined &&
+    (requestedPageId === undefined || selection.wasNotFound);
 
   return (
     <main className="dashboard-main" id="main">
@@ -102,18 +101,25 @@ export async function DashboardWorkspacePage({
           pages={listEditorPages(contentRevision.definition, publishedDefinition)}
           workspaceUrl={dashboardWorkspace.activeWorkspaceUrl}
           lastSaved={formatDashboardMoment(contentRevision.createdAt)}
-          notFoundPageAsked={pageWasNotFound}
+          askedForMissingPage={selection.wasNotFound}
         />
       ) : (
         <WorkspaceEditorSurface
           variant={destination}
           csrfToken={mutationToken}
           contentRevision={contentRevision}
-          selectedPageId={resolveEditorPage(
-            contentRevision.definition,
-            requestedPageId,
-          ).id}
-          pages={listEditorPages(contentRevision.definition)}
+          // Design edits the whole site, so it names no page and shows no
+          // page switcher.
+          selectedPageId={
+            destination === "pages"
+              ? selection?.page.id
+              : undefined
+          }
+          pages={
+            destination === "pages"
+              ? listEditorPages(contentRevision.definition)
+              : []
+          }
           initialPreviewUrl={previewUrl}
           initialContentStale={dashboardWorkspace.contentStale}
           activeWorkspaceUrl={dashboardWorkspace.activeWorkspaceUrl}

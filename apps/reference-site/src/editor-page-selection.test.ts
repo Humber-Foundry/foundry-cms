@@ -11,7 +11,6 @@ import {
 import {
   editorPageForLinkPath,
   editorPageHref,
-  editorPageWasNotFound,
   fieldsForEditorPage,
   listEditorPages,
   readEditorPageId,
@@ -40,27 +39,24 @@ describe("readEditorPageId", () => {
 
 describe("resolveEditorPage", () => {
   it("opens the home page when the address names no page", () => {
-    expect(resolveEditorPage(twoPages, undefined)).toEqual(
-      homePage(twoPages),
-    );
+    expect(resolveEditorPage(twoPages, undefined)).toEqual({
+      page: homePage(twoPages),
+      wasNotFound: false,
+    });
   });
 
   it("opens the page the address names", () => {
-    expect(resolveEditorPage(twoPages, secondPage.id)).toEqual(secondPage);
+    expect(resolveEditorPage(twoPages, secondPage.id)).toEqual({
+      page: secondPage,
+      wasNotFound: false,
+    });
   });
 
-  it("falls back to the home page when the draft has no such page", () => {
-    expect(resolveEditorPage(twoPages, "page_gone")).toEqual(
-      homePage(twoPages),
-    );
-  });
-});
-
-describe("editorPageWasNotFound", () => {
-  it("is true only when the address named a page the draft does not hold", () => {
-    expect(editorPageWasNotFound(twoPages, "page_gone")).toBe(true);
-    expect(editorPageWasNotFound(twoPages, secondPage.id)).toBe(false);
-    expect(editorPageWasNotFound(twoPages, undefined)).toBe(false);
+  it("falls back to the home page, and says so, when there is no such page", () => {
+    expect(resolveEditorPage(twoPages, "page_gone")).toEqual({
+      page: homePage(twoPages),
+      wasNotFound: true,
+    });
   });
 });
 
@@ -101,6 +97,22 @@ describe("listEditorPages", () => {
 
     const unchanged = listEditorPages(referenceSiteDefinition, published);
     expect(unchanged[0]!.publishedState).toBe("on-your-site");
+  });
+
+  it("reads a page as unchanged when only its field order differs", () => {
+    const home = homePage(referenceSiteDefinition);
+    // A stored page is read from JSON, so its fields may arrive in another
+    // order than the page built in memory. That is the same page.
+    const reordered = Object.fromEntries(
+      Object.entries(home).reverse(),
+    ) as typeof home;
+    const draft: SiteDefinition = {
+      ...referenceSiteDefinition,
+      pages: [reordered],
+    };
+    expect(
+      listEditorPages(draft, referenceSiteDefinition)[0]!.publishedState,
+    ).toBe("on-your-site");
   });
 });
 

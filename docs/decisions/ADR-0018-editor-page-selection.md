@@ -69,8 +69,8 @@ edits.
 The visual canvas still builds itself from the home page. Until #158 moves it,
 the editor shows the canvas on the home page alone. On any other page the owner
 edits that page's words in the field list, and the screen says that adding,
-moving and removing sections is not ready there yet. A canvas drawing the home
-page under another page's name would be a lie on screen.
+moving and removing sections is not ready there yet. A canvas that drew the
+home page under another page's name would tell the owner something untrue.
 
 ## Consequences
 
@@ -78,8 +78,14 @@ Pages no longer opens straight into the editor, so the three browser journeys
 that went to `/dash/pages` now open a page from the list first.
 
 The address rewrites that follow a save and a recovery clean-up build their URL
-from the selected page, so `?page=` survives a save. The preview opens in a new
-tab, so the editor tab keeps its address across a preview.
+from the selected page, so `?page=` survives a save and a reload.
+
+The preview opens in a new tab, so the editor tab keeps its address while the
+owner reads the preview and comes back to it. The separate "Back to the
+dashboard" link inside the preview tab still lands on the Pages list, because
+the preview is of the whole draft and names no one page. Carrying a page
+through that link needs the preview routes to know which page was open, which
+is ticket #156's work on a preview per page.
 
 "Last edited" is shown once for the whole draft, not per page. A revision is
 one immutable version of the whole definition, so the store holds no per-page

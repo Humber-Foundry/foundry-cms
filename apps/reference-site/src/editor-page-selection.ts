@@ -34,34 +34,38 @@ export function readEditorPageId(
   return trimmed === "" ? undefined : trimmed;
 }
 
+/** The page the editor opens, and whether the address actually found it. */
+export type ResolvedEditorPage = Readonly<{
+  page: SitePage;
+  /**
+   * `true` when the address named a page this draft does not hold. The caller
+   * must then say so; showing `page` without a word would let an owner edit
+   * one page believing they were editing another.
+   */
+  wasNotFound: boolean;
+}>;
+
 /**
  * The page the editor opens.
  *
  * An address with no page, or one naming a page this draft does not hold,
  * falls back to the home page. A draft always has a home page, so the editor
  * always has something to show and never fails on a stale link.
+ *
+ * The answer carries `wasNotFound` with it, so a caller cannot take the page
+ * and forget that the address asked for a different one.
  */
 export function resolveEditorPage(
   definition: SiteDefinition,
   requestedPageId: string | undefined,
-): SitePage {
-  if (requestedPageId === undefined) return homePage(definition);
-  return findPageById(definition, requestedPageId) ?? homePage(definition);
-}
-
-/**
- * `true` when the address named a page that this draft does not hold, so a
- * screen can say the page was not found instead of silently showing another
- * one.
- */
-export function editorPageWasNotFound(
-  definition: SiteDefinition,
-  requestedPageId: string | undefined,
-): boolean {
-  return (
-    requestedPageId !== undefined &&
-    findPageById(definition, requestedPageId) === undefined
-  );
+): ResolvedEditorPage {
+  if (requestedPageId === undefined) {
+    return { page: homePage(definition), wasNotFound: false };
+  }
+  const found = findPageById(definition, requestedPageId);
+  return found === undefined
+    ? { page: homePage(definition), wasNotFound: true }
+    : { page: found, wasNotFound: false };
 }
 
 /** What the Pages list and the page switcher show for one page. */
@@ -108,11 +112,35 @@ export function listEditorPages(
       publishedState:
         published === undefined
           ? "not-published"
-          : JSON.stringify(published) === JSON.stringify(page)
+          : samePage(published, page)
             ? "on-your-site"
             : "changed-since-publish",
     };
   });
+}
+
+/**
+ * Whether two versions of a page hold the same content.
+ *
+ * The comparison sorts object keys, because one version is read from stored
+ * JSON and the other is built in memory. Two objects with the same fields in a
+ * different order are the same page, and a plain text comparison would call
+ * them different and tell the owner a page had changed when it had not.
+ */
+function samePage(left: SitePage, right: SitePage): boolean {
+  return stableText(left) === stableText(right);
+}
+
+function stableText(value: unknown): string {
+  return JSON.stringify(value, (_key, held: unknown) =>
+    held !== null && typeof held === "object" && !Array.isArray(held)
+      ? Object.fromEntries(
+          Object.entries(held as Record<string, unknown>).sort(([a], [b]) =>
+            a < b ? -1 : a > b ? 1 : 0,
+          ),
+        )
+      : held,
+  );
 }
 
 /**

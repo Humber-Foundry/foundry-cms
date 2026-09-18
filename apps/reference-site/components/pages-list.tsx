@@ -15,7 +15,7 @@ export function PagesList({
   pages,
   workspaceUrl,
   lastSaved,
-  notFoundPageAsked,
+  askedForMissingPage,
 }: {
   pages: ReadonlyArray<EditorPageSummary>;
   /** The Pages address with the workspace it already carries. */
@@ -27,11 +27,11 @@ export function PagesList({
    */
   lastSaved?: string;
   /** `true` when the address asked for a page this draft no longer holds. */
-  notFoundPageAsked?: boolean;
+  askedForMissingPage?: boolean;
 }) {
   return (
     <section className="pages-list" aria-label="Your pages">
-      {notFoundPageAsked ? (
+      {askedForMissingPage ? (
         <p className="dashboard-note" role="status">
           That page is not in this draft any more. Here are the pages it has.
         </p>

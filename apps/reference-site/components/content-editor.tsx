@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useReducer,
   useRef,
@@ -12,6 +13,7 @@ import {
 import type { ContentRevision } from "@humber-foundry/application";
 import {
   homePage,
+  homePageSlug,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
@@ -85,7 +87,7 @@ import type { SiteImageTile } from "../src/site-used-photos";
  * including a middle-click opening a new tab — is stopped. Switching to Edit
  * is the way to change where a link goes.
  */
-function blockBrowseNavigation(event: React.MouseEvent): string | undefined {
+function blockedNavigationHref(event: React.MouseEvent): string | undefined {
   const anchor = (event.target as HTMLElement).closest?.("a");
   if (anchor === null || anchor === undefined) return undefined;
   const href = anchor.getAttribute("href") ?? "";
@@ -270,9 +272,12 @@ export function ContentEditor({
   // "conflict" while another session's revision has landed underneath, and
   // "stale" when the whole workspace is behind production.
   const hasUnsavedChanges = state.status !== "saved";
-  // The page the owner asked to open while edits were still unsaved. The
+  // The address the owner asked to go to while edits were still unsaved. The
   // prompt holds it until they choose to leave or to stay.
-  const [pageToOpen, setPageToOpen] = useState<string | null>(null);
+  const [addressToLeaveFor, setAddressToLeaveFor] = useState<string | null>(null);
+  // Ties the "Editing" label to its control. Generated, because the editor may
+  // be mounted more than once on a screen and an id must stay unique.
+  const pageChooserId = useId();
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -317,11 +322,10 @@ export function ContentEditor({
   // The page the owner opened. One rule, in editor-page-selection.ts, answers
   // this for every screen that has to know.
   const selectedPage = useMemo(
-    () => resolveEditorPage(state.workingDefinition, selectedPageId),
+    () => resolveEditorPage(state.workingDefinition, selectedPageId).page,
     [state.workingDefinition, selectedPageId],
   );
-  const selectedPageIsHome =
-    selectedPage.id === homePage(state.workingDefinition).id;
+  const selectedPageIsHome = selectedPage.slug === homePageSlug;
   /**
    * The address of the editor on this page. A save and a recovery clean-up
    * both rewrite the address, so they must keep the page the owner is on
@@ -360,6 +364,14 @@ export function ContentEditor({
         : undefined,
     [state.persistedDefinition, state.workingDefinition],
   );
+  /**
+   * Whether this draft holds a change the server has not stored yet.
+   *
+   * Read from the edits themselves, not from the editor's status. A workspace
+   * that is merely stale, or mid-save, has nothing the owner would lose, and
+   * telling them otherwise would be untrue.
+   */
+  const hasUnsavedEdits = edits.length > 0 || composition !== undefined;
   const recoverableEdits = useMemo<StaleRecoveryEdit[]>(
     () => {
       const fieldEdits = edits.map((edit) => ({
@@ -1818,13 +1830,28 @@ export function ContentEditor({
    * Opening another page reloads the editor on that page. Edits that are not
    * saved live only in this tab, so an owner with unsaved work is asked first.
    */
+  /** Leaves the editor for another address in this workspace. */
+  function leaveEditorFor(address: string) {
+    window.location.assign(address);
+  }
+
   function openPage(pageId: string) {
     if (pageId === selectedPage.id) return;
-    if (hasUnsavedChanges) {
-      setPageToOpen(pageId);
+    if (hasUnsavedEdits) {
+      setAddressToLeaveFor(editorPageHref(activeWorkspaceUrl, pageId));
       return;
     }
-    window.location.assign(editorPageHref(activeWorkspaceUrl, pageId));
+    leaveEditorFor(editorPageHref(activeWorkspaceUrl, pageId));
+  }
+
+  /** Goes back to the list of pages, asking first about unsaved edits. */
+  function openPagesList(event: React.MouseEvent) {
+    event.preventDefault();
+    if (hasUnsavedEdits) {
+      setAddressToLeaveFor(activeWorkspaceUrl);
+      return;
+    }
+    leaveEditorFor(activeWorkspaceUrl);
   }
 
   /**
@@ -1833,8 +1860,11 @@ export function ContentEditor({
    * must not leave the editor.
    */
   function browseNavigation(event: React.MouseEvent) {
-    const href = blockBrowseNavigation(event);
+    const href = blockedNavigationHref(event);
     if (href === undefined) return;
+    // A middle click asks for a new tab. Opening the other page in this tab
+    // instead is not what was asked, so the click is only stopped.
+    if (event.button !== 0) return;
     const target = editorPageForLinkPath(state.workingDefinition, href);
     if (target !== undefined) openPage(target.id);
   }
@@ -1842,11 +1872,14 @@ export function ContentEditor({
   const pageSwitcherNode =
     pages.length === 0 ? null : (
       <div className="editor-page-switcher">
-        <label className="editor-page-choose">
+        <span className="editor-page-choose">
           {/* "Editing", not "Page": the screen is already headed Pages, and
-            * this says which one of them the owner has open. */}
-          <span>Editing</span>
+            * this says which one of them the owner has open. The label is tied
+            * to the control by id, so the name a screen reader reads is that
+            * one word and not the chosen page's title as well. */}
+          <label htmlFor={pageChooserId}>Editing</label>
           <select
+            id={pageChooserId}
             value={selectedPage.id}
             onChange={(event) => openPage(event.target.value)}
           >
@@ -1856,38 +1889,38 @@ export function ContentEditor({
               </option>
             ))}
           </select>
-        </label>
-        <a className="editor-page-all" href={activeWorkspaceUrl}>
+        </span>
+        <a
+          className="editor-page-all"
+          href={activeWorkspaceUrl}
+          onClick={openPagesList}
+        >
           All pages
         </a>
       </div>
     );
 
   const pageSwitchPromptNode =
-    pageToOpen === null ? null : (
+    addressToLeaveFor === null ? null : (
       <div className="editor-page-switch-prompt" role="alert">
         <p>
-          You have edits on this page that are not saved. Opening another page
-          now loses them. Save first, or open the other page and lose them.
+          You have edits here that are not saved yet. Leaving this page now
+          loses them. Save first, or leave and lose them.
         </p>
         <span className="editor-page-switch-actions">
           <button
             type="button"
             className="button"
-            onClick={() => setPageToOpen(null)}
+            onClick={() => setAddressToLeaveFor(null)}
           >
             Stay on this page
           </button>
           <button
             type="button"
             className="button"
-            onClick={() =>
-              window.location.assign(
-                editorPageHref(activeWorkspaceUrl, pageToOpen),
-              )
-            }
+            onClick={() => leaveEditorFor(addressToLeaveFor)}
           >
-            Open the other page
+            Leave and lose them
           </button>
         </span>
       </div>
