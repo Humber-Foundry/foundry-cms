@@ -129,6 +129,11 @@ async function main() {
       startWorkspace.click(),
     ]);
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
+
+    // Pages opens on the list of every page. Open the home page from it to
+    // reach the editor.
+    await page.locator(".pages-list-row").first().click();
+    await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=/u);
     const workspace = new URL(page.url()).searchParams.get("workspace");
 
     // Give the site a built-in photo: a full-width image section defaults to a
