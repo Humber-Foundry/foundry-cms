@@ -422,7 +422,15 @@
   font-size: var(--dash-text-small);
 }
 
+/* The dot between the email and the role is its own element so the gap on
+ * each side of it is a fixed flex gap, not a literal space character in a
+ * text node — a text-node space can collapse under some layouts, a flex
+ * gap cannot. This applies at every width so the spacing is identical on
+ * desktop and phone. */
 .signed-in-as {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
   color: var(--dash-ink-soft);
 }
 
@@ -432,7 +440,6 @@
    * email with an ellipsis and keeps the role and the dot at full size, so
    * the role is never the part that goes missing. */
   .signed-in-as {
-    display: inline-flex;
     min-width: 0;
     max-width: 55vw;
   }
@@ -444,6 +451,7 @@
     white-space: nowrap;
   }
 
+  .signed-in-as-dot,
   .signed-in-as-role {
     flex-shrink: 0;
   }
@@ -706,7 +714,6 @@
    composer uses it for the lines and picture that decide how the message
    looks before anyone opens it. */
 .composer-section {
-  position: relative;
   display: grid;
   gap: 1rem;
   margin: 0;
@@ -715,30 +722,33 @@
   padding: 1rem;
 }
 
+/* A native `<legend>` straddles its fieldset's top border, and a browser
+ * only reserves room in that border for the legend's first line — a
+ * second line, at any width the legend wraps at, lands on the border or
+ * the field below it. There is no fixed padding that stays correct for
+ * every wrap count, so the legend text moves into a normal in-flow
+ * heading instead (`.composer-section-heading`), which the fieldset's own
+ * `gap` always keeps 1rem clear of the next field no matter how many
+ * lines it takes. The real `<legend>` stays in the markup, visually
+ * hidden, so the fieldset still has an accessible name; the heading
+ * duplicates its text for sighted users and is hidden from assistive
+ * tech so the name is not announced twice. */
 .composer-section > legend {
-  padding: 0 0.35rem;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.composer-section-heading {
+  margin: 0;
   color: var(--dash-accent);
   font-size: var(--dash-text-small);
   font-weight: 600;
-}
-
-/* On a narrow phone this legend wraps to two lines. A browser only reserves
- * room in the top border for the legend's first line, so an in-flow second
- * line lands on that border. Taking the legend out of flow and giving the
- * fieldset matching top padding puts both lines above the fields with
- * nothing behind them to touch. */
-@media (max-width: 30rem) {
-  .composer-section {
-    padding-top: 3rem;
-  }
-
-  .composer-section > legend {
-    position: absolute;
-    top: 0.65rem;
-    left: 1rem;
-    right: 1rem;
-    padding: 0;
-  }
 }
 
 .composer-settings label,
