@@ -6,11 +6,12 @@ export type ContentRevisionAttempt = Readonly<{
 type Fetcher = typeof fetch;
 
 async function send(
+  url: string,
   attempt: ContentRevisionAttempt,
   mutationToken: string,
   fetcher: Fetcher,
 ) {
-  const response = await fetcher("/api/foundry-cms/revisions", {
+  const response = await fetcher(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -22,16 +23,25 @@ async function send(
   return { response, body: (await response.json()) as unknown };
 }
 
-export async function sendContentRevisionAttempt({
+/**
+ * Sends one mutation attempt to a `/api/foundry-cms/*` route, and retries
+ * it once with a fresh mutation token if the first attempt is rejected for
+ * a stale token. Every human-mutation route under `/api/foundry-cms` reads
+ * the same per-identity token, so refreshing it through the revisions route
+ * is correct even when `url` points elsewhere.
+ */
+export async function sendHumanMutationAttempt({
+  url,
   attempt,
   mutationToken,
   fetcher = fetch,
 }: {
+  url: string;
   attempt: ContentRevisionAttempt;
   mutationToken: string;
   fetcher?: Fetcher;
 }) {
-  let result = await send(attempt, mutationToken, fetcher);
+  let result = await send(url, attempt, mutationToken, fetcher);
   const { response, body } = result;
   if (
     response.status !== 403 ||
@@ -57,6 +67,23 @@ export async function sendContentRevisionAttempt({
     throw new Error("content_revision_token_refresh_failed");
   }
   mutationToken = refreshed.mutationToken;
-  result = await send(attempt, mutationToken, fetcher);
+  result = await send(url, attempt, mutationToken, fetcher);
   return { ...result, mutationToken };
+}
+
+export async function sendContentRevisionAttempt({
+  attempt,
+  mutationToken,
+  fetcher = fetch,
+}: {
+  attempt: ContentRevisionAttempt;
+  mutationToken: string;
+  fetcher?: Fetcher;
+}) {
+  return sendHumanMutationAttempt({
+    url: "/api/foundry-cms/revisions",
+    attempt,
+    mutationToken,
+    fetcher,
+  });
 }

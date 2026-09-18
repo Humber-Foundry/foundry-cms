@@ -50,14 +50,69 @@ function storedContentHash(bytes) {
 
 function fixedBaseRuntimeContentHash(bytes) {
   const definition = JSON.parse(bytes);
-  return createHash("sha256")
-    .update(
-      canonicalJson({
+  const withDefaultMedia = Array.isArray(definition.pages)
+    ? {
+        ...definition,
+        pages: definition.pages.map((page) => ({
+          ...page,
+          media: page.media ?? [],
+        })),
+      }
+    : {
         ...definition,
         home: {
           ...definition.home,
           media: definition.home.media ?? [],
         },
+      };
+  return createHash("sha256")
+    .update(canonicalJson(withDefaultMedia))
+    .digest("hex");
+}
+
+/**
+ * One projected definition rewritten in the shape it had before 1.7.0: a
+ * single `home` object and no page collection. Used to recompute the content
+ * hash a deployment made under an older reader still reports.
+ *
+ * Returns `null` when the definition does not hold exactly one page, because
+ * a multi-page site has no pre-1.7.0 shape.
+ */
+function withPreviousHomeShape(projected) {
+  if (!Array.isArray(projected.pages) || projected.pages.length !== 1) {
+    return null;
+  }
+  // The home page is the page with the root slug. This file cannot import
+  // `homePage`, because it is plain JavaScript run by node.
+  const homePageDocument = projected.pages.find(({ slug }) => slug === "");
+  if (homePageDocument === undefined) {
+    return null;
+  }
+  const { pages: _pages, ...withoutPages } = projected;
+  const { slug: _slug, title: _title, ...home } = homePageDocument;
+  return { ...withoutPages, home };
+}
+
+/**
+ * The content hash the same stored file produced under Site Definition 1.6.0,
+ * before the page collection replaced the single `home` object.
+ *
+ * The reader changed, not the published bytes, so a deployment made before the
+ * 1.7.0 upgrade still carries the 1.6.0 hash in its live marker.
+ */
+function contentHashUnderSchema160(bytes) {
+  const previous = withPreviousHomeShape(
+    projectPublishedSiteDefinition(JSON.parse(bytes)),
+  );
+  if (previous === null) {
+    return null;
+  }
+  return createHash("sha256")
+    .update(
+      canonicalJson({
+        ...previous,
+        definitionVersion: "1.6.0",
+        schemaVersion: "1.6.0",
       }),
     )
     .digest("hex");
@@ -75,8 +130,8 @@ function fixedBaseRuntimeContentHash(bytes) {
 function previousProjectedContentHash(bytes) {
   const stored = JSON.parse(bytes);
   if (
-    stored.schemaVersion === "1.6.0" ||
-    stored.definitionVersion === "1.6.0"
+    stored.schemaVersion === "1.7.0" ||
+    stored.definitionVersion === "1.7.0"
   ) {
     return null;
   }
@@ -92,17 +147,21 @@ function previousProjectedContentHash(bytes) {
     const { keywords: _keywords, shareImage: _shareImage, ...previous } = seo;
     return previous;
   };
+  const previous = withPreviousHomeShape(projected);
+  if (previous === null) {
+    return null;
+  }
   return createHash("sha256")
     .update(
       canonicalJson({
-        ...projected,
+        ...previous,
         definitionVersion: "1.3.0",
         schemaVersion: "1.3.0",
         design: { ...design, typography, colour },
         site: previousSite,
         home: {
-          ...projected.home,
-          seo: withoutSharingFields(projected.home.seo),
+          ...previous.home,
+          seo: withoutSharingFields(previous.home.seo),
         },
         blog: {
           ...projected.blog,
@@ -296,6 +355,7 @@ export async function assertExactProductionContent({
     expectedContentHash,
     storedContentHash(expectedPublishedContent),
     fixedBaseRuntimeContentHash(expectedPublishedContent),
+    contentHashUnderSchema160(expectedPublishedContent),
     previousProjectedContentHash(expectedPublishedContent),
   ]);
   const changedPaths = readChangedPaths(liveCommit, expectedCommit)

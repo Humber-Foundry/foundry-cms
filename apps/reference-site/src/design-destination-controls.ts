@@ -2,6 +2,7 @@ import {
   designContract,
   designTokenFieldPath,
   designTokenValue,
+  homePage,
   sectionVariantFieldPath,
   type DesignOptionPreview,
   type DesignTokenKey,
@@ -81,7 +82,7 @@ function tokenControl(
 function sectionStyleControls(
   definition: SiteDefinition,
 ): ReadonlyArray<DesignControl> {
-  return definition.home.sections.flatMap((section) => {
+  return homePage(definition).sections.flatMap((section) => {
     if (section.type === "registered") {
       return [];
     }

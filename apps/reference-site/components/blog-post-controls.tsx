@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 
-import type { ContentRevision } from "@humber-foundry/application";
+import {
+  resolvePostPublicationInstant,
+  type ArchivedBlogPostSummary,
+  type BlogPostOperationalSummary,
+  type BlogPostSchedule,
+  type ContentRevision,
+} from "@humber-foundry/application";
 import {
   formatSeoKeywords,
   parseSeoKeywords,
@@ -27,6 +33,7 @@ import { ComposerActions, emptyRichTextBody } from "./composer";
 import type { SiteImageTile } from "../src/site-used-photos";
 import {
   sendContentRevisionAttempt,
+  sendHumanMutationAttempt,
   type ContentRevisionAttempt,
 } from "../src/content-revision-client";
 
@@ -352,6 +359,42 @@ function PostComposer({
   );
 }
 
+/** A local date and time, and a submit button, for scheduling one post. */
+function ScheduleForm({
+  busy,
+  onSchedule,
+}: {
+  busy: boolean;
+  onSchedule(localValue: string): void;
+}) {
+  const [localValue, setLocalValue] = useState("");
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSchedule(localValue);
+      }}
+    >
+      <label>
+        <span>Publish date and time</span>
+        <small className="composer-hint">
+          In your own time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}).
+        </small>
+        <input
+          type="datetime-local"
+          required
+          value={localValue}
+          disabled={busy}
+          onChange={(event) => setLocalValue(event.target.value)}
+        />
+      </label>
+      <button type="submit" className="copy-button" disabled={busy}>
+        {busy ? "Scheduling…" : "Schedule"}
+      </button>
+    </form>
+  );
+}
+
 /** The plain words for where a post stands, and the one action that fits. */
 function blogPostStanding(
   post: Pick<BlogPost, "id" | "targetVisibility">,
@@ -382,16 +425,131 @@ function blogPostStanding(
   };
 }
 
+/**
+ * Whether any post's target visibility ("public" or "unpublished") does not
+ * yet match what the live site verifies. `blogPostLifecycleAction` returns
+ * `null` for exactly this mismatch — a post waiting to go live, or waiting
+ * to come off the site, at the next site publish.
+ */
+export function blogHasPendingSitePublish(
+  posts: ReadonlyArray<Pick<BlogPost, "id" | "targetVisibility">>,
+  verifiedPublicPostIds: ReadonlySet<BlogPostId>,
+): boolean {
+  return posts.some(
+    (post) => blogPostLifecycleAction(post, verifiedPublicPostIds) === null,
+  );
+}
+
+/**
+ * A local date and time, e.g. "November 1, 2026, 1:30 AM (America/Vancouver)".
+ * `localDateTime` is already civil time in `ianaTimeZone` — no further zone
+ * conversion is needed, so this formats it as a UTC instant with the same
+ * clock digits and labels the zone name alongside it.
+ */
+export function formatLocalScheduleTime(
+  localDateTime: string,
+  ianaTimeZone: string,
+): string {
+  const [datePart, timePart] = localDateTime.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+  const asIfUtc = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(asIfUtc);
+  return `${formatted} (${ianaTimeZone})`;
+}
+
+/**
+ * The plain-words line under a post about its schedule, and whether the
+ * post is eligible to show a "Schedule" control at all (it is active and
+ * has no active schedule already). This does not decide whether scheduling
+ * needs a preview first — that depends on what preview this browser session
+ * has actually shown, which only the component (not this summary) knows.
+ * See `previewedRevision` in `BlogPostControls`.
+ */
+export function blogPostScheduleStanding(
+  summary: BlogPostOperationalSummary | undefined,
+): Readonly<{ line: string | null; canSchedule: boolean }> {
+  if (summary === undefined || summary.collectionState !== "active") {
+    return { line: null, canSchedule: false };
+  }
+  if (summary.activeSchedule !== null) {
+    return {
+      line: `Scheduled to publish ${
+        formatLocalScheduleTime(
+          summary.activeSchedule.localDateTime,
+          summary.activeSchedule.ianaTimeZone,
+        )
+      }.`,
+      canSchedule: false,
+    };
+  }
+  return { line: null, canSchedule: true };
+}
+
+/**
+ * The truthful failure line for a post's most recent scheduled execution,
+ * matched to the domain's "User-visible failures" wording, or `null` when
+ * the last execution did not fail.
+ */
+export function blogPostExecutionFailureNote(
+  summary: BlogPostOperationalSummary | undefined,
+): string | null {
+  const execution = summary?.latestExecution;
+  if (
+    execution === undefined ||
+    execution === null ||
+    (execution.state !== "failed" && execution.state !== "blocked")
+  ) {
+    return null;
+  }
+  return summary!.liveRevisionId !== null
+    ? "Update failed; the previous version remains live."
+    : "First publication failed; it is not live yet.";
+}
+
+const scheduleNeedsApprovalMessage =
+  "Scheduling needs a preview of this exact version. Preview this post, " +
+  "then schedule it. Editing the post after that clears its schedule, so " +
+  "schedule it again after any later edit.";
+
+const blogOperationErrorMessages: Readonly<Record<string, string>> = {
+  approval_stale: scheduleNeedsApprovalMessage,
+  approval_required: scheduleNeedsApprovalMessage,
+  local_time_invalid: "That date and time could not be read. Try again.",
+  civil_time_resolution_mismatch:
+    "That local time does not exist or is ambiguous in this time zone. Pick a different time.",
+  production_operation_in_progress:
+    "The site is already publishing. Try again once it finishes.",
+  post_already_archived: "This post is already archived.",
+  post_not_archived: "This post is not archived, so it cannot be restored.",
+};
+
+function blogOperationErrorMessage(code: string): string {
+  return blogOperationErrorMessages[code] ??
+    "The change was not accepted. Refresh and try again.";
+}
+
 export function BlogPostControls({
   revision,
   csrfToken,
   siteImages,
   verifiedPublicPostIds,
+  postSummaries,
+  archivedPosts,
 }: {
   revision: ContentRevision;
   csrfToken: string;
   siteImages: ReadonlyArray<SiteImageTile>;
   verifiedPublicPostIds: ReadonlyArray<BlogPostId>;
+  postSummaries: ReadonlyMap<BlogPostId, BlogPostOperationalSummary>;
+  archivedPosts: ReadonlyArray<ArchivedBlogPostSummary>;
 }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -403,6 +561,15 @@ export function BlogPostControls({
   const [writingNew, setWritingNew] = useState(posts.length === 0);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const verifiedPublicPosts = new Set(verifiedPublicPostIds);
+  // The exact content revision this browser session has opened a preview
+  // for. Scheduling asserts to the server that a human inspected the
+  // preview (the same claim the site-wide Publish button already makes —
+  // see `approveRevision` in content-editor.tsx) so that assertion has to
+  // be backed by an actual preview open in this session, not just a
+  // previously-approved state that might be stale or belong to someone else.
+  const [previewedRevision, setPreviewedRevision] = useState<number | null>(
+    null,
+  );
 
   async function send(body: unknown, operation: string) {
     const attempt =
@@ -468,6 +635,7 @@ export function BlogPostControls({
       ) {
         throw new Error("blog_preview_access_failed");
       }
+      setPreviewedRevision(revision.revision);
       const destination = blogPostPreviewUrl(result.body.previewUrl, post.slug);
       if (popup === null) {
         window.open(destination, "_blank", "noopener,noreferrer");
@@ -480,6 +648,114 @@ export function BlogPostControls({
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Sends one command to the blog-operations route (schedule, cancel
+   * schedule, archive, restore, retry execution). On success this reloads
+   * the page, exactly like `send` does for the ordinary post edits, so the
+   * reloaded server data always carries the exact current schedule/archive
+   * state — there is no separate client-side cache of it to go stale.
+   */
+  async function sendBlogOperation(body: unknown, operation: string) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await sendHumanMutationAttempt({
+        url: "/api/foundry-cms/blog-operations",
+        attempt: {
+          body: JSON.stringify(body),
+          idempotencyKey: mutationKey(operation),
+        },
+        mutationToken,
+      });
+      setMutationToken(result.mutationToken);
+      if (!result.response.ok) {
+        const code =
+          typeof result.body === "object" &&
+          result.body !== null &&
+          "error" in result.body &&
+          typeof result.body.error === "string"
+            ? result.body.error
+            : "";
+        setMessage(blogOperationErrorMessage(code));
+        return;
+      }
+      window.location.assign(
+        `${window.location.pathname}?workspace=${encodeURIComponent(
+          revision.workspaceId,
+        )}`,
+      );
+    } catch {
+      setMessage("The change could not be confirmed. Check the post, then try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Records that a human reviewed the site's current preview, so the post
+   * can be scheduled. This is the same approval the site-wide Publish
+   * button on Pages records — scheduling a post needs the whole site's
+   * preview approved, because a post's fingerprint is bound to it.
+   */
+  async function approveCurrentRevisionForScheduling(): Promise<
+    string | null
+  > {
+    const result = await sendHumanMutationAttempt({
+      url: "/api/foundry-cms/publications",
+      attempt: {
+        body: JSON.stringify({
+          operation: "approve",
+          workspaceId: revision.workspaceId,
+          revision: revision.revision,
+          previewConfirmed: true,
+        }),
+        idempotencyKey: mutationKey("approve-for-schedule"),
+      },
+      mutationToken,
+    });
+    setMutationToken(result.mutationToken);
+    if (
+      !result.response.ok ||
+      typeof result.body !== "object" ||
+      result.body === null ||
+      !("id" in result.body) ||
+      typeof result.body.id !== "string"
+    ) {
+      return null;
+    }
+    return result.body.id;
+  }
+
+  async function schedulePost(post: BlogPost, localValue: string) {
+    const instant = new Date(localValue);
+    if (localValue === "" || Number.isNaN(instant.getTime())) {
+      setMessage("That date and time could not be read. Try again.");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    const approvalId = await approveCurrentRevisionForScheduling();
+    setBusy(false);
+    if (approvalId === null) {
+      setMessage(scheduleNeedsApprovalMessage);
+      return;
+    }
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const resolvedTime = resolvePostPublicationInstant(
+      instant.toISOString(),
+      browserTimeZone,
+    );
+    await sendBlogOperation(
+      {
+        operation: "activate_schedule",
+        postId: post.id,
+        approvalId,
+        resolvedTime,
+      },
+      "activate-blog-post-schedule",
+    );
   }
 
   function savePost(
@@ -518,6 +794,11 @@ export function BlogPostControls({
     );
   }
 
+  const sitePublishPending = blogHasPendingSitePublish(
+    posts,
+    verifiedPublicPosts,
+  );
+
   return (
     <section aria-labelledby="blog-posts-heading">
       <div className="dashboard-section-heading">
@@ -539,6 +820,15 @@ export function BlogPostControls({
           </button>
         )}
       </div>
+      {sitePublishPending ? (
+        <p className="composer-hint">
+          A post here is marked for the next site publish and is not live
+          until then.{" "}
+          <a href="/dash/pages" className="button button-primary">
+            Publish the site
+          </a>
+        </p>
+      ) : null}
       {writingNew ? (
         <PostComposer
           editorId="post-body"
@@ -559,6 +849,9 @@ export function BlogPostControls({
         {posts.map((post) => {
           const standing = blogPostStanding(post, verifiedPublicPosts);
           const standingOperation = standing.operation;
+          const summary = postSummaries.get(post.id);
+          const scheduleStanding = blogPostScheduleStanding(summary);
+          const executionFailure = blogPostExecutionFailureNote(summary);
           if (editingPostId === post.id) {
             return (
               <li key={post.id} className="post-list-editing">
@@ -584,6 +877,14 @@ export function BlogPostControls({
                 <strong>{post.title}</strong>
                 <span>{standing.label}</span>
               </div>
+              {scheduleStanding.line === null ? null : (
+                <p className="composer-hint">{scheduleStanding.line}</p>
+              )}
+              {executionFailure === null ? null : (
+                <p className="composer-hint" role="alert">
+                  {executionFailure}
+                </p>
+              )}
               <div className="post-list-actions">
                 <button
                   type="button"
@@ -625,11 +926,145 @@ export function BlogPostControls({
                     {standing.actionLabel}
                   </button>
                 )}
+                {summary?.activeSchedule !== null &&
+                summary?.activeSchedule !== undefined ? (
+                  <button
+                    type="button"
+                    className="copy-button"
+                    disabled={busy}
+                    onClick={() => {
+                      void sendBlogOperation(
+                        {
+                          operation: "cancel_schedule",
+                          postId: post.id,
+                          scheduleId: summary.activeSchedule!.id,
+                        },
+                        "cancel-blog-post-schedule",
+                      );
+                    }}
+                  >
+                    Cancel schedule
+                  </button>
+                ) : null}
+                {executionFailure !== null && summary !== undefined ? (
+                  <button
+                    type="button"
+                    className="copy-button"
+                    disabled={busy}
+                    onClick={() => {
+                      void sendBlogOperation(
+                        {
+                          operation: "retry_execution",
+                          postId: post.id,
+                          executionId: summary.latestExecution!.executionId,
+                        },
+                        "retry-blog-post-execution",
+                      );
+                    }}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="copy-button"
+                  disabled={busy || summary === undefined}
+                  onClick={() => {
+                    if (summary === undefined) return;
+                    const liveNotice = standing.label === "On your site"
+                      ? " This post is on the site now; archiving takes it off the site first."
+                      : "";
+                    if (
+                      !window.confirm(
+                        `Archive "${post.title}"?${liveNotice} It moves to Archived posts and can be restored as a draft later.`,
+                      )
+                    ) {
+                      return;
+                    }
+                    void sendBlogOperation(
+                      {
+                        operation: "archive",
+                        postId: post.id,
+                        selectedPostRevisionId: summary.postRevisionId,
+                      },
+                      "archive-blog-post",
+                    );
+                  }}
+                >
+                  Archive
+                </button>
               </div>
+              {scheduleStanding.canSchedule &&
+              previewedRevision === revision.revision ? (
+                <details className="composer-settings">
+                  <summary>Schedule this post</summary>
+                  <ScheduleForm
+                    busy={busy}
+                    onSchedule={(localValue) =>
+                      void schedulePost(post, localValue)}
+                  />
+                </details>
+              ) : null}
+              {scheduleStanding.canSchedule &&
+              previewedRevision !== revision.revision ? (
+                <p className="composer-hint">{scheduleNeedsApprovalMessage}</p>
+              ) : null}
             </li>
           );
         })}
       </ul>
+      {archivedPosts.length === 0 ? null : (
+        <section aria-labelledby="archived-blog-posts-heading">
+          <div className="dashboard-section-heading">
+            <div>
+              <h2 id="archived-blog-posts-heading">Archived posts</h2>
+              <p>
+                Archived posts are off the site. Restore one to bring it back
+                as a new draft.
+              </p>
+            </div>
+          </div>
+          <ul className="post-list">
+            {archivedPosts.map((archived) => (
+              <li key={archived.postId}>
+                <div className="post-list-summary">
+                  <strong>{archived.title === "" ? archived.postId : archived.title}</strong>
+                  <span>
+                    {archived.collectionState === "archiving"
+                      ? "Archiving — coming off the site"
+                      : "Archived"}
+                  </span>
+                </div>
+                {archived.collectionState === "archiving" ? (
+                  <p className="composer-hint">
+                    Archive pending; the post remains live until this
+                    finishes. This can take a few minutes.
+                  </p>
+                ) : null}
+                <div className="post-list-actions">
+                  <button
+                    type="button"
+                    className="copy-button"
+                    disabled={busy || archived.collectionState !== "archived"}
+                    onClick={() => {
+                      void sendBlogOperation(
+                        {
+                          operation: "restore",
+                          postId: archived.postId,
+                          selectedPostRevisionId: archived.postRevisionId,
+                        },
+                        "restore-blog-post",
+                      );
+                    }}
+                  >
+                    Restore as draft
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {pendingAttempt === null ? null : (
         <button
           type="button"

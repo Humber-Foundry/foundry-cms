@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
+  homePage,
   referenceSiteDefinition,
   serializeSiteDefinitionRichTextForPublication,
+  type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
 import {
@@ -82,6 +84,25 @@ async function revisionFixture() {
     idempotencyKey: "save-publish-workspace-0001",
   });
   return { application, saved };
+}
+
+/**
+ * The same definition in the shape it was stored in before 1.7.0: one `home`
+ * object instead of a `pages` collection, with no slug and no title, because
+ * neither field existed then.
+ *
+ * A fixture that claims a schema version older than 1.7.0 must use that
+ * version's shape, or it never exercises the page-collection projection step.
+ *
+ * The return type is `any` on purpose. No current type describes an older
+ * schema shape, and every caller feeds it to a reader that takes an unknown
+ * stored value.
+ */
+function withLegacyHomeShape(definition: SiteDefinition): any {
+  const copy = structuredClone(definition);
+  const { pages: _pages, ...rest } = copy as unknown as Record<string, any>;
+  const { slug: _slug, title: _title, ...home } = homePage(copy);
+  return { ...rest, home };
 }
 
 describe("content publication application", () => {
@@ -543,7 +564,7 @@ describe("content publication application", () => {
     [
       "a cross-component variant",
       (definition: Record<string, any>) => {
-        definition.home.sections[0].variant = "cards";
+        definition.pages[0].sections[0].variant = "cards";
       },
     ],
     [
@@ -583,7 +604,7 @@ describe("content publication application", () => {
 
   it("fingerprints tokens and variants as design while ignoring copy-only changes", async () => {
     const base = revisionApplication.saved;
-    const hero = base.definition.home.sections[0]!;
+    const hero = homePage(base.definition).sections[0]!;
     if (hero.type !== "hero") {
       throw new TypeError("expected_hero_fixture");
     }
@@ -599,13 +620,15 @@ describe("content publication application", () => {
     });
     const copyRevision = await revisionWith({
       ...base.definition,
-      home: {
-        ...base.definition.home,
-        sections: [
-          { ...hero, title: "Copy-only fingerprint change" },
-          ...base.definition.home.sections.slice(1),
-        ],
-      },
+      pages: [
+        {
+          ...homePage(base.definition),
+          sections: [
+            { ...hero, title: "Copy-only fingerprint change" },
+            ...homePage(base.definition).sections.slice(1),
+          ],
+        },
+      ],
     });
     const tokenRevision = await revisionWith({
       ...base.definition,
@@ -616,13 +639,15 @@ describe("content publication application", () => {
     });
     const variantRevision = await revisionWith({
       ...base.definition,
-      home: {
-        ...base.definition.home,
-        sections: [
-          { ...hero, variant: "focused" },
-          ...base.definition.home.sections.slice(1),
-        ],
-      },
+      pages: [
+        {
+          ...homePage(base.definition),
+          sections: [
+            { ...hero, variant: "focused" },
+            ...homePage(base.definition).sections.slice(1),
+          ],
+        },
+      ],
     });
 
     const [baseFingerprint, copyFingerprint, tokenFingerprint, variantFingerprint] =
@@ -1398,9 +1423,9 @@ describe("content publication application", () => {
 
   it("restores a verified legacy v1 artifact without applying the v2 rich-text manifest contract", async () => {
     const store = createInMemoryContentPublicationStore();
-    const legacyDefinition = structuredClone(
+    const legacyDefinition = withLegacyHomeShape(
       revisionApplication.saved.definition,
-    ) as any;
+    );
     legacyDefinition.definitionVersion = "1.1.0";
     legacyDefinition.schemaVersion = "1.1.0";
     delete legacyDefinition.home.media;
@@ -1603,9 +1628,9 @@ describe("content publication application", () => {
       requestedBy: membershipId,
       idempotencyKey: "publish-ambiguous-before-v2-rollout",
     });
-    const legacyDefinition = structuredClone(
+    const legacyDefinition = withLegacyHomeShape(
       revisionApplication.saved.definition,
-    ) as any;
+    );
     legacyDefinition.definitionVersion = "1.1.0";
     legacyDefinition.schemaVersion = "1.1.0";
     delete legacyDefinition.home.media;

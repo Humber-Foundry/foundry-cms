@@ -43,7 +43,7 @@ const heroOccurrence = {
 const contentRevision = {
   workspaceId: "workspace_owner",
   revision: 4,
-  definition: { home: { media: [] } },
+  definition: { pages: [{ slug: "", media: [] }] },
   inputs: {},
   createdAt: "2026-08-01T00:00:00.000Z",
   createdBy: "membership-owner",

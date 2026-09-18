@@ -13,7 +13,10 @@ import {
   createInMemoryContentRevisionStore,
   sha256CanonicalJson,
 } from "@humber-foundry/application";
-import { pageCompositionContract } from "@humber-foundry/site-definition";
+import {
+  homePage,
+  pageCompositionContract,
+} from "@humber-foundry/site-definition";
 
 import { SiteRenderer, SiteSection } from "../components/site-renderer";
 import { createVisualComponentConfig } from "../components/visual-component-editor";
@@ -43,14 +46,16 @@ function registeredComponentFixture() {
   );
   const fixture = {
     ...definition,
-    home: {
-      ...definition.home,
-      sections: [
-        ...definition.home.sections.slice(0, 2),
-        ...sections,
-        ...definition.home.sections.slice(2),
-      ],
-    },
+    pages: [
+      {
+        ...homePage(definition),
+        sections: [
+          ...homePage(definition).sections.slice(0, 2),
+          ...sections,
+          ...homePage(definition).sections.slice(2),
+        ],
+      },
+    ],
   };
   if (!isInstalledSiteDefinition(fixture)) {
     throw new Error("registered_component_fixture_invalid");
@@ -146,7 +151,9 @@ describe("installation-owned page components", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(
-      result.definition.home.sections.find(({ id }) => id === "section_story"),
+      homePage(result.definition).sections.find(
+        ({ id }) => id === "section_story",
+      ),
     ).toMatchObject({
       type: "registered",
       props: { title: "The useful question is already in the room." },
@@ -169,10 +176,12 @@ describe("installation-owned page components", () => {
     } as const;
     const candidate = {
       ...installedSiteDefinition,
-      home: {
-        ...installedSiteDefinition.home,
-        sections: [...installedSiteDefinition.home.sections, unknown],
-      },
+      pages: [
+        {
+          ...homePage(installedSiteDefinition),
+          sections: [...homePage(installedSiteDefinition).sections, unknown],
+        },
+      ],
     };
 
     expect(isInstalledSiteDefinition(candidate)).toBe(false);
@@ -210,7 +219,7 @@ describe("installation-owned page components", () => {
         composition: {
           slotId: pageCompositionContract.slot.id,
           components: [
-            ...installedSiteDefinition.home.sections,
+            ...homePage(installedSiteDefinition).sections,
             {
               id: "section_unknown",
               type: "registered",
@@ -239,7 +248,9 @@ describe("installation-owned page components", () => {
 
   it("rejects an invalid registered component before publication approval", async () => {
     const invalid = registeredComponentFixture();
-    const story = invalid.home.sections.find(({ id }) => id === "section_story");
+    const story = homePage(invalid).sections.find(
+      ({ id }) => id === "section_story",
+    );
     if (story?.type !== "registered") throw new Error("story_fixture_missing");
     (story.props as Record<string, unknown>).imageSrc = "javascript:alert(1)";
     const revision = {
