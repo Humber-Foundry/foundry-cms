@@ -1,6 +1,9 @@
 "use client";
 
-import type { EditableSiteField } from "@humber-foundry/site-definition";
+import {
+  parseSiteHref,
+  type EditableSiteField,
+} from "@humber-foundry/site-definition";
 
 /** The four things a link can point at, in the order the picker offers them. */
 type LinkTarget = "page" | "section" | "blog" | "email";
@@ -14,10 +17,10 @@ type ParsedFieldValue = Readonly<{
   email: string;
 }>;
 
-const pageHrefPattern = /^page:([a-z][a-z0-9_]*)(?:#([a-z][a-z0-9_]*))?$/u;
-
 /**
- * Reads a stored href into what the picker shows.
+ * Reads a stored href into what the picker shows, through the shared
+ * `parseSiteHref`, so the picker and every renderer agree on what a stored
+ * value means.
  *
  * A bare `#anchor`, written before this picker existed, always named a
  * section on the home page (ADR-0019), so it opens here the same way:
@@ -28,32 +31,36 @@ function parseFieldValue(
   targets: SiteHrefTargets,
 ): ParsedFieldValue {
   const homeId = targets[0]?.id ?? "";
-  if (value === "blog") {
-    return { target: "blog", pageId: homeId, sectionId: "", email: "" };
+  const parsed = parseSiteHref(value);
+  switch (parsed.kind) {
+    case "blog":
+      return { target: "blog", pageId: homeId, sectionId: "", email: "" };
+    case "mailto":
+      return {
+        target: "email",
+        pageId: homeId,
+        sectionId: "",
+        email: parsed.address,
+      };
+    case "anchor":
+      return {
+        target: "section",
+        pageId: homeId,
+        sectionId: parsed.anchor,
+        email: "",
+      };
+    case "page":
+      return parsed.anchor === null
+        ? { target: "page", pageId: parsed.pageId, sectionId: "", email: "" }
+        : {
+            target: "section",
+            pageId: parsed.pageId,
+            sectionId: parsed.anchor,
+            email: "",
+          };
+    case "unrecognized":
+      return { target: "page", pageId: homeId, sectionId: "", email: "" };
   }
-  if (value.startsWith("mailto:")) {
-    return {
-      target: "email",
-      pageId: homeId,
-      sectionId: "",
-      email: value.slice("mailto:".length),
-    };
-  }
-  if (value.startsWith("#")) {
-    return {
-      target: "section",
-      pageId: homeId,
-      sectionId: value.slice(1),
-      email: "",
-    };
-  }
-  const match = pageHrefPattern.exec(value);
-  if (match) {
-    return match[2] === undefined
-      ? { target: "page", pageId: match[1]!, sectionId: "", email: "" }
-      : { target: "section", pageId: match[1]!, sectionId: match[2]!, email: "" };
-  }
-  return { target: "page", pageId: homeId, sectionId: "", email: "" };
 }
 
 function buildHref(parsed: ParsedFieldValue): string {

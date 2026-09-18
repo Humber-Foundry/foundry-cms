@@ -120,6 +120,49 @@ export function resolveSiteHref(
   }
 }
 
+/** One `SiteLink`-typed field in a definition, and where it lives. */
+export type SiteHrefOccurrence = Readonly<{
+  link: SiteLink;
+  /** Where the link is edited: the Navigation group, or a page's own content. */
+  location: "navigation" | "page";
+  /** The page the link is edited on. Absent for a navigation link, which is site-wide. */
+  pageId?: string;
+}>;
+
+/**
+ * Every link in the definition: every navigation item, and every hero or
+ * call-to-action button on every page.
+ *
+ * This is the one place that walks every `SiteLink`-typed field. Both the
+ * dangling-page-reference check in `isBaseSiteDefinition` and
+ * `findPageHrefReferences` below read it, so the set of fields that carry a
+ * link is named once.
+ */
+export function everySiteLink(
+  definition: SiteDefinition,
+): ReadonlyArray<SiteHrefOccurrence> {
+  const occurrences: SiteHrefOccurrence[] = definition.site.navigation.map(
+    (link) => ({ link, location: "navigation" }),
+  );
+  for (const page of definition.pages) {
+    for (const section of page.sections) {
+      if (section.type === "hero") {
+        occurrences.push(
+          { link: section.primaryAction, location: "page", pageId: page.id },
+          { link: section.secondaryAction, location: "page", pageId: page.id },
+        );
+      } else if (section.type === "callToAction") {
+        occurrences.push({
+          link: section.action,
+          location: "page",
+          pageId: page.id,
+        });
+      }
+    }
+  }
+  return occurrences;
+}
+
 /** One link that targets a page, and where it lives in the definition. */
 export type SiteHrefPageReference = Readonly<{
   /** Where the referencing link is edited: the Navigation group, or a page's own content. */
@@ -129,17 +172,6 @@ export type SiteHrefPageReference = Readonly<{
   /** The page the link is edited on. Absent for a navigation link, which is site-wide. */
   pageId?: string;
 }>;
-
-function siteLinkReferences(
-  link: SiteLink,
-  pageId: string,
-  location: SiteHrefPageReference["location"],
-  hostPageId: string | undefined,
-): SiteHrefPageReference | null {
-  return siteHrefPageId(link.href) === pageId
-    ? { location, label: link.label, ...(hostPageId === undefined ? {} : { pageId: hostPageId }) }
-    : null;
-}
 
 /**
  * Every navigation item, and every hero or call-to-action button, whose link
@@ -153,28 +185,11 @@ export function findPageHrefReferences(
   definition: SiteDefinition,
   pageId: string,
 ): ReadonlyArray<SiteHrefPageReference> {
-  const references: SiteHrefPageReference[] = [];
-  for (const link of definition.site.navigation) {
-    const reference = siteLinkReferences(link, pageId, "navigation", undefined);
-    if (reference !== null) references.push(reference);
-  }
-  for (const page of definition.pages) {
-    for (const section of page.sections) {
-      if (section.type === "hero") {
-        for (const link of [section.primaryAction, section.secondaryAction]) {
-          const reference = siteLinkReferences(link, pageId, "page", page.id);
-          if (reference !== null) references.push(reference);
-        }
-      } else if (section.type === "callToAction") {
-        const reference = siteLinkReferences(
-          section.action,
-          pageId,
-          "page",
-          page.id,
-        );
-        if (reference !== null) references.push(reference);
-      }
-    }
-  }
-  return references;
+  return everySiteLink(definition)
+    .filter((occurrence) => siteHrefPageId(occurrence.link.href) === pageId)
+    .map(({ link, location, pageId: hostPageId }) => ({
+      location,
+      label: link.label,
+      ...(hostPageId === undefined ? {} : { pageId: hostPageId }),
+    }));
 }

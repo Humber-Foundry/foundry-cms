@@ -148,6 +148,23 @@ broken link.
 - `resolveSiteHref`'s `pageHref` argument is unused by any caller but the
   production one today. It exists now so #156 can supply a preview builder
   without changing this function's shape.
+- **A `page:` link clicked inside today's revision preview leaves the
+  preview.** The preview route
+  (`app/__foundry/preview/[workspaceId]/[revision]/page.tsx`) renders only the
+  home page — there is no preview route for any other page yet, because that
+  route is #156's job ("preview per page"). Its `SiteHeader` has no other
+  address to send a `page:<id>` link to, so it falls back to that page's
+  plain public path, `pagePath(target)`, the same address the link resolves
+  to on the live site. Following the link exits the preview: the visitor
+  lands on whatever is actually published at that path, with the preview's
+  access token and revision context dropped. An anchor on the home page
+  (`#anchor` or `page:<home id>#anchor`) and `blog` are unaffected — both
+  already resolve inside the preview, because the preview always renders the
+  home page and `blogHref` is passed in by the preview route itself. The
+  issue's acceptance line, "Links render correctly on the public site and
+  inside a revision preview," is only true with that one carve-out until
+  #156 ships a page to send a `page:` preview link to. #159 and #156 should
+  read this before either is called done.
 
 ## Alternatives considered
 

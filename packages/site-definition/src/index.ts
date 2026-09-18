@@ -26,7 +26,7 @@ import {
   pageSlugPattern,
   reservedPageSlugs,
 } from "./pages";
-import { siteHrefPageId } from "./site-href";
+import { everySiteLink, siteHrefPageId } from "./site-href";
 
 export * from "./rich-text";
 
@@ -1084,25 +1084,12 @@ export function isBaseSiteDefinition(value: unknown): value is SiteDefinition {
     // A `page:` href must name a page that exists. JSON Schema cannot look a
     // value up in another array, so this is a runtime check, the same way
     // duplicate page ids and slugs are checked above. See ADR-0019.
-    const assertHrefTargetsKnownPage = (href: string) => {
-      const targetId = siteHrefPageId(href);
+    for (const { link } of everySiteLink(definition)) {
+      const targetId = siteHrefPageId(link.href);
       if (targetId !== null && !pageIds.has(targetId)) {
         throw new TypeError("site_href_page_absent");
       }
-    };
-    definition.site.navigation.forEach((link) => {
-      assertHrefTargetsKnownPage(link.href);
-    });
-    definition.pages.forEach((page) => {
-      page.sections.forEach((section) => {
-        if (section.type === "hero") {
-          assertHrefTargetsKnownPage(section.primaryAction.href);
-          assertHrefTargetsKnownPage(section.secondaryAction.href);
-        } else if (section.type === "callToAction") {
-          assertHrefTargetsKnownPage(section.action.href);
-        }
-      });
-    });
+    }
     const postIds = new Set<string>();
     const postSlugs = new Set<string>();
     definition.blog.posts.forEach((post) => {
