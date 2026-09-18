@@ -685,9 +685,10 @@
 }
 
 /* Whether email or publishing is connected. Colour carries the difference
- * between the three states; a connected line reads in the accent colour, a
- * missing one stays in the same soft ink as an ordinary hint but keeps the
- * ordinary reading order, and local development sits between the two. */
+ * between the three states: local development reads in the same soft ink as
+ * an ordinary hint, since nothing needs fixing there; a connected line reads
+ * in the accent colour; a missing one reads in the full ink used for prose,
+ * because it names a setting the owner still has to install. */
 .connection-status {
   margin: 0.5rem 0 0;
   color: var(--dash-ink-soft);
