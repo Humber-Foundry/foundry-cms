@@ -52,6 +52,13 @@
   --dash-field-bg: #fbfcfa;
   --dash-field-radius: 0.45rem;
 
+  /* One height for every control that sits beside another control — a
+   * button next to an input, a button next to a select. Older rules repeat
+   * 2.75rem directly; use this token on new work and move a rule across
+   * when you are already editing it, so a button never again stands taller
+   * or shorter than the field beside it. */
+  --dash-control-height: 2.75rem;
+
   min-height: 100vh;
   background: var(--dash-canvas);
   color: var(--dash-ink);
@@ -146,7 +153,18 @@
   border-top: 1px solid var(--dash-line);
 }
 
-.dashboard-main > section > p {
+/* The section right after the page heading would otherwise sit between two
+ * rules — the heading's own bottom border, then this section's top border —
+ * with nothing but empty space between them. The heading's border is
+ * already the one seam a destination needs, so the first section drops its
+ * own border and keeps only a plain gap. */
+.page-heading + section:not(.content-editor) {
+  margin-top: var(--dash-gap);
+  padding-top: 0;
+  border-top: 0;
+}
+
+.dashboard-main > section > p:not(.empty-state) {
   max-width: 60ch;
   margin: 0.4rem 0 1.25rem;
   color: var(--dash-ink-soft);
@@ -404,18 +422,38 @@
   font-size: var(--dash-text-small);
 }
 
+/* The dot between the email and the role is its own element so the gap on
+ * each side of it is a fixed flex gap, not a literal space character in a
+ * text node — a text-node space can collapse under some layouts, a flex
+ * gap cannot. This applies at every width so the spacing is identical on
+ * desktop and phone. */
 .signed-in-as {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
   color: var(--dash-ink-soft);
 }
 
 @media (max-width: 40rem) {
-  /* Keep the link out of the header on a narrow phone; the account line is
-   * what matters there and the public site is one tap from Overview. */
+  /* The role after the dot is what a person on a phone needs to see; the
+   * email in front of it is the part that can give way. The row shrinks the
+   * email with an ellipsis and keeps the role and the dot at full size, so
+   * the role is never the part that goes missing. */
   .signed-in-as {
-    max-width: 14ch;
+    min-width: 0;
+    max-width: 55vw;
+  }
+
+  .signed-in-as-email {
     overflow: hidden;
+    min-width: 0;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .signed-in-as-dot,
+  .signed-in-as-role {
+    flex-shrink: 0;
   }
 }
 
@@ -503,6 +541,18 @@
     border-right: 0;
     border-bottom: 1px solid var(--dash-line);
     -webkit-overflow-scrolling: touch;
+    /* A row a phone must scroll needs to say so. Fading the two ends
+     * instead of cutting a label in half shows there is more to reach,
+     * without adding a label of its own. Snapping settles the row on a
+     * whole link after a scroll or a swipe, so it never rests mid-label. */
+    scroll-snap-type: x proximity;
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 1rem,
+      #000 calc(100% - 1rem),
+      transparent
+    );
   }
 
   .dashboard-nav-group {
@@ -531,6 +581,7 @@
 
   .dashboard-nav a {
     white-space: nowrap;
+    scroll-snap-align: start;
   }
 
   /* On small screens the toolbar scrolls with the page instead of staying
@@ -603,7 +654,7 @@
 
 .composer-main-image > label {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.5rem;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
   font-weight: 700;
@@ -622,10 +673,15 @@
   font-weight: 400;
 }
 
+/* A field name and its hint sit in the same label, which sets a bold weight
+ * for the name. Without its own weight here the hint inherits that bold
+ * weight too, and the two lines read as one block. Normal weight is what
+ * tells them apart. */
 .composer-hint {
   margin: 0;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
+  font-weight: 400;
 }
 
 .composer-settings {
@@ -666,8 +722,30 @@
   padding: 1rem;
 }
 
+/* A native `<legend>` straddles its fieldset's top border, and a browser
+ * only reserves room in that border for the legend's first line — a
+ * second line, at any width the legend wraps at, lands on the border or
+ * the field below it. There is no fixed padding that stays correct for
+ * every wrap count, so the legend text moves into a normal in-flow
+ * heading instead (`.composer-section-heading`), which the fieldset's own
+ * `gap` always keeps 1rem clear of the next field no matter how many
+ * lines it takes. The real `<legend>` stays in the markup, visually
+ * hidden, so the fieldset still has an accessible name; the heading
+ * duplicates its text for sighted users and is hidden from assistive
+ * tech so the name is not announced twice. */
 .composer-section > legend {
-  padding: 0 0.35rem;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.composer-section-heading {
+  margin: 0;
   color: var(--dash-accent);
   font-size: var(--dash-text-small);
   font-weight: 600;
@@ -676,7 +754,7 @@
 .composer-settings label,
 .composer-settings-open label {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.5rem;
   color: var(--dash-ink-soft);
   font-size: var(--dash-text-small);
   font-weight: 700;
@@ -854,7 +932,8 @@
 }
 
 .copy-button {
-  min-height: 2.75rem;
+  box-sizing: border-box;
+  min-height: var(--dash-control-height);
   flex: 0 0 auto;
   border: 1px solid #cbd2cd;
   border-radius: 0.55rem;
@@ -881,24 +960,31 @@
 
 .access-invite-form label {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.5rem;
   color: var(--ink-soft);
   font-size: var(--dash-text-small);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .access-invite-form input,
 .access-invite-form select {
-  min-height: 2.75rem;
+  box-sizing: border-box;
+  min-height: var(--dash-control-height);
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   background: var(--paper);
   color: var(--ink);
   padding: 0.65rem 0.75rem;
   font: inherit;
-  text-transform: none;
+}
+
+/* `.dashboard button { font: inherit }` matches a class plus a type, which
+ * outranks the single class on `.copy-button` that sets the small size, so
+ * this button inherits the form's own larger text instead. Two classes here
+ * outrank that type selector and put the small size back, so this button's
+ * text — and so its height — matches the field beside it. */
+.access-invite-form button.copy-button {
+  font-size: var(--dash-text-small);
 }
 
 .inventory-row strong small {
@@ -916,11 +1002,13 @@
 }
 
 .member-actions button {
+  box-sizing: border-box;
+  min-height: var(--dash-control-height);
   border: 1px solid var(--line);
   border-radius: 999px;
   background: transparent;
   color: var(--ink);
-  padding: 0.35rem 0.6rem;
+  padding: 0.35rem 0.9rem;
   cursor: pointer;
 }
 
@@ -1907,6 +1995,17 @@
   font-weight: 400;
 }
 
+/* A field's `rows` attribute is only a starting height. The owner's own
+ * words decide how tall it grows from there, up to a cap that still leaves
+ * the rest of the panel reachable. `resize` is the fallback for a browser
+ * that does not grow a field on its own. */
+.editor-field-textarea {
+  field-sizing: content;
+  min-height: 4.6rem;
+  max-height: 16rem;
+  resize: vertical;
+}
+
 .rich-text-editor {
   overflow: hidden;
   border: 1px solid var(--dash-field-line);
@@ -2813,11 +2912,19 @@
  * grow to share the width, so the last row is as full as the rows above it.
  * Both the Photos page and the photo picker render this grid, so a tile
  * looks the same in either place. */
-/* A media grid, like a modern CMS library: even columns that reflow with the
- * width, every tile the same shape, aligned on a steady rhythm. */
+/* Every tile is the same fixed size, laid out as a wrapping list rather than
+ * a grid. A CSS grid with a fixed column count leaves the last row ragged
+ * whenever the photo count does not divide evenly — the row's trailing grid
+ * cells stay empty instead of the row filling, and grid's own column tracks
+ * make that gap read as a broken alignment. The photo count changes every
+ * time someone uploads or deletes a photo, so no fixed count is ever safe.
+ * A plain wrapping list has no column tracks to break: the last line simply
+ * holds fewer tiles, at their same fixed size, the way any wrapping list
+ * of cards does. Tiles never grow to fill space, so a short last row never
+ * stretches wider than the rows above it either. */
 .media-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--dash-gap);
   margin: 1.5rem 0 0;
   padding: 0;
@@ -2826,6 +2933,8 @@
 
 .media-gallery > li {
   display: flex;
+  flex: 0 0 12.5rem;
+  width: 12.5rem;
   min-width: 0;
 }
 
@@ -2939,7 +3048,12 @@ div.media-gallery-tile-site {
   font-size: var(--dash-text-small);
 }
 
-.media-places-heading {
+/* `.dashboard h3` sets `margin: 0` at the same specificity as a bare class
+ * selector, and it is declared earlier in this file, so a plain
+ * `.media-places-heading` rule loses that tie and never runs. Matching the
+ * element type here wins the tie instead, so the heading keeps its own
+ * space above the actions row. */
+h3.media-places-heading {
   margin: 2rem 0 0.25rem;
 }
 
@@ -3088,6 +3202,17 @@ div.media-gallery-tile-site {
   font-size: var(--dash-h2);
 }
 
+/* A long title has no room left for Close beside it at a phone width, so
+ * flex-wrap drops Close onto its own line with only the row gap above it.
+ * Stacking on purpose, full width, reads as one deliberate layout instead
+ * of Close spilling under the title. */
+@media (max-width: 30rem) {
+  .media-picker-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 .media-picker-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3171,7 +3296,7 @@ div.media-gallery-tile-site {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  min-height: 2.5rem;
+  min-height: var(--dash-control-height);
   padding: 0.45rem 0.9rem;
   border: 1px solid var(--dash-field-line);
   border-radius: 999px;

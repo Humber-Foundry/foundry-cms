@@ -361,6 +361,9 @@ function EmailComposer({
         */}
         <fieldset className="composer-section">
           <legend>SEO and sharing — how this email looks in an inbox</legend>
+          <p className="composer-section-heading" aria-hidden="true">
+            SEO and sharing — how this email looks in an inbox
+          </p>
           <p className="composer-hint">
             The subject above is the first line an inbox shows.
           </p>

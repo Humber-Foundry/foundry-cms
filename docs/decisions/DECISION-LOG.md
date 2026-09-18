@@ -21,3 +21,4 @@
 | [ADR-0014](ADR-0014-campaign-images.md) | Campaign images — header, share and inline images, made absolute and served | Accepted | 2026-08-16 |
 | [ADR-0015](ADR-0015-foundation-framework-sync-seam.md) | The framework/installation-owned seam and three-way foundation sync | Accepted | 2026-08-17 |
 | [ADR-0016](ADR-0016-site-definition-page-collection.md) | A page collection replaces the single home page | Accepted | 2026-09-18 |
+| [ADR-0017](ADR-0017-page-scoped-editable-field-paths.md) | A field path carries its page id, and the home page keeps its old paths | Accepted | 2026-09-18 |
