@@ -4,11 +4,9 @@ import {
   isSiteDefinition,
   serializeRichTextDocument,
   serializeRichTextToMarkdown,
-  type ProofSection,
   type BlogPostId,
   type SeoMetadata,
   type SerializedRichTextDocument,
-  type ServicesSection,
   type SiteDefinition,
 } from "./index";
 import {
@@ -176,6 +174,24 @@ function fieldBinding({
     ...(validate === undefined ? {} : { validate }),
     write,
   };
+}
+
+/**
+ * One section of one page inside a mutable draft, ready to write to.
+ *
+ * A write reaches the section by position, because the draft is a copy of the
+ * definition the field list was read from and holds the same pages in the same
+ * order.
+ */
+function draftPageSection(
+  draft: MutableSiteDefinition,
+  pageIndex: number,
+  sectionIndex: number,
+): Record<string, any> {
+  return draft.pages[pageIndex]!.sections[sectionIndex] as unknown as Record<
+    string,
+    any
+  >;
 }
 
 /**
@@ -382,9 +398,9 @@ function editableFieldBindings(
    */
   const homeIndex = homePageIndex(definition);
   const pagesInFieldOrder = [
-    { page: definition.pages[homeIndex]!, index: homeIndex },
-    ...definition.pages.flatMap((page, index) =>
-      index === homeIndex ? [] : [{ page, index }],
+    { page: definition.pages[homeIndex]!, pageIndex: homeIndex },
+    ...definition.pages.flatMap((page, pageIndex) =>
+      pageIndex === homeIndex ? [] : [{ page, pageIndex }],
     ),
   ];
   const fields: EditableFieldBinding[] = [
@@ -435,7 +451,7 @@ function editableFieldBindings(
     }),
     // A page's SEO paths already start with its page id, on the home page as
     // well as on every other page, so one rule covers them all.
-    ...pagesInFieldOrder.flatMap(({ page, index }) =>
+    ...pagesInFieldOrder.flatMap(({ page, pageIndex }) =>
       seoFieldBindings({
         pathPrefix: page.id,
         labelPrefix: "Page",
@@ -444,7 +460,7 @@ function editableFieldBindings(
         seo: page.seo,
         titleHint: seoFieldHints.page.title,
         descriptionHint: seoFieldHints.page.description,
-        select: (draft) => draft.pages[index]!.seo,
+        select: (draft) => draft.pages[pageIndex]!.seo,
       }),
     ),
   ];
@@ -468,10 +484,10 @@ function editableFieldBindings(
    * Every content section of every page, home page first, each one carrying
    * the page it belongs to and that page's position in `pages`.
    */
-  const pageSections = pagesInFieldOrder.flatMap(({ page, index }) =>
+  const pageSections = pagesInFieldOrder.flatMap(({ page, pageIndex }) =>
     page.sections.map((section, sectionIndex) => ({
       page,
-      pageIndex: index,
+      pageIndex,
       section,
       sectionIndex,
     })),
@@ -493,10 +509,7 @@ function editableFieldBindings(
         multiline: false,
         values: variant.values,
         write: (draft, value) => {
-          const draftSection = draft.pages[pageIndex]!.sections[
-            sectionIndex
-          ] as unknown as Record<string, unknown>;
-          draftSection.variant = value;
+          draftPageSection(draft, pageIndex, sectionIndex).variant = value;
         },
       }),
     );
@@ -516,10 +529,8 @@ function editableFieldBindings(
           value,
           multiline,
           write: (draft, nextValue) => {
-            const draftSection = draft.pages[pageIndex]!.sections[
-              sectionIndex
-            ] as unknown as Record<string, unknown>;
-            draftSection[property] = nextValue;
+            draftPageSection(draft, pageIndex, sectionIndex)[property] =
+              nextValue;
           },
         }),
       );
@@ -540,15 +551,7 @@ function editableFieldBindings(
           value,
           multiline: false,
           write: (draft, nextValue) => {
-            write(
-              draft.pages[pageIndex]!.sections[
-                sectionIndex
-              ] as unknown as Record<
-                string,
-                any
-              >,
-              nextValue,
-            );
+            write(draftPageSection(draft, pageIndex, sectionIndex), nextValue);
           },
         }),
       );
@@ -601,15 +604,12 @@ function editableFieldBindings(
                 value: item[property],
                 multiline,
                 write: (draft, nextValue) => {
-                  const draftSection = draft.pages[pageIndex]!.sections[
-                    sectionIndex
-                  ] as ServicesSection;
-                  (
-                    draftSection.items[itemIndex] as unknown as Record<
-                      string,
-                      string
-                    >
-                  )[property] = nextValue;
+                  const items = draftPageSection(
+                    draft,
+                    pageIndex,
+                    sectionIndex,
+                  ).items as Record<string, string>[];
+                  items[itemIndex]![property] = nextValue;
                 },
               }),
             );
@@ -638,15 +638,12 @@ function editableFieldBindings(
                 value: metric[property],
                 multiline: false,
                 write: (draft, nextValue) => {
-                  const draftSection = draft.pages[pageIndex]!.sections[
-                    sectionIndex
-                  ] as ProofSection;
-                  (
-                    draftSection.metrics[metricIndex] as unknown as Record<
-                      string,
-                      string
-                    >
-                  )[property] = nextValue;
+                  const metrics = draftPageSection(
+                    draft,
+                    pageIndex,
+                    sectionIndex,
+                  ).metrics as Record<string, string>[];
+                  metrics[metricIndex]![property] = nextValue;
                 },
               }),
             );
@@ -667,10 +664,8 @@ function editableFieldBindings(
             multiline: true,
             format: "richText",
             write: (draft, value) => {
-              const draftSection = draft.pages[pageIndex]!.sections[
-                sectionIndex
-              ] as unknown as Record<string, unknown>;
-              draftSection.body = parseSerializedRichTextDocument(value);
+              draftPageSection(draft, pageIndex, sectionIndex).body =
+                parseSerializedRichTextDocument(value);
             },
           }),
         );

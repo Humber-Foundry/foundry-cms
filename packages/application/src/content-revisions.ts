@@ -183,6 +183,10 @@ type BlogPostAggregateState = Readonly<{
  * editable field of its page, so its field path carries the page id on every
  * page below the home page. Reading the style through the page keeps two pages
  * that hold sections with the same id apart.
+ *
+ * This is exported because it is the seam ticket #158 uses when the editor
+ * composes a page other than the home page. Until then the one caller inside
+ * this module passes the home page.
  */
 export function compositionWithAuthoritativeVariants(
   page: SitePage,

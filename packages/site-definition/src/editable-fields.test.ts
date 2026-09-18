@@ -4,6 +4,7 @@ import {
   DuplicateEditableSiteFieldPathError,
   applySiteDefinitionEdits,
   homePage,
+  homePageSlug,
   isSiteDefinition,
   listEditableSiteFields,
   pageFieldPath,
@@ -25,10 +26,8 @@ import {
  * The copy is a deep copy, because a stored definition is read from JSON and
  * so never shares one object between two pages.
  */
-function withSecondPage(
-  definition: SiteDefinition = referenceSiteDefinition,
-  page: Partial<SitePage> = {},
-): SiteDefinition {
+function withSecondPage(page: Partial<SitePage> = {}): SiteDefinition {
+  const definition = referenceSiteDefinition;
   const home = homePage(definition);
   return {
     ...definition,
@@ -104,7 +103,7 @@ describe("published rich-text file paths", () => {
       withSecondPage(),
     );
     const after = serializeSiteDefinitionRichTextForPublication(
-      withSecondPage(referenceSiteDefinition, { slug: "company" }),
+      withSecondPage({ slug: "company" }),
     );
 
     expect(after.map(({ filePath }) => filePath)).toStrictEqual(
@@ -158,8 +157,28 @@ describe("page-scoped editable field paths", () => {
 
   it("builds a second page's paths from its page id and not from its slug", () => {
     expect(
-      pathsOfPage(withSecondPage(referenceSiteDefinition, { slug: "company" }), "page_about"),
+      pathsOfPage(withSecondPage({ slug: "company" }), "page_about"),
     ).toStrictEqual(pathsOfPage(withSecondPage(), "page_about"));
+  });
+
+  it("moves both pages' paths when another page takes the root slug", () => {
+    // A page is the home page because it holds the root slug. Moving the root
+    // slug therefore moves which page has unprefixed paths. This test records
+    // that consequence. ADR-0017 accepts it, and ticket #159 owns the warning
+    // an owner must see before a slug change on a published page.
+    const base = withSecondPage();
+    const swapped: SiteDefinition = {
+      ...base,
+      pages: [
+        { ...base.pages[0]!, slug: "welcome" },
+        { ...base.pages[1]!, slug: homePageSlug },
+      ],
+    };
+
+    expect(pathsOfPage(swapped, "page_about")).toContain("section_hero.title");
+    expect(pathsOfPage(swapped, "page_home")).toContain(
+      "page_home.section_hero.title",
+    );
   });
 
   it("names the page every page field belongs to", () => {
@@ -187,7 +206,7 @@ describe("the duplicate field path guard", () => {
 
   it("refuses a repeated section id inside a second page", () => {
     const home = homePage(referenceSiteDefinition);
-    const definition = withSecondPage(referenceSiteDefinition, {
+    const definition = withSecondPage({
       sections: [home.sections[0]!, home.sections[0]!],
     });
 
