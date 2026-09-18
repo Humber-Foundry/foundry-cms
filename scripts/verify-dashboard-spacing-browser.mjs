@@ -275,6 +275,7 @@ const destinations = [
   ["Newsletter", "/dash/campaigns"],
   ["Visitors", "/dash/analytics"],
   ["Settings", "/dash/settings"],
+  ["Connect an agent", "/dash/settings/connect-agent"],
 ];
 
 /**
