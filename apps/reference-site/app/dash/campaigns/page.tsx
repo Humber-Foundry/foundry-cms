@@ -26,10 +26,12 @@ export default async function DashboardCampaignsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const access = await requireAuthorizedDashboardAccess();
-  const { workspace } = await readWorkspaceSearchParams(searchParams);
+  const { workspace, staleRecovery } =
+    await readWorkspaceSearchParams(searchParams);
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     "/dash/campaigns",
+    staleRecovery,
   );
   const definition = await loadPublishedDefinition();
   const mutationToken = await loadMutationToken();
@@ -39,16 +41,13 @@ export default async function DashboardCampaignsPage({
   ).application.queries.listCampaigns({ actor: access.identity });
 
   const { contentRevision } = dashboardWorkspace;
-  const postArtifacts =
-    contentRevision === undefined
-      ? []
-      : await createBlogPostArtifactFingerprints({
-          definition: contentRevision.definition,
-          inputs: {
-            ...contentRevision.inputs,
-            schemaVersion: contentRevision.definition.schemaVersion,
-          },
-        });
+  const postArtifacts = await createBlogPostArtifactFingerprints({
+    definition: contentRevision.definition,
+    inputs: {
+      ...contentRevision.inputs,
+      schemaVersion: contentRevision.definition.schemaVersion,
+    },
+  });
 
   return (
     <main className="dashboard-main" id="main">
@@ -70,7 +69,7 @@ export default async function DashboardCampaignsPage({
         // absolute site photos, never a bare path the owner could not send.
         siteImages={siteStaticImageTiles(
           definition,
-          contentRevision?.definition,
+          contentRevision.definition,
         ).filter((image) => image.src.startsWith("https://"))}
         initialCampaigns={campaigns}
         // The steps say whose step each one is. The server still decides every
