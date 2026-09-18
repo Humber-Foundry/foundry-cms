@@ -234,6 +234,14 @@ mean a test was delivered. While delivery is not connected, a campaign can
 still be written, saved and cancelled, and every send and test operation is
 refused.
 
+**Publishing readiness** — Whether this installation holds every setting site
+publishing needs (the GitHub App identity, the repository it writes to, the
+public origin, the Cloudflare deployment, and the publication signing
+secret), and the names of the settings it still lacks. It reports setting
+names only, never a setting value, a token or a key. Connected means the
+settings are installed; it does not mean GitHub or Cloudflare were reached —
+this check makes no network call. See ADR-0021.
+
 **Test delivery** — A real provider test-send operation for one exact campaign
 fingerprint and explicit test recipients. An on-screen preview is not a test
 delivery.

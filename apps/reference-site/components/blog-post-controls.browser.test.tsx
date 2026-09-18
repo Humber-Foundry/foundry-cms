@@ -135,6 +135,18 @@ describe("blog post controls browser acceptance", () => {
       "fetch",
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        // The Blog list's connection-status note reads publishing readiness
+        // on its own, on mount, separate from this test's steps. It is not
+        // one of the requests this test is about.
+        if (url === "/api/foundry-cms/publishing-readiness") {
+          return Response.json({
+            publishing: {
+              state: "connected",
+              missingSettings: [],
+              setupGuide: "docs/operations/github-publishing-readiness.md",
+            },
+          });
+        }
         submitted.push({ url, body: String(init?.body) });
         if (url === "/api/foundry-cms/blog-operations") {
           return Response.json({
@@ -216,7 +228,20 @@ describe("blog post controls browser acceptance", () => {
     vi.stubGlobal(
       "fetch",
       async (input: RequestInfo | URL, init?: RequestInit) => {
-        submitted.push({ url: String(input), body: init?.body });
+        const url = String(input);
+        // The Blog list's connection-status note reads publishing readiness
+        // on its own, on mount, separate from this test's steps. It is not
+        // one of the requests this test is about.
+        if (url === "/api/foundry-cms/publishing-readiness") {
+          return Response.json({
+            publishing: {
+              state: "connected",
+              missingSettings: [],
+              setupGuide: "docs/operations/github-publishing-readiness.md",
+            },
+          });
+        }
+        submitted.push({ url, body: init?.body });
         return Response.json(
           { error: "human_authority_required" },
           { status: 422 },
@@ -257,6 +282,17 @@ describe("blog post controls browser acceptance", () => {
       "fetch",
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        // The Blog list's connection-status note reads publishing readiness
+        // on its own, on mount, separate from this test's numbered steps.
+        if (url === "/api/foundry-cms/publishing-readiness") {
+          return Response.json({
+            publishing: {
+              state: "connected",
+              missingSettings: [],
+              setupGuide: "docs/operations/github-publishing-readiness.md",
+            },
+          });
+        }
         submitted.push({ url, body: String(init?.body) });
         call += 1;
         if (call === 1) {
