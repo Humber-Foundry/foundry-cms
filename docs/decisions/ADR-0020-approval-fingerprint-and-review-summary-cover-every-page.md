@@ -71,15 +71,23 @@ describes a draft to a person. Its result is `ContentChangeSummary`:
 - `publicEffect` — what a visitor sees after publication, ending with the
   sentence that says reading the review neither approves nor publishes.
 
-A page is named by its title and its web address, never by its page id. Three
+A page is named by its title and its web address, never by its page id. Some
 things a visitor sees are not editable fields, so the summary compares them
-directly: a page name, a web address and the order of a page's sections. They
-are reported as `Page name`, `Web address` and `Section order`.
+directly: a page name, a web address, the sections of a page, the order of
+those sections and the order of the pages. They read as `Page name`,
+`Web address`, `Hero removed`, `Section added`, `Section order` and
+`Page order`. A section takes the name the editor gives it; a section the
+installation registered has no owner-facing name, so it reads as `Section`.
+Section order is reported only when the sections that stayed are in a new
+order, so a section swapped for another is not called a reorder.
 
 The summary reads both definitions in both directions. A field the draft no
 longer holds is reported as gone, so a page whose only change is a removed
-section still names that page. A removed section takes its card heading, so one
-gone section is one line and not a list of every field it used to hold.
+navigation item or a removed list item still names that page. The fields of a
+gone section are left out, because that section already has its own line.
+
+A blog post is not a page, so posts have their own heading. A post that came or
+went reads as one line under `Blog`, by its post title.
 
 ## Consequences
 

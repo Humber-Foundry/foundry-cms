@@ -209,6 +209,69 @@ describe("content change summary", () => {
     expect(summary.publicEffect).toContain("The page at /about changes.");
   });
 
+  it("names an added section, including one the installation registered", () => {
+    const draft: SiteDefinition = {
+      ...twoPages,
+      pages: twoPages.pages.map((page) =>
+        page.id !== "page_about"
+          ? page
+          : {
+              ...page,
+              sections: [
+                ...page.sections,
+                {
+                  id: "section_about_story",
+                  type: "registered" as const,
+                  component: "story",
+                  props: {},
+                },
+              ],
+            },
+      ),
+    };
+    const summary = createContentChangeSummary({ base: twoPages, draft });
+
+    expect(summary.changedDocuments).toEqual(["About us — Section added"]);
+    expect(summary.designChanges).toEqual([]);
+  });
+
+  it("does not call a swapped section a new section order", () => {
+    const draft: SiteDefinition = {
+      ...twoPages,
+      pages: twoPages.pages.map((page) =>
+        page.id !== "page_about"
+          ? page
+          : {
+              ...page,
+              sections: [
+                {
+                  id: "section_about_story",
+                  type: "registered" as const,
+                  component: "story",
+                  props: {},
+                },
+              ],
+            },
+      ),
+    };
+    const summary = createContentChangeSummary({ base: twoPages, draft });
+
+    expect(summary.designChanges).toEqual([]);
+    expect(summary.changedDocuments).toEqual([
+      "About us — Hero removed, Section added",
+    ]);
+  });
+
+  it("names a new page order", () => {
+    const draft: SiteDefinition = {
+      ...twoPages,
+      pages: [...twoPages.pages].reverse(),
+    };
+    const summary = createContentChangeSummary({ base: twoPages, draft });
+
+    expect(summary.changedDocuments).toEqual(["Site settings — Page order"]);
+  });
+
   it("names a page whose sections only changed order", () => {
     const home = homePage(twoPages);
     const draft: SiteDefinition = {
@@ -266,6 +329,19 @@ describe("content change summary", () => {
     expect(summary.changedDocuments.join(" ")).toContain("Blog — ");
     expect(summary.changedDocuments.join(" ")).not.toContain("Site settings");
     expect(summary.publicEffect).toContain("The blog changes.");
+
+    const withoutPost: SiteDefinition = {
+      ...withPost,
+      blog: { ...withPost.blog!, posts: [] },
+    };
+    expect(
+      createContentChangeSummary({ base: withPost, draft: withoutPost })
+        .changedDocuments,
+    ).toEqual(["Blog — First post removed"]);
+    expect(
+      createContentChangeSummary({ base: withoutPost, draft: withPost })
+        .changedDocuments,
+    ).toEqual(["Blog — First post added"]);
   });
 
   it("covers a change, a new page and a removed page together", () => {
