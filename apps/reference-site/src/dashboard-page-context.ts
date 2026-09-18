@@ -1,11 +1,12 @@
 import "server-only";
 
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
 import {
   AccessDeniedError,
+  type ContentActorId,
   type ContentRevision,
   type ContentWorkspaceId,
   ContentRevisionConfigurationError,
@@ -20,9 +21,10 @@ import { HumanAccessConfigurationError } from "@/src/human-access-configuration"
 import { loadHumanAccessRequestContext } from "@/src/human-access-runtime";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
 import {
-  contentWorkspaceIdForActor,
   latestContentWorkspaceIdForActor,
   loadContentRevisionApplication,
+  openDefaultContentWorkspace,
+  openDefaultWorkspaceIdempotencyKey,
   requireExistingContentWorkspaceAccess,
 } from "@/src/content-revision-runtime";
 import { revisionPreviewGatewayUrl } from "@/src/content-revision-links";
@@ -75,12 +77,12 @@ export const loadMutationToken = cache(async (): Promise<string> => {
 });
 
 export type DashboardWorkspace = Readonly<{
-  /** The workspace the owner is editing, whether or not it holds a revision. */
+  /** The workspace the owner is editing. It always exists. */
   workspaceId: ContentWorkspaceId;
-  /** Absent until the owner starts a draft workspace. */
-  contentRevision?: ContentRevision;
-  previewUrl?: string;
-  contentStale?: boolean;
+  /** The workspace's current revision. A workspace always has one. */
+  contentRevision: ContentRevision;
+  previewUrl: string;
+  contentStale: boolean;
   /**
    * Set when the draft was written against an older site schema. The owner has
    * to start a fresh workspace; these edits are what can be carried across.
@@ -91,39 +93,116 @@ export type DashboardWorkspace = Readonly<{
 }>;
 
 /**
+ * Pick the workspace an editing route should open, and make sure it exists.
+ *
+ * A workspace id in `?workspace=` is only used when the person can still open
+ * it. A stale or shared link therefore falls back to their own workspace
+ * instead of a 404. When they have no workspace at all, this creates their
+ * default one, so no destination has to ask a site owner to start a draft.
+ */
+async function resolveDashboardWorkspaceId(
+  actorId: ContentActorId,
+  requestedWorkspace?: string,
+): Promise<ContentWorkspaceId> {
+  // A malformed id is a bad link, not a failure worth reporting. Validating it
+  // outside the access check keeps a real fault inside that check visible.
+  let requested: ContentWorkspaceId | undefined;
+  if (requestedWorkspace !== undefined) {
+    try {
+      requested = createContentWorkspaceId(requestedWorkspace);
+    } catch {
+      requested = undefined;
+    }
+  }
+
+  if (requested !== undefined) {
+    try {
+      await requireExistingContentWorkspaceAccess(requested, actorId);
+      return requested;
+    } catch (error) {
+      if (!(error instanceof ContentWorkspaceAccessError)) {
+        throw error;
+      }
+    }
+  }
+
+  const latest = await latestContentWorkspaceIdForActor(actorId);
+  if (latest !== null) {
+    return latest;
+  }
+  return (
+    await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+    )
+  ).workspaceId;
+}
+
+/** The preserved draft a recovery screen offers to replace. */
+export function preservedRevisionOf(contentRevision: ContentRevision) {
+  return {
+    workspaceId: contentRevision.workspaceId,
+    revision: contentRevision.revision,
+    schemaVersion: contentRevision.inputs.schemaVersion,
+  };
+}
+
+/**
+ * Why a draft can no longer be saved, which decides what the recovery screen
+ * promises. Only an older-schema draft carries edits out of the stored draft,
+ * so the two cases must never be reported as one.
+ */
+export function recoveryReasonOf(
+  workspace: DashboardWorkspace,
+): "older-schema" | "site-updated" {
+  return workspace.schemaRecovery === undefined
+    ? "site-updated"
+    : "older-schema";
+}
+
+/**
  * Resolve the workspace and its current revision for an editing route.
  *
- * `requestedWorkspace` comes from the `?workspace=` search parameter. When it
- * is absent the owner gets their most recent workspace, and a missing workspace
- * is reported as "no draft yet" rather than a 404 — that is the state the
- * "Start a draft" call to action exists for.
+ * `requestedWorkspace` comes from the `?workspace=` search parameter. The
+ * returned workspace always exists and always holds a revision, so a
+ * destination never has to render a "start a draft" step.
  */
 export async function loadDashboardWorkspace(
-  requestedWorkspace?: string,
-  routePath = "/dash",
+  requestedWorkspace: string | undefined,
+  routePath: string,
+  // Required, though it is often absent: a destination that forgot it would
+  // strand a person's preserved edits when the redirect below fires.
+  staleRecovery: Readonly<{ id: string; sourceWorkspaceId: string }> | undefined,
 ): Promise<DashboardWorkspace> {
   const access = await requireAuthorizedDashboardAccess();
   const definition = await loadPublishedDefinition();
   const actorId = createContentActorId(access.membership.id);
-  const hasRequestedWorkspace = requestedWorkspace !== undefined;
-
-  let workspaceId: ContentWorkspaceId;
-  try {
-    workspaceId =
-      requestedWorkspace === undefined
-        ? ((await latestContentWorkspaceIdForActor(actorId)) ??
-          (await contentWorkspaceIdForActor(actorId)))
-        : createContentWorkspaceId(requestedWorkspace);
-  } catch {
-    notFound();
-  }
-
-  const activeWorkspaceUrl = `${routePath}?workspace=${encodeURIComponent(
-    workspaceId,
-  )}`;
 
   try {
-    await requireExistingContentWorkspaceAccess(workspaceId, actorId);
+    const workspaceId = await resolveDashboardWorkspaceId(
+      actorId,
+      requestedWorkspace,
+    );
+    const activeWorkspaceUrl = `${routePath}?workspace=${encodeURIComponent(
+      workspaceId,
+    )}`;
+
+    // The URL asked for a workspace this person cannot open. Send them to the
+    // one they did get, so the address bar and every sidebar link stop
+    // carrying the dead id. A recovery in progress travels with them, or its
+    // preserved edits would be stranded in the browser.
+    if (
+      requestedWorkspace !== undefined &&
+      requestedWorkspace !== workspaceId
+    ) {
+      const destination = new URLSearchParams({ workspace: workspaceId });
+      if (staleRecovery !== undefined) {
+        destination.set("recovery", staleRecovery.id);
+        destination.set("recoverFrom", staleRecovery.sourceWorkspaceId);
+      }
+      redirect(`${routePath}?${destination.toString()}`);
+    }
+
     const contentApplication = await loadContentRevisionApplication(
       workspaceId,
       actorId,
@@ -156,12 +235,8 @@ export async function loadDashboardWorkspace(
       activeWorkspaceUrl,
     };
   } catch (error) {
-    if (
-      error instanceof ContentWorkspaceAccessError &&
-      !hasRequestedWorkspace
-    ) {
-      return { workspaceId, activeWorkspaceUrl };
-    }
+    // Either error here is an installation fault, not a person without a
+    // draft: every path above either opens a workspace or creates one.
     if (
       error instanceof ContentWorkspaceAccessError ||
       error instanceof ContentRevisionConfigurationError
@@ -176,6 +251,11 @@ export async function loadDashboardWorkspace(
  * Read `?workspace=` and `?recovery=`/`?recoverFrom=` from a route's search
  * parameters. The recovery pair is only honoured when both are present and the
  * member can still open the workspace the edits came from.
+ *
+ * A pair that cannot be honoured is dropped rather than reported as a missing
+ * page. Recovery edits are held in the person's own browser, so a stale or
+ * shared link carries a pointer to edits this browser does not have; the
+ * destination still has a workspace to open.
  */
 export async function readWorkspaceSearchParams(
   searchParams: Promise<Record<string, string | string[] | undefined>>,
@@ -196,28 +276,36 @@ export async function readWorkspaceSearchParams(
     return { workspace };
   }
 
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      requested.recovery,
+    )
+  ) {
+    return { workspace };
+  }
+
+  // The source id is checked on its own, so a real fault inside the access
+  // check below stays visible instead of looking like a bad link.
+  let sourceWorkspaceId: ContentWorkspaceId;
+  try {
+    sourceWorkspaceId = createContentWorkspaceId(requested.recoverFrom);
+  } catch {
+    return { workspace };
+  }
+
   const access = await requireAuthorizedDashboardAccess();
   const actorId = createContentActorId(access.membership.id);
   try {
-    if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
-        requested.recovery,
-      )
-    ) {
-      notFound();
-    }
-    const sourceWorkspaceId = createContentWorkspaceId(requested.recoverFrom);
     await requireExistingContentWorkspaceAccess(sourceWorkspaceId, actorId);
     return {
       workspace,
       staleRecovery: { id: requested.recovery, sourceWorkspaceId },
     };
   } catch (error) {
-    if (
-      error instanceof ContentWorkspaceAccessError ||
-      error instanceof ContentRevisionConfigurationError ||
-      error instanceof TypeError
-    ) {
+    if (error instanceof ContentWorkspaceAccessError) {
+      return { workspace };
+    }
+    if (error instanceof ContentRevisionConfigurationError) {
       notFound();
     }
     throw error;

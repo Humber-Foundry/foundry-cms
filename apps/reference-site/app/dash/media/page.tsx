@@ -24,20 +24,20 @@ export default async function DashboardMediaPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { workspace } = await readWorkspaceSearchParams(searchParams);
+  const { workspace, staleRecovery } =
+    await readWorkspaceSearchParams(searchParams);
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     "/dash/media",
+    staleRecovery,
   );
   const mutationToken = await loadMutationToken();
   const publishedDefinition = await loadPublishedDefinition();
-  const draftDefinition = dashboardWorkspace.contentRevision?.definition;
+  const draftDefinition = dashboardWorkspace.contentRevision.definition;
 
   const occurrences = mergeMediaOccurrenceState(
     [],
-    draftDefinition === undefined
-      ? []
-      : homePage(draftDefinition).media ?? [],
+    homePage(draftDefinition).media ?? [],
   );
   // Every photo the site actually shows — built-in images and the photos placed
   // through the published site or the current draft — so the gallery is "all

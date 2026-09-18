@@ -5,15 +5,20 @@ vi.mock("server-only", () => ({}));
 import {
   ContentRevisionConfigurationError,
   createContentActorId,
+  isValidContentMutationIdempotencyKey,
 } from "@humber-foundry/application";
 
+import type { HumanAccessEnvironment } from "./human-access-configuration";
 import {
   contentWorkspaceIdForActor,
   contentWorkspaceIdForMutation,
   gitContentProductionBase,
   isGitObjectId,
+  openDefaultContentWorkspace,
+  openDefaultWorkspaceIdempotencyKey,
   resolveContentReleaseInputs,
 } from "./content-revision-runtime";
+import { useMigratedTestDatabase } from "./test-support/migrated-test-database";
 
 describe("content revision workspace routing", () => {
   it("gives each actor a stable independent workspace", async () => {
@@ -103,5 +108,173 @@ describe("production base validation", () => {
     expect(() => resolveContentReleaseInputs({}, "")).toThrow(
       ContentRevisionConfigurationError,
     );
+  });
+});
+
+describe("opening the default draft workspace", () => {
+  const actorId = createContentActorId("membership-owner");
+  const { database } = useMigratedTestDatabase(
+    [
+      "0005_content_revisions.sql",
+      "0007_content_publication.sql",
+      "0008_media_assets.sql",
+      "0011_blog_post_transition_audit.sql",
+      "0013_blog_post_verified_state.sql",
+      "0014_blog_post_artifact_fingerprints.sql",
+      "0015_blog_post_render_artifacts.sql",
+      "0022_blog_post_scheduling_archive.sql",
+    ],
+    { compatibilityDate: "2026-07-26" },
+  );
+
+  function environment(): HumanAccessEnvironment {
+    return {
+      FOUNDRY_DB: database,
+      FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+    } as unknown as HumanAccessEnvironment;
+  }
+
+  async function countOf(statement: string, workspaceId: string) {
+    const row = await database
+      .prepare(statement)
+      .bind(workspaceId)
+      .first<{ count: number }>();
+    return row?.count ?? 0;
+  }
+
+  const workspaceRows = (workspaceId: string) =>
+    countOf(
+      "SELECT COUNT(*) AS count FROM content_workspaces WHERE workspace_id = ?1",
+      workspaceId,
+    );
+  const revisionRows = (workspaceId: string) =>
+    countOf(
+      "SELECT COUNT(*) AS count FROM content_revisions WHERE workspace_id = ?1",
+      workspaceId,
+    );
+
+  it("creates the actor's own default workspace at revision 0", async () => {
+    const opened = await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+
+    expect(opened.workspaceId).toBe(await contentWorkspaceIdForActor(actorId));
+    expect(opened.revision.revision).toBe(0);
+    expect(opened.revision.workspaceId).toBe(opened.workspaceId);
+    await expect(workspaceRows(opened.workspaceId)).resolves.toBe(1);
+    await expect(revisionRows(opened.workspaceId)).resolves.toBe(1);
+  });
+
+  it("writes no revision audit event for the published base revision", async () => {
+    const opened = await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+
+    // Revision 0 is a copy of the published site, not somebody's edit. The
+    // explicit `create_default_workspace` API operation calls this same
+    // function, so both ways of opening the workspace leave the same rows.
+    await expect(
+      countOf(
+        "SELECT COUNT(*) AS count FROM content_revision_audit_events WHERE workspace_id = ?1",
+        opened.workspaceId,
+      ),
+    ).resolves.toBe(0);
+  });
+
+  it("returns the same single workspace when two first requests arrive together", async () => {
+    const [first, second] = await Promise.all([
+      openDefaultContentWorkspace(
+        actorId,
+        "dashboard-open-default-request-a",
+        environment(),
+      ),
+      openDefaultContentWorkspace(
+        actorId,
+        "dashboard-open-default-request-b",
+        environment(),
+      ),
+    ]);
+
+    expect(second.workspaceId).toBe(first.workspaceId);
+    expect(first.revision.revision).toBe(0);
+    expect(second.revision.revision).toBe(0);
+    expect(second.revision.inputs.contentHash).toBe(
+      first.revision.inputs.contentHash,
+    );
+    await expect(workspaceRows(first.workspaceId)).resolves.toBe(1);
+    await expect(revisionRows(first.workspaceId)).resolves.toBe(1);
+  });
+
+  it("leaves the blog tables alone for a site with no posts", async () => {
+    // ADR-0005 lists every table this write touches. This installation
+    // publishes no posts, so opening a workspace must add no blog rows at
+    // all. It does not exercise the guard that stops a published post being
+    // advanced; that guard lives in the store's SQL and is stated in
+    // ADR-0005, not proved here.
+    const opened = await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+    await openDefaultContentWorkspace(
+      createContentActorId("membership-editor"),
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+
+    for (const table of [
+      "blog_posts",
+      "blog_post_revisions",
+      "blog_post_render_artifacts",
+    ]) {
+      const row = await database
+        .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
+        .first<{ count: number }>();
+      expect(row?.count ?? 0).toBe(0);
+    }
+    await expect(workspaceRows(opened.workspaceId)).resolves.toBe(1);
+  });
+
+  it("reopens the existing workspace instead of creating a second one", async () => {
+    const first = await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+    const reopened = await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+
+    expect(reopened.workspaceId).toBe(first.workspaceId);
+    expect(reopened.revision.revision).toBe(0);
+    await expect(workspaceRows(first.workspaceId)).resolves.toBe(1);
+    await expect(revisionRows(first.workspaceId)).resolves.toBe(1);
+  });
+
+  it("gives each actor a separate workspace", async () => {
+    const owner = await openDefaultContentWorkspace(
+      actorId,
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+    const editor = await openDefaultContentWorkspace(
+      createContentActorId("membership-editor"),
+      openDefaultWorkspaceIdempotencyKey,
+      environment(),
+    );
+
+    expect(editor.workspaceId).not.toBe(owner.workspaceId);
+  });
+
+  it("uses an idempotency key the application operation accepts", () => {
+    expect(
+      isValidContentMutationIdempotencyKey(openDefaultWorkspaceIdempotencyKey),
+    ).toBe(true);
   });
 });
