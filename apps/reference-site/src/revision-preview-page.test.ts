@@ -150,9 +150,12 @@ describe("revision preview page", () => {
     const review = {
       previewId: "preview-mcp-55",
       actorId: "agent-55",
-      changedDocuments: ["site_foundry.name"],
+      pages: [],
+      changedDocuments: ["Site settings — Site name"],
       designChanges: [],
-      publicEffect: "No public effect. This review does not approve or publish.",
+      publicEffect:
+        "Settings that every page shares change. " +
+        "This review does not approve or publish anything.",
     };
     mocks.loadIdentity.mockResolvedValue({ identity });
     mocks.authorize.mockResolvedValue({

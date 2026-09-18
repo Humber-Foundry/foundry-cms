@@ -3,12 +3,10 @@ import "server-only";
 import {
   createCanonicalPreviewArtifactHash,
   createContentActorId,
+  createContentChangeSummary,
   createContentWorkspaceId,
 } from "@humber-foundry/application";
-import {
-  listEditableSiteFields,
-  type SiteId,
-} from "@humber-foundry/site-definition";
+import type { SiteId } from "@humber-foundry/site-definition";
 
 import { loadContentRevisionApplication } from "./content-revision-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
@@ -52,27 +50,16 @@ export async function loadMcpPreviewForHuman(input: {
   }
   const base = await application.queries.getRevision(0);
   if (base === null) return null;
-  const baseFields = new Map(
-    listEditableSiteFields(base.definition).map((field) => [
-      field.path,
-      JSON.stringify(field.value),
-    ]),
-  );
-  const changed = listEditableSiteFields(revision.definition).filter(
-    (field) => baseFields.get(field.path) !== JSON.stringify(field.value),
-  );
+  const summary = createContentChangeSummary({
+    base: base.definition,
+    draft: revision.definition,
+  });
   return {
     revision,
     review: {
       previewId: input.previewId,
       actorId: row.actor_id,
-      changedDocuments: changed
-        .filter(({ group }) => group !== "Design")
-        .map(({ path }) => path),
-      designChanges: changed
-        .filter(({ group }) => group === "Design")
-        .map(({ path }) => path),
-      publicEffect: "No public effect. This review does not approve or publish.",
+      ...summary,
     },
   };
 }

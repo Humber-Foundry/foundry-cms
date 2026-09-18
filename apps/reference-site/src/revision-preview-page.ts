@@ -11,6 +11,7 @@ import {
   ContentWorkspaceAccessError,
   createContentActorId,
   createContentWorkspaceId,
+  type ContentChangeSummary,
   type ContentRevision,
 } from "@humber-foundry/application";
 
@@ -36,13 +37,11 @@ export type RevisionPreviewPageProps = {
 };
 
 type RevisionPreview = ContentRevision & {
-  mcpReview?: Readonly<{
-    previewId: string;
-    actorId: string;
-    changedDocuments: ReadonlyArray<string>;
-    designChanges: ReadonlyArray<string>;
-    publicEffect: string;
-  }>;
+  mcpReview?: ContentChangeSummary &
+    Readonly<{
+      previewId: string;
+      actorId: string;
+    }>;
 };
 
 const loadSelectedRevision = cache(async function loadSelectedRevision(
