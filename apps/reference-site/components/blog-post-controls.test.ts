@@ -337,7 +337,7 @@ describe("openArchiveWithdrawalPreview", () => {
 describe("confirmArchiveWithdrawal", () => {
   const withdrawal = { workspaceId: "workspace_withdrawal", revision: 3 };
 
-  it("never sends an approve request until it is called with an already-opened preview's withdrawal location", async () => {
+  it("confirms and continues using exactly the withdrawal location it is given, with no separate recover-access request", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ id: "approval-withdrawal-1" }))
