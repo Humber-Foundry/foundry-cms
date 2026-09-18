@@ -1500,9 +1500,18 @@ describe("blog post operations", () => {
 
     const archived = await store.listArchivedPosts("foundry-site");
     expect(archived).toHaveLength(1);
+    // This in-memory store has no post-content snapshot to read a title,
+    // slug or excerpt from — only the durable D1 store does (see
+    // d1-blog-post-operations-store.test.ts, "lists archived posts with
+    // their title..."). Asserting the exact blank values here, rather than
+    // a partial match, keeps that gap visible instead of silent.
     expect(archived[0]).toMatchObject({
       postId: "post-scheduled-release",
       collectionState: "archived",
+      title: "",
+      slug: "",
+      excerpt: "",
+      archivedAt: null,
     });
 
     const summary = await store.findOperationalSummary(

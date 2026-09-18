@@ -93,19 +93,15 @@ describe("blog schedule standing", () => {
     };
   }
 
-  it("says why scheduling is unavailable before a preview is approved", () => {
-    const standing = blogPostScheduleStanding(
-      summary({ workflowState: "editing" }),
-    );
-    expect(standing.canSchedule).toBe(false);
-    expect(standing.line).toMatch(/approved site preview/u);
-  });
-
-  it("allows scheduling once the post is approved with no active schedule", () => {
-    const standing = blogPostScheduleStanding(
-      summary({ workflowState: "approved" }),
-    );
-    expect(standing).toEqual({ line: null, canSchedule: true });
+  it("is eligible to schedule regardless of the cached workflow state", () => {
+    // Whether a preview has actually been inspected this session is a
+    // session fact the component tracks itself (`previewedRevision`), not
+    // something this summary-only function can see — it only rules out a
+    // post that is archived or already scheduled.
+    expect(blogPostScheduleStanding(summary({ workflowState: "editing" })))
+      .toEqual({ line: null, canSchedule: true });
+    expect(blogPostScheduleStanding(summary({ workflowState: "approved" })))
+      .toEqual({ line: null, canSchedule: true });
   });
 
   it("shows the active schedule's local time instead of the schedule control", () => {

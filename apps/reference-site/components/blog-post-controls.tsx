@@ -467,10 +467,11 @@ export function formatLocalScheduleTime(
 
 /**
  * The plain-words line under a post about its schedule, and whether the
- * "Schedule" control should show. A post needs an approved site preview
- * before it can be scheduled, and editing a post after approval clears both
- * the approval and any schedule — this says that rule up front rather than
- * just removing the control with no explanation.
+ * post is eligible to show a "Schedule" control at all (it is active and
+ * has no active schedule already). This does not decide whether scheduling
+ * needs a preview first — that depends on what preview this browser session
+ * has actually shown, which only the component (not this summary) knows.
+ * See `previewedRevision` in `BlogPostControls`.
  */
 export function blogPostScheduleStanding(
   summary: BlogPostOperationalSummary | undefined,
@@ -489,16 +490,7 @@ export function blogPostScheduleStanding(
       canSchedule: false,
     };
   }
-  if (summary.workflowState === "approved") {
-    return { line: null, canSchedule: true };
-  }
-  return {
-    line:
-      "Not scheduled. Scheduling needs an approved site preview, and " +
-      "editing this post after approval clears its schedule. Approve the " +
-      "preview on Pages, then schedule again.",
-    canSchedule: false,
-  };
+  return { line: null, canSchedule: true };
 }
 
 /**
@@ -522,11 +514,14 @@ export function blogPostExecutionFailureNote(
     : "First publication failed; it is not live yet.";
 }
 
+const scheduleNeedsApprovalMessage =
+  "Scheduling needs a preview of this exact version. Preview this post, " +
+  "then schedule it. Editing the post after that clears its schedule, so " +
+  "schedule it again after any later edit.";
+
 const blogOperationErrorMessages: Readonly<Record<string, string>> = {
-  approval_stale:
-    "The site preview changed since it was approved. Approve it again, then schedule.",
-  approval_required:
-    "Scheduling needs an approved site preview. Approve it on Pages, then schedule again.",
+  approval_stale: scheduleNeedsApprovalMessage,
+  approval_required: scheduleNeedsApprovalMessage,
   local_time_invalid: "That date and time could not be read. Try again.",
   civil_time_resolution_mismatch:
     "That local time does not exist or is ambiguous in this time zone. Pick a different time.",
@@ -566,6 +561,15 @@ export function BlogPostControls({
   const [writingNew, setWritingNew] = useState(posts.length === 0);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const verifiedPublicPosts = new Set(verifiedPublicPostIds);
+  // The exact content revision this browser session has opened a preview
+  // for. Scheduling asserts to the server that a human inspected the
+  // preview (the same claim the site-wide Publish button already makes —
+  // see `approveRevision` in content-editor.tsx) so that assertion has to
+  // be backed by an actual preview open in this session, not just a
+  // previously-approved state that might be stale or belong to someone else.
+  const [previewedRevision, setPreviewedRevision] = useState<number | null>(
+    null,
+  );
 
   async function send(body: unknown, operation: string) {
     const attempt =
@@ -631,6 +635,7 @@ export function BlogPostControls({
       ) {
         throw new Error("blog_preview_access_failed");
       }
+      setPreviewedRevision(revision.revision);
       const destination = blogPostPreviewUrl(result.body.previewUrl, post.slug);
       if (popup === null) {
         window.open(destination, "_blank", "noopener,noreferrer");
@@ -734,9 +739,7 @@ export function BlogPostControls({
     const approvalId = await approveCurrentRevisionForScheduling();
     setBusy(false);
     if (approvalId === null) {
-      setMessage(
-        "Scheduling needs an approved site preview. Approve it on Pages, then schedule again.",
-      );
+      setMessage(scheduleNeedsApprovalMessage);
       return;
     }
     const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -991,7 +994,8 @@ export function BlogPostControls({
                   Archive
                 </button>
               </div>
-              {scheduleStanding.canSchedule ? (
+              {scheduleStanding.canSchedule &&
+              previewedRevision === revision.revision ? (
                 <details className="composer-settings">
                   <summary>Schedule this post</summary>
                   <ScheduleForm
@@ -1000,6 +1004,10 @@ export function BlogPostControls({
                       void schedulePost(post, localValue)}
                   />
                 </details>
+              ) : null}
+              {scheduleStanding.canSchedule &&
+              previewedRevision !== revision.revision ? (
+                <p className="composer-hint">{scheduleNeedsApprovalMessage}</p>
               ) : null}
             </li>
           );
@@ -1027,6 +1035,12 @@ export function BlogPostControls({
                       : "Archived"}
                   </span>
                 </div>
+                {archived.collectionState === "archiving" ? (
+                  <p className="composer-hint">
+                    Archive pending; the post remains live until this
+                    finishes. This can take a few minutes.
+                  </p>
+                ) : null}
                 <div className="post-list-actions">
                   <button
                     type="button"
