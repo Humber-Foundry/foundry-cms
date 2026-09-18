@@ -89,6 +89,26 @@ has to be copied here too. This is a known duplication; a shared token file
 consumable by both the Worker and Next.js build was out of scope for this
 ticket.
 
+## Verification
+
+The connect screen is a Next.js route, so it is checked at 1440px and 390px
+by `scripts/verify-dashboard-spacing-browser.mjs` and
+`scripts/verify-dashboard-axe-browser.mjs`, both wired into `npm run
+test:browser`. The OAuth consent screen has no Next.js route — it is served
+directly by the Worker's fetch handler, which `npm run dev` does not mount —
+so there is no dev server a browser script can point at. Its exact markup is
+covered by `apps/reference-site/src/mcp-http-runtime.test.ts`, including the
+restyled permission list and every consent-POST failure branch now returning
+`text/html`. Its 1440px and 390px layouts were checked by hand: the exact HTML
+a passing test produced was rendered in a real headless browser at both
+widths and read as PNG screenshots. That manual check caught a real defect —
+wrapping each permission row's text in `<li>` as loose text and a `<code>`
+element made the browser split them into separate flex items, which wrapped
+into a broken column layout on a 390px screen — now fixed by wrapping each
+row's label text in one `<span>`. This manual check is not repeatable by an
+automated script without adding a TypeScript-in-Node loader this ticket does
+not otherwise need; that stays open work if the consent screen changes again.
+
 ## Consequences
 
 - An Owner can connect a client with nothing pasted, from one screen, with

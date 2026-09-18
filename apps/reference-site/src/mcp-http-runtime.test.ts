@@ -903,6 +903,8 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(missingProof.status).toBe(400);
+    // A browser posted this form, so an invalid step-up is a readable page.
+    expect(missingProof.headers.get("content-type")).toContain("text/html");
     const wrongConnectionProof = await runtime.fetch(
       new Request(`${resourceUri}/oauth/authorize`, {
         method: "POST",
@@ -917,6 +919,9 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(wrongConnectionProof.status).toBe(400);
+    expect(wrongConnectionProof.headers.get("content-type")).toContain(
+      "text/html",
+    );
     expect(connections.get(first.connectionId)?.scopes).toEqual(["site.read"]);
     expect(connections.get(second.connectionId)?.scopes).toEqual(["site.read"]);
   });
@@ -1005,6 +1010,8 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(authorization.status).toBe(400);
+    // A browser posted this form, so the failure is a readable page.
+    expect(authorization.headers.get("content-type")).toContain("text/html");
     expect(connections.size).toBe(0);
 
     const connected = fixture();
@@ -3610,6 +3617,30 @@ describe("MCP authorize parameter and scope compatibility", () => {
     const page = await response.text();
     expect(page).not.toContain('"error"');
     expect(page).toContain("Return to the client");
+    expect(connections.size).toBe(0);
+  });
+
+  it("shows a readable page, not JSON, when a consent submission has the wrong origin", async () => {
+    const { runtime, connections } = fixture();
+    const parameters = await baseParameters();
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: "https://attacker.example",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const page = await response.text();
+    expect(page).not.toContain('"error"');
     expect(connections.size).toBe(0);
   });
 });
