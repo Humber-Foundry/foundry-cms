@@ -79,6 +79,29 @@ export function homePage(definition: SiteDefinition): SitePage {
 }
 
 /**
+ * The editable field path of one field on one page.
+ *
+ * `pathInPage` is the path the field has inside its own page, such as
+ * `section_hero.title` or `seo.title` for a page's SEO block. Note that a
+ * page's SEO paths already start with the page id, so they are passed in
+ * whole.
+ *
+ * The home page adds no prefix. Its paths were written when a site held one
+ * page. A published rich-text file is named after its field path, and a stored
+ * draft holds the path each edit was made under, so a prefix on the home page
+ * would rename every published file and invalidate every stored draft path.
+ * See ADR-0017.
+ *
+ * Every other page prefixes its fields with its page id. A page id never
+ * changes, so a slug rename moves no file. Two pages may hold sections with
+ * the same id, because the page id in front of the section id keeps the two
+ * paths apart.
+ */
+export function pageFieldPath(page: SitePage, pathInPage: string): string {
+  return page.slug === homePageSlug ? pathInPage : `${page.id}.${pathInPage}`;
+}
+
+/**
  * The same definition with one page swapped for a new version of itself.
  *
  * The page is matched by id, and the order of `pages` is kept, so a rewrite

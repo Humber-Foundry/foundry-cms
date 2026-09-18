@@ -3,6 +3,7 @@ import {
   designTokenFieldPath,
   designTokenValue,
   homePage,
+  pageFieldPath,
   sectionVariantFieldPath,
   type DesignOptionPreview,
   type DesignTokenKey,
@@ -82,14 +83,18 @@ function tokenControl(
 function sectionStyleControls(
   definition: SiteDefinition,
 ): ReadonlyArray<DesignControl> {
-  return homePage(definition).sections.flatMap((section) => {
+  // Design still lists the home page's sections. Ticket #158 gives it the
+  // page the editor has open. The path is built through `pageFieldPath`, so
+  // this list follows the one field path rule whichever page it reads.
+  const page = homePage(definition);
+  return page.sections.flatMap((section) => {
     if (section.type === "registered") {
       return [];
     }
     const variant = designContract.variants[section.type];
     return [
       {
-        path: sectionVariantFieldPath(section.id),
+        path: pageFieldPath(page, sectionVariantFieldPath(section.id)),
         label: variant.label,
         help: variant.help,
         value: section.variant,

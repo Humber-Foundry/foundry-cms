@@ -11,12 +11,15 @@ import {
   foundationPageComponentRegistry,
   homePage,
   isSiteDefinitionWithPageComponents,
+  pageFieldPath,
+  sectionVariantFieldPath,
   type BlogPost,
   type BlogPostId,
   type PageComposition,
   type PageComponentRegistry,
   type SiteDefinition,
   type SiteDefinitionEdit,
+  type SitePage,
   type StoredSiteDefinitionSchemaVersion,
   type SiteMediaOccurrence,
 } from "@humber-foundry/site-definition";
@@ -173,13 +176,25 @@ type BlogPostAggregateState = Readonly<{
   version: number;
 }>;
 
-function compositionWithAuthoritativeVariants(
-  definition: SiteDefinition,
+/**
+ * Keep each section's stored style unless this save also edits that style.
+ *
+ * `page` is the page the composition belongs to. A section style is an
+ * editable field of its page, so its field path carries the page id on every
+ * page below the home page. Reading the style through the page keeps two pages
+ * that hold sections with the same id apart.
+ *
+ * This is exported because it is the seam ticket #158 uses when the editor
+ * composes a page other than the home page. Until then the one caller inside
+ * this module passes the home page.
+ */
+export function compositionWithStoredSectionStyles(
+  page: SitePage,
   composition: PageComposition,
   edits: ReadonlyArray<SiteDefinitionEdit>,
 ): PageComposition {
   const existingById = new Map(
-    homePage(definition).sections.map((section) => [section.id, section]),
+    page.sections.map((section) => [section.id, section]),
   );
   const variantEdits = new Map(
     edits
@@ -192,7 +207,9 @@ function compositionWithAuthoritativeVariants(
       const existing = existingById.get(component.id);
       if (
         existing === undefined ||
-        variantEdits.get(`${component.id}.variant`) !== component.variant
+        variantEdits.get(
+          pageFieldPath(page, sectionVariantFieldPath(component.id)),
+        ) !== component.variant
       ) {
         return component;
       }
@@ -966,8 +983,10 @@ export function createContentRevisionApplication({
               ? { ok: true as const, definition: baseDefinition }
               : applyPageComposition(
                   baseDefinition,
-                  compositionWithAuthoritativeVariants(
-                    baseDefinition,
+                  // A composition still applies to the home page. Ticket #158
+                  // passes the page the editor has open instead.
+                  compositionWithStoredSectionStyles(
+                    homePage(baseDefinition),
                     command.composition,
                     command.edits,
                   ),
