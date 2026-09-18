@@ -168,17 +168,24 @@ A dashboard `GET` may open the requesting person's own draft workspace, which
 creates it when they do not have one. No other operation may be reached from a
 `GET` or a `HEAD`.
 
-That operation writes exactly four things:
+That operation writes exactly five tables, in one batch:
 
 - the workspace row, which ignores a workspace that is already there;
 - its revision 0, which is inserted only when that revision is absent;
-- the workspace's own blog-post revision rows, which ignore a row that is
-  already there; and
-- the site-wide blog-post rows, which are keyed by site and post rather than by
+- the blog-post revision rows for the published posts. These are content
+  addressed: the key is derived from the site, post, post revision and content
+  hash, not from the workspace, so two people opening a workspace produce the
+  same key and the second insert is ignored;
+- the blog render artifacts for those posts, keyed by workspace, revision and
+  post, which ignore a row that is already there; and
+- the site-wide blog-post rows, keyed by site and post rather than by
   workspace. This is the one statement that can update an existing row, so it
   is guarded: it only advances a post when the incoming revision is the next
   one after the stored revision. A copy of the already published posts is never
   the next revision, so opening a workspace cannot advance them.
+
+None of these rows is published content. Publication reads approved content
+and writes Git, which no `GET` can reach.
 
 This is the one exception to "`GET` and `HEAD` remain side-effect free" above.
 The original clause exists so that a cross-site request cannot change what the

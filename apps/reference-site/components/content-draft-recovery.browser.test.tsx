@@ -56,7 +56,7 @@ describe("content draft recovery screen", () => {
     const updated = mount("site-updated").textContent ?? "";
 
     expect(older).toContain("older version of your site");
-    expect(older).toContain("changes that still fit are copied across");
+    expect(older).toContain("Any changes that still fit are copied across");
 
     // Nothing is carried out of the stored draft in this case, so the screen
     // must not say anything is.

@@ -60,7 +60,9 @@ vi.mock("@/src/content-revision-links", () => ({
   revisionPreviewGatewayUrl: mocks.previewUrl,
 }));
 vi.mock("@/foundry/site-definition.server", () => ({
-  installedSite: { application: { queries: { getPublishedSite: mocks.getPublishedSite } } },
+  installedSite: {
+    application: { queries: { getPublishedSite: mocks.getPublishedSite } },
+  },
 }));
 vi.mock("@/src/content-schema-recovery", () => ({
   durableSchemaRecoveryEdits: mocks.durableSchemaRecoveryEdits,
@@ -126,7 +128,11 @@ describe("dashboard workspace resolution", () => {
 
   it("creates the draft workspace on a first visit so no destination asks for one", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(null);
-    const workspace = await loadDashboardWorkspace(undefined, "/dash/blog", undefined);
+    const workspace = await loadDashboardWorkspace(
+      undefined,
+      "/dash/blog",
+      undefined,
+    );
 
     expect(mocks.openDefaultWorkspace).toHaveBeenCalledTimes(1);
     expect(mocks.openDefaultWorkspace).toHaveBeenCalledWith(
@@ -147,7 +153,11 @@ describe("dashboard workspace resolution", () => {
   it("reuses the person's most recent workspace and creates nothing", async () => {
     mocks.latestWorkspaceId.mockResolvedValue(otherWorkspaceId);
     mocks.getCurrent.mockResolvedValue(revisionOf(otherWorkspaceId, 4));
-    const workspace = await loadDashboardWorkspace(undefined, "/dash", undefined);
+    const workspace = await loadDashboardWorkspace(
+      undefined,
+      "/dash",
+      undefined,
+    );
 
     expect(mocks.openDefaultWorkspace).not.toHaveBeenCalled();
     expect(workspace.workspaceId).toBe(otherWorkspaceId);
@@ -156,7 +166,11 @@ describe("dashboard workspace resolution", () => {
 
   it("opens a workspace id from the URL when the person can still open it", async () => {
     mocks.getCurrent.mockResolvedValue(revisionOf(otherWorkspaceId, 2));
-    const workspace = await loadDashboardWorkspace(otherWorkspaceId, "/dash/pages", undefined);
+    const workspace = await loadDashboardWorkspace(
+      otherWorkspaceId,
+      "/dash/pages",
+      undefined,
+    );
 
     expect(workspace.workspaceId).toBe(otherWorkspaceId);
     expect(workspace.activeWorkspaceUrl).toBe(
@@ -236,9 +250,9 @@ describe("dashboard workspace resolution", () => {
       new ContentRevisionConfigurationError(),
     );
 
-    await expect(loadDashboardWorkspace(undefined, "/dash", undefined)).rejects.toThrow(
-      "not_found",
-    );
+    await expect(
+      loadDashboardWorkspace(undefined, "/dash", undefined),
+    ).rejects.toThrow("not_found");
   });
 
   it("reports the edits to carry across when the draft was written for an older site schema", async () => {
@@ -251,7 +265,11 @@ describe("dashboard workspace resolution", () => {
       { path: "home.hero.title", value: "New title", baseValue: "Old title" },
     ];
     mocks.durableSchemaRecoveryEdits.mockReturnValue(carried);
-    const workspace = await loadDashboardWorkspace(undefined, "/dash/pages", undefined);
+    const workspace = await loadDashboardWorkspace(
+      undefined,
+      "/dash/pages",
+      undefined,
+    );
 
     expect(workspace.schemaRecovery).toEqual(carried);
     expect(workspace.contentRevision.revision).toBe(5);
@@ -282,7 +300,11 @@ describe("dashboard workspace resolution", () => {
     mocks.latestWorkspaceId.mockResolvedValue(ownWorkspaceId);
     mocks.getCurrent.mockResolvedValue(revisionOf(ownWorkspaceId, 3));
     mocks.isRevisionCurrent.mockResolvedValue(false);
-    const workspace = await loadDashboardWorkspace(undefined, "/dash", undefined);
+    const workspace = await loadDashboardWorkspace(
+      undefined,
+      "/dash",
+      undefined,
+    );
 
     expect(workspace.contentStale).toBe(true);
   });
@@ -297,7 +319,7 @@ describe("recovery reason", () => {
     activeWorkspaceUrl: "/dash",
   } as never as Parameters<typeof recoveryReasonOf>[0];
 
-  it("reports an older-schema draft only when edits can be carried across", () => {
+  it("reports an older-schema draft whenever schema recovery is set", () => {
     expect(
       recoveryReasonOf({
         ...workspace,
@@ -305,6 +327,11 @@ describe("recovery reason", () => {
           { path: "home.title", value: "New", baseValue: "Old" },
         ],
       } as never),
+    ).toBe("older-schema");
+    // An older-schema draft may carry no edits at all. It is still the
+    // older-schema case, because the schema is why it cannot be saved.
+    expect(
+      recoveryReasonOf({ ...workspace, schemaRecovery: [] } as never),
     ).toBe("older-schema");
   });
 

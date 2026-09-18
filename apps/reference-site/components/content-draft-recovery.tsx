@@ -343,7 +343,7 @@ export function ContentDraftRecovery({
           {reason === "older-schema" ? (
             <p>
               This draft was written for an older version of your site, so it
-              can no longer be saved. Start a fresh draft to carry on. The
+              can no longer be saved. Start a fresh draft to carry on. Any
               changes that still fit are copied across, and this draft is kept.
             </p>
           ) : (
