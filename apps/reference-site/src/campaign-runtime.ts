@@ -188,6 +188,23 @@ const developmentChannelConfiguration: CampaignChannelConfiguration = Object.fre
 });
 
 /**
+ * The verified test address on file for one membership, or null.
+ *
+ * Who may receive a test and who may be offered one must never disagree, so
+ * both the send path and the screen's list read this one function. It returns
+ * the address to the caller that sends; no caller may put it on screen.
+ */
+function verifiedTestAddress(
+  recipients: Readonly<Record<string, string>>,
+  membershipId: string,
+): string | null {
+  const address = recipients[membershipId];
+  return typeof address === "string" && address.trim() !== ""
+    ? address.trim()
+    : null;
+}
+
+/**
  * The campaign channel configuration for one installation.
  *
  * The compliance footer it builds is stored on every campaign revision and is
@@ -306,6 +323,16 @@ export async function loadCampaignRequestContext(
   application: CampaignApplication;
   testDelivery: CampaignTestDeliveryApplication;
   bulkDelivery: CampaignBulkDeliveryApplication;
+  /**
+   * The test recipients this installation has verified, by membership id only.
+   * A test address is a person's own mailbox, so it is never returned, logged
+   * or shown. `yours` names the signed-in person's own id when they are one of
+   * them, which lets the screen offer "send a test to your own address" without
+   * ever naming an address.
+   */
+  listTestRecipients(): Promise<
+    Readonly<{ ids: ReadonlyArray<string>; yours: string | null }>
+  >;
 }>> {
   const human = await loadHumanAccessRequestContext(requestHeaders);
   if (human.state !== "authorized") {
@@ -541,6 +568,14 @@ export async function loadCampaignRequestContext(
         actor,
         capability: "campaign.bulk.authorize",
       }),
+    // An Editor writes campaigns, so an Editor may read where a campaign has
+    // got to. Reading grants nothing; only `authorizeOwner` above admits the
+    // Owner commands.
+    authorizeRead: (actor) =>
+      human.application.queries.requireCapability({
+        actor,
+        capability: "content.write",
+      }),
     identifyActor: () => human.membership.id,
     validateOwnerAuthority: async (ownerActorId) =>
       (await isActiveOwner(ownerActorId)) ??
@@ -581,6 +616,21 @@ export async function loadCampaignRequestContext(
     delivery,
     readDeliveryHealth: () => testAdapter.health(),
     bulkDelivery,
+    listTestRecipients: async () => {
+      const ownerIds =
+        await human.application.queries.listActiveOwnerIdsForTestDelivery({
+          actor: human.identity,
+        });
+      // An owner without a configured address cannot receive a test, so
+      // offering them would promise a send that always fails.
+      const ids = ownerIds.filter(
+        (id) => verifiedTestAddress(testRecipients, id) !== null,
+      );
+      return Object.freeze({
+        ids: Object.freeze(ids),
+        yours: ids.includes(human.membership.id) ? human.membership.id : null,
+      });
+    },
     testDelivery: createCampaignTestDeliveryApplication({
       siteId: installedSite.application.siteId,
       campaignStore: store,
@@ -607,17 +657,13 @@ export async function loadCampaignRequestContext(
           ),
         );
         return recipientIds.map((id) => {
-          if (!activeOwnerIds.has(id)) {
+          const address = activeOwnerIds.has(id)
+            ? verifiedTestAddress(testRecipients, id)
+            : null;
+          if (address === null) {
             throw new CampaignValidationError("test_recipient_forbidden");
           }
-          const address = testRecipients[id];
-          if (
-            typeof address !== "string" ||
-            address.trim() === ""
-          ) {
-            throw new CampaignValidationError("test_recipient_forbidden");
-          }
-          return { id, address: address.trim() };
+          return { id, address };
         });
       },
       providerOwnershipEvidence,
