@@ -62,11 +62,11 @@ export default async function FormSubmissionPage({
       <p>
         {submission.formId} form ·{" "}
         {formatDashboardMoment(submission.acceptedAt)} · receipt{" "}
-        {submission.receiptId}
         <HelpTip label="What's a receipt?">
           The code that identifies this one message, so you or support can
           find it again exactly.
-        </HelpTip>
+        </HelpTip>{" "}
+        {submission.receiptId}
       </p>
       {submission.classification === "suspected_spam" ? (
         <p role="status">
