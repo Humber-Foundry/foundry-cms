@@ -2175,6 +2175,7 @@ describe("production MCP HTTP runtime", () => {
           "foundry.site.get",
           "foundry.content.list",
           "foundry.content.get",
+          "foundry.section.list",
         ]);
       } finally {
         server.close();
