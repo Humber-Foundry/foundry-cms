@@ -77,6 +77,9 @@ function fixture(scopes: ReadonlyArray<string>) {
     }>
   >();
   let deploymentCurrent = true;
+  // The photos this site's media library already holds. An agent may name
+  // one of these in a blog post and no other picture at all.
+  const mediaLibrary = new Set<string>(["asset_open_day"]);
   const read = createMcpReadApplication({
     site: createSiteApplication({
       siteId: referenceSiteDefinition.site.id,
@@ -207,6 +210,9 @@ function fixture(scopes: ReadonlyArray<string>) {
             },
           },
         };
+      },
+      async mediaLibraryHoldsAsset({ assetId }) {
+        return mediaLibrary.has(assetId);
       },
       humanReviewUrl(previewId) {
         return `https://foundry.example/dash/review/${previewId}`;
@@ -2351,6 +2357,63 @@ describe("MCP blog draft tools", () => {
     });
   });
 
+  it("refuses a media path for a photo the library does not hold", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-8-0000");
+    await expect(
+      fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-unknown-photo",
+          post: {
+            ...post,
+            mainImage: {
+              url: "/api/media/asset_never_uploaded",
+              alt: "Not there",
+            },
+          },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "blog_media_not_in_library",
+    });
+  });
+
+  it("refuses a picture in the body that the library does not hold", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-9-0000");
+    await expect(
+      fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-body-photo",
+          post: {
+            ...post,
+            body: {
+              ...post.body,
+              children: [
+                ...post.body.children,
+                {
+                  type: "image" as const,
+                  src: "/api/media/asset_never_uploaded",
+                  alt: "Not there",
+                },
+              ],
+            },
+          },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "blog_media_not_in_library",
+    });
+  });
+
   it("accepts a photo the media library already holds", async () => {
     const { fixtureValue, workspaceId } = await openedDraft("open-blog-3-00000000");
     const created = resultOf<{ postId: string }>(
@@ -2487,5 +2550,102 @@ describe("MCP blog draft tools", () => {
       code: "VALIDATION_FAILED",
       reason: "post_not_found",
     });
+  });
+});
+
+describe("MCP page and blog acceptance journey", () => {
+  it("restructures a page, writes a full post, and prepares a preview in one draft", async () => {
+    // The acceptance criterion of issue #171: one agent, one draft, a page
+    // whose sections it changed and a post it wrote from nothing, handed to a
+    // person as a canonical preview.
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    const principalValue = value.activePrincipal;
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await value.application.openWorkspace(
+        principalValue,
+        { expectedRevision: 0, idempotencyKey: "open-blog-journey-1" },
+        context,
+      ),
+    );
+    const workspaceId = opened.workspaceId;
+
+    const page = resultOf<{ pageId: string; revision: number }>(
+      await value.application.createPage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "journey-page-create-1",
+          title: "News",
+          slug: "news",
+          startingLayout: "introduction",
+        },
+        context,
+      ),
+    );
+    const restructured = resultOf<{ revision: number }>(
+      await value.application.restructurePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: page.revision,
+          idempotencyKey: "journey-page-restructure-1",
+          pageId: page.pageId,
+          operations: [{ op: "add", sectionType: "proof", position: 1 }],
+        },
+        context,
+      ),
+    );
+
+    const created = resultOf<{ postId: string; revision: number }>(
+      await value.application.createBlogPost(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: restructured.revision,
+          idempotencyKey: "journey-blog-create-1",
+          post: {
+            slug: "open-day",
+            title: "Open day",
+            excerpt: "What to expect.",
+            seo: {
+              title: "Open day",
+              description: "What to expect.",
+              keywords: ["events"],
+              shareImage: null,
+            },
+            mainImage: {
+              url: "/api/media/asset_open_day",
+              alt: "The workshop",
+            },
+            body: createRichTextDocumentFromPlainText("Doors open at ten."),
+          },
+        },
+        context,
+      ),
+    );
+
+    const { definition } = await value.workspaces
+      .get(workspaceId)!
+      .queries.getCurrent();
+    expect(findPageById(definition, page.pageId)!.sections).toHaveLength(3);
+    expect(
+      definition.blog.posts.find(({ id }) => id === created.postId)?.title,
+    ).toBe("Open day");
+
+    const preview = resultOf<{ previewId: string; humanReviewUrl: string }>(
+      await value.application.preparePreview(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: created.revision,
+          idempotencyKey: "journey-preview-1",
+        },
+        context,
+      ),
+    );
+    expect(preview.previewId).toBeTruthy();
+    // The preview is where the agent stops. Nothing here approves it.
+    expect(preview.humanReviewUrl).toContain(preview.previewId);
   });
 });

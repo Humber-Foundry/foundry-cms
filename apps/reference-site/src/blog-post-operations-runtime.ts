@@ -166,6 +166,7 @@ export async function advanceScheduledBlogPostExecution(
           siteId: schedule.siteId,
           connectionId: mcpAuthority.connectionId,
           actorId: mcpAuthority.actorId,
+          operation: mcpAuthority.operation,
           requiredScopes: mcpAuthority.requiredScopes,
         }))
       )
@@ -205,6 +206,7 @@ export async function advanceScheduledBlogPostExecution(
               siteId: schedule.siteId,
               connectionId: mcpAuthority.connectionId,
               actorId: mcpAuthority.actorId,
+              operation: mcpAuthority.operation,
               requiredScopes: mcpAuthority.requiredScopes,
             });
     if (
@@ -429,6 +431,7 @@ async function restoreArchivedBlogPostAsDraftCommand(input: {
           siteId: installedSiteDefinition.site.id,
           connectionId: input.authority.connectionId,
           actorId: input.authority.actorId,
+          operation: input.authority.operation,
           requiredScopes: input.authority.requiredScopes,
         }))
   ) {

@@ -407,7 +407,9 @@ editing it is always refused.
 
 `foundry.blog.create` starts a new post and `foundry.blog.update` rewrites one,
 both as a new immutable revision, and both need `content.draft`. The field set
-is the Site Definition's own blog post shape. A post's tags are
+is the Site Definition's own blog post shape, minus the four fields the blog
+owns rather than the writer: `id`, `revision`, `collectionState` and
+`targetVisibility`. A post's tags are
 `seo.keywords`; the blog has no separate tag field. An update sends the whole
 post, the way the dashboard's editor saves it, so a field the request leaves
 out is cleared rather than kept.
@@ -418,10 +420,12 @@ one post. The result reports it as `postId`.
 
 Every picture in a post — the header image, the share image and every picture
 in the body — has to be one of this site's own photos, named by its media path
-`/api/media/<assetId>`. An agent can use a photo the media library already
-holds; it cannot add one, and it cannot point the site at a picture somewhere
-else. A picture that is not a media path is refused with the named reason
-`blog_media_not_in_library`. Uploading a photo is not an MCP tool.
+`/api/media/<assetId>`, and the media library has to hold it. The tool looks
+each one up. An agent can use a photo the library already holds; it cannot add
+one, and it cannot point the site at a picture somewhere else. Any other
+picture is refused with the named reason `blog_media_not_in_library`, and the
+refusal names the field rather than repeating the address. Uploading a photo is
+not an MCP tool.
 
 Other refusals carry the blog's own named `reason`: `slug_already_exists`,
 `post_not_found`, `post_already_exists`, `schema_invalid`, and

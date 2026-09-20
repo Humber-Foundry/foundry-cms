@@ -1,10 +1,10 @@
 import {
   designContract,
   listEditableSiteFields,
+  createBlogPostId,
   mediaAssetIdFromPublishedPath,
   serializeRichTextDocument,
   type BlogPost,
-  type BlogPostId,
   type BlogPostSchemaError,
   type PageSectionOperation,
   type RichTextDocument,
@@ -92,6 +92,15 @@ export type McpDraftRuntime = Readonly<{
     workspaceId: ContentWorkspaceId;
   }): Promise<ContentRevisionApplication>;
   humanReviewUrl(previewId: string): string;
+  /**
+   * Whether this site's media library holds the photo with this asset id.
+   * A blog post may only name a photo the library already has; uploading
+   * one is not an MCP tool. See ADR-0036.
+   */
+  mediaLibraryHoldsAsset(input: {
+    principal: McpConnectionPrincipal;
+    assetId: string;
+  }): Promise<boolean>;
   replayPreview(input: {
     principal: McpConnectionPrincipal;
     workspaceId: ContentWorkspaceId;
@@ -293,6 +302,43 @@ export function requireMcpRevisionScopes(
 }
 
 /**
+ * What every draft record tool shares: who is asking, which tool it is, what
+ * it sent, the permissions it needs, and how an ordinary refusal is named.
+ *
+ * `namedRefusal` lets one family of tools read a refusal in its own words. It
+ * keeps the seam itself free of any one record's vocabulary: a blog code
+ * belongs to the blog tools, not to the four page tools that share this seam.
+ */
+type DraftRecordMutation<Input extends McpPageMutationInput> = Readonly<{
+  principal: McpConnectionPrincipal;
+  operation: string;
+  input: Input;
+  context: McpExecutionContext;
+  requiredScopes?: ReadonlyArray<string>;
+  refusalReason?: string;
+  namedRefusal?: (error: ContentRevisionValidationError) => McpReadError | null;
+}>;
+
+/**
+ * Read a refused blog write in the blog's own words.
+ *
+ * The blog reports its rules under the `blog` field. The code is the named
+ * reason an agent branches on, the same way a page lifecycle code is, and the
+ * sentence is the plain words a site owner would read.
+ */
+function blogRefusal(error: ContentRevisionValidationError) {
+  const code = error.fields.blog;
+  if (code === undefined || !Object.hasOwn(blogRefusalSentences, code)) {
+    return null;
+  }
+  return new McpReadError(
+    "VALIDATION_FAILED",
+    blogRefusalSentences[code as BlogPostSchemaError["code"]],
+    { reason: code },
+  );
+}
+
+/**
  * What every MCP page tool takes: the draft, the revision the agent read
  * before it decided, and the key that makes a retry safe. It is the same
  * front as `foundry.content.patch`, because a page operation is the same kind
@@ -430,8 +476,9 @@ const blogPostRefusedReason = "blog_post_refused";
 
 /**
  * What an agent writes into one blog post. It is the post's own field set
- * from the Site Definition, minus the three fields the blog owns rather than
- * the writer: its id, its revision number and whether it is on the site. A
+ * from the Site Definition, minus the four fields the blog owns rather than
+ * the writer: its id, its revision number, and the two that say whether it is
+ * in the collection and on the site. A
  * post's tags are `seo.keywords`, which is where the blog has always kept
  * them. See ADR-0036.
  */
@@ -455,21 +502,33 @@ export type McpUpdateBlogPostInput = McpPageMutationInput &
  * already has; it cannot add one, and it cannot point the site at a picture
  * somewhere else. See ADR-0036.
  */
-function requireOwnMediaReferences(post: McpBlogPostContent) {
-  const addresses: Array<string> = [];
-  const collectImage = (image: SeoShareImage | null) => {
-    if (image !== null) addresses.push(image.url);
+function blogPostMediaFields(post: McpBlogPostContent) {
+  const fields: Array<Readonly<{ field: string; address: string }>> = [];
+  const collectImage = (field: string, image: SeoShareImage | null) => {
+    if (image !== null) fields.push({ field, address: image.url });
   };
-  collectImage(post.mainImage);
-  collectImage(post.seo.shareImage);
-  for (const block of post.body.children) {
-    if (block.type === "image") addresses.push(block.src);
-  }
-  for (const address of addresses) {
-    if (mediaAssetIdFromPublishedPath(address) === null) {
+  collectImage("mainImage", post.mainImage);
+  collectImage("seo.shareImage", post.seo.shareImage);
+  post.body.children.forEach((block, index) => {
+    if (block.type === "image") {
+      fields.push({ field: `body.children.${index}`, address: block.src });
+    }
+  });
+  return fields;
+}
+
+async function requireOwnMediaReferences(
+  post: McpBlogPostContent,
+  holdsAsset: (assetId: string) => Promise<boolean>,
+) {
+  for (const { field, address } of blogPostMediaFields(post)) {
+    const assetId = mediaAssetIdFromPublishedPath(address);
+    // The refusal names the field rather than repeating the address, so
+    // nothing a caller wrote is echoed back into a client's screen.
+    if (assetId === null || !(await holdsAsset(assetId))) {
       throw new McpReadError(
         "VALIDATION_FAILED",
-        `The picture ${address} is not one of this site's photos. Use the media path of a photo the site already holds.`,
+        `The picture at ${field} is not one of this site's photos. Use the media path of a photo the media library already holds.`,
         { reason: blogMediaNotInLibraryReason },
       );
     }
@@ -701,29 +760,25 @@ export function createMcpDraftApplication({
     recordKey,
     requiredScopes = [mcpContentDraftScope],
     refusalReason = pageFieldsRefusedReason,
-  }: {
-    principal: McpConnectionPrincipal;
-    operation: string;
-    input: Input;
-    context: McpExecutionContext;
-    recordKey: "pageId" | "postId";
-    requiredScopes?: ReadonlyArray<string>;
-    refusalReason?: string;
-    run(
-      application: ContentRevisionApplication,
-      command: PageMutationCommand,
-    ): Promise<
-      Readonly<{
-        revision: SavedContentRevision;
-        recordId: string;
-        replayed: boolean;
-      }>
-    >;
-    replayedRecordId(
-      workspaceId: ContentWorkspaceId,
-      storageKey: string,
-    ): Promise<string>;
-  }) {
+    namedRefusal = () => null,
+  }: DraftRecordMutation<Input> &
+    Readonly<{
+      recordKey: "pageId" | "postId";
+      run(
+        application: ContentRevisionApplication,
+        command: PageMutationCommand,
+      ): Promise<
+        Readonly<{
+          revision: SavedContentRevision;
+          recordId: string;
+          replayed: boolean;
+        }>
+      >;
+      replayedRecordId(
+        workspaceId: ContentWorkspaceId,
+        storageKey: string,
+      ): Promise<string>;
+    }>) {
     return base.executeScoped({
       principal,
       operation,
@@ -794,24 +849,7 @@ export function createMcpDraftApplication({
           );
         } catch (error) {
           if (error instanceof ContentRevisionValidationError) {
-            // The blog reports its own rules under the `blog` field. The
-            // code is the named reason an agent branches on, the same way a
-            // page lifecycle code is, and the sentence is the plain words a
-            // site owner would read.
-            const blogCode = error.fields.blog;
-            if (
-              blogCode !== undefined &&
-              Object.hasOwn(blogRefusalSentences, blogCode)
-            ) {
-              throw new McpReadError(
-                "VALIDATION_FAILED",
-                blogRefusalSentences[
-                  blogCode as BlogPostSchemaError["code"]
-                ],
-                { reason: blogCode },
-              );
-            }
-            throw pageRefusal(error, refusalReason);
+            throw namedRefusal(error) ?? pageRefusal(error, refusalReason);
           }
           if (
             error instanceof ContentRevisionConflictError ||
@@ -851,22 +889,17 @@ export function createMcpDraftApplication({
     run,
     replayedPageId,
     ...rest
-  }: {
-    principal: McpConnectionPrincipal;
-    operation: string;
-    input: Input;
-    context: McpExecutionContext;
-    requiredScopes?: ReadonlyArray<string>;
-    refusalReason?: string;
-    run(
-      application: ContentRevisionApplication,
-      command: PageMutationCommand,
-    ): Promise<PageMutationResult>;
-    replayedPageId(
-      workspaceId: ContentWorkspaceId,
-      storageKey: string,
-    ): Promise<string>;
-  }) {
+  }: DraftRecordMutation<Input> &
+    Readonly<{
+      run(
+        application: ContentRevisionApplication,
+        command: PageMutationCommand,
+      ): Promise<PageMutationResult>;
+      replayedPageId(
+        workspaceId: ContentWorkspaceId,
+        storageKey: string,
+      ): Promise<string>;
+    }>) {
     return draftRecordMutation({
       ...rest,
       recordKey: "pageId",
@@ -1389,8 +1422,11 @@ export function createMcpDraftApplication({
         context,
         recordKey: "postId",
         refusalReason: blogPostRefusedReason,
+        namedRefusal: blogRefusal,
         async run(application, command) {
-          requireOwnMediaReferences(input.post);
+          await requireOwnMediaReferences(input.post, (assetId) =>
+            runtime.mediaLibraryHoldsAsset({ principal, assetId }),
+          );
           const saved = await application.commands.createBlogPost({
             ...command,
             siteId: principal.siteId,
@@ -1430,12 +1466,15 @@ export function createMcpDraftApplication({
         context,
         recordKey: "postId",
         refusalReason: blogPostRefusedReason,
+        namedRefusal: blogRefusal,
         async run(application, command) {
-          requireOwnMediaReferences(input.post);
+          await requireOwnMediaReferences(input.post, (assetId) =>
+            runtime.mediaLibraryHoldsAsset({ principal, assetId }),
+          );
           const saved = await application.commands.editBlogPost({
             ...command,
             siteId: principal.siteId,
-            postId: input.postId as BlogPostId,
+            postId: createBlogPostId(input.postId),
             post: input.post,
           });
           return {

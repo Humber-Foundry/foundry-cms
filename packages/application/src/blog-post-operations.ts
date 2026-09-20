@@ -277,6 +277,12 @@ export type BlogPostOperationsStore = Readonly<{
     siteId: SiteId | string;
     connectionId: string;
     actorId: string;
+    /**
+     * Which blog command is being run. The store pins the one permission
+     * that command needs from `mcpBlogOperationScopes`, so the permission a
+     * command requires is never taken from the caller's own list.
+     */
+    operation: McpBlogOperation;
     requiredScopes: ReadonlyArray<string>;
   }): Promise<boolean>;
   findMcpScheduleAuthority(
@@ -696,11 +702,13 @@ export function createBlogPostOperationsApplication({
   ) {
     const requiredScope = mcpBlogOperationScopes[authority.operation];
     if (
+      authority.requiredScopes.length === 0 ||
       !authority.requiredScopes.includes(requiredScope) ||
       !(await store.hasMcpBlogOperationAuthority({
         siteId,
         connectionId: authority.connectionId,
         actorId: authority.actorId,
+        operation: authority.operation,
         requiredScopes: authority.requiredScopes,
       }))
     ) {
@@ -1719,8 +1727,11 @@ export function createInMemoryBlogPostOperationsStore(seed: {
         `${input.connectionId}\0${input.actorId}\0${input.siteId}`;
       if (!mcpScheduleGrants.has(key)) return false;
       const granted = mcpScheduleGrants.get(key);
+      if (granted === undefined) return true;
+      // The permission this command needs is pinned to the command, not
+      // taken from the caller's list. See ADR-0036.
       return (
-        granted === undefined ||
+        granted.includes(mcpBlogOperationScopes[input.operation]) &&
         input.requiredScopes.every((scope) => granted.includes(scope))
       );
     },

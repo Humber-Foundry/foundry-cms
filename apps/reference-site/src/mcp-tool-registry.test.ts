@@ -350,10 +350,16 @@ describe("MCP draft tool registry", () => {
       if (tool.annotations.readOnlyHint === false) {
         expect(properties).toContain("idempotencyKey");
         // A tool that writes a draft revision has to carry the revision the
-        // agent read before it decided. A blog command that acts on the
-        // collection rather than the draft names no workspace and has no
-        // revision to carry. See ADR-0036.
-        if (properties.includes("workspaceId")) {
+        // agent read before it decided. The one exception is a blog command
+        // that acts on the collection rather than the draft: it names the
+        // post it acts on, names no workspace, and has no revision to
+        // carry. See ADR-0036.
+        const actsOnTheCollection =
+          properties.includes("postId") &&
+          !properties.includes("workspaceId");
+        if (actsOnTheCollection) {
+          expect(tool.name).toMatch(/^foundry\.blog\./u);
+        } else {
           expect(properties).toContain("expectedRevision");
         }
       }

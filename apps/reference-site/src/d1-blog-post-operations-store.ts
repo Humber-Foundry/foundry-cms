@@ -1,6 +1,7 @@
 import {
   BlogPostOperationError,
   createBlogPostOperationsApplication,
+  mcpBlogOperationScopes,
   createContentApprovalId,
   createContentWorkspaceId,
   type ArchivedBlogPostSummary,
@@ -40,6 +41,7 @@ function contentAuthoritySql(binds: {
   connection: string;
   mcpActor: string;
   scopes: string;
+  pinnedScope: string;
 }) {
   return `(
                EXISTS (
@@ -50,8 +52,12 @@ function contentAuthoritySql(binds: {
                )
                OR (
                  ${binds.connection} IS NOT NULL
+                 AND json_array_length(COALESCE(${binds.scopes}, '[]')) > 0
                  AND EXISTS (
                    SELECT 1 FROM mcp_connections AS authority
+                   JOIN mcp_connection_scopes AS pinned
+                     ON pinned.connection_id = authority.id
+                    AND pinned.scope = ${binds.pinnedScope}
                    WHERE authority.id = ${binds.connection}
                      AND authority.site_id = ${binds.site}
                      AND authority.actor_id = ${binds.mcpActor}
@@ -71,16 +77,27 @@ function contentAuthoritySql(binds: {
              )`;
 }
 
-/** The three MCP authority binds, or nulls when a person ran the command. */
+/**
+ * The four MCP authority binds, or nulls when a person ran the command: the
+ * connection, its actor, the permissions the request evaluated, and the one
+ * permission this command needs. They arrive in the order
+ * `contentAuthoritySql` names them.
+ */
 function mcpAuthorityBinds(
   authority: McpBlogOperationAuthority | undefined,
-): readonly [string | null, string | null, string | null] {
+): readonly [
+  string | null,
+  string | null,
+  string | null,
+  string | null,
+] {
   return authority === undefined
-    ? [null, null, null]
+    ? [null, null, null, null]
     : [
         authority.connectionId,
         authority.actorId,
         JSON.stringify(authority.requiredScopes),
+        mcpBlogOperationScopes[authority.operation],
       ];
 }
 
@@ -812,10 +829,14 @@ export function createD1BlogPostOperationsStore(
         .prepare(
           `SELECT connection.id
            FROM mcp_connections AS connection
+           JOIN mcp_connection_scopes AS pinned
+             ON pinned.connection_id = connection.id
+            AND pinned.scope = ?5
            WHERE connection.id = ?1
              AND connection.actor_id = ?2
              AND connection.site_id = ?3
              AND connection.status = 'active'
+             AND json_array_length(?4) > 0
              AND NOT EXISTS (
                SELECT 1
                FROM json_each(?4) AS required
@@ -833,6 +854,9 @@ export function createD1BlogPostOperationsStore(
           input.actorId,
           input.siteId,
           JSON.stringify(input.requiredScopes),
+          // The one permission this command needs, taken from the command
+          // rather than from the caller's list. See ADR-0036.
+          mcpBlogOperationScopes[input.operation],
         )
         .first<{ id: string }>()) !== null;
     },
@@ -984,6 +1008,7 @@ export function createD1BlogPostOperationsStore(
                connection: "?17",
                mcpActor: "?18",
                scopes: "?19",
+               pinnedScope: "?20",
              })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
@@ -1063,6 +1088,7 @@ export function createD1BlogPostOperationsStore(
                 siteId: proposal.siteId,
                 connectionId: authority.connectionId,
                 actorId: authority.actorId,
+                operation: authority.operation,
                 requiredScopes: authority.requiredScopes,
               }))
         ) {
@@ -1462,6 +1488,7 @@ export function createD1BlogPostOperationsStore(
                 siteId: schedule.siteId,
                 connectionId: authority.connectionId,
                 actorId: authority.actorId,
+                operation: authority.operation,
                 requiredScopes: authority.requiredScopes,
               });
         if (!hasAuthority) {
@@ -1744,6 +1771,7 @@ export function createD1BlogPostOperationsStore(
               siteId: input.siteId,
               connectionId: input.authority.connectionId,
               actorId: input.authority.actorId,
+              operation: input.authority.operation,
               requiredScopes: input.authority.requiredScopes,
             });
       if (!hasAuthority) {
@@ -2683,6 +2711,7 @@ export function createD1BlogPostOperationsStore(
                connection: "?13",
                mcpActor: "?14",
                scopes: "?15",
+               pinnedScope: "?16",
              })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
@@ -2742,12 +2771,13 @@ export function createD1BlogPostOperationsStore(
                updated_at = excluded.updated_at
              WHERE blog_post_collection_states.collection_state = 'active'
                AND ${contentAuthoritySql({
-               site: "?1",
-               actor: "?6",
-               connection: "?13",
-               mcpActor: "?14",
-               scopes: "?15",
-             })}
+                 site: "?1",
+                 actor: "?6",
+                 connection: "?13",
+                 mcpActor: "?14",
+                 scopes: "?15",
+                 pinnedScope: "?16",
+               })}
                AND NOT EXISTS (
                  SELECT 1 FROM blog_post_operation_audit_events
                  WHERE site_id = ?1
@@ -3530,6 +3560,7 @@ export function createD1BlogPostOperationsStore(
                connection: "?7",
                mcpActor: "?8",
                scopes: "?9",
+               pinnedScope: "?10",
              })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
@@ -3666,6 +3697,7 @@ export function createD1BlogPostOperationsStore(
                  connection: "?7",
                  mcpActor: "?8",
                  scopes: "?9",
+                 pinnedScope: "?10",
                })}`,
           )
           .bind(

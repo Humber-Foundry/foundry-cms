@@ -14,6 +14,8 @@ import {
 
 import { createBlogPostId } from "@humber-foundry/site-definition";
 
+import { createMediaAssetId } from "@humber-foundry/application";
+
 import { installedSiteDefinition } from "../foundry/site-definition";
 import { installedPageComponentRegistry } from "../foundry/page-components";
 
@@ -30,6 +32,7 @@ import {
   restoreArchivedBlogPostAsDraft,
 } from "./blog-post-operations-runtime";
 import { createD1BlogPostOperationsStore } from "./d1-blog-post-operations-store";
+import { createD1MediaAssetStore } from "./d1-media-asset-store";
 import { createContentPublicationApplicationForEnvironment } from "./content-publication-environment-runtime";
 import {
   mcpPreviewReviewUrl,
@@ -290,6 +293,14 @@ export function createProductionMcpRuntime(
           workspaceId,
           actorId,
           environment,
+        );
+      },
+      async mediaLibraryHoldsAsset({ assetId }) {
+        return (
+          (await createD1MediaAssetStore(database).getAsset(
+            installedSiteDefinition.site.id,
+            createMediaAssetId(assetId),
+          )) !== null
         );
       },
       humanReviewUrl: (previewId) =>

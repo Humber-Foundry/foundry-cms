@@ -59,16 +59,27 @@ accept one
 
 The blog layer already had this shape for one command:
 `activateSchedule` takes an optional `authority` record naming the connection,
-and checks it instead of a human membership. Archive, restore and
-`proposeSchedule` now take the same record, and the D1 statements that
-guarded those commands with a `human_memberships` row now accept either an
-active owner or editor, or an active MCP connection holding every permission
-the request evaluated. One SQL fragment, `contentAuthoritySql`, writes that
-rule once.
+and checks it instead of a human membership. Archive, restore,
+`claimRestore` and `proposeSchedule` now take the same record, and the D1
+statements that guarded those commands with a `human_memberships` row now
+accept either an active owner or editor, or an active MCP connection. One SQL
+fragment, `contentAuthoritySql`, writes that rule once.
+
+The permission a command needs is pinned to the command, in
+`mcpBlogOperationScopes`, and is never read out of the caller's own list. The
+connection must hold that pinned permission and every permission the request
+evaluated, and the evaluated list may not be empty. Both the application check
+and the SQL check enforce the pin, so neither stands alone.
 
 A connection never borrows the membership of the person who granted it. The
 audit row names the connection's own actor, so a change an agent made and a
 change a person made are told apart afterwards.
+
+The reference site restores a post through `claimRestore` and the restore
+initialization extension rather than through `commands.restore`, so the MCP
+check for restore runs in `restoreArchivedBlogPostAsDraftCommand` and again in
+the `claimRestore` statement. `commands.restore` carries the same branch so
+the command surface stays uniform.
 
 ### 3. Archiving is content work, and it does not take a live post off the site
 
@@ -114,10 +125,12 @@ report and what a caller could not see before.
 
 Every picture address in a post — the header image, the share image and every
 picture in the body — has to be this site's media path,
-`/api/media/<assetId>`. Anything else is refused with the named reason
-`blog_media_not_in_library`. An agent can use a photo the media library already
-holds; it cannot add one, and it cannot point the site at a picture somewhere
-else. Uploading a photo is
+`/api/media/<assetId>`, naming a photo the media library actually holds. The
+tool looks each one up. Anything else is refused with the named reason
+`blog_media_not_in_library`, and the refusal names the field rather than
+repeating the address a caller sent. An agent can use a photo the library
+already holds; it cannot add one, and it cannot point the site at a picture
+somewhere else. Uploading a photo is
 [#172](https://github.com/Humber-Foundry/foundry-cms/issues/172) and is still
 not an MCP tool.
 
