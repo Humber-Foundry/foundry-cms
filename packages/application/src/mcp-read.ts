@@ -1,8 +1,10 @@
 import {
   designContract,
   findPageById,
+  foundationPageComponentRegistry,
   resolvePageSeo,
   siteDefinitionSchema,
+  type PageComponentRegistry,
   type SiteDefinition,
   type SiteId,
 } from "@humber-foundry/site-definition";
@@ -352,11 +354,55 @@ function isAuthenticConnection(
   );
 }
 
+/**
+ * The section types a page can hold, as an agent needs to read them.
+ *
+ * Each one carries the words an owner reads for it, the section styles it
+ * offers, and the fields an agent may write with `foundry.content.patch`. A
+ * field that the Site Definition protects, such as a section's nested item
+ * list, is left out, because naming it would invite an edit that is always
+ * refused. See ADR-0035.
+ */
+function siteSectionTypes(registry: PageComponentRegistry) {
+  return registry.allowedComponents.map((sectionType) => {
+    const registration = registry.components[sectionType]!;
+    const variant = Object.hasOwn(designContract.variants, sectionType)
+      ? designContract.variants[
+          sectionType as keyof typeof designContract.variants
+        ]
+      : null;
+    return {
+      sectionType,
+      label: registration.label,
+      variants:
+        variant === null
+          ? []
+          : variant.options.map(({ value, label, description }) => ({
+              value,
+              label,
+              description,
+            })),
+      fields: registration.editableFields.map((name) => {
+        const field = registration.fields[name]!;
+        return {
+          name,
+          label: field.label,
+          format:
+            field.control === "richText"
+              ? ("richText" as const)
+              : ("plainText" as const),
+        };
+      }),
+    };
+  });
+}
+
 export function createMcpReadApplication({
   site,
   siteMetadata,
   connections,
   cursors,
+  pageComponents = foundationPageComponentRegistry,
   createInvocationId = () => crypto.randomUUID(),
   now = () => new Date().toISOString(),
 }: {
@@ -373,6 +419,13 @@ export function createMcpReadApplication({
   }>;
   connections: McpConnectionStore;
   cursors: McpCursorCodec;
+  /**
+   * The section types this installation registers. It defaults to the
+   * foundation set; an installation that registers its own sections passes its
+   * own registry, so `foundry.section.list` names exactly the sections this
+   * site can hold.
+   */
+  pageComponents?: PageComponentRegistry;
   createInvocationId?: () => string;
   now?: () => string;
 }) {
@@ -742,6 +795,20 @@ export function createMcpReadApplication({
             contentHash: await execution.run(() => sha256CanonicalJson(schema)),
             lastModified: liveRelease?.observedAt ?? null,
           };
+        },
+      });
+    },
+    listSectionTypes(
+      principal: McpConnectionPrincipal,
+      context: McpExecutionContext = uninterruptedContext,
+    ) {
+      return execute({
+        principal,
+        operation: "foundry.section.list",
+        auditInput: {},
+        context,
+        async run() {
+          return { sections: siteSectionTypes(pageComponents) };
         },
       });
     },

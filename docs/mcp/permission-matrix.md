@@ -79,6 +79,8 @@ human authorization decision remains authoritative where it is stricter.
 | `foundry.page.rename` | `content.draft` | None | New immutable revision |
 | `foundry.page.duplicate` | `content.draft` | None | New immutable revision holding a copied page |
 | `foundry.page.delete` | `content.draft` | None | New immutable revision without that page |
+| `foundry.page.restructure` | `content.draft`, and `design.draft` as well when the request names a section style | None | New immutable revision with that page's sections changed |
+| `foundry.section.list` | `site.read` | None | None |
 | `foundry.design.patch` | `design.draft` | None | New immutable revision |
 | `foundry.preview.prepare` | matching draft scopes | None | Canonical preview artifact |
 | `foundry.campaign.create` | `campaign.draft` | None | Standalone campaign revision |

@@ -289,6 +289,35 @@ describe("site-scoped MCP read application", () => {
     );
   });
 
+  it("names every registered section type, its section styles and its editable fields", async () => {
+    const { application, audit } = fixture();
+
+    const listed = await application.listSectionTypes(principal);
+    const hero = listed.result.sections.find(
+      ({ sectionType }) => sectionType === "hero",
+    )!;
+    expect(hero.label).toBe("Hero");
+    expect(hero.variants.map(({ value }) => value)).toEqual([
+      "editorial",
+      "focused",
+    ]);
+    // A field the Site Definition protects, such as the hero's buttons, is
+    // left out, because an edit to it is always refused.
+    expect(hero.fields.map(({ name }) => name)).toEqual([
+      "eyebrow",
+      "title",
+      "summary",
+    ]);
+    // The call-to-action body is the one rich-text field a section carries.
+    const callToAction = listed.result.sections.find(
+      ({ sectionType }) => sectionType === "callToAction",
+    )!;
+    expect(
+      callToAction.fields.find(({ name }) => name === "body")!.format,
+    ).toBe("richText");
+    expect(audit.at(-1)?.operation).toBe("foundry.section.list");
+  });
+
   it("conceals cross-site reads and records a safe denial", async () => {
     const { application, audit } = fixture({
       connection: activeConnection({

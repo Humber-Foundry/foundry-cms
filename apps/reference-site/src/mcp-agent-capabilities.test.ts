@@ -21,8 +21,6 @@ describe("mcpAgentCapabilityDescriptions", () => {
       .join(" ")
       .toLowerCase();
     for (const forbidden of [
-      "create a page",
-      "creates a page",
       "write a blog post",
       "writes a blog post",
       "upload a photo",
@@ -39,5 +37,14 @@ describe("mcpAgentNeverDoes", () => {
     expect(text).toContain("subscriber list");
     expect(text).toContain("email address");
     expect(text).toContain("approv");
+  });
+
+  it("no longer says a page change is out of reach, because it is not", () => {
+    // The page tools (#161) and the section tools (#171) ship, so a screen
+    // that still said an agent cannot make a page would mislead the owner
+    // deciding whether to grant the content draft permission.
+    const text = mcpAgentNeverDoes.join(" ").toLowerCase();
+    expect(text).not.toContain("cannot create a new page");
+    expect(text).toContain("blog post from nothing");
   });
 });

@@ -27,6 +27,7 @@ import {
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
+  mcpRestructureScopes,
   sha256CanonicalJson,
   type McpMutationFailure,
   type ContentRevisionApplication,
@@ -1791,5 +1792,445 @@ describe("MCP page tools", () => {
         ),
       ),
     );
+  });
+});
+
+describe("MCP page restructure tool", () => {
+  async function openedDraft(scopes: ReadonlyArray<string>, key: string) {
+    const fixtureValue = fixture(scopes);
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await fixtureValue.application.openWorkspace(
+        fixtureValue.activePrincipal,
+        { expectedRevision: 0, idempotencyKey: key },
+        context,
+      ),
+    );
+    return { fixtureValue, workspaceId: opened.workspaceId };
+  }
+
+  /** A draft with one page of the agent's own, at revision 1. */
+  async function draftWithPage(scopes: ReadonlyArray<string>, key: string) {
+    const { fixtureValue, workspaceId } = await openedDraft(scopes, key);
+    const created = resultOf<{ pageId: string }>(
+      await fixtureValue.application.createPage(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: `${key}-create`,
+          title: "What we offer",
+          slug: "what-we-offer",
+          startingLayout: "what_you_offer",
+        },
+        context,
+      ),
+    );
+    return { fixtureValue, workspaceId, pageId: created.pageId };
+  }
+
+  async function sectionsOf(
+    fixtureValue: ReturnType<typeof fixture>,
+    workspaceId: ContentWorkspaceId,
+    pageId: string,
+  ) {
+    const { definition } = await fixtureValue.workspaces
+      .get(workspaceId)!
+      .queries.getCurrent();
+    return findPageById(definition, pageId)!.sections;
+  }
+
+  it("changes the sections of a page the agent made inside the draft", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-restructure-1",
+    );
+    const result = resultOf<{
+      pageId: string;
+      revision: number;
+      replayed: boolean;
+      previewArtifact: string;
+    }>(
+      await fixtureValue.application.restructurePage(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 1,
+          idempotencyKey: "restructure-1",
+          pageId,
+          operations: [
+            { op: "add", sectionType: "proof", position: 1 },
+            { op: "remove", sectionId: `${pageId}_services` },
+          ],
+        },
+        context,
+      ),
+    );
+    expect(result.pageId).toBe(pageId);
+    expect(result.revision).toBe(2);
+    expect(result.replayed).toBe(false);
+    expect(result.previewArtifact).toMatch(/^[0-9a-f]{64}$/u);
+    expect(
+      (await sectionsOf(fixtureValue, workspaceId, pageId)).map(
+        ({ type }) => type,
+      ),
+    ).toEqual(["hero", "proof", "callToAction"]);
+  });
+
+  it("repeats the same answer when the same request is sent twice", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-restructure-replay",
+    );
+    const input = {
+      workspaceId,
+      expectedRevision: 1,
+      idempotencyKey: "restructure-replay-1",
+      pageId,
+      operations: [
+        { op: "duplicate" as const, sectionId: `${pageId}_services` },
+      ],
+    };
+    const first = resultOf<{ revision: number }>(
+      await fixtureValue.application.restructurePage(
+        fixtureValue.activePrincipal,
+        input,
+        context,
+      ),
+    );
+    const second = resultOf<{ revision: number; replayed: boolean }>(
+      await fixtureValue.application.restructurePage(
+        fixtureValue.activePrincipal,
+        input,
+        context,
+      ),
+    );
+    expect(second.replayed).toBe(true);
+    expect(second.revision).toBe(first.revision);
+    expect(
+      await sectionsOf(fixtureValue, workspaceId, pageId),
+    ).toHaveLength(4);
+  });
+
+  it("needs the content draft scope, and the design scope only to choose a section style", async () => {
+    const withContent = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-restructure-scope-1",
+    );
+    await expect(
+      withContent.fixtureValue.application.restructurePage(
+        withContent.fixtureValue.activePrincipal,
+        {
+          workspaceId: withContent.workspaceId,
+          expectedRevision: 1,
+          idempotencyKey: "restructure-scope-variant-1",
+          pageId: withContent.pageId,
+          operations: [
+            {
+              op: "set_variant",
+              sectionId: `${withContent.pageId}_hero`,
+              variant: "focused",
+            },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpContentDraftScope, mcpDesignDraftScope],
+    });
+
+    const designOnly = await openedDraft(
+      [mcpInitialScope, mcpDesignDraftScope],
+      "open-restructure-scope-2",
+    );
+    await expect(
+      designOnly.fixtureValue.application.restructurePage(
+        designOnly.fixtureValue.activePrincipal,
+        {
+          workspaceId: designOnly.workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "restructure-scope-structure-1",
+          pageId: "page_0123456789abcdef0123",
+          operations: [{ op: "add", sectionType: "proof", position: 0 }],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpContentDraftScope],
+    });
+  });
+
+  it("styles a section on a page made inside the draft when both scopes are held", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope, mcpDesignDraftScope],
+      "open-restructure-arrange",
+    );
+    await fixtureValue.application.restructurePage(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: "restructure-arrange-1",
+        pageId,
+        operations: [
+          { op: "set_variant", sectionId: `${pageId}_hero`, variant: "focused" },
+          { op: "add", sectionType: "proof", position: 3, variant: "panel" },
+        ],
+      },
+      context,
+    );
+    const sections = await sectionsOf(fixtureValue, workspaceId, pageId);
+    expect(sections[0]!.type === "hero" && sections[0]!.variant).toBe(
+      "focused",
+    );
+    expect(sections[3]!.type === "proof" && sections[3]!.variant).toBe(
+      "panel",
+    );
+  });
+
+  it("prepares a preview of the page it restructured, on the content scope alone", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-restructure-preview",
+    );
+    await fixtureValue.application.restructurePage(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: "restructure-preview-1",
+        pageId,
+        operations: [{ op: "add", sectionType: "proof", position: 1 }],
+      },
+      context,
+    );
+    const prepared = resultOf<{
+      previewId: string;
+      humanReviewUrl: string;
+      approvalStatus: string;
+    }>(
+      await fixtureValue.application.preparePreview(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 2,
+          idempotencyKey: "restructure-preview-prepare-1",
+        },
+        context,
+      ),
+    );
+    expect(prepared.previewId).toEqual(expect.any(String));
+    // Preparing a preview never approves it; a person still has to.
+    expect(prepared.approvalStatus).toBe("pending_human_review");
+    expect(
+      fixtureValue.previewScopesEvaluated.at(-1),
+    ).toEqual([mcpContentDraftScope]);
+  });
+
+  it("copies a section with the style it already carries, on the content scope alone", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope, mcpDesignDraftScope],
+      "open-restructure-copy-style",
+    );
+    await fixtureValue.application.restructurePage(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: "restructure-copy-style-1",
+        pageId,
+        operations: [
+          { op: "set_variant", sectionId: `${pageId}_hero`, variant: "focused" },
+        ],
+      },
+      context,
+    );
+    // The agent names no style here, so the copy needs the content scope only,
+    // the same as copying a whole page does. See ADR-0035.
+    expect(
+      mcpRestructureScopes([{ op: "duplicate", sectionId: `${pageId}_hero` }]),
+    ).toEqual([mcpContentDraftScope]);
+    await fixtureValue.application.restructurePage(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 2,
+        idempotencyKey: "restructure-copy-style-2",
+        pageId,
+        operations: [{ op: "duplicate", sectionId: `${pageId}_hero` }],
+      },
+      context,
+    );
+    const sections = await sectionsOf(fixtureValue, workspaceId, pageId);
+    expect(sections[1]!.type === "hero" && sections[1]!.variant).toBe(
+      "focused",
+    );
+  });
+
+  it("refuses a restructure with a named reason an agent can act on", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-restructure-refusal",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+    const restructure = (
+      idempotencyKey: string,
+      operations: ReadonlyArray<unknown>,
+      page: string = pageId,
+    ) =>
+      fixtureValue.application.restructurePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 1,
+          idempotencyKey,
+          pageId: page,
+          operations: operations as never,
+        },
+        context,
+      );
+
+    await expect(
+      restructure(
+        "restructure-refusal-missing-page",
+        [{ op: "add", sectionType: "proof", position: 0 }],
+        mintedPageId("3".repeat(20)),
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_not_found",
+    });
+
+    await expect(
+      restructure("restructure-refusal-missing-section", [
+        { op: "remove", sectionId: "not_a_section" },
+      ]),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_section_not_found",
+      message: "That section is not on this page.",
+    });
+
+    // Sending that same refused request again says the same thing.
+    await expect(
+      restructure("restructure-refusal-missing-section", [
+        { op: "remove", sectionId: "not_a_section" },
+      ]),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_section_not_found",
+      replayed: true,
+    });
+
+    await expect(
+      restructure("restructure-refusal-empty-page", [
+        { op: "remove", sectionId: `${pageId}_hero` },
+        { op: "remove", sectionId: `${pageId}_services` },
+        { op: "remove", sectionId: `${pageId}_call_to_action` },
+      ]),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_sections_refused",
+    });
+  });
+});
+
+describe("MCP design tool on a draft-made page", () => {
+  it("styles a section the installed site never held, and names why it refuses", async () => {
+    const fixtureValue = fixture([
+      mcpInitialScope,
+      mcpContentDraftScope,
+      mcpDesignDraftScope,
+    ]);
+    const principalValue = fixtureValue.activePrincipal;
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await fixtureValue.application.openWorkspace(
+        principalValue,
+        { expectedRevision: 0, idempotencyKey: "open-design-draft-page-1" },
+        context,
+      ),
+    );
+    const created = resultOf<{ pageId: string }>(
+      await fixtureValue.application.createPage(
+        principalValue,
+        {
+          workspaceId: opened.workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "design-draft-page-create-1",
+          title: "What we offer",
+          slug: "what-we-offer",
+          startingLayout: "what_you_offer",
+        },
+        context,
+      ),
+    );
+    // The section is on a page the installed site has never held, so an
+    // enumeration built from the installed site could not have named it.
+    await fixtureValue.application.patchDesign(
+      principalValue,
+      {
+        workspaceId: opened.workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: "design-draft-page-variant-1",
+        operations: [
+          {
+            op: "set_variant",
+            componentId: `${created.pageId}.${created.pageId}_hero`,
+            value: "focused",
+          },
+        ],
+      },
+      context,
+    );
+    const { definition } = await fixtureValue.workspaces
+      .get(opened.workspaceId)!
+      .queries.getCurrent();
+    const hero = findPageById(definition, created.pageId)!.sections[0]!;
+    expect(hero.type === "hero" && hero.variant).toBe("focused");
+
+    await expect(
+      fixtureValue.application.patchDesign(
+        principalValue,
+        {
+          workspaceId: opened.workspaceId,
+          expectedRevision: 2,
+          idempotencyKey: "design-draft-page-variant-2",
+          operations: [
+            {
+              op: "set_variant",
+              componentId: "no_such_section",
+              value: "focused",
+            },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "design_setting_not_found",
+    });
+
+    await expect(
+      fixtureValue.application.patchDesign(
+        principalValue,
+        {
+          workspaceId: opened.workspaceId,
+          expectedRevision: 2,
+          idempotencyKey: "design-draft-page-variant-3",
+          operations: [
+            {
+              op: "set_variant",
+              componentId: `${created.pageId}.${created.pageId}_hero`,
+              value: "cards",
+            },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "design_value_not_registered",
+    });
   });
 });

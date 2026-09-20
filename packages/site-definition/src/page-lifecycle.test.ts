@@ -16,12 +16,14 @@ import {
   pageSlugRefusal,
   pageStartingLayouts,
   pageTitleRefusal,
+  planPageSectionRestructure,
   PageLifecycleError,
   referenceSiteDefinition,
   removePageFromDefinition,
   suggestPageSlug,
   type SiteDefinition,
   type SiteLink,
+  type PageSectionOperation,
   type SitePage,
 } from "./index";
 
@@ -558,5 +560,199 @@ describe("the page name and web address as editable fields", () => {
   it("lets the web address be left blank only on the home page", () => {
     expect(field(`${firstPageId}.slug`).optional).toBe(true);
     expect(field(`${firstPageId}.title`).optional).toBe(false);
+  });
+});
+
+describe("planPageSectionRestructure", () => {
+  const definition = create(referenceSiteDefinition, {
+    startingLayout: "what_you_offer",
+  });
+  const page = findPageById(definition, firstPageId)!;
+  const plan = (operations: ReadonlyArray<PageSectionOperation>) =>
+    planPageSectionRestructure(definition, page, operations);
+  const types = (sections: ReadonlyArray<{ type: string }>) =>
+    sections.map(({ type }) => type);
+
+  it("leaves the page as it is when no operation is given", () => {
+    const result = plan([]);
+    expect(result.sections).toEqual(page.sections);
+    expect(result.variantChanges).toEqual({});
+  });
+
+  it("adds a registered section at the position asked for", () => {
+    const result = plan([{ op: "add", sectionType: "proof", position: 1 }]);
+    expect(types(result.sections)).toEqual([
+      "hero",
+      "proof",
+      "services",
+      "callToAction",
+    ]);
+  });
+
+  it("names a new section after the page that holds it", () => {
+    const result = plan([{ op: "add", sectionType: "proof", position: 3 }]);
+    expect(result.sections[3]!.id).toBe(`${firstPageId}_proof`);
+  });
+
+  it("gives two sections of the same kind different identifiers", () => {
+    const result = plan([
+      { op: "add", sectionType: "proof", position: 3 },
+      { op: "add", sectionType: "proof", position: 4 },
+    ]);
+    expect(result.sections[3]!.id).toBe(`${firstPageId}_proof`);
+    expect(result.sections[4]!.id).toBe(`${firstPageId}_proof_2`);
+  });
+
+  it("gives a new section the section style the caller chose", () => {
+    const result = plan([
+      { op: "add", sectionType: "proof", position: 3, variant: "panel" },
+    ]);
+    const added = result.sections[3]!;
+    expect(added.type === "proof" && added.variant).toBe("panel");
+    // A section this request added carries its section style in the section
+    // itself, because there is no earlier value to compare it with.
+    expect(result.variantChanges).toEqual({});
+  });
+
+  it("removes a section", () => {
+    const result = plan([
+      { op: "remove", sectionId: `${firstPageId}_services` },
+    ]);
+    expect(types(result.sections)).toEqual(["hero", "callToAction"]);
+  });
+
+  it("moves a section to a new position", () => {
+    const result = plan([
+      { op: "move", sectionId: `${firstPageId}_call_to_action`, position: 0 },
+    ]);
+    expect(types(result.sections)).toEqual(["callToAction", "hero", "services"]);
+  });
+
+  it("puts a copied section straight after the section it came from", () => {
+    const result = plan([
+      { op: "duplicate", sectionId: `${firstPageId}_services` },
+    ]);
+    expect(types(result.sections)).toEqual([
+      "hero",
+      "services",
+      "services",
+      "callToAction",
+    ]);
+    expect(result.sections[2]!.id).toBe(`${firstPageId}_services_2`);
+  });
+
+  it("gives every nested item in a copied section a fresh identifier", () => {
+    const result = plan([
+      { op: "duplicate", sectionId: `${firstPageId}_services` },
+    ]);
+    const copy = result.sections[2]!;
+    expect(copy.type === "services" && copy.items.map(({ id }) => id)).toEqual([
+      `${copy.id}_item_1`,
+    ]);
+  });
+
+  it("reports a section style change on a section the page already held", () => {
+    const result = plan([
+      {
+        op: "set_variant",
+        sectionId: `${firstPageId}_hero`,
+        variant: "focused",
+      },
+    ]);
+    expect(result.variantChanges).toEqual({
+      [`${firstPageId}_hero`]: "focused",
+    });
+  });
+
+  it("reports no section style change when the section keeps its section style", () => {
+    const hero = page.sections[0]!;
+    const result = plan([
+      {
+        op: "set_variant",
+        sectionId: hero.id,
+        variant: hero.type === "hero" ? hero.variant : "editorial",
+      },
+    ]);
+    expect(result.variantChanges).toEqual({});
+  });
+
+  it("reports no section style change for a section the request removed again", () => {
+    const result = plan([
+      {
+        op: "set_variant",
+        sectionId: `${firstPageId}_hero`,
+        variant: "focused",
+      },
+      { op: "remove", sectionId: `${firstPageId}_hero` },
+    ]);
+    expect(result.variantChanges).toEqual({});
+  });
+
+  it("carries out the operations in the order they are given", () => {
+    const result = plan([
+      { op: "add", sectionType: "proof", position: 3 },
+      { op: "move", sectionId: `${firstPageId}_proof`, position: 0 },
+    ]);
+    expect(types(result.sections)).toEqual([
+      "proof",
+      "hero",
+      "services",
+      "callToAction",
+    ]);
+  });
+
+  it("refuses a section that is not on this page", () => {
+    expect(
+      refusal(() => plan([{ op: "remove", sectionId: "not_a_section" }])).code,
+    ).toBe("page_section_not_found");
+  });
+
+  it("refuses a kind of section this site does not register", () => {
+    expect(
+      refusal(() =>
+        plan([{ op: "add", sectionType: "carousel", position: 0 }]),
+      ).code,
+    ).toBe("page_section_type_unknown");
+  });
+
+  it("refuses a position outside the section list", () => {
+    expect(
+      refusal(() =>
+        plan([{ op: "add", sectionType: "proof", position: 4 }]),
+      ).code,
+    ).toBe("page_section_position_invalid");
+    expect(
+      refusal(() =>
+        plan([{ op: "move", sectionId: `${firstPageId}_hero`, position: 3 }]),
+      ).code,
+    ).toBe("page_section_position_invalid");
+  });
+
+  it("refuses a section style this kind of section does not offer", () => {
+    expect(
+      refusal(() =>
+        plan([
+          {
+            op: "set_variant",
+            sectionId: `${firstPageId}_hero`,
+            variant: "cards",
+          },
+        ]),
+      ).code,
+    ).toBe("page_section_variant_unknown");
+  });
+
+  it("carries a sentence the owner can read for every refusal", () => {
+    expect(
+      Object.values(
+        refusal(() => plan([{ op: "remove", sectionId: "not_a_section" }]))
+          .fields,
+      ),
+    ).toEqual(["That section is not on this page."]);
+  });
+
+  it("leaves the page it was planned from untouched", () => {
+    plan([{ op: "remove", sectionId: `${firstPageId}_services` }]);
+    expect(findPageById(definition, firstPageId)!.sections).toHaveLength(3);
   });
 });
