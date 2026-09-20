@@ -91,6 +91,7 @@ describe("blog post controls browser acceptance", () => {
           verifiedPublicPostIds: [],
           postSummaries: new Map(),
           archivedPosts,
+          pendingScheduleRequestAgentNames: new Map(),
         }),
       );
     });

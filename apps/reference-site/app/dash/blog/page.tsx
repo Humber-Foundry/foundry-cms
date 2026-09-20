@@ -8,7 +8,11 @@ import { BlogPostControls } from "@/components/blog-post-controls";
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { verifiedPublicBlogPostIds } from "@/components/published-blog-posts";
 import { installedSiteDefinition } from "@/foundry/site-definition";
-import { loadBlogPostOperationsApplication } from "@/src/blog-post-operations-runtime";
+import {
+  loadBlogPostOperationalSummaries,
+  loadBlogPostOperationsApplication,
+} from "@/src/blog-post-operations-runtime";
+import { blogScheduleRequestAgentNames } from "@/src/blog-schedule-request-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -38,33 +42,40 @@ async function loadBlogPostOperationalContext(
   Readonly<{
     summaries: ReadonlyMap<BlogPostId, BlogPostOperationalSummary>;
     archivedPosts: ReadonlyArray<ArchivedBlogPostSummary>;
+    pendingScheduleRequestAgentNames: ReadonlyMap<BlogPostId, string>;
   }>
 > {
   try {
-    const application = await loadBlogPostOperationsApplication(
-      await loadHumanAccessEnvironment(),
-    );
+    const environment = await loadHumanAccessEnvironment();
+    const application = await loadBlogPostOperationsApplication(environment);
     const siteId = installedSiteDefinition.site.id;
-    const summaryEntries = await Promise.all(
-      postIds.map(async (postId) => {
-        const summary = await application.queries.getPostSummary(
-          siteId,
+    const summaries = await loadBlogPostOperationalSummaries(
+      environment,
+      siteId,
+      postIds,
+    );
+    const pendingProposalsByPostId = new Map(
+      [...summaries.entries()]
+        .filter(([, summary]) => summary.pendingScheduleProposal !== null)
+        .map(([postId, summary]) => [
           postId,
-        );
-        return summary === null ? null : ([postId, summary] as const);
-      }),
+          summary.pendingScheduleProposal!,
+        ]),
     );
     return {
-      summaries: new Map(
-        summaryEntries.filter(
-          (entry): entry is readonly [BlogPostId, BlogPostOperationalSummary] =>
-            entry !== null,
-        ),
-      ),
+      summaries,
       archivedPosts: await application.queries.listArchivedPosts(siteId),
+      pendingScheduleRequestAgentNames: await blogScheduleRequestAgentNames(
+        environment,
+        pendingProposalsByPostId,
+      ),
     };
   } catch {
-    return { summaries: new Map(), archivedPosts: [] };
+    return {
+      summaries: new Map(),
+      archivedPosts: [],
+      pendingScheduleRequestAgentNames: new Map(),
+    };
   }
 }
 
@@ -94,11 +105,16 @@ export default async function DashboardBlogPage({
   const needsFreshWorkspace =
     schemaRecovery !== undefined || dashboardWorkspace.contentStale;
 
-  const { summaries, archivedPosts } = needsFreshWorkspace
-    ? { summaries: new Map(), archivedPosts: [] }
-    : await loadBlogPostOperationalContext(
-        contentRevision.definition.blog.posts.map((post) => post.id),
-      );
+  const { summaries, archivedPosts, pendingScheduleRequestAgentNames } =
+    needsFreshWorkspace
+      ? {
+          summaries: new Map(),
+          archivedPosts: [],
+          pendingScheduleRequestAgentNames: new Map(),
+        }
+      : await loadBlogPostOperationalContext(
+          contentRevision.definition.blog.posts.map((post) => post.id),
+        );
 
   return (
     <main className="dashboard-main" id="main">
@@ -127,6 +143,7 @@ export default async function DashboardBlogPage({
           verifiedPublicPostIds={verifiedPublicBlogPostIds(definition)}
           postSummaries={summaries}
           archivedPosts={archivedPosts}
+          pendingScheduleRequestAgentNames={pendingScheduleRequestAgentNames}
         />
       )}
     </main>

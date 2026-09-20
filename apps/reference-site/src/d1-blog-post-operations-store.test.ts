@@ -71,6 +71,7 @@ describe("D1 blog post operations store", () => {
       "0020_mcp_mutation_receipts.sql",
       "0022_blog_post_scheduling_archive.sql",
       "0024_mcp_publication_scopes.sql",
+      "0034_blog_post_schedule_proposal_declines.sql",
     ],
     { compatibilityDate: "2026-07-26" },
   );
@@ -1160,6 +1161,231 @@ describe("D1 blog post operations store", () => {
         .bind(referenceSiteDefinition.site.id, postId)
         .first(),
     ).toEqual({ workflow_state: "editing" });
+  });
+
+  it("shows a durable schedule request in the post summary until a person declines it", async () => {
+    const store = createD1BlogPostOperationsStore(database);
+    const app = createBlogPostOperationsApplication({
+      store,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_attention`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const resolvedTime = {
+      localDateTime: "2026-11-01T01:00:00",
+      ianaTimeZone: "America/Vancouver",
+      utcOffsetChoice: "-07:00",
+      executeAtUtc: now,
+    };
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+
+    const proposal = await app.commands.proposeSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime,
+      idempotencyKey: "durable-attention-proposal",
+    });
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toEqual(proposal);
+
+    const declined = await app.commands.declineScheduleProposal({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: proposal.id,
+      idempotencyKey: "durable-attention-decline",
+    });
+    expect(declined).toEqual(proposal);
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+
+    // A retried decline is a no-op, not an error, and the row stays immutable.
+    await expect(app.commands.declineScheduleProposal({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: proposal.id,
+      idempotencyKey: "durable-attention-decline-again",
+    })).resolves.toEqual(proposal);
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM blog_post_schedule_proposal_declines
+           WHERE proposal_id = ?1`,
+        )
+        .bind(proposal.id)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
+    await expect(
+      database
+        .prepare(
+          `UPDATE blog_post_schedule_proposal_declines
+           SET declined_at = ?1 WHERE proposal_id = ?2`,
+        )
+        .bind(now, proposal.id)
+        .run(),
+    ).rejects.toThrow(
+      /blog_post_schedule_proposal_declines_are_immutable/u,
+    );
+  });
+
+  it("never resurrects an older undeclined durable request once the newest one is declined", async () => {
+    const store = createD1BlogPostOperationsStore(database);
+    const app = createBlogPostOperationsApplication({
+      store,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const olderProposal = await app.commands.proposeSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: "2026-11-01T08:00:00.000Z",
+      },
+      idempotencyKey: "durable-older-proposal",
+    });
+    operationTime = now;
+    const newerProposal = await app.commands.proposeSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime: {
+        localDateTime: "2026-10-15T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: "2026-10-15T08:00:00.000Z",
+      },
+      idempotencyKey: "durable-newer-proposal",
+    });
+    expect(newerProposal.createdAt > olderProposal.createdAt).toBe(true);
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toEqual(newerProposal);
+
+    await app.commands.declineScheduleProposal({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: newerProposal.id,
+      idempotencyKey: "durable-decline-newer-proposal",
+    });
+
+    // The older proposal was never declined. It must not resurface as
+    // pending — only the post's single newest proposal is ever shown.
+    expect(
+      (await app.queries.getPostSummary(
+        referenceSiteDefinition.site.id,
+        postId,
+      ))?.pendingScheduleProposal,
+    ).toBeNull();
+  });
+
+  it("lets an Owner decline the same way the seeded Editor does, and refuses an actor with no active membership", async () => {
+    const ownerId = createContentActorId("membership-owner-declines");
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO human_users (id, email, created_at)
+           VALUES ('user-owner-declines', 'owner-declines@example.com', ?1)`,
+        )
+        .bind(beforeNow),
+      database
+        .prepare(
+          `INSERT INTO human_memberships (
+             id, site_id, user_id, email, identity_issuer,
+             identity_subject, role, status, created_at, updated_at
+           ) VALUES (
+             ?1, ?2, 'user-owner-declines', 'owner-declines@example.com',
+             'https://access.example.com', 'owner-declines', 'owner',
+             'active', ?3, ?3
+           )`,
+        )
+        .bind(ownerId, referenceSiteDefinition.site.id, beforeNow),
+    ]);
+    const store = createD1BlogPostOperationsStore(database);
+    const app = createBlogPostOperationsApplication({
+      store,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const resolvedTime = {
+      localDateTime: "2026-11-01T01:00:00",
+      ianaTimeZone: "America/Vancouver",
+      utcOffsetChoice: "-07:00",
+      executeAtUtc: now,
+    };
+
+    // The Editor role (the membership every other test in this file seeds)
+    // may decline, matching CONTEXT.md: Owner and Editor share the same
+    // content authority.
+    const editorProposal = await app.commands.proposeSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime,
+      idempotencyKey: "role-check-editor-proposal",
+    });
+    await expect(app.commands.declineScheduleProposal({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: editorProposal.id,
+      idempotencyKey: "role-check-editor-declines",
+    })).resolves.toEqual(editorProposal);
+
+    // An Owner may decline too, under the Owner's own membership id.
+    const ownerProposal = await app.commands.proposeSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime,
+      idempotencyKey: "role-check-owner-proposal",
+    });
+    await expect(app.commands.declineScheduleProposal({
+      actorId: ownerId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: ownerProposal.id,
+      idempotencyKey: "role-check-owner-declines",
+    })).resolves.toEqual(ownerProposal);
+
+    // Neither role check is a rubber stamp: an actor with no active
+    // membership on this site is refused.
+    const strangerProposal = await app.commands.proposeSchedule({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime,
+      idempotencyKey: "role-check-stranger-proposal",
+    });
+    await expect(app.commands.declineScheduleProposal({
+      actorId: createContentActorId("membership-no-such-member"),
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      proposalId: strangerProposal.id,
+      idempotencyKey: "role-check-stranger-declines",
+    })).rejects.toMatchObject({ code: "human_authority_required" });
   });
 
   it("keeps durable schedule proposals human-only until issue 56", async () => {

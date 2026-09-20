@@ -10,6 +10,7 @@ import {
   createContentWorkspaceId,
   createHumanMembershipId,
   createInMemoryBlogPostOperationsStore,
+  type BlogPostOperationalSummary,
   type BlogPostOperationsStore,
   type BlogPostScheduleExecution,
   type BlogPostScheduleExecutionLease,
@@ -111,6 +112,43 @@ export async function loadBlogPostOperationsApplication(
     ...environment,
     FOUNDRY_DB: environment.FOUNDRY_DB,
   }).application;
+}
+
+/**
+ * Each named post's schedule, archive and pending-schedule-request state, in
+ * one read per post. Both the Blog list and Overview's "Needs attention"
+ * list use this, so a post's pending schedule request is computed exactly
+ * once, in one place.
+ *
+ * Returns an empty map instead of throwing when blog-post operations are not
+ * configured, so a missing schedule/archive backend never blocks the page
+ * that called this.
+ */
+export async function loadBlogPostOperationalSummaries(
+  environment: HumanAccessEnvironment,
+  siteId: string,
+  postIds: ReadonlyArray<BlogPostId>,
+): Promise<ReadonlyMap<BlogPostId, BlogPostOperationalSummary>> {
+  try {
+    const application = await loadBlogPostOperationsApplication(environment);
+    const entries = await Promise.all(
+      postIds.map(async (postId) => {
+        const summary = await application.queries.getPostSummary(
+          siteId,
+          postId,
+        );
+        return summary === null ? null : ([postId, summary] as const);
+      }),
+    );
+    return new Map(
+      entries.filter(
+        (entry): entry is readonly [BlogPostId, BlogPostOperationalSummary] =>
+          entry !== null,
+      ),
+    );
+  } catch {
+    return new Map();
+  }
 }
 
 function executionOutcome(status: ContentPublicationStatus) {

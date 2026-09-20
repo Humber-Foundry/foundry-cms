@@ -183,6 +183,13 @@ export type BlogPostOperationalSummary = BlogPostOperationalState &
     archiveRequestId: string | null;
     activeSchedule: BlogPostSchedule | null;
     latestExecution: BlogPostScheduleExecution | null;
+    /**
+     * The post's newest schedule request nobody has answered yet: not
+     * declined, and not already covered by an active schedule. `null` once
+     * either of those happens, or when nobody has ever asked. See ADR-0036
+     * and issue #219.
+     */
+    pendingScheduleProposal: BlogPostScheduleProposal | null;
   }>;
 
 /**
@@ -264,6 +271,19 @@ export type BlogPostOperationsStore = Readonly<{
     postId: BlogPostId | string;
     idempotencyKey: string;
   }): Promise<BlogPostScheduleProposal | null>;
+  /**
+   * A person's decision to decline one schedule request an app made. Only a
+   * person declines; there is no MCP variant, because an agent may not
+   * answer its own request. See ADR-0036.
+   */
+  declineScheduleProposal(input: {
+    actorId: ContentActorId;
+    siteId: SiteId | string;
+    postId: BlogPostId | string;
+    proposalId: string;
+    requestId: string;
+    occurredAt: string;
+  }): Promise<BlogPostScheduleProposal>;
   hasHumanContentAuthority(input: {
     siteId: SiteId | string;
     actorId: ContentActorId;
@@ -947,6 +967,40 @@ export function createBlogPostOperationsApplication({
           },
         );
       },
+      /**
+       * A person declines one schedule request an app made. Declining does
+       * not touch the post; it only stops the request from asking again.
+       * Only an Owner or Editor may decline — never an agent. See ADR-0036.
+       */
+      async declineScheduleProposal(input: {
+        actorId: ContentActorId;
+        siteId: SiteId | string;
+        postId: BlogPostId | string;
+        proposalId: string;
+        idempotencyKey: string;
+      }) {
+        return audited(
+          {
+            siteId: input.siteId,
+            postId: input.postId,
+            actorId: input.actorId,
+            commandType: "blog.post.schedule.decline",
+            requestId: input.idempotencyKey,
+          },
+          async () => {
+            await requireHumanContentAuthority(input);
+            requireIdempotencyKey(input.idempotencyKey);
+            return store.declineScheduleProposal({
+              actorId: input.actorId,
+              siteId: input.siteId,
+              postId: input.postId,
+              proposalId: input.proposalId,
+              requestId: input.idempotencyKey,
+              occurredAt: now(),
+            });
+          },
+        );
+      },
       async activateSchedule(input: {
         actorId: ContentActorId;
         siteId: SiteId | string;
@@ -1516,6 +1570,7 @@ export function createInMemoryBlogPostOperationsStore(seed: {
     string,
     BlogPostScheduleProposal
   >();
+  const scheduleProposalDeclines = new Set<string>();
   const scheduleCancellationRequests = new Map<
     string,
     Readonly<{
@@ -1618,12 +1673,28 @@ export function createInMemoryBlogPostOperationsStore(seed: {
             right.claimedAt.localeCompare(left.claimedAt)
           )
           .map(publicExecution)[0] ?? null;
+      const latestProposal =
+        [...scheduleProposals.values()]
+          .filter(
+            (proposal) =>
+              proposal.siteId === siteId && proposal.postId === postId,
+          )
+          .sort((left, right) =>
+            right.createdAt.localeCompare(left.createdAt)
+          )[0] ?? null;
+      const pendingScheduleProposal =
+        activeSchedule !== null ||
+        latestProposal === null ||
+        scheduleProposalDeclines.has(latestProposal.id)
+          ? null
+          : latestProposal;
       return Object.freeze({
         ...post,
         archiveRequestId:
           archiveRequestIdByPost.get(postKey(siteId, postId)) ?? null,
         activeSchedule,
         latestExecution,
+        pendingScheduleProposal,
       });
     },
     async listArchivedPosts(siteId) {
@@ -1712,6 +1783,33 @@ export function createInMemoryBlogPostOperationsStore(seed: {
       return scheduleProposalRequests.get(
         `${input.siteId}\0${input.idempotencyKey}`,
       ) ?? null;
+    },
+    async declineScheduleProposal(input) {
+      const proposal = scheduleProposals.get(input.proposalId);
+      if (
+        proposal === undefined ||
+        proposal.siteId !== input.siteId ||
+        proposal.postId !== input.postId
+      ) {
+        throw new BlogPostOperationError("schedule_proposal_not_found");
+      }
+      if (scheduleProposalDeclines.has(input.proposalId)) {
+        return proposal;
+      }
+      scheduleProposalDeclines.add(input.proposalId);
+      await store.recordAudit({
+        siteId: input.siteId,
+        postId: input.postId,
+        actorId: input.actorId,
+        commandType: "blog.post.schedule.decline",
+        requestId: input.requestId,
+        outcome: "accepted",
+        reasonCode: "accepted",
+        beforeState: proposal,
+        afterState: proposal,
+        occurredAt: input.occurredAt,
+      });
+      return proposal;
     },
     async hasHumanContentAuthority(input) {
       return humanActorIds.has(input.actorId);

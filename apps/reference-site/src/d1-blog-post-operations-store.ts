@@ -495,7 +495,8 @@ export function createD1BlogPostOperationsStore(
       if (post === null) {
         return null;
       }
-      const [archiveRow, scheduleRow, executionRow] = await Promise.all([
+      const [archiveRow, scheduleRow, executionRow, proposalRow] =
+        await Promise.all([
         database
           .prepare(
             `SELECT archive_request_id
@@ -539,6 +540,30 @@ export function createD1BlogPostOperationsStore(
           )
           .bind(siteId, postId)
           .first<ExecutionRow>(),
+        database
+          .prepare(
+            // Only ever the post's single newest proposal, exactly like the
+            // in-memory store. This must NOT filter declined rows out of
+            // the candidate set: doing so would let an older, undeclined
+            // proposal resurface as "pending" after the newest one was
+            // declined, which the in-memory store never does.
+            `SELECT proposal.id, proposal.site_id, proposal.post_id,
+                    proposal.workspace_id, proposal.content_revision,
+                    proposal.post_revision_id, proposal.authority_version,
+                    proposal.local_date_time, proposal.iana_time_zone,
+                    proposal.utc_offset_choice, proposal.execute_at_utc,
+                    proposal.time_zone_database_version, proposal.created_by,
+                    proposal.proposal_audit_id, proposal.created_at,
+                    decline.proposal_id AS declined_proposal_id
+             FROM blog_post_schedule_proposals AS proposal
+             LEFT JOIN blog_post_schedule_proposal_declines AS decline
+               ON decline.proposal_id = proposal.id
+             WHERE proposal.site_id = ?1 AND proposal.post_id = ?2
+             ORDER BY proposal.created_at DESC
+             LIMIT 1`,
+          )
+          .bind(siteId, postId)
+          .first<ScheduleProposalRow & { declined_proposal_id: string | null }>(),
       ]);
       return {
         ...post,
@@ -547,6 +572,12 @@ export function createD1BlogPostOperationsStore(
           scheduleRow === null ? null : scheduleFromRow(scheduleRow),
         latestExecution:
           executionRow === null ? null : executionFromRow(executionRow),
+        pendingScheduleProposal:
+          scheduleRow !== null ||
+          proposalRow === null ||
+          proposalRow.declined_proposal_id !== null
+            ? null
+            : scheduleProposalFromRow(proposalRow),
       };
     },
     async listArchivedPosts(siteId): Promise<ReadonlyArray<ArchivedBlogPostSummary>> {
@@ -1050,6 +1081,81 @@ export function createD1BlogPostOperationsStore(
         .bind(input.siteId, input.postId, input.idempotencyKey)
         .first<ScheduleProposalRow>();
       return row === null ? null : scheduleProposalFromRow(row);
+    },
+    async declineScheduleProposal(input) {
+      const proposalRow = await database
+        .prepare(
+          `SELECT id, site_id, post_id, workspace_id, content_revision,
+                  post_revision_id, authority_version,
+                  local_date_time, iana_time_zone, utc_offset_choice,
+                  execute_at_utc, time_zone_database_version, created_by,
+                  proposal_audit_id, created_at
+           FROM blog_post_schedule_proposals
+           WHERE id = ?1 AND site_id = ?2 AND post_id = ?3`,
+        )
+        .bind(input.proposalId, input.siteId, input.postId)
+        .first<ScheduleProposalRow>();
+      if (proposalRow === null) {
+        throw new BlogPostOperationError("schedule_proposal_not_found");
+      }
+      const proposal = scheduleProposalFromRow(proposalRow);
+      const beforeState = await store.findPost(input.siteId, input.postId);
+      const results = await database.batch([
+        database
+          .prepare(
+            `INSERT INTO blog_post_schedule_proposal_declines (
+               proposal_id, site_id, post_id, request_id, declined_by,
+               declined_at
+             )
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6
+             WHERE EXISTS (
+               SELECT 1 FROM human_memberships
+               WHERE site_id = ?2 AND id = ?5
+                 AND status = 'active' AND role IN ('owner', 'editor')
+             )
+             ON CONFLICT (proposal_id) DO NOTHING`,
+          )
+          .bind(
+            input.proposalId,
+            input.siteId,
+            input.postId,
+            input.requestId,
+            input.actorId,
+            input.occurredAt,
+          ),
+        prepareAcceptedBlogPostAudit(
+          database,
+          {
+            siteId: input.siteId,
+            postId: input.postId,
+            actorId: input.actorId,
+            commandType: "blog.post.schedule.decline",
+            requestId: input.requestId,
+            beforeState,
+            afterState: proposal,
+            occurredAt: input.occurredAt,
+          },
+          `EXISTS (
+             SELECT 1 FROM blog_post_schedule_proposal_declines
+             WHERE proposal_id = ?10
+           )`,
+          [input.proposalId],
+        ),
+      ]);
+      if ((results[0]?.meta.changes ?? 0) !== 1) {
+        const concurrentDecline = await database
+          .prepare(
+            `SELECT proposal_id FROM blog_post_schedule_proposal_declines
+             WHERE proposal_id = ?1`,
+          )
+          .bind(input.proposalId)
+          .first<{ proposal_id: string }>();
+        if (concurrentDecline !== null) {
+          return proposal;
+        }
+        throw new BlogPostOperationError("human_authority_required");
+      }
+      return proposal;
     },
     async saveSchedule(schedule, idempotencyKey, authority) {
       const beforeState = await store.findPost(
