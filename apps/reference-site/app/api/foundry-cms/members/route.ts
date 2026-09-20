@@ -87,7 +87,16 @@ function commandErrorResponse(
   { commandDispatched = false } = {},
 ): Response | null {
   if (error instanceof AccessDeniedError) {
-    return Response.json({ error: "not_authorized" }, { status: 403 });
+    // `error.code` is the exact reason the domain layer refused the change
+    // (for example "membership_email_ambiguous" or
+    // "membership_transition_not_allowed"). The screen keeps `error` as the
+    // generic "not_authorized" for anything that already checks it, and adds
+    // `reason` so the dashboard can show the person the real reason instead
+    // of one generic sentence for every refusal.
+    return Response.json(
+      { error: "not_authorized", reason: error.code },
+      { status: 403 },
+    );
   }
   if (error instanceof HumanAccessConfigurationError) {
     if (commandDispatched) {

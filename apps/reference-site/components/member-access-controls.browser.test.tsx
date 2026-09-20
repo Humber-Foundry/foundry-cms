@@ -6,6 +6,10 @@ import { page, userEvent } from "vitest/browser";
 
 import type { HumanMembership } from "@humber-foundry/application";
 import { createSiteId } from "@humber-foundry/site-definition";
+import {
+  humanMutationResultHeader,
+  recordedHumanMutationResult,
+} from "../src/human-mutation-protocol";
 
 // The dashboard's own stylesheet, so the layout assertions exercise the real
 // grid and spacing rules instead of the browser's unstyled default layout.
@@ -120,6 +124,70 @@ describe("Settings Users panel and its shared access mutation state", () => {
     expect(host.textContent).not.toContain("Member");
   });
 
+  it("offers the sole active Owner no refusable action, and explains why", async () => {
+    const { host } = renderScope([member()], () => Response.json({ ok: true }));
+
+    const row = host.querySelector(".inventory-row:not(.inventory-head)");
+    expect(row).not.toBeNull();
+    expect(row!.querySelector("button")).toBeNull();
+    expect(row!.textContent).toContain(
+      "The site must always have one Owner, so make another person an Owner first.",
+    );
+  });
+
+  it("keeps the usual actions on both rows when there are two active Owners", async () => {
+    const { host } = renderScope(
+      [
+        member({ id: "membership-owner-1" as HumanMembership["id"] }),
+        member({
+          id: "membership-owner-2" as HumanMembership["id"],
+          email: "second-owner@example.com",
+        }),
+      ],
+      () => Response.json({ ok: true }),
+    );
+
+    const rows = host.querySelectorAll(".inventory-row:not(.inventory-head)");
+    expect(rows).toHaveLength(2);
+    for (const row of Array.from(rows)) {
+      expect(
+        Array.from(row.querySelectorAll("button")).map((button) =>
+          button.textContent?.trim(),
+        ),
+      ).toEqual(["Make Editor", "Suspend", "Revoke"]);
+      expect(row.textContent).not.toContain(
+        "The site must always have one Owner",
+      );
+    }
+  });
+
+  it("still offers the usual actions on an Editor's row when the sole Owner is also listed", async () => {
+    const { host } = renderScope(
+      [
+        member(),
+        member({
+          id: "membership-editor" as HumanMembership["id"],
+          role: "editor",
+          email: "editor@example.com",
+        }),
+      ],
+      () => Response.json({ ok: true }),
+    );
+
+    const rows = Array.from(
+      host.querySelectorAll(".inventory-row:not(.inventory-head)"),
+    );
+    const editorRow = rows.find((row) =>
+      row.textContent?.includes("editor@example.com"),
+    );
+    expect(editorRow).toBeDefined();
+    expect(
+      Array.from(editorRow!.querySelectorAll("button")).map((button) =>
+        button.textContent?.trim(),
+      ),
+    ).toEqual(["Make Owner", "Suspend", "Revoke"]);
+  });
+
   it("gives Owner, Editor, Active, Suspended and Revoked each their own help tip", async () => {
     const { host } = renderScope([member()], () => Response.json({ ok: true }));
 
@@ -197,7 +265,10 @@ describe("Settings Users panel and its shared access mutation state", () => {
   it("still confirms a Suspend through the dashboard dialog, not window.confirm", async () => {
     const confirmSpy = vi.spyOn(window, "confirm");
     let statusChangeCalled = false;
-    renderScope([member()], (init) => {
+    // Not the sole active Owner — an Editor row keeps its Suspend button, so
+    // this test still exercises the same dialog it always has (#150: the
+    // sole active Owner's row no longer offers Suspend at all).
+    renderScope([member({ role: "editor", email: "editor@example.com" })], (init) => {
       const body = JSON.parse(String(init.body));
       if (body.action === "change_status") statusChangeCalled = true;
       return Response.json({ ok: true });
@@ -218,6 +289,44 @@ describe("Settings Users panel and its shared access mutation state", () => {
     );
     await waitFor(() => (statusChangeCalled ? true : undefined));
     expect(statusChangeCalled).toBe(true);
+  });
+
+  it("shows the plain reason for a refused change instead of a generic sentence", async () => {
+    const { host } = renderScope(
+      [
+        member({ id: "membership-owner-1" as HumanMembership["id"] }),
+        member({
+          id: "membership-owner-2" as HumanMembership["id"],
+          email: "second-owner@example.com",
+        }),
+      ],
+      () =>
+        Response.json(
+          { error: "not_authorized", reason: "membership_email_ambiguous" },
+          {
+            status: 403,
+            headers: { [humanMutationResultHeader]: recordedHumanMutationResult },
+          },
+        ),
+    );
+
+    await userEvent.click(
+      page.getByRole("button", { name: "Suspend", exact: true }).first(),
+    );
+    await waitFor(() =>
+      document.querySelector("dialog.revoke-confirm-dialog[open]"),
+    );
+    await userEvent.click(
+      page.getByRole("dialog").getByRole("button", { name: "Confirm" }),
+    );
+
+    await waitFor(() =>
+      host.textContent?.includes("already invited") ? true : undefined,
+    );
+    expect(host.textContent).toContain(
+      "That email address is not valid, or is already invited.",
+    );
+    expect(host.textContent).not.toContain("Access change was not applied.");
   });
 
   it("shares one mutation state: a failed request's retry button appears in the technical detail controls", async () => {

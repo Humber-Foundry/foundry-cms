@@ -19,6 +19,7 @@ import {
 } from "./access-display";
 import {
   createHumanAccessMutationAttempt,
+  humanAccessMutationFailureMessage,
   isHumanAccessMutationAmbiguousFailure,
   isHumanAccessMutationInProgress,
   isHumanAccessMutationRequestCheckFailed,
@@ -157,7 +158,7 @@ export function useHumanAccessMutation({
           router.refresh();
           return true;
         }
-        setMessage("Access change was not applied.");
+        setMessage(humanAccessMutationFailureMessage(body));
         return true;
       }
       setSyncPending(false);
@@ -341,6 +342,15 @@ export function MemberAccessPanel({
   const [pendingAction, setPendingAction] =
     useState<PendingMemberAction | null>(null);
 
+  // The server always refuses a role, suspend or revoke change that would
+  // leave the site with no active Owner (the `human_memberships_preserve_
+  // last_owner` D1 trigger, ADR-0027). The list the server already returned
+  // is the same list the trigger checks, so counting active Owners here
+  // tells the row which actions would only ever fail.
+  const activeOwnerCount = members.filter(
+    (candidate) => candidate.role === "owner" && candidate.status === "active",
+  ).length;
+
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -429,48 +439,73 @@ export function MemberAccessPanel({
         {mutation.message}
       </p>
       <RoleAndStatusHelp />
-      <div className="inventory-table" role="table" aria-label="Users">
+      <div
+        className="inventory-table member-access-table"
+        role="table"
+        aria-label="Users"
+      >
         <div className="inventory-row inventory-head" role="row">
           <span role="columnheader">User</span>
           <span role="columnheader">Access</span>
           <span role="columnheader">Actions</span>
         </div>
-        {members.map((member) => (
-          <div className="inventory-row" role="row" key={member.id}>
-            <strong role="cell">
-              {member.email}
-              <small>{roleDisplayLabel[member.role]}</small>
-            </strong>
-            <span role="cell" className="state-label">
-              {membershipStatusDisplayLabel[member.status]}
-            </span>
-            <div role="cell" className="member-actions">
-              {member.status === "revoked" ? null : (
-                <button
-                  type="button"
-                  disabled={mutation.pending || mutation.retryAvailable}
-                  onClick={() =>
-                    requestRoleChange(member, otherHumanRole(member.role))
-                  }
-                >
-                  Make {roleDisplayLabel[otherHumanRole(member.role)]}
-                </button>
-              )}
-              {availableMembershipStatusActions(member.status).map(
-                (status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    disabled={mutation.pending || mutation.retryAvailable}
-                    onClick={() => requestStatusChange(member, status)}
-                  >
-                    {statusActionLabels[status]}
-                  </button>
-                ),
-              )}
+        {members.map((member) => {
+          // The only active Owner cannot be made an Editor, suspended or
+          // revoked — every one of those would leave the site with no
+          // active Owner, and the server always refuses it. Offering the
+          // buttons here would only ever produce a failed request, so this
+          // row explains the rule instead (#150).
+          const isSoleActiveOwner =
+            member.role === "owner" &&
+            member.status === "active" &&
+            activeOwnerCount <= 1;
+
+          return (
+            <div className="inventory-row" role="row" key={member.id}>
+              <strong role="cell">
+                {member.email}
+                <small>{roleDisplayLabel[member.role]}</small>
+              </strong>
+              <span role="cell" className="state-label">
+                {membershipStatusDisplayLabel[member.status]}
+              </span>
+              <div role="cell" className="member-actions">
+                {isSoleActiveOwner ? (
+                  <span className="member-actions-note">
+                    The site must always have one Owner, so make another
+                    person an Owner first.
+                  </span>
+                ) : (
+                  <>
+                    {member.status === "revoked" ? null : (
+                      <button
+                        type="button"
+                        disabled={mutation.pending || mutation.retryAvailable}
+                        onClick={() =>
+                          requestRoleChange(member, otherHumanRole(member.role))
+                        }
+                      >
+                        Make {roleDisplayLabel[otherHumanRole(member.role)]}
+                      </button>
+                    )}
+                    {availableMembershipStatusActions(member.status).map(
+                      (status) => (
+                        <button
+                          key={status}
+                          type="button"
+                          disabled={mutation.pending || mutation.retryAvailable}
+                          onClick={() => requestStatusChange(member, status)}
+                        >
+                          {statusActionLabels[status]}
+                        </button>
+                      ),
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <MemberActionConfirmDialog
         pendingAction={pendingAction}

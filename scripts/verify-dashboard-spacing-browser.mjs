@@ -361,6 +361,25 @@ async function checkDestination(page, origin, name, href, viewportLabel) {
   });
   await page.waitForTimeout(600);
 
+  // Settings' "Technical detail" disclosure starts collapsed, so its
+  // content is not in the layout at all until it opens — a sweep that never
+  // opens it can never measure the gap between the sections inside it. This
+  // is how #150's defect (the "Room left for messages" heading touching the
+  // dashed box above it, 0px gap) passed this check before: nothing here
+  // ever rendered that content.
+  if (name === "Settings") {
+    // Settings has two `.technical-inventory` disclosures ("Technical
+    // detail" and, nested inside Site details, "Version numbers and
+    // published records"), so match this one by its own summary text.
+    const technicalDetail = page.getByText("Technical detail", {
+      exact: true,
+    });
+    if ((await technicalDetail.count()) > 0) {
+      await technicalDetail.click({ timeout: 8000 });
+      await page.waitForTimeout(300);
+    }
+  }
+
   const tight = await page.evaluate(collectTightText, minimumTextGap);
   if (tight.length > 0) {
     throw new Error(

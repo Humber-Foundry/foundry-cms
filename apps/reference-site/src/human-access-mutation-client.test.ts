@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createHumanAccessMutationAttempt,
+  humanAccessMutationFailureMessage,
   isHumanAccessMutationAmbiguousFailure,
   isHumanAccessMutationInProgress,
   isHumanAccessMutationRequestCheckFailed,
@@ -14,6 +15,70 @@ import {
   humanMutationResultHeader,
   recordedHumanMutationResult,
 } from "./human-mutation-protocol";
+
+describe("human access mutation failure sentences", () => {
+  it("maps the last-Owner refusal to a plain sentence naming the rule", () => {
+    expect(humanAccessMutationFailureMessage({ error: "last_owner" })).toBe(
+      "The site must always have one Owner, so make another person an Owner first.",
+    );
+  });
+
+  it("maps every known refusal reason to its own plain sentence", () => {
+    const cases: ReadonlyArray<[string, string]> = [
+      [
+        "membership_transition_not_allowed",
+        "This person's access is already revoked, so it cannot be changed further.",
+      ],
+      [
+        "membership_email_ambiguous",
+        "That email address is not valid, or is already invited.",
+      ],
+      [
+        "capability_not_authorized",
+        "You do not have permission to make this change.",
+      ],
+      [
+        "membership_not_active",
+        "You do not have permission to make this change.",
+      ],
+      [
+        "membership_not_found",
+        "This person could not be found. Refresh the page and try again.",
+      ],
+      [
+        "campaign_test_send_in_progress",
+        "A campaign test send is in progress. Try again once it finishes.",
+      ],
+      [
+        "invitation_not_claimable",
+        "That invitation cannot be accepted. It may have expired or already been used.",
+      ],
+    ];
+    for (const [reason, sentence] of cases) {
+      expect(
+        humanAccessMutationFailureMessage({ error: "not_authorized", reason }),
+      ).toBe(sentence);
+    }
+  });
+
+  it("keeps a generic sentence for an unknown reason, and never an internal code", () => {
+    expect(
+      humanAccessMutationFailureMessage({
+        error: "not_authorized",
+        reason: "some_future_reason_code",
+      }),
+    ).toBe("Access change was not applied.");
+    expect(humanAccessMutationFailureMessage({ error: "not_authorized" })).toBe(
+      "Access change was not applied.",
+    );
+    expect(humanAccessMutationFailureMessage(null)).toBe(
+      "Access change was not applied.",
+    );
+    expect(humanAccessMutationFailureMessage({})).toBe(
+      "Access change was not applied.",
+    );
+  });
+});
 
 describe("human access mutation client", () => {
   it("describes destructive membership changes before dispatch", () => {
