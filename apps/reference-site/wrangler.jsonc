@@ -69,6 +69,11 @@
     "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS": "123 Harbour Street, Victoria, BC",
     "FOUNDRY_CAMPAIGN_CONTACT_URL": "https://foundry.tinyskiff.xyz/contact",
     "FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL": "https://foundry.tinyskiff.xyz/newsletter/unsubscribe",
+    // The public half of the Turnstile widget pair. It is shown in the page, so
+    // it is a var rather than a secret. The matching FOUNDRY_TURNSTILE_SECRET
+    // stays a secret. Until both exist, the newsletter signup form says signup
+    // is not available and takes no address.
+    "FOUNDRY_TURNSTILE_SITE_KEY": "",
     "FOUNDRY_ANALYTICS_ENGINE_DATASET": "foundry_reference_interactions",
     // Set during guided provisioning. Until both this and the
     // FOUNDRY_ANALYTICS_API_TOKEN secret exist, the Cloudflare sources report

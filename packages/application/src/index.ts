@@ -10,6 +10,8 @@ export { isValidGitBranchName } from "./git-branch-name.mjs";
 export * from "./in-memory-human-access-store";
 export * from "./subscriber-ledger";
 export * from "./in-memory-subscriber-ledger-store";
+export * from "./newsletter-signup";
+export * from "./in-memory-newsletter-signup-store";
 export * from "./campaign";
 export * from "./campaign-bulk-delivery";
 export * from "./in-memory-campaign-bulk-state-store";
