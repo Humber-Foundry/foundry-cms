@@ -15,7 +15,15 @@ import "./dashboard.css";
 // sections, and syncHostStyles copies these rules into the canvas iframe.
 // Without it the canvas shows a bare skeleton instead of the real site.
 import "../public.css";
-import "@puckeditor/core/puck.css";
+// The editor's own vendor stylesheet, chosen deliberately over
+// "@puckeditor/core/puck.css": that default file `@import`s a font
+// stylesheet from an outside server (rsms.me) on every dashboard page load.
+// This build has no `@font-face` for that font, and the dashboard's own type
+// system (dashboard.css) already uses the system font stack everywhere, so
+// the editor gains nothing from the outside request. This variant is the
+// same stylesheet with that one `@import` removed; everything else is
+// identical, and the editor falls back to the same system font stack.
+import "@puckeditor/core/no-external.css";
 
 export const dynamic = "force-dynamic";
 
