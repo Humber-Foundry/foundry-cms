@@ -17,6 +17,7 @@ vi.mock("server-only", () => ({}));
 const commandMocks = vi.hoisted(() => ({
   activateInvitation: vi.fn(),
   changeStatus: vi.fn(),
+  changeRole: vi.fn(),
   invite: vi.fn(),
   reconcileEligibility: vi.fn(),
   authorizeIdentity: vi.fn(),
@@ -205,6 +206,75 @@ describe("human access command endpoint", () => {
           action: "change_status",
           membershipId: "membership-owner",
           status: "suspended",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "last_owner",
+    });
+  });
+
+  it("rejects an unknown role instead of guessing one", async () => {
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/members", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "change_role",
+          membershipId: "membership-editor",
+          role: "superuser",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "invalid_command",
+    });
+  });
+
+  it("changes a member's role", async () => {
+    commandMocks.changeRole.mockResolvedValueOnce({
+      id: "membership-editor",
+      role: "owner",
+    });
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/members", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "change_role",
+          membershipId: "membership-editor",
+          role: "owner",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      membership: { id: "membership-editor", role: "owner" },
+    });
+    expect(commandMocks.changeRole).toHaveBeenCalledWith({
+      actor: authorizedContext.identity,
+      membershipId: "membership-editor",
+      role: "owner",
+    });
+  });
+
+  it("returns a conflict when a role change would leave no active Owner", async () => {
+    commandMocks.changeRole.mockRejectedValueOnce(new LastOwnerError());
+
+    const response = await POST(
+      new Request("https://foundry.example/api/foundry-cms/members", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "change_role",
+          membershipId: "membership-owner",
+          role: "editor",
         }),
       }),
     );

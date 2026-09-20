@@ -116,6 +116,16 @@ export type MembershipStatusChange =
         | "membership_transition_not_allowed";
     }>;
 
+export type MembershipRoleChange =
+  | Readonly<{ changed: true; membership: HumanMembership }>
+  | Readonly<{
+      changed: false;
+      reason:
+        | "membership_not_found"
+        | "last_owner"
+        | "membership_transition_not_allowed";
+    }>;
+
 export interface HumanAccessStore {
   findMembershipByIdentity(input: {
     siteId: SiteId;
@@ -146,6 +156,12 @@ export interface HumanAccessStore {
     now: string;
     syncOperationId: EligibilitySyncOperationId;
   }): Promise<MembershipStatusChange>;
+  changeMembershipRole(input: {
+    siteId: SiteId;
+    membershipId: HumanMembershipId;
+    role: HumanRole;
+    now: string;
+  }): Promise<MembershipRoleChange>;
   markEligibilitySynchronized(input: {
     siteId: SiteId;
     operationIds: ReadonlyArray<EligibilitySyncOperationId>;
@@ -198,6 +214,11 @@ export type HumanAccessApplication = Readonly<{
       actor: ExternalHumanIdentity;
       membershipId: HumanMembershipId;
       status: MembershipStatus;
+    }): Promise<HumanMembership>;
+    changeRole(input: {
+      actor: ExternalHumanIdentity;
+      membershipId: HumanMembershipId;
+      role: HumanRole;
     }): Promise<HumanMembership>;
     reconcileEligibility(input: {
       actor: ExternalHumanIdentity;
@@ -280,6 +301,23 @@ export function isMembershipStatusTransitionAllowed(
   next: MembershipStatus,
 ) {
   return current !== "revoked" || next === "revoked";
+}
+
+export function isHumanRole(value: unknown): value is HumanRole {
+  return value === "owner" || value === "editor";
+}
+
+/**
+ * A revoked user is a closed record. Its role no longer authorizes anything,
+ * so there is nothing for a role change to mean once a membership reaches
+ * that state.
+ */
+export function isMembershipRoleChangeAllowed(status: MembershipStatus) {
+  return status !== "revoked";
+}
+
+export function otherHumanRole(role: HumanRole): HumanRole {
+  return role === "owner" ? "editor" : "owner";
 }
 
 export function availableMembershipStatusActions(
@@ -484,6 +522,40 @@ export function createHumanAccessApplication({
     return result.membership;
   }
 
+  /**
+   * Owner or Editor, changed in place. Per ADR-0005, this is a transactional
+   * D1 operation only: the Cloudflare Access allow list is keyed by email,
+   * not by role, so a role change never needs an Access API call and never
+   * touches eligibility synchronization.
+   */
+  async function changeRole({
+    actor,
+    membershipId,
+    role,
+  }: {
+    actor: ExternalHumanIdentity;
+    membershipId: HumanMembershipId;
+    role: HumanRole;
+  }): Promise<HumanMembership> {
+    await requireCapability({ actor, capability: "access.manage" });
+    const result = await store.changeMembershipRole({
+      siteId,
+      membershipId,
+      role,
+      now: clock().toISOString(),
+    });
+    if (!result.changed) {
+      if (result.reason === "last_owner") {
+        throw new LastOwnerError();
+      }
+      if (result.reason === "membership_transition_not_allowed") {
+        throw new AccessDeniedError("membership_transition_not_allowed");
+      }
+      throw new AccessDeniedError("membership_not_found");
+    }
+    return result.membership;
+  }
+
   const queries: HumanAccessApplication["queries"] = Object.freeze({
     requireCapability,
     async listMembers({ actor }) {
@@ -563,6 +635,7 @@ export function createHumanAccessApplication({
       return membership;
     },
     changeStatus,
+    changeRole,
     async reconcileEligibility({ actor }) {
       await requireCapability({ actor, capability: "access.manage" });
       await reconcileHumanAccessEligibility({

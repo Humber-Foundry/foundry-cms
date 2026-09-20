@@ -383,6 +383,21 @@
   cursor: pointer;
 }
 
+/* `.dashboard-main > section` (the page's own section-gap rule, above) only
+ * matches a section that is a direct child of `.dashboard-main`. The two
+ * sections inside this disclosure are children of `<details>` instead, so
+ * they never matched it and sat with no gap between them — the "Room left
+ * for messages" heading touched the dashed box above it (#150). This gives
+ * a later section inside the disclosure the same gap and rule the page's
+ * own sections use. The first section keeps its plain gap below `summary`,
+ * matching how the page's own first section under a heading has no rule
+ * above it either. */
+.technical-inventory > section + section {
+  margin-top: var(--dash-panel-gap);
+  padding-top: var(--dash-panel-gap);
+  border-top: 1px solid var(--dash-line);
+}
+
 .technical-inventory table {
   width: 100%;
   border-collapse: collapse;
@@ -1037,6 +1052,32 @@
   color: var(--ink);
   padding: 0.35rem 0.9rem;
   cursor: pointer;
+}
+
+/* The sole active Owner's row: the site's one rule about that row, in place
+ * of the buttons the server would always refuse (#150). */
+.member-actions-note {
+  color: var(--ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+/* What "Owner", "Editor", "Active", "Suspended" and "Revoked" mean, each
+ * behind its own help tip (#150). A row of short labels, not a grid, since
+ * five items never fill complete rows at every width. */
+.access-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin: 0 0 1rem;
+  color: var(--ink-soft);
+  font-size: var(--dash-text-small);
+}
+
+.access-sync-retry-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
 }
 
 @media (max-width: 720px) {
@@ -2234,6 +2275,16 @@
   width: fit-content;
 }
 
+/* Users' Actions column can hold up to three buttons ("Make Editor" /
+ * "Make Owner", "Suspend", "Revoke"). The base grid's 0.7fr Actions column
+ * was too narrow for three buttons at 1440px — "Revoke" wrapped onto its
+ * own second line (#150) — so this table keeps the same three columns but
+ * gives Actions more of the row's width, at the User and Access columns'
+ * expense (Access only ever holds one short status word). */
+.member-access-table .inventory-row {
+  grid-template-columns: 1.3fr 1fr 1fr;
+}
+
 /* Connected agents ---------------------------------------------------------
  *
  * Four columns (client, permissions, state, action), so this overrides the
@@ -2399,6 +2450,13 @@
    * one-column rule right above this, so it must be repeated here to still
    * collapse to one column at this width. */
   .mcp-connections .inventory-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Same reason: the Users table's three-column override above `@media`
+   * (`.member-access-table .inventory-row`) also outranks the one-column
+   * rule above by specificity, so it needs the same repeat here (#150). */
+  .member-access-table .inventory-row {
     grid-template-columns: 1fr;
   }
 
