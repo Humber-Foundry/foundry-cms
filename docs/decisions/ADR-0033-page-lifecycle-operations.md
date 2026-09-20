@@ -157,8 +157,13 @@ so each one invalidates an open approval and the owner is asked to look again.
 That is the intended cost of a structural change.
 
 Changing the web address of a page that is already on the live site breaks the
-old address. The Rename dialog says so before publish, and the review summary
-lists `Web address` among that page's changes. Redirects from the old address
+old address. Three surfaces say so before publish, each to whoever is looking
+at it. The Rename dialog names the old address, because it is the one surface
+that knows what is published. The Web address field carries the warning in its
+hint, because the field list cannot see the published site and this is the
+other place an owner changes an address. The review summary, which is how a
+draft an agent wrote is reviewed, says the page moves and the old address stops
+working. Redirects from the old address
 are **not** in this ticket and nothing is filed for them: whether this product
 should keep a redirect table at all is a product question, not a gap left
 behind by this change.
