@@ -1387,7 +1387,7 @@ describe("MCP page tools", () => {
       code: "VALIDATION_FAILED",
       reason: "design_field_not_content",
       message:
-        "The field design.colour.accent is a design setting. Change it with foundry.design.patch.",
+        "The field design.colour.accent is a design setting, not content. Use foundry.design.patch for a design change.",
     });
 
     await expect(

@@ -127,14 +127,17 @@ site, or of a page that was already there, still needs that scope, and
 
 The boundary this gives up is also exact. A page added inside the draft
 carries design values that are not compared against anything, because there
-is nothing to compare them with. An agent cannot set one itself:
-`foundry.design.patch` is the only MCP tool that writes a design value and it
-asks for `design.draft`. A person can, in the editor, and a connection
-holding only `content.draft` could then prepare a preview of that revision or
-publish it. Preparing a preview creates no approval, and publishing still
-needs that person's approval of that exact revision
-([ADR-0004](ADR-0004-draft-preview-publish-pipeline.md)), so what the
-connection can do is carry a design change the person made and approved. It
+is nothing to compare them with. An agent cannot choose one:
+`foundry.design.patch` is the only MCP tool that lets a caller name a design
+value, and it asks for `design.draft`. The values a create or a duplicate
+writes are the ones the starting point or the copied page already carried.
+
+A person can change such a value in the editor, and a connection holding only
+`content.draft` could then prepare a preview of that revision. Preparing a
+preview creates no approval. Publishing it needs `publication.publish` as
+well, and that person's approval of that exact revision
+([ADR-0004](ADR-0004-draft-preview-publish-pipeline.md)). So what a
+content-scoped connection can do is carry a design change the person made. It
 cannot make one. Closing even that would mean knowing which value a starting
 point places for each section, which is a component registry question rather
 than a scope question, and it is not part of this ticket.

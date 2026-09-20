@@ -318,6 +318,10 @@ named reason.
 `introduction` or `what_you_offer`. A page id is minted from the idempotency
 key, so repeating the same create returns the same page and never a second one.
 
+`foundry.design.patch` still builds its list of component variants from the
+installed site, so a section on a page made inside a draft cannot have its
+variant changed through MCP yet.
+
 ### Patch design
 
 ```json

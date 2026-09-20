@@ -318,9 +318,10 @@ export type McpDeletePageInput = McpPageMutationInput &
 const pageFieldsRefusedReason = "page_fields_refused";
 
 /**
- * The named reason for a content edit the draft has no field for, and for one
- * sent in the wrong format. An agent branches on these instead of reading the
- * sentence.
+ * The three named reasons a content edit is refused for: the draft has no
+ * field at that path, the path is a design setting rather than content, or
+ * the value was sent in the other format. An agent branches on these instead
+ * of reading the sentence.
  */
 const contentFieldNotEditableReason = "content_field_not_editable";
 const contentFieldFormatReason = "content_field_format_mismatch";
@@ -398,7 +399,7 @@ function contentEdits(
     if (contract.group === "Design") {
       throw new McpReadError(
         "VALIDATION_FAILED",
-        `The field ${field} is a design setting. Change it with foundry.design.patch.`,
+        `The field ${field} is a design setting, not content. Use foundry.design.patch for a design change.`,
         { reason: designFieldNotContentReason },
       );
     }
