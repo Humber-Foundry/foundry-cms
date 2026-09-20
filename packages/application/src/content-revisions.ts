@@ -286,6 +286,34 @@ export type DeletePageCommand = PageMutationCommand &
   Readonly<{ pageId: string }>;
 
 /**
+ * The page id a create or a duplicate mints for this request.
+ *
+ * It is built from the one thing that identifies the request and nothing else:
+ * its idempotency key, inside its workspace. Sending the same request twice
+ * therefore mints the same id, so a retry after an unknown result can never
+ * leave two pages behind. See ADR-0033.
+ *
+ * `createPage` and `duplicatePage` call this themselves. A caller only needs
+ * it to name the page a request it already carried out made: the MCP page
+ * tools call it when they replay a stored receipt, because a receipt records
+ * the revision and not the page.
+ */
+export async function mintedContentPageId(
+  input: Readonly<{
+    workspaceId: ContentWorkspaceId;
+    idempotencyKey: string;
+  }>,
+): Promise<string> {
+  return mintedPageId(
+    await sha256CanonicalJson({
+      purpose: "foundry.page.id",
+      workspaceId: input.workspaceId,
+      idempotencyKey: input.idempotencyKey,
+    }),
+  );
+}
+
+/**
  * What a page operation gives back.
  *
  * `pageId` is the page the operation acted on: the new page for a create or a
@@ -1131,24 +1159,14 @@ export function createContentRevisionApplication({
   }
 
   /**
-   * The page id a create or a duplicate mints.
-   *
-   * It is built from the one thing that identifies this request and nothing
-   * else: its idempotency key, inside its workspace. Three things follow.
-   * Sending the same request twice mints the same id, so a retry can never
-   * leave two pages behind. The id is never built from the page's name or its
-   * web address, both of which change while a page id never does. And because
-   * a fresh request always carries a fresh key, a deleted page's id is never
-   * minted again. See ADR-0033.
+   * The page id this create or duplicate mints. `mintedContentPageId` holds
+   * the rule and the reasons for it; this only names the two things it reads.
    */
   async function mintPageId(command: PageMutationCommand): Promise<string> {
-    return mintedPageId(
-      await sha256CanonicalJson({
-        purpose: "foundry.page.id",
-        workspaceId: command.workspaceId,
-        idempotencyKey: command.idempotencyKey,
-      }),
-    );
+    return mintedContentPageId({
+      workspaceId: command.workspaceId,
+      idempotencyKey: command.idempotencyKey,
+    });
   }
 
   /** Run one page operation as a new revision of the draft. */

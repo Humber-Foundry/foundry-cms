@@ -135,7 +135,11 @@ Annotations are shown as
 | `foundry.content.get` | `T / - / - / F` | Read one published page or post document. |
 | `foundry.workspace.open` | `F / F / T / F` | Open one site-scoped canonical draft workspace at revision zero. |
 | `foundry.workspace.get` | `T / - / - / F` | Read an authorized site-scoped draft workspace. |
-| `foundry.content.patch` | `F / T / T / F` | Apply allowlisted content field edits to a new immutable revision. |
+| `foundry.content.patch` | `F / T / T / F` | Edit content fields of any page in the draft, as a new immutable revision. |
+| `foundry.page.create` | `F / F / T / F` | Add a page to the draft from one of the starting points, as a new immutable revision. |
+| `foundry.page.rename` | `F / T / T / F` | Change one page's name and web address in the draft, as a new immutable revision. |
+| `foundry.page.duplicate` | `F / F / T / F` | Copy one page in the draft under a new name and web address, as a new immutable revision. |
+| `foundry.page.delete` | `F / T / T / F` | Remove one page from the draft, as a new immutable revision. |
 | `foundry.design.patch` | `F / T / T / F` | Apply registered design tokens or component variants to a new immutable revision. |
 | `foundry.preview.prepare` | `F / F / T / F` | Prepare an immutable canonical preview and a human review URL without creating approval. |
 | `foundry.publication.request` | `F / T / T / T` | Publish one exact approved workspace revision through the canonical publication pipeline. |
@@ -264,12 +268,59 @@ schemas through `tools/list`; generated schema snapshots are conformance-tested.
 Input schema constraints:
 
 - `operations` contains 1–100 discriminated commands.
-- `field` must be one of the full stable paths advertised by the content schema.
+- `field` is a dotted path. The schema checks its shape; the draft's own field
+  list decides whether the path is real, so a page an agent made in the same
+  draft can be edited at once (ADR-0034). A path that is not editable in that
+  draft is refused with `VALIDATION_FAILED`.
+- Every page's fields are reachable. A page other than the home page carries
+  its page id in front of each path (ADR-0017).
 - Rich text is the canonical editor JSON, not HTML.
 - This v1 patch surface exposes only `set`; it never accepts delete, unset,
   relationship, file, code or markup commands.
 - The output returns the workspace, new revision, content and preview hashes,
   schema version, validation result and replay status.
+- A refused edit carries a named `reason`: `content_field_not_editable` when
+  the draft has no field at that path, `design_field_not_content` when the
+  path is a design setting, and `content_field_format_mismatch` when the field
+  holds the other kind of value. The message names the path.
+
+### Add, rename, copy and remove a page
+
+```json
+{
+  "workspaceId": "workspace_mcp_3a0fc8d4",
+  "expectedRevision": 4,
+  "idempotencyKey": "0a6ec3ea-3f6b-4a1f-9b1f-0d1f2b3c4d5e",
+  "title": "About us",
+  "slug": "about-us",
+  "startingLayout": "introduction"
+}
+```
+
+The four page tools call the same application operations the dashboard calls
+(ADR-0033), so they refuse for the same reasons and in the same words. Each one
+writes a new immutable revision and returns `pageId`: the new page for
+`foundry.page.create` and `foundry.page.duplicate`, the named page for
+`foundry.page.rename` and `foundry.page.delete`.
+
+Refusals carry a named `reason` beside the message, so an agent can act on it
+without reading the sentence: `page_not_found`, `page_id_taken`,
+`page_slug_refused`, `page_title_refused`, `page_is_home`, `page_still_linked`,
+`schema_invalid`, and `page_fields_refused` when a rename is refused by the
+name or web address field itself. A `page_still_linked` message names every
+link that still points at the page, so the agent can change those first.
+
+A starting point this server does not offer, and a malformed page id, are
+refused at the tool's own schema instead, with `VALIDATION_FAILED` and no
+named reason.
+
+`startingLayout` is one of the registered starting points: `blank`,
+`introduction` or `what_you_offer`. A page id is minted from the idempotency
+key, so repeating the same create returns the same page and never a second one.
+
+`foundry.design.patch` still builds its list of component variants from the
+installed site, so a section on a page made inside a draft cannot have its
+variant changed through MCP yet.
 
 ### Patch design
 

@@ -1,6 +1,6 @@
 import {
   designContract,
-  homePage,
+  findPageById,
   resolvePageSeo,
   siteDefinitionSchema,
   type SiteDefinition,
@@ -272,17 +272,19 @@ function contentSummaries(
   }> | null,
 ): ReadonlyArray<PublishedContentSummary> {
   const summaries = [
-    {
+    // Every page the site has, in the order the definition holds them, so an
+    // agent can find a page it did not already know the id of. See ADR-0016.
+    ...definition.pages.map((page) => ({
       kind: "page" as const,
-      contentId: homePage(definition).id,
+      contentId: page.id,
       // The owner may leave the SEO title blank to ask for the fallback, so
       // this reads the resolved title rather than the raw field.
-      title: resolvePageSeo(definition, homePage(definition)).title,
+      title: resolvePageSeo(definition, page).title,
       revision: null,
       contentHash: "",
       liveGitSha: liveRelease?.gitSha ?? null,
       lastModified: liveRelease?.observedAt ?? null,
-    },
+    })),
     ...definition.blog.posts.map((post) => ({
       kind: "post" as const,
       contentId: post.id,
@@ -306,17 +308,18 @@ function contentDocument(
   }> | null,
 ): PublishedContentDocument | null {
   if (kind === "page") {
-    return homePage(definition).id === contentId
-      ? {
+    const page = findPageById(definition, contentId);
+    return page === undefined
+      ? null
+      : {
           kind,
           contentId,
           revision: null,
           contentHash: "",
           liveGitSha: liveRelease?.gitSha ?? null,
           lastModified: liveRelease?.observedAt ?? null,
-          document: homePage(definition),
-        }
-      : null;
+          document: page,
+        };
   }
   const post = definition.blog.posts.find((candidate) => candidate.id === contentId);
   return post === undefined
@@ -805,7 +808,7 @@ export function createMcpReadApplication({
               allItemsWithDocuments.map(async (item) => {
                 const document =
                   item.kind === "page"
-                    ? homePage(definition)
+                    ? findPageById(definition, item.contentId)
                     : definition.blog.posts.find(
                         (post) => post.id === item.contentId,
                       );

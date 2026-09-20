@@ -280,6 +280,10 @@ describe("MCP draft tool registry", () => {
       "foundry.workspace.open",
       "foundry.workspace.get",
       "foundry.content.patch",
+      "foundry.page.create",
+      "foundry.page.rename",
+      "foundry.page.duplicate",
+      "foundry.page.delete",
       "foundry.preview.prepare",
     ]);
     expect(names([mcpInitialScope, mcpDesignDraftScope])).toEqual([
@@ -347,6 +351,127 @@ describe("MCP draft tool registry", () => {
       mutationTools.find(({ name }) => name === "foundry.content.patch")
         ?.annotations.destructiveHint,
     ).toBe(true);
+  });
+
+  it("accepts a field path the installed definition never held", () => {
+    const contentPatch = registry()
+      .list(principal([mcpInitialScope, mcpContentDraftScope]))
+      .find(({ name }) => name === "foundry.content.patch")!;
+    const validate = new Ajv2020({
+      strict: false,
+      formats: { uuid: true },
+    }).compile(contentPatch.inputSchema);
+    const common = {
+      workspaceId: "workspace_draft_fields",
+      expectedRevision: 0,
+      idempotencyKey: "11111111-1111-4111-8111-111111111111",
+    };
+    const operation = (field: string) => ({
+      ...common,
+      operations: [{ op: "set", field, value: "A new page's own words." }],
+    });
+
+    // A page an agent made in the draft carries its own field paths. The
+    // installed definition knows nothing about them, and the draft decides.
+    expect(
+      validate(operation("page_0123456789abcdef0123.seo.description")),
+    ).toBe(true);
+    expect(
+      validate(operation(`${referenceSiteDefinition.site.id}.name`)),
+    ).toBe(true);
+    for (const field of [
+      "",
+      "Page_home.title",
+      "page_home..title",
+      "page_home.title ",
+      "../secrets",
+      "page_home.title; drop",
+    ]) {
+      expect(validate(operation(field)), field).toBe(false);
+    }
+  });
+
+  it("takes only a draft, a revision, a key and the page a lifecycle tool acts on", () => {
+    const tools = registry().list(
+      principal([mcpInitialScope, mcpContentDraftScope]),
+    );
+    const pageTools = tools.filter(({ name }) =>
+      name.startsWith("foundry.page."),
+    );
+    expect(pageTools.map(({ name }) => name)).toEqual([
+      "foundry.page.create",
+      "foundry.page.rename",
+      "foundry.page.duplicate",
+      "foundry.page.delete",
+    ]);
+    // Removing a page and renaming one overwrite what is there; adding one
+    // and copying one do not.
+    expect(
+      Object.fromEntries(
+        pageTools.map(({ name, annotations: hints }) => [
+          name,
+          hints.destructiveHint,
+        ]),
+      ),
+    ).toEqual({
+      "foundry.page.create": false,
+      "foundry.page.rename": true,
+      "foundry.page.duplicate": false,
+      "foundry.page.delete": true,
+    });
+    for (const tool of pageTools) {
+      expect(tool.annotations).toMatchObject({
+        readOnlyHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+      expect(schemaPropertyNames(tool.inputSchema)).not.toEqual(
+        expect.arrayContaining(["siteId", "sections", "html", "approvalId"]),
+      );
+    }
+
+    const validator = new Ajv2020({ strict: false, formats: { uuid: true } });
+    const create = validator.compile(
+      pageTools.find(({ name }) => name === "foundry.page.create")!.inputSchema,
+    );
+    const common = {
+      workspaceId: "workspace_page_tools",
+      expectedRevision: 0,
+      idempotencyKey: "11111111-1111-4111-8111-111111111111",
+    };
+    expect(
+      create({
+        ...common,
+        title: "About us",
+        slug: "about-us",
+        startingLayout: "introduction",
+      }),
+    ).toBe(true);
+    // Only a starting point the editor can draw is offered.
+    expect(
+      create({
+        ...common,
+        title: "About us",
+        slug: "about-us",
+        startingLayout: "freeform",
+      }),
+    ).toBe(false);
+    expect(
+      create({
+        ...common,
+        title: "About us",
+        slug: "About Us",
+        startingLayout: "blank",
+      }),
+    ).toBe(false);
+
+    const remove = validator.compile(
+      pageTools.find(({ name }) => name === "foundry.page.delete")!.inputSchema,
+    );
+    expect(remove({ ...common, pageId: "page_0123456789abcdef0123" })).toBe(
+      true,
+    );
+    expect(remove({ ...common, pageId: "Page-One" })).toBe(false);
   });
 
   it("accepts replay-aware mutation envelopes and actionable stale errors", () => {
@@ -842,6 +967,10 @@ describe("MCP campaign and analytics tool registry", () => {
         "foundry.workspace.open": "content.draft or design.draft",
         "foundry.workspace.get": "matching draft scope",
         "foundry.content.patch": "content.draft",
+        "foundry.page.create": "content.draft",
+        "foundry.page.rename": "content.draft",
+        "foundry.page.duplicate": "content.draft",
+        "foundry.page.delete": "content.draft",
         "foundry.design.patch": "design.draft",
         "foundry.preview.prepare": "matching draft scopes",
         "foundry.campaign.create": "campaign.draft",
@@ -874,7 +1003,7 @@ describe("MCP campaign and analytics tool registry", () => {
         mcpAnalyticsReadScope,
       ]),
     );
-    expect(tools).toHaveLength(18);
+    expect(tools).toHaveLength(22);
 
     for (const tool of tools) {
       const inputSchema = JSON.parse(
