@@ -117,8 +117,10 @@ not otherwise need; that stays open work if the consent screen changes again.
   the same phrase for the same permission.
 - A failed consent submission is now diagnosable by the person looking at it,
   without weakening what is accepted.
-- `mcpScopeLabels` in `packages/application` is dead code inside this
-  repository. A future cleanup may remove it once no external consumer
-  depends on it.
+- `mcpScopeLabels` in `packages/application` was dead code inside this
+  repository. Issue #203 removed it: a real re-export of `mcpScopeDisplay`
+  was not possible, because `packages/application` cannot depend on
+  `apps/reference-site` without inverting the package/app dependency
+  direction, and the export had no caller left to keep compatible.
 - The consent screen's inline styles must be kept in step with
   `dashboard.css` by hand; nothing currently fails a build if they drift.
