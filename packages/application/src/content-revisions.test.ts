@@ -749,6 +749,92 @@ describe("content revision application", () => {
     );
   });
 
+  it("writes each page's structural change onto its own page", async () => {
+    // A save can carry a change for more than one page: a restored draft can
+    // leave an unsaved structural change on a page the owner is not looking
+    // at. Each change names its page through its slot id, so neither can land
+    // on the other's page. See ADR-0032.
+    const home = homePage(referenceSiteDefinition);
+    const secondPage = {
+      id: "page_about",
+      slug: "about",
+      title: "About",
+      seo: { title: "", description: "", keywords: [], shareImage: null },
+      media: [],
+      sections: [
+        createDefaultPageSection("proof", "section_about_proof"),
+      ],
+    };
+    const twoPages = {
+      ...referenceSiteDefinition,
+      pages: [home, secondPage],
+    } as typeof referenceSiteDefinition;
+
+    const application = createContentRevisionApplication({
+      siteDefinition: twoPages,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-two-pages-0001");
+
+    const homeComposition: PageComposition = {
+      ...toPageComposition(home),
+      components: [...home.sections].reverse() as PageSection[],
+    };
+    const secondComposition: PageComposition = {
+      ...toPageComposition(secondPage),
+      components: [
+        ...secondPage.sections,
+        createDefaultPageSection("proof", "section_about_second"),
+      ] as PageSection[],
+    };
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [],
+      compositions: [homeComposition, secondComposition],
+      idempotencyKey: "compose-two-pages-0001",
+    });
+
+    expect(homePage(saved.definition).sections.map(({ id }) => id)).toEqual(
+      [...home.sections].reverse().map(({ id }) => id),
+    );
+    expect(
+      saved.definition.pages
+        .find(({ id }) => id === "page_about")!
+        .sections.map(({ id }) => id),
+    ).toEqual(["section_about_proof", "section_about_second"]);
+  });
+
+  it("rejects a structural change whose slot names no page of the site", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-unknown-slot-0001");
+
+    await expect(
+      application.commands.save({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        edits: [],
+        compositions: [
+          {
+            slotId: "slot_page_missing_sections",
+            components: [
+              ...homePage(referenceSiteDefinition).sections,
+            ] as PageSection[],
+          },
+        ],
+        idempotencyKey: "compose-unknown-slot-0001",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionValidationError);
+  });
+
   it("rejects a composition-only save with empty required rich text", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,

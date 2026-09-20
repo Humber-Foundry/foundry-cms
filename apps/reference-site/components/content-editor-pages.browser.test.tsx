@@ -13,9 +13,9 @@ import { withSecondPage } from "../src/test-support/two-page-site-definition";
  * The editor on a draft with two pages.
  *
  * The installed reference site has one page, and creating a page is ticket
- * #159, so a second page comes from a test fixture. These checks cover what
- * #157 promises: one page's fields at a time, a way to reach the other page,
- * and a truthful word about the canvas on a page it cannot yet draw.
+ * #159, so a second page comes from a test fixture. These checks cover one
+ * page's fields at a time, a way to reach the other page, and the canvas
+ * drawing whichever page the owner opened.
  */
 
 const twoPages = withSecondPage();
@@ -67,6 +67,20 @@ function shownPaths(host: HTMLElement): string[] {
   );
 }
 
+/**
+ * Press Edit, which is how the owner reaches the canvas and the page settings
+ * beside it. The editor opens on Browse, so a check of the settings has to
+ * start here — on every page alike, now that every page has a canvas.
+ */
+function startEditing(host: HTMLElement): HTMLElement {
+  const edit = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent?.trim() === "Edit",
+  );
+  expect(edit).toBeDefined();
+  flushSync(() => edit!.click());
+  return host;
+}
+
 afterEach(() => {
   while (mounted.length > 0) {
     const { host, root } = mounted.pop()!;
@@ -77,7 +91,7 @@ afterEach(() => {
 
 describe("the editor on a chosen page", () => {
   it("shows the chosen page's fields and leaves the other page's out", () => {
-    const host = mount(second.id);
+    const host = startEditing(mount(second.id));
     const paths = shownPaths(host);
     const fields = listEditableSiteFields(twoPages);
     // Design tokens belong to the Design destination, so Pages never shows
@@ -100,7 +114,7 @@ describe("the editor on a chosen page", () => {
       .map(({ path }) => path);
     expect(siteWidePaths.length).toBeGreaterThan(0);
 
-    const onSecond = shownPaths(mount(second.id));
+    const onSecond = shownPaths(startEditing(mount(second.id)));
     for (const path of siteWidePaths) expect(onSecond).toContain(path);
   });
 
@@ -127,21 +141,33 @@ describe("the editor on a chosen page", () => {
     );
   });
 
-  it("says the canvas is not ready on a page it cannot draw yet", () => {
-    const host = mount(second.id);
-    expect(host.textContent).toContain(
-      "Adding, moving and removing sections on this page is not ready yet",
-    );
-    expect(host.querySelector(".editor-stage")).toBeNull();
-    expect(host.querySelector(".editor-browse")).toBeNull();
+  it("draws the canvas on the home page", () => {
+    const host = startEditing(mount(home.id));
+    expect(host.querySelector(".editor-immersive")).not.toBeNull();
+    expect(host.querySelector(".editor-stage")).not.toBeNull();
   });
 
-  it("draws the canvas on the home page", () => {
-    const host = mount(home.id);
+  // The whole point of this ticket: a second page gets the same canvas as the
+  // home page, with the same way to add, move and remove its sections.
+  it("draws the canvas on a second page too", () => {
+    const host = startEditing(mount(second.id));
     expect(host.querySelector(".editor-immersive")).not.toBeNull();
-    expect(host.textContent).not.toContain(
-      "Adding, moving and removing sections on this page is not ready yet",
-    );
+    expect(host.querySelector(".editor-stage")).not.toBeNull();
+    expect(
+      [...host.querySelectorAll("summary")].some(
+        (summary) => summary.textContent?.includes("Add section"),
+      ),
+    ).toBe(true);
+  });
+
+  // The words that told the owner the canvas was unfinished on other pages
+  // are gone, because the canvas now works on every page.
+  it("no longer says sections are unavailable on any page", () => {
+    for (const pageId of [home.id, second.id]) {
+      expect(mount(pageId).textContent).not.toContain(
+        "not ready yet",
+      );
+    }
   });
 
   it("shows the home page's fields when the address names no page", () => {
