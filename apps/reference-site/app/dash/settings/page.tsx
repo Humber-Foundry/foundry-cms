@@ -61,9 +61,8 @@ export default async function DashboardSettingsPage() {
   });
   const mcpConnections = await loadMcpConnectionsForDashboard();
   const ownerNotifications = await loadOwnerNotificationStatus(access);
-  const emailDelivery = await readCampaignDeliveryReadiness(
-    await loadCampaignRequestContext(await headers()),
-  );
+  const campaignContext = await loadCampaignRequestContext(await headers());
+  const emailDelivery = await readCampaignDeliveryReadiness(campaignContext);
   const publishing = await readContentPublicationReadiness();
 
   return (
@@ -80,6 +79,19 @@ export default async function DashboardSettingsPage() {
         <p>Whether email delivery and site publishing are connected.</p>
         <ConnectionStatus kind="email" readiness={emailDelivery} />
         <ConnectionStatus kind="publishing" readiness={publishing} />
+      </section>
+
+      <section aria-labelledby="sender-details">
+        <h2 id="sender-details">Sender details</h2>
+        <p>
+          Every email must carry your name, your postal address, a way to
+          contact you and a way to stop the emails. Foundry never writes these
+          for you.
+        </p>
+        <ConnectionStatus
+          kind="senderDetails"
+          readiness={campaignContext.senderDetails}
+        />
       </section>
 
       <section aria-labelledby="people">

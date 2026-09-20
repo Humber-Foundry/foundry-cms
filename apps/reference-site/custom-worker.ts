@@ -1,7 +1,10 @@
 // @ts-expect-error The OpenNext worker is generated before Wrangler bundles this entry.
 import openNextWorker from "./.open-next/worker.js";
 
-import { reconcileHumanAccessEligibility } from "@humber-foundry/application";
+import {
+  reconcileHumanAccessEligibility,
+  stableRejectionReason,
+} from "@humber-foundry/application";
 
 import { installedSiteDefinition } from "./foundry/site-definition";
 
@@ -72,8 +75,20 @@ async function runScheduledWork(
     runScheduledBlogPostPublications(environment).catch(() => {
       console.error("scheduled_blog_publication_failed");
     }),
-    runScheduledCampaignBulkDeliveries(environment).catch(() => {
-      console.error("scheduled_campaign_delivery_failed");
+    runScheduledCampaignBulkDeliveries(environment).catch((error: unknown) => {
+      // The reason is logged, not swallowed. A worker that stops because the
+      // installation has not set its sender details is not a fault to chase;
+      // an operator needs to read which of the two it was. Only the stable
+      // reason code is logged, and it never carries a setting value.
+      console.error(
+        "scheduled_campaign_delivery_failed",
+        JSON.stringify({
+          reason: stableRejectionReason(
+            error,
+            "scheduled_campaign_delivery_failed",
+          ),
+        }),
+      );
     }),
     runScheduledAnalyticsProjection(environment).catch(() => {
       // Analytics is never authoritative for an operation, so a failed

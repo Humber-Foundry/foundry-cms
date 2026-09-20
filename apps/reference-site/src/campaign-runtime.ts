@@ -23,7 +23,8 @@ import {
   type SubscriberLedgerStore,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
-  type CampaignChannelConfiguration,
+  configuredCampaignChannel,
+  type CampaignChannelConfigurationState,
   type CampaignRevision,
   type CampaignStore,
   type NewsletterDeliveryAdapter,
@@ -52,17 +53,15 @@ import {
   readSubscriberIdentityKeySecret,
   type HumanAccessEnvironment,
 } from "./human-access-configuration";
-import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
+import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import {
   campaignDeliverySetupGuide,
   listMissingCampaignDeliverySettings,
   type CampaignDeliveryReadiness,
+  type CampaignSenderReadiness,
 } from "./campaign-delivery-readiness";
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
 import { installedSite } from "../foundry/site-definition.server";
-import {
-  newsletterUnsubscribePlaceholder,
-} from "./newsletter-unsubscribe-token";
 import {
   createBrevoNewsletterDeliveryAdapter,
 } from "./brevo-newsletter-delivery-adapter";
@@ -170,22 +169,42 @@ const developmentProviderOwnershipEvidence:
     accountScopeFingerprint: "0".repeat(64),
     verifiedAt: "1970-01-01T00:00:00.000Z",
   });
-const developmentChannelConfiguration: CampaignChannelConfiguration = Object.freeze({
-  senderIdentityId: "sender_primary",
-  complianceFooter: Object.freeze({
-    version: "local-footer-v1",
-    content:
-      "Foundry local development · Local development only · " +
-      "Contact: https://example.test/contact · Newsletter preferences",
-    unsubscribePlaceholder:
-      "https://example.test/newsletter/unsubscribe" +
-      "?token={{foundry.unsubscribe.token}}",
-  }),
-  audienceDefinition: Object.freeze({
-    id: "canonical-consent-and-suppression" as const,
-    version: 1 as const,
-  }),
-});
+/**
+ * The channel used only when the site runs in local development.
+ *
+ * This is the one place a footer is not built from an installation's own
+ * settings, and it is confined to local development. It announces itself:
+ * the name reads "Foundry local development" and the address reads "Local
+ * development only", so nobody could mistake it for a real legal name or a
+ * real postal address.
+ *
+ * Nothing it writes can reach a person. In local development the campaign
+ * store is the in-memory one above, every provider adapter is the fail-closed
+ * one, and delivery readiness reports `local_development`, so a test and a
+ * bulk send are both refused before any provider is called.
+ *
+ * Outside local development there is no default footer and no placeholder.
+ * The settings are read, and the work is refused while they are absent.
+ */
+const developmentChannelConfiguration: CampaignChannelConfigurationState =
+  configuredCampaignChannel(
+    Object.freeze({
+      senderIdentityId: "sender_primary",
+      complianceFooter: Object.freeze({
+        version: "local-footer-v1",
+        content:
+          "Foundry local development · Local development only · " +
+          "Contact: https://example.test/contact · Newsletter preferences",
+        unsubscribePlaceholder:
+          "https://example.test/newsletter/unsubscribe" +
+          "?token={{foundry.unsubscribe.token}}",
+      }),
+      audienceDefinition: Object.freeze({
+        id: "canonical-consent-and-suppression" as const,
+        version: 1 as const,
+      }),
+    }),
+  );
 
 /**
  * The verified test address on file for one membership, or null.
@@ -202,35 +221,6 @@ function verifiedTestAddress(
   return typeof address === "string" && address.trim() !== ""
     ? address.trim()
     : null;
-}
-
-/**
- * The campaign channel configuration for one installation.
- *
- * The compliance footer it builds is stored on every campaign revision and is
- * read by whoever receives the email, so it is always built from the
- * installation's own settings. Foundry never stands in for it, and it is built
- * the same way whether or not the delivery secrets are installed.
- *
- * The unsubscribe address needs the configured address only. The delivery
- * secret signs a real token later, at send time.
- */
-export function resolveCampaignChannelConfiguration(
-  environment: HumanAccessEnvironment,
-): CampaignChannelConfiguration {
-  let placeholder = "";
-  try {
-    placeholder = newsletterUnsubscribePlaceholder(
-      environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
-    );
-  } catch {
-    // An absent or malformed unsubscribe address is a configuration fault.
-    // Passing the empty address on lets the channel reader name it the same
-    // way it names every other absent compliance setting, rather than raising
-    // a bare URL error.
-    placeholder = "";
-  }
-  return readCampaignChannelConfiguration(environment, placeholder);
 }
 
 /**
@@ -310,6 +300,14 @@ export type CampaignDeliveryContext = Readonly<{
    * of the settings it still needs. It never carries a setting's value.
    */
   delivery: CampaignDeliveryReadiness;
+  /**
+   * Whether this installation has set the sender identity and the legal
+   * footer that must appear at the bottom of every email. Reported separately
+   * from the delivery secrets, because they are separate settings with
+   * separate consequences: without the footer nothing may be written or sent
+   * at all, even when the provider is reachable.
+   */
+  senderDetails: CampaignSenderReadiness;
   /** What the delivery provider reports about its own credential and sender. */
   readDeliveryHealth: () => Promise<NewsletterDeliveryHealth>;
 }>;
@@ -420,6 +418,11 @@ export async function loadCampaignRequestContext(
     providerHealth: null,
     setupGuide: campaignDeliverySetupGuide,
   });
+  let senderDetails: CampaignSenderReadiness = Object.freeze({
+    state: "local_development" as const,
+    missingSettings: Object.freeze([]),
+    setupGuide: campaignDeliverySetupGuide,
+  });
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
     // A missing database is a fault, not a missing delivery setting. Nothing
@@ -451,7 +454,12 @@ export async function loadCampaignRequestContext(
     });
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
-    channelConfiguration = resolveCampaignChannelConfiguration(environment);
+    // The sender details are separate settings from the delivery secrets, so
+    // they are reported under their own heading. The page loads either way,
+    // and the screen names exactly the settings the application refused on.
+    const senderSettings = resolveCampaignChannel(environment);
+    channelConfiguration = senderSettings.channel;
+    senderDetails = senderSettings.readiness;
     if (delivery.state !== "connected") {
       // Delivery is not configured. Writing and saving a campaign still work,
       // so the Newsletter page renders. Every provider adapter stays the
@@ -607,6 +615,7 @@ export async function loadCampaignRequestContext(
           }),
     artifactPublisher: bulkArtifactPublisher,
     adapter: bulkAdapter,
+    channelConfiguration,
     fingerprintKey: bulkFingerprintKey,
     maximumAudienceRecipients: brevoBulkRecipientLimit,
   });
@@ -614,6 +623,7 @@ export async function loadCampaignRequestContext(
     identity: human.identity,
     application,
     delivery,
+    senderDetails,
     readDeliveryHealth: () => testAdapter.health(),
     bulkDelivery,
     listTestRecipients: async () => {
@@ -636,6 +646,7 @@ export async function loadCampaignRequestContext(
       campaignStore: store,
       store: testDeliveryStore,
       adapter: testAdapter,
+      channelConfiguration,
       authorize: (actor, capability) =>
         human.application.queries.requireCapability({
           actor,

@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   campaignAudienceDefinition,
+  configuredCampaignChannel,
   CampaignConflictError,
   CampaignIdempotencyError,
   createCampaignApplication,
@@ -83,7 +84,7 @@ describe("D1 campaign store", () => {
       identifyActor: () => createHumanMembershipId("membership-editor"),
       findPostRevision: async () => null,
       resolveAudience: async () => ({ eligibleSubscriberCount: 7 }),
-      channelConfiguration: {
+      channelConfiguration: configuredCampaignChannel({
         senderIdentityId: "sender_primary",
         complianceFooter: {
           version: "footer-v1",
@@ -93,7 +94,7 @@ describe("D1 campaign store", () => {
             "?token={{foundry.unsubscribe.token}}",
         },
         audienceDefinition: campaignAudienceDefinition,
-      },
+      }),
       siteCanonicalOrigin: "https://example.test",
       rendererVersion: "1111111111111111111111111111111111111111",
       schemaVersion: "1.7.0",
