@@ -60,6 +60,7 @@ import {
   useContentEditorPersistence,
 } from "../src/content-editor-persistence";
 import { pageCompositionChanged } from "../src/page-composition-puck";
+import { PublishingConnectionStatus } from "./connection-status";
 import { DesignDestination } from "./design-destination";
 import { HelpTip } from "./help-tip";
 import { RichTextEditor } from "./rich-text-editor";
@@ -1580,6 +1581,7 @@ export function ContentEditor({
       <summary className="button button-primary">Publish</summary>
       <div className="publish-panel">
         <p className="publish-panel-title">Put this draft on the live site</p>
+        <PublishingConnectionStatus />
         <ol className="publish-steps">
           <li data-done={state.status === "saved"}>{saveStepText}</li>
           <li data-done={previewChecked}>

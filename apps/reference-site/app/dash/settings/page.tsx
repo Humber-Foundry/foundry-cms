@@ -1,11 +1,18 @@
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import type { PublicFormDeliveryHealth } from "@humber-foundry/application";
 
+import { ConnectionStatus } from "@/components/connection-status";
 import { McpConnectionControls } from "@/components/mcp-connection-controls";
 import { MemberAccessControls } from "@/components/member-access-controls";
 import { OwnerNotificationControls } from "@/components/owner-notification-controls";
 import { SiteTechnicalDetail } from "@/components/site-technical-detail";
+import {
+  loadCampaignRequestContext,
+  readCampaignDeliveryReadiness,
+} from "@/src/campaign-runtime";
+import { readContentPublicationReadiness } from "@/src/content-publication-runtime";
 import { loadMcpConnectionsForDashboard } from "@/src/mcp-dashboard-runtime";
 import { ownerAlertSenderState } from "@/src/owner-alert-status";
 import { loadOwnerNotificationStatus } from "@/src/public-form-messages-runtime";
@@ -54,6 +61,10 @@ export default async function DashboardSettingsPage() {
   });
   const mcpConnections = await loadMcpConnectionsForDashboard();
   const ownerNotifications = await loadOwnerNotificationStatus(access);
+  const emailDelivery = await readCampaignDeliveryReadiness(
+    await loadCampaignRequestContext(await headers()),
+  );
+  const publishing = await readContentPublicationReadiness();
 
   return (
     <main className="dashboard-main" id="main">
@@ -63,6 +74,13 @@ export default async function DashboardSettingsPage() {
           <p>Who can sign in, which agents are connected, and site details.</p>
         </div>
       </div>
+
+      <section aria-labelledby="connections">
+        <h2 id="connections">Connections</h2>
+        <p>Whether email delivery and site publishing are connected.</p>
+        <ConnectionStatus kind="email" readiness={emailDelivery} />
+        <ConnectionStatus kind="publishing" readiness={publishing} />
+      </section>
 
       <section aria-labelledby="people">
         <h2 id="people">People</h2>
