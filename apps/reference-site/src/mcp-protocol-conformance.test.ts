@@ -37,6 +37,7 @@ const idempotencyKey = "22222222-2222-4222-8222-222222222222";
 const approvalId = `approval_${"a".repeat(32)}`;
 const scheduleId = "schedule_0123abcd-4567-89ab-cdef-0123456789ab";
 const contentHash = "a".repeat(64);
+const pageId = "page_0123456789abcdef0123";
 const previewArtifact = "b".repeat(64);
 const productionBase = `git:${"a".repeat(40)}@content:${"b".repeat(64)}`;
 
@@ -64,6 +65,8 @@ const canonicalRevision = {
   createdAt: observedAt,
   createdBy: "mcp-agent-conformance",
 };
+
+const pageResult = { ...draftResult, replayed: false, previewArtifact };
 
 const results: Record<string, unknown> = {
   "foundry.site.get": {
@@ -108,6 +111,10 @@ const results: Record<string, unknown> = {
     replayed: false,
     previewArtifact,
   },
+  "foundry.page.create": { ...pageResult, pageId },
+  "foundry.page.rename": { ...pageResult, pageId },
+  "foundry.page.duplicate": { ...pageResult, pageId },
+  "foundry.page.delete": { ...pageResult, pageId },
   "foundry.design.patch": {
     ...draftResult,
     replayed: false,
@@ -225,6 +232,36 @@ const inputs: Record<string, unknown> = {
       },
     ],
   },
+  "foundry.page.create": {
+    workspaceId,
+    expectedRevision: 0,
+    idempotencyKey,
+    title: "About us",
+    slug: "about-us",
+    startingLayout: "introduction",
+  },
+  "foundry.page.rename": {
+    workspaceId,
+    expectedRevision: 1,
+    idempotencyKey,
+    pageId,
+    title: "Our approach",
+    slug: "our-approach",
+  },
+  "foundry.page.duplicate": {
+    workspaceId,
+    expectedRevision: 1,
+    idempotencyKey,
+    pageId,
+    title: "Our approach in detail",
+    slug: "our-approach-in-detail",
+  },
+  "foundry.page.delete": {
+    workspaceId,
+    expectedRevision: 1,
+    idempotencyKey,
+    pageId,
+  },
   "foundry.design.patch": {
     workspaceId,
     expectedRevision: 0,
@@ -280,7 +317,7 @@ const inputs: Record<string, unknown> = {
 };
 
 describe("MCP protocol-wrapper emission conformance", () => {
-  it("independently validates protocol-wrapper success and business-error emissions for all 18 descriptors", async () => {
+  it("independently validates protocol-wrapper success and business-error emissions for all 22 descriptors", async () => {
     let failingTool: string | null = null;
     const emit = (name: string) => async () => {
       if (failingTool === name) {
@@ -298,6 +335,10 @@ describe("MCP protocol-wrapper emission conformance", () => {
       openWorkspace: emit("foundry.workspace.open"),
       getWorkspace: emit("foundry.workspace.get"),
       patchContent: emit("foundry.content.patch"),
+      createPage: emit("foundry.page.create"),
+      renamePage: emit("foundry.page.rename"),
+      duplicatePage: emit("foundry.page.duplicate"),
+      deletePage: emit("foundry.page.delete"),
       patchDesign: emit("foundry.design.patch"),
       preparePreview: emit("foundry.preview.prepare"),
       requestPublication: emit("foundry.publication.request"),

@@ -9,12 +9,17 @@ import {
 } from "@humber-foundry/site-definition";
 
 import {
+  ContentPageOperationError,
   ContentRevisionConflictError,
   ContentRevisionStaleError,
+  ContentRevisionValidationError,
   createContentActorId,
+  mintedContentPageId,
   type ContentRevision,
   type ContentRevisionApplication,
   type ContentWorkspaceId,
+  type PageMutationCommand,
+  type PageMutationResult,
   type SavedContentRevision,
 } from "./content-revisions";
 import { sha256CanonicalJson } from "./deterministic-hash";
@@ -26,6 +31,21 @@ import {
   type McpExecutionContext,
   type McpReadAuditEvent,
 } from "./mcp-read";
+
+/**
+ * What a refused MCP draft mutation records and replays.
+ *
+ * `reason` is the named cause the agent branches on, such as `page_is_home`.
+ * It is stored with the code and the message so that replaying the same
+ * request reports the same refusal, word for word and reason for reason.
+ */
+export type McpMutationFailure = Readonly<{
+  code: McpReadError["code"];
+  message: string;
+  reason: string | null;
+  latestRevision: number | null;
+  conflictResource: string | null;
+}>;
 
 export type McpDraftRuntime = Readonly<{
   replayMutation(input: {
@@ -46,20 +66,10 @@ export type McpDraftRuntime = Readonly<{
     principal: McpConnectionPrincipal;
     audit: McpReadAuditEvent & { idempotencyKey: string };
     resultHash: string;
-    error: Readonly<{
-      code: McpReadError["code"];
-      message: string;
-      latestRevision: number | null;
-      conflictResource: string | null;
-    }>;
+    error: McpMutationFailure;
   }): Promise<
     Readonly<{
-      error: Readonly<{
-        code: McpReadError["code"];
-        message: string;
-        latestRevision: number | null;
-        conflictResource: string | null;
-      }>;
+      error: McpMutationFailure;
       observedAt: string;
       replayed: boolean;
     }>
@@ -217,6 +227,20 @@ export function mcpRevisionScopes(
   return mcpDefinitionScopes(base.definition, revision.definition, fallback);
 }
 
+/**
+ * Which draft scopes a revision's own changes need.
+ *
+ * A field both sides hold is read by its group: a Design field means the
+ * design changed, anything else means the content changed.
+ *
+ * A field only one side holds belongs to a record this draft added or removed,
+ * such as a page. That is a content change whatever group the field is in. A
+ * page an agent adds brings the design fields its sections start with, and
+ * those are defaults the starting point placed rather than a design the agent
+ * chose; no design that was already on the site changed. Changing one of them
+ * afterwards still needs `foundry.design.patch`, which asks for the design
+ * draft scope itself. See ADR-0034.
+ */
 function mcpDefinitionScopes(
   base: SiteDefinition,
   revision: SiteDefinition,
@@ -230,10 +254,16 @@ function mcpDefinitionScopes(
   );
   let contentChanged = false;
   let designChanged = false;
+  const revisionPaths = new Set<string>();
   for (const field of listEditableSiteFields(revision)) {
-    if (baseFields.get(field.path) === JSON.stringify(field.value)) continue;
-    if (field.group === "Design") designChanged = true;
+    revisionPaths.add(field.path);
+    const before = baseFields.get(field.path);
+    if (before === JSON.stringify(field.value)) continue;
+    if (before !== undefined && field.group === "Design") designChanged = true;
     else contentChanged = true;
+  }
+  for (const path of baseFields.keys()) {
+    if (!revisionPaths.has(path)) contentChanged = true;
   }
   const scopes = [
     ...(contentChanged ? [mcpContentDraftScope] : []),
@@ -253,6 +283,69 @@ export function requireMcpRevisionScopes(
       { requiredScopes },
     );
   }
+}
+
+/**
+ * What every MCP page tool takes: the draft, the revision the agent read
+ * before it decided, and the key that makes a retry safe. It is the same
+ * front as `foundry.content.patch`, because a page operation is the same kind
+ * of draft write.
+ */
+export type McpPageMutationInput = Readonly<{
+  workspaceId: ContentWorkspaceId;
+  expectedRevision: number;
+  idempotencyKey: string;
+}>;
+
+export type McpCreatePageInput = McpPageMutationInput &
+  Readonly<{ title: string; slug: string; startingLayout: string }>;
+
+export type McpRenamePageInput = McpPageMutationInput &
+  Readonly<{ pageId: string; title: string; slug: string }>;
+
+export type McpDuplicatePageInput = McpPageMutationInput &
+  Readonly<{ pageId: string; title: string; slug: string }>;
+
+export type McpDeletePageInput = McpPageMutationInput &
+  Readonly<{ pageId: string }>;
+
+/**
+ * The named reason for a page refusal the draft raised without a page
+ * lifecycle code of its own. A rename is two ordinary field edits, so the
+ * field's own check refuses it and reports one sentence per field. The agent
+ * reads those sentences in the message and this word in `reason`.
+ */
+const pageFieldsRefusedReason = "page_fields_refused";
+
+/**
+ * The three named reasons a content edit is refused for: the draft has no
+ * field at that path, the path is a design setting rather than content, or
+ * the value was sent in the other format. An agent branches on these instead
+ * of reading the sentence.
+ */
+const contentFieldNotEditableReason = "content_field_not_editable";
+const contentFieldFormatReason = "content_field_format_mismatch";
+const designFieldNotContentReason = "design_field_not_content";
+
+/**
+ * Turn a refused page operation into the tool error an agent acts on.
+ *
+ * The sentences come from the draft itself, which is the one place the page
+ * rules are written (ADR-0033), so an agent and a site owner read the same
+ * words. `reason` carries the stable code a program branches on.
+ */
+function pageRefusal(error: ContentRevisionValidationError): McpReadError {
+  const sentences = Object.values(error.fields).join(" ");
+  return new McpReadError(
+    "VALIDATION_FAILED",
+    sentences === "" ? "The page operation was refused." : sentences,
+    {
+      reason:
+        error instanceof ContentPageOperationError
+          ? error.code
+          : pageFieldsRefusedReason,
+    },
+  );
 }
 
 function staleRevision(
@@ -287,17 +380,36 @@ function contentEdits(
   definition: SiteDefinition,
   operations: ReadonlyArray<McpContentPatchOperation>,
 ): ReadonlyArray<SiteDefinitionEdit> {
-  const contentFields = new Map(
-    listEditableSiteFields(definition)
-      .filter(({ group }) => group !== "Design")
-      .map((field) => [field.path, field]),
+  // Every field the draft holds, so a refusal can tell a path that is not
+  // there from a path that is there but is a design setting.
+  const draftFields = new Map(
+    listEditableSiteFields(definition).map((field) => [field.path, field]),
   );
   return operations.map(({ field, value, format }) => {
-    const contract = contentFields.get(field);
-    if (contract === undefined || contract.format !== (format ?? "plainText")) {
+    const contract = draftFields.get(field);
+    if (contract === undefined) {
+      // The draft's own field list is the answer, and the tool no longer
+      // advertises one, so the refusal names the path it turned down.
       throw new McpReadError(
         "VALIDATION_FAILED",
-        "The content field is not editable through MCP.",
+        `This draft has no field at ${field}.`,
+        { reason: contentFieldNotEditableReason },
+      );
+    }
+    if (contract.group === "Design") {
+      throw new McpReadError(
+        "VALIDATION_FAILED",
+        `The field ${field} is a design setting, not content. Use foundry.design.patch for a design change.`,
+        { reason: designFieldNotContentReason },
+      );
+    }
+    if (contract.format !== (format ?? "plainText")) {
+      throw new McpReadError(
+        "VALIDATION_FAILED",
+        format === "richText"
+          ? `The field ${field} holds plain text, not rich text.`
+          : `The field ${field} holds rich text. Send it with format "richText".`,
+        { reason: contentFieldFormatReason },
       );
     }
     if (contract.format !== "richText") {
@@ -372,9 +484,10 @@ export function createMcpDraftApplication({
   ) {
     return async (audit: McpReadAuditEvent, error: McpReadError) => {
       const joinedAudit = { ...audit, idempotencyKey };
-      const failure = {
+      const failure: McpMutationFailure = {
         code: error.code,
         message: error.message,
+        reason: error.reason,
         latestRevision: error.latestRevision,
         conflictResource: error.conflictResource,
       };
@@ -389,6 +502,7 @@ export function createMcpDraftApplication({
         recorded.error.message,
         {
           observedAt: recorded.observedAt,
+          reason: recorded.error.reason ?? undefined,
           latestRevision: recorded.error.latestRevision ?? undefined,
           conflictResource:
             recorded.error.conflictResource ?? undefined,
@@ -397,6 +511,140 @@ export function createMcpDraftApplication({
         },
       );
     };
+  }
+
+  /**
+   * Run one page operation as an MCP tool call.
+   *
+   * Every page tool goes through here, so all four get the same draft scope,
+   * the same replay handling, the same base-revision check and the same
+   * refusal shape. The work itself is `run`, which calls the matching
+   * application command; this adds nothing to what the dashboard does.
+   *
+   * `replayedPageId` names the page a stored receipt was for. A receipt
+   * records the revision, not the page, so a create and a duplicate rebuild
+   * the id they minted while a rename and a delete already know it.
+   */
+  function pageMutation<Input extends McpPageMutationInput>({
+    principal,
+    operation,
+    input,
+    context,
+    run,
+    replayedPageId,
+  }: {
+    principal: McpConnectionPrincipal;
+    operation: string;
+    input: Input;
+    context: McpExecutionContext;
+    run(
+      application: ContentRevisionApplication,
+      command: PageMutationCommand,
+    ): Promise<PageMutationResult>;
+    replayedPageId(
+      workspaceId: ContentWorkspaceId,
+      storageKey: string,
+    ): Promise<string>;
+  }) {
+    return base.executeScoped({
+      principal,
+      operation,
+      auditInput: input,
+      requiredScopes: [mcpContentDraftScope],
+      context,
+      joinedAudit: true,
+      recordJoinedFailure: recordJoinedFailure(
+        principal,
+        input.idempotencyKey,
+      ),
+      async run(execution, audit) {
+        const joinedAudit = {
+          ...audit,
+          idempotencyKey: input.idempotencyKey,
+        };
+        const storageKey = await execution.run(() =>
+          mutationStorageKey(operation, input.idempotencyKey),
+        );
+        const replay = await execution.run(() =>
+          runtime.replayMutation({ principal, audit: joinedAudit }),
+        );
+        if (replay !== null) {
+          const replayApplication = await execution.run(() =>
+            load(principal, replay.workspaceId),
+          );
+          const replayRevision = await execution.run(() =>
+            replayApplication.queries.getRevisionWithBookmark(
+              replay.revision,
+            ),
+          );
+          if (replayRevision === null) {
+            throw new McpReadError(
+              "TEMPORARILY_UNAVAILABLE",
+              "The replayed page result is unavailable.",
+            );
+          }
+          assertSite(replayRevision, principal.siteId);
+          return {
+            ...revisionResult(replayRevision),
+            pageId: await execution.run(() =>
+              replayedPageId(replay.workspaceId, storageKey),
+            ),
+            replayed: true,
+            previewArtifact: await execution.run(() =>
+              createCanonicalPreviewArtifactHash(replayRevision),
+            ),
+          };
+        }
+        const application = await execution.run(() =>
+          load(principal, input.workspaceId),
+        );
+        const current = await execution.run(() =>
+          application.queries.getCurrent(),
+        );
+        assertSite(current, principal.siteId);
+        let mutation: PageMutationResult;
+        try {
+          mutation = await execution.run(() =>
+            run(application, {
+              actorId: createMcpContentActorId(principal),
+              workspaceId: input.workspaceId,
+              schemaVersion: current.definition.schemaVersion,
+              baseRevision: input.expectedRevision,
+              idempotencyKey: storageKey,
+              joinedAudit,
+            }),
+          );
+        } catch (error) {
+          if (error instanceof ContentRevisionValidationError) {
+            throw pageRefusal(error);
+          }
+          if (
+            error instanceof ContentRevisionConflictError ||
+            error instanceof ContentRevisionStaleError
+          ) {
+            const latest =
+              error instanceof ContentRevisionConflictError
+                ? error.currentRevision
+                : (
+                    await execution.run(() =>
+                      application.queries.getCurrent()
+                    )
+                  ).revision;
+            throw staleRevision(input.workspaceId, latest);
+          }
+          throw error;
+        }
+        const saved = mutation.revision;
+        return {
+          ...revisionResult(saved),
+          pageId: mutation.pageId,
+          replayed: mutation.replayed,
+          previewArtifact: await execution.run(() =>
+            createCanonicalPreviewArtifactHash(saved),
+          ),
+        };
+      },
+    });
   }
 
   return Object.freeze({
@@ -784,6 +1032,86 @@ export function createMcpDraftApplication({
             ),
           };
         },
+      });
+    },
+    createPage(
+      principal: McpConnectionPrincipal,
+      input: McpCreatePageInput,
+      context: McpExecutionContext,
+    ) {
+      return pageMutation({
+        principal,
+        operation: "foundry.page.create",
+        input,
+        context,
+        run: (application, command) =>
+          application.commands.createPage({
+            ...command,
+            title: input.title,
+            slug: input.slug,
+            startingLayout: input.startingLayout,
+          }),
+        replayedPageId: (workspaceId, idempotencyKey) =>
+          mintedContentPageId({ workspaceId, idempotencyKey }),
+      });
+    },
+    renamePage(
+      principal: McpConnectionPrincipal,
+      input: McpRenamePageInput,
+      context: McpExecutionContext,
+    ) {
+      return pageMutation({
+        principal,
+        operation: "foundry.page.rename",
+        input,
+        context,
+        run: (application, command) =>
+          application.commands.renamePage({
+            ...command,
+            pageId: input.pageId,
+            title: input.title,
+            slug: input.slug,
+          }),
+        replayedPageId: async () => input.pageId,
+      });
+    },
+    duplicatePage(
+      principal: McpConnectionPrincipal,
+      input: McpDuplicatePageInput,
+      context: McpExecutionContext,
+    ) {
+      return pageMutation({
+        principal,
+        operation: "foundry.page.duplicate",
+        input,
+        context,
+        run: (application, command) =>
+          application.commands.duplicatePage({
+            ...command,
+            pageId: input.pageId,
+            title: input.title,
+            slug: input.slug,
+          }),
+        replayedPageId: (workspaceId, idempotencyKey) =>
+          mintedContentPageId({ workspaceId, idempotencyKey }),
+      });
+    },
+    deletePage(
+      principal: McpConnectionPrincipal,
+      input: McpDeletePageInput,
+      context: McpExecutionContext,
+    ) {
+      return pageMutation({
+        principal,
+        operation: "foundry.page.delete",
+        input,
+        context,
+        run: (application, command) =>
+          application.commands.deletePage({
+            ...command,
+            pageId: input.pageId,
+          }),
+        replayedPageId: async () => input.pageId,
       });
     },
     preparePreview(

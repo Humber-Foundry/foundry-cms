@@ -4,8 +4,11 @@ import {
   createBlogPostId,
   createRichTextDocumentFromPlainText,
   createSiteId,
+  duplicatePageInDefinition,
   homePage,
+  mintedPageId,
   referenceSiteDefinition,
+  resolvePageSeo,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
@@ -46,6 +49,15 @@ const definitionWithPost = {
     ],
   },
 } satisfies SiteDefinition;
+// A second page, made the way the product makes one, so the read tests run
+// against a site that really holds more than one page.
+const secondPageId = mintedPageId("0".repeat(20));
+const twoPageDefinition = duplicatePageInDefinition(definitionWithPost, {
+  sourcePageId: homePage(definitionWithPost).id,
+  pageId: secondPageId,
+  title: "About us",
+  slug: "about-us",
+});
 const secondSiteId = createSiteId("site_pairwise_second");
 const secondSiteDefinition = {
   ...definitionWithPost,
@@ -96,6 +108,7 @@ function activeConnection(
 
 function fixture(overrides: {
   connection?: McpConnectionGrant | null;
+  definition?: SiteDefinition;
   onFind?: () => void;
   resolveConnection?: () => McpConnectionGrant | null;
 } = {}) {
@@ -107,7 +120,9 @@ function fixture(overrides: {
       site: createSiteApplication({
         siteId,
         publishedSites: createInMemoryPublishedSiteRepository([
-          createPublishedSiteBundle(definitionWithPost),
+          createPublishedSiteBundle(
+            overrides.definition ?? definitionWithPost,
+          ),
         ]),
       }),
       siteMetadata: {
@@ -221,6 +236,57 @@ describe("site-scoped MCP read application", () => {
         kind: "post",
       }),
     ]);
+  });
+
+  it("lists every page and reads any one of them by its id", async () => {
+    const { application } = fixture({ definition: twoPageDefinition });
+
+    const listed = await application.listContent(principal, {
+      kind: "page",
+      limit: 100,
+      cursor: null,
+    });
+    expect(
+      listed.result.items.map(({ kind, contentId, title }) => ({
+        kind,
+        contentId,
+        title,
+      })),
+    ).toEqual(
+      twoPageDefinition.pages.map((page) => ({
+        kind: "page",
+        contentId: page.id,
+        title: resolvePageSeo(twoPageDefinition, page).title,
+      })),
+    );
+    expect(listed.result.nextCursor).toBeNull();
+
+    const second = await application.getContent(principal, {
+      kind: "page",
+      contentId: secondPageId,
+    });
+    expect(second.result.document).toEqual(
+      twoPageDefinition.pages.find(({ id }) => id === secondPageId),
+    );
+    // Each page hashes to its own document, so an agent can tell one from the
+    // other without reading both.
+    const home = await application.getContent(principal, {
+      kind: "page",
+      contentId: homePage(twoPageDefinition).id,
+    });
+    expect(second.result.contentHash).not.toEqual(home.result.contentHash);
+    expect(
+      listed.result.items.map(({ contentHash }) => contentHash),
+    ).toEqual([home.result.contentHash, second.result.contentHash]);
+
+    await expect(
+      application.getContent(principal, {
+        kind: "page",
+        contentId: mintedPageId("1".repeat(20)),
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "OBJECT_NOT_FOUND" }),
+    );
   });
 
   it("conceals cross-site reads and records a safe denial", async () => {

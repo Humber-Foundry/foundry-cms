@@ -3,6 +3,7 @@ import {
   type ContentWorkspaceId,
   type McpConnectionPrincipal,
   type McpDraftRuntime,
+  type McpMutationFailure,
   type McpReadAuditEvent,
 } from "@humber-foundry/application";
 
@@ -167,23 +168,18 @@ export function createD1McpPreviewStore(
   function prepareFailureReceipt(input: {
     audit: McpReadAuditEvent & { idempotencyKey: string };
     resultHash: string;
-    error: Readonly<{
-      code: McpReadError["code"];
-      message: string;
-      latestRevision: number | null;
-      conflictResource: string | null;
-    }>;
+    error: McpMutationFailure;
   }) {
     return database
       .prepare(
         `INSERT INTO mcp_mutation_receipts (
            site_id, actor_id, operation, idempotency_key, input_hash,
            invocation_id, result_hash, result_state, workspace_id, revision,
-           content_hash, preview_id, error_code, error_message,
+           content_hash, preview_id, error_code, error_message, error_reason,
            latest_revision, conflict_resource, replay_count, created_at
          ) VALUES (
            ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'failed', NULL, NULL,
-           NULL, NULL, ?8, ?9, ?10, ?11, 0, ?12
+           NULL, NULL, ?8, ?9, ?10, ?11, ?12, 0, ?13
          )
          ON CONFLICT (site_id, actor_id, operation, idempotency_key)
          DO NOTHING`,
@@ -198,6 +194,7 @@ export function createD1McpPreviewStore(
         input.resultHash,
         input.error.code,
         input.error.message,
+        input.error.reason,
         input.error.latestRevision,
         input.error.conflictResource,
         input.audit.occurredAt,
@@ -244,8 +241,8 @@ export function createD1McpPreviewStore(
         .prepare(
           `SELECT input_hash, result_hash, result_state, workspace_id,
                   revision, content_hash, preview_id, error_code,
-                  error_message, latest_revision, conflict_resource,
-                  created_at
+                  error_message, error_reason, latest_revision,
+                  conflict_resource, created_at
            FROM mcp_mutation_receipts
            WHERE site_id = ?1
              AND actor_id = ?2
@@ -268,6 +265,7 @@ export function createD1McpPreviewStore(
           preview_id: string | null;
           error_code: McpReadError["code"] | null;
           error_message: string | null;
+          error_reason: string | null;
           latest_revision: number | null;
           conflict_resource: string | null;
           created_at: string;
@@ -309,6 +307,7 @@ export function createD1McpPreviewStore(
           receipt.error_message,
           {
             observedAt: receipt.created_at,
+            reason: receipt.error_reason ?? undefined,
             latestRevision: receipt.latest_revision ?? undefined,
             conflictResource: receipt.conflict_resource ?? undefined,
             replayed: true,
@@ -340,18 +339,13 @@ export function createD1McpPreviewStore(
       principal: McpConnectionPrincipal;
       audit: McpReadAuditEvent & { idempotencyKey: string };
       resultHash: string;
-      error: Readonly<{
-        code: McpReadError["code"];
-        message: string;
-        latestRevision: number | null;
-        conflictResource: string | null;
-      }>;
+      error: McpMutationFailure;
     }) {
       await prepareFailureReceipt(input).run();
       const receipt = await database
         .prepare(
           `SELECT input_hash, invocation_id, error_code, error_message,
-                  latest_revision, conflict_resource, created_at
+                  error_reason, latest_revision, conflict_resource, created_at
            FROM mcp_mutation_receipts
            WHERE site_id = ?1
              AND actor_id = ?2
@@ -369,6 +363,7 @@ export function createD1McpPreviewStore(
           invocation_id: string;
           error_code: McpReadError["code"] | null;
           error_message: string | null;
+          error_reason: string | null;
           latest_revision: number | null;
           conflict_resource: string | null;
           created_at: string;
@@ -394,6 +389,7 @@ export function createD1McpPreviewStore(
             code: "IDEMPOTENCY_KEY_REUSED" as const,
             message:
               "The idempotency key was already used for different input.",
+            reason: null,
             latestRevision: null,
             conflictResource: null,
           },
@@ -446,6 +442,7 @@ export function createD1McpPreviewStore(
         error: {
           code: receipt.error_code,
           message: receipt.error_message,
+          reason: receipt.error_reason,
           latestRevision: receipt.latest_revision,
           conflictResource: receipt.conflict_resource,
         },
