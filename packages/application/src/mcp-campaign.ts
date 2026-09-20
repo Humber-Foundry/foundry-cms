@@ -101,13 +101,6 @@ type McpCampaignApplicationBase = Readonly<{
 }>;
 
 /**
- * Maps a domain rejection onto the stable MCP error contract. Campaign
- * commands report every rejection through a small set of typed errors, so the
- * agent sees the same code for the same policy decision no matter which
- * command raised it. `requiredScope` is the scope the calling tool gates on,
- * so a denial reports the scope that operation needs rather than a fixed one.
- */
-/**
  * The one sentence an agent reads for the one reason every path in the
  * product reports while an installation has not set its sender details and
  * email footer (ADR-0030). It names what the site owner must do, not the
@@ -116,6 +109,13 @@ type McpCampaignApplicationBase = Readonly<{
 const campaignSenderDetailsNotConfiguredMessage =
   "The site owner must set the sender details in the dashboard before this can be used.";
 
+/**
+ * Maps a domain rejection onto the stable MCP error contract. Campaign
+ * commands report every rejection through a small set of typed errors, so the
+ * agent sees the same code for the same policy decision no matter which
+ * command raised it. `requiredScope` is the scope the calling tool gates on,
+ * so a denial reports the scope that operation needs rather than a fixed one.
+ */
 function campaignError(
   error: unknown,
   requiredScope: typeof mcpCampaignDraftScope | typeof mcpCampaignTestScope,
