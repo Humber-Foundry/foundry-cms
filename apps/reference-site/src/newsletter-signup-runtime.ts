@@ -1,5 +1,3 @@
-import "server-only";
-
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
   createInMemoryNewsletterSignupStore,
@@ -12,7 +10,7 @@ import {
   type SubscriberLedgerStore,
 } from "@humber-foundry/application";
 
-import { installedSite } from "../foundry/site-definition.server";
+import { installedSiteDefinition } from "../foundry/site-definition";
 import { createD1NewsletterSignupStore } from "./d1-newsletter-signup-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
 import { createSignedNewsletterConfirmationLinks } from "./newsletter-confirmation-token";
@@ -23,6 +21,21 @@ import {
   type NewsletterSignupEnvironment,
   type NewsletterSignupReadiness,
 } from "./newsletter-signup-readiness";
+
+/**
+ * This module carries no `server-only` marker on purpose. The scheduled worker
+ * reaches it through `newsletter-confirmation-runtime.ts`, and the worker is
+ * not a Next.js server component, so that marker throws there at start-up.
+ * `public-form-notification-runtime.ts` is left unmarked for the same reason.
+ *
+ * Nothing here is reachable from the browser: the public signup form imports
+ * only `foundry/newsletter-signup-contract.ts`, and `verify:bundle` checks that
+ * boundary on every build.
+ *
+ * The site id comes from `foundry/site-definition.ts` rather than from
+ * `site-definition.server.ts` for the same reason: the server module carries
+ * the marker too.
+ */
 
 type RateLimitBinding = Readonly<{
   limit(input: { key: string }): Promise<Readonly<{ success: boolean }>>;
@@ -111,7 +124,7 @@ export function createNewsletterSignupRuntime({
   })();
 
   return createNewsletterSignupApplication({
-    siteId: installedSite.application.siteId,
+    siteId: installedSiteDefinition.site.id,
     store: signupStore,
     ledgerStore,
     createIdentityKey: (email) =>
