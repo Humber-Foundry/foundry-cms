@@ -1,6 +1,6 @@
 # ADR-0021: One shared component reports whether email and publishing are connected
 
-- **Status:** Accepted
+- **Status:** Accepted, amended
 - **Date:** 2026-09-18
 
 ## Context
@@ -78,9 +78,13 @@ of names, and never renders a value, a token, a key or a personal address.
 - A site owner can now tell, in plain words, whether either connection is
   installed, and read the exact settings still missing, from every screen
   where they do the work.
-- #183 will add the sender and compliance settings to the delivery readiness
-  report under their own heading; `ConnectionStatus` needs no change for
-  that, because it already renders whatever `missingSettings` holds.
+- #183 added the sender and compliance settings under their own heading. The
+  expectation written here — that `ConnectionStatus` would need no change —
+  did not hold: the owner does not read setting names, so that heading says
+  what is missing in plain words and keeps the names behind a disclosure.
+  [ADR-0030](ADR-0030-campaign-channel-configuration-is-a-value.md) amends
+  this ADR with a third `ConnectionKind` and a per-kind rule for whether the
+  names belong on the line. The `email` and `publishing` kinds are unchanged.
 - The publishing readiness check never calls GitHub or Cloudflare. A future
   ticket that wants to prove a working connection, not just present settings,
   needs a new state or a separate signal; this ADR does not add one.

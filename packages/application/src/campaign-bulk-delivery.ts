@@ -7,6 +7,11 @@ import {
   sha256Text,
 } from "./deterministic-hash";
 import { renderCampaignRevision } from "./campaign-renderer";
+import {
+  campaignSenderDetailsNotConfiguredReason,
+  refuseCommandsExcept,
+  type CampaignChannelConfigurationState,
+} from "./campaign-channel-state";
 import type {
   Campaign,
   CampaignActor,
@@ -769,6 +774,62 @@ function artifactBytes(artifact: CampaignBulkSendArtifact) {
   return `${canonicalJson(artifact)}\n`;
 }
 
+/**
+ * The bulk commands that still work while the installation has not set its
+ * sender details and compliance footer. None of them sends anything:
+ *
+ * - `cancelSchedule` stops a send. An Owner needs it exactly when something
+ *   about delivery has stopped working.
+ * - `ingestVerifiedEvent` records what the provider reports about a send that
+ *   already happened. Dropping those events would lose an unsubscribe.
+ *
+ * This names what stays rather than what is blocked, so a command added later
+ * is refused until someone allows it here deliberately.
+ *
+ * The `queries` are untouched. Reading a campaign's state grants nothing, and
+ * the Newsletter screen needs it to explain where a campaign has got to.
+ */
+const bulkCommandsAllowedWithoutSenderDetails = Object.freeze([
+  "cancelSchedule",
+  "ingestVerifiedEvent",
+] as const) satisfies ReadonlyArray<
+  keyof CampaignBulkDeliveryApplication["commands"]
+>;
+
+/**
+ * Refuse every authorizing, scheduling and sending path with one named reason.
+ *
+ * The compliance footer is stored on the campaign revision and read by whoever
+ * receives the email. Foundry never invents one, so while the settings are
+ * absent nothing may be authorized, scheduled or sent.
+ */
+function withoutSenderDetails(
+  application: CampaignBulkDeliveryApplication,
+): CampaignBulkDeliveryApplication {
+  const raise = () =>
+    new CampaignBulkDeliveryError(campaignSenderDetailsNotConfiguredReason);
+  return Object.freeze({
+    commands: refuseCommandsExcept(
+      application.commands,
+      bulkCommandsAllowedWithoutSenderDetails,
+      raise,
+    ),
+    queries: application.queries,
+    scheduler: Object.freeze({
+      claimDue: raiseAsync(raise),
+      execute: raiseAsync(raise),
+      reconcilePending: raiseAsync(raise),
+    }),
+  });
+}
+
+/** A scheduler entry point that always rejects with one named reason. */
+function raiseAsync(raise: () => Error) {
+  return async (): Promise<never> => {
+    throw raise();
+  };
+}
+
 export function createCampaignBulkDeliveryApplication({
   siteId,
   store,
@@ -782,6 +843,7 @@ export function createCampaignBulkDeliveryApplication({
   applyProviderSuppression,
   artifactPublisher,
   adapter,
+  channelConfiguration,
   fingerprintKey,
   maximumAudienceRecipients,
   clock = () => new Date(),
@@ -822,6 +884,12 @@ export function createCampaignBulkDeliveryApplication({
   }): Promise<void>;
   artifactPublisher: CampaignBulkArtifactPublisher;
   adapter: CampaignBulkDeliveryAdapter;
+  /**
+   * The sender details and compliance footer this installation has set, or the
+   * typed value that says they are absent. While they are absent every command
+   * that could authorize, schedule or send is refused with one named reason.
+   */
+  channelConfiguration: CampaignChannelConfigurationState;
   fingerprintKey: string;
   /**
    * The largest audience one logical send operation may dispatch in a single
@@ -1703,5 +1771,7 @@ export function createCampaignBulkDeliveryApplication({
       },
     }),
   });
-  return application;
+  return channelConfiguration.state === "configured"
+    ? application
+    : withoutSenderDetails(application);
 }

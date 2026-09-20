@@ -41,9 +41,8 @@ export default async function DashboardSettingsPage() {
   });
   const mcpConnections = await loadMcpConnectionsForDashboard();
   const ownerNotifications = await loadOwnerNotificationStatus(access);
-  const emailDelivery = await readCampaignDeliveryReadiness(
-    await loadCampaignRequestContext(await headers()),
-  );
+  const campaignContext = await loadCampaignRequestContext(await headers());
+  const emailDelivery = await readCampaignDeliveryReadiness(campaignContext);
   const publishing = await readContentPublicationReadiness();
 
   return (
@@ -61,6 +60,7 @@ export default async function DashboardSettingsPage() {
         mutationToken={mutationToken}
         emailDelivery={emailDelivery}
         publishing={publishing}
+        senderDetails={campaignContext.senderDetails}
         definition={definition}
         ownerNotificationHealth={ownerNotifications.health}
         failedDeliveries={ownerNotifications.failedDeliveries}

@@ -4,6 +4,7 @@ import {
   validateCampaignChannelConfiguration,
   validateCampaignInput,
 } from "./campaign-renderer";
+import { campaignSenderDetailsNotConfiguredReason } from "./campaign-channel-state";
 import { sha256CanonicalJson } from "./deterministic-hash";
 import { AccessDeniedError } from "./human-access";
 import {
@@ -21,6 +22,7 @@ import {
   type CampaignApplicationDependencies,
   type CampaignAuditEvent,
   type CampaignAuthor,
+  type CampaignChannelConfiguration,
   type CampaignCommandKey,
   type CampaignCommandName,
   type CampaignCommandReceipt,
@@ -30,13 +32,26 @@ import {
   type CampaignRevision,
 } from "./campaign-types";
 
-function stableRejectionReason(error: unknown): string {
+/**
+ * The stable reason code one error carries, or a generic one.
+ *
+ * A reason code is a lower-case word with underscores. Anything else could be
+ * a message with a value in it, so it is never passed on: a rejection reason
+ * is recorded in the audit trail and read by an operator, and must never carry
+ * a setting value, an address or a token.
+ *
+ * Exported because the scheduled worker logs the same shape.
+ */
+export function stableRejectionReason(
+  error: unknown,
+  fallback = "campaign_command_rejected",
+): string {
   return error instanceof CampaignConflictError ||
     error instanceof CampaignNotFoundError ||
     error instanceof CampaignValidationError ||
     (error instanceof Error && /^[a-z][a-z0-9_]+$/u.test(error.message))
     ? error.message
-    : "campaign_command_rejected";
+    : fallback;
 }
 
 function rejectionError(reason: string): Error {
@@ -71,8 +86,25 @@ export function createCampaignApplication({
   clock = () => new Date(),
   createId = () => crypto.randomUUID(),
 }: CampaignApplicationDependencies): CampaignApplication {
+  // The sender details and compliance footer may be absent. Reading a campaign
+  // still works, so the application is built either way; the create and edit
+  // paths below refuse with one named reason instead. Foundry never stands in
+  // a placeholder footer, because the footer is stored on the revision and is
+  // read by whoever receives the email.
   const configuredChannel =
-    validateCampaignChannelConfiguration(channelConfiguration);
+    channelConfiguration.state === "configured"
+      ? validateCampaignChannelConfiguration(channelConfiguration.configuration)
+      : null;
+
+  /** The channel, or the named refusal while the settings are absent. */
+  function requireConfiguredChannel(): CampaignChannelConfiguration {
+    if (configuredChannel === null) {
+      throw new CampaignValidationError(
+        campaignSenderDetailsNotConfiguredReason,
+      );
+    }
+    return configuredChannel;
+  }
   const activeRendererCommit = rendererVersion.trim();
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(activeRendererCommit)) {
     throw new CampaignValidationError("campaign_renderer_commit_invalid");
@@ -318,7 +350,11 @@ export function createCampaignApplication({
   }) {
     let authored;
     try {
-      authored = validateCampaignInput(input, configuredChannel, siteCanonicalOrigin);
+      authored = validateCampaignInput(
+        input,
+        requireConfiguredChannel(),
+        siteCanonicalOrigin,
+      );
     } catch (error) {
       return rejectCommand({
         command,
@@ -433,6 +469,10 @@ export function createCampaignApplication({
       targetId = campaign.id,
       commandName = "campaign.request_test",
     }) {
+      // This records that a test was accepted. A test cannot be accepted
+      // while the compliance footer cannot be built, so recording one would
+      // be a false record.
+      requireConfiguredChannel();
       const command = await commandKey({
         actorId: identifyActor(actor),
         requestId,
@@ -480,6 +520,9 @@ export function createCampaignApplication({
       targetId,
       confirmation,
     }) {
+      // Same reason as above: no test can have been sent, so no receipt for
+      // one can be confirmed.
+      requireConfiguredChannel();
       const command = await commandKey({
         actorId: identifyActor(actor),
         requestId,
@@ -714,7 +757,11 @@ export function createCampaignApplication({
           throw new CampaignConflictError();
         }
         currentRevision = await getRevision(campaignId, current.version);
-        authored = validateCampaignInput(input, configuredChannel, siteCanonicalOrigin);
+        authored = validateCampaignInput(
+          input,
+          requireConfiguredChannel(),
+          siteCanonicalOrigin,
+        );
       } catch (error) {
         return rejectCommand({
           command,
