@@ -539,10 +539,17 @@ history" for support and developers, with one help tip on the section
 explaining what each is for.
 
 **App / Connected app** — The dashboard's word for what this glossary calls
-an **MCP agent**. The dashboard says "an app", "the app that made this
-draft", or the app's own name; it never shows the words MCP, agent,
-connection id or actor id as page copy. When the connection record names no
-client, the dashboard says "A connected app".
+an **MCP agent**, used in draft review, Overview and every other place that
+names who made a draft: "an app", "the app that made this draft", or the
+app's own name. When the connection record names no client, the dashboard
+says "A connected app".
+
+Settings' "Connected agents" section and the "Connect an AI agent" screen
+are the one exception: there the owner's own word for the thing they
+connect is "agent" or "AI agent", so that section's heading, button and
+empty-state copy say "agent" instead. Everywhere else, including this
+exception, the words MCP, connection id and actor id never appear as page
+copy.
 
 **Draft review** — The dashboard's word for the screen where a person
 answers a draft an app prepared (`/dash/review/<previewId>`). It carries two

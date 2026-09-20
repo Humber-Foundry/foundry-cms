@@ -82,11 +82,12 @@ describe("Owner MCP connection inventory", () => {
     expect(markup).not.toContain("CLIENT");
     expect(markup).not.toContain("Permissions");
     expect(markup).toContain("empty-state");
-    expect(markup).toMatch(/no app is connected yet/iu);
-    expect(markup).toMatch(/connecting one starts/iu);
-    // The dashboard's own word for an MCP agent is "app" — CONTEXT.md's
-    // Owner-facing words section keeps "agent" out of page copy.
-    expect(markup).not.toMatch(/\bagent\b/iu);
+    expect(markup).toMatch(/no agent is connected yet/iu);
+    // Settings' Connected agents section is the documented exception to
+    // CONTEXT.md's "App / Connected app" rule: the owner's own word for
+    // what they connect here is "agent", matching the section heading and
+    // the "Connect an agent" button above this sentence.
+    expect(markup).toMatch(/select connect an agent/iu);
   });
 
   it("reads timestamps as relative time instead of an absolute clock string", () => {
