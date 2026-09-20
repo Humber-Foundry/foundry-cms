@@ -42,6 +42,11 @@ function createStorage() {
   };
 }
 
+const referenceSectionContext = {
+  definition: referenceSiteDefinition,
+  page: homePage(referenceSiteDefinition),
+};
+
 const edit = {
   path: "section_hero.title",
   baseValue: "Original title",
@@ -50,7 +55,7 @@ const edit = {
 
 function legacyComposition(definition: SiteDefinition) {
   return {
-    ...toPageComposition(definition),
+    ...toPageComposition(homePage(definition)),
     components: homePage(definition).sections.map((section) => {
       if (section.type !== "callToAction") {
         return section;
@@ -480,16 +485,22 @@ describe("stale edit recovery", () => {
       },
     ];
 
-    expect(excludeCompositionOwnedEdits(edits, [section])).toEqual([
-      edits[2],
-    ]);
+    expect(
+      excludeCompositionOwnedEdits(
+        edits,
+        homePage(referenceSiteDefinition),
+        [section],
+      ),
+    ).toEqual([edits[2]]);
   });
 
   it("uses one fail-closed structural recovery path", () => {
     const edit = {
       path: "slot_home_sections",
       baseValue: "",
-      value: JSON.stringify(toPageComposition(referenceSiteDefinition)),
+      value: JSON.stringify(
+        toPageComposition(homePage(referenceSiteDefinition)),
+      ),
     };
 
     expect(
@@ -524,7 +535,7 @@ describe("stale edit recovery", () => {
         : createDefaultPageSection(
             "callToAction",
             "section_legacy_contact_added",
-            referenceSiteDefinition,
+            referenceSectionContext,
           );
       const target = {
         ...referenceSiteDefinition,
@@ -558,7 +569,7 @@ describe("stale edit recovery", () => {
     const removable = createDefaultPageSection(
       "callToAction",
       "section_legacy_contact_removable",
-      referenceSiteDefinition,
+      referenceSectionContext,
     );
     const source = {
       ...referenceSiteDefinition,
@@ -592,9 +603,11 @@ describe("stale edit recovery", () => {
 
   it("retains a recovered structural edit as a conflict when revalidation fails", () => {
     const currentValue = JSON.stringify(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
-    const composition = toPageComposition(referenceSiteDefinition);
+    const composition = toPageComposition(
+      homePage(referenceSiteDefinition),
+    );
     const edit = {
       path: "slot_home_sections",
       baseValue: currentValue,
@@ -623,7 +636,9 @@ describe("stale edit recovery", () => {
   });
 
   it("recovers structure without overwriting disjoint concurrent copy", () => {
-    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const sourceComposition = toPageComposition(
+      homePage(referenceSiteDefinition),
+    );
     const reordered = {
       ...sourceComposition,
       components: [...sourceComposition.components].reverse(),
@@ -631,7 +646,7 @@ describe("stale edit recovery", () => {
     const edit = {
       path: "slot_home_sections",
       baseValue: JSON.stringify(
-        toPageCompositionIdentity(referenceSiteDefinition),
+        toPageCompositionIdentity(homePage(referenceSiteDefinition)),
       ),
       value: JSON.stringify(reordered),
     };
@@ -664,7 +679,7 @@ describe("stale edit recovery", () => {
       new Map([
         [
           edit.path,
-          JSON.stringify(toPageCompositionIdentity(concurrent)),
+          JSON.stringify(toPageCompositionIdentity(homePage(concurrent))),
         ],
       ]),
     );
@@ -687,7 +702,9 @@ describe("stale edit recovery", () => {
   });
 
   it("rejects removal of a component with concurrent copy changes", () => {
-    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const sourceComposition = toPageComposition(
+      homePage(referenceSiteDefinition),
+    );
     const edit = {
       path: "slot_home_sections",
       baseValue: JSON.stringify(sourceComposition),
@@ -720,7 +737,9 @@ describe("stale edit recovery", () => {
   });
 
   it("preserves a component added after the structural recovery baseline", () => {
-    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const sourceComposition = toPageComposition(
+      homePage(referenceSiteDefinition),
+    );
     const edit = {
       path: "slot_home_sections",
       baseValue: JSON.stringify(sourceComposition),
@@ -732,7 +751,7 @@ describe("stale edit recovery", () => {
     const concurrentAddition = createDefaultPageSection(
       "proof",
       "section_concurrent_proof",
-      referenceSiteDefinition,
+      referenceSectionContext,
     );
     const concurrent = {
       ...referenceSiteDefinition,
@@ -762,16 +781,18 @@ describe("stale edit recovery", () => {
   });
 
   it("does not project dependent fields when the structural base conflicts", () => {
-    const sourceComposition = toPageComposition(referenceSiteDefinition);
+    const sourceComposition = toPageComposition(
+      homePage(referenceSiteDefinition),
+    );
     const recoveredAddition = createDefaultPageSection(
       "proof",
       "section_recovered_proof",
-      referenceSiteDefinition,
+      referenceSectionContext,
     );
     const concurrentAddition = createDefaultPageSection(
       "services",
       "section_concurrent_services",
-      referenceSiteDefinition,
+      referenceSectionContext,
     );
     const concurrent = {
       ...referenceSiteDefinition,

@@ -377,6 +377,7 @@ describe("visual component editor browser acceptance", () => {
       root.render(
         createElement(VisualComponentEditor, {
           definition: referenceSiteDefinition,
+          page: homePage(referenceSiteDefinition),
           disabled: false,
           onChange: () => undefined,
         }),
@@ -440,6 +441,7 @@ describe("visual component editor browser acceptance", () => {
       root.render(
         createElement(VisualComponentEditor, {
           definition: referenceSiteDefinition,
+          page: homePage(referenceSiteDefinition),
           disabled: false,
           iframeEnabled: false,
           onChange: (definition) => {
@@ -500,6 +502,7 @@ describe("visual component editor browser acceptance", () => {
     const config = createVisualComponentConfig(
       () => new Set(["section_contact"]),
       () => referenceSiteDefinition,
+      () => homePage(referenceSiteDefinition),
     );
     expect(Object.keys(config.components.hero.fields!)).toEqual([
       "id",
@@ -547,6 +550,7 @@ describe("visual component editor browser acceptance", () => {
           null,
           createElement(VisualComponentEditor, {
             definition: referenceSiteDefinition,
+            page: homePage(referenceSiteDefinition),
             disabled: false,
             iframeEnabled: false,
             onChange: (definition) => {
@@ -598,6 +602,7 @@ describe("visual component editor browser acceptance", () => {
       root.render(
         createElement(VisualComponentEditor, {
           definition: installedSiteDefinition,
+          page: homePage(installedSiteDefinition),
           disabled: false,
           iframeEnabled: false,
           onChange: (definition) => {
@@ -1153,7 +1158,10 @@ describe("visual component editor browser acceptance", () => {
     const addedProof = createDefaultPageSection(
       "proof",
       "section_recovered_proof",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     await writeContentEditorOutbox({
       workspaceId,
@@ -1166,9 +1174,11 @@ describe("visual component editor browser acceptance", () => {
         },
         {
           path: "slot_home_sections",
-          baseValue: JSON.stringify(toPageComposition(referenceSiteDefinition)),
+          baseValue: JSON.stringify(
+            toPageComposition(homePage(referenceSiteDefinition)),
+          ),
           value: JSON.stringify({
-            ...toPageComposition(referenceSiteDefinition),
+            ...toPageComposition(homePage(referenceSiteDefinition)),
             components: [
               ...homePage(referenceSiteDefinition).sections,
               addedProof,
@@ -1211,7 +1221,10 @@ describe("visual component editor browser acceptance", () => {
     const addedProof = createDefaultPageSection(
       "proof",
       "section_migrated_proof",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     await clearContentEditorOutbox(destinationWorkspaceId);
     await writeContentEditorOutbox({
@@ -1239,10 +1252,10 @@ describe("visual component editor browser acceptance", () => {
           {
             path: "slot_home_sections",
             baseValue: JSON.stringify(
-              toPageComposition(referenceSiteDefinition),
+              toPageComposition(homePage(referenceSiteDefinition)),
             ),
             value: JSON.stringify({
-              ...toPageComposition(referenceSiteDefinition),
+              ...toPageComposition(homePage(referenceSiteDefinition)),
               components: [
                 ...homePage(referenceSiteDefinition).sections,
                 addedProof,

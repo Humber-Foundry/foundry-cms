@@ -717,7 +717,7 @@ describe("content revision application", () => {
     });
     await createWorkspace(application, "create-workspace-compose-0001");
     const composition = {
-      ...toPageComposition(referenceSiteDefinition),
+      ...toPageComposition(homePage(referenceSiteDefinition)),
       components: [
         ...homePage(referenceSiteDefinition).sections,
       ] as PageSection[],
@@ -733,7 +733,7 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 0,
       edits: [],
-      composition,
+      compositions: [composition],
       idempotencyKey: "compose-page-components-0001",
     });
 
@@ -757,7 +757,7 @@ describe("content revision application", () => {
     });
     await createWorkspace(application, "create-workspace-empty-rich-text");
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const callToAction = composition.components.find(
       (section) => section.type === "callToAction",
@@ -781,7 +781,7 @@ describe("content revision application", () => {
         ...commandInputs,
         baseRevision: 0,
         edits: [],
-        composition,
+        compositions: [composition],
         idempotencyKey: "composition-empty-rich-text",
       }),
     ).rejects.toEqual(
@@ -805,7 +805,7 @@ describe("content revision application", () => {
     });
     await createWorkspace(application, "create-workspace-compose-copy");
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const hero = composition.components[0]!;
     if (hero.type !== "hero") {
@@ -826,7 +826,7 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "action_start.label", value: "Start here" }],
-      composition: reorderedComposition,
+      compositions: [reorderedComposition],
       idempotencyKey: "compose-with-nested-copy",
     });
 
@@ -851,7 +851,7 @@ describe("content revision application", () => {
       "create-workspace-compose-variant",
     );
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const originalHero = composition.components[0]!;
     if (originalHero.type !== "hero") {
@@ -861,7 +861,10 @@ describe("content revision application", () => {
     const added = createDefaultPageSection(
       "proof",
       "section_added_proof",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     if (added.type !== "proof") {
       throw new Error("expected_proof_fixture");
@@ -873,15 +876,17 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.variant", value: "focused" }],
-      composition: {
-        ...composition,
-        components: [
-          composition.components[1]!,
-          hero,
-          ...composition.components.slice(2),
-          nonDefaultAdded,
-        ],
-      },
+      compositions: [
+        {
+          ...composition,
+          components: [
+            composition.components[1]!,
+            hero,
+            ...composition.components.slice(2),
+            nonDefaultAdded,
+          ],
+        },
+      ],
       idempotencyKey: "compose-with-variants",
     });
 
@@ -914,15 +919,17 @@ describe("content revision application", () => {
         ...commandInputs,
         baseRevision: 0,
         edits: [],
-        composition: {
-          slotId: "slot_home_sections",
-          components: [
-            {
-              ...homePage(referenceSiteDefinition).sections[0],
-              type: "script",
-            },
-          ],
-        } as never,
+        compositions: [
+          {
+            slotId: "slot_home_sections",
+            components: [
+              {
+                ...homePage(referenceSiteDefinition).sections[0],
+                type: "script",
+              },
+            ],
+          } as never,
+        ],
         idempotencyKey: "compose-page-components-0002",
       }),
     ).rejects.toEqual(
@@ -1427,7 +1434,7 @@ describe("section style reconciliation per page", () => {
 
   /** The page's composition with the hero section given another style. */
   const restyledComposition = (): PageComposition => {
-    const composition = toPageComposition(referenceSiteDefinition);
+    const composition = toPageComposition(homePage(referenceSiteDefinition));
     return {
       ...composition,
       components: composition.components.map((component) =>

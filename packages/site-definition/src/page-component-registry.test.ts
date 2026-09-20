@@ -96,7 +96,10 @@ describe("installation-owned page component registry", () => {
     const section = registry.createDefault(
       "imageCopyStory",
       "section_story",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
 
     expect(section).toEqual({
@@ -131,7 +134,10 @@ describe("installation-owned page component registry", () => {
             registry.createDefault(
               "imageCopyStory",
               "section_story",
-              referenceSiteDefinition,
+              {
+                definition: referenceSiteDefinition,
+                page: homePage(referenceSiteDefinition),
+              },
             ),
           ],
         },
@@ -168,7 +174,10 @@ describe("installation-owned page component registry", () => {
     const valid = registry.createDefault(
       "imageCopyStory",
       "section_story",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     if (valid.type !== "registered") throw new Error("expected_registered_component");
     const invalid = {
@@ -216,13 +225,17 @@ describe("installation-owned page component registry", () => {
     const initial = themedRegistry.createDefault(
       "themedStory",
       "section_themed_story",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     if (initial.type !== "registered") throw new Error("expected_registered_component");
     const inserted = applyPageComposition(
       referenceSiteDefinition,
+      homePage(referenceSiteDefinition),
       {
-        ...toPageComposition(referenceSiteDefinition),
+        ...toPageComposition(homePage(referenceSiteDefinition)),
         components: [...homePage(referenceSiteDefinition).sections, initial],
       },
       themedRegistry,
@@ -235,8 +248,9 @@ describe("installation-owned page component registry", () => {
     };
     const changed = applyPageComposition(
       inserted.definition,
+      homePage(inserted.definition),
       {
-        ...toPageComposition(inserted.definition),
+        ...toPageComposition(homePage(inserted.definition)),
         components: [
           ...homePage(inserted.definition).sections.slice(0, -1),
           changedTheme,
@@ -305,8 +319,9 @@ describe("installation-owned page component registry", () => {
 
     expect(applyPageComposition(
       definition,
+      homePage(definition),
       {
-        ...toPageComposition(definition),
+        ...toPageComposition(homePage(definition)),
         components: [...homePage(definition).sections.slice(0, -1), changed],
       },
       profileRegistry,
@@ -323,13 +338,17 @@ describe("installation-owned page component registry", () => {
     const first = registry.createDefault(
       "imageCopyStory",
       "section_story",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     if (first.type !== "registered") throw new Error("expected_registered_component");
     const inserted = applyPageComposition(
       referenceSiteDefinition,
+      homePage(referenceSiteDefinition),
       {
-        ...toPageComposition(referenceSiteDefinition),
+        ...toPageComposition(homePage(referenceSiteDefinition)),
         components: [first, ...homePage(referenceSiteDefinition).sections],
       },
       registry,
@@ -344,8 +363,9 @@ describe("installation-owned page component registry", () => {
     };
     const changed = applyPageComposition(
       inserted.definition,
+      homePage(inserted.definition),
       {
-        ...toPageComposition(inserted.definition),
+        ...toPageComposition(homePage(inserted.definition)),
         components: [
           duplicate,
           ...homePage(inserted.definition).sections.filter(
