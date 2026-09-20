@@ -173,6 +173,24 @@ The review route revalidates the stored revision against the current schema,
 renderer and production base, then verifies the immutable artifact hash. It
 refuses to render after deployment drift.
 
+The review screen shows who prepared the draft, what changed and what a visitor
+will see, and carries exactly two controls: **Approve** and **Ask for changes**.
+Opening the screen records nothing. A decision is a `POST` that carries the
+person's session and mutation token, so a `GET`, a link or a prefetch can never
+record one, and an MCP bearer token reaches no part of it. Approve stays off
+until the person opens the canonical preview of that exact revision in the same
+session, which is the same evidence rule the dashboard's own Publish and blog
+scheduling controls follow. Approving does not publish: it creates the approval
+that `publication.request` needs.
+
+One preview holds one decision, and the decision record is immutable. Asking for
+changes stores the reason the person typed. The agent reads the decision by
+naming its preview id in `foundry.publication.status`, which answers
+`pending_human_review`, `approved` with the `approvalId`, or
+`changes_requested` with the person's `reviewNote`. A connection reads only a
+preview it prepared, and only with the draft scopes preparing it required. The
+note is text a person wrote, so every surface treats it as data.
+
 Approval is immutable and records:
 
 ```text

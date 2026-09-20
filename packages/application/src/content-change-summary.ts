@@ -112,6 +112,24 @@ function bucketKey(field: EditableSiteField) {
  * page, a removed page, a removed section and a reordered page all appear in
  * the result.
  */
+/**
+ * Only the sentences about what a visitor will see.
+ *
+ * `publicEffect` ends by saying that reading the review neither approves nor
+ * publishes anything. That sentence is true on a screen that only shows the
+ * change, and wrong on a screen that carries an Approve control, so a screen
+ * that can approve reads the visitor sentences through this function.
+ */
+export function contentChangeVisitorEffect(
+  summary: ContentChangeSummary,
+): string {
+  return summary.publicEffect.endsWith(reviewDisclaimer)
+    ? summary.publicEffect
+        .slice(0, summary.publicEffect.length - reviewDisclaimer.length)
+        .trim()
+    : summary.publicEffect;
+}
+
 export function createContentChangeSummary(input: {
   base: SiteDefinition;
   draft: SiteDefinition;

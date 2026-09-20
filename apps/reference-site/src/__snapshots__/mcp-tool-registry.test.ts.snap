@@ -154,13 +154,13 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": true,
     },
-    "description": "Read the current state of a publication or publication schedule.",
+    "description": "Read the current state of a publication, publication schedule or prepared preview.",
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "b5e17139a45868bcca9571aa58590d2a259aee0e9877b688fb3cab0596097c0a",
+    "inputSchemaSha256": "8e438f6c6133859031f10061a623a0c3faf993e61c3c0b694e49df8db1cc2ec9",
     "name": "foundry.publication.status",
-    "outputSchemaSha256": "d015d8b2025ad7fd4c5c734516a811c65efb2f922a73fb6c06bbf9a6b618b653",
+    "outputSchemaSha256": "ae771df24841f2b09e3e25c6b09685a6bc54059b0d95231f3948de8818a9c1cc",
   },
   {
     "annotations": {

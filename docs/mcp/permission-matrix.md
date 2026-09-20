@@ -53,6 +53,8 @@ Legend: **A** allowed by application authorization, **H** human-only,
 | Read subscriber identity/list | A | H, if separately authorized | — | — |
 | Create canonical preview | A | A | draft scope matching changed state | — |
 | Approve rendered revision | A | A | — | — |
+| Ask a connection for changes | A | A | — | — |
+| Read a prepared preview's review state | A | A | draft scopes for that revision, own preview only | — |
 | Request immediate site/blog publish | A | A | `publication.publish` + valid human approval | — |
 | Schedule site/blog publish | A | A | `publication.schedule` + valid human approval | Executes exact authorization |
 | Request controlled campaign test | A | A | `campaign.test` | Executes exact test request |
@@ -83,7 +85,7 @@ human authorization decision remains authoritative where it is stricter.
 | `foundry.publication.schedule` | `publication.schedule` + matching draft scopes | Existing human approval | Scheduled operation |
 | `foundry.publication.cancel` | `publication.schedule` | None; only before claim | Cancels site/blog schedule |
 | `foundry.publication.request` | `publication.publish` + matching draft scopes | Existing human approval | Git/build operation |
-| `foundry.publication.status` | `publication.publish` or `publication.schedule` | None | None |
+| `foundry.publication.status` | `publication.publish` or `publication.schedule`; a preview id needs `site.read` plus the revision's draft scopes | None | None |
 | `foundry.analytics.read` | `analytics.read` | None | None |
 
 Authorization is the intersection of token scopes, current D1 grant, site

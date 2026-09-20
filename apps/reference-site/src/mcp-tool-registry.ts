@@ -198,13 +198,17 @@ const scheduleIdSchema = {
   pattern: `^${scheduleIdPattern}$`,
 } as const;
 
-// A status read names either a publication or a blog schedule. Constraining
-// the shape here keeps a malformed identifier a terminal validation failure
-// rather than a retryable error raised from an identifier constructor deeper
-// in the application layer.
+const previewIdPattern =
+  "preview_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+// A status read names a publication, a blog schedule or a prepared preview.
+// Constraining the shape here keeps a malformed identifier a terminal
+// validation failure rather than a retryable error raised from an identifier
+// constructor deeper in the application layer.
 const operationIdSchema = {
   type: "string",
-  pattern: `^(publish_[a-f0-9]{32}|${scheduleIdPattern})$`,
+  pattern:
+    `^(publish_[a-f0-9]{32}|${scheduleIdPattern}|${previewIdPattern})$`,
 } as const;
 
 const publicationOperationResult = {
@@ -216,6 +220,19 @@ const publicationOperationResult = {
     replayed: { type: "boolean" },
   },
   required: ["operationId", "state", "replayed"],
+} as const;
+
+// A status read of a prepared preview also reports the person's decision.
+// `approvalId` appears only after a person approved, and is the approval
+// `foundry.publication.request` requires. `reviewNote` is the reason a person
+// typed when they asked for changes, so a client renders it as text.
+const publicationStatusResult = {
+  ...publicationOperationResult,
+  properties: {
+    ...publicationOperationResult.properties,
+    approvalId: approvalIdSchema,
+    reviewNote: { type: "string", minLength: 1, maxLength: 1000 },
+  },
 } as const;
 
 const contentFields = listEditableSiteFields(installedSiteDefinition)
@@ -1372,7 +1389,7 @@ const descriptors = {
   "foundry.publication.status": {
     name: "foundry.publication.status",
     description:
-      "Read the current state of a publication or publication schedule.",
+      "Read the current state of a publication, publication schedule or prepared preview.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1383,7 +1400,7 @@ const descriptors = {
       },
       required: ["workspaceId", "revision", "operationId"],
     },
-    outputSchema: toolOutputSchema(publicationOperationResult),
+    outputSchema: toolOutputSchema(publicationStatusResult),
     annotations,
     execution: taskExecution,
   },
