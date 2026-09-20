@@ -64,6 +64,7 @@ export default async function BlogPostPreviewPage(
       <PreviewProvenance
         revision={revision}
         heading="Exact saved post preview"
+        showMcpReview={false}
       />
       <BlogPostRenderer
         definition={revision.definition}

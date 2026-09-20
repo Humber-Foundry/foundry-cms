@@ -1,4 +1,23 @@
-import type { RevisionPreview } from "@/src/revision-preview-page";
+import type {
+  ContentChangeSummary,
+  ContentRevisionInputs,
+  ContentWorkspaceId,
+} from "@humber-foundry/application";
+
+/**
+ * Everything `PreviewProvenance` reads off a revision — no more. A page
+ * preview, a blog post preview and the home preview each load a fuller
+ * revision object; this is the narrow slice this panel actually needs, so
+ * it can be tested and reused without building a full revision fixture.
+ */
+export type PreviewProvenanceRevision = Readonly<{
+  workspaceId: ContentWorkspaceId;
+  revision: number;
+  createdAt: string;
+  inputs: ContentRevisionInputs;
+  mcpReview?: ContentChangeSummary &
+    Readonly<{ previewId: string; actorId: string }>;
+}>;
 
 /** One line per changed page, so long page names stay readable. */
 function ReviewLines({ lines }: { lines: ReadonlyArray<string> }) {
@@ -24,9 +43,17 @@ function ReviewLines({ lines }: { lines: ReadonlyArray<string> }) {
 export function PreviewProvenance({
   revision,
   heading = "Exact saved preview",
+  showMcpReview = true,
 }: {
-  revision: RevisionPreview;
+  revision: PreviewProvenanceRevision;
   heading?: string;
+  /**
+   * Whether to show the MCP review summary when the revision came from an
+   * agent draft. The blog post preview route sets this to `false`: it never
+   * showed this block before #156, and #156's job is a page preview route,
+   * not a change to what the blog post preview already showed.
+   */
+  showMcpReview?: boolean;
 }) {
   return (
     <aside className="preview-provenance" aria-label="Preview provenance">
@@ -54,7 +81,7 @@ export function PreviewProvenance({
           <dd>{revision.inputs.productionBase}</dd>
         </div>
       </dl>
-      {revision.mcpReview === undefined ? null : (
+      {!showMcpReview || revision.mcpReview === undefined ? null : (
         <dl className="preview-review">
           <div>
             <dt>MCP actor</dt>

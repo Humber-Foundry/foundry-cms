@@ -90,15 +90,19 @@ today's home preview URL keep working unchanged.
 ### 3. A shared provenance panel
 
 The home preview route and the blog post preview route each also repeated
-their own "Exact saved preview" aside, including the MCP review block. That
-panel is now `PreviewProvenance` in `components/preview-provenance.tsx`,
-which all three routes render. A page preview and the home preview now show
-the same provenance and the same MCP review summary when the revision came
-from an agent draft; a reviewer sees the same information about the revision
-no matter which of its pages they are looking at. This also means the blog
-post preview now shows the MCP review block when one is present, which it
-did not before — a byproduct of removing the duplication, not a change this
-ticket's acceptance criteria asked for on its own.
+their own "Exact saved preview" aside. That panel is now `PreviewProvenance`
+in `components/preview-provenance.tsx`, which all three routes render. A
+page preview and the home preview show the same provenance and the same MCP
+review summary when the revision came from an agent draft; a reviewer sees
+the same information about the revision no matter which of its pages they
+are looking at.
+
+The blog post preview route passes `showMcpReview={false}`, so its rendered
+output is unchanged: it never showed the MCP review block before this
+ticket, and this ticket's job is a page preview route, not a change to what
+the blog post preview already shows. `PreviewProvenance` still removes the
+duplicated markup there — only the MCP review block stays conditional on
+this flag.
 
 ### 4. Preview metadata
 
