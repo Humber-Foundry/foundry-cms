@@ -948,6 +948,88 @@ describe("the page collection", () => {
     expect(isSiteDefinition(definition)).toBe(true);
   });
 
+  it("accepts a media occurrence built from its own page's id", () => {
+    const definition = withPages([
+      structuredClone(homePage(referenceSiteDefinition)),
+      secondPage({
+        media: [
+          {
+            occurrenceId: "occurrence_page_about_detail",
+            revision: 1,
+            asset: {
+              assetId: "asset_about_detail",
+              width: 800,
+              height: 600,
+              contentType: "image/jpeg",
+            },
+            crop: null,
+          },
+        ],
+      }),
+    ]);
+
+    expect(
+      validateDefinition(definition),
+      validateDefinition.errors?.toString(),
+    ).toBe(true);
+    expect(isSiteDefinition(definition)).toBe(true);
+  });
+
+  it("rejects a media occurrence built for a different page", () => {
+    // Passes the loosened JSON Schema pattern (it ends in "_detail"), but
+    // names the home page, not "page_about". isBaseSiteDefinition is the
+    // only check that can compare an occurrence id to the id of the page
+    // that holds it. See ADR-0026.
+    const definition = withPages([
+      structuredClone(homePage(referenceSiteDefinition)),
+      secondPage({
+        media: [
+          {
+            occurrenceId: "occurrence_home_detail",
+            revision: 1,
+            asset: {
+              assetId: "asset_about_detail",
+              width: 800,
+              height: 600,
+              contentType: "image/jpeg",
+            },
+            crop: null,
+          },
+        ],
+      }),
+    ]);
+
+    expect(
+      validateDefinition(definition),
+      validateDefinition.errors?.toString(),
+    ).toBe(true);
+    expect(isSiteDefinition(definition)).toBe(false);
+  });
+
+  it("rejects an occurrence id with no page-id segment", () => {
+    const definition = withPages([
+      structuredClone(homePage(referenceSiteDefinition)),
+      secondPage({
+        media: [
+          {
+            occurrenceId: "occurrence_detail",
+            revision: 1,
+            asset: {
+              assetId: "asset_about_detail",
+              width: 800,
+              height: 600,
+              contentType: "image/jpeg",
+            },
+            crop: null,
+          },
+        ],
+      }),
+    ]);
+
+    expect(validateDefinition(definition)).toBe(false);
+    expect(isSiteDefinition(definition)).toBe(false);
+  });
+
   it("rejects a duplicate page id and a duplicate page slug", () => {
     const home = structuredClone(homePage(referenceSiteDefinition));
     const duplicateId = withPages([home, secondPage({ id: home.id })]);
