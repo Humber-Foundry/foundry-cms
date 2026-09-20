@@ -63,8 +63,8 @@ export function createBrevoNewsletterConfirmationSender({
 
   const sender: NewsletterConfirmationSender = {
     async send(message) {
-      const sender = senders[message.senderIdentityId];
-      if (sender === undefined) {
+      const senderIdentity = senders[message.senderIdentityId];
+      if (senderIdentity === undefined) {
         // A message with no verified sender can never be delivered. Say so once
         // rather than retry for a day.
         return { outcome: "permanent_failure" };
@@ -80,7 +80,10 @@ export function createBrevoNewsletterConfirmationSender({
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            sender: { email: sender.email, name: sender.name },
+            sender: {
+              email: senderIdentity.email,
+              name: senderIdentity.name,
+            },
             to: [{ email: message.address }],
             subject,
             textContent: text,

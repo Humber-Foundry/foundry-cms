@@ -16,7 +16,7 @@ export const newsletterIdentityKeyPattern = /^[a-f0-9]{64}$/u;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function base64UrlEncode(bytes: Uint8Array): string {
+function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary)
@@ -25,7 +25,7 @@ export function base64UrlEncode(bytes: Uint8Array): string {
     .replaceAll("=", "");
 }
 
-export function base64UrlDecode(value: string): Uint8Array {
+function base64UrlDecode(value: string): Uint8Array {
   const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
   const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
   const binary = atob(normalized + padding);

@@ -436,6 +436,40 @@ describe("newsletter signup", () => {
     ).toStrictEqual([["expired", null]]);
   });
 
+  it("never sends a second message after a lease runs out with no answer", async () => {
+    let now = new Date("2026-03-01T10:00:00.000Z");
+    const harness = createHarness({ now: () => now });
+    await harness.application.requestSignup({
+      submissionId: firstSubmission,
+      email: address,
+      disclosure,
+    });
+
+    // The first run claims the job and the process dies before it records an
+    // outcome, so this installation never learns whether the message went out.
+    await harness.store.claimDueConfirmationJobs({
+      siteId,
+      now: now.toISOString(),
+      leaseToken: "lost-lease",
+      leaseUntil: "2026-03-01T10:04:00.000Z",
+      limit: 25,
+    });
+
+    now = new Date("2026-03-01T10:10:00.000Z");
+    const outcome = await harness.application.deliverDueConfirmations({
+      leaseToken: "lease-2",
+    });
+
+    // Sending again could put a second message in front of somebody who never
+    // asked for one, so the request is given up instead.
+    expect(outcome).toStrictEqual({ sent: 0, retried: 0, failed: 0 });
+    expect(harness.sent).toHaveLength(0);
+    expect(
+      harness.store.listSignups().map((signup) => [signup.state, signup.email]),
+    ).toStrictEqual([["expired", null]]);
+    expect(harness.store.listJobs()).toHaveLength(0);
+  });
+
   it("leaves a retried signup exactly as it was", async () => {
     const harness = createHarness();
     await harness.application.requestSignup({

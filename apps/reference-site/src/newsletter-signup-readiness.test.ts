@@ -15,6 +15,7 @@ const connected: NewsletterSignupEnvironment = Object.freeze({
   FOUNDRY_NEWSLETTER_DELIVERY_SECRET: secret,
   FOUNDRY_SUBSCRIBER_IDENTITY_SECRET: secret,
   FOUNDRY_TURNSTILE_SITE_KEY: "0xSITEKEY",
+  FOUNDRY_TURNSTILE_SECRET: "turnstile-secret",
   FOUNDRY_BREVO_API_KEY: "api-key",
   FOUNDRY_BREVO_SENDERS_JSON: JSON.stringify({
     primary: { id: 1, email: "news@example.test", name: "Studio" },
@@ -52,6 +53,16 @@ describe("newsletter signup readiness", () => {
     expect(readiness.missingSettings).toStrictEqual([
       "FOUNDRY_CAMPAIGN_LEGAL_NAME",
     ]);
+  });
+
+  it("needs both halves of the automated-traffic check", () => {
+    // With the site key alone the form would look ready and then refuse every
+    // address at the last moment.
+    const { FOUNDRY_TURNSTILE_SECRET, ...withoutSecret } = connected;
+    expect(FOUNDRY_TURNSTILE_SECRET).toBe("turnstile-secret");
+    expect(
+      readNewsletterSignupReadiness(withoutSecret).missingSettings,
+    ).toStrictEqual(["FOUNDRY_TURNSTILE_SECRET"]);
   });
 
   it("refuses a delivery secret that is too short", () => {

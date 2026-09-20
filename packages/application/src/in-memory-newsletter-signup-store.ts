@@ -118,16 +118,41 @@ export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
       leaseUntil,
       limit,
     }) {
+      // A lease that ran out means the previous attempt's outcome is unknown.
+      // Give up on it rather than risk a second message to the same person, and
+      // settle the request it belonged to: no message is coming, so there is
+      // nothing left to confirm and no reason to hold the address. The D1 store
+      // does exactly this before it claims anything.
+      for (const [id, job] of jobs) {
+        if (
+          job.siteId !== siteId ||
+          job.status !== "processing" ||
+          job.leaseUntil === null ||
+          Date.parse(job.leaseUntil) > Date.parse(now)
+        ) {
+          continue;
+        }
+        const signup = signups.get(id);
+        if (signup !== undefined && signup.state === "pending") {
+          signups.set(id, {
+            ...signup,
+            email: null,
+            state: "expired",
+            settledAt: now,
+          });
+        }
+        jobs.delete(id);
+      }
+
       const claimed: NewsletterConfirmationJob[] = [];
       for (const [id, job] of jobs) {
         if (claimed.length >= limit) break;
-        const leaseFree =
-          job.leaseUntil === null || Date.parse(job.leaseUntil) <= Date.parse(now);
         if (
           job.siteId !== siteId ||
-          (job.status !== "pending" && job.status !== "processing") ||
+          job.status !== "pending" ||
           Date.parse(job.availableAt) > Date.parse(now) ||
-          !leaseFree
+          (job.leaseUntil !== null &&
+            Date.parse(job.leaseUntil) > Date.parse(now))
         ) {
           continue;
         }
@@ -157,6 +182,7 @@ export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
       leaseToken,
       outcome,
       availableAt,
+      recordedAt,
     }) {
       const job = jobs.get(requestId);
       if (
@@ -193,7 +219,7 @@ export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
           ...signup,
           email: null,
           state: "expired",
-          settledAt: job.firstAvailableAt,
+          settledAt: recordedAt,
         });
       }
       jobs.set(requestId, {

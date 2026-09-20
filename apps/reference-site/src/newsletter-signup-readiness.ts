@@ -35,6 +35,7 @@ export const newsletterSignupSettingNames = Object.freeze([
   "FOUNDRY_NEWSLETTER_DELIVERY_SECRET",
   "FOUNDRY_SUBSCRIBER_IDENTITY_SECRET",
   "FOUNDRY_TURNSTILE_SITE_KEY",
+  "FOUNDRY_TURNSTILE_SECRET",
   "FOUNDRY_BREVO_API_KEY",
   "FOUNDRY_BREVO_SENDERS_JSON",
   "FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID",
@@ -62,6 +63,11 @@ const newsletterSignupSettingChecks: Readonly<
     isLongEnoughSecret(environment.FOUNDRY_SUBSCRIBER_IDENTITY_SECRET),
   FOUNDRY_TURNSTILE_SITE_KEY: (environment) =>
     isPresent(environment.FOUNDRY_TURNSTILE_SITE_KEY),
+  // The widget needs both halves of the pair. With the site key alone the form
+  // would look ready and then refuse every address at the last moment, which is
+  // exactly what saying "not available yet" is meant to prevent.
+  FOUNDRY_TURNSTILE_SECRET: (environment) =>
+    isPresent(environment.FOUNDRY_TURNSTILE_SECRET),
   FOUNDRY_BREVO_API_KEY: (environment) =>
     isPresent(environment.FOUNDRY_BREVO_API_KEY),
   FOUNDRY_BREVO_SENDERS_JSON: (environment) =>

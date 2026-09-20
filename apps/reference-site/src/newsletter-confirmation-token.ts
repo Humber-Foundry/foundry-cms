@@ -100,7 +100,7 @@ export async function verifyNewsletterConfirmationToken({
  * The confirmation address. It is built from the deployment's canonical origin,
  * so a link can never point somewhere else.
  */
-export function newsletterConfirmationUrl(canonicalOrigin: string) {
+function newsletterConfirmationUrl(canonicalOrigin: string) {
   const parsed = new URL("/newsletter/confirm", canonicalOrigin);
   if (
     parsed.protocol !== "https:" ||

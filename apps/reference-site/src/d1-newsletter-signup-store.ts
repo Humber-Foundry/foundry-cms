@@ -207,30 +207,23 @@ export function createD1NewsletterSignupStore(
       limit,
     }) {
       // A lease that ran out means the previous attempt's outcome is unknown.
-      // Give up on it rather than risk a second message to the same person,
-      // and settle the request it belonged to: no message is coming, so there
-      // is nothing left to confirm and no reason to hold the address.
-      await database.batch([
-        database
-          .prepare(
-            `UPDATE newsletter_signup_requests
-             SET state = 'expired', email = NULL, settled_at = ?2
-             WHERE site_id = ?1 AND state = 'pending' AND id IN (
-               SELECT request_id FROM newsletter_confirmation_jobs
-               WHERE site_id = ?1 AND status = 'processing'
-                 AND lease_until <= ?2
-             )`,
-          )
-          .bind(siteId, now),
-        database
-          .prepare(
-            `UPDATE newsletter_confirmation_jobs
-             SET status = 'failed', address = '', lease_token = NULL,
-                 lease_until = NULL, updated_at = ?2
-             WHERE site_id = ?1 AND status = 'processing' AND lease_until <= ?2`,
-          )
-          .bind(siteId, now),
-      ]);
+      // Give up on it rather than risk a second message to the same person, and
+      // settle the request it belonged to: no message is coming, so there is
+      // nothing left to confirm and no reason to hold the address. Settling the
+      // request fires the trigger that removes the job, so one statement does
+      // both.
+      await database
+        .prepare(
+          `UPDATE newsletter_signup_requests
+           SET state = 'expired', email = NULL, settled_at = ?2
+           WHERE site_id = ?1 AND state = 'pending' AND id IN (
+             SELECT request_id FROM newsletter_confirmation_jobs
+             WHERE site_id = ?1 AND status = 'processing'
+               AND lease_until <= ?2
+           )`,
+        )
+        .bind(siteId, now)
+        .run();
 
       await database
         .prepare(

@@ -62,8 +62,10 @@ CREATE TABLE newsletter_confirmation_jobs (
 CREATE INDEX newsletter_confirmation_jobs_due
   ON newsletter_confirmation_jobs (site_id, status, available_at, lease_until);
 
--- A settled request must not leave a job holding the address behind. The job
--- row is removed with the request, and a failed job keeps an empty address.
+-- A settled request must not leave a job holding the address behind. Removing
+-- the job here is what clears the address, so every path that stops a request
+-- being confirmable — confirmed, refused, expired or superseded — drops the
+-- address with it.
 CREATE TRIGGER newsletter_signup_settled_clears_job
 AFTER UPDATE OF state ON newsletter_signup_requests
 WHEN NEW.state <> 'pending' AND OLD.state = 'pending'
