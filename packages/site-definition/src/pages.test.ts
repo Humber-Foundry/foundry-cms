@@ -7,6 +7,7 @@ import {
   homePage,
   homePageIndex,
   homePageSlug,
+  findPageByMediaOccurrenceId,
   pageMediaOccurrenceId,
   replacePage,
   reservedPageSlugs,
@@ -111,6 +112,38 @@ describe("site page accessors", () => {
         id: "page_absent",
       }),
     ).toThrow("site_definition_page_absent");
+  });
+});
+
+describe("findPageByMediaOccurrenceId", () => {
+  it("finds the page an occurrence id names", () => {
+    const definition = withExtraPage(referenceSiteDefinition, {});
+    expect(
+      findPageByMediaOccurrenceId(definition, "occurrence_home_hero")?.slug,
+    ).toBe("");
+    expect(
+      findPageByMediaOccurrenceId(
+        definition,
+        "occurrence_page_about_detail",
+      )?.id,
+    ).toBe("page_about");
+    expect(
+      findPageByMediaOccurrenceId(definition, "occurrence_page_news_hero"),
+    ).toBeUndefined();
+  });
+
+  it("keeps the home page's own pair when another page takes the id home", () => {
+    // Nothing in the schema stops a page below the home page from taking the
+    // page id `home`, and then both pages claim `occurrence_home_hero`. The
+    // pair belongs to the home page, so the home page wins and can still hold
+    // a photo. See ADR-0026.
+    const definition = withExtraPage(referenceSiteDefinition, {
+      id: "home",
+      slug: "home-page",
+    });
+    expect(
+      findPageByMediaOccurrenceId(definition, "occurrence_home_hero")?.slug,
+    ).toBe("");
   });
 });
 

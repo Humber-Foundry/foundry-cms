@@ -696,8 +696,8 @@ export type McpUpdateBlogPostInput = McpPageMutationInput &
  * Every picture address in a post — the header image, the share image and
  * every picture in the body — must be this site's own media path,
  * `/api/media/<assetId>`. An agent can choose a photo the media library
- * already has; it cannot add one, and it cannot point the site at a picture
- * somewhere else. See ADR-0036.
+ * already has, and can add one first with `foundry.media.upload`; it cannot
+ * point the site at a picture somewhere else. See ADR-0036 and ADR-0037.
  */
 function blogPostMediaFields(post: McpBlogPostContent) {
   const fields: Array<

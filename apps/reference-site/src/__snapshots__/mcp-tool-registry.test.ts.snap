@@ -183,7 +183,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": true,
     },
-    "description": "List the photos this site already holds, with the address to use for each one.",
+    "description": "List the photos this site already holds, oldest first, with the address to use for each one.",
     "execution": {
       "taskSupport": "forbidden",
     },

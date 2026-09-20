@@ -160,9 +160,11 @@ server-side is follow-up work.
 
 `foundry.media.list` reads the whole photo library and then cuts the page the
 agent asked for, exactly as `foundry.content.list` reads the whole published
-site. The page an agent receives is bounded; the read behind it is not. This is
-the existing pattern rather than a new one, and a library large enough for it to
-matter would want the same fix in both tools.
+site. The page an agent receives is bounded; the read behind it is not. The
+cursor carries an offset, so deleting a photo between two pages moves one photo
+past the reader. Both of these are the existing list pattern rather than new
+ones, and a library large enough for either to matter would want the same fix
+in both tools.
 
 A photo above 4 MiB cannot be sent through MCP. A person can still upload a
 larger original in the dashboard. An agent that has a larger picture must send

@@ -36,8 +36,8 @@ describe("the photo id an upload mints", () => {
     expect(await mcpMediaAssetId(mediaPrincipal(), key)).toBe(first);
     expect(first).toMatch(/^asset_[0-9a-f]{32}$/u);
 
-    // A different connection, a different site, or a different retry key all
-    // mint a different id, so no agent can reach an id another actor holds.
+    // A different actor, a different site, or a different retry key all mint
+    // a different id, so no agent can reach an id another actor holds.
     expect(
       await mcpMediaAssetId(mediaPrincipal({ actorId: "actor-other" }), key),
     ).not.toBe(first);

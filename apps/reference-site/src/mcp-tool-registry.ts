@@ -2053,7 +2053,7 @@ const descriptors = {
   "foundry.media.list": {
     name: "foundry.media.list",
     description:
-      "List the photos this site already holds, with the address to use for each one.",
+      "List the photos this site already holds, oldest first, with the address to use for each one.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

@@ -2937,6 +2937,38 @@ describe("MCP photo tools", () => {
     expect(created.postId).toBeTruthy();
   });
 
+  it("leaves one photo when the same upload is sent twice", async () => {
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    const before = value.mediaLibrary.size;
+    const request = {
+      fileName: "workshop.jpg",
+      bytesBase64: jpegBase64(1_024),
+      idempotencyKey: "media-upload-retry-1",
+    };
+    const first = resultOf<{ assetId: string }>(
+      await value.application.uploadMedia(
+        value.activePrincipal,
+        request,
+        context,
+      ),
+    );
+    const second = resultOf<{ assetId: string }>(
+      await value.application.uploadMedia(
+        value.activePrincipal,
+        request,
+        context,
+      ),
+    );
+    // The retry key reaches the media library unchanged, so the same request
+    // twice mints the same photo id and the library holds one more photo,
+    // not two. See ADR-0037.
+    expect(second.assetId).toBe(first.assetId);
+    expect(value.mediaLibrary.size).toBe(before + 1);
+    expect(
+      value.uploads.map(({ idempotencyKey }) => idempotencyKey),
+    ).toEqual(["media-upload-retry-1", "media-upload-retry-1"]);
+  });
+
   it("refuses bytes that are not a picture, and a picture too big to carry", async () => {
     const value = fixture([mcpInitialScope, mcpContentDraftScope]);
     await expect(

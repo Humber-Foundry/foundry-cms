@@ -13,6 +13,7 @@ import {
   isMediaContentType,
   McpMediaValidationError,
   McpReadError,
+  MediaMutationInProgressError,
   MediaOccurrenceConflictError,
   MediaSiteAccessError,
   MediaValidationError,
@@ -254,9 +255,9 @@ export function isMcpProductionRequest(request: Request): boolean {
 /**
  * The photo id one upload mints.
  *
- * It is made from this site, this connection and the retry key the agent
- * sent, so a retry after an unknown result mints the same id and leaves one
- * photo, not two. An agent never chooses a photo's id.
+ * It is made from this site, this connection's own actor id and the retry key
+ * the agent sent, so a retry after an unknown result mints the same id and
+ * leaves one photo, not two. An agent never chooses a photo's id.
  */
 export async function mcpMediaAssetId(
   principal: McpConnectionPrincipal,
@@ -323,14 +324,19 @@ function mediaLibraryRefusal(error: unknown, fallbackReason: string) {
       "Another change moved that photo slot. Read the draft again and retry.",
     );
   }
-  if (error instanceof MediaSiteAccessError) {
-    // The media library raises this both for a photo of another site and for
-    // a mutation lease it could not renew. The second is transient and the
-    // two cannot be told apart here, so the refusal invites a retry rather
-    // than telling an agent to stop.
+  if (
+    error instanceof MediaMutationInProgressError ||
+    error instanceof MediaSiteAccessError
+  ) {
+    // The media library raises the first when another change holds its short
+    // mutation lease, and the second both for a photo of another site and for
+    // a lease it could not renew. Every one of those is either transient or
+    // already refused earlier by the tool's own checks, so the refusal
+    // invites a retry rather than telling an agent to stop. The dashboard's
+    // own route answers the same errors with 409 and a retry.
     return new McpReadError(
       "TEMPORARILY_UNAVAILABLE",
-      "The photo library is busy. Try the same request again.",
+      "The photo library could not finish that request. Try the same request again.",
     );
   }
   return error;

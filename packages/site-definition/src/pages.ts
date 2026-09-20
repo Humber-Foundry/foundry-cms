@@ -140,12 +140,13 @@ export function pageMediaOccurrenceId(
 
 /**
  * The page a media occurrence id names, or `undefined` when this site has no
- * such page, or when more than one page claims that occurrence.
+ * such page.
  *
- * Two pages would claim one occurrence id only if a page below the home page
- * took the page id `home`. Nothing in the schema forbids that id, so this
- * refuses to answer rather than picking whichever comes first, the same way
- * `findPageByCompositionSlotId` does. See ADR-0026.
+ * Two pages claim one occurrence id only when a page below the home page takes
+ * the page id `home`. Nothing in the schema forbids that id, and
+ * `occurrence_home_hero` and `occurrence_home_detail` are the home page's own
+ * reserved pair, so the home page wins that tie. Without this the home page
+ * could not hold a photo at all on such a site. See ADR-0026.
  */
 export function findPageByMediaOccurrenceId(
   definition: SiteDefinition,
@@ -156,7 +157,8 @@ export function findPageByMediaOccurrenceId(
       (slot) => pageMediaOccurrenceId(page, slot) === occurrenceId,
     ),
   );
-  return claiming.length === 1 ? claiming[0] : undefined;
+  if (claiming.length <= 1) return claiming[0];
+  return claiming.find((page) => page.slug === homePageSlug);
 }
 
 /**

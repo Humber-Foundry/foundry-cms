@@ -67,6 +67,9 @@ function isMediaUploadCall(value: unknown): boolean {
   return (
     isRecord(value) &&
     value.jsonrpc === "2.0" &&
+    // An upload asks for an answer, so it carries a request id. A
+    // notification-shaped body cannot claim the larger ceiling.
+    isRequestId(value.id) &&
     value.method === "tools/call" &&
     isRecord(value.params) &&
     value.params.name === mediaUploadToolName
