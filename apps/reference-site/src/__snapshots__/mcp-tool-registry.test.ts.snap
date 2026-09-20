@@ -80,13 +80,73 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": false,
     },
-    "description": "Apply allowlisted content field edits to a new immutable revision.",
+    "description": "Edit content fields of any page in the draft, as a new immutable revision.",
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "43e11684836c43f90005b83ad628545e214471a242f89d6c571698c3c81c41b7",
+    "inputSchemaSha256": "94ba51f755e4ba9d99ea97e27a769ffd4949ddeb2f3d7b993c25099c47f4e1b0",
     "name": "foundry.content.patch",
     "outputSchemaSha256": "cff1feb1bc040dd1a6433e494094f4705bfd8bc1cac86d315a3b2cd7276d97e9",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Add a page to the draft from one of the starting points, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "a8531df107e5b8da4481aaedd40a8e738a201f5f609f4ea4ee184572f1b2bac4",
+    "name": "foundry.page.create",
+    "outputSchemaSha256": "192ed404865dfee589f4879abbd5b411b662ad0eaaa6af7ffd921e756f85df9e",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Change one page's name and web address in the draft, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "1c3731b9ec8b79f8a28ffff9da1997f2708f373cc1daca45421afc01b1189a92",
+    "name": "foundry.page.rename",
+    "outputSchemaSha256": "192ed404865dfee589f4879abbd5b411b662ad0eaaa6af7ffd921e756f85df9e",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Copy one page in the draft under a new name and web address, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "1c3731b9ec8b79f8a28ffff9da1997f2708f373cc1daca45421afc01b1189a92",
+    "name": "foundry.page.duplicate",
+    "outputSchemaSha256": "192ed404865dfee589f4879abbd5b411b662ad0eaaa6af7ffd921e756f85df9e",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Remove one page from the draft, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "87f66b37f8c5ddc78757a1f6c1eea6afb95362d11027849a3c16bb9acc7c9064",
+    "name": "foundry.page.delete",
+    "outputSchemaSha256": "192ed404865dfee589f4879abbd5b411b662ad0eaaa6af7ffd921e756f85df9e",
   },
   {
     "annotations": {

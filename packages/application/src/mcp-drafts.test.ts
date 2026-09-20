@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   createRichTextDocumentFromPlainText,
   createSiteId,
+  findPageById,
+  homePage,
+  isMintedPageId,
   listEditableSiteFields,
+  mintedPageId,
   referenceSiteDefinition,
 } from "@humber-foundry/site-definition";
 
@@ -23,6 +27,8 @@ import {
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
+  sha256CanonicalJson,
+  type McpMutationFailure,
   type ContentRevisionApplication,
   type ContentWorkspaceId,
   type McpConnectionPrincipal,
@@ -66,12 +72,7 @@ function fixture(scopes: ReadonlyArray<string>) {
     Readonly<{
       inputHash: string;
       observedAt: string;
-      error: Readonly<{
-        code: McpReadError["code"];
-        message: string;
-        latestRevision: number | null;
-        conflictResource: string | null;
-      }>;
+      error: McpMutationFailure;
     }>
   >();
   let deploymentCurrent = true;
@@ -134,6 +135,7 @@ function fixture(scopes: ReadonlyArray<string>) {
           failure.error.message,
           {
             observedAt: failure.observedAt,
+            reason: failure.error.reason ?? undefined,
             latestRevision:
               failure.error.latestRevision ?? undefined,
             conflictResource:
@@ -1188,5 +1190,421 @@ describe("MCP canonical draft application", () => {
       code: "VALIDATION_FAILED",
       replayed: true,
     });
+  });
+});
+
+describe("MCP page tools", () => {
+  async function openedDraft(scopes: ReadonlyArray<string>, key: string) {
+    const fixtureValue = fixture(scopes);
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await fixtureValue.application.openWorkspace(
+        fixtureValue.activePrincipal,
+        { expectedRevision: 0, idempotencyKey: key },
+        context,
+      ),
+    );
+    return { fixtureValue, workspaceId: opened.workspaceId };
+  }
+
+  function definitionOf(
+    fixtureValue: ReturnType<typeof fixture>,
+    workspaceId: ContentWorkspaceId,
+  ) {
+    return fixtureValue.workspaces
+      .get(workspaceId)!
+      .queries.getCurrent()
+      .then(({ definition }) => definition);
+  }
+
+  it("adds, edits, copies and removes a page inside one draft", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-page-journey-1",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+
+    const created = resultOf<{ pageId: string; revision: number }>(
+      await fixtureValue.application.createPage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-create-journey-1",
+          title: "About us",
+          slug: "about-us",
+          startingLayout: "introduction",
+        },
+        context,
+      ),
+    );
+    expect(created.revision).toBe(1);
+    expect(isMintedPageId(created.pageId)).toBe(true);
+    const afterCreate = await definitionOf(fixtureValue, workspaceId);
+    expect(findPageById(afterCreate, created.pageId)).toMatchObject({
+      title: "About us",
+      slug: "about-us",
+    });
+
+    // The new page's own fields are editable in the same draft, even though
+    // the installed definition never held them.
+    const patched = resultOf<{ revision: number }>(
+      await fixtureValue.application.patchContent(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 1,
+          idempotencyKey: "page-journey-patch-1",
+          operations: [
+            {
+              op: "set",
+              field: `${created.pageId}.seo.description`,
+              value: "What this studio does and why.",
+            },
+          ],
+        },
+        context,
+      ),
+    );
+    expect(patched.revision).toBe(2);
+    expect(
+      findPageById(
+        await definitionOf(fixtureValue, workspaceId),
+        created.pageId,
+      )?.seo.description,
+    ).toBe("What this studio does and why.");
+
+    const renamed = resultOf<{ pageId: string }>(
+      await fixtureValue.application.renamePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 2,
+          idempotencyKey: "page-rename-journey-1",
+          pageId: created.pageId,
+          title: "Our approach",
+          slug: "our-approach",
+        },
+        context,
+      ),
+    );
+    expect(renamed.pageId).toBe(created.pageId);
+    expect(
+      findPageById(
+        await definitionOf(fixtureValue, workspaceId),
+        created.pageId,
+      ),
+    ).toMatchObject({ title: "Our approach", slug: "our-approach" });
+
+    const copied = resultOf<{ pageId: string }>(
+      await fixtureValue.application.duplicatePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 3,
+          idempotencyKey: "page-duplicate-journey-1",
+          pageId: created.pageId,
+          title: "Our approach in detail",
+          slug: "our-approach-in-detail",
+        },
+        context,
+      ),
+    );
+    expect(copied.pageId).not.toBe(created.pageId);
+    const afterCopy = await definitionOf(fixtureValue, workspaceId);
+    expect(afterCopy.pages.map(({ slug }) => slug)).toEqual([
+      "",
+      "our-approach",
+      "our-approach-in-detail",
+    ]);
+    // No two pages share a section id, so no two pages share a field path.
+    const sectionIds = afterCopy.pages.flatMap(({ sections }) =>
+      sections.map(({ id }) => id),
+    );
+    expect(new Set(sectionIds).size).toBe(sectionIds.length);
+
+    const deleted = resultOf<{ pageId: string; revision: number }>(
+      await fixtureValue.application.deletePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 4,
+          idempotencyKey: "page-delete-journey-1",
+          pageId: copied.pageId,
+        },
+        context,
+      ),
+    );
+    expect(deleted).toMatchObject({ pageId: copied.pageId, revision: 5 });
+    expect(
+      findPageById(
+        await definitionOf(fixtureValue, workspaceId),
+        copied.pageId,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("refuses a page operation with a named reason an agent can act on", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-page-refusal-1",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+    const home = homePage(referenceSiteDefinition);
+
+    await expect(
+      fixtureValue.application.deletePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-delete-home-1",
+          pageId: home.id,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_is_home",
+      message:
+        "The home page cannot be deleted. Every site needs a home page.",
+    });
+
+    // Sending that same refused request again says the same thing, because
+    // the reason is recorded with the code and the message.
+    await expect(
+      fixtureValue.application.deletePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-delete-home-1",
+          pageId: home.id,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_is_home",
+      replayed: true,
+    });
+
+    await expect(
+      fixtureValue.application.deletePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-delete-missing-1",
+          pageId: mintedPageId("2".repeat(20)),
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_not_found",
+    });
+
+    await expect(
+      fixtureValue.application.createPage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-create-reserved-1",
+          title: "Blog",
+          slug: "blog",
+          startingLayout: "blank",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_slug_refused",
+      message: "The site already uses /blog for something else. Choose another web address.",
+    });
+
+    // A rename is two ordinary field edits, so the field's own check refuses
+    // it and the tool reports the field sentences under one named reason.
+    await expect(
+      fixtureValue.application.renamePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-rename-home-address-1",
+          pageId: home.id,
+          title: "Welcome",
+          slug: "welcome",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_fields_refused",
+      message:
+        "The home page always sits at the top of the site, so its web address cannot change.",
+    });
+  });
+
+  it("mints one page for a repeated create and refuses a stale base revision", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-page-replay-1",
+    );
+    const principalValue = fixtureValue.activePrincipal;
+    const input = {
+      workspaceId,
+      expectedRevision: 0,
+      idempotencyKey: "page-create-replay-1",
+      title: "Contact",
+      slug: "contact-us",
+      startingLayout: "blank",
+    };
+
+    const first = resultOf<{ pageId: string; replayed: boolean }>(
+      await fixtureValue.application.createPage(
+        principalValue,
+        input,
+        context,
+      ),
+    );
+    const second = resultOf<{
+      pageId: string;
+      replayed: boolean;
+      revision: number;
+    }>(await fixtureValue.application.createPage(
+      principalValue,
+      input,
+      context,
+    ));
+    expect(second).toMatchObject({
+      pageId: first.pageId,
+      replayed: true,
+      revision: 1,
+    });
+    const definition = await definitionOf(fixtureValue, workspaceId);
+    expect(definition.pages).toHaveLength(2);
+
+    await expect(
+      fixtureValue.application.createPage(
+        principalValue,
+        {
+          ...input,
+          idempotencyKey: "page-create-stale-1",
+          slug: "contact-team",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "STALE_REVISION", latestRevision: 1 });
+  });
+
+  it("needs the content draft scope for every page operation", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      [mcpInitialScope, mcpDesignDraftScope],
+      "open-page-scope-1",
+    );
+    await expect(
+      fixtureValue.application.createPage(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "page-create-unscoped-1",
+          title: "Ideas",
+          slug: "ideas",
+          startingLayout: "blank",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpContentDraftScope],
+    });
+  });
+
+  it("makes the same page an owner would make in the dashboard", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-page-parity-1",
+    );
+    const idempotencyKey = "page-create-parity-1";
+    const mcp = resultOf<{
+      pageId: string;
+      revision: number;
+      contentHash: string;
+      validation: unknown;
+      previewArtifact: string;
+    }>(
+      await fixtureValue.application.createPage(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey,
+          title: "What we offer",
+          slug: "what-we-offer",
+          startingLayout: "what_you_offer",
+        },
+        context,
+      ),
+    );
+
+    // The dashboard writes the same command through the same operation, in a
+    // draft with the same identity, so the two pages must be the same page.
+    const humanActor = createContentActorId("membership-human-55");
+    const human = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      workspaceId,
+      actorId: humanActor,
+      rendererVersion,
+      productionBase,
+      now: () => now,
+    });
+    await human.commands.create({
+      actorId: humanActor,
+      workspaceId,
+      idempotencyKey: "open-human-page-parity-1",
+    });
+    const humanResult = await human.commands.createPage({
+      actorId: humanActor,
+      workspaceId,
+      schemaVersion: referenceSiteDefinition.schemaVersion,
+      baseRevision: 0,
+      idempotencyKey: `mcp-${await sha256CanonicalJson({
+        operation: "foundry.page.create",
+        idempotencyKey,
+      })}`,
+      title: "What we offer",
+      slug: "what-we-offer",
+      startingLayout: "what_you_offer",
+    });
+
+    expect({
+      pageId: mcp.pageId,
+      revision: mcp.revision,
+      contentHash: mcp.contentHash,
+      validation: mcp.validation,
+      previewArtifact: mcp.previewArtifact,
+    }).toEqual({
+      pageId: humanResult.pageId,
+      revision: humanResult.revision.revision,
+      contentHash: humanResult.revision.inputs.contentHash,
+      validation: { valid: true, issues: [] },
+      previewArtifact: await createCanonicalPreviewArtifactHash(
+        humanResult.revision,
+      ),
+    });
+    expect(
+      findPageById(
+        await definitionOf(fixtureValue, workspaceId),
+        mcp.pageId,
+      ),
+    ).toEqual(
+      findPageById(
+        (await human.queries.getCurrent()).definition,
+        humanResult.pageId,
+      ),
+    );
   });
 });

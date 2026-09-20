@@ -41,6 +41,7 @@ describe("D1 MCP connection store", () => {
       "0024_mcp_publication_scopes.sql",
       "0027_mcp_registered_clients.sql",
       "0028_mcp_preview_reviews.sql",
+      "0030_mcp_page_operation_receipts.sql",
     ],
     { compatibilityDate: "2026-07-26" },
   );
@@ -622,6 +623,7 @@ describe("D1 MCP connection store", () => {
         error: {
           code: "VALIDATION_FAILED",
           message: "Input A failed validation.",
+          reason: null,
           latestRevision: null,
           conflictResource: null,
         },
@@ -638,6 +640,7 @@ describe("D1 MCP connection store", () => {
         error: {
           code: "STALE_REVISION",
           message: "Input B lost its expected revision.",
+          reason: null,
           latestRevision: 4,
           conflictResource:
             "foundry://workspaces/workspace_failure/revisions/4",
@@ -657,6 +660,7 @@ describe("D1 MCP connection store", () => {
         code: "IDEMPOTENCY_KEY_REUSED",
         message:
           "The idempotency key was already used for different input.",
+        reason: null,
         latestRevision: null,
         conflictResource: null,
       },
@@ -961,6 +965,7 @@ describe("D1 MCP connection store", () => {
       error: {
         code: "STALE_REVISION",
         message: "The workspace revision changed.",
+        reason: null,
         latestRevision: 3,
         conflictResource:
           "foundry://workspaces/workspace_mcp_preview/revisions/3",
@@ -1015,6 +1020,44 @@ describe("D1 MCP connection store", () => {
       outcome: "denied",
       reason: "STALE_REVISION",
       replayed: 1,
+    });
+    // A refused page operation keeps its named reason, so asking again says
+    // exactly what the first refusal said.
+    const refusedPageAudit = {
+      ...previewInput.audit,
+      invocationId: "invocation-page-refusal-original",
+      operation: "foundry.page.delete",
+      inputHash: "9".repeat(64),
+      idempotencyKey: "page-delete-terminal-key-1",
+    } as const;
+    await previews.recordMutationFailure({
+      principal: previewInput.principal,
+      audit: refusedPageAudit,
+      resultHash: "c".repeat(64),
+      error: {
+        code: "VALIDATION_FAILED",
+        message:
+          "The home page cannot be deleted. Every site needs a home page.",
+        reason: "page_is_home",
+        latestRevision: null,
+        conflictResource: null,
+      },
+    });
+    await expect(
+      previews.replayMutation({
+        principal: previewInput.principal,
+        audit: {
+          ...refusedPageAudit,
+          invocationId: "invocation-page-refusal-replay",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "page_is_home",
+      message:
+        "The home page cannot be deleted. Every site needs a home page.",
+      replayed: true,
+      auditRecorded: true,
     });
     await expect(previews.preparePreview(previewInput)).resolves.toEqual({
       previewId: "preview-scoped-1",

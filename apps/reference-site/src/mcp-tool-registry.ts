@@ -27,7 +27,9 @@ import { installedSiteDefinition } from "../foundry/site-definition";
 import {
   designContract,
   campaignShareImageUrlPattern,
-  listEditableSiteFields,
+  pageSlugMaxLength,
+  pageSlugPattern,
+  pageStartingLayouts,
   seoShareImageUrlMaxLength,
   siteDefinitionSchema,
   type RichTextDocument,
@@ -246,15 +248,80 @@ const publicationStatusResult = {
   },
 } as const;
 
-const contentFields = listEditableSiteFields(installedSiteDefinition)
-  .filter(({ group }) => group !== "Design");
-const contentFieldPaths = contentFields.map(({ path }) => path);
-const plainTextContentFieldPaths = contentFields
-  .filter(({ format }) => format === "plainText")
-  .map(({ path }) => path);
-const richTextContentFieldPaths = contentFields
-  .filter(({ format }) => format === "richText")
-  .map(({ path }) => path);
+/**
+ * The shape of an editable field path.
+ *
+ * A path is a chain of identifiers joined by dots, exactly as
+ * `listEditableSiteFields` builds it: the record's own id, then the field
+ * inside it, with the page id in front on every page but the home page
+ * (ADR-0017). The set of paths is not fixed here, because an agent that made
+ * a page in a draft must be able to edit that page's fields in the same
+ * draft, and the installed definition knows nothing about it. The draft's own
+ * field list decides which of these paths is real (ADR-0034).
+ */
+const editableFieldPathPattern =
+  "^[a-z][A-Za-z0-9_]*(?:\\.[a-z][A-Za-z0-9_]*)*$";
+
+/**
+ * The longest field path a tool accepts, and the longest plain-text value it
+ * accepts. Both are exhaustion bounds; the draft applies the real rules.
+ */
+const editableFieldPathMaxLength = 300;
+const plainTextValueMaxLength = 200_000;
+
+const editableFieldPathShape = new RegExp(editableFieldPathPattern, "u");
+
+const contentFieldPathSchema = {
+  type: "string",
+  minLength: 1,
+  maxLength: editableFieldPathMaxLength,
+  pattern: editableFieldPathPattern,
+} as const;
+
+function isContentFieldPath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= editableFieldPathMaxLength &&
+    editableFieldPathShape.test(value)
+  );
+}
+
+// A page id is an ordinary Site Definition identifier, so `home` and a minted
+// `page_<digest>` are both well formed here. Whether the draft holds a page
+// with this id is the draft's answer, not the schema's.
+const pageIdSchema = {
+  type: "string",
+  minLength: 1,
+  maxLength: 200,
+  pattern: siteDefinitionSchema.$defs.id.pattern,
+} as const;
+
+const pageIdShape = new RegExp(siteDefinitionSchema.$defs.id.pattern, "u");
+
+// A page name is the editable field `<pageId>.title`, so it takes the same
+// bound as any other plain-text field edit rather than a second limit.
+const pageTitleSchema = {
+  type: "string",
+  minLength: 1,
+  maxLength: plainTextValueMaxLength,
+} as const;
+
+// The empty address belongs to the home page, and a reserved address names a
+// route the installation already serves. Neither is excluded here: the draft
+// refuses both with a sentence that says which rule was broken and carries a
+// named reason, which a bare schema mismatch could not (ADR-0033).
+const pageSlugSchema = {
+  type: "string",
+  maxLength: pageSlugMaxLength,
+  pattern: pageSlugPattern,
+} as const;
+
+const pageSlugShape = new RegExp(pageSlugPattern, "u");
+
+const pageStartingLayoutSchema = {
+  enum: pageStartingLayouts.map(({ id }) => id),
+} as const;
+
 const designVariantContracts =
   homePage(installedSiteDefinition).sections.flatMap((section) =>
     section.type === "registered"
@@ -297,6 +364,20 @@ const draftMutationResult = {
     replayed: { type: "boolean" },
   },
   required: [...draftResult.required, "replayed"],
+} as const;
+/**
+ * What a page tool gives back. It is the draft mutation result with the page
+ * the operation acted on: the new page for a create or a duplicate, the named
+ * page for a rename or a delete.
+ */
+const pageMutationResult = {
+  ...draftMutationResult,
+  properties: {
+    ...draftMutationResult.properties,
+    pageId: pageIdSchema,
+    previewArtifact: { type: "string", pattern: "^[0-9a-f]{64}$" },
+  },
+  required: [...draftMutationResult.required, "pageId", "previewArtifact"],
 } as const;
 const canonicalDefinitionResult = {
   type: "object",
@@ -428,24 +509,21 @@ function parsePatchInput(input: unknown) {
       !isRecord(operation) ||
       !hasExactKeys(operation, ["op", "field", "value"], ["format"]) ||
       operation.op !== "set" ||
-      typeof operation.field !== "string" ||
-      !contentFieldPaths.includes(operation.field) ||
+      !isContentFieldPath(operation.field) ||
       (operation.format !== undefined &&
         operation.format !== "plainText" &&
         operation.format !== "richText")
     ) {
       continue;
     }
-    const contract = contentFields.find(
-      ({ path }) => path === operation.field,
-    )!;
+    // The format the caller declared decides how the value is read. The draft
+    // then checks that this field really takes that format, and refuses the
+    // edit if it does not, so nothing here has to know the field list.
     if (
-      contract.format === "plainText" &&
-      (operation.format === undefined ||
-        operation.format === "plainText") &&
+      operation.format !== "richText" &&
       typeof operation.value === "string" &&
       operation.value.length >= 1 &&
-      operation.value.length <= 200_000
+      operation.value.length <= plainTextValueMaxLength
     ) {
       operations.push({
         op: "set",
@@ -457,11 +535,7 @@ function parsePatchInput(input: unknown) {
       });
       continue;
     }
-    if (
-      contract.format === "richText" &&
-      operation.format === "richText" &&
-      isRecord(operation.value)
-    ) {
+    if (operation.format === "richText" && isRecord(operation.value)) {
       operations.push({
         op: "set",
         field: operation.field,
@@ -473,6 +547,117 @@ function parsePatchInput(input: unknown) {
   return operations.length === input.operations.length
     ? { ...common, operations }
     : null;
+}
+
+/**
+ * Read the three things every page tool takes, and nothing else. `extraKeys`
+ * names the fields this particular operation adds, so a key that belongs to
+ * another page tool is rejected rather than ignored.
+ */
+function parsePageMutationInput(
+  input: unknown,
+  extraKeys: ReadonlyArray<string>,
+) {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, [
+      "workspaceId",
+      "expectedRevision",
+      "idempotencyKey",
+      ...extraKeys,
+    ]) ||
+    typeof input.workspaceId !== "string" ||
+    !Number.isSafeInteger(input.expectedRevision) ||
+    (input.expectedRevision as number) < 0 ||
+    !validIdempotencyKey(input.idempotencyKey)
+  ) {
+    return null;
+  }
+  try {
+    return {
+      workspaceId: createContentWorkspaceId(input.workspaceId),
+      expectedRevision: input.expectedRevision as number,
+      idempotencyKey: input.idempotencyKey,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isPageTitle(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= plainTextValueMaxLength
+  );
+}
+
+function isPageSlug(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= pageSlugMaxLength &&
+    pageSlugShape.test(value)
+  );
+}
+
+function isPageId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 200 &&
+    pageIdShape.test(value)
+  );
+}
+
+function parseCreatePageInput(input: unknown) {
+  const common = parsePageMutationInput(input, [
+    "title",
+    "slug",
+    "startingLayout",
+  ]);
+  if (
+    common === null ||
+    !isRecord(input) ||
+    !isPageTitle(input.title) ||
+    !isPageSlug(input.slug) ||
+    typeof input.startingLayout !== "string" ||
+    !pageStartingLayouts.some(({ id }) => id === input.startingLayout)
+  ) {
+    return null;
+  }
+  return {
+    ...common,
+    title: input.title,
+    slug: input.slug,
+    startingLayout: input.startingLayout,
+  };
+}
+
+function parseNamedPageInput(input: unknown) {
+  const common = parsePageMutationInput(input, ["pageId", "title", "slug"]);
+  if (
+    common === null ||
+    !isRecord(input) ||
+    !isPageId(input.pageId) ||
+    !isPageTitle(input.title) ||
+    !isPageSlug(input.slug)
+  ) {
+    return null;
+  }
+  return {
+    ...common,
+    pageId: input.pageId,
+    title: input.title,
+    slug: input.slug,
+  };
+}
+
+function parseDeletePageInput(input: unknown) {
+  const common = parsePageMutationInput(input, ["pageId"]);
+  if (common === null || !isRecord(input) || !isPageId(input.pageId)) {
+    return null;
+  }
+  return { ...common, pageId: input.pageId };
 }
 
 function parseDesignPatchInput(input: unknown) {
@@ -1166,7 +1351,7 @@ const descriptors = {
   "foundry.content.patch": {
     name: "foundry.content.patch",
     description:
-      "Apply allowlisted content field edits to a new immutable revision.",
+      "Edit content fields of any page in the draft, as a new immutable revision.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1185,12 +1370,12 @@ const descriptors = {
                 additionalProperties: false,
                 properties: {
                   op: { const: "set" },
-                  field: { enum: plainTextContentFieldPaths },
+                  field: contentFieldPathSchema,
                   format: { const: "plainText" },
                   value: {
                     type: "string",
                     minLength: 1,
-                    maxLength: 200000,
+                    maxLength: plainTextValueMaxLength,
                   },
                 },
                 required: ["op", "field", "value"],
@@ -1200,7 +1385,7 @@ const descriptors = {
                 additionalProperties: false,
                 properties: {
                   op: { const: "set" },
-                  field: { enum: richTextContentFieldPaths },
+                  field: contentFieldPathSchema,
                   format: { const: "richText" },
                   value: { $ref: "#/$defs/richTextDocument" },
                 },
@@ -1229,6 +1414,114 @@ const descriptors = {
       },
       required: [...draftMutationResult.required, "previewArtifact"],
     }),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.page.create": {
+    name: "foundry.page.create",
+    description:
+      "Add a page to the draft from one of the starting points, as a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        title: pageTitleSchema,
+        slug: pageSlugSchema,
+        startingLayout: pageStartingLayoutSchema,
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "title",
+        "slug",
+        "startingLayout",
+      ],
+    },
+    outputSchema: toolOutputSchema(pageMutationResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.page.rename": {
+    name: "foundry.page.rename",
+    description:
+      "Change one page's name and web address in the draft, as a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        pageId: pageIdSchema,
+        title: pageTitleSchema,
+        slug: pageSlugSchema,
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "pageId",
+        "title",
+        "slug",
+      ],
+    },
+    outputSchema: toolOutputSchema(pageMutationResult),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.page.duplicate": {
+    name: "foundry.page.duplicate",
+    description:
+      "Copy one page in the draft under a new name and web address, as a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        pageId: pageIdSchema,
+        title: pageTitleSchema,
+        slug: pageSlugSchema,
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "pageId",
+        "title",
+        "slug",
+      ],
+    },
+    outputSchema: toolOutputSchema(pageMutationResult),
+    annotations: nonDestructiveMutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.page.delete": {
+    name: "foundry.page.delete",
+    description:
+      "Remove one page from the draft, as a new immutable revision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workspaceId: workspaceIdSchema,
+        expectedRevision: { type: "integer", minimum: 0 },
+        idempotencyKey: idempotencyKeySchema,
+        pageId: pageIdSchema,
+      },
+      required: [
+        "workspaceId",
+        "expectedRevision",
+        "idempotencyKey",
+        "pageId",
+      ],
+    },
+    outputSchema: toolOutputSchema(pageMutationResult),
     annotations: mutationAnnotations,
     execution: taskExecution,
   },
@@ -1710,6 +2003,58 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       }
       return application.patchContent!(principal, parsed, context);
     },
+    "foundry.page.create": async (principal, input, context) => {
+      const parsed = parseCreatePageInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.page.create",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.createPage!(principal, parsed, context);
+    },
+    "foundry.page.rename": async (principal, input, context) => {
+      const parsed = parseNamedPageInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.page.rename",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.renamePage!(principal, parsed, context);
+    },
+    "foundry.page.duplicate": async (principal, input, context) => {
+      const parsed = parseNamedPageInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.page.duplicate",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.duplicatePage!(principal, parsed, context);
+    },
+    "foundry.page.delete": async (principal, input, context) => {
+      const parsed = parseDeletePageInput(input);
+      if (parsed === null) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.page.delete",
+          input,
+          context,
+          [mcpContentDraftScope],
+        );
+      }
+      return application.deletePage!(principal, parsed, context);
+    },
     "foundry.design.patch": async (principal, input, context) => {
       const parsed = parseDesignPatchInput(input);
       if (parsed === null) {
@@ -2010,6 +2355,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         .filter(([name]) => {
           if (
             name.startsWith("foundry.workspace.") ||
+            name.startsWith("foundry.page.") ||
             name === "foundry.content.patch" ||
             name === "foundry.design.patch" ||
             name === "foundry.preview.prepare"
@@ -2062,7 +2408,12 @@ export function createMcpToolRegistry(application: McpReadApplication) {
               principal.scopes.includes(mcpDesignDraftScope)
             );
           }
-          if (name === "foundry.content.patch") {
+          // A page operation writes content, so it needs the content draft
+          // scope, exactly as a content field edit does.
+          if (
+            name === "foundry.content.patch" ||
+            name.startsWith("foundry.page.")
+          ) {
             return principal.scopes.includes(mcpContentDraftScope);
           }
           if (name === "foundry.design.patch") {
@@ -2078,6 +2429,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         application.openWorkspace === undefined &&
         (
           name.startsWith("foundry.workspace.") ||
+          name.startsWith("foundry.page.") ||
           name === "foundry.content.patch" ||
           name === "foundry.design.patch" ||
           name === "foundry.preview.prepare"

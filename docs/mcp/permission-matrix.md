@@ -75,6 +75,10 @@ human authorization decision remains authoritative where it is stricter.
 | `foundry.workspace.open` | `content.draft` or `design.draft` | None | Creates/resumes workspace |
 | `foundry.workspace.get` | matching draft scope | None | None |
 | `foundry.content.patch` | `content.draft` | None | New immutable revision |
+| `foundry.page.create` | `content.draft` | None | New immutable revision holding a new page |
+| `foundry.page.rename` | `content.draft` | None | New immutable revision |
+| `foundry.page.duplicate` | `content.draft` | None | New immutable revision holding a copied page |
+| `foundry.page.delete` | `content.draft` | None | New immutable revision without that page |
 | `foundry.design.patch` | `design.draft` | None | New immutable revision |
 | `foundry.preview.prepare` | matching draft scopes | None | Canonical preview artifact |
 | `foundry.campaign.create` | `campaign.draft` | None | Standalone campaign revision |
