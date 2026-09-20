@@ -2,12 +2,12 @@ import {
   designContract,
   designTokenFieldPath,
   designTokenValue,
-  homePage,
   pageFieldPath,
   sectionVariantFieldPath,
   type DesignOptionPreview,
   type DesignTokenKey,
   type SiteDefinition,
+  type SitePage,
 } from "@humber-foundry/site-definition";
 
 /**
@@ -81,12 +81,11 @@ function tokenControl(
 }
 
 function sectionStyleControls(
-  definition: SiteDefinition,
+  page: SitePage,
 ): ReadonlyArray<DesignControl> {
-  // Design still lists the home page's sections. Ticket #158 gives it the
-  // page the editor has open. The path is built through `pageFieldPath`, so
-  // this list follows the one field path rule whichever page it reads.
-  const page = homePage(definition);
+  // The styles listed are those of the page the editor has open. The path is
+  // built through `pageFieldPath`, so the list follows the one field path rule
+  // on every page.
   return page.sections.flatMap((section) => {
     if (section.type === "registered") {
       return [];
@@ -123,10 +122,15 @@ export function optionColumns(optionCount: number): number {
   return 1;
 }
 
+/**
+ * The controls the Design destination shows. The type, colour and space
+ * controls belong to the whole site; the section styles belong to `page`.
+ */
 export function designControlGroups(
   definition: SiteDefinition,
+  page: SitePage,
 ): ReadonlyArray<DesignControlGroup> {
-  const sectionStyles = sectionStyleControls(definition);
+  const sectionStyles = sectionStyleControls(page);
   return [
     ...tokenGroups.map((group) => ({
       title: group.title,

@@ -34,3 +34,4 @@
 | [ADR-0028](ADR-0028-connect-agent-screen-and-consent-restyle.md) | One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page | Accepted | 2026-09-18 |
 | [ADR-0029](ADR-0029-page-scoped-revision-preview.md) | The revision preview gets one route per page, and the preview's own page-href builder keeps a link inside it | Accepted | 2026-09-20 |
 | [ADR-0030](ADR-0030-campaign-channel-configuration-is-a-value.md) | The campaign channel configuration is a value, and there is no default compliance footer | Accepted | 2026-09-19 |
+| [ADR-0032](ADR-0032-page-composition-slot-per-page.md) | Every page has its own section slot, and the editor writes only to the page it has open | Accepted | 2026-09-19 |

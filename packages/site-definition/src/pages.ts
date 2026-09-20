@@ -139,6 +139,73 @@ export function pageMediaOccurrenceId(
 }
 
 /**
+ * The identifier of one page's section slot: the place the visual editor adds,
+ * moves and removes sections in.
+ *
+ * The home page keeps `slot_home_sections` unchanged. That identifier is the
+ * field path a stored draft writes its unsaved structural change under, so a
+ * new name would make every stored home-page recovery record unreadable. This
+ * is the same reason `pageFieldPath` gives the home page no prefix and
+ * `pageMediaOccurrenceId` keeps the home page's two occurrence ids. See
+ * ADR-0017, ADR-0026 and ADR-0032.
+ *
+ * Every other page's slot id is built from its own page id:
+ * `slot_<pageId>_sections`. A page id never changes, so a slug rename leaves
+ * the identifier alone.
+ *
+ * Two pages would share a slot id only if a page below the home page took the
+ * page id `home`. Nothing in the schema forbids that id, so
+ * `findPageByCompositionSlotId` refuses to answer when two pages claim one
+ * slot, rather than picking whichever comes first.
+ */
+export function pageCompositionSlotId(page: SitePage): string {
+  return page.slug === homePageSlug
+    ? "slot_home_sections"
+    : `slot_${page.id}_sections`;
+}
+
+/**
+ * The one shape every page's section slot id matches. The middle part is a
+ * page id, so this repeats the page id pattern in `index.ts` (`$defs.id`,
+ * `^[a-z][a-z0-9_]*$`). Change one and change the other.
+ */
+export const pageCompositionSlotIdPattern = /^slot_[a-z][a-z0-9_]*_sections$/u;
+
+/**
+ * Whether a field path names a page's section slot rather than one field.
+ *
+ * The shape is `slot_<name>_sections`, which holds no dot. Every field path
+ * holds one — `section_hero.title`, or a page id in front of it — so a slot id
+ * and a field path can never be read for each other.
+ */
+export function isPageCompositionSlotId(path: string): boolean {
+  return pageCompositionSlotIdPattern.test(path);
+}
+
+/**
+ * The page a section-slot identifier names, or `undefined` when this site has
+ * no such page, or when more than one page claims that slot.
+ *
+ * A stored draft holds a structural change under its slot id alone. This is
+ * how the editor reads that identifier back and finds the page the change
+ * belongs to, so a recovered change is restored to the page it was made on.
+ *
+ * Two pages claim one slot only when a page below the home page has the page
+ * id `home`. There is then no single right answer, so this gives none: the
+ * caller reports a conflict and the owner decides, which is safe. Picking the
+ * first match would write one page's sections onto another without a word.
+ */
+export function findPageByCompositionSlotId(
+  definition: SiteDefinition,
+  slotId: string,
+): SitePage | undefined {
+  const claiming = definition.pages.filter(
+    (page) => pageCompositionSlotId(page) === slotId,
+  );
+  return claiming.length === 1 ? claiming[0] : undefined;
+}
+
+/**
  * The same definition with one page swapped for a new version of itself.
  *
  * The page is matched by id, and the order of `pages` is kept, so a rewrite

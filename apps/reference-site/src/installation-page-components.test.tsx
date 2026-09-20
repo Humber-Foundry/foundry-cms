@@ -42,7 +42,10 @@ function registeredComponentFixture() {
     ["connectorCards", "section_connectors"],
     ["invitationNewsletter", "section_invitation"],
   ].map(([type, id]) =>
-    installedPageComponentRegistry.createDefault(type!, id!, definition),
+    installedPageComponentRegistry.createDefault(type!, id!, {
+      definition,
+      page: homePage(definition),
+    }),
   );
   const fixture = {
     ...definition,
@@ -65,7 +68,11 @@ function registeredComponentFixture() {
 
 describe("installation-owned page components", () => {
   it("owns validation, editor metadata, and rendering in one installed registration", () => {
-    const config = createVisualComponentConfig(() => new Set(), () => installedSiteDefinition);
+    const config = createVisualComponentConfig(
+      () => new Set(),
+      () => installedSiteDefinition,
+      () => homePage(installedSiteDefinition),
+    );
     expect(Object.keys(config.components)).toEqual(
       installedPageComponentRegistry.allowedComponents,
     );
@@ -137,7 +144,7 @@ describe("installation-owned page components", () => {
   it("round-trips a visible custom edit through the installed Puck adapter", () => {
     const definition = registeredComponentFixture();
     const data = definitionToPuckData(
-      definition,
+      homePage(definition),
       installedPageComponentRegistry,
     );
     const story = data.content.find(({ type }) => type === "imageCopyStory");
@@ -146,6 +153,7 @@ describe("installation-owned page components", () => {
 
     const result = puckDataToDefinition(
       definition,
+      homePage(definition),
       data,
       installedPageComponentRegistry,
     );
@@ -162,8 +170,8 @@ describe("installation-owned page components", () => {
     });
     expect(
       pageCompositionChanged(
-        definition,
-        result.definition,
+        homePage(definition),
+        homePage(result.definition),
         installedPageComponentRegistry,
       ),
     ).toBe(true);
@@ -218,18 +226,20 @@ describe("installation-owned page components", () => {
         schemaVersion: installedSiteDefinition.schemaVersion,
         baseRevision: 0,
         edits: [],
-        composition: {
-          slotId: pageCompositionContract.slot.id,
-          components: [
-            ...homePage(installedSiteDefinition).sections,
-            {
-              id: "section_unknown",
-              type: "registered",
-              component: "unknownComponent",
-              props: { title: "Do not save" },
-            },
-          ],
-        },
+        compositions: [
+          {
+            slotId: pageCompositionContract.slot.id,
+            components: [
+              ...homePage(installedSiteDefinition).sections,
+              {
+                id: "section_unknown",
+                type: "registered",
+                component: "unknownComponent",
+                props: { title: "Do not save" },
+              },
+            ],
+          },
+        ],
         idempotencyKey: "component-security-save-0001",
         joinedAudit: {
           invocationId: "invocation-component-security",

@@ -65,14 +65,19 @@ describe("Puck page-composition adapter", () => {
         },
       ],
     } as SiteDefinition;
-    const data = definitionToPuckData(definition, registry);
+    const data = definitionToPuckData(homePage(definition), registry);
     const source = data.content.at(-1)!;
     data.content.push({
       ...structuredClone(source),
       props: { ...structuredClone(source.props), id: "themedStory-generated-copy" },
     });
 
-    const result = puckDataToDefinition(definition, data, registry);
+    const result = puckDataToDefinition(
+      definition,
+      homePage(definition),
+      data,
+      registry,
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -132,14 +137,19 @@ describe("Puck page-composition adapter", () => {
         },
       ],
     } as SiteDefinition;
-    const data = definitionToPuckData(definition, registry);
+    const data = definitionToPuckData(homePage(definition), registry);
     const source = data.content.at(-1)!;
     data.content.push({
       ...structuredClone(source),
       props: { ...structuredClone(source.props), id: "profileCard-generated-copy" },
     });
 
-    const result = puckDataToDefinition(definition, data, registry);
+    const result = puckDataToDefinition(
+      definition,
+      homePage(definition),
+      data,
+      registry,
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -152,7 +162,7 @@ describe("Puck page-composition adapter", () => {
 
 
   it("binds Puck data to stable registered component identifiers", () => {
-    const data = definitionToPuckData(referenceSiteDefinition);
+    const data = definitionToPuckData(homePage(referenceSiteDefinition));
 
     expect(data.content.map(({ type, props }) => [type, props.id])).toEqual([
       ["hero", "section_hero"],
@@ -179,14 +189,15 @@ describe("Puck page-composition adapter", () => {
 
     const result = puckDataToDefinition(
       definition,
-      definitionToPuckData(definition),
+      homePage(definition),
+      definitionToPuckData(homePage(definition)),
     );
 
     expect(result).toEqual({ ok: true, definition });
   });
 
   it("does not let stale Puck props overwrite the outer variant owner", () => {
-    const staleData = definitionToPuckData(referenceSiteDefinition);
+    const staleData = definitionToPuckData(homePage(referenceSiteDefinition));
     const sourceHero = homePage(referenceSiteDefinition).sections[0]!;
     const liveDefinition = {
       ...referenceSiteDefinition,
@@ -216,7 +227,11 @@ describe("Puck page-composition adapter", () => {
       },
     };
 
-    const result = puckDataToDefinition(liveDefinition, staleData);
+    const result = puckDataToDefinition(
+      liveDefinition,
+      homePage(liveDefinition),
+      staleData,
+    );
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -231,7 +246,7 @@ describe("Puck page-composition adapter", () => {
 
   it("maps a Puck insert, reorder, duplicate, remove, and field change to a valid definition", () => {
     const data = structuredClone(
-      definitionToPuckData(referenceSiteDefinition),
+      definitionToPuckData(homePage(referenceSiteDefinition)),
     ) as {
       root: { props: Record<string, never> };
       content: Array<{ type: PageSection["type"]; props: PageSection }>;
@@ -271,7 +286,11 @@ describe("Puck page-composition adapter", () => {
       },
     ];
 
-    const result = puckDataToDefinition(referenceSiteDefinition, data);
+    const result = puckDataToDefinition(
+      referenceSiteDefinition,
+      homePage(referenceSiteDefinition),
+      data,
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -322,7 +341,7 @@ describe("Puck page-composition adapter", () => {
         },
       ],
     } as SiteDefinition;
-    const result = puckDataToDefinition(base, {
+    const result = puckDataToDefinition(base, homePage(base), {
       root: { props: {} },
       content: [
         { type: "proof", props: proof },
@@ -359,10 +378,14 @@ describe("Puck page-composition adapter", () => {
   });
 
   it("fails closed for unregistered Puck content", () => {
-    const result = puckDataToDefinition(referenceSiteDefinition, {
-      root: { props: {} },
-      content: [{ type: "script", props: { id: "section_script" } }],
-    });
+    const result = puckDataToDefinition(
+      referenceSiteDefinition,
+      homePage(referenceSiteDefinition),
+      {
+        root: { props: {} },
+        content: [{ type: "script", props: { id: "section_script" } }],
+      },
+    );
 
     expect(result).toEqual({
       ok: false,
@@ -375,7 +398,7 @@ describe("Puck page-composition adapter", () => {
 
   it("carries a versioned rich-text body through the Puck adapter", () => {
     const data = structuredClone(
-      definitionToPuckData(referenceSiteDefinition),
+      definitionToPuckData(homePage(referenceSiteDefinition)),
     );
     const callToAction = data.content.find(
       (component) => component.type === "callToAction",
@@ -386,7 +409,11 @@ describe("Puck page-composition adapter", () => {
       body,
     };
 
-    const result = puckDataToDefinition(referenceSiteDefinition, data);
+    const result = puckDataToDefinition(
+      referenceSiteDefinition,
+      homePage(referenceSiteDefinition),
+      data,
+    );
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -400,7 +427,7 @@ describe("Puck page-composition adapter", () => {
 
   it("rejects a raw string in the rich-text Puck field", () => {
     const data = structuredClone(
-      definitionToPuckData(referenceSiteDefinition),
+      definitionToPuckData(homePage(referenceSiteDefinition)),
     ) as unknown as {
       content: Array<{
         type: PageSection["type"];
@@ -412,7 +439,13 @@ describe("Puck page-composition adapter", () => {
     )!;
     callToAction.props.body = "<script>alert(1)</script>";
 
-    expect(puckDataToDefinition(referenceSiteDefinition, data)).toEqual({
+    expect(
+      puckDataToDefinition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        data,
+      ),
+    ).toEqual({
       ok: false,
       errors: {
         "section_contact.body":
@@ -423,11 +456,17 @@ describe("Puck page-composition adapter", () => {
 
   it("rejects duplicate Puck identities instead of deriving position-based IDs", () => {
     const data = structuredClone(
-      definitionToPuckData(referenceSiteDefinition),
+      definitionToPuckData(homePage(referenceSiteDefinition)),
     );
     data.content.push(structuredClone(data.content[0]!));
 
-    expect(puckDataToDefinition(referenceSiteDefinition, data)).toEqual({
+    expect(
+      puckDataToDefinition(
+        referenceSiteDefinition,
+        homePage(referenceSiteDefinition),
+        data,
+      ),
+    ).toEqual({
       ok: false,
       errors: {
         slot_home_sections:
@@ -453,7 +492,10 @@ describe("Puck page-composition adapter", () => {
       ],
     };
     expect(
-      pageCompositionChanged(referenceSiteDefinition, copyEdited),
+      pageCompositionChanged(
+        homePage(referenceSiteDefinition),
+        homePage(copyEdited),
+      ),
     ).toBe(false);
 
     const reordered = {
@@ -466,7 +508,10 @@ describe("Puck page-composition adapter", () => {
       ],
     };
     expect(
-      pageCompositionChanged(referenceSiteDefinition, reordered),
+      pageCompositionChanged(
+        homePage(referenceSiteDefinition),
+        homePage(reordered),
+      ),
     ).toBe(true);
   });
 });

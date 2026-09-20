@@ -1,16 +1,16 @@
 import {
   applyPageComposition,
   createDefaultPageSection,
-  pageCompositionContract,
+  pageCompositionSlotId,
   remapPageSectionNestedIds,
+  replacePage,
   toPageCompositionIdentity,
   foundationPageComponentRegistry,
   mergePageComponentFieldEdit,
   type PageComponentRegistry,
   type PageSection,
   type SiteDefinition,
-  homePage,
-  replacePage,
+  type SitePage,
 } from "@humber-foundry/site-definition";
 
 export type PageCompositionPuckData = {
@@ -27,13 +27,17 @@ export type PageCompositionPuckResult =
   | Readonly<{ ok: true; definition: SiteDefinition }>
   | Readonly<{ ok: false; errors: Readonly<Record<string, string>> }>;
 
+/**
+ * One page drawn as the canvas reads it. `page` is the page the owner opened,
+ * so the canvas always shows the sections of that page and no other.
+ */
 export function definitionToPuckData(
-  definition: SiteDefinition,
+  page: SitePage,
   registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): PageCompositionPuckData {
   return {
     root: { props: {} },
-    content: homePage(definition).sections.map((section) =>
+    content: page.sections.map((section) =>
       section.type === "registered"
         ? {
             type: registry.keyFor(section),
@@ -80,8 +84,16 @@ function isPageComponentType(
   );
 }
 
+/**
+ * What the canvas now holds, written back onto one page.
+ *
+ * `page` is the page the owner opened. Every read of existing sections and
+ * every write below is of that page, so a change made on one page cannot
+ * reach another. See ADR-0032.
+ */
 export function puckDataToDefinition(
   definition: SiteDefinition,
+  page: SitePage,
   value: unknown,
   registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): PageCompositionPuckResult {
@@ -94,7 +106,7 @@ export function puckDataToDefinition(
     return {
       ok: false,
       errors: {
-        [pageCompositionContract.slot.id]:
+        [pageCompositionSlotId(page)]:
           "The visual editor returned an invalid page slot.",
       },
     };
@@ -134,7 +146,7 @@ export function puckDataToDefinition(
       return {
         ok: false,
         errors: {
-          [pageCompositionContract.slot.id]:
+          [pageCompositionSlotId(page)]:
             "Only registered page components can enter this slot.",
         },
       };
@@ -148,21 +160,21 @@ export function puckDataToDefinition(
       return {
         ok: false,
         errors: {
-          [pageCompositionContract.slot.id]:
+          [pageCompositionSlotId(page)]:
             "Every Puck component needs one unique stable identifier.",
         },
       };
     }
     ids.add(id);
-    const existing = homePage(definition).sections.find(
+    const existing = page.sections.find(
       (section) =>
         section.id === id && registry.keyFor(section) === componentType,
     );
-    const submittedContext = replacePage(definition, {
-      ...homePage(definition),
+    const submittedContextPage = {
+      ...page,
       sections: [
         ...components,
-        ...homePage(definition).sections.filter(
+        ...page.sections.filter(
           ({ id: existingId }) =>
             submittedIds.has(existingId) &&
             !components.some(
@@ -170,10 +182,18 @@ export function puckDataToDefinition(
             ),
         ),
       ],
-    });
+    };
     const base =
       existing ??
-      createDefaultPageSection(componentType, id, submittedContext, registry);
+      createDefaultPageSection(
+        componentType,
+        id,
+        {
+          definition: replacePage(definition, submittedContextPage),
+          page: submittedContextPage,
+        },
+        registry,
+      );
     const registration = registry.components[componentType]!;
     const editableProps = registration.editableFields;
     const section = structuredClone(base) as unknown as Record<
@@ -222,7 +242,7 @@ export function puckDataToDefinition(
     // non-editable scaffold from its source component.
     const duplicateSource =
       existing === undefined
-        ? [...homePage(definition).sections, ...components].find((source) => {
+        ? [...page.sections, ...components].find((source) => {
             if (registry.keyFor(source) !== componentType) {
               return false;
             }
@@ -286,25 +306,35 @@ export function puckDataToDefinition(
     if (base.type !== "registered") section.type = componentType;
     components.push(section as unknown as PageSection);
   }
-  return applyPageComposition(definition, {
-    slotId: pageCompositionContract.slot.id,
+  return applyPageComposition(definition, page, {
+    slotId: pageCompositionSlotId(page),
     components,
   }, registry);
 }
 
+/**
+ * Whether one page's structure differs between two drafts: its sections, their
+ * order, their type, and the scaffolding of its registered sections.
+ *
+ * Both pages are the same page read from two drafts, so a caller compares like
+ * with like. A page absent from one of the drafts counts as changed.
+ */
 export function pageCompositionChanged(
-  persisted: SiteDefinition,
-  working: SiteDefinition,
+  persisted: SitePage | undefined,
+  working: SitePage | undefined,
   registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): boolean {
+  if (persisted === undefined || working === undefined) {
+    return persisted !== working;
+  }
   return (
     JSON.stringify(toPageCompositionIdentity(persisted, registry)) !==
       JSON.stringify(toPageCompositionIdentity(working, registry)) ||
     JSON.stringify(
-      homePage(persisted).sections.filter(({ type }) => type === "registered"),
+      persisted.sections.filter(({ type }) => type === "registered"),
     ) !==
       JSON.stringify(
-        homePage(working).sections.filter(({ type }) => type === "registered"),
+        working.sections.filter(({ type }) => type === "registered"),
       )
   );
 }

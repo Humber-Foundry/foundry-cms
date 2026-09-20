@@ -1,26 +1,85 @@
 import {
+  findPageById,
   listEditableSiteFields,
-  pageCompositionContract,
+  pageCompositionSlotId,
   toPageCompositionIdentity,
   updateEditableSiteField,
   type SiteDefinition,
   type SiteDefinitionEdit,
-  homePage,
+  type SitePage,
   replacePage,
 } from "@humber-foundry/site-definition";
 
-function compositionIdentity(definition: SiteDefinition): string {
-  return JSON.stringify(toPageCompositionIdentity(definition));
+/**
+ * The structure of one page of a draft, as a comparable value. A page the
+ * draft does not hold reads as an empty string, so an added or removed page
+ * differs from every real structure.
+ */
+function pageCompositionIdentity(
+  definition: SiteDefinition,
+  pageId: string,
+): string {
+  const page = findPageById(definition, pageId);
+  return page === undefined
+    ? ""
+    : JSON.stringify(toPageCompositionIdentity(page));
 }
 
-function hasConcurrentCompositionConflict(
+/** Every page id either of the two drafts holds, without repeats. */
+function everyPageId(
+  ...definitions: ReadonlyArray<SiteDefinition>
+): string[] {
+  return [
+    ...new Set(
+      definitions.flatMap(({ pages }) => pages.map(({ id }) => id)),
+    ),
+  ];
+}
+
+/** The same definition with every page emptied of its sections. */
+function withoutAnySections(definition: SiteDefinition): SiteDefinition {
+  return {
+    ...definition,
+    pages: definition.pages.map((page) => ({ ...page, sections: [] })),
+  };
+}
+
+/** The same definition holding one section, on one page, and nothing else. */
+function withOnlySection(
+  definition: SiteDefinition,
+  page: SitePage,
+  sectionIndex: number,
+): SiteDefinition {
+  return replacePage(withoutAnySections(definition), {
+    ...page,
+    sections: [page.sections[sectionIndex]!],
+  });
+}
+
+/**
+ * The pages whose structure this editor and a revision saved elsewhere both
+ * changed, in different ways.
+ *
+ * Each page is judged on its own. Comparing every page as one value would call
+ * page A conflicted because page B changed elsewhere, and would report the
+ * trouble against the wrong page. See ADR-0032.
+ */
+function concurrentCompositionConflicts(
   state: ContentEditorState,
   incoming: SiteDefinition,
-): boolean {
-  const persisted = compositionIdentity(state.persistedDefinition);
-  const working = compositionIdentity(state.workingDefinition);
-  const external = compositionIdentity(incoming);
-  return working !== persisted && external !== persisted && working !== external;
+): SitePage[] {
+  return everyPageId(state.workingDefinition, incoming).flatMap((pageId) => {
+    const persisted = pageCompositionIdentity(
+      state.persistedDefinition,
+      pageId,
+    );
+    const working = pageCompositionIdentity(state.workingDefinition, pageId);
+    const external = pageCompositionIdentity(incoming, pageId);
+    const conflicted =
+      working !== persisted && external !== persisted && working !== external;
+    const page = findPageById(state.workingDefinition, pageId);
+    return conflicted && page !== undefined ? [page] : [];
+  });
 }
 
 function concurrentFieldConflicts(
@@ -63,26 +122,41 @@ function concurrentFieldConflicts(
     .sort();
 }
 
+/**
+ * Put one locally edited section back into the incoming revision, on the page
+ * it was edited on.
+ *
+ * Every page is searched, because the owner may have edited a section of a
+ * page they are no longer looking at. The section is matched to its own page
+ * by id, so restoring an edit to page B never touches page A.
+ */
 function restoreLocalEditableOwner(
   definition: SiteDefinition,
   working: SiteDefinition,
   path: string,
 ): SiteDefinition | null {
   const baseFieldPaths = new Set(
-    listEditableSiteFields(
-      replacePage(working, { ...homePage(working), sections: [] }),
-    ).map((field) => field.path),
-  );
-  const localSectionIndex = homePage(working).sections.findIndex((section) =>
-    listEditableSiteFields(
-      replacePage(working, { ...homePage(working), sections: [section] }),
-    ).some(
-      (field) => field.path === path && !baseFieldPaths.has(field.path),
+    listEditableSiteFields(withoutAnySections(working)).map(
+      (field) => field.path,
     ),
   );
-  if (localSectionIndex >= 0) {
-    const localSection = homePage(working).sections[localSectionIndex]!;
-    const sections = [...homePage(definition).sections];
+  for (const workingPage of working.pages) {
+    const localSectionIndex = workingPage.sections.findIndex((_section, at) =>
+      listEditableSiteFields(
+        withOnlySection(working, workingPage, at),
+      ).some(
+        (field) => field.path === path && !baseFieldPaths.has(field.path),
+      ),
+    );
+    if (localSectionIndex < 0) continue;
+    const localSection = workingPage.sections[localSectionIndex]!;
+    const incomingPage = definition.pages.find(
+      ({ id }) => id === workingPage.id,
+    );
+    // The incoming revision no longer holds this page, so there is nowhere to
+    // put the section back. The caller keeps the edit as a conflict instead.
+    if (incomingPage === undefined) return null;
+    const sections = [...incomingPage.sections];
     const incomingIndex = sections.findIndex(
       (section) => section.id === localSection.id,
     );
@@ -95,7 +169,7 @@ function restoreLocalEditableOwner(
         localSection,
       );
     }
-    return replacePage(definition, { ...homePage(definition), sections });
+    return replacePage(definition, { ...incomingPage, sections });
   }
 
   const localNavigationIndex = working.site.navigation.findIndex(
@@ -140,27 +214,46 @@ function mergeExternalRevision(
       .filter((field) => persisted.get(field.path) !== field.value)
       .map((field) => field.path),
   );
-  const compositionChanged =
-    compositionIdentity(state.persistedDefinition) !==
-    compositionIdentity(state.workingDefinition);
-  const incomingFields = hasConcurrentCompositionConflict(state, incoming)
-    ? []
-    : listEditableSiteFields(incoming);
-  const incomingSections = new Map(
-    homePage(incoming).sections.map((section) => [
-      `${section.type}:${section.id}`,
-      section,
-    ]),
+  // Only the pages the owner actually restructured in this session. A page
+  // they did not touch takes the incoming order, so a change saved elsewhere
+  // to another page is kept rather than overwritten.
+  const locallyRestructuredPageIds = new Set(
+    everyPageId(state.persistedDefinition, state.workingDefinition).filter(
+      (pageId) =>
+        pageCompositionIdentity(state.persistedDefinition, pageId) !==
+        pageCompositionIdentity(state.workingDefinition, pageId),
+    ),
   );
-  let merged = compositionChanged
-    ? replacePage(incoming, {
-        ...homePage(incoming),
-        sections: homePage(state.workingDefinition).sections.map(
+  const incomingFields =
+    concurrentCompositionConflicts(state, incoming).length > 0
+      ? []
+      : listEditableSiteFields(incoming);
+  // An unsaved structural change is kept on whichever page it was made on.
+  // Each page's sections are matched within that page alone, so the order the
+  // owner set on one page is never written onto another.
+  let merged = state.workingDefinition.pages.reduce(
+    (definition, workingPage) => {
+      if (!locallyRestructuredPageIds.has(workingPage.id)) return definition;
+      const incomingPage = definition.pages.find(
+        ({ id }) => id === workingPage.id,
+      );
+      if (incomingPage === undefined) return definition;
+      const incomingSections = new Map(
+        incomingPage.sections.map((section) => [
+          `${section.type}:${section.id}`,
+          section,
+        ]),
+      );
+      return replacePage(definition, {
+        ...incomingPage,
+        sections: workingPage.sections.map(
           (section) =>
             incomingSections.get(`${section.type}:${section.id}`) ?? section,
         ),
-      })
-    : incoming;
+      });
+    },
+    incoming,
+  );
   for (const field of workingFields) {
     if (!locallyDirtyPaths.has(field.path)) continue;
     const updated = updateEditableSiteField(merged, field);
@@ -422,15 +515,16 @@ export function contentEditorReducer(
         errors: {},
       };
     case "externalRevision":
-      const compositionConflict = hasConcurrentCompositionConflict(
+      const compositionConflicts = concurrentCompositionConflicts(
         state,
         action.definition,
       );
-      const fieldConflicts = compositionConflict
-        ? []
-        : concurrentFieldConflicts(state, action.definition);
+      const fieldConflicts =
+        compositionConflicts.length > 0
+          ? []
+          : concurrentFieldConflicts(state, action.definition);
       const hasConflict =
-        compositionConflict || fieldConflicts.length > 0;
+        compositionConflicts.length > 0 || fieldConflicts.length > 0;
       return {
         ...state,
         persistedDefinition: action.definition,
@@ -445,12 +539,16 @@ export function contentEditorReducer(
               ? "saved"
               : state.status,
         errors: {
-          ...(compositionConflict
-            ? {
-                [pageCompositionContract.slot.id]:
-                  "The page structure changed elsewhere. Reload latest to reconcile your unsaved structure.",
-              }
-            : {}),
+          // Keyed by the slot of the page that actually changed, so the
+          // record says which page is in trouble. The editor renders errors by
+          // field path today, so this one is not yet put on screen; the
+          // message below is what the owner reads.
+          ...Object.fromEntries(
+            compositionConflicts.map((page) => [
+              pageCompositionSlotId(page),
+              "The page structure changed elsewhere. Reload latest to reconcile your unsaved structure.",
+            ]),
+          ),
           ...Object.fromEntries(
             fieldConflicts.map((path) => [
               path,

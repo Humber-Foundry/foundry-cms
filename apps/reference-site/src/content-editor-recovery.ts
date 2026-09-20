@@ -2,13 +2,16 @@ import {
   applyPageComposition,
   createRichTextDocumentFromPlainText,
   createSerializedRichTextDocument,
-  homePage,
+  findPageByCompositionSlotId,
   listEditableSiteFields,
-  pageCompositionContract,
+  isPageCompositionSlotId,
+  pageCompositionSlotId,
+  pageFieldPath,
   serializeRichTextDocument,
   toPageCompositionIdentity,
   type PageSection,
   type SiteDefinition,
+  type SitePage,
   type SiteDefinitionEdit,
 } from "@humber-foundry/site-definition";
 import { canonicalJson } from "@humber-foundry/application";
@@ -37,7 +40,7 @@ function upgradeLegacyStructuralRecoveryEdit(
   edit: StaleRecoveryEdit,
 ): StaleRecoveryEdit {
   if (
-    edit.path !== pageCompositionContract.slot.id ||
+    !isPageCompositionSlotId(edit.path) ||
     edit.format === "richText"
   ) {
     return edit;
@@ -114,7 +117,7 @@ export function upgradeLegacyRichTextRecoveryEdit(
 }
 
 export function comparableRecoveryValue(edit: StaleRecoveryEdit): string {
-  if (edit.path !== pageCompositionContract.slot.id) {
+  if (!isPageCompositionSlotId(edit.path)) {
     return edit.value;
   }
   try {
@@ -154,7 +157,7 @@ export function comparableRecoveryValue(edit: StaleRecoveryEdit): string {
 export function comparableRecoveryBaseValue(
   edit: StaleRecoveryEdit,
 ): string {
-  return edit.path === pageCompositionContract.slot.id
+  return isPageCompositionSlotId(edit.path)
     ? comparableRecoveryValue({
         path: edit.path,
         format: "plainText",
@@ -170,7 +173,16 @@ export function applyStructuralRecovery(
 ):
   | Readonly<{ ok: true; definition: SiteDefinition }>
   | Readonly<{ ok: false }> {
-  if (edit.path !== pageCompositionContract.slot.id) {
+  // The record names its page through its own path, which is that page's
+  // section slot id. Nothing else is stored, so a record written before a
+  // reload, a page switch or a crash goes back to the page it was made on. A
+  // record written when the CMS held one page carries `slot_home_sections` and
+  // still resolves to the home page. See ADR-0032.
+  const page = findPageByCompositionSlotId(definition, edit.path);
+  // A record whose page this draft no longer holds is left for the caller to
+  // report as a conflict. Restoring it onto some other page would move the
+  // owner's sections to a page they never edited.
+  if (page === undefined) {
     return { ok: false };
   }
   const recoveredEdit = upgradeLegacyStructuralRecoveryEdit(edit);
@@ -218,7 +230,7 @@ export function applyStructuralRecovery(
         ),
       );
       baseIds = new Set(baseById.keys());
-      for (const current of homePage(definition).sections) {
+      for (const current of page.sections) {
         const base = baseById.get(current.id);
         if (
           base !== undefined &&
@@ -228,13 +240,11 @@ export function applyStructuralRecovery(
           return { ok: false };
         }
       }
-    } else if (
-      homePage(definition).sections.some(({ id }) => !targetIds.has(id))
-    ) {
+    } else if (page.sections.some(({ id }) => !targetIds.has(id))) {
       return { ok: false };
     }
     const currentById = new Map(
-      homePage(definition).sections.map((section) => [section.id, section]),
+      page.sections.map((section) => [section.id, section]),
     );
     const mergedComposition = {
       ...composition,
@@ -254,13 +264,14 @@ export function applyStructuralRecovery(
         }),
         ...(baseIds === null
           ? []
-          : homePage(definition).sections.filter(
+          : page.sections.filter(
               ({ id }) => !baseIds.has(id) && !targetIds.has(id),
             )),
       ],
     };
     const result = applyPageComposition(
       definition,
+      page,
       mergedComposition,
       installedPageComponentRegistry,
     );
@@ -302,20 +313,22 @@ export function planStructuralFirstRecovery(
 }> {
   const orderedEdits = [
     ...edits.filter(
-      ({ path }) => path === pageCompositionContract.slot.id,
+      ({ path }) => isPageCompositionSlotId(path),
     ),
     ...edits.filter(
-      ({ path }) => path !== pageCompositionContract.slot.id,
+      ({ path }) => !isPageCompositionSlotId(path),
     ),
   ];
   let projectedDefinition = definition;
   for (const edit of orderedEdits) {
-    if (edit.path !== pageCompositionContract.slot.id) {
+    const page = findPageByCompositionSlotId(projectedDefinition, edit.path);
+    if (page === undefined) {
       continue;
     }
     if (
-      JSON.stringify(toPageCompositionIdentity(projectedDefinition, installedPageComponentRegistry)) !==
-      comparableRecoveryBaseValue(edit)
+      JSON.stringify(
+        toPageCompositionIdentity(page, installedPageComponentRegistry),
+      ) !== comparableRecoveryBaseValue(edit)
     ) {
       continue;
     }
@@ -326,21 +339,37 @@ export function planStructuralFirstRecovery(
   }
   return {
     orderedEdits,
+    // Every page offers its own structure, so a record made on one page is
+    // compared with that page and never with another.
     destinationValues: new Map([
       ...listEditableSiteFields(projectedDefinition).map(
         (field) => [field.path, field.value] as const,
       ),
-      [
-        pageCompositionContract.slot.id,
-        JSON.stringify(toPageCompositionIdentity(definition, installedPageComponentRegistry)),
-      ] as const,
+      ...definition.pages.map(
+        (page) =>
+          [
+            pageCompositionSlotId(page),
+            JSON.stringify(
+              toPageCompositionIdentity(page, installedPageComponentRegistry),
+            ),
+          ] as const,
+      ),
     ]),
     projected: projectedDefinition !== definition,
   };
 }
 
+/**
+ * Drop the field records a structural record already carries.
+ *
+ * A section added in this session travels inside its page's structural record,
+ * words and all, so keeping a separate record for each of its fields would
+ * restore the same text twice. `page` is the page those sections are on, so
+ * the field paths compared here carry that page's prefix. See ADR-0017.
+ */
 export function excludeCompositionOwnedEdits(
   edits: ReadonlyArray<StaleRecoveryEdit>,
+  page: SitePage,
   components: ReadonlyArray<PageSection>,
 ): StaleRecoveryEdit[] {
   const componentIds = new Set<string>();
@@ -363,7 +392,7 @@ export function excludeCompositionOwnedEdits(
   visit(components);
   return edits.filter(({ path }) => {
     for (const id of componentIds) {
-      if (path.startsWith(`${id}.`)) {
+      if (path.startsWith(pageFieldPath(page, `${id}.`))) {
         return false;
       }
     }

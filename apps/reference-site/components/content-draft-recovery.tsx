@@ -7,7 +7,7 @@ import {
   type ContentRevision,
 } from "@humber-foundry/application";
 import {
-  pageCompositionContract,
+  isPageCompositionSlotId,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 import { isInstalledSiteDefinition } from "../foundry/site-definition";
@@ -48,7 +48,7 @@ function fullRecoveryValue(
   edit: StaleRecoveryEdit,
   property: "baseValue" | "value",
 ): string {
-  if (edit.path !== pageCompositionContract.slot.id) {
+  if (!isPageCompositionSlotId(edit.path)) {
     return edit[property];
   }
   try {
@@ -59,7 +59,7 @@ function fullRecoveryValue(
 }
 
 function hasIdentityOnlyStructuralBase(edit: StaleRecoveryEdit): boolean {
-  if (edit.path !== pageCompositionContract.slot.id) {
+  if (!isPageCompositionSlotId(edit.path)) {
     return false;
   }
   try {

@@ -1,18 +1,25 @@
 import type {
   PageSection,
   SiteDefinition,
+  SitePage,
 } from "./index";
 import {
   foundationPageComponentRegistry,
   type PageComponentField,
   type PageComponentRegistry,
+  type PageSectionContext,
 } from "./page-component-registry";
-import { homePage, replacePage } from "./pages";
+import { pageCompositionSlotId, replacePage } from "./pages";
 
 export type PageComponentType = Exclude<PageSection["type"], "registered">;
 
 export type PageComposition = Readonly<{
-  slotId: "slot_home_sections";
+  /**
+   * The section slot this composition fills. It names one page — see
+   * `pageCompositionSlotId` — so a composition can never be applied to a page
+   * it was not built for.
+   */
+  slotId: string;
   components: ReadonlyArray<PageSection>;
 }>;
 
@@ -35,6 +42,12 @@ const foundationCompositionComponents = Object.freeze(
   ),
 );
 
+/**
+ * The section slot as the contract describes it. `id` and `path` are the home
+ * page's, because the contract is published as one shape and the home page's
+ * identifiers are the ones already in stored drafts and published files. Use
+ * `pageCompositionSlotId(page)` for the slot of any one page.
+ */
 export const pageCompositionContract = Object.freeze({
   slot: Object.freeze({
     id: "slot_home_sections" as const,
@@ -49,23 +62,26 @@ export const pageCompositionContract = Object.freeze({
 export function createDefaultPageSection(
   type: string,
   id: string,
-  definition?: SiteDefinition,
+  context?: PageSectionContext,
   registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): PageSection {
-  return registry.createDefault(type, id, definition);
+  return registry.createDefault(type, id, context);
 }
 
-export function toPageComposition(
-  definition: SiteDefinition,
-): PageComposition {
+/** The sections of one page, as the slot the visual editor fills. */
+export function toPageComposition(page: SitePage): PageComposition {
   return {
-    slotId: pageCompositionContract.slot.id,
-    components: homePage(definition).sections,
+    slotId: pageCompositionSlotId(page),
+    components: page.sections,
   };
 }
 
+/**
+ * One page's structure without its words: which sections it holds, of which
+ * type, in which order. Two drafts with the same identity differ only in text.
+ */
 export function toPageCompositionIdentity(
-  definition: SiteDefinition,
+  page: SitePage,
   registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): Readonly<{
   slotId: PageComposition["slotId"];
@@ -74,8 +90,8 @@ export function toPageCompositionIdentity(
   >;
 }> {
   return {
-    slotId: pageCompositionContract.slot.id,
-    components: homePage(definition).sections.map((section) => ({
+    slotId: pageCompositionSlotId(page),
+    components: page.sections.map((section) => ({
       id: section.id,
       type: registry.keyFor(section),
     })),
@@ -103,14 +119,21 @@ function validateObjectKeys(
   return true;
 }
 
+/**
+ * The sections of `page` that protected scaffolding points at with a `#id`
+ * anchor, so the editor can refuse to remove one and leave a dead link.
+ *
+ * `sections` is what the page is about to hold; it defaults to what it holds
+ * now. Only this page's anchors count, because an anchor is resolved within
+ * the page it is on.
+ */
 export function referencedPageComponentIds(
   definition: SiteDefinition,
-  sections: ReadonlyArray<PageSection> = homePage(definition).sections,
+  page: SitePage,
+  sections: ReadonlyArray<PageSection> = page.sections,
 ): ReadonlySet<string> {
   const referenced = new Set<string>();
-  const componentIds = new Set(
-    homePage(definition).sections.map(({ id }) => id),
-  );
+  const componentIds = new Set(page.sections.map(({ id }) => id));
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
       value.forEach(visit);
@@ -328,13 +351,22 @@ function validateEditableProps(
   if (!validation.ok) Object.assign(errors, validation.errors);
 }
 
+/**
+ * The submitted sections written onto one page.
+ *
+ * `page` is the page the composition belongs to, and the submitted `slotId`
+ * must be that page's own slot. Every read below is of `page`, so a
+ * composition built for one page can never change another. See ADR-0032.
+ */
 export function applyPageComposition(
   definition: SiteDefinition,
+  page: SitePage,
   value: unknown,
   registry: PageComponentRegistry = foundationPageComponentRegistry,
 ): PageCompositionResult {
   const errors = Object.create(null) as Record<string, string>;
-  if (!isRecord(value) || value.slotId !== pageCompositionContract.slot.id) {
+  const slotIdOfPage = pageCompositionSlotId(page);
+  if (!isRecord(value) || value.slotId !== slotIdOfPage) {
     const slotId =
       isRecord(value) && typeof value.slotId === "string"
         ? value.slotId
@@ -346,7 +378,7 @@ export function applyPageComposition(
     !validateObjectKeys(
       value,
       ["slotId", "components"],
-      pageCompositionContract.slot.id,
+      slotIdOfPage,
       errors,
     )
   ) {
@@ -356,8 +388,7 @@ export function applyPageComposition(
     return {
       ok: false,
       errors: {
-        [pageCompositionContract.slot.id]:
-          "Provide the registered components for this slot.",
+        [slotIdOfPage]: "Provide the registered components for this slot.",
       },
     };
   }
@@ -365,12 +396,12 @@ export function applyPageComposition(
     value.components.length < pageCompositionContract.slot.minItems ||
     value.components.length > pageCompositionContract.slot.maxItems
   ) {
-    errors[pageCompositionContract.slot.id] =
+    errors[slotIdOfPage] =
       `Use ${pageCompositionContract.slot.minItems}–${pageCompositionContract.slot.maxItems} components.`;
   }
 
   const existingById = new Map(
-    homePage(definition).sections.map((section) => [section.id, section]),
+    page.sections.map((section) => [section.id, section]),
   );
   const submittedIds = new Set(
     value.components.flatMap((candidate) =>
@@ -399,13 +430,10 @@ export function applyPageComposition(
     }
   };
   seedProtectedIds(definition.site);
-  seedProtectedIds({
-    id: homePage(definition).id,
-    seo: homePage(definition).seo,
-  });
+  seedProtectedIds({ id: page.id, seo: page.seo });
   for (const candidate of value.components) {
     if (!isRecord(candidate)) {
-      errors[pageCompositionContract.slot.id] =
+      errors[slotIdOfPage] =
         "Every slot item must be a registered component.";
       continue;
     }
@@ -449,28 +477,41 @@ export function applyPageComposition(
     }
     const submittedContextSections = [
       ...accepted,
-      ...homePage(definition).sections.filter(
+      ...page.sections.filter(
         ({ id: existingId }) =>
           submittedIds.has(existingId) &&
           !accepted.some(({ id: acceptedId }) => acceptedId === existingId),
       ),
     ];
-    const submittedContext = replacePage(definition, {
-      ...homePage(definition),
+    const submittedContextPage = {
+      ...page,
       sections: submittedContextSections,
-    });
+    };
     const defaultScaffold =
       existing === undefined &&
       (
         equalProtectedShape(
-          createDefaultPageSection(componentKey, id, definition, registry),
+          createDefaultPageSection(
+            componentKey,
+            id,
+            { definition, page },
+            registry,
+          ),
           section,
           registry,
           false,
           false,
         ) ||
         equalProtectedShape(
-          createDefaultPageSection(componentKey, id, submittedContext, registry),
+          createDefaultPageSection(
+            componentKey,
+            id,
+            {
+              definition: replacePage(definition, submittedContextPage),
+              page: submittedContextPage,
+            },
+            registry,
+          ),
           section,
           registry,
           false,
@@ -480,7 +521,7 @@ export function applyPageComposition(
     const duplicateScaffold =
       existing === undefined &&
       hasCanonicalDuplicateIds(section) &&
-      [...homePage(definition).sections, ...accepted]
+      [...page.sections, ...accepted]
         .filter((source) => registry.keyFor(source) === componentKey)
         .some((source) =>
           equalProtectedShape(source, section, registry, true, false),
@@ -548,6 +589,7 @@ export function applyPageComposition(
   const acceptedIds = new Set(accepted.map(({ id }) => id));
   for (const referencedId of referencedPageComponentIds(
     definition,
+    page,
     accepted,
   )) {
     if (!acceptedIds.has(referencedId)) {
@@ -561,6 +603,6 @@ export function applyPageComposition(
   const next = structuredClone(definition) as SiteDefinition;
   return {
     ok: true,
-    definition: replacePage(next, { ...homePage(next), sections: accepted }),
+    definition: replacePage(next, { ...page, sections: accepted }),
   };
 }

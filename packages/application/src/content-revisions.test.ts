@@ -717,7 +717,7 @@ describe("content revision application", () => {
     });
     await createWorkspace(application, "create-workspace-compose-0001");
     const composition = {
-      ...toPageComposition(referenceSiteDefinition),
+      ...toPageComposition(homePage(referenceSiteDefinition)),
       components: [
         ...homePage(referenceSiteDefinition).sections,
       ] as PageSection[],
@@ -733,7 +733,7 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 0,
       edits: [],
-      composition,
+      compositions: [composition],
       idempotencyKey: "compose-page-components-0001",
     });
 
@@ -749,6 +749,92 @@ describe("content revision application", () => {
     );
   });
 
+  it("writes each page's structural change onto its own page", async () => {
+    // A save can carry a change for more than one page: a restored draft can
+    // leave an unsaved structural change on a page the owner is not looking
+    // at. Each change names its page through its slot id, so neither can land
+    // on the other's page. See ADR-0032.
+    const home = homePage(referenceSiteDefinition);
+    const secondPage = {
+      id: "page_about",
+      slug: "about",
+      title: "About",
+      seo: { title: "", description: "", keywords: [], shareImage: null },
+      media: [],
+      sections: [
+        createDefaultPageSection("proof", "section_about_proof"),
+      ],
+    };
+    const twoPages = {
+      ...referenceSiteDefinition,
+      pages: [home, secondPage],
+    } as typeof referenceSiteDefinition;
+
+    const application = createContentRevisionApplication({
+      siteDefinition: twoPages,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-two-pages-0001");
+
+    const homeComposition: PageComposition = {
+      ...toPageComposition(home),
+      components: [...home.sections].reverse() as PageSection[],
+    };
+    const secondComposition: PageComposition = {
+      ...toPageComposition(secondPage),
+      components: [
+        ...secondPage.sections,
+        createDefaultPageSection("proof", "section_about_second"),
+      ] as PageSection[],
+    };
+
+    const saved = await application.commands.save({
+      actorId: editorActorId,
+      ...commandInputs,
+      baseRevision: 0,
+      edits: [],
+      compositions: [homeComposition, secondComposition],
+      idempotencyKey: "compose-two-pages-0001",
+    });
+
+    expect(homePage(saved.definition).sections.map(({ id }) => id)).toEqual(
+      [...home.sections].reverse().map(({ id }) => id),
+    );
+    expect(
+      saved.definition.pages
+        .find(({ id }) => id === "page_about")!
+        .sections.map(({ id }) => id),
+    ).toEqual(["section_about_proof", "section_about_second"]);
+  });
+
+  it("rejects a structural change whose slot names no page of the site", async () => {
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createInMemoryContentRevisionStore(),
+      ...applicationInputs,
+    });
+    await createWorkspace(application, "create-workspace-unknown-slot-0001");
+
+    await expect(
+      application.commands.save({
+        actorId: editorActorId,
+        ...commandInputs,
+        baseRevision: 0,
+        edits: [],
+        compositions: [
+          {
+            slotId: "slot_page_missing_sections",
+            components: [
+              ...homePage(referenceSiteDefinition).sections,
+            ] as PageSection[],
+          },
+        ],
+        idempotencyKey: "compose-unknown-slot-0001",
+      }),
+    ).rejects.toBeInstanceOf(ContentRevisionValidationError);
+  });
+
   it("rejects a composition-only save with empty required rich text", async () => {
     const application = createContentRevisionApplication({
       siteDefinition: referenceSiteDefinition,
@@ -757,7 +843,7 @@ describe("content revision application", () => {
     });
     await createWorkspace(application, "create-workspace-empty-rich-text");
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const callToAction = composition.components.find(
       (section) => section.type === "callToAction",
@@ -781,7 +867,7 @@ describe("content revision application", () => {
         ...commandInputs,
         baseRevision: 0,
         edits: [],
-        composition,
+        compositions: [composition],
         idempotencyKey: "composition-empty-rich-text",
       }),
     ).rejects.toEqual(
@@ -805,7 +891,7 @@ describe("content revision application", () => {
     });
     await createWorkspace(application, "create-workspace-compose-copy");
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const hero = composition.components[0]!;
     if (hero.type !== "hero") {
@@ -826,7 +912,7 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "action_start.label", value: "Start here" }],
-      composition: reorderedComposition,
+      compositions: [reorderedComposition],
       idempotencyKey: "compose-with-nested-copy",
     });
 
@@ -851,7 +937,7 @@ describe("content revision application", () => {
       "create-workspace-compose-variant",
     );
     const composition = structuredClone(
-      toPageComposition(referenceSiteDefinition),
+      toPageComposition(homePage(referenceSiteDefinition)),
     );
     const originalHero = composition.components[0]!;
     if (originalHero.type !== "hero") {
@@ -861,7 +947,10 @@ describe("content revision application", () => {
     const added = createDefaultPageSection(
       "proof",
       "section_added_proof",
-      referenceSiteDefinition,
+      {
+        definition: referenceSiteDefinition,
+        page: homePage(referenceSiteDefinition),
+      },
     );
     if (added.type !== "proof") {
       throw new Error("expected_proof_fixture");
@@ -873,15 +962,17 @@ describe("content revision application", () => {
       ...commandInputs,
       baseRevision: 0,
       edits: [{ path: "section_hero.variant", value: "focused" }],
-      composition: {
-        ...composition,
-        components: [
-          composition.components[1]!,
-          hero,
-          ...composition.components.slice(2),
-          nonDefaultAdded,
-        ],
-      },
+      compositions: [
+        {
+          ...composition,
+          components: [
+            composition.components[1]!,
+            hero,
+            ...composition.components.slice(2),
+            nonDefaultAdded,
+          ],
+        },
+      ],
       idempotencyKey: "compose-with-variants",
     });
 
@@ -914,15 +1005,17 @@ describe("content revision application", () => {
         ...commandInputs,
         baseRevision: 0,
         edits: [],
-        composition: {
-          slotId: "slot_home_sections",
-          components: [
-            {
-              ...homePage(referenceSiteDefinition).sections[0],
-              type: "script",
-            },
-          ],
-        } as never,
+        compositions: [
+          {
+            slotId: "slot_home_sections",
+            components: [
+              {
+                ...homePage(referenceSiteDefinition).sections[0],
+                type: "script",
+              },
+            ],
+          } as never,
+        ],
         idempotencyKey: "compose-page-components-0002",
       }),
     ).rejects.toEqual(
@@ -1427,7 +1520,7 @@ describe("section style reconciliation per page", () => {
 
   /** The page's composition with the hero section given another style. */
   const restyledComposition = (): PageComposition => {
-    const composition = toPageComposition(referenceSiteDefinition);
+    const composition = toPageComposition(homePage(referenceSiteDefinition));
     return {
       ...composition,
       components: composition.components.map((component) =>

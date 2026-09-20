@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   designContract,
+  homePage,
   listEditableSiteFields,
   referenceSiteDefinition,
   updateEditableSiteField,
@@ -12,7 +13,10 @@ import {
   optionColumns,
 } from "./design-destination-controls";
 
-const groups = designControlGroups(referenceSiteDefinition);
+const groups = designControlGroups(
+  referenceSiteDefinition,
+  homePage(referenceSiteDefinition),
+);
 const controls = groups.flatMap((group) => group.controls);
 const designFields = listEditableSiteFields(referenceSiteDefinition).filter(
   (field) => field.group === "Design",
