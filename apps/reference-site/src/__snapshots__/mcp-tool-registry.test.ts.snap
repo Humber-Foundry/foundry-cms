@@ -199,6 +199,81 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": false,
     },
+    "description": "Start a new blog post in the draft, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "ef89e4fdb63294328b9de03bc4ae72687ad8702c9806798857f8b22852b4dab6",
+    "name": "foundry.blog.create",
+    "outputSchemaSha256": "63b1ea4da2e26b5448e06185b271d906d9494cc281bc81e3e9e11083026039e4",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Rewrite one blog post in the draft, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "8e805367cc25ca05cfc920cfe9e903f2daebf693881520efdcccff9aad83ab5a",
+    "name": "foundry.blog.update",
+    "outputSchemaSha256": "63b1ea4da2e26b5448e06185b271d906d9494cc281bc81e3e9e11083026039e4",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Take one post out of the blog. A post that is on the site comes off it only after a person approves the removal.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "8e9468d13bc4c5732cac36fcc820b5300ed3704a8966f65b6123276a2e775a8d",
+    "name": "foundry.blog.archive",
+    "outputSchemaSha256": "8926ca8411e53e77a34cbfffd225a08046917fb869c53b853dd757724b219300",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Put one archived post back as an unpublished draft.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "8e9468d13bc4c5732cac36fcc820b5300ed3704a8966f65b6123276a2e775a8d",
+    "name": "foundry.blog.restore",
+    "outputSchemaSha256": "6564a5f33a18393d4731635e0f5d9cbd98d38f0f509041872337170fba39d1c4",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Ask a person to publish one post at a named time. It records the request only; a person approves the post and starts the schedule.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "1538decd8f6dc798b6e11f113b44fe06953e9d334845afd5c1a3bd51658819f3",
+    "name": "foundry.blog.schedule_request",
+    "outputSchemaSha256": "3cf36ad7aec0a883e72bba5d5041d4c79422719638e206a0cc731b09549dc937",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
     "description": "Prepare an immutable canonical preview and a human review URL without creating approval.",
     "execution": {
       "taskSupport": "forbidden",

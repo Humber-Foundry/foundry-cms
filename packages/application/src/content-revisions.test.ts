@@ -451,9 +451,12 @@ describe("content revision application", () => {
       idempotencyKey: "create-blog-post-0002",
     } as const;
     const created = await application.commands.createBlogPost(command);
-    await expect(application.commands.createBlogPost(command)).resolves.toEqual(
-      created,
-    );
+    expect(created.replayed).toBe(false);
+    expect(created.postId).toBe(command.post.id);
+    // The same request again answers with the same revision and the same
+    // post, and says it was a replay rather than writing a second post.
+    const replayed = await application.commands.createBlogPost(command);
+    expect(replayed).toEqual({ ...created, replayed: true });
     await expect(
       application.commands.createBlogPost({
         ...command,

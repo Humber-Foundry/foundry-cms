@@ -1,6 +1,7 @@
 import {
   BlogPostOperationError,
   createBlogPostOperationsApplication,
+  mcpBlogOperationScopes,
   createContentApprovalId,
   createContentWorkspaceId,
   type ArchivedBlogPostSummary,
@@ -13,12 +14,17 @@ import {
   type BlogPostScheduleExecution,
   type BlogPostScheduleProposal,
   type ContentActorId,
+  type McpBlogOperationAuthority,
   type McpBlogScheduleAuthority,
   type RestoredBlogPostDraft,
 } from "@humber-foundry/application";
 import type { BlogPostId, SiteId } from "@humber-foundry/site-definition";
 import type { BlogPost, SiteDefinition } from "@humber-foundry/site-definition";
 
+import {
+  contentAuthoritySql,
+  mcpAuthorityBinds,
+} from "./d1-blog-post-content-authority";
 import {
   prepareAcceptedBlogPostAudit,
   recordD1BlogPostAudit,
@@ -748,18 +754,19 @@ export function createD1BlogPostOperationsStore(
         .bind(input.siteId, input.actorId)
         .first<{ id: string }>()) !== null;
     },
-    async hasMcpScheduleAuthority(input) {
+    async hasMcpBlogOperationAuthority(input) {
       return (await database
         .prepare(
           `SELECT connection.id
            FROM mcp_connections AS connection
-           JOIN mcp_connection_scopes AS scope
-             ON scope.connection_id = connection.id
-            AND scope.scope = 'publication.schedule'
+           JOIN mcp_connection_scopes AS pinned
+             ON pinned.connection_id = connection.id
+            AND pinned.scope = ?5
            WHERE connection.id = ?1
              AND connection.actor_id = ?2
              AND connection.site_id = ?3
              AND connection.status = 'active'
+             AND json_array_length(?4) > 0
              AND NOT EXISTS (
                SELECT 1
                FROM json_each(?4) AS required
@@ -777,6 +784,9 @@ export function createD1BlogPostOperationsStore(
           input.actorId,
           input.siteId,
           JSON.stringify(input.requiredScopes),
+          // The one permission this command needs, taken from the command
+          // rather than from the caller's list. See ADR-0036.
+          mcpBlogOperationScopes[input.operation],
         )
         .first<{ id: string }>()) !== null;
     },
@@ -869,7 +879,7 @@ export function createD1BlogPostOperationsStore(
         candidates.results[0]!.post_id,
       );
     },
-    async saveScheduleProposal(proposal, idempotencyKey) {
+    async saveScheduleProposal(proposal, idempotencyKey, authority) {
       const replay = await database
         .prepare(
           `SELECT id, site_id, post_id, workspace_id, content_revision,
@@ -922,14 +932,14 @@ export function createD1BlogPostOperationsStore(
                  AND post.current_revision_id = ?14
                  AND post.version = ?15
              )
-             AND EXISTS (
-               SELECT membership.id
-               FROM human_memberships AS membership
-               WHERE membership.site_id = ?2
-                 AND membership.id = ?11
-                 AND membership.status = 'active'
-                 AND membership.role IN ('owner', 'editor')
-             )
+             AND ${contentAuthoritySql({
+               site: "?2",
+               actor: "?11",
+               connection: "?17",
+               mcpActor: "?18",
+               scopes: "?19",
+               pinnedScope: "?20",
+             })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
                WHERE site_id = ?2
@@ -955,6 +965,7 @@ export function createD1BlogPostOperationsStore(
             proposal.postRevisionId,
             proposal.authorityVersion,
             proposal.proposalAuditId,
+            ...mcpAuthorityBinds(authority),
           ),
         prepareAcceptedBlogPostAudit(
           database,
@@ -997,14 +1008,24 @@ export function createD1BlogPostOperationsStore(
         }
         if (
           concurrentReplay === null &&
-          !(await store.hasScheduleProposalAuthority({
-            siteId: proposal.siteId,
-            postId: proposal.postId,
-            actorId: proposal.createdBy,
-          }))
+          !(authority === undefined
+            ? await store.hasScheduleProposalAuthority({
+                siteId: proposal.siteId,
+                postId: proposal.postId,
+                actorId: proposal.createdBy,
+              })
+            : await store.hasMcpBlogOperationAuthority({
+                siteId: proposal.siteId,
+                connectionId: authority.connectionId,
+                actorId: authority.actorId,
+                operation: authority.operation,
+                requiredScopes: authority.requiredScopes,
+              }))
         ) {
           throw new BlogPostOperationError(
-            "schedule_proposal_authority_required",
+            authority === undefined
+              ? "schedule_proposal_authority_required"
+              : "mcp_schedule_authority_required",
           );
         }
         throw new BlogPostOperationError(
@@ -1393,10 +1414,11 @@ export function createD1BlogPostOperationsStore(
                 siteId: schedule.siteId,
                 actorId: schedule.activatedBy,
               })
-            : await store.hasMcpScheduleAuthority({
+            : await store.hasMcpBlogOperationAuthority({
                 siteId: schedule.siteId,
                 connectionId: authority.connectionId,
                 actorId: authority.actorId,
+                operation: authority.operation,
                 requiredScopes: authority.requiredScopes,
               });
         if (!hasAuthority) {
@@ -1675,10 +1697,11 @@ export function createD1BlogPostOperationsStore(
               siteId: input.siteId,
               actorId: input.actorId,
             })
-          : await store.hasMcpScheduleAuthority({
+          : await store.hasMcpBlogOperationAuthority({
               siteId: input.siteId,
               connectionId: input.authority.connectionId,
               actorId: input.authority.actorId,
+              operation: input.authority.operation,
               requiredScopes: input.authority.requiredScopes,
             });
       if (!hasAuthority) {
@@ -2612,12 +2635,14 @@ export function createD1BlogPostOperationsStore(
                    )
                  )
              )
-             AND EXISTS (
-               SELECT 1 FROM human_memberships
-               WHERE site_id = ?1 AND id = ?6
-                 AND status = 'active'
-                 AND role IN ('owner', 'editor')
-             )
+             AND ${contentAuthoritySql({
+               site: "?1",
+               actor: "?6",
+               connection: "?13",
+               mcpActor: "?14",
+               scopes: "?15",
+               pinnedScope: "?16",
+             })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
                WHERE site_id = ?1
@@ -2675,12 +2700,14 @@ export function createD1BlogPostOperationsStore(
                version = blog_post_collection_states.version + 1,
                updated_at = excluded.updated_at
              WHERE blog_post_collection_states.collection_state = 'active'
-               AND EXISTS (
-                 SELECT 1 FROM human_memberships
-                 WHERE site_id = ?1 AND id = ?6
-                   AND status = 'active'
-                   AND role IN ('owner', 'editor')
-               )
+               AND ${contentAuthoritySql({
+                 site: "?1",
+                 actor: "?6",
+                 connection: "?13",
+                 mcpActor: "?14",
+                 scopes: "?15",
+                 pinnedScope: "?16",
+               })}
                AND NOT EXISTS (
                  SELECT 1 FROM blog_post_operation_audit_events
                  WHERE site_id = ?1
@@ -2752,6 +2779,7 @@ export function createD1BlogPostOperationsStore(
             post.postRevisionId,
             post.version,
             post.liveRevisionId,
+            ...mcpAuthorityBinds(input.authority),
           ),
         database
           .prepare(
@@ -3456,13 +3484,14 @@ export function createD1BlogPostOperationsStore(
                updated_at = ?4
            WHERE site_id = ?5 AND post_id = ?6
              AND collection_state = 'archived'
-             AND EXISTS (
-               SELECT 1 FROM human_memberships AS current_actor
-               WHERE current_actor.site_id = ?5
-                 AND current_actor.id = ?3
-                 AND current_actor.status = 'active'
-                 AND current_actor.role IN ('owner', 'editor')
-             )
+             AND ${contentAuthoritySql({
+               site: "?5",
+               actor: "?3",
+               connection: "?7",
+               mcpActor: "?8",
+               scopes: "?9",
+               pinnedScope: "?10",
+             })}
              AND NOT EXISTS (
                SELECT 1 FROM blog_post_operation_audit_events
                WHERE site_id = ?5
@@ -3494,6 +3523,7 @@ export function createD1BlogPostOperationsStore(
           input.occurredAt,
           input.siteId,
           input.postId,
+          ...mcpAuthorityBinds(input.authority),
         )
         .run();
       if ((claimed.meta.changes ?? 0) !== 1) {
@@ -3591,12 +3621,14 @@ export function createD1BlogPostOperationsStore(
                    AND command_type = 'blog.post.restore'
                    AND request_id = ?4 AND outcome = 'accepted'
                )
-               AND EXISTS (
-                 SELECT 1 FROM human_memberships
-                 WHERE site_id = ?2 AND id = ?6
-                   AND status = 'active'
-                   AND role IN ('owner', 'editor')
-               )`,
+               AND ${contentAuthoritySql({
+                 site: "?2",
+                 actor: "?6",
+                 connection: "?7",
+                 mcpActor: "?8",
+                 scopes: "?9",
+                 pinnedScope: "?10",
+               })}`,
           )
           .bind(
             input.occurredAt,
@@ -3605,6 +3637,7 @@ export function createD1BlogPostOperationsStore(
             input.idempotencyKey,
             input.selectedPostRevisionId,
             input.actorId,
+            ...mcpAuthorityBinds(input.authority),
           ),
         database
           .prepare(

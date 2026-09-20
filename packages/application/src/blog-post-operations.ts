@@ -118,14 +118,46 @@ export type BlogPostScheduleClaim = Readonly<{
   lease: BlogPostScheduleExecutionLease | null;
 }>;
 
-export type McpBlogScheduleAuthority = Readonly<{
+/**
+ * Which blog operations an MCP connection may carry out in its own name, and
+ * the one permission each of them needs.
+ *
+ * An MCP connection is a different actor from the person who granted it, even
+ * when they are the same human (see the MCP threat model). So a blog command
+ * an agent runs carries this record instead of a dashboard membership, and
+ * the audit trail names the connection.
+ *
+ * Archiving and restoring are content work: neither takes a post off the
+ * public site by itself. Archiving a live post only starts the removal, and
+ * that removal is an ordinary publication a person must still review and
+ * approve. Asking for a schedule is a request a person turns into a schedule,
+ * so it needs the schedule permission and nothing more. See ADR-0036.
+ */
+export const mcpBlogOperationScopes = Object.freeze({
+  "foundry.publication.schedule": "publication.schedule",
+  "foundry.blog.schedule_request": "publication.schedule",
+  "foundry.blog.archive": "content.draft",
+  "foundry.blog.restore": "content.draft",
+} as const);
+
+export type McpBlogOperation = keyof typeof mcpBlogOperationScopes;
+
+export type McpBlogOperationAuthority = Readonly<{
   kind: "mcp";
   connectionId: string;
   actorId: string;
-  operation: "foundry.publication.schedule";
+  operation: McpBlogOperation;
   requiredScopes: ReadonlyArray<string>;
   audit?: McpLinkedPublicationAudit;
 }>;
+
+/**
+ * The authority record kept with an active schedule. Only the schedule tool
+ * writes one, because only a schedule runs on its own later and has to be
+ * checked again when it does.
+ */
+export type McpBlogScheduleAuthority = McpBlogOperationAuthority &
+  Readonly<{ operation: "foundry.publication.schedule" }>;
 
 export type BlogPostArchiveResult = BlogPostOperationalState &
   Readonly<{
@@ -225,6 +257,7 @@ export type BlogPostOperationsStore = Readonly<{
   saveScheduleProposal(
     proposal: BlogPostScheduleProposal,
     idempotencyKey: string,
+    authority?: McpBlogOperationAuthority,
   ): Promise<BlogPostScheduleProposal>;
   findScheduleProposalByRequest(input: {
     siteId: SiteId | string;
@@ -240,10 +273,16 @@ export type BlogPostOperationsStore = Readonly<{
     postId: BlogPostId | string;
     actorId: ContentActorId;
   }): Promise<boolean>;
-  hasMcpScheduleAuthority(input: {
+  hasMcpBlogOperationAuthority(input: {
     siteId: SiteId | string;
     connectionId: string;
     actorId: string;
+    /**
+     * Which blog command is being run. The store pins the one permission
+     * that command needs from `mcpBlogOperationScopes`, so the permission a
+     * command requires is never taken from the caller's own list.
+     */
+    operation: McpBlogOperation;
     requiredScopes: ReadonlyArray<string>;
   }): Promise<boolean>;
   findMcpScheduleAuthority(
@@ -337,6 +376,7 @@ export type BlogPostOperationsStore = Readonly<{
     selectedPostRevisionId: string;
     idempotencyKey: string;
     occurredAt: string;
+    authority?: McpBlogOperationAuthority;
   }): Promise<BlogPostArchiveResult>;
   confirmArchiveWithdrawal(input: {
     siteId: SiteId | string;
@@ -393,6 +433,7 @@ export type BlogPostOperationsStore = Readonly<{
     selectedPostRevisionId: string;
     idempotencyKey: string;
     occurredAt: string;
+    authority?: McpBlogOperationAuthority;
   }): Promise<void>;
   recordAudit(event: BlogPostOperationAuditEvent): Promise<void>;
   restore(input: {
@@ -402,6 +443,7 @@ export type BlogPostOperationsStore = Readonly<{
     selectedPostRevisionId: string;
     idempotencyKey: string;
     occurredAt: string;
+    authority?: McpBlogOperationAuthority;
     provenance?: {
       workspaceId: ContentWorkspaceId;
       contentRevision: number;
@@ -646,20 +688,35 @@ export function createBlogPostOperationsApplication({
     }
   }
 
-  async function requireMcpScheduleAuthority(
+  /**
+   * Check that an MCP connection may run this blog command.
+   *
+   * The connection has to be active, it has to be the actor it claims, and it
+   * has to hold every permission the request evaluated, including the one
+   * this operation needs. A request that never asked for that permission is
+   * refused here, before any post is read.
+   */
+  async function requireMcpOperationAuthority(
     siteId: SiteId | string,
-    authority: McpBlogScheduleAuthority,
+    authority: McpBlogOperationAuthority,
   ) {
+    const requiredScope = mcpBlogOperationScopes[authority.operation];
     if (
-      !(await store.hasMcpScheduleAuthority({
+      authority.requiredScopes.length === 0 ||
+      !authority.requiredScopes.includes(requiredScope) ||
+      !(await store.hasMcpBlogOperationAuthority({
         siteId,
         connectionId: authority.connectionId,
         actorId: authority.actorId,
+        operation: authority.operation,
         requiredScopes: authority.requiredScopes,
       }))
     ) {
       throw new BlogPostOperationError(
-        "mcp_schedule_authority_required",
+        authority.operation === "foundry.blog.archive" ||
+          authority.operation === "foundry.blog.restore"
+          ? "mcp_blog_authority_required"
+          : "mcp_schedule_authority_required",
       );
     }
   }
@@ -811,6 +868,7 @@ export function createBlogPostOperationsApplication({
           "timeZoneDatabaseVersion"
         >;
         idempotencyKey: string;
+        authority?: McpBlogOperationAuthority;
       }) {
         return audited(
           {
@@ -821,7 +879,14 @@ export function createBlogPostOperationsApplication({
             requestId: input.idempotencyKey,
           },
           async () => {
-            await requireScheduleProposalAuthority(input);
+            if (input.authority === undefined) {
+              await requireScheduleProposalAuthority(input);
+            } else {
+              await requireMcpOperationAuthority(
+                input.siteId,
+                input.authority,
+              );
+            }
             requireIdempotencyKey(input.idempotencyKey);
             const replay = await store.findScheduleProposalByRequest({
               siteId: input.siteId,
@@ -877,6 +942,7 @@ export function createBlogPostOperationsApplication({
                 createdAt: now(),
               },
               input.idempotencyKey,
+              input.authority,
             );
           },
         );
@@ -905,7 +971,7 @@ export function createBlogPostOperationsApplication({
             if (input.authority === undefined) {
               await requireHumanContentAuthority(input);
             } else {
-              await requireMcpScheduleAuthority(
+              await requireMcpOperationAuthority(
                 input.siteId,
                 input.authority,
               );
@@ -1040,7 +1106,7 @@ export function createBlogPostOperationsApplication({
             if (input.authority === undefined) {
               await requireHumanContentAuthority(input);
             } else {
-              await requireMcpScheduleAuthority(
+              await requireMcpOperationAuthority(
                 input.siteId,
                 input.authority,
               );
@@ -1252,6 +1318,7 @@ export function createBlogPostOperationsApplication({
         postId: BlogPostId | string;
         selectedPostRevisionId: string;
         idempotencyKey: string;
+        authority?: McpBlogOperationAuthority;
       }) {
         return audited(
           {
@@ -1262,7 +1329,14 @@ export function createBlogPostOperationsApplication({
             requestId: input.idempotencyKey,
           },
           async () => {
-            await requireHumanContentAuthority(input);
+            if (input.authority === undefined) {
+              await requireHumanContentAuthority(input);
+            } else {
+              await requireMcpOperationAuthority(
+                input.siteId,
+                input.authority,
+              );
+            }
             requireIdempotencyKey(input.idempotencyKey);
             return store.archive({ ...input, occurredAt: now() });
           },
@@ -1338,6 +1412,7 @@ export function createBlogPostOperationsApplication({
         postId: BlogPostId | string;
         selectedPostRevisionId: string;
         idempotencyKey: string;
+        authority?: McpBlogOperationAuthority;
         provenance?: {
           workspaceId: ContentWorkspaceId;
           contentRevision: number;
@@ -1353,7 +1428,14 @@ export function createBlogPostOperationsApplication({
             requestId: input.idempotencyKey,
           },
           async () => {
-            await requireHumanContentAuthority(input);
+            if (input.authority === undefined) {
+              await requireHumanContentAuthority(input);
+            } else {
+              await requireMcpOperationAuthority(
+                input.siteId,
+                input.authority,
+              );
+            }
             requireIdempotencyKey(input.idempotencyKey);
             return store.restore({ ...input, occurredAt: now() });
           },
@@ -1640,13 +1722,16 @@ export function createInMemoryBlogPostOperationsStore(seed: {
           `${input.actorId}\0${input.siteId}\0${input.postId}`,
         );
     },
-    async hasMcpScheduleAuthority(input) {
+    async hasMcpBlogOperationAuthority(input) {
       const key =
         `${input.connectionId}\0${input.actorId}\0${input.siteId}`;
       if (!mcpScheduleGrants.has(key)) return false;
       const granted = mcpScheduleGrants.get(key);
+      if (granted === undefined) return true;
+      // The permission this command needs is pinned to the command, not
+      // taken from the caller's list. See ADR-0036.
       return (
-        granted === undefined ||
+        granted.includes(mcpBlogOperationScopes[input.operation]) &&
         input.requiredScopes.every((scope) => granted.includes(scope))
       );
     },

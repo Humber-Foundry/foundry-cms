@@ -57,6 +57,9 @@ Legend: **A** allowed by application authorization, **H** human-only,
 | Read a prepared preview's review state | A | A | draft scopes for that revision, own preview only | — |
 | Request immediate site/blog publish | A | A | `publication.publish` + valid human approval | — |
 | Schedule site/blog publish | A | A | `publication.schedule` + valid human approval | Executes exact authorization |
+| Take a post out of the blog, or put one back | A | A | `content.draft` | — |
+| Take a live post off the public site | A | A | — | — |
+| Ask for a blog post to be published at a time | A | A | `publication.schedule` | — |
 | Request controlled campaign test | A | A | `campaign.test` | Executes exact test request |
 | Authorize/schedule/send bulk email | H | — | — | Executes separately authorized send only |
 | Manage humans, MCP grants or integrations | H | — | — | — |
@@ -83,6 +86,11 @@ human authorization decision remains authoritative where it is stricter.
 | `foundry.section.list` | `site.read` | None | None |
 | `foundry.design.patch` | `design.draft` | None | New immutable revision |
 | `foundry.preview.prepare` | matching draft scopes | None | Canonical preview artifact |
+| `foundry.blog.create` | `content.draft` | None | New immutable revision holding a new post |
+| `foundry.blog.update` | `content.draft` | None | New immutable revision |
+| `foundry.blog.archive` | `content.draft` | None; a live post comes off the site only after a human approves its removal | Post leaves the blog; a live post enters `archiving` and a removal draft is prepared |
+| `foundry.blog.restore` | `content.draft` | None | Archived post returns as an unpublished draft revision |
+| `foundry.blog.schedule_request` | `publication.schedule` | None; the request itself is what a human approves | Records a schedule request. No schedule, no publication |
 | `foundry.campaign.create` | `campaign.draft` | None | Standalone campaign revision |
 | `foundry.campaign.edit` | `campaign.draft` | None | New campaign revision |
 | `foundry.campaign.get` | `campaign.draft` | None | None |

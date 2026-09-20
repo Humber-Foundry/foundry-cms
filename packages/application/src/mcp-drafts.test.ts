@@ -77,6 +77,9 @@ function fixture(scopes: ReadonlyArray<string>) {
     }>
   >();
   let deploymentCurrent = true;
+  // The photos this site's media library already holds. An agent may name
+  // one of these in a blog post and no other picture at all.
+  const mediaLibrary = new Set<string>(["asset_open_day"]);
   const read = createMcpReadApplication({
     site: createSiteApplication({
       siteId: referenceSiteDefinition.site.id,
@@ -207,6 +210,9 @@ function fixture(scopes: ReadonlyArray<string>) {
             },
           },
         };
+      },
+      async mediaLibraryHoldsAsset({ assetId }) {
+        return mediaLibrary.has(assetId);
       },
       humanReviewUrl(previewId) {
         return `https://foundry.example/dash/review/${previewId}`;
@@ -2232,5 +2238,414 @@ describe("MCP design tool on a draft-made page", () => {
       code: "VALIDATION_FAILED",
       reason: "design_value_not_registered",
     });
+  });
+});
+
+describe("MCP blog draft tools", () => {
+  const post = {
+    slug: "spring-open-day",
+    title: "Spring open day",
+    excerpt: "What to expect on the day.",
+    seo: {
+      title: "Spring open day",
+      description: "What to expect on the day.",
+      keywords: ["events", "spring"],
+      shareImage: null,
+    },
+    mainImage: null,
+    body: createRichTextDocumentFromPlainText("Doors open at ten."),
+  } as const;
+
+  async function openedDraft(key: string) {
+    const fixtureValue = fixture([mcpInitialScope, mcpContentDraftScope]);
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await fixtureValue.application.openWorkspace(
+        fixtureValue.activePrincipal,
+        { expectedRevision: 0, idempotencyKey: key },
+        context,
+      ),
+    );
+    return { fixtureValue, workspaceId: opened.workspaceId };
+  }
+
+  function definitionOf(
+    fixtureValue: ReturnType<typeof fixture>,
+    workspaceId: ContentWorkspaceId,
+  ) {
+    return fixtureValue.workspaces
+      .get(workspaceId)!
+      .queries.getCurrent()
+      .then(({ definition }) => definition);
+  }
+
+  it("writes a post, mints its id, and rewrites it in the same draft", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-1-00000000");
+    const principalValue = fixtureValue.activePrincipal;
+
+    const created = resultOf<{ postId: string; revision: number }>(
+      await fixtureValue.application.createBlogPost(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-1-000000",
+          post,
+        },
+        context,
+      ),
+    );
+    expect(created.revision).toBe(1);
+    // The agent never chose this id. The tool minted it as a version 4
+    // UUID, which is the only shape the blog accepts.
+    expect(created.postId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    const afterCreate = await definitionOf(fixtureValue, workspaceId);
+    expect(
+      afterCreate.blog.posts.find(({ id }) => id === created.postId),
+    ).toMatchObject({
+      slug: "spring-open-day",
+      title: "Spring open day",
+      targetVisibility: "public",
+      revision: 1,
+    });
+
+    const updated = resultOf<{ postId: string; revision: number }>(
+      await fixtureValue.application.updateBlogPost(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 1,
+          idempotencyKey: "blog-update-1-000000",
+          postId: created.postId,
+          post: { ...post, title: "Spring open day, rescheduled" },
+        },
+        context,
+      ),
+    );
+    expect(updated.postId).toBe(created.postId);
+    expect(updated.revision).toBe(2);
+    expect(
+      (await definitionOf(fixtureValue, workspaceId)).blog.posts.find(
+        ({ id }) => id === created.postId,
+      )?.title,
+    ).toBe("Spring open day, rescheduled");
+  });
+
+  it("refuses a picture the site does not hold, and names why", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-2-00000000");
+    await expect(
+      fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-outside-picture",
+          post: {
+            ...post,
+            mainImage: {
+              url: "https://pictures.example/hero.jpg",
+              alt: "Somewhere else",
+            },
+          },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "blog_media_not_in_library",
+    });
+  });
+
+  it("refuses a media path for a photo the library does not hold", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-8-0000");
+    await expect(
+      fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-unknown-photo",
+          post: {
+            ...post,
+            mainImage: {
+              url: "/api/media/asset_never_uploaded",
+              alt: "Not there",
+            },
+          },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "blog_media_not_in_library",
+    });
+  });
+
+  it("refuses a picture in the body that the library does not hold", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-9-0000");
+    await expect(
+      fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-body-photo",
+          post: {
+            ...post,
+            body: {
+              ...post.body,
+              children: [
+                ...post.body.children,
+                {
+                  type: "image" as const,
+                  src: "/api/media/asset_never_uploaded",
+                  alt: "Not there",
+                },
+              ],
+            },
+          },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "blog_media_not_in_library",
+    });
+  });
+
+  it("accepts a photo the media library already holds", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-3-00000000");
+    const created = resultOf<{ postId: string }>(
+      await fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-own-picture",
+          post: {
+            ...post,
+            mainImage: {
+              url: "/api/media/asset_open_day",
+              alt: "The workshop",
+            },
+          },
+        },
+        context,
+      ),
+    );
+    expect(
+      (await definitionOf(fixtureValue, workspaceId)).blog.posts.find(
+        ({ id }) => id === created.postId,
+      )?.mainImage,
+    ).toEqual({ url: "/api/media/asset_open_day", alt: "The workshop" });
+  });
+
+  it("refuses a second post on a web address the draft already uses", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-4-00000000");
+    await fixtureValue.application.createBlogPost(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 0,
+        idempotencyKey: "blog-create-first",
+        post,
+      },
+      context,
+    );
+    await expect(
+      fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 1,
+          idempotencyKey: "blog-create-same-address",
+          post: { ...post, title: "A different post" },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "slug_already_exists",
+    });
+  });
+
+  it("refuses a post write without the content draft permission", async () => {
+    const fixtureValue = fixture([mcpInitialScope, mcpDesignDraftScope]);
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await fixtureValue.application.openWorkspace(
+        fixtureValue.activePrincipal,
+        { expectedRevision: 0, idempotencyKey: "open-blog-5-00000000" },
+        context,
+      ),
+    );
+    await expect(
+      fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId: opened.workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-create-no-scope",
+          post,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "INSUFFICIENT_SCOPE",
+      requiredScopes: [mcpContentDraftScope],
+    });
+  });
+
+  it("answers a repeated write from its receipt instead of writing again", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-6-00000000");
+    const request = {
+      workspaceId,
+      expectedRevision: 0,
+      idempotencyKey: "blog-create-replay",
+      post,
+    } as const;
+    const first = resultOf<{ postId: string; revision: number }>(
+      await fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        request,
+        context,
+      ),
+    );
+    const second = resultOf<{
+      postId: string;
+      revision: number;
+      replayed: boolean;
+    }>(
+      await fixtureValue.application.createBlogPost(
+        fixtureValue.activePrincipal,
+        request,
+        context,
+      ),
+    );
+    expect(second.replayed).toBe(true);
+    expect(second.postId).toBe(first.postId);
+    expect(second.revision).toBe(first.revision);
+    expect(
+      (await definitionOf(fixtureValue, workspaceId)).blog.posts.filter(
+        ({ id }) => id === first.postId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("refuses an update to a post the draft does not hold", async () => {
+    const { fixtureValue, workspaceId } = await openedDraft("open-blog-7-00000000");
+    await expect(
+      fixtureValue.application.updateBlogPost(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "blog-update-missing",
+          postId: "00000000-0000-4000-8000-00000000abcd",
+          post,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "post_not_found",
+    });
+  });
+});
+
+describe("MCP page and blog acceptance journey", () => {
+  it("restructures a page, writes a full post, and prepares a preview in one draft", async () => {
+    // The acceptance criterion of issue #171: one agent, one draft, a page
+    // whose sections it changed and a post it wrote from nothing, handed to a
+    // person as a canonical preview.
+    const value = fixture([mcpInitialScope, mcpContentDraftScope]);
+    const principalValue = value.activePrincipal;
+    const opened = resultOf<{ workspaceId: ContentWorkspaceId }>(
+      await value.application.openWorkspace(
+        principalValue,
+        { expectedRevision: 0, idempotencyKey: "open-blog-journey-1" },
+        context,
+      ),
+    );
+    const workspaceId = opened.workspaceId;
+
+    const page = resultOf<{ pageId: string; revision: number }>(
+      await value.application.createPage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "journey-page-create-1",
+          title: "News",
+          slug: "news",
+          startingLayout: "introduction",
+        },
+        context,
+      ),
+    );
+    const restructured = resultOf<{ revision: number }>(
+      await value.application.restructurePage(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: page.revision,
+          idempotencyKey: "journey-page-restructure-1",
+          pageId: page.pageId,
+          operations: [{ op: "add", sectionType: "proof", position: 1 }],
+        },
+        context,
+      ),
+    );
+
+    const created = resultOf<{ postId: string; revision: number }>(
+      await value.application.createBlogPost(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: restructured.revision,
+          idempotencyKey: "journey-blog-create-1",
+          post: {
+            slug: "open-day",
+            title: "Open day",
+            excerpt: "What to expect.",
+            seo: {
+              title: "Open day",
+              description: "What to expect.",
+              keywords: ["events"],
+              shareImage: null,
+            },
+            mainImage: {
+              url: "/api/media/asset_open_day",
+              alt: "The workshop",
+            },
+            body: createRichTextDocumentFromPlainText("Doors open at ten."),
+          },
+        },
+        context,
+      ),
+    );
+
+    const { definition } = await value.workspaces
+      .get(workspaceId)!
+      .queries.getCurrent();
+    expect(findPageById(definition, page.pageId)!.sections).toHaveLength(3);
+    expect(
+      definition.blog.posts.find(({ id }) => id === created.postId)?.title,
+    ).toBe("Open day");
+
+    const preview = resultOf<{ previewId: string; humanReviewUrl: string }>(
+      await value.application.preparePreview(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: created.revision,
+          idempotencyKey: "journey-preview-1",
+        },
+        context,
+      ),
+    );
+    expect(preview.previewId).toBeTruthy();
+    // The preview is where the agent stops. Nothing here approves it.
+    expect(preview.humanReviewUrl).toContain(preview.previewId);
   });
 });

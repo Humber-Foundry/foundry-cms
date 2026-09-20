@@ -669,6 +669,176 @@ describe("D1 blog post operations store", () => {
     )).resolves.toMatchObject({ collectionState: "active" });
   });
 
+  it("lets an MCP connection archive a post under its own authority", async () => {
+    // The connection is its own actor. It never borrows the membership of
+    // the person who granted it, and the D1 statement has to accept it on
+    // its own permissions. See ADR-0036.
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-archive-71', 'agent-71', ?1, 'client-71',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-archive-71', 'site.read'),
+           ('connection-archive-71', 'content.draft')`,
+      ),
+    ]);
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const post = await durableStore.findPost(
+      referenceSiteDefinition.site.id,
+      postId,
+    );
+    const app = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const archived = await app.commands.archive({
+      actorId: createContentActorId("mcp-agent-71"),
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      selectedPostRevisionId: post!.postRevisionId,
+      idempotencyKey: "mcp-archive-own-authority",
+      authority: {
+        kind: "mcp",
+        connectionId: "connection-archive-71",
+        actorId: "agent-71",
+        operation: "foundry.blog.archive",
+        requiredScopes: ["content.draft"],
+      },
+    });
+    expect(archived.collectionState).toBe("archived");
+    // The audit names the connection's own actor, not the person's.
+    expect(
+      await database
+        .prepare(
+          `SELECT actor_id FROM blog_post_operation_audit_events
+           WHERE site_id = ?1 AND command_type = 'blog.post.archive'
+             AND request_id = 'mcp-archive-own-authority'
+             AND outcome = 'accepted'`,
+        )
+        .bind(referenceSiteDefinition.site.id)
+        .first(),
+    ).toEqual({ actor_id: "mcp-agent-71" });
+  });
+
+  it("refuses an MCP archive when the connection lacks the content draft permission", async () => {
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-archive-72', 'agent-72', ?1, 'client-72',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-archive-72', 'site.read'),
+           ('connection-archive-72', 'publication.schedule')`,
+      ),
+    ]);
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const post = await durableStore.findPost(
+      referenceSiteDefinition.site.id,
+      postId,
+    );
+    const app = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    await expect(
+      app.commands.archive({
+        actorId: createContentActorId("mcp-agent-72"),
+        siteId: referenceSiteDefinition.site.id,
+        postId,
+        selectedPostRevisionId: post!.postRevisionId,
+        idempotencyKey: "mcp-archive-wrong-permission",
+        // The connection asks under a permission it does hold. Archiving
+        // needs the content draft permission, which is pinned to the
+        // command rather than taken from this list, so it is still refused.
+        authority: {
+          kind: "mcp",
+          connectionId: "connection-archive-72",
+          actorId: "agent-72",
+          operation: "foundry.blog.archive",
+          requiredScopes: ["publication.schedule"],
+        },
+      }),
+    ).rejects.toMatchObject({ code: "mcp_blog_authority_required" });
+    await expect(
+      durableStore.findPost(referenceSiteDefinition.site.id, postId),
+    ).resolves.toMatchObject({ collectionState: "active" });
+  });
+
+  it("refuses an MCP archive after the connection is revoked", async () => {
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-archive-73', 'agent-73', ?1, 'client-73',
+             'https://client.example/callback', '["site.read"]',
+             'revoked', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-archive-73', 'site.read'),
+           ('connection-archive-73', 'content.draft')`,
+      ),
+    ]);
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const post = await durableStore.findPost(
+      referenceSiteDefinition.site.id,
+      postId,
+    );
+    const app = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    await expect(
+      app.commands.archive({
+        actorId: createContentActorId("mcp-agent-73"),
+        siteId: referenceSiteDefinition.site.id,
+        postId,
+        selectedPostRevisionId: post!.postRevisionId,
+        idempotencyKey: "mcp-archive-revoked",
+        authority: {
+          kind: "mcp",
+          connectionId: "connection-archive-73",
+          actorId: "agent-73",
+          operation: "foundry.blog.archive",
+          requiredScopes: ["content.draft"],
+        },
+      }),
+    ).rejects.toMatchObject({ code: "mcp_blog_authority_required" });
+    await expect(
+      durableStore.findPost(referenceSiteDefinition.site.id, postId),
+    ).resolves.toMatchObject({ collectionState: "active" });
+  });
+
   it("durably claims one execution and replays it across application instances", async () => {
     const approval = await approveCurrent();
     const app = createBlogPostOperationsApplication({
@@ -3767,6 +3937,256 @@ describe("D1 blog post operations store", () => {
       referenceSiteDefinition.site.id,
       siblingPostId,
     )).resolves.toMatchObject({ collectionState: "archived" });
+  });
+
+  it("lets an MCP connection archive then restore under its own authority", async () => {
+    // Restore reaches D1 through `claimRestore`, which is a different
+    // statement from archive's, so it needs its own evidence that the MCP
+    // branch and its bind numbers are right. See ADR-0036.
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-restore-74', 'agent-74', ?1, 'client-74',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-restore-74', 'site.read'),
+           ('connection-restore-74', 'content.draft')`,
+      ),
+    ]);
+    const mcpActorId = createContentActorId("mcp-agent-74");
+    const authority = {
+      kind: "mcp" as const,
+      connectionId: "connection-restore-74",
+      actorId: "agent-74",
+      operation: "foundry.blog.restore" as const,
+      requiredScopes: ["content.draft"],
+    };
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const post = await durableStore.findPost(
+      referenceSiteDefinition.site.id,
+      postId,
+    );
+    const app = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    await app.commands.archive({
+      actorId: mcpActorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      selectedPostRevisionId: post!.postRevisionId,
+      idempotencyKey: "mcp-archive-before-restore",
+      authority: { ...authority, operation: "foundry.blog.archive" },
+    });
+
+    const restored = await restoreArchivedBlogPostAsDraft({
+      environment: {
+        FOUNDRY_DB: database,
+        FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+        FOUNDRY_RENDERER_VERSION: "renderer-v1",
+      },
+      actorId: mcpActorId,
+      postId,
+      selectedPostRevisionId: post!.postRevisionId,
+      idempotencyKey: "mcp-restore-own-authority",
+      authority,
+    });
+    // The post comes back unpublished. Nothing put it on the site.
+    expect(restored).toMatchObject({ targetVisibility: "unpublished" });
+    await expect(
+      durableStore.findPost(referenceSiteDefinition.site.id, postId),
+    ).resolves.toMatchObject({ collectionState: "active" });
+  });
+
+  it("refuses an MCP restore when the connection lacks the content draft permission", async () => {
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-restore-75', 'agent-75', ?1, 'client-75',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-restore-75', 'site.read'),
+           ('connection-restore-75', 'publication.schedule')`,
+      ),
+    ]);
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const post = await durableStore.findPost(
+      referenceSiteDefinition.site.id,
+      postId,
+    );
+    const app = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    await app.commands.archive({
+      actorId,
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      selectedPostRevisionId: post!.postRevisionId,
+      idempotencyKey: "human-archive-before-refused-restore",
+    });
+    await expect(
+      restoreArchivedBlogPostAsDraft({
+        environment: {
+          FOUNDRY_DB: database,
+          FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+          FOUNDRY_RENDERER_VERSION: "renderer-v1",
+        },
+        actorId: createContentActorId("mcp-agent-75"),
+        postId,
+        selectedPostRevisionId: post!.postRevisionId,
+        idempotencyKey: "mcp-restore-wrong-permission",
+        authority: {
+          kind: "mcp",
+          connectionId: "connection-restore-75",
+          actorId: "agent-75",
+          operation: "foundry.blog.restore",
+          requiredScopes: ["publication.schedule"],
+        },
+      }),
+    ).rejects.toMatchObject({ code: "mcp_blog_authority_required" });
+    await expect(
+      durableStore.findPost(referenceSiteDefinition.site.id, postId),
+    ).resolves.toMatchObject({ collectionState: "archived" });
+  });
+
+  it("lets an MCP connection ask for a schedule, and records only a request", async () => {
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-propose-76', 'agent-76', ?1, 'client-76',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-propose-76', 'site.read'),
+           ('connection-propose-76', 'publication.schedule')`,
+      ),
+    ]);
+    const durableStore = createD1BlogPostOperationsStore(database);
+    const app = createBlogPostOperationsApplication({
+      store: durableStore,
+      now: () => operationTime,
+      createId: (kind) => `${kind}_proposed`,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    const proposal = await app.commands.proposeSchedule({
+      actorId: createContentActorId("mcp-agent-76"),
+      siteId: referenceSiteDefinition.site.id,
+      postId,
+      resolvedTime: {
+        localDateTime: "2026-11-01T01:00:00",
+        ianaTimeZone: "America/Vancouver",
+        utcOffsetChoice: "-07:00",
+        executeAtUtc: now,
+      },
+      idempotencyKey: "mcp-propose-own-authority",
+      authority: {
+        kind: "mcp",
+        connectionId: "connection-propose-76",
+        actorId: "agent-76",
+        operation: "foundry.blog.schedule_request",
+        requiredScopes: ["publication.schedule"],
+      },
+    });
+    expect(proposal.createdBy).toBe("mcp-agent-76");
+    // A request is all it is. No schedule exists until a person approves.
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM blog_post_schedules
+           WHERE site_id = ?1 AND post_id = ?2`,
+        )
+        .bind(referenceSiteDefinition.site.id, postId)
+        .first(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("refuses an MCP schedule request without the schedule permission", async () => {
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO mcp_connections (
+             id, actor_id, site_id, oauth_client_id, redirect_uri,
+             scopes_json, status, created_by_membership_id, created_at
+           ) VALUES (
+             'connection-propose-77', 'agent-77', ?1, 'client-77',
+             'https://client.example/callback', '["site.read"]',
+             'active', ?2, ?3
+           )`,
+        )
+        .bind(referenceSiteDefinition.site.id, actorId, beforeNow),
+      database.prepare(
+        `INSERT INTO mcp_connection_scopes (connection_id, scope)
+         VALUES
+           ('connection-propose-77', 'site.read'),
+           ('connection-propose-77', 'content.draft')`,
+      ),
+    ]);
+    const app = createBlogPostOperationsApplication({
+      store: createD1BlogPostOperationsStore(database),
+      now: () => operationTime,
+      timeZoneDatabaseVersion: () => "2026a",
+    });
+    await expect(
+      app.commands.proposeSchedule({
+        actorId: createContentActorId("mcp-agent-77"),
+        siteId: referenceSiteDefinition.site.id,
+        postId,
+        resolvedTime: {
+          localDateTime: "2026-11-01T01:00:00",
+          ianaTimeZone: "America/Vancouver",
+          utcOffsetChoice: "-07:00",
+          executeAtUtc: now,
+        },
+        idempotencyKey: "mcp-propose-wrong-permission",
+        authority: {
+          kind: "mcp",
+          connectionId: "connection-propose-77",
+          actorId: "agent-77",
+          operation: "foundry.blog.schedule_request",
+          requiredScopes: ["content.draft"],
+        },
+      }),
+    ).rejects.toMatchObject({ code: "mcp_schedule_authority_required" });
+    expect(
+      await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM blog_post_schedule_proposals
+           WHERE idempotency_key = 'mcp-propose-wrong-permission'`,
+        )
+        .first(),
+    ).toEqual({ count: 0 });
   });
 
   it("keeps archive records immutable and exposes restoration as unpublished work", async () => {

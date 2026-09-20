@@ -1,9 +1,14 @@
 import {
   designContract,
   listEditableSiteFields,
+  createBlogPostId,
+  mediaAssetIdFromPublishedPath,
   serializeRichTextDocument,
+  type BlogPost,
+  type BlogPostSchemaError,
   type PageSectionOperation,
   type RichTextDocument,
+  type SeoShareImage,
   type SiteDefinition,
   type SiteDefinitionEdit,
   type SiteId,
@@ -15,6 +20,7 @@ import {
   ContentRevisionStaleError,
   ContentRevisionValidationError,
   createContentActorId,
+  mintedContentBlogPostId,
   mintedContentPageId,
   type ContentRevision,
   type ContentRevisionApplication,
@@ -86,6 +92,15 @@ export type McpDraftRuntime = Readonly<{
     workspaceId: ContentWorkspaceId;
   }): Promise<ContentRevisionApplication>;
   humanReviewUrl(previewId: string): string;
+  /**
+   * Whether this site's media library holds the photo with this asset id.
+   * A blog post may only name a photo the library already has; uploading
+   * one is not an MCP tool. See ADR-0036.
+   */
+  mediaLibraryHoldsAsset(input: {
+    principal: McpConnectionPrincipal;
+    assetId: string;
+  }): Promise<boolean>;
   replayPreview(input: {
     principal: McpConnectionPrincipal;
     workspaceId: ContentWorkspaceId;
@@ -287,10 +302,47 @@ export function requireMcpRevisionScopes(
 }
 
 /**
- * What every MCP page tool takes: the draft, the revision the agent read
- * before it decided, and the key that makes a retry safe. It is the same
- * front as `foundry.content.patch`, because a page operation is the same kind
- * of draft write.
+ * What every draft record tool shares: who is asking, which tool it is, what
+ * it sent, the permissions it needs, and how an ordinary refusal is named.
+ *
+ * `namedRefusal` lets one family of tools read a refusal in its own words. It
+ * keeps the seam itself free of any one record's vocabulary: a blog code
+ * belongs to the blog tools, not to the four page tools that share this seam.
+ */
+type DraftRecordMutation<Input extends McpPageMutationInput> = Readonly<{
+  principal: McpConnectionPrincipal;
+  operation: string;
+  input: Input;
+  context: McpExecutionContext;
+  requiredScopes?: ReadonlyArray<string>;
+  refusalReason?: string;
+  namedRefusal?: (error: ContentRevisionValidationError) => McpReadError | null;
+}>;
+
+/**
+ * Read a refused blog write in the blog's own words.
+ *
+ * The blog reports its rules under the `blog` field. The code is the named
+ * reason an agent branches on, the same way a page lifecycle code is, and the
+ * sentence is the plain words a site owner would read.
+ */
+function blogRefusal(error: ContentRevisionValidationError) {
+  const code = error.fields.blog;
+  if (code === undefined || !Object.hasOwn(blogRefusalSentences, code)) {
+    return null;
+  }
+  return new McpReadError(
+    "VALIDATION_FAILED",
+    blogRefusalSentences[code as BlogPostSchemaError["code"]],
+    { reason: code },
+  );
+}
+
+/**
+ * What every MCP tool that writes a draft record takes: the draft, the
+ * revision the agent read before it decided, and the key that makes a retry
+ * safe. It is the same front as `foundry.content.patch`, because a page
+ * operation and a blog post write are the same kind of draft write.
  */
 export type McpPageMutationInput = Readonly<{
   workspaceId: ContentWorkspaceId;
@@ -389,6 +441,122 @@ const designFieldNotContentReason = "design_field_not_content";
  */
 const designSettingNotFoundReason = "design_setting_not_found";
 const designValueNotRegisteredReason = "design_value_not_registered";
+
+/**
+ * One plain sentence for each rule the blog itself keeps, so an agent that
+ * writes a post reads the same words a site owner would. `reason` carries the
+ * blog's own code, which is what a program branches on.
+ */
+const blogRefusalSentences: Readonly<
+  Record<BlogPostSchemaError["code"], string>
+> = Object.freeze({
+  cross_site_identifier: "That post belongs to another site.",
+  post_already_exists: "This draft already has a post with that id.",
+  post_already_live: "That post is already on the site.",
+  post_not_found: "This draft has no post with that id.",
+  post_not_live: "That post is not on the site.",
+  post_not_unpublished: "That post is not waiting to go back on the site.",
+  slug_already_exists:
+    "Another post in this draft already uses that web address.",
+  schema_invalid: "The post does not match the site's content rules.",
+});
+
+/**
+ * The named reason a post is refused for naming a picture that is not one of
+ * this site's own photos. An agent may point at a photo the media library
+ * already holds; uploading a new one is not an MCP tool.
+ */
+const blogMediaNotInLibraryReason = "blog_media_not_in_library";
+
+/**
+ * The named reason a post write is refused for when the draft turned it down
+ * without a blog code of its own, such as a field the site's own rules refuse.
+ */
+const blogPostRefusedReason = "blog_post_refused";
+
+/**
+ * What an agent writes into one blog post. It is the post's own field set
+ * from the Site Definition, minus the four fields the blog owns rather than
+ * the writer: its id, its revision number, and the two that say whether it is
+ * in the collection and on the site. A
+ * post's tags are `seo.keywords`, which is where the blog has always kept
+ * them. See ADR-0036.
+ */
+export type McpBlogPostContent = Omit<
+  BlogPost,
+  "id" | "revision" | "collectionState" | "targetVisibility"
+>;
+
+export type McpCreateBlogPostInput = McpPageMutationInput &
+  Readonly<{ post: McpBlogPostContent }>;
+
+export type McpUpdateBlogPostInput = McpPageMutationInput &
+  Readonly<{ postId: string; post: McpBlogPostContent }>;
+
+/**
+ * Refuse a post that points at a picture this site does not hold.
+ *
+ * Every picture address in a post — the header image, the share image and
+ * every picture in the body — must be this site's own media path,
+ * `/api/media/<assetId>`. An agent can choose a photo the media library
+ * already has; it cannot add one, and it cannot point the site at a picture
+ * somewhere else. See ADR-0036.
+ */
+function blogPostMediaFields(post: McpBlogPostContent) {
+  const fields: Array<
+    Readonly<{ field: string; assetId: string | null }>
+  > = [];
+  const collectImage = (field: string, image: SeoShareImage | null) => {
+    if (image !== null) {
+      fields.push({
+        field,
+        assetId: mediaAssetIdFromPublishedPath(image.url),
+      });
+    }
+  };
+  collectImage("mainImage", post.mainImage);
+  collectImage("seo.shareImage", post.seo.shareImage);
+  post.body.children.forEach((block, index) => {
+    if (block.type === "image") {
+      fields.push({
+        field: `body.children.${index}`,
+        assetId: mediaAssetIdFromPublishedPath(block.src),
+      });
+    }
+  });
+  return fields;
+}
+
+async function requireOwnMediaReferences(
+  post: McpBlogPostContent,
+  holdsAsset: (assetId: string) => Promise<boolean>,
+) {
+  const fields = blogPostMediaFields(post);
+  // A post often uses the same photo twice, as its header and its share
+  // picture, so each photo is looked up once however often it appears.
+  const assetIds = new Set(
+    fields.flatMap(({ assetId }) => (assetId === null ? [] : [assetId])),
+  );
+  const held = new Map(
+    await Promise.all(
+      [...assetIds].map(
+        async (assetId) =>
+          [assetId, await holdsAsset(assetId)] as const,
+      ),
+    ),
+  );
+  for (const { field, assetId } of fields) {
+    // The refusal names the field rather than repeating the address, so
+    // nothing a caller wrote is echoed back into a client's screen.
+    if (assetId === null || held.get(assetId) !== true) {
+      throw new McpReadError(
+        "VALIDATION_FAILED",
+        `The picture at ${field} is not one of this site's photos. Use the media path of a photo the media library already holds.`,
+        { reason: blogMediaNotInLibraryReason },
+      );
+    }
+  }
+}
 
 /**
  * Turn a refused page operation into the tool error an agent acts on.
@@ -589,42 +757,51 @@ export function createMcpDraftApplication({
   }
 
   /**
-   * Run one page operation as an MCP tool call.
+   * Run one draft record operation as an MCP tool call.
    *
-   * Every page tool goes through here, so all four get the same draft scope,
-   * the same replay handling, the same base-revision check and the same
-   * refusal shape. The work itself is `run`, which calls the matching
-   * application command; this adds nothing to what the dashboard does.
+   * Every page tool and every blog draft tool goes through here, so they all
+   * get the same draft scope, the same replay handling, the same
+   * base-revision check and the same refusal shape. The work itself is `run`,
+   * which calls the matching application command; this adds nothing to what
+   * the dashboard does.
    *
-   * `replayedPageId` names the page a stored receipt was for. A receipt
-   * records the revision, not the page, so a create and a duplicate rebuild
-   * the id they minted while a rename and a delete already know it.
+   * `recordKey` is the name the result reports the record under: `pageId` for
+   * a page, `postId` for a blog post.
+   *
+   * `replayedRecordId` names the record a stored receipt was for. A receipt
+   * records the revision, not the record, so a create and a duplicate rebuild
+   * the id they minted while a rename, a delete and an update already know
+   * it.
    */
-  function pageMutation<Input extends McpPageMutationInput>({
+  function draftRecordMutation<Input extends McpPageMutationInput>({
     principal,
     operation,
     input,
     context,
     run,
-    replayedPageId,
+    replayedRecordId,
+    recordKey,
     requiredScopes = [mcpContentDraftScope],
     refusalReason = pageFieldsRefusedReason,
-  }: {
-    principal: McpConnectionPrincipal;
-    operation: string;
-    input: Input;
-    context: McpExecutionContext;
-    requiredScopes?: ReadonlyArray<string>;
-    refusalReason?: string;
-    run(
-      application: ContentRevisionApplication,
-      command: PageMutationCommand,
-    ): Promise<PageMutationResult>;
-    replayedPageId(
-      workspaceId: ContentWorkspaceId,
-      storageKey: string,
-    ): Promise<string>;
-  }) {
+    namedRefusal = () => null,
+  }: DraftRecordMutation<Input> &
+    Readonly<{
+      recordKey: "pageId" | "postId";
+      run(
+        application: ContentRevisionApplication,
+        command: PageMutationCommand,
+      ): Promise<
+        Readonly<{
+          revision: SavedContentRevision;
+          recordId: string;
+          replayed: boolean;
+        }>
+      >;
+      replayedRecordId(
+        workspaceId: ContentWorkspaceId,
+        storageKey: string,
+      ): Promise<string>;
+    }>) {
     return base.executeScoped({
       principal,
       operation,
@@ -665,8 +842,8 @@ export function createMcpDraftApplication({
           assertSite(replayRevision, principal.siteId);
           return {
             ...revisionResult(replayRevision),
-            pageId: await execution.run(() =>
-              replayedPageId(replay.workspaceId, storageKey),
+            [recordKey]: await execution.run(() =>
+              replayedRecordId(replay.workspaceId, storageKey),
             ),
             replayed: true,
             previewArtifact: await execution.run(() =>
@@ -681,7 +858,7 @@ export function createMcpDraftApplication({
           application.queries.getCurrent(),
         );
         assertSite(current, principal.siteId);
-        let mutation: PageMutationResult;
+        let mutation: Awaited<ReturnType<typeof run>>;
         try {
           mutation = await execution.run(() =>
             run(application, {
@@ -695,7 +872,7 @@ export function createMcpDraftApplication({
           );
         } catch (error) {
           if (error instanceof ContentRevisionValidationError) {
-            throw pageRefusal(error, refusalReason);
+            throw namedRefusal(error) ?? pageRefusal(error, refusalReason);
           }
           if (
             error instanceof ContentRevisionConflictError ||
@@ -716,11 +893,46 @@ export function createMcpDraftApplication({
         const saved = mutation.revision;
         return {
           ...revisionResult(saved),
-          pageId: mutation.pageId,
+          [recordKey]: mutation.recordId,
           replayed: mutation.replayed,
           previewArtifact: await execution.run(() =>
             createCanonicalPreviewArtifactHash(saved),
           ),
+        };
+      },
+    });
+  }
+
+  /**
+   * Run one page operation as an MCP tool call. It is the draft record seam
+   * with the page's own words: the application command answers with a
+   * `PageMutationResult`, and the result reports the page as `pageId`.
+   */
+  function pageMutation<Input extends McpPageMutationInput>({
+    run,
+    replayedPageId,
+    ...rest
+  }: DraftRecordMutation<Input> &
+    Readonly<{
+      run(
+        application: ContentRevisionApplication,
+        command: PageMutationCommand,
+      ): Promise<PageMutationResult>;
+      replayedPageId(
+        workspaceId: ContentWorkspaceId,
+        storageKey: string,
+      ): Promise<string>;
+    }>) {
+    return draftRecordMutation({
+      ...rest,
+      recordKey: "pageId",
+      replayedRecordId: replayedPageId,
+      async run(application, command) {
+        const mutation = await run(application, command);
+        return {
+          revision: mutation.revision,
+          recordId: mutation.pageId,
+          replayed: mutation.replayed,
         };
       },
     });
@@ -1212,6 +1424,89 @@ export function createMcpDraftApplication({
             operations: input.operations,
           }),
         replayedPageId: async () => input.pageId,
+      });
+    },
+    /**
+     * Start a new blog post in the draft.
+     *
+     * The agent writes the post's words and picks its pictures; it never
+     * chooses the post's id. The id is minted from this request, so a retry
+     * after an unknown result mints the same id and leaves one post, not two.
+     */
+    createBlogPost(
+      principal: McpConnectionPrincipal,
+      input: McpCreateBlogPostInput,
+      context: McpExecutionContext,
+    ) {
+      return draftRecordMutation({
+        principal,
+        operation: "foundry.blog.create",
+        input,
+        context,
+        recordKey: "postId",
+        refusalReason: blogPostRefusedReason,
+        namedRefusal: blogRefusal,
+        async run(application, command) {
+          await requireOwnMediaReferences(input.post, (assetId) =>
+            runtime.mediaLibraryHoldsAsset({ principal, assetId }),
+          );
+          const saved = await application.commands.createBlogPost({
+            ...command,
+            siteId: principal.siteId,
+            post: {
+              ...input.post,
+              id: await mintedContentBlogPostId({
+                workspaceId: command.workspaceId,
+                idempotencyKey: command.idempotencyKey,
+              }),
+            },
+          });
+          return {
+            revision: saved,
+            recordId: saved.postId,
+            replayed: saved.replayed,
+          };
+        },
+        replayedRecordId: (workspaceId, idempotencyKey) =>
+          mintedContentBlogPostId({ workspaceId, idempotencyKey }),
+      });
+    },
+    /**
+     * Rewrite one blog post in the draft.
+     *
+     * The whole post is sent, the way the dashboard's own editor saves it, so
+     * a field the request leaves out is cleared rather than quietly kept.
+     */
+    updateBlogPost(
+      principal: McpConnectionPrincipal,
+      input: McpUpdateBlogPostInput,
+      context: McpExecutionContext,
+    ) {
+      return draftRecordMutation({
+        principal,
+        operation: "foundry.blog.update",
+        input,
+        context,
+        recordKey: "postId",
+        refusalReason: blogPostRefusedReason,
+        namedRefusal: blogRefusal,
+        async run(application, command) {
+          await requireOwnMediaReferences(input.post, (assetId) =>
+            runtime.mediaLibraryHoldsAsset({ principal, assetId }),
+          );
+          const saved = await application.commands.editBlogPost({
+            ...command,
+            siteId: principal.siteId,
+            postId: createBlogPostId(input.postId),
+            post: input.post,
+          });
+          return {
+            revision: saved,
+            recordId: saved.postId,
+            replayed: saved.replayed,
+          };
+        },
+        replayedRecordId: async () => input.postId,
       });
     },
     preparePreview(
