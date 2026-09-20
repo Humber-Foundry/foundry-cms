@@ -356,10 +356,38 @@ async function checkPagesSettingsPanel(page, origin, viewportLabel) {
 }
 
 async function checkDestination(page, origin, name, href, viewportLabel) {
-  await page.goto(`${origin}${href}`, {
-    waitUntil: "networkidle",
-    timeout: 45_000,
-  });
+  if (name === "Settings") {
+    // Settings never reaches Playwright's "networkidle": every dashboard
+    // route's CSS bundle carries the Puck editor's stylesheet
+    // (`@puckeditor/core/puck.css`), which itself `@import`s a font
+    // stylesheet from `https://rsms.me` — the one cross-origin request on
+    // an otherwise same-origin page. `networkidle` waits for that request
+    // to go quiet too, and on a loaded machine (already a known source of
+    // socket contention here — see the D1/workerd port-exhaustion note in
+    // WORKER_RULES) that cross-origin fetch can stall past the 45s
+    // timeout while the page itself has already rendered. Settings pays
+    // for this more than the other destinations because it does the
+    // heaviest server read of any dashboard screen (members, MCP
+    // connections, owner-notification health, campaign context, email and
+    // publishing readiness), which pushes the request later into the
+    // check's time budget. Reproduced by stalling `https://rsms.me/**`
+    // with Playwright request routing: `networkidle` timed out, while
+    // waiting for the "Connected agents" heading after `waitUntil:
+    // "commit"` succeeded in under 200ms.
+    //
+    // So Settings waits for its own content instead of network silence.
+    // This does not loosen any spacing assertion below; it only changes
+    // how the check decides the page is ready to measure.
+    await page.goto(`${origin}${href}`, { waitUntil: "commit", timeout: 45_000 });
+    await page
+      .getByRole("heading", { name: "Connected agents" })
+      .waitFor({ state: "visible", timeout: 45_000 });
+  } else {
+    await page.goto(`${origin}${href}`, {
+      waitUntil: "networkidle",
+      timeout: 45_000,
+    });
+  }
   await page.waitForTimeout(600);
 
   // Settings' "Technical detail" disclosure starts collapsed, so its

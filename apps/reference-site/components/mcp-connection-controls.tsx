@@ -21,6 +21,14 @@ export function McpConnectionTable({
   pendingId: string | null;
   onRevoke(connection: McpConnectionSummary): void;
 }) {
+  if (connections.length === 0) {
+    return (
+      <p className="empty-state">
+        No agent is connected yet. Use Connect an agent above to start one.
+      </p>
+    );
+  }
+
   return (
     <div className="mcp-connections">
       <div
@@ -101,11 +109,6 @@ export function McpConnectionTable({
           </div>
         ))}
       </div>
-      {connections.length === 0 ? (
-        <p className="inventory-empty">
-          No agent connections have been authorized.
-        </p>
-      ) : null}
     </div>
   );
 }

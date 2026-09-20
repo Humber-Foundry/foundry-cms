@@ -4,6 +4,7 @@ import { roleDisplayLabel } from "@/components/access-display";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { InvitationActivation } from "@/components/invitation-activation";
 import { createHumanMutationToken } from "@/src/human-mutation-runtime";
+import { siteInitial } from "@/src/site-display";
 import {
   loadDashboardAccess,
   loadPublishedDefinition,
@@ -45,7 +46,7 @@ export default async function DashboardLayout({
     <div className="dashboard">
       <header className="dashboard-header">
         <a className="wordmark wordmark-dashboard" href="/dash">
-          <span aria-hidden="true">F</span>
+          <span aria-hidden="true">{siteInitial(definition.site.name)}</span>
           {definition.site.name}
         </a>
         <div className="dashboard-header-meta">

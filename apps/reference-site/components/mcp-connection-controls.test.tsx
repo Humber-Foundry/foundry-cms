@@ -67,7 +67,7 @@ describe("Owner MCP connection inventory", () => {
     expect(markup).toContain("Unrecognized permission");
   });
 
-  it("keeps every non-row child outside the table role", () => {
+  it("shows a plain empty state with no table when there are no connections", () => {
     const markup = renderToStaticMarkup(
       <McpConnectionTable
         connections={[]}
@@ -76,36 +76,14 @@ describe("Owner MCP connection inventory", () => {
       />,
     );
 
-    expect(markup).toContain("No agent connections have been authorized.");
-    // Walk every <div ...> and </div> tag with a depth counter starting at
-    // the div carrying role="table", so the extracted slice is that div's
-    // own balanced content — not just up to the first nested closing tag.
-    const openIndex = markup.indexOf('role="table"');
-    const containerStart = markup.lastIndexOf("<div", openIndex);
-    const tagPattern = /<div\b[^>]*>|<\/div>/gu;
-    tagPattern.lastIndex = containerStart;
-    let depth = 0;
-    let containerEnd = -1;
-    for (let match = tagPattern.exec(markup); match !== null; match = tagPattern.exec(markup)) {
-      if (match[0].startsWith("</div")) {
-        depth -= 1;
-        if (depth === 0) {
-          containerEnd = match.index;
-          break;
-        }
-      } else {
-        depth += 1;
-      }
-    }
-    expect(containerEnd).toBeGreaterThan(containerStart);
-    const tableBody = markup.slice(containerStart, containerEnd);
-
-    // Only role="row" children sit inside the table's own box; the empty
-    // message is a sibling paragraph rendered after it closes.
-    expect(tableBody).not.toContain("<p");
-    expect(markup.indexOf("No agent connections have been authorized.")).toBeGreaterThan(
-      containerEnd,
-    );
+    // No table at all — not even empty column headers — matches the plain
+    // sentence the owner reads instead (#213).
+    expect(markup).not.toContain('role="table"');
+    expect(markup).not.toContain("CLIENT");
+    expect(markup).not.toContain("Permissions");
+    expect(markup).toContain("empty-state");
+    expect(markup).toMatch(/no agent is connected yet/iu);
+    expect(markup).toMatch(/connect an agent/iu);
   });
 
   it("reads timestamps as relative time instead of an absolute clock string", () => {

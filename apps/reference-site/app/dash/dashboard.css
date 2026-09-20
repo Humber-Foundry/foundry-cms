@@ -2405,14 +2405,6 @@
   gap: 0.3rem;
 }
 
-/* Sits below the bordered table instead of inside its `role="table"` box, so
- * it is never mistaken for a row and never touches the table's own border. */
-.inventory-empty {
-  margin: 0.75rem 0 0;
-  color: var(--ink-soft);
-  font-size: var(--dash-text-small);
-}
-
 .revoke-confirm-dialog {
   width: min(28rem, calc(100vw - 2rem));
   border: 1px solid var(--dash-line);
