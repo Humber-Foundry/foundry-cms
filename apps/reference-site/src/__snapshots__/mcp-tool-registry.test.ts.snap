@@ -155,11 +155,40 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": false,
     },
+    "description": "Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "b059525904da5f978a777655ec624affda58815844c4e2cf9d7f3b9a6c80bc2e",
+    "name": "foundry.page.restructure",
+    "outputSchemaSha256": "192ed404865dfee589f4879abbd5b411b662ad0eaaa6af7ffd921e756f85df9e",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "List the section types a page can hold, with their section styles and their editable fields.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "7760a5a5ce90f1c50ad52b3bb68cfcb409a0d348b55eb2f066cd92e85474cac1",
+    "name": "foundry.section.list",
+    "outputSchemaSha256": "4dc2404f46f7fb195024816d8d275f58ca2e3eaf7f3246e5da4353ba1c2debeb",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
     "description": "Apply registered design tokens or component variants to a new immutable revision.",
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "fa2e8ab508ab659a9931de4e209c903b8c546847eaf987fc176c7085c1533bb5",
+    "inputSchemaSha256": "ba91f49a63f18fe95adfd7f773bde8553c16273360b438b393672f4c7df31dab",
     "name": "foundry.design.patch",
     "outputSchemaSha256": "cff1feb1bc040dd1a6433e494094f4705bfd8bc1cac86d315a3b2cd7276d97e9",
   },

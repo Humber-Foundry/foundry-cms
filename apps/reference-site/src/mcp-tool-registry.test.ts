@@ -128,6 +128,7 @@ describe("MCP draft tool registry", () => {
       "foundry.site.get",
       "foundry.content.list",
       "foundry.content.get",
+      "foundry.section.list",
       "foundry.publication.request",
       "foundry.publication.status",
     ]);
@@ -135,6 +136,7 @@ describe("MCP draft tool registry", () => {
       "foundry.site.get",
       "foundry.content.list",
       "foundry.content.get",
+      "foundry.section.list",
       "foundry.publication.schedule",
       "foundry.publication.status",
       "foundry.publication.cancel",
@@ -272,6 +274,7 @@ describe("MCP draft tool registry", () => {
       "foundry.site.get",
       "foundry.content.list",
       "foundry.content.get",
+      "foundry.section.list",
     ]);
     expect(names([mcpInitialScope, mcpContentDraftScope])).toEqual([
       "foundry.site.get",
@@ -284,6 +287,8 @@ describe("MCP draft tool registry", () => {
       "foundry.page.rename",
       "foundry.page.duplicate",
       "foundry.page.delete",
+      "foundry.page.restructure",
+      "foundry.section.list",
       "foundry.preview.prepare",
     ]);
     expect(names([mcpInitialScope, mcpDesignDraftScope])).toEqual([
@@ -292,6 +297,7 @@ describe("MCP draft tool registry", () => {
       "foundry.content.get",
       "foundry.workspace.open",
       "foundry.workspace.get",
+      "foundry.section.list",
       "foundry.design.patch",
       "foundry.preview.prepare",
     ]);
@@ -403,9 +409,10 @@ describe("MCP draft tool registry", () => {
       "foundry.page.rename",
       "foundry.page.duplicate",
       "foundry.page.delete",
+      "foundry.page.restructure",
     ]);
-    // Removing a page and renaming one overwrite what is there; adding one
-    // and copying one do not.
+    // Removing a page, renaming one and restructuring one overwrite what is
+    // there; adding one and copying one do not.
     expect(
       Object.fromEntries(
         pageTools.map(({ name, annotations: hints }) => [
@@ -418,6 +425,7 @@ describe("MCP draft tool registry", () => {
       "foundry.page.rename": true,
       "foundry.page.duplicate": false,
       "foundry.page.delete": true,
+      "foundry.page.restructure": true,
     });
     for (const tool of pageTools) {
       expect(tool.annotations).toMatchObject({
@@ -522,7 +530,7 @@ describe("MCP draft tool registry", () => {
     ).toBe(true);
   });
 
-  it("pairs each advertised design target with only its registered values", () => {
+  it("pairs each advertised design token with only its registered values, and leaves the section pairing to the draft", () => {
     const designPatch = registry()
       .list(principal([mcpInitialScope, mcpDesignDraftScope]))
       .find(({ name }) => name === "foundry.design.patch")!;
@@ -556,6 +564,37 @@ describe("MCP draft tool registry", () => {
         ],
       }),
     ).toBe(false);
+    // A word that is not a section style of any registered section is refused
+    // here, before the call.
+    expect(
+      validate({
+        ...input,
+        operations: [
+          {
+            op: "set_variant",
+            componentId: "section_hero",
+            value: "enormous",
+          },
+        ],
+      }),
+    ).toBe(false);
+    // So is a section reference that is not a field path.
+    expect(
+      validate({
+        ...input,
+        operations: [
+          {
+            op: "set_variant",
+            componentId: "section_hero.",
+            value: "focused",
+          },
+        ],
+      }),
+    ).toBe(false);
+    // A real section style of another kind of section passes the schema and is
+    // refused by the draft instead, because only the draft knows which section
+    // this is. That is what lets an agent arrange a section on a page it made
+    // inside the draft. See ADR-0035.
     expect(
       validate({
         ...input,
@@ -567,7 +606,20 @@ describe("MCP draft tool registry", () => {
           },
         ],
       }),
-    ).toBe(false);
+    ).toBe(true);
+    // A section on any page but the home page is named with its page in front.
+    expect(
+      validate({
+        ...input,
+        operations: [
+          {
+            op: "set_variant",
+            componentId: "page_0123456789abcdef0123.page_hero",
+            value: "focused",
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 
   it("authorizes hidden draft tools before reporting malformed arguments", async () => {
@@ -971,6 +1023,10 @@ describe("MCP campaign and analytics tool registry", () => {
         "foundry.page.rename": "content.draft",
         "foundry.page.duplicate": "content.draft",
         "foundry.page.delete": "content.draft",
+        "foundry.page.restructure":
+          "content.draft, and design.draft as well when the request names " +
+          "a section style",
+        "foundry.section.list": "site.read",
         "foundry.design.patch": "design.draft",
         "foundry.preview.prepare": "matching draft scopes",
         "foundry.campaign.create": "campaign.draft",
@@ -1003,7 +1059,7 @@ describe("MCP campaign and analytics tool registry", () => {
         mcpAnalyticsReadScope,
       ]),
     );
-    expect(tools).toHaveLength(22);
+    expect(tools).toHaveLength(24);
 
     for (const tool of tools) {
       const inputSchema = JSON.parse(

@@ -11,6 +11,7 @@ import {
 } from "@humber-foundry/application";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
+import { installedPageComponentRegistry } from "../foundry/page-components";
 
 import { createMcpAnalyticsRuntime } from "./mcp-analytics-runtime";
 import { createMcpCampaignRuntime } from "./mcp-campaign-runtime";
@@ -257,6 +258,7 @@ export function createProductionMcpRuntime(
     },
     connections: store,
     cursors,
+    pageComponents: installedPageComponentRegistry,
   });
   const draftApplication = createMcpDraftApplication({
     base: readApplication,

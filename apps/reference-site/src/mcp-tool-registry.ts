@@ -8,6 +8,7 @@ import {
   mcpContentDraftScope,
   mcpContractVersion,
   mcpDesignDraftScope,
+  mcpRestructureScopes,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
   type CampaignId,
@@ -24,8 +25,10 @@ import {
 
 import { previewChangeReasonLimit } from "./mcp-preview-review-limits";
 import { installedSiteDefinition } from "../foundry/site-definition";
+import { installedPageComponentRegistry } from "../foundry/page-components";
 import {
   designContract,
+  pageCompositionContract,
   campaignShareImageUrlPattern,
   pageSlugMaxLength,
   pageSlugPattern,
@@ -33,8 +36,8 @@ import {
   seoShareImageUrlMaxLength,
   siteDefinitionSchema,
   type RichTextDocument,
+  type PageSectionOperation,
   type SeoShareImage,
-  homePage,
 } from "@humber-foundry/site-definition";
 
 import { hasExactKeys, isRecord } from "./mcp-http-support";
@@ -271,14 +274,14 @@ const plainTextValueMaxLength = 200_000;
 
 const editableFieldPathShape = new RegExp(editableFieldPathPattern, "u");
 
-const contentFieldPathSchema = {
+const editableFieldPathSchema = {
   type: "string",
   minLength: 1,
   maxLength: editableFieldPathMaxLength,
   pattern: editableFieldPathPattern,
 } as const;
 
-function isContentFieldPath(value: unknown): value is string {
+function isEditableFieldPath(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length <= editableFieldPathMaxLength &&
@@ -286,19 +289,34 @@ function isContentFieldPath(value: unknown): value is string {
   );
 }
 
-// A page id is an ordinary Site Definition identifier, so a hand-written id
-// and a minted `page_<digest>` are both well formed here. Whether the draft
-// holds a page with this id is the draft's answer, not the schema's.
-const pageIdMaxLength = 200;
+// A page id and a section id are both ordinary Site Definition identifiers, so
+// a hand-written id and a minted `page_<digest>` are both well formed here.
+// Whether the draft holds a page or a section with this id is the draft's
+// answer, not the schema's.
+const definitionIdentifierMaxLength = 200;
 
-const pageIdSchema = {
+const definitionIdentifierSchema = {
   type: "string",
   minLength: 1,
-  maxLength: pageIdMaxLength,
+  maxLength: definitionIdentifierMaxLength,
   pattern: siteDefinitionSchema.$defs.id.pattern,
 } as const;
 
-const pageIdShape = new RegExp(siteDefinitionSchema.$defs.id.pattern, "u");
+const definitionIdentifierShape = new RegExp(
+  siteDefinitionSchema.$defs.id.pattern,
+  "u",
+);
+
+function isDefinitionIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= definitionIdentifierMaxLength &&
+    definitionIdentifierShape.test(value)
+  );
+}
+
+const pageIdSchema = definitionIdentifierSchema;
 
 // A page name is the editable field `<pageId>.title`, so it takes the same
 // bound as any other plain-text field edit rather than a second limit.
@@ -324,15 +342,59 @@ const pageStartingLayoutSchema = {
   enum: pageStartingLayouts.map(({ id }) => id),
 } as const;
 
-const designVariantContracts =
-  homePage(installedSiteDefinition).sections.flatMap((section) =>
-    section.type === "registered"
-      ? []
-      : [{
-          componentId: section.id,
-          values: designContract.variants[section.type].values,
-        }],
-  );
+/**
+ * How a design command names one section.
+ *
+ * It is the section's own id on the home page, and the page id followed by the
+ * section id on every other page, which is the shape a section's editable
+ * field path has (ADR-0017). The tool no longer advertises a closed list of
+ * section ids: a list built at module load can only describe the installed
+ * site, so it could not name a section on a page an agent made inside a draft.
+ * The draft's own design field list answers whether the section is real, the
+ * same way it already answered whether the value is registered. See ADR-0035.
+ */
+const designComponentIdSchema = editableFieldPathSchema;
+
+/**
+ * Every section style any registered section offers, sorted and without
+ * repetition. The schema says which words are section styles at all; which of
+ * them one section offers is the draft's answer.
+ */
+const designVariantValues: ReadonlyArray<string> = [
+  ...new Set(
+    Object.values(designContract.variants).flatMap(({ values }) => [
+      ...(values as ReadonlyArray<string>),
+    ]),
+  ),
+].sort();
+
+/**
+ * The bounds a restructure request is held to before the draft sees it.
+ *
+ * A page holds at most `pageCompositionContract.slot.maxItems` sections, so a
+ * position beyond that can never be right, and a request that carries more
+ * operations than that could not leave a page the draft would accept.
+ */
+const sectionPositionSchema = {
+  type: "integer",
+  minimum: 0,
+  maximum: pageCompositionContract.slot.maxItems,
+} as const;
+
+const sectionIdSchema = definitionIdentifierSchema;
+
+const sectionTypeSchema = {
+  enum: [...installedPageComponentRegistry.allowedComponents],
+} as const;
+
+const sectionVariantSchema = { enum: designVariantValues } as const;
+
+/**
+ * The most section operations one request may carry. A page holds at most
+ * twelve sections, so twice that is more than enough to rebuild a page from
+ * nothing in one request, and it bounds the work a single call can ask for.
+ */
+const sectionOperationLimit = pageCompositionContract.slot.maxItems * 2;
 const draftResult = {
   type: "object",
   additionalProperties: false,
@@ -511,7 +573,7 @@ function parsePatchInput(input: unknown) {
       !isRecord(operation) ||
       !hasExactKeys(operation, ["op", "field", "value"], ["format"]) ||
       operation.op !== "set" ||
-      !isContentFieldPath(operation.field) ||
+      !isEditableFieldPath(operation.field) ||
       (operation.format !== undefined &&
         operation.format !== "plainText" &&
         operation.format !== "richText")
@@ -602,15 +664,6 @@ function isPageSlug(value: unknown): value is string {
   );
 }
 
-function isPageId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length >= 1 &&
-    value.length <= pageIdMaxLength &&
-    pageIdShape.test(value)
-  );
-}
-
 function parseCreatePageInput(input: unknown) {
   const common = parsePageMutationInput(input, [
     "title",
@@ -640,7 +693,7 @@ function parseNamedPageInput(input: unknown) {
   if (
     common === null ||
     !isRecord(input) ||
-    !isPageId(input.pageId) ||
+    !isDefinitionIdentifier(input.pageId) ||
     !isPageTitle(input.title) ||
     !isPageSlug(input.slug)
   ) {
@@ -656,10 +709,115 @@ function parseNamedPageInput(input: unknown) {
 
 function parseDeletePageInput(input: unknown) {
   const common = parsePageMutationInput(input, ["pageId"]);
-  if (common === null || !isRecord(input) || !isPageId(input.pageId)) {
+  if (common === null || !isRecord(input) || !isDefinitionIdentifier(input.pageId)) {
     return null;
   }
   return { ...common, pageId: input.pageId };
+}
+
+function isSectionPosition(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    (value as number) >= 0 &&
+    (value as number) <= pageCompositionContract.slot.maxItems
+  );
+}
+
+/**
+ * Read one section operation, or answer `null`.
+ *
+ * Every operation is read by its own exact key set, so a key that belongs to
+ * another operation is refused rather than ignored. Which section types and
+ * section styles exist is the schema's answer here; whether this page holds that
+ * section, and whether that section offers that section style, is the draft's.
+ */
+function parseSectionOperation(
+  operation: unknown,
+): PageSectionOperation | null {
+  if (!isRecord(operation) || typeof operation.op !== "string") return null;
+  if (
+    operation.op === "add" &&
+    (hasExactKeys(operation, ["op", "sectionType", "position"]) ||
+      hasExactKeys(operation, ["op", "sectionType", "position", "variant"])) &&
+    typeof operation.sectionType === "string" &&
+    installedPageComponentRegistry.allowedComponents.includes(
+      operation.sectionType,
+    ) &&
+    isSectionPosition(operation.position) &&
+    (operation.variant === undefined ||
+      (typeof operation.variant === "string" &&
+        designVariantValues.includes(operation.variant)))
+  ) {
+    return {
+      op: "add",
+      sectionType: operation.sectionType,
+      position: operation.position,
+      ...(operation.variant === undefined
+        ? {}
+        : { variant: operation.variant as string }),
+    };
+  }
+  if (
+    operation.op === "remove" &&
+    hasExactKeys(operation, ["op", "sectionId"]) &&
+    isDefinitionIdentifier(operation.sectionId)
+  ) {
+    return { op: "remove", sectionId: operation.sectionId };
+  }
+  if (
+    operation.op === "move" &&
+    hasExactKeys(operation, ["op", "sectionId", "position"]) &&
+    isDefinitionIdentifier(operation.sectionId) &&
+    isSectionPosition(operation.position)
+  ) {
+    return {
+      op: "move",
+      sectionId: operation.sectionId,
+      position: operation.position,
+    };
+  }
+  if (
+    operation.op === "duplicate" &&
+    hasExactKeys(operation, ["op", "sectionId"]) &&
+    isDefinitionIdentifier(operation.sectionId)
+  ) {
+    return { op: "duplicate", sectionId: operation.sectionId };
+  }
+  if (
+    operation.op === "set_variant" &&
+    hasExactKeys(operation, ["op", "sectionId", "variant"]) &&
+    isDefinitionIdentifier(operation.sectionId) &&
+    typeof operation.variant === "string" &&
+    designVariantValues.includes(operation.variant)
+  ) {
+    return {
+      op: "set_variant",
+      sectionId: operation.sectionId,
+      variant: operation.variant,
+    };
+  }
+  return null;
+}
+
+function parseRestructurePageInput(input: unknown) {
+  const common = parsePageMutationInput(input, ["pageId", "operations"]);
+  if (
+    common === null ||
+    !isRecord(input) ||
+    !isDefinitionIdentifier(input.pageId) ||
+    !Array.isArray(input.operations) ||
+    input.operations.length < 1 ||
+    input.operations.length > sectionOperationLimit
+  ) {
+    return null;
+  }
+  const operations = input.operations.flatMap((operation) => {
+    const parsed = parseSectionOperation(operation);
+    return parsed === null ? [] : [parsed];
+  });
+  return operations.length === input.operations.length
+    ? { ...common, pageId: input.pageId, operations }
+    : null;
 }
 
 function parseDesignPatchInput(input: unknown) {
@@ -706,13 +864,9 @@ function parseDesignPatchInput(input: unknown) {
     if (
       operation.op === "set_variant" &&
       hasExactKeys(operation, ["op", "componentId", "value"]) &&
-      typeof operation.componentId === "string" &&
+      isEditableFieldPath(operation.componentId) &&
       typeof operation.value === "string" &&
-      designVariantContracts.some(
-        ({ componentId, values }) =>
-          componentId === operation.componentId &&
-          values.includes(operation.value as never),
-      )
+      designVariantValues.includes(operation.value)
     ) {
       operations.push({
         op: "set_variant" as const,
@@ -1398,7 +1552,7 @@ const descriptors = {
                 additionalProperties: false,
                 properties: {
                   op: { const: "set" },
-                  field: contentFieldPathSchema,
+                  field: editableFieldPathSchema,
                   format: { const: "plainText" },
                   value: {
                     type: "string",
@@ -1413,7 +1567,7 @@ const descriptors = {
                 additionalProperties: false,
                 properties: {
                   op: { const: "set" },
-                  field: contentFieldPathSchema,
+                  field: editableFieldPathSchema,
                   format: { const: "richText" },
                   value: { $ref: "#/$defs/richTextDocument" },
                 },
@@ -1493,6 +1647,132 @@ const descriptors = {
     annotations: mutationAnnotations,
     execution: taskExecution,
   },
+  "foundry.page.restructure": {
+    name: "foundry.page.restructure",
+    description:
+      "Add, remove, move and copy the sections of one page in the draft, and choose their section styles, as a new immutable revision.",
+    inputSchema: pageToolInputSchema({
+      pageId: pageIdSchema,
+      operations: {
+        type: "array",
+        minItems: 1,
+        maxItems: sectionOperationLimit,
+        items: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                op: { const: "add" },
+                sectionType: sectionTypeSchema,
+                position: sectionPositionSchema,
+                variant: sectionVariantSchema,
+              },
+              required: ["op", "sectionType", "position"],
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                op: { const: "remove" },
+                sectionId: sectionIdSchema,
+              },
+              required: ["op", "sectionId"],
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                op: { const: "move" },
+                sectionId: sectionIdSchema,
+                position: sectionPositionSchema,
+              },
+              required: ["op", "sectionId", "position"],
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                op: { const: "duplicate" },
+                sectionId: sectionIdSchema,
+              },
+              required: ["op", "sectionId"],
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                op: { const: "set_variant" },
+                sectionId: sectionIdSchema,
+                variant: sectionVariantSchema,
+              },
+              required: ["op", "sectionId", "variant"],
+            },
+          ],
+        },
+      },
+    }),
+    outputSchema: toolOutputSchema(pageMutationResult),
+    annotations: mutationAnnotations,
+    execution: taskExecution,
+  },
+  "foundry.section.list": {
+    name: "foundry.section.list",
+    description:
+      "List the section types a page can hold, with their section styles and their editable fields.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+    },
+    outputSchema: toolOutputSchema({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        sections: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              sectionType: sectionTypeSchema,
+              label: { type: "string", minLength: 1 },
+              variants: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    value: sectionVariantSchema,
+                    label: { type: "string", minLength: 1 },
+                    description: { type: "string", minLength: 1 },
+                  },
+                  required: ["value", "label", "description"],
+                },
+              },
+              fields: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    name: { type: "string", minLength: 1 },
+                    label: { type: "string", minLength: 1 },
+                    format: { enum: ["plainText", "richText"] },
+                  },
+                  required: ["name", "label", "format"],
+                },
+              },
+            },
+            required: ["sectionType", "label", "variants", "fields"],
+          },
+        },
+      },
+      required: ["sections"],
+    }),
+    annotations,
+    execution: taskExecution,
+  },
   "foundry.design.patch": {
     name: "foundry.design.patch",
     description:
@@ -1522,18 +1802,16 @@ const descriptors = {
                   required: ["op", "token", "value"],
                 }),
               ),
-              ...designVariantContracts.map(
-                ({ componentId, values }) => ({
-                  type: "object",
-                  additionalProperties: false,
-                  properties: {
-                    op: { const: "set_variant" },
-                    componentId: { const: componentId },
-                    value: { enum: [...values] },
-                  },
-                  required: ["op", "componentId", "value"],
-                }),
-              ),
+              {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  op: { const: "set_variant" },
+                  componentId: designComponentIdSchema,
+                  value: { enum: designVariantValues },
+                },
+                required: ["op", "componentId", "value"],
+              },
             ],
           },
         },
@@ -2022,6 +2300,37 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         );
       }
       return application.deletePage!(principal, parsed, context);
+    },
+    "foundry.page.restructure": async (principal, input, context) => {
+      const parsed = parseRestructurePageInput(input);
+      if (parsed === null) {
+        // A malformed request still says which scopes it was asking for, so
+        // the refusal names the design draft scope when the request tried to
+        // choose a section style. See ADR-0035.
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.page.restructure",
+          input,
+          context,
+          mcpRestructureScopes(
+            isRecord(input) && Array.isArray(input.operations)
+              ? input.operations
+              : [],
+          ),
+        );
+      }
+      return application.restructurePage!(principal, parsed, context);
+    },
+    "foundry.section.list": async (principal, input, context) => {
+      if (!isRecord(input) || !hasExactKeys(input, [])) {
+        return application.rejectInvalidInput(
+          principal,
+          "foundry.section.list",
+          input,
+          context,
+        );
+      }
+      return application.listSectionTypes(principal, context);
     },
     "foundry.design.patch": async (principal, input, context) => {
       const parsed = parseDesignPatchInput(input);

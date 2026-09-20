@@ -42,6 +42,7 @@ describe("D1 MCP connection store", () => {
       "0027_mcp_registered_clients.sql",
       "0028_mcp_preview_reviews.sql",
       "0030_mcp_page_operation_receipts.sql",
+      "0031_mcp_page_restructure_receipts.sql",
     ],
     { compatibilityDate: "2026-07-26" },
   );
