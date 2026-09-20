@@ -152,7 +152,14 @@ export function NewsletterSignupForm({
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (previewOnly || status.state !== "ready") return;
+    // A refused try must be tryable again. `error` keeps the site key, so the
+    // form is still able to send.
+    if (
+      previewOnly ||
+      (status.state !== "ready" && status.state !== "error")
+    ) {
+      return;
+    }
     if (token.current === "") {
       setStatus({
         state: "error",
@@ -258,7 +265,9 @@ export function NewsletterSignupForm({
               {status.state === "sending" ? "Sending…" : actionLabel}
             </button>
           </div>
-          {previewOnly ? null : <div ref={challenge} />}
+          {previewOnly ? null : (
+            <div className="newsletter-signup-check" ref={challenge} />
+          )}
           <p className="newsletter-signup-note" id={statusId} aria-live="polite">
             {status.state === "error" ? status.message : consentNote}
           </p>

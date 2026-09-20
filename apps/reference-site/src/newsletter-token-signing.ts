@@ -10,6 +10,9 @@
  * link and miss the other.
  */
 
+/** The shape of a subscriber identity key: a SHA-256 digest in hex. */
+export const newsletterIdentityKeyPattern = /^[a-f0-9]{64}$/u;
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 

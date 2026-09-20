@@ -97,7 +97,7 @@ describe("the durable newsletter signup store", () => {
     ]);
   });
 
-  it("treats a repeated submission id as a replay, not a second request", async () => {
+  it("treats a repeated submission id as a replay, and changes nothing", async () => {
     await store().savePendingSignup({ pending: pending(), job: job() });
     expect(
       await store().savePendingSignup({
@@ -109,7 +109,15 @@ describe("the durable newsletter signup store", () => {
         }),
       }),
     ).toStrictEqual({ outcome: "replayed" });
-    expect(await savedAddresses()).toHaveLength(1);
+
+    // A retry must leave the first request exactly as it was. Superseding it
+    // would settle the request the person is waiting on and delete the job, so
+    // the confirmation message would never be sent and they would wait for a
+    // link that cannot arrive.
+    expect(await savedAddresses()).toStrictEqual([["pending", address]]);
+    expect(await jobAddresses()).toStrictEqual([
+      { request_id: "newsletter_signup-1", status: "pending", address },
+    ]);
   });
 
   it("allows only one pending request per address", async () => {
@@ -297,7 +305,30 @@ describe("the durable newsletter signup store", () => {
     expect((await jobAddresses())[0]).toMatchObject({ status: "processing" });
   });
 
-  it("gives up on a job whose lease ran out, and clears its address", async () => {
+  it("settles the request when the message can never be sent", async () => {
+    await store().savePendingSignup({ pending: pending(), job: job() });
+    const [claimed] = await store().claimDueConfirmationJobs({
+      siteId,
+      now: requestedAt,
+      leaseToken: "lease-1",
+      leaseUntil: "2026-03-01T10:04:00.000Z",
+      limit: 25,
+    });
+    await store().recordConfirmationOutcome({
+      siteId,
+      requestId: claimed!.requestId,
+      leaseToken: "lease-1",
+      outcome: "permanent_failure",
+      availableAt: null,
+      recordedAt: "2026-03-01T10:01:00.000Z",
+    });
+    // Nobody can open a link they never received, so the request is not left
+    // holding the address for the rest of the day.
+    expect(await savedAddresses()).toStrictEqual([["expired", null]]);
+    expect(await jobAddresses()).toStrictEqual([]);
+  });
+
+  it("settles the request when a lease runs out with no answer", async () => {
     await store().savePendingSignup({ pending: pending(), job: job() });
     await store().claimDueConfirmationJobs({
       siteId,
@@ -313,9 +344,8 @@ describe("the durable newsletter signup store", () => {
       leaseUntil: "2026-03-01T10:14:00.000Z",
       limit: 25,
     });
-    expect(await jobAddresses()).toStrictEqual([
-      { request_id: "newsletter_signup-1", status: "failed", address: "" },
-    ]);
+    expect(await savedAddresses()).toStrictEqual([["expired", null]]);
+    expect(await jobAddresses()).toStrictEqual([]);
   });
 
   it("finds a request by its submission id and by its own id", async () => {

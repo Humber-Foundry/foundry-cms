@@ -22,6 +22,3 @@ export const newsletterSignupMaximumBodySize = 4 * 1_024;
  * believable. A form filled faster than this was not filled by a person.
  */
 export const newsletterSignupMinimumFillTimeMs = 2_000;
-
-/** The longest consent sentence this form will carry. */
-export const newsletterConsentWordingMaximumLength = 400;

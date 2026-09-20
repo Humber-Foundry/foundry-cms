@@ -13,9 +13,16 @@ type JobRow = NewsletterConfirmationJob & {
 
 /**
  * The store the domain tests run against. It keeps the same rules the D1 store
- * enforces with SQL: one pending request per address, an address cleared as
- * soon as a request stops being pending, and a claimed job that another caller
- * cannot claim again before the lease runs out.
+ * enforces with SQL, in the same order:
+ *
+ * - a repeated submission id changes nothing at all, because it is a retry of
+ *   one signup rather than a second one;
+ * - otherwise one pending request per address, the earlier one superseded in
+ *   the same step as the new one is written;
+ * - an address cleared as soon as a request stops being pending;
+ * - a claimed job another caller cannot claim again before the lease runs out;
+ * - a message that will never be sent settles its request, so nobody is left
+ *   waiting for a link that is not coming.
  */
 export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
   listSignups(): ReadonlyArray<PendingNewsletterSignup>;
@@ -177,6 +184,17 @@ export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
           leaseUntil: null,
         });
         return;
+      }
+      // The message will never be sent. Settle the request and drop the job,
+      // which is what the D1 store's trigger does.
+      const signup = signups.get(requestId);
+      if (signup !== undefined && signup.state === "pending") {
+        signups.set(requestId, {
+          ...signup,
+          email: null,
+          state: "expired",
+          settledAt: job.firstAvailableAt,
+        });
       }
       jobs.set(requestId, {
         ...job,

@@ -75,17 +75,32 @@ export function createD1NewsletterSignupStore(
   return {
     async savePendingSignup({ pending, job }) {
       const results = await database.batch([
-        // Supersede first, inside this same transaction. Two requests for one
-        // address that arrive together would otherwise both pass a separate
-        // check and then collide on the one-pending-request index, so a person
-        // would see a failure instead of a confirmation message.
+        // Supersede any earlier pending request for this address, inside this
+        // same transaction. Two signups for one address that arrive together
+        // would otherwise both pass a separate check and then collide on the
+        // one-pending-request index, so a person would see a failure instead
+        // of a confirmation message.
+        //
+        // A repeated submission id is a retry of one signup, not a second one.
+        // It must change nothing at all: superseding on a retry would settle
+        // the request the person is still waiting on, delete its confirmation
+        // job, and leave them waiting for a message that can never be sent.
         database
           .prepare(
             `UPDATE newsletter_signup_requests
              SET state = 'superseded', email = NULL, settled_at = ?3
-             WHERE site_id = ?1 AND identity_key = ?2 AND state = 'pending'`,
+             WHERE site_id = ?1 AND identity_key = ?2 AND state = 'pending'
+               AND NOT EXISTS (
+                 SELECT 1 FROM newsletter_signup_requests AS retry
+                 WHERE retry.site_id = ?1 AND retry.submission_id = ?4
+               )`,
           )
-          .bind(pending.siteId, pending.identityKey, pending.requestedAt),
+          .bind(
+            pending.siteId,
+            pending.identityKey,
+            pending.requestedAt,
+            pending.submissionId,
+          ),
         database
           .prepare(
             `INSERT INTO newsletter_signup_requests (
@@ -192,16 +207,30 @@ export function createD1NewsletterSignupStore(
       limit,
     }) {
       // A lease that ran out means the previous attempt's outcome is unknown.
-      // Give up on it rather than risk a second message to the same person.
-      await database
-        .prepare(
-          `UPDATE newsletter_confirmation_jobs
-           SET status = 'failed', address = '', lease_token = NULL,
-               lease_until = NULL, updated_at = ?2
-           WHERE site_id = ?1 AND status = 'processing' AND lease_until <= ?2`,
-        )
-        .bind(siteId, now)
-        .run();
+      // Give up on it rather than risk a second message to the same person,
+      // and settle the request it belonged to: no message is coming, so there
+      // is nothing left to confirm and no reason to hold the address.
+      await database.batch([
+        database
+          .prepare(
+            `UPDATE newsletter_signup_requests
+             SET state = 'expired', email = NULL, settled_at = ?2
+             WHERE site_id = ?1 AND state = 'pending' AND id IN (
+               SELECT request_id FROM newsletter_confirmation_jobs
+               WHERE site_id = ?1 AND status = 'processing'
+                 AND lease_until <= ?2
+             )`,
+          )
+          .bind(siteId, now),
+        database
+          .prepare(
+            `UPDATE newsletter_confirmation_jobs
+             SET status = 'failed', address = '', lease_token = NULL,
+                 lease_until = NULL, updated_at = ?2
+             WHERE site_id = ?1 AND status = 'processing' AND lease_until <= ?2`,
+          )
+          .bind(siteId, now),
+      ]);
 
       await database
         .prepare(
@@ -253,22 +282,35 @@ export function createD1NewsletterSignupStore(
           .run();
         return;
       }
-      // A message that was sent, and a message that will never be sent, both
-      // stop needing the address.
+      if (outcome === "sent") {
+        // The message is out. The request stays pending, because the person
+        // still has to open the link, but the address is no longer needed here.
+        await database
+          .prepare(
+            `UPDATE newsletter_confirmation_jobs
+             SET status = 'sent', address = '', lease_token = NULL,
+                 lease_until = NULL, updated_at = ?4
+             WHERE site_id = ?1 AND request_id = ?2 AND lease_token = ?3`,
+          )
+          .bind(siteId, requestId, leaseToken, recordedAt)
+          .run();
+        return;
+      }
+      // The message will never be sent. Nobody can open a link they never
+      // received, so the request is settled now rather than held for the rest
+      // of the confirmation window. Settling it fires the trigger that removes
+      // the job, which is what clears the address.
       await database
         .prepare(
-          `UPDATE newsletter_confirmation_jobs
-           SET status = ?4, address = '', lease_token = NULL,
-               lease_until = NULL, updated_at = ?5
-           WHERE site_id = ?1 AND request_id = ?2 AND lease_token = ?3`,
+          `UPDATE newsletter_signup_requests
+           SET state = 'expired', email = NULL, settled_at = ?4
+           WHERE site_id = ?1 AND id = ?2 AND state = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM newsletter_confirmation_jobs
+               WHERE request_id = ?2 AND lease_token = ?3
+             )`,
         )
-        .bind(
-          siteId,
-          requestId,
-          leaseToken,
-          outcome === "sent" ? "sent" : "failed",
-          recordedAt,
-        )
+        .bind(siteId, requestId, leaseToken, recordedAt)
         .run();
     },
   };

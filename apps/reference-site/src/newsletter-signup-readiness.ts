@@ -27,8 +27,6 @@ import {
  * form is told yes or no and nothing else: a visitor has no business learning
  * how a site is configured.
  */
-export const newsletterSignupSetupGuide = emailDeliverySetupGuide;
-
 export type NewsletterSignupReadiness = Readonly<{
   state: "connected" | "not_configured" | "local_development";
   missingSettings: ReadonlyArray<NewsletterSignupSettingName>;
@@ -99,7 +97,7 @@ export function readNewsletterSignupReadiness(
     return Object.freeze({
       state: "local_development",
       missingSettings: Object.freeze([]),
-      setupGuide: newsletterSignupSetupGuide,
+      setupGuide: emailDeliverySetupGuide,
     });
   }
   const missingSettings = newsletterSignupSettingNames.filter(
@@ -108,7 +106,7 @@ export function readNewsletterSignupReadiness(
   return Object.freeze({
     state: missingSettings.length === 0 ? "connected" : "not_configured",
     missingSettings: Object.freeze(missingSettings),
-    setupGuide: newsletterSignupSetupGuide,
+    setupGuide: emailDeliverySetupGuide,
   });
 }
 

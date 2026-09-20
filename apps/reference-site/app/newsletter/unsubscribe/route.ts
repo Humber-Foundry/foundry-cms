@@ -14,33 +14,16 @@ import {
 import {
   loadSubscriberLedgerIntegrationApplication,
 } from "../../../src/subscriber-ledger-runtime";
+import {
+  escapeHtmlAttribute,
+  newsletterPublicPage,
+} from "../../../src/newsletter-public-page";
 
-function html(body: string, status = 200) {
-  return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
-      `<meta name="viewport" content="width=device-width">` +
-      `<title>Newsletter preferences</title></head><body>${body}</body></html>`,
-    {
-      status,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "private, no-store",
-        "referrer-policy": "no-referrer",
-      },
-    },
-  );
-}
+const html = (body: string, status = 200) =>
+  newsletterPublicPage({ title: "Newsletter preferences", body, status });
 
 function tokenFromUrl(request: Request) {
   return new URL(request.url).searchParams.get("token") ?? "";
-}
-
-function escapeAttribute(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 function deliveryAdapter(
@@ -69,7 +52,7 @@ export async function GET(request: Request) {
   return html(
     `<main><h1>Unsubscribe from this newsletter?</h1>` +
       `<form method="post">` +
-      `<input type="hidden" name="token" value="${escapeAttribute(token)}">` +
+      `<input type="hidden" name="token" value="${escapeHtmlAttribute(token)}">` +
       `<button type="submit">Unsubscribe</button></form></main>`,
   );
 }

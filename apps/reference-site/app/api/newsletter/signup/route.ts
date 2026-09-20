@@ -4,7 +4,6 @@ import {
   newsletterConsentWordings,
 } from "../../../../foundry/newsletter-consent-wordings";
 import {
-  newsletterConsentWordingMaximumLength,
   newsletterSignupMaximumBodySize,
   newsletterSignupMinimumFillTimeMs,
   newsletterSignupSchemaVersion,
@@ -180,10 +179,7 @@ export async function POST(request: Request) {
   // when it matches a sentence in this site's own published pages, so a caller
   // cannot write words of their own into somebody's consent record.
   const consentWording = value.consentWording.trim();
-  if (
-    consentWording.length > newsletterConsentWordingMaximumLength ||
-    !newsletterConsentWordings().includes(consentWording)
-  ) {
+  if (!newsletterConsentWordings().includes(consentWording)) {
     return publicJson({ error: "signup_rejected" }, 400);
   }
 

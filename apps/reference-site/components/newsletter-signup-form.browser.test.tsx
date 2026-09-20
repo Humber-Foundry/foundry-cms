@@ -189,6 +189,31 @@ describe("the public newsletter signup form", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("can be tried again after a refused try", async () => {
+    answerStatus({ available: true, turnstileSiteKey: "1x00000000000000000000AA" });
+    render();
+    const input = await waitFor(() => {
+      const found = document.querySelector<HTMLInputElement>("input");
+      return found !== null && !found.disabled ? found : undefined;
+    });
+    const button = document.querySelector<HTMLButtonElement>("button")!;
+
+    // Sending before the automated-traffic check has finished is refused.
+    document.querySelector<HTMLFormElement>("form")!.requestSubmit();
+    const note = await waitFor(() =>
+      [...document.querySelectorAll(".newsletter-signup-note")].find(
+        (candidate) =>
+          candidate.textContent?.includes("try again") === true,
+      ) ?? undefined,
+    );
+    expect(note.textContent).toContain("try again");
+
+    // After a refusal the person must be able to correct what they typed and
+    // send again, rather than press a button that does nothing.
+    expect(input.disabled).toBe(false);
+    expect(button.disabled).toBe(false);
+  });
+
   it("carries a message for somebody with JavaScript off", async () => {
     // A browser that runs JavaScript never parses the contents of a noscript
     // element, so only its presence can be checked here. The wording is

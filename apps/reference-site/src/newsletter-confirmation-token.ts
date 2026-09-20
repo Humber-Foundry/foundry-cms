@@ -5,6 +5,7 @@ import {
 } from "@humber-foundry/application";
 
 import {
+  newsletterIdentityKeyPattern,
   signNewsletterToken,
   verifyNewsletterToken,
 } from "./newsletter-token-signing";
@@ -12,15 +13,14 @@ import {
 /**
  * The signed confirmation link for newsletter signup.
  *
- * It is the unsubscribe link's twin: the same shape, the same delivery secret,
- * one shared signer, and its own context string, so a token minted for one
- * purpose is refused for the other. The payload carries the request id and the
- * address's identity key, never the address.
+ * It has the same shape as the unsubscribe link and uses the same delivery
+ * secret and the same signer, under its own context string, so a token signed
+ * for one purpose is refused for the other. The payload carries the request id
+ * and the address's identity key, never the address.
  */
 const context = "foundry.newsletter-confirm.v1";
 const invalidTokenCode = "confirm_token_invalid";
 const invalidSecretCode = "confirm_secret_invalid";
-const identityKeyPattern = /^[a-f0-9]{64}$/u;
 const requestIdPattern = /^[A-Za-z0-9_:-]{1,128}$/u;
 
 export async function createNewsletterConfirmationToken({
@@ -36,7 +36,7 @@ export async function createNewsletterConfirmationToken({
 }) {
   if (
     !requestIdPattern.test(requestId) ||
-    !identityKeyPattern.test(identityKey) ||
+    !newsletterIdentityKeyPattern.test(identityKey) ||
     !Number.isFinite(Date.parse(expiresAt))
   ) {
     throw new TypeError("confirm_token_input_invalid");
@@ -84,7 +84,7 @@ export async function verifyNewsletterConfirmationToken({
     typeof parsed.requestId !== "string" ||
     !requestIdPattern.test(parsed.requestId) ||
     typeof parsed.identityKey !== "string" ||
-    !identityKeyPattern.test(parsed.identityKey) ||
+    !newsletterIdentityKeyPattern.test(parsed.identityKey) ||
     typeof parsed.expiresAt !== "string" ||
     Date.parse(parsed.expiresAt) <= now.getTime()
   ) {

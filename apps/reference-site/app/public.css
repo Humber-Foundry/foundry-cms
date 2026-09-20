@@ -747,11 +747,9 @@
   line-height: 1.5;
 }
 
-.newsletter-signup-form > div:empty {
-  margin: 0;
-}
-
-.newsletter-signup-form > div:not(:empty) {
+/* The automated-traffic check. It is empty until the widget draws itself, so
+   it takes its spacing only once it holds something. */
+.newsletter-signup-check:not(:empty) {
   margin-top: 1rem;
 }
 

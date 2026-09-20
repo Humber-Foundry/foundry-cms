@@ -4,6 +4,17 @@ import {
 } from "@humber-foundry/application";
 
 import { loadNewsletterSignupApplication } from "../../../src/newsletter-signup-runtime";
+import {
+  escapeHtmlAttribute,
+  newsletterPublicPage,
+} from "../../../src/newsletter-public-page";
+
+const html = (body: string, status = 200) =>
+  newsletterPublicPage({
+    title: "Confirm your newsletter signup",
+    body,
+    status,
+  });
 
 /**
  * The page a person reaches from the confirmation message.
@@ -14,31 +25,6 @@ import { loadNewsletterSignupApplication } from "../../../src/newsletter-signup-
  *
  * No address appears in this page, in its URL, or in any error it returns.
  */
-
-function html(body: string, status = 200) {
-  return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
-      `<meta name="viewport" content="width=device-width">` +
-      `<title>Confirm your newsletter signup</title></head>` +
-      `<body>${body}</body></html>`,
-    {
-      status,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "private, no-store",
-        "referrer-policy": "no-referrer",
-      },
-    },
-  );
-}
-
-function escapeAttribute(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
 
 const expiredPage =
   "<main><h1>This confirmation link is no longer valid</h1>" +
@@ -53,7 +39,7 @@ export async function GET(request: Request) {
     `<main><h1>Confirm your newsletter signup</h1>` +
       `<p>Press the button to join the list. Nothing is added until you do.</p>` +
       `<form method="post">` +
-      `<input type="hidden" name="token" value="${escapeAttribute(token)}">` +
+      `<input type="hidden" name="token" value="${escapeHtmlAttribute(token)}">` +
       `<button type="submit">Confirm signup</button></form></main>`,
   );
 }

@@ -7,6 +7,7 @@ import {
   createNewsletterSignupApplication,
   createSubscriberIdentityKey,
   type NewsletterSignupApplication,
+  type NewsletterConfirmationSender,
   type NewsletterSignupStore,
   type SubscriberLedgerStore,
 } from "@humber-foundry/application";
@@ -23,11 +24,6 @@ import {
   type NewsletterSignupReadiness,
 } from "./newsletter-signup-readiness";
 
-export {
-  publicNewsletterSignupStatus,
-  type PublicNewsletterSignupStatus,
-} from "./newsletter-signup-public-status";
-
 type RateLimitBinding = Readonly<{
   limit(input: { key: string }): Promise<Readonly<{ success: boolean }>>;
 }>;
@@ -42,21 +38,38 @@ function isLocalDevelopment() {
   return process.env.NODE_ENV === "development";
 }
 
+/**
+ * The provider that sends confirmation messages, or a sender that refuses when
+ * the provider key is absent.
+ *
+ * With the key absent, `readDelivery` already reports the installation as not
+ * configured, so nothing is ever queued and this sender is never called. It is
+ * built anyway because the application needs one, and it refuses rather than
+ * carry a made-up key that would look like a real credential.
+ */
+function confirmationSender(
+  environment: NewsletterSignupRuntimeEnvironment,
+  senders: Readonly<Record<string, { id: number; email: string; name: string }>>,
+  fetcher?: typeof fetch,
+): NewsletterConfirmationSender {
+  const apiKey = environment.FOUNDRY_BREVO_API_KEY?.trim() ?? "";
+  if (apiKey === "") {
+    return Object.freeze({
+      async send() {
+        return { outcome: "permanent_failure" as const };
+      },
+    });
+  }
+  return createBrevoNewsletterConfirmationSender({
+    apiKey,
+    senders,
+    ...(fetcher === undefined ? {} : { fetcher }),
+  });
+}
+
 export async function loadNewsletterSignupEnvironment(): Promise<NewsletterSignupRuntimeEnvironment> {
   const { env } = await getCloudflareContext({ async: true });
   return env as NewsletterSignupRuntimeEnvironment;
-}
-
-export async function loadNewsletterSignupReadiness(): Promise<NewsletterSignupReadiness> {
-  if (isLocalDevelopment()) {
-    return readNewsletterSignupReadiness(
-      {},
-      { localDevelopment: true },
-    );
-  }
-  return readNewsletterSignupReadiness(
-    await loadNewsletterSignupEnvironment(),
-  );
 }
 
 /**
@@ -107,11 +120,7 @@ export function createNewsletterSignupRuntime({
       canonicalOrigin: environment.FOUNDRY_CANONICAL_ORIGIN ?? "",
       secret,
     }),
-    sender: createBrevoNewsletterConfirmationSender({
-      apiKey: environment.FOUNDRY_BREVO_API_KEY ?? "unset",
-      senders,
-      ...(fetcher === undefined ? {} : { fetcher }),
-    }),
+    sender: confirmationSender(environment, senders, fetcher),
     async readDelivery() {
       return readNewsletterConfirmationDelivery(environment);
     },

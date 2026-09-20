@@ -429,6 +429,35 @@ describe("newsletter signup", () => {
       status: "failed",
       address: "",
     });
+    // Nobody can open a link they never received, so the request is settled
+    // now rather than held for the rest of the confirmation window.
+    expect(
+      harness.store.listSignups().map((signup) => [signup.state, signup.email]),
+    ).toStrictEqual([["expired", null]]);
+  });
+
+  it("leaves a retried signup exactly as it was", async () => {
+    const harness = createHarness();
+    await harness.application.requestSignup({
+      submissionId: firstSubmission,
+      email: address,
+      disclosure,
+    });
+    await harness.application.requestSignup({
+      submissionId: firstSubmission,
+      email: address,
+      disclosure,
+    });
+    // A repeated submission id is one signup tried twice. Treating it as a
+    // second signup would supersede the request the person is waiting on and
+    // drop its confirmation job, so no message could ever be sent.
+    expect(
+      harness.store.listSignups().map((signup) => [signup.state, signup.email]),
+    ).toStrictEqual([["pending", address]]);
+    expect(harness.store.listJobs()).toHaveLength(1);
+
+    await harness.application.deliverDueConfirmations({ leaseToken: "lease" });
+    expect(harness.sent).toHaveLength(1);
   });
 
   it("supersedes an earlier pending request for the same address", async () => {
