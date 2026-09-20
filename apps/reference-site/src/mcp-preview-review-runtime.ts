@@ -12,6 +12,8 @@ import { loadContentRevisionApplication } from "./content-revision-runtime";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import { mcpConnectionDisplayName } from "./mcp-connection-display";
 
+import { previewsWaitingForReviewQuery } from "./mcp-preview-review-limits";
+
 export { previewChangeReasonLimit } from "./mcp-preview-review-limits";
 
 /** Shown when the connection record no longer names the client. */
@@ -194,22 +196,7 @@ export async function loadPreviewsWaitingForReview(input: {
   const environment = await loadHumanAccessEnvironment();
   if (environment.FOUNDRY_DB === undefined) return [];
   const result = await environment.FOUNDRY_DB
-    .prepare(
-      `SELECT artifact.preview_id, artifact.created_at,
-              connection.oauth_client_id
-       FROM mcp_preview_artifacts AS artifact
-       JOIN content_workspaces AS workspace
-         ON workspace.workspace_id = artifact.workspace_id
-        AND workspace.current_revision = artifact.revision
-        AND workspace.lifecycle = 'open'
-       LEFT JOIN mcp_connections AS connection
-         ON connection.id = artifact.connection_id
-       LEFT JOIN mcp_preview_reviews AS review
-         ON review.preview_id = artifact.preview_id
-       WHERE artifact.site_id = ?1 AND review.preview_id IS NULL
-       ORDER BY artifact.created_at DESC
-       LIMIT ?2`,
-    )
+    .prepare(previewsWaitingForReviewQuery)
     .bind(input.siteId, input.limit ?? 20)
     .all<{
       preview_id: string;

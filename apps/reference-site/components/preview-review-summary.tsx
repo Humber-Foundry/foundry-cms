@@ -4,12 +4,6 @@ import { contentChangeVisitorEffect } from "@humber-foundry/application";
 import { HelpTip } from "@/components/help-tip";
 import { mcpRelativeTime } from "@/src/mcp-connection-display";
 
-const pageStateWords: Readonly<Record<string, string>> = {
-  created: "New page",
-  changed: "Changed",
-  removed: "Removed",
-};
-
 export type PreviewReviewDecided = Readonly<{
   decision: "approved" | "changes_requested";
   approvalId: string | null;
@@ -33,6 +27,9 @@ export function PreviewReviewSummary({
   preparedAt: string;
   summary: ContentChangeSummary;
 }) {
+  // `changedDocuments` already names every changed, created and removed page
+  // by its title, and `publicEffect` gives each page's web address. Listing
+  // `summary.pages` beside them said the same thing twice.
   const changeLines = [...summary.changedDocuments, ...summary.designChanges];
   return (
     <>
@@ -52,18 +49,6 @@ export function PreviewReviewSummary({
 
       <section className="panel" aria-labelledby="review-changes">
         <h2 id="review-changes">What changed</h2>
-        {summary.pages.length === 0 ? null : (
-          <ul className="review-pages">
-            {summary.pages.map((page) => (
-              <li key={page.pageId}>
-                <span className="review-page-title">{page.title}</span>{" "}
-                <span className="review-page-state">
-                  {pageStateWords[page.state] ?? "Changed"} · {page.path}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
         {changeLines.length === 0 ? (
           <p className="empty-state">
             This draft changes nothing a visitor can see.

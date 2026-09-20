@@ -10,6 +10,7 @@ import {
 import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import { createD1McpConnectionStore } from "./d1-mcp-connection-store";
+import { previewsWaitingForReviewQuery } from "./mcp-preview-review-limits";
 import { createD1McpPreviewStore } from "./d1-mcp-preview-store";
 import { createD1ContentRevisionStore } from "./d1-content-revision-store";
 import {
@@ -1997,6 +1998,82 @@ describe("D1 MCP connection store", () => {
         previewId,
       }),
     ).resolves.toBeNull();
+  });
+
+  it("lists only the previews nobody has answered yet", async () => {
+    const siteId = referenceSiteDefinition.site.id;
+    const workspaceId = createContentWorkspaceId("workspace_review_waiting");
+    const actorId = createContentActorId("mcp-review-waiting");
+    await database
+      .prepare(
+        `INSERT INTO mcp_connections (
+           id, actor_id, site_id, oauth_client_id, redirect_uri, scopes_json,
+           status, created_by_membership_id, created_at
+         ) VALUES (
+           'connection-review-waiting', 'review-waiting', ?1,
+           'https://helper.example/mcp.json',
+           'https://helper.example/callback', '["site.read"]', 'active',
+           'membership-owner', ?2
+         )`,
+      )
+      .bind(siteId, "2026-09-18T18:00:00.000Z")
+      .run();
+    const application = createContentRevisionApplication({
+      siteDefinition: referenceSiteDefinition,
+      store: createD1ContentRevisionStore(database, siteId, workspaceId),
+      workspaceId,
+      actorId,
+      rendererVersion: "renderer-70",
+      productionBase: "a".repeat(40),
+    });
+    await application.commands.create({
+      actorId,
+      workspaceId,
+      idempotencyKey: "create-review-waiting",
+    });
+    const addPreview = (previewId: string, key: string, createdAt: string) =>
+      database
+        .prepare(
+          `INSERT INTO mcp_preview_artifacts (
+             preview_id, connection_id, actor_id, site_id, workspace_id,
+             revision, idempotency_key, request_hash, artifact_hash, created_at
+           ) VALUES (
+             ?1, 'connection-review-waiting', 'review-waiting', ?2, ?3, 0,
+             ?4, ?5, ?5, ?6
+           )`,
+        )
+        .bind(previewId, siteId, workspaceId, key, "d".repeat(64), createdAt)
+        .run();
+    const answered = "preview_22222222-3333-4444-8555-666666666666";
+    const waiting = "preview_33333333-4444-4555-8666-777777777777";
+    await addPreview(answered, "answered-key", "2026-09-18T18:05:00.000Z");
+    await addPreview(waiting, "waiting-key", "2026-09-18T18:06:00.000Z");
+    await database
+      .prepare(
+        `INSERT INTO mcp_preview_reviews (
+           preview_id, site_id, workspace_id, revision, decision,
+           approval_id, reason, decided_by, decided_at
+         ) VALUES (
+           ?1, ?2, ?3, 0, 'changes_requested', NULL, 'Not yet',
+           'membership-owner', ?4
+         )`,
+      )
+      .bind(answered, siteId, workspaceId, "2026-09-18T19:00:00.000Z")
+      .run();
+
+    // The statement Overview runs, read from the same place the runtime reads
+    // it, so this proves the real SQL against a real database.
+    const listed = await database
+      .prepare(previewsWaitingForReviewQuery)
+      .bind(siteId, 20)
+      .all<{ preview_id: string; oauth_client_id: string | null }>();
+
+    expect(
+      listed.results.map((row: { preview_id: string }) => row.preview_id),
+    ).toEqual([waiting]);
+    expect(listed.results[0]?.oauth_client_id).toBe(
+      "https://helper.example/mcp.json",
+    );
   });
 
   it("keeps one decision per preview, and never changes or removes it", async () => {

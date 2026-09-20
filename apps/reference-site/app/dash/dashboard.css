@@ -4043,31 +4043,19 @@ h3.media-places-heading {
  * least --dash-control-height tall and keeps at least 0.5rem between its text
  * and any border or other control. The lists stay lists, because the number of
  * changed pages cannot fill a grid row. */
-.review-pages,
 .review-changes {
   margin: 1rem 0 0;
   padding: 0;
   list-style: none;
 }
 
-.review-pages li,
 .review-changes li {
   padding-block: 0.6rem;
   border-top: 1px solid var(--dash-line);
 }
 
-.review-pages li:first-child,
 .review-changes li:first-child {
   border-top: 0;
-}
-
-.review-page-title {
-  font-weight: 600;
-}
-
-.review-page-state {
-  color: var(--dash-ink-soft);
-  font-size: var(--dash-text-small);
 }
 
 .review-effect {

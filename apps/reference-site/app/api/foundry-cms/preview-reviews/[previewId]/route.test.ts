@@ -54,6 +54,8 @@ describe("preview check endpoint", () => {
 
     expect(response.status).toBe(204);
     await expect(response.text()).resolves.toBe("");
+    // The answer is about one person and one moment, so it is never stored.
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 
   it("answers not found once the draft moved on", async () => {
@@ -62,6 +64,7 @@ describe("preview check endpoint", () => {
     const response = await GET(request(), { params });
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 
   it("refuses a caller with no signed-in person", async () => {

@@ -1314,6 +1314,10 @@ const descriptors = {
       ...draftResult,
       properties: {
         ...draftResult.properties,
+        // Deliberately looser than `previewIdPattern`. A preview prepared
+        // before preview ids carried a prefix still replays through this
+        // tool, and its result must stay valid against its own schema.
+        // `foundry.publication.status` is the strict surface.
         previewId: { type: "string", minLength: 1, maxLength: 200 },
         previewArtifact: {
           type: "string",

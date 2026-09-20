@@ -182,8 +182,9 @@ until the person asks for the canonical preview of that exact revision in the
 same session and the server still serves it, which is the evidence rule the
 dashboard's blog scheduling control follows. That rule shows the person asked
 for the preview; the refusal that actually protects the site is the server's
-revalidation of the revision and artifact hash when a decision is recorded. Approving does not publish: it creates the approval
-that `publication.request` needs.
+revalidation of the revision and artifact hash when a decision is recorded.
+Approving does not publish: it creates the approval that
+`publication.request` needs.
 
 One preview holds one decision, and the decision record is immutable. Asking for
 changes stores the reason the person typed. The agent reads the decision by

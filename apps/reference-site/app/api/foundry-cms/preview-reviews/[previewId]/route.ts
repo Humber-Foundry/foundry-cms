@@ -12,6 +12,18 @@ import {
 import { loadMcpPreviewForHuman } from "../../../../../src/mcp-preview-review-runtime";
 
 /**
+ * The answer depends on who is asking and on the draft as it stands right
+ * now, so it is never stored. A cached answer would turn Approve on for a
+ * preview that has since moved on, or keep it off after the draft settled.
+ */
+function answer(status: number) {
+  return new Response(null, {
+    status,
+    headers: { "cache-control": "private, no-store" },
+  });
+}
+
+/**
  * Does this preview still stand?
  *
  * The review screen asks before it turns Approve on. The answer is a status
@@ -31,26 +43,26 @@ export async function GET(
     );
     const access = await authorizeAuthenticatedHumanIdentity(identity);
     if (access.state !== "authorized") {
-      return new Response(null, { status: 403 });
+      return answer(403);
     }
     const { previewId } = await params;
     const selected = await loadMcpPreviewForHuman({
       previewId,
       siteId: access.membership.siteId,
     });
-    return new Response(null, { status: selected === null ? 404 : 204 });
+    return answer(selected === null ? 404 : 204);
   } catch (error) {
     if (
       error instanceof AccessDeniedError ||
       error instanceof AccessIdentityError
     ) {
-      return new Response(null, { status: 403 });
+      return answer(403);
     }
     if (
       error instanceof AccessIdentityUnavailableError ||
       error instanceof HumanAccessConfigurationError
     ) {
-      return new Response(null, { status: 503 });
+      return answer(503);
     }
     throw error;
   }
