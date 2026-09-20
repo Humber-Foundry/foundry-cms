@@ -3,6 +3,7 @@ import {
   createHumanMembershipId,
   EligibilitySyncConvergenceError,
   InvalidHumanEmailError,
+  isHumanRole,
   isMembershipStatus,
   LastOwnerError,
 } from "@humber-foundry/application";
@@ -37,6 +38,11 @@ type MemberCommand =
       action: "change_status";
       membershipId: string;
       status: "active" | "suspended" | "revoked";
+    }>
+  | Readonly<{
+      action: "change_role";
+      membershipId: string;
+      role: "owner" | "editor";
     }>;
 
 function isMemberCommand(value: unknown): value is MemberCommand {
@@ -65,6 +71,14 @@ function isMemberCommand(value: unknown): value is MemberCommand {
       isMembershipStatus(value.status)
     );
   }
+  if (value.action === "change_role") {
+    return (
+      "membershipId" in value &&
+      typeof value.membershipId === "string" &&
+      "role" in value &&
+      isHumanRole(value.role)
+    );
+  }
   return false;
 }
 
@@ -73,7 +87,16 @@ function commandErrorResponse(
   { commandDispatched = false } = {},
 ): Response | null {
   if (error instanceof AccessDeniedError) {
-    return Response.json({ error: "not_authorized" }, { status: 403 });
+    // `error.code` is the exact reason the domain layer refused the change
+    // (for example "membership_email_ambiguous" or
+    // "membership_transition_not_allowed"). The screen keeps `error` as the
+    // generic "not_authorized" for anything that already checks it, and adds
+    // `reason` so the dashboard can show the person the real reason instead
+    // of one generic sentence for every refusal.
+    return Response.json(
+      { error: "not_authorized", reason: error.code },
+      { status: 403 },
+    );
   }
   if (error instanceof HumanAccessConfigurationError) {
     if (commandDispatched) {
@@ -168,13 +191,25 @@ export async function POST(request: Request) {
             return Response.json({ invitation }, { status: 201 });
           }
 
+          if (command.action === "change_status") {
+            const membershipId = createHumanMembershipId(
+              command.membershipId,
+            );
+            const membership =
+              await context.application.commands.changeStatus({
+                actor: context.identity,
+                membershipId,
+                status: command.status,
+              });
+            return Response.json({ membership });
+          }
+
           const membershipId = createHumanMembershipId(command.membershipId);
-          const membership =
-            await context.application.commands.changeStatus({
-              actor: context.identity,
-              membershipId,
-              status: command.status,
-            });
+          const membership = await context.application.commands.changeRole({
+            actor: context.identity,
+            membershipId,
+            role: command.role,
+          });
           return Response.json({ membership });
         } catch (error) {
           const response = commandErrorResponse(error, {

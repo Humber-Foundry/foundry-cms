@@ -2,6 +2,7 @@ import {
   createInvitationEligibilitySyncOperationId,
   isInvitationAccessEligible,
   isInvitationClaimable,
+  isMembershipRoleChangeAllowed,
   isMembershipStatusTransitionAllowed,
   readInvitationIdFromEligibilitySyncOperation,
   type EligibilitySyncOperationId,
@@ -183,6 +184,36 @@ export function createInMemoryHumanAccessStore({
         attempts: 0,
         nextAttemptAt: new Date(0).toISOString(),
       });
+      return { changed: true, membership: updated };
+    },
+    async changeMembershipRole({ siteId, membershipId, role }) {
+      const membership = membershipRecords.get(membershipId);
+      if (membership?.siteId !== siteId) {
+        return { changed: false, reason: "membership_not_found" };
+      }
+      if (!isMembershipRoleChangeAllowed(membership.status)) {
+        return {
+          changed: false,
+          reason: "membership_transition_not_allowed",
+        };
+      }
+      if (
+        membership.role === "owner" &&
+        membership.status === "active" &&
+        role !== "owner"
+      ) {
+        const activeOwnerCount = [...membershipRecords.values()].filter(
+          (candidate) =>
+            candidate.siteId === siteId &&
+            candidate.role === "owner" &&
+            candidate.status === "active",
+        ).length;
+        if (activeOwnerCount <= 1) {
+          return { changed: false, reason: "last_owner" };
+        }
+      }
+      const updated = { ...membership, role };
+      membershipRecords.set(membershipId, updated);
       return { changed: true, membership: updated };
     },
     async markEligibilitySynchronized({ siteId, operationIds, now }) {

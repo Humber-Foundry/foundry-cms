@@ -484,6 +484,14 @@ item's unpublished revision. The internal `workspaceId` and revision number
 never appear as ordinary page copy; the dashboard says "unpublished changes"
 or "your draft" instead.
 
+**User** — The dashboard's word for what this glossary's Actors section and
+the code call a **member** (a human's membership in the site — its `role`
+and `status`). "Member" reads as jargon and does not say what the person can
+do, so Settings and every screen a person reads say "user": the section is
+"Users", the button is "Invite user", the table column is "User". Code
+identifiers (`HumanMembership`, `membershipId`, `member-access-controls.tsx`)
+keep "member" or "membership"; only the words a person reads changed.
+
 **Owner / Editor** — The two roles a user can hold, shown capitalized
 wherever a role appears (`Owner`, `Editor`), never as the internal lowercase
 value.
