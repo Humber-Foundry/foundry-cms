@@ -2285,6 +2285,80 @@
   margin-top: 1rem;
 }
 
+/* Connect an agent ---------------------------------------------------------
+ *
+ * The address and its copy button sit on one row on a wide screen and stack
+ * on a phone, so the button never crowds the address text. Two lists (what
+ * an agent can and cannot do) stay one body size plus one small size, with
+ * weight carrying the permission name rather than a third size. */
+.agent-address-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-field-bg);
+}
+
+.agent-address-row code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-capability-list {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-capability-list li {
+  padding: 1rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+.agent-capability-list li p {
+  margin: 0.35rem 0 0;
+  color: var(--dash-ink-soft);
+}
+
+.agent-client-steps {
+  margin-top: var(--dash-gap);
+  padding: 1.25rem;
+  border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-surface);
+}
+
+.agent-client-steps + .agent-client-steps {
+  margin-top: 1.25rem;
+}
+
+.agent-client-steps h3 {
+  margin-bottom: 0.5rem;
+}
+
+.agent-client-steps ol {
+  margin: 0.75rem 0;
+  padding-left: 1.25rem;
+}
+
+.agent-client-steps li {
+  margin-bottom: 0.5rem;
+}
+
+.agent-client-sources {
+  margin: 0.75rem 0 0;
+  color: var(--dash-ink-soft);
+  font-size: var(--dash-text-small);
+}
+
 @media (max-width: 760px) {
   .dashboard-header {
     align-items: flex-start;

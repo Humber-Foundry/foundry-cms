@@ -2,7 +2,6 @@ import { SignJWT, jwtVerify } from "jose";
 
 import {
   mcpInitialScope,
-  mcpScopeLabels,
   mcpSupportedScopes,
   sha256CanonicalJson,
   type McpConnectionGrant,
@@ -13,6 +12,7 @@ import {
 } from "@humber-foundry/application";
 import type { SiteId } from "@humber-foundry/site-definition";
 
+import { mcpScopeDisplay } from "./mcp-connection-display";
 import {
   isValidMcpRedirectUri,
   mcpClientRegistrationLimits,
@@ -54,6 +54,116 @@ const clientRegistrationsPerHour = 20;
 const clientRegistrationCapacity = 500;
 const authorizationStateLimit = 512;
 const clientIdLimit = 2_048;
+
+/**
+ * The consent screen is served as plain HTML by this Worker, outside the
+ * Next.js dashboard, so it cannot import the dashboard's stylesheet. This
+ * copies the same values instead: one heading size, one body text size,
+ * colour for hierarchy, kept corner radius on every control, and every
+ * control at least 44px tall. Keeping the values here identical to
+ * `apps/reference-site/app/dash/dashboard.css` is how this page keeps
+ * matching the dashboard type system.
+ */
+const mcpConsentStyles = `<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 1.5rem;
+    background: #f3f5f2;
+    color: #17201d;
+    font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  main { max-width: 34rem; margin: 0 auto; }
+  .consent-panel {
+    background: #ffffff;
+    border: 1px solid #d3dad5;
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+  }
+  h1 {
+    font-size: clamp(1.75rem, 1.2rem + 1.6vw, 2.25rem);
+    line-height: 1.2;
+    margin: 0 0 1rem;
+  }
+  p { margin: 0 0 1rem; }
+  .consent-claim-notice {
+    background: #e7f0ea;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin: 0 0 1.5rem;
+  }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 0.5rem 1rem; margin: 0 0 1.5rem; }
+  dt { color: #4a5651; }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  fieldset { border: 1px solid #d3dad5; border-radius: 0.5rem; padding: 1rem; margin: 0 0 1.5rem; }
+  legend { padding: 0 0.5rem; }
+  .consent-scope-list { list-style: none; margin: 0; padding: 0; }
+  .consent-scope-list li {
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #d3dad5;
+  }
+  .consent-scope-list li:last-child { border-bottom: none; }
+  .consent-scope-list li > span,
+  .consent-scope-list li > label { flex: 1 1 auto; min-width: 0; }
+  input[type="checkbox"] { width: 1.25rem; height: 1.25rem; flex: none; }
+  button {
+    min-height: 2.75rem;
+    padding: 0 1.5rem;
+    border-radius: 0.5rem;
+    border: none;
+    background: #14563d;
+    color: #ffffff;
+    font: inherit;
+    cursor: pointer;
+  }
+  code { font-family: ui-monospace, "SF Mono", "IBM Plex Mono", monospace; font-size: 0.9em; }
+  @media (max-width: 420px) {
+    dl { grid-template-columns: 1fr; }
+  }
+</style>`;
+
+/**
+ * A readable HTML page for a request the consent screen could not complete.
+ * A client that started the connection sent this browser here; showing raw
+ * JSON left a person looking at an error they could not act on. This never
+ * loosens which requests are accepted, only how a rejected one is shown.
+ */
+function authorizationProblemPage(
+  heading: string,
+  message: string,
+  status: number,
+) {
+  return new Response(
+    `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Connect MCP client</title>${mcpConsentStyles}</head>
+  <body>
+    <main>
+      <div class="consent-panel">
+        <h1>${escapeHtml(heading)}</h1>
+        <p>${escapeHtml(message)}</p>
+        <p>Return to the client you started this from and try connecting again.</p>
+      </div>
+    </main>
+  </body>
+</html>`,
+    {
+      status,
+      headers: {
+        "cache-control": "no-store",
+        "content-security-policy":
+          "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        "content-type": "text/html; charset=utf-8",
+        "x-content-type-options": "nosniff",
+      },
+    },
+  );
+}
 
 export type McpAuthorizationGrantInput = Readonly<{
   connectionId: string;
@@ -751,12 +861,15 @@ export function createMcpHttpRuntime({
       mcpInitialScope,
       ...(stepUpConnection?.scopes ?? []),
     ]);
+    // The plain phrase for each scope comes from the same map the dashboard
+    // uses for the connected-agents list and the connect screen, so an Owner
+    // reads the same words everywhere a permission is shown.
     const choices = authorization.scopes
       .map((scope) => {
-        const label = `${escapeHtml(mcpScopeLabels[scope] ?? scope)} (<code>${escapeHtml(scope)}</code>)`;
+        const label = `${escapeHtml(mcpScopeDisplay(scope).phrase)} (<code>${escapeHtml(scope)}</code>)`;
         return fixedScopes.has(scope)
-          ? `<li><input type="checkbox" checked disabled> ${label} — always included<input type="hidden" name="granted_scope" value="${escapeHtml(scope)}"></li>`
-          : `<li><label><input type="checkbox" name="granted_scope" value="${escapeHtml(scope)}" checked> ${label}</label></li>`;
+          ? `<li><input type="checkbox" checked disabled><span>${label} — always included</span><input type="hidden" name="granted_scope" value="${escapeHtml(scope)}"></li>`
+          : `<li><label><input type="checkbox" name="granted_scope" value="${escapeHtml(scope)}" checked><span>${label}</span></label></li>`;
       })
       .join("\n        ");
     const connectionDetails =
@@ -771,38 +884,41 @@ export function createMcpHttpRuntime({
     return new Response(
       `<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Connect MCP client</title></head>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Connect MCP client</title>${mcpConsentStyles}</head>
   <body>
     <main>
-      <h1>Connect ${escapeHtml(authorization.clientName)}</h1>
-      <p>${
-        stepUpConnection === null
-          ? "Grant this connection access to"
-          : "Add permissions to this exact existing connection for"
-      } ${escapeHtml(siteName)}.</p>
-      <p>The client name above comes from the client. Treat it as a claim, not
-      as proof. Approve only a client you started yourself.</p>
-      <dl>${connectionDetails}<dt>Client identifier</dt><dd>${escapeHtml(authorization.clientId)}</dd><dt>Return address</dt><dd>${escapeHtml(authorization.redirectUri)}</dd></dl>
-      <form method="post" action="${escapeHtml(authorizationPath)}">
-        ${fields}
-        <fieldset>
-          <legend>Permissions to approve</legend>
-          <p>Clear any permission you do not want. You can approve fewer
-          permissions than the client asked for.${
-            stepUpConnection === null
-              ? ""
-              : " Keep at least one new permission ticked, or there is nothing to add."
-          }</p>
-          <ul>
-        ${choices}
-          </ul>
-        </fieldset>
-        <button type="submit">${
+      <div class="consent-panel">
+        <h1>Connect ${escapeHtml(authorization.clientName)}</h1>
+        <p>${
           stepUpConnection === null
-            ? "Approve this connection"
-            : "Approve added permissions"
-        }</button>
-      </form>
+            ? "Grant this connection access to"
+            : "Add permissions to this exact existing connection for"
+        } ${escapeHtml(siteName)}.</p>
+        <p class="consent-claim-notice">The client name above comes from the
+        client. Treat it as a claim, not as proof. Approve only a client you
+        started yourself.</p>
+        <dl>${connectionDetails}<dt>Client identifier</dt><dd>${escapeHtml(authorization.clientId)}</dd><dt>Return address</dt><dd>${escapeHtml(authorization.redirectUri)}</dd></dl>
+        <form method="post" action="${escapeHtml(authorizationPath)}">
+          ${fields}
+          <fieldset>
+            <legend>Permissions to approve</legend>
+            <p>Clear any permission you do not want. You can approve fewer
+            permissions than the client asked for.${
+              stepUpConnection === null
+                ? ""
+                : " Keep at least one new permission ticked, or there is nothing to add."
+            }</p>
+            <ul class="consent-scope-list">
+          ${choices}
+            </ul>
+          </fieldset>
+          <button type="submit">${
+            stepUpConnection === null
+              ? "Approve this connection"
+              : "Approve added permissions"
+          }</button>
+        </form>
+      </div>
     </main>
   </body>
 </html>`,
@@ -856,14 +972,25 @@ export function createMcpHttpRuntime({
         allow: "GET, POST",
       });
     }
+    // A person's browser posted this form, so a failure past this point
+    // renders a readable page rather than the JSON error a machine client
+    // reads at the token and registration endpoints.
     if (request.headers.get("origin") !== canonicalOrigin) {
-      return jsonResponse({ error: "invalid_request" }, 400);
+      return authorizationProblemPage(
+        "This form could not be verified",
+        "This approval did not come from this site's own consent page. Return to the client and start connecting again.",
+        400,
+      );
     }
     let parsed: Awaited<ReturnType<typeof readAuthorizationBody>>;
     try {
       parsed = await readAuthorizationBody(request);
     } catch {
-      return jsonResponse({ error: "invalid_request" }, 400);
+      return authorizationProblemPage(
+        "This form could not be read",
+        "The approval could not be understood. Return to the client and start connecting again.",
+        400,
+      );
     }
     const parameters = readAuthorizationRequest(parsed.body);
     const authorization =
@@ -871,11 +998,19 @@ export function createMcpHttpRuntime({
         ? null
         : await resolveAuthorizationRequest(parameters);
     if (authorization === null) {
-      return jsonResponse({ error: "invalid_request" }, 400);
+      return authorizationProblemPage(
+        "This connection request could not be completed",
+        "The request is missing information, or names a client or address this site does not recognize. Return to the client and start connecting again.",
+        400,
+      );
     }
     const stepUp = await verifyStepUpAuthorization(authorization);
     if (!stepUp.valid) {
-      return jsonResponse({ error: "invalid_request" }, 400);
+      return authorizationProblemPage(
+        "This connection request could not be completed",
+        "This added-permission request no longer matches an existing connection. Return to the client and start connecting again.",
+        400,
+      );
     }
     // The Owner may approve fewer permissions than the client asked for.
     const offered = withStepUpScopes(authorization, stepUp.connection);
@@ -892,7 +1027,11 @@ export function createMcpHttpRuntime({
             (scope) => !granted.includes(scope),
           )))
     ) {
-      return jsonResponse({ error: "invalid_request" }, 400);
+      return authorizationProblemPage(
+        "These permissions could not be approved",
+        "The permissions submitted do not keep every permission this connection already holds, or add none. Return to the client and start connecting again.",
+        400,
+      );
     }
     let owner;
     try {
@@ -901,7 +1040,11 @@ export function createMcpHttpRuntime({
         csrfToken: parsed.csrfToken,
       });
     } catch {
-      return jsonResponse({ error: "access_denied" }, 403);
+      return authorizationProblemPage(
+        "Sign-in required",
+        "Sign in as a site Owner, then return to the client and start connecting again.",
+        403,
+      );
     }
     const code = createAuthorizationCode();
     const observedAt = now();
