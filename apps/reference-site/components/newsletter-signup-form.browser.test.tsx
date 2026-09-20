@@ -36,6 +36,7 @@ describe("the public newsletter signup form", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete window.turnstile;
   });
 
   afterEach(() => {
@@ -43,6 +44,7 @@ describe("the public newsletter signup form", () => {
     document.body.replaceChildren();
     root = undefined;
     host = undefined;
+    delete window.turnstile;
   });
 
   function render(extra: Record<string, unknown> = {}) {
@@ -148,6 +150,25 @@ describe("the public newsletter signup form", () => {
     const gap =
       button.getBoundingClientRect().top - input.getBoundingClientRect().bottom;
     expect(gap).toBeGreaterThanOrEqual(8);
+  });
+
+  it("asks the verification widget to fill the row's width, not a fixed narrower one", async () => {
+    await page.viewport(390, 844);
+    answerStatus({ available: true, turnstileSiteKey: "0xSITEKEY" });
+    const renderWidget = vi.fn().mockReturnValue("widget-1");
+    window.turnstile = { render: renderWidget, reset: vi.fn() };
+
+    render();
+    await waitFor(() =>
+      renderWidget.mock.calls.length > 0 ? true : undefined,
+    );
+
+    const [container, options] = renderWidget.mock.calls[0]!;
+    expect(options).toMatchObject({ size: "flexible" });
+    const button = document.querySelector<HTMLButtonElement>("button")!;
+    expect((container as HTMLElement).getBoundingClientRect().width).toBe(
+      button.getBoundingClientRect().width,
+    );
   });
 
   it("puts the field and the button on one line at 1440px", async () => {

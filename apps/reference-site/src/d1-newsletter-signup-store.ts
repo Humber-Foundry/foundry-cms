@@ -199,6 +199,17 @@ export function createD1NewsletterSignupStore(
       return { expired: result.results.length };
     },
 
+    async countPendingSignups({ siteId, now }) {
+      const result = await database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM newsletter_signup_requests
+           WHERE site_id = ?1 AND state = 'pending' AND expires_at > ?2`,
+        )
+        .bind(siteId, now)
+        .first<{ count: number }>();
+      return result?.count ?? 0;
+    },
+
     async claimDueConfirmationJobs({
       siteId,
       now,

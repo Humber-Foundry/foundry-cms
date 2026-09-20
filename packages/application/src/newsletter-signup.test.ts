@@ -687,4 +687,23 @@ describe("newsletter signup", () => {
       createNewsletterSignupRequestId(String(message.requestId)),
     );
   });
+
+  it("counts a person waiting to confirm, and stops counting once they confirm", async () => {
+    const harness = createHarness();
+    const message = await signUpAndSend(harness);
+    // Well after the signup and well before its 24-hour expiry.
+    const stillWaiting = "2026-03-01T12:00:00.000Z";
+
+    expect(
+      await harness.store.countPendingSignups({ siteId, now: stillWaiting }),
+    ).toBe(1);
+
+    await harness.application.confirmSignup({
+      token: harness.tokenFor(message),
+    });
+
+    expect(
+      await harness.store.countPendingSignups({ siteId, now: stillWaiting }),
+    ).toBe(0);
+  });
 });
