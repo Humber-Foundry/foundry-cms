@@ -6,7 +6,9 @@ import {
 } from "@humber-foundry/site-definition";
 
 import {
+  campaignChannelNotConfigured,
   CampaignValidationError,
+  configuredCampaignChannel,
   createCampaignApplication,
   createCampaignTestDeliveryApplication,
   createInMemoryCampaignTestDeliveryStore,
@@ -51,7 +53,7 @@ const input: CampaignEditableInput = {
   },
   emailContent: createRichTextDocumentFromPlainText("Exact campaign body."),
 };
-const channelConfiguration = {
+const campaignChannel = {
   senderIdentityId: "sender_primary",
   complianceFooter: {
     version: "footer-v1",
@@ -65,6 +67,8 @@ const channelConfiguration = {
     version: 1,
   } as const,
 };
+const channelConfiguration =
+  configuredCampaignChannel(campaignChannel);
 const testProviderMessageId = "<foundry-test-message@brevo.test>";
 
 function testProviderReceipt() {
@@ -95,6 +99,7 @@ function createFixture(
   authorizedMembership: HumanMembership = membership,
   activeRendererVersion = () => "1".repeat(40),
   recipientFingerprintKey = defaultRecipientFingerprintKey,
+  channel: typeof channelConfiguration = channelConfiguration,
 ) {
   let sequence = 0;
   let campaignSequence = 0;
@@ -127,6 +132,7 @@ function createFixture(
   const application = createCampaignTestDeliveryApplication({
     siteId,
     campaignStore,
+    channelConfiguration: channel,
     store: deliveryStore,
     adapter,
     authorize: async () => authorizedMembership,
@@ -1804,5 +1810,64 @@ describe("campaign test delivery", () => {
       }),
     ]);
     expect(JSON.stringify(events)).not.toContain("@");
+  });
+});
+
+describe("campaign test delivery without the sender details", () => {
+  // A test is a real email with the legal footer at the bottom of it. While
+  // the installation has not set the sender details, no test goes out, and
+  // the reason is the same word every other path reports.
+  it("refuses a test request with one named reason", async () => {
+    const adapter = capableAdapter();
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      campaignChannelNotConfigured(["FOUNDRY_CAMPAIGN_LEGAL_NAME"]),
+    );
+    const created = await createCampaign(campaignApplication);
+
+    await expect(
+      application.commands.requestTest({
+        actor,
+        requestId: "campaign-test-request-without-footer-1",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary"],
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+  });
+
+  it("asks the provider for nothing at all", async () => {
+    const adapter = capableAdapter();
+    const { application, campaignApplication } = createFixture(
+      adapter,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      campaignChannelNotConfigured(["FOUNDRY_CAMPAIGN_LEGAL_NAME"]),
+    );
+    const created = await createCampaign(campaignApplication);
+
+    await expect(
+      application.commands.requestTest({
+        actor,
+        requestId: "campaign-test-request-without-footer-2",
+        campaignId: created.campaign.id,
+        testRecipientIds: ["owner-primary"],
+      }),
+    ).rejects.toThrow("campaign_sender_details_not_configured");
+    expect(adapter.prepareTest).not.toHaveBeenCalled();
+    expect(adapter.sendTest).not.toHaveBeenCalled();
   });
 });

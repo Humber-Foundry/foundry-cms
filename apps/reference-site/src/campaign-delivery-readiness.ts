@@ -67,8 +67,108 @@ export const campaignDeliverySettingNames = Object.freeze([
 export type CampaignDeliverySettingName =
   (typeof campaignDeliverySettingNames)[number];
 
+/**
+ * How one installation's sender details and email footer are set.
+ *
+ * This has the same shape as `CampaignDeliveryReadiness` so one component can
+ * render either, but it answers a different question. Delivery readiness is
+ * about the secrets that let Foundry reach the email provider. This is about
+ * the name, postal address, contact address and unsubscribe address that must
+ * appear at the bottom of every email, and about which sender the email comes
+ * from.
+ *
+ * Foundry never invents any of them, so while one is absent no campaign can be
+ * written, tested, scheduled or sent.
+ *
+ * `missingSettings` holds configuration names only, never a value.
+ */
+export type CampaignSenderReadiness = Readonly<{
+  state: "connected" | "not_configured" | "local_development";
+  missingSettings: ReadonlyArray<CampaignSenderSettingName>;
+  setupGuide: string;
+}>;
+
+/**
+ * Every campaign identity and compliance setting an installation must hold
+ * before Foundry can build the legal footer it stores on a campaign revision.
+ * The order is the order the setup document works through them: who the email
+ * is from, then the four parts of the footer, then the footer's version mark.
+ */
+export const campaignSenderSettingNames = Object.freeze([
+  "FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID",
+  "FOUNDRY_CAMPAIGN_LEGAL_NAME",
+  "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS",
+  "FOUNDRY_CAMPAIGN_CONTACT_URL",
+  "FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL",
+  "FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION",
+] as const);
+
+/** One named campaign identity or compliance setting. */
+export type CampaignSenderSettingName =
+  (typeof campaignSenderSettingNames)[number];
+
 function isPresent(value: string | undefined): boolean {
   return value !== undefined && value.trim() !== "";
+}
+
+/**
+ * An address a reader can open from inside an email. It must be absolute and
+ * `https://`, and must carry no username or password, because the footer is
+ * sent to every recipient.
+ */
+function isAbsoluteHttpsAddress(value: string | undefined): boolean {
+  if (!isPresent(value)) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(value!.trim());
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === "https:" &&
+    parsed.username === "" &&
+    parsed.password === ""
+  );
+}
+
+/**
+ * Whether each named sender setting is installed and well formed. Each rule
+ * matches `readCampaignChannelConfiguration`, so a setting reported as
+ * installed here cannot make the channel reader refuse.
+ */
+const campaignSenderSettingChecks: Readonly<
+  Record<
+    CampaignSenderSettingName,
+    (environment: HumanAccessEnvironment) => boolean
+  >
+> = Object.freeze({
+  FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID: (environment) =>
+    isPresent(environment.FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID),
+  FOUNDRY_CAMPAIGN_LEGAL_NAME: (environment) =>
+    isPresent(environment.FOUNDRY_CAMPAIGN_LEGAL_NAME),
+  FOUNDRY_CAMPAIGN_POSTAL_ADDRESS: (environment) =>
+    isPresent(environment.FOUNDRY_CAMPAIGN_POSTAL_ADDRESS),
+  FOUNDRY_CAMPAIGN_CONTACT_URL: (environment) =>
+    isAbsoluteHttpsAddress(environment.FOUNDRY_CAMPAIGN_CONTACT_URL),
+  FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: (environment) =>
+    isAbsoluteHttpsAddress(environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL),
+  FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION: (environment) =>
+    isPresent(environment.FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION),
+});
+
+/**
+ * The names of the sender and footer settings this installation still needs,
+ * in setup order. An empty list means the legal footer can be built from the
+ * installation's own values.
+ */
+export function listMissingCampaignSenderSettings(
+  environment: HumanAccessEnvironment,
+): ReadonlyArray<CampaignSenderSettingName> {
+  return Object.freeze(
+    campaignSenderSettingNames.filter(
+      (name) => !campaignSenderSettingChecks[name](environment),
+    ),
+  );
 }
 
 /**

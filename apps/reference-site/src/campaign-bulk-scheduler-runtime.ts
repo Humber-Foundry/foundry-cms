@@ -12,6 +12,7 @@ import {
 } from "./brevo-campaign-bulk-delivery-adapter";
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
 import { createCampaignBulkAudience } from "./campaign-bulk-audience";
+import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
 import {
   createActiveOwnerCheck,
   createCampaignBulkSourceReader,
@@ -21,6 +22,7 @@ import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
+import { newsletterUnsubscribePlaceholder } from "./newsletter-unsubscribe-token";
 import type { HumanAccessEnvironment } from "./human-access-configuration";
 import { readSubscriberIdentityKeySecret } from "./human-access-configuration";
 import {
@@ -31,6 +33,28 @@ import {
 type DurableCampaignBulkEnvironment = HumanAccessEnvironment & {
   FOUNDRY_DB: NonNullable<HumanAccessEnvironment["FOUNDRY_DB"]>;
 };
+
+/**
+ * The installation's sender details and legal footer, as a value.
+ *
+ * The scheduled worker serves no screen, so it reads the same settings the
+ * Newsletter page reads and reports the same named reason. An unsubscribe
+ * address that cannot be parsed is passed on as an empty string, so the
+ * channel reader names it like any other absent setting.
+ */
+function resolveSchedulerChannelConfiguration(
+  environment: HumanAccessEnvironment,
+) {
+  let placeholder = "";
+  try {
+    placeholder = newsletterUnsubscribePlaceholder(
+      environment.FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL ?? "",
+    );
+  } catch {
+    placeholder = "";
+  }
+  return readCampaignChannelConfiguration(environment, placeholder);
+}
 
 export async function createDurableCampaignBulkDeliveryApplication(
   environment: DurableCampaignBulkEnvironment,
@@ -49,6 +73,7 @@ export async function createDurableCampaignBulkDeliveryApplication(
     environment,
     senders,
   );
+  const channelConfiguration = resolveSchedulerChannelConfiguration(environment);
 
   const loadSource = createCampaignBulkSourceReader({
     siteId,
@@ -100,6 +125,7 @@ export async function createDurableCampaignBulkDeliveryApplication(
         bulkConfiguration.providerConfigurationFingerprint,
       senders,
     }),
+    channelConfiguration,
     fingerprintKey,
     maximumAudienceRecipients: brevoBulkRecipientLimit,
   });
@@ -110,6 +136,13 @@ export async function runScheduledCampaignBulkDeliveries(
 ) {
   if (environment.FOUNDRY_DB === undefined) {
     throw new Error("campaign_bulk_delivery_not_configured");
+  }
+  // Nothing may be scheduled or sent while the installation has not set the
+  // sender details and legal footer, so the worker says so and stops rather
+  // than claiming work it would have to refuse one operation at a time.
+  const channelConfiguration = resolveSchedulerChannelConfiguration(environment);
+  if (channelConfiguration.state !== "configured") {
+    throw new Error(channelConfiguration.reason);
   }
   const application = await createDurableCampaignBulkDeliveryApplication({
     ...environment,

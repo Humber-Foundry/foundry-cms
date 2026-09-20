@@ -7,7 +7,7 @@ import {
   type CampaignApplication,
   type CampaignAudienceDefinition,
   type CampaignAuthor,
-  type CampaignChannelConfiguration,
+  type CampaignChannelConfigurationState,
   type CampaignStore,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
@@ -79,7 +79,7 @@ type CampaignInstallationParts = Readonly<{
   store: CampaignStore;
   testDeliveryStore: CampaignTestDeliveryStore;
   adapter: NewsletterDeliveryAdapter;
-  channelConfiguration: CampaignChannelConfiguration;
+  channelConfiguration: CampaignChannelConfigurationState;
   resolveAudience(
     definition: CampaignAudienceDefinition,
   ): Promise<Readonly<{ eligibleSubscriberCount: number }>>;
@@ -112,6 +112,14 @@ async function loadInstallationParts(
     environment,
     deliveryAdapter.unsubscribePlaceholder,
   );
+  if (channelConfiguration.state !== "configured") {
+    // The legal footer is stored on every campaign revision and is read by
+    // whoever receives the email. Foundry never invents one, so an MCP client
+    // may neither write nor test a campaign until the installation sets these
+    // settings. The reason is the same word the Newsletter page and the
+    // scheduled worker report.
+    throw new Error(channelConfiguration.reason);
+  }
   const store = createD1CampaignStore(database);
   const testDeliveryStore = createD1CampaignTestDeliveryStore(database);
   const subscriberStore = createD1SubscriberLedgerStore(database);
@@ -214,6 +222,7 @@ function bindApplications(
     campaignStore: parts.store,
     store: parts.testDeliveryStore,
     adapter: parts.adapter,
+    channelConfiguration: parts.channelConfiguration,
     authorize,
     identifyActor: () => actorId,
     resolveAudience: parts.resolveAudience,

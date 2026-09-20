@@ -23,7 +23,8 @@ import {
   type SubscriberLedgerStore,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
-  type CampaignChannelConfiguration,
+  configuredCampaignChannel,
+  type CampaignChannelConfigurationState,
   type CampaignRevision,
   type CampaignStore,
   type NewsletterDeliveryAdapter,
@@ -56,7 +57,9 @@ import { readCampaignChannelConfiguration } from "./campaign-channel-configurati
 import {
   campaignDeliverySetupGuide,
   listMissingCampaignDeliverySettings,
+  listMissingCampaignSenderSettings,
   type CampaignDeliveryReadiness,
+  type CampaignSenderReadiness,
 } from "./campaign-delivery-readiness";
 import { resolveContentReleaseInputs } from "./content-revision-runtime";
 import { installedSite } from "../foundry/site-definition.server";
@@ -170,22 +173,25 @@ const developmentProviderOwnershipEvidence:
     accountScopeFingerprint: "0".repeat(64),
     verifiedAt: "1970-01-01T00:00:00.000Z",
   });
-const developmentChannelConfiguration: CampaignChannelConfiguration = Object.freeze({
-  senderIdentityId: "sender_primary",
-  complianceFooter: Object.freeze({
-    version: "local-footer-v1",
-    content:
-      "Foundry local development · Local development only · " +
-      "Contact: https://example.test/contact · Newsletter preferences",
-    unsubscribePlaceholder:
-      "https://example.test/newsletter/unsubscribe" +
-      "?token={{foundry.unsubscribe.token}}",
-  }),
-  audienceDefinition: Object.freeze({
-    id: "canonical-consent-and-suppression" as const,
-    version: 1 as const,
-  }),
-});
+const developmentChannelConfiguration: CampaignChannelConfigurationState =
+  configuredCampaignChannel(
+    Object.freeze({
+      senderIdentityId: "sender_primary",
+      complianceFooter: Object.freeze({
+        version: "local-footer-v1",
+        content:
+          "Foundry local development · Local development only · " +
+          "Contact: https://example.test/contact · Newsletter preferences",
+        unsubscribePlaceholder:
+          "https://example.test/newsletter/unsubscribe" +
+          "?token={{foundry.unsubscribe.token}}",
+      }),
+      audienceDefinition: Object.freeze({
+        id: "canonical-consent-and-suppression" as const,
+        version: 1 as const,
+      }),
+    }),
+  );
 
 /**
  * The verified test address on file for one membership, or null.
@@ -214,10 +220,13 @@ function verifiedTestAddress(
  *
  * The unsubscribe address needs the configured address only. The delivery
  * secret signs a real token later, at send time.
+ *
+ * An absent setting is a value, not a fault. The Newsletter page still loads
+ * and names what is missing; writing and sending are refused instead.
  */
 export function resolveCampaignChannelConfiguration(
   environment: HumanAccessEnvironment,
-): CampaignChannelConfiguration {
+): CampaignChannelConfigurationState {
   let placeholder = "";
   try {
     placeholder = newsletterUnsubscribePlaceholder(
@@ -310,6 +319,14 @@ export type CampaignDeliveryContext = Readonly<{
    * of the settings it still needs. It never carries a setting's value.
    */
   delivery: CampaignDeliveryReadiness;
+  /**
+   * Whether this installation has set the sender identity and the legal
+   * footer that must appear at the bottom of every email. Reported separately
+   * from the delivery secrets, because they are separate settings with
+   * separate consequences: without the footer nothing may be written or sent
+   * at all, even when the provider is reachable.
+   */
+  senderDetails: CampaignSenderReadiness;
   /** What the delivery provider reports about its own credential and sender. */
   readDeliveryHealth: () => Promise<NewsletterDeliveryHealth>;
 }>;
@@ -420,6 +437,11 @@ export async function loadCampaignRequestContext(
     providerHealth: null,
     setupGuide: campaignDeliverySetupGuide,
   });
+  let senderDetails: CampaignSenderReadiness = Object.freeze({
+    state: "local_development" as const,
+    missingSettings: Object.freeze([]),
+    setupGuide: campaignDeliverySetupGuide,
+  });
   if (process.env.NODE_ENV !== "development") {
     const environment = await loadHumanAccessEnvironment();
     // A missing database is a fault, not a missing delivery setting. Nothing
@@ -452,6 +474,30 @@ export async function loadCampaignRequestContext(
     findPostRevision = (siteId, revisionId) =>
       d1PostRevision(environment.FOUNDRY_DB!, siteId, revisionId);
     channelConfiguration = resolveCampaignChannelConfiguration(environment);
+    // The sender details are separate settings from the delivery secrets, so
+    // they are reported under their own heading. The page loads either way.
+    const missingSenderSettings =
+      listMissingCampaignSenderSettings(environment);
+    senderDetails = Object.freeze(
+      channelConfiguration.state === "configured"
+        ? {
+            state: "connected" as const,
+            missingSettings: Object.freeze([]),
+            setupGuide: campaignDeliverySetupGuide,
+          }
+        : {
+            state: "not_configured" as const,
+            // The channel reader and this list apply the same rule to the same
+            // settings. Naming the unsubscribe address covers the one case the
+            // reader can still refuse with nothing else missing: an address
+            // that parses but cannot carry the unsubscribe token.
+            missingSettings:
+              missingSenderSettings.length > 0
+                ? missingSenderSettings
+                : Object.freeze(["FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL" as const]),
+            setupGuide: campaignDeliverySetupGuide,
+          },
+    );
     if (delivery.state !== "connected") {
       // Delivery is not configured. Writing and saving a campaign still work,
       // so the Newsletter page renders. Every provider adapter stays the
@@ -607,6 +653,7 @@ export async function loadCampaignRequestContext(
           }),
     artifactPublisher: bulkArtifactPublisher,
     adapter: bulkAdapter,
+    channelConfiguration,
     fingerprintKey: bulkFingerprintKey,
     maximumAudienceRecipients: brevoBulkRecipientLimit,
   });
@@ -614,6 +661,7 @@ export async function loadCampaignRequestContext(
     identity: human.identity,
     application,
     delivery,
+    senderDetails,
     readDeliveryHealth: () => testAdapter.health(),
     bulkDelivery,
     listTestRecipients: async () => {
@@ -636,6 +684,7 @@ export async function loadCampaignRequestContext(
       campaignStore: store,
       store: testDeliveryStore,
       adapter: testAdapter,
+      channelConfiguration,
       authorize: (actor, capability) =>
         human.application.queries.requireCapability({
           actor,

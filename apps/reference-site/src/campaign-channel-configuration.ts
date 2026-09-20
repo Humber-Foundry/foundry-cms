@@ -1,72 +1,63 @@
-import type {
-  CampaignChannelConfiguration,
+import {
+  campaignChannelNotConfigured,
+  configuredCampaignChannel,
+  type CampaignChannelConfigurationState,
 } from "@humber-foundry/application";
 
+import {
+  listMissingCampaignSenderSettings,
+} from "./campaign-delivery-readiness";
 import type {
   HumanAccessEnvironment,
 } from "./human-access-configuration";
 
-export class CampaignChannelConfigurationError extends Error {
-  constructor() {
-    super("campaign_channel_not_configured");
-    this.name = "CampaignChannelConfigurationError";
-  }
-}
-
-function requireSetting(value: string | undefined): string {
-  if (value === undefined || value.trim() === "") {
-    throw new CampaignChannelConfigurationError();
-  }
-  return value.trim();
-}
-
-function requireAbsoluteHttpsUrl(value: string | undefined): string {
-  const normalized = requireSetting(value);
-  let parsed;
-  try {
-    parsed = new URL(normalized);
-  } catch {
-    throw new CampaignChannelConfigurationError();
-  }
-  if (
-    parsed.protocol !== "https:" ||
-    parsed.username !== "" ||
-    parsed.password !== ""
-  ) {
-    throw new CampaignChannelConfigurationError();
-  }
-  return parsed.toString();
-}
-
+/**
+ * The sender identity and legal footer for one installation, or the typed
+ * value that says which settings are still absent.
+ *
+ * This never throws for an absent setting and never stands in a value. The
+ * footer is stored on every campaign revision and is read by whoever receives
+ * the email, so a placeholder here could later be sent as the legal name and
+ * postal address. The caller gets a value it has to read before it can reach
+ * the configuration.
+ *
+ * `unsubscribePlaceholder` is the unsubscribe address with the token marker in
+ * it. The caller builds it from `FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL`; an empty
+ * string means that setting is absent or malformed, and it is then named like
+ * any other absent setting.
+ */
 export function readCampaignChannelConfiguration(
   environment: HumanAccessEnvironment,
   unsubscribePlaceholder: string,
-): CampaignChannelConfiguration {
-  const legalName = requireSetting(environment.FOUNDRY_CAMPAIGN_LEGAL_NAME);
-  const postalAddress = requireSetting(
-    environment.FOUNDRY_CAMPAIGN_POSTAL_ADDRESS,
-  );
-  const contactUrl = requireAbsoluteHttpsUrl(
-    environment.FOUNDRY_CAMPAIGN_CONTACT_URL,
-  );
-  return Object.freeze({
-    senderIdentityId: requireSetting(
-      environment.FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID,
-    ),
-    complianceFooter: Object.freeze({
-      version: requireSetting(
-        environment.FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION,
-      ),
-      content:
-        `${legalName} · ${postalAddress} · Contact: ${contactUrl} · ` +
-        "Newsletter preferences",
-      unsubscribePlaceholder: requireAbsoluteHttpsUrl(
-        unsubscribePlaceholder,
-      ),
+): CampaignChannelConfigurationState {
+  const missingSettings = listMissingCampaignSenderSettings(environment);
+  if (missingSettings.length > 0 || unsubscribePlaceholder.trim() === "") {
+    return campaignChannelNotConfigured(
+      missingSettings.length > 0
+        ? missingSettings
+        : ["FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL"],
+    );
+  }
+  const legalName = environment.FOUNDRY_CAMPAIGN_LEGAL_NAME!.trim();
+  const postalAddress = environment.FOUNDRY_CAMPAIGN_POSTAL_ADDRESS!.trim();
+  const contactUrl = new URL(
+    environment.FOUNDRY_CAMPAIGN_CONTACT_URL!.trim(),
+  ).toString();
+  return configuredCampaignChannel(
+    Object.freeze({
+      senderIdentityId:
+        environment.FOUNDRY_CAMPAIGN_SENDER_IDENTITY_ID!.trim(),
+      complianceFooter: Object.freeze({
+        version: environment.FOUNDRY_CAMPAIGN_COMPLIANCE_VERSION!.trim(),
+        content:
+          `${legalName} · ${postalAddress} · Contact: ${contactUrl} · ` +
+          "Newsletter preferences",
+        unsubscribePlaceholder: unsubscribePlaceholder.trim(),
+      }),
+      audienceDefinition: Object.freeze({
+        id: "canonical-consent-and-suppression" as const,
+        version: 1 as const,
+      }),
     }),
-    audienceDefinition: Object.freeze({
-      id: "canonical-consent-and-suppression",
-      version: 1,
-    }),
-  });
+  );
 }

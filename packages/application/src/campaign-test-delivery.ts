@@ -7,6 +7,10 @@ import {
 import { AccessDeniedError } from "./human-access";
 import { renderCampaignRevision } from "./campaign-renderer";
 import {
+  campaignSenderDetailsNotConfiguredReason,
+  type CampaignChannelConfigurationState,
+} from "./campaign-channel-state";
+import {
   CampaignIdempotencyError,
   CampaignNotFoundError,
   CampaignValidationError,
@@ -571,6 +575,7 @@ export function createCampaignTestDeliveryApplication({
   campaignStore,
   store,
   adapter,
+  channelConfiguration,
   authorize,
   identifyActor,
   resolveAudience,
@@ -589,6 +594,12 @@ export function createCampaignTestDeliveryApplication({
   campaignStore: CampaignStore;
   store: CampaignTestDeliveryStore;
   adapter: NewsletterDeliveryAdapter;
+  /**
+   * The sender details and legal footer this installation has set, or the
+   * typed value that says they are absent. A test is a real email, so while
+   * they are absent every test request is refused with one named reason.
+   */
+  channelConfiguration: CampaignChannelConfigurationState;
   authorize(
     actor: CampaignActor,
     capability: "campaign.author" | "campaign.test.confirm",
@@ -731,6 +742,13 @@ export function createCampaignTestDeliveryApplication({
     commandState: { accepted: boolean },
   ) {
     await authorize(actor, "campaign.author");
+    // A test is a real email with the legal footer at the bottom of it. While
+    // the installation has not set its sender details, no test goes out.
+    if (channelConfiguration.state !== "configured") {
+      throw new CampaignValidationError(
+        campaignSenderDetailsNotConfiguredReason,
+      );
+    }
     if (!isCampaignRequestId(requestId)) {
       throw new CampaignIdempotencyError("campaign_idempotency_key_invalid");
     }

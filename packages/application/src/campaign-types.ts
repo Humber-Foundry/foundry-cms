@@ -7,6 +7,7 @@ import type {
   SiteId,
 } from "@humber-foundry/site-definition";
 
+import type { CampaignChannelConfigurationState } from "./campaign-channel-state";
 import type { ExternalHumanIdentity } from "./human-access";
 
 declare const campaignIdBrand: unique symbol;
@@ -408,7 +409,12 @@ export type CampaignApplicationDependencies = Readonly<{
   resolveAudience(
     definition: CampaignAudienceDefinition,
   ): Promise<Readonly<{ eligibleSubscriberCount: number }>>;
-  channelConfiguration: CampaignChannelConfiguration;
+  /**
+   * The sender details and legal footer this installation has set, or the
+   * typed value that says they are absent. While they are absent, creating and
+   * editing a campaign are refused; reading one still works.
+   */
+  channelConfiguration: CampaignChannelConfigurationState;
   /**
    * The site's public address, used to make a post share image absolute when a
    * campaign is derived from that post. Empty when the installation has not set

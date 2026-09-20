@@ -19,7 +19,11 @@ import {
   readCampaignDeliveryReadiness,
   resolveCampaignChannelConfiguration,
 } from "./campaign-runtime";
-import { campaignDeliverySettingNames } from "./campaign-delivery-readiness";
+import {
+  campaignDeliverySettingNames,
+  campaignSenderSettingNames,
+} from "./campaign-delivery-readiness";
+import { createCampaignId } from "@humber-foundry/application";
 
 
 /**
@@ -173,6 +177,12 @@ describe("campaign request context without delivery settings", () => {
   });
 });
 
+const connectedSenderDetails = {
+  state: "connected" as const,
+  missingSettings: [],
+  setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
+};
+
 describe("delivery readiness report", () => {
   it("returns the not-configured report without asking the provider", async () => {
     const readDeliveryHealth = vi.fn();
@@ -183,7 +193,11 @@ describe("delivery readiness report", () => {
       setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
     };
     await expect(
-      readCampaignDeliveryReadiness({ delivery, readDeliveryHealth }),
+      readCampaignDeliveryReadiness({
+        delivery,
+        senderDetails: connectedSenderDetails,
+        readDeliveryHealth,
+      }),
     ).resolves.toEqual(delivery);
     expect(readDeliveryHealth).not.toHaveBeenCalled();
   });
@@ -201,6 +215,7 @@ describe("delivery readiness report", () => {
         providerHealth: null,
         setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
       },
+      senderDetails: connectedSenderDetails,
       readDeliveryHealth: async () => health,
     });
     expect(readiness.providerHealth).toEqual(health);
@@ -215,6 +230,7 @@ describe("delivery readiness report", () => {
         providerHealth: null,
         setupGuide: "docs/operations/brevo-test-delivery-readiness.md",
       },
+      senderDetails: connectedSenderDetails,
       readDeliveryHealth: async () => {
         throw new Error("network unreachable");
       },
@@ -233,37 +249,191 @@ describe("compliance footer without delivery secrets", () => {
     // receives the email, so Foundry never stands in for it. It is built the
     // same way whether or not the delivery secrets are installed.
     const channel = resolveCampaignChannelConfiguration(channelEnvironment);
-    expect(channel.senderIdentityId).toBe("sender_primary");
-    expect(channel.complianceFooter.version).toBe("footer-v1");
-    expect(channel.complianceFooter.content).toContain("Example Publisher");
-    expect(channel.complianceFooter.content).toContain("1 Example Street");
-    expect(channel.complianceFooter.unsubscribePlaceholder).toBe(
+    expect(channel.state).toBe("configured");
+    if (channel.state !== "configured") throw new Error("unreachable");
+    const { configuration } = channel;
+    expect(configuration.senderIdentityId).toBe("sender_primary");
+    expect(configuration.complianceFooter.version).toBe("footer-v1");
+    expect(configuration.complianceFooter.content).toContain(
+      "Example Publisher",
+    );
+    expect(configuration.complianceFooter.content).toContain(
+      "1 Example Street",
+    );
+    expect(configuration.complianceFooter.unsubscribePlaceholder).toBe(
       "https://example.test/newsletter/unsubscribe" +
         "?token={{foundry.unsubscribe.token}}",
     );
   });
 
-  it("refuses to build a footer the installation has not configured", () => {
+  it("reports a value rather than a placeholder footer when a setting is absent", () => {
     const { FOUNDRY_CAMPAIGN_LEGAL_NAME: _absent, ...rest } =
       channelEnvironment;
-    expect(() => resolveCampaignChannelConfiguration(rest)).toThrow(
-      "campaign_channel_not_configured",
-    );
+    const channel = resolveCampaignChannelConfiguration(rest);
+    expect(channel.state).toBe("not_configured");
+    if (channel.state !== "not_configured") throw new Error("unreachable");
+    expect(channel.reason).toBe("campaign_sender_details_not_configured");
+    expect(channel.missingSettings).toEqual([
+      "FOUNDRY_CAMPAIGN_LEGAL_NAME",
+    ]);
   });
 
   it("names an absent unsubscribe address like any other absent setting", () => {
-    // An empty address must raise the named configuration error, not a bare
-    // URL error from the address parser.
+    // An empty or malformed address is named, not raised as a bare URL error
+    // from the address parser.
     const { FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: _absent, ...rest } =
       channelEnvironment;
-    expect(() => resolveCampaignChannelConfiguration(rest)).toThrow(
-      "campaign_channel_not_configured",
+    for (const environment of [
+      rest,
+      { ...channelEnvironment, FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: "not a url" },
+    ]) {
+      const channel = resolveCampaignChannelConfiguration(environment);
+      expect(channel.state).toBe("not_configured");
+      if (channel.state !== "not_configured") throw new Error("unreachable");
+      expect(channel.missingSettings).toEqual([
+        "FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL",
+      ]);
+    }
+  });
+});
+
+describe("campaign request context without the sender details", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("NODE_ENV", "production");
+    mocks.loadHuman.mockResolvedValue({
+      state: "authorized",
+      identity,
+      membership: { id: "membership-owner" },
+      application: {
+        queries: {
+          requireCapability: async () => ({ id: "membership-owner" }),
+          listActiveOwnerIdsForTestDelivery: async () => ["membership-owner"],
+        },
+      },
+    });
+    // A new installation: the database is there, nothing else is.
+    mocks.loadEnvironment.mockResolvedValue({
+      FOUNDRY_DB: database,
+      FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("loads rather than failing the page", async () => {
+    const context = await loadCampaignRequestContext(new Headers());
+    expect(context.application).toBeDefined();
+    expect(context.testDelivery).toBeDefined();
+    expect(context.bulkDelivery).toBeDefined();
+  });
+
+  it("reports the sender details under their own heading", async () => {
+    const context = await loadCampaignRequestContext(new Headers());
+    expect(context.senderDetails.state).toBe("not_configured");
+    expect(context.senderDetails.missingSettings).toEqual([
+      ...campaignSenderSettingNames,
+    ]);
+    expect(context.senderDetails.setupGuide).toBe(
+      "docs/operations/brevo-test-delivery-readiness.md",
     );
-    expect(() =>
-      resolveCampaignChannelConfiguration({
-        ...channelEnvironment,
-        FOUNDRY_CAMPAIGN_UNSUBSCRIBE_URL: "not a url",
-      }),
-    ).toThrow("campaign_channel_not_configured");
+    // The delivery secrets stay in their own report.
+    expect(context.delivery.missingSettings).toEqual([
+      ...campaignDeliverySettingNames,
+    ]);
+    for (const name of context.senderDetails.missingSettings) {
+      expect(context.delivery.missingSettings).not.toContain(name);
+    }
+  });
+
+  it("names settings only and never a value", async () => {
+    const context = await loadCampaignRequestContext(new Headers());
+    for (const name of context.senderDetails.missingSettings) {
+      expect(name).toMatch(/^FOUNDRY_[A-Z0-9_]+$/u);
+    }
+  });
+
+  it("still reports the settings as missing when only one is absent", async () => {
+    const { FOUNDRY_CAMPAIGN_POSTAL_ADDRESS: _absent, ...rest } =
+      channelEnvironment;
+    mocks.loadEnvironment.mockResolvedValue({
+      FOUNDRY_DB: database,
+      FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+      ...rest,
+    });
+    const context = await loadCampaignRequestContext(new Headers());
+    expect(context.senderDetails.state).toBe("not_configured");
+    expect(context.senderDetails.missingSettings).toEqual([
+      "FOUNDRY_CAMPAIGN_POSTAL_ADDRESS",
+    ]);
+  });
+
+  it("reports the sender details as connected once every setting is set", async () => {
+    mocks.loadEnvironment.mockResolvedValue({
+      FOUNDRY_DB: database,
+      FOUNDRY_PRODUCTION_BASE: "a".repeat(40),
+      ...channelEnvironment,
+    });
+    const context = await loadCampaignRequestContext(new Headers());
+    expect(context.senderDetails.state).toBe("connected");
+    expect(context.senderDetails.missingSettings).toEqual([]);
+  });
+
+  it("refuses every authorizing, scheduling and sending command with one reason", async () => {
+    const context = await loadCampaignRequestContext(new Headers());
+    const campaignId = createCampaignId(
+      "00000000-0000-4000-8000-000000000183",
+    );
+    const requestId = "campaign-request-0000000000000183";
+    const refusals = [
+      () =>
+        context.bulkDelivery.commands.authorize({
+          actor: identity,
+          requestId,
+          campaignId,
+          testExecutionId: "00000000-0000-4000-8000-000000000184",
+        }),
+      () =>
+        context.bulkDelivery.commands.activateSchedule({
+          actor: identity,
+          requestId,
+          campaignId,
+          authorizationId: "00000000-0000-4000-8000-000000000185",
+          resolvedTime: {
+            localDateTime: "2030-01-01T00:00:00",
+            ianaTimeZone: "UTC",
+            utcOffsetChoice: "+00:00",
+            executeAtUtc: "2030-01-01T00:00:00.000Z",
+            timeZoneDatabaseVersion: "2026a",
+          },
+        }),
+      () =>
+        context.bulkDelivery.commands.sendNow({
+          actor: identity,
+          requestId,
+          campaignId,
+          authorizationId: "00000000-0000-4000-8000-000000000186",
+        }),
+      () =>
+        context.bulkDelivery.commands.retrySend({
+          actor: identity,
+          requestId,
+          campaignId,
+          operationId: "00000000-0000-4000-8000-000000000187",
+        }),
+      () => context.bulkDelivery.scheduler.claimDue(),
+      () =>
+        context.bulkDelivery.scheduler.execute(
+          "00000000-0000-4000-8000-000000000188",
+        ),
+      () => context.bulkDelivery.scheduler.reconcilePending(),
+    ];
+    for (const refusal of refusals) {
+      await expect(
+        (async () => refusal())(),
+      ).rejects.toThrow("campaign_sender_details_not_configured");
+    }
   });
 });
