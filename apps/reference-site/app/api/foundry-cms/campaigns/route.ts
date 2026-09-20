@@ -18,8 +18,7 @@ import {
   loadCampaignRequestContext,
   readCampaignDeliveryReadiness,
 } from "../../../../src/campaign-runtime";
-import { loadHumanAccessEnvironment } from "../../../../src/human-access-environment";
-import { mcpScheduleRequestAgentName } from "../../../../src/mcp-schedule-request-agent";
+import { loadPendingCampaignScheduleRequests } from "../../../../src/campaign-schedule-request-runtime";
 import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
 
 type CampaignCommand =
@@ -459,60 +458,6 @@ function command(value: unknown): CampaignCommand | null {
     : null;
 }
 
-type PendingScheduleRequestView = Readonly<{
-  proposalId: string;
-  campaignId: string;
-  agentName: string;
-  localDateTime: string;
-  ianaTimeZone: string;
-}>;
-
-/**
- * The send-time requests an app has made that nobody has answered yet, named
- * by the app that asked.
- *
- * Only a request an app made is reported, exactly as Overview and the Blog
- * list report a post's request. A failure answers with an empty list, so a
- * request store that cannot be read never stops the Newsletter screen
- * loading. See ADR-0039.
- */
-async function readPendingScheduleRequests(
-  context: Awaited<ReturnType<typeof loadCampaignRequestContext>>,
-  campaignId?: ReturnType<typeof createCampaignId>,
-): Promise<ReadonlyArray<PendingScheduleRequestView>> {
-  try {
-    const pending =
-      campaignId === undefined
-        ? await context.scheduleProposals.queries.listPending()
-        : [
-            await context.scheduleProposals.queries.pending({ campaignId }),
-          ].filter((proposal) => proposal !== null);
-    const environment = await loadHumanAccessEnvironment();
-    const named = await Promise.all(
-      pending.map(async (proposal) => {
-        const agentName = await mcpScheduleRequestAgentName(
-          environment,
-          proposal.createdBy,
-        );
-        return agentName === null
-          ? null
-          : {
-              proposalId: proposal.id,
-              campaignId: String(proposal.campaignId),
-              agentName,
-              localDateTime: proposal.localDateTime,
-              ianaTimeZone: proposal.ianaTimeZone,
-            };
-      }),
-    );
-    return named.filter(
-      (request): request is PendingScheduleRequestView => request !== null,
-    );
-  } catch {
-    return [];
-  }
-}
-
 export async function GET(request: Request) {
   try {
     const context = await loadCampaignRequestContext(request.headers);
@@ -539,7 +484,9 @@ export async function GET(request: Request) {
       return Response.json(
         {
           campaigns,
-          scheduleRequests: await readPendingScheduleRequests(context),
+          scheduleRequests: await loadPendingCampaignScheduleRequests({
+            requests: context.scheduleProposals,
+          }),
         },
         { headers: { "cache-control": "private, no-store" } },
       );
@@ -570,7 +517,12 @@ export async function GET(request: Request) {
     // request an app made is shown, named by the app, exactly as Overview and
     // the Blog list show a post's request. See ADR-0039.
     const scheduleRequest =
-      (await readPendingScheduleRequests(context, campaignId))[0] ?? null;
+      (
+        await loadPendingCampaignScheduleRequests({
+          requests: context.scheduleProposals,
+          campaignId,
+        })
+      )[0] ?? null;
     return Response.json(
       {
         rendered,

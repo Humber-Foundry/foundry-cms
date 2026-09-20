@@ -50,6 +50,15 @@ newsletter drafts". Both call the campaign operations that already exist:
 Newsletter screen reads. Nothing about a campaign's rules is written a second
 time in the MCP layer.
 
+`status` reads the stored send rows through the campaign bulk state store
+rather than through the bulk delivery application. That application refuses to
+build without an email adapter, an artifact publisher, an audience resolver
+and a fingerprint key, and its `authorizeRead` admits a human membership,
+which an MCP connection never has — the same reason §3 gives for keeping the
+request its own small application. The permission that admits this read is the
+connection's `campaign.draft`, checked at the tool boundary like every other
+campaign tool.
+
 `status` answers through `campaignBulkStateReport`, the one function that
 narrows a stored send down to what a screen may know. That function already
 existed inside the bulk delivery query; this change lifts it out so the
@@ -107,6 +116,13 @@ ADR-0038 §1 fixed for a blog request, applied here in one place — the
 application's own `pending` query — so the dashboard and the tool cannot
 disagree about what is still waiting.
 
+A campaign whose send is already set has nothing left to ask for, so
+`proposeSchedule` refuses one outright with `campaign_send_already_scheduled`
+rather than recording a request that would answer `pending_human_approval`
+while every screen showed nothing pending. A person who answers a request by
+scheduling the send themselves clears it the same way: `activeSchedule`
+becomes non-null and the request stops being pending, with nothing declined.
+
 `commands.decline` writes one row to `campaign_schedule_proposal_declines`,
 keyed by the request id, with update and delete triggers that make it
 immutable. It has no MCP variant: only an active Owner or Editor may call it,
@@ -135,12 +151,14 @@ directly is left out of both, as it is for the blog.
 ### 6. Every refusal carries a named reason
 
 `mcp_schedule_authority_required`, `human_authority_required`,
-`campaign_not_found`, `schedule_request_not_found`,
-`schedule_request_idempotency_key_reused`,
+`campaign_not_found`, `campaign_send_already_scheduled`,
+`schedule_request_not_found`, `schedule_request_idempotency_key_reused`,
 `schedule_request_idempotency_key_invalid`,
-`time_zone_database_version_unavailable`, and the campaign schedule's own
-`bulk_schedule_time_invalid` and `bulk_schedule_time_mismatch` for a time that
-is malformed, past, or does not match the zone it claims. A replayed refusal
+`schedule_request_campaign_stale`, `schedule_instant_invalid`,
+`iana_time_zone_invalid`, `time_zone_database_version_unavailable`, and the
+campaign schedule's own `bulk_schedule_time_invalid` and
+`bulk_schedule_time_mismatch` for a time that is malformed, past, or does not
+match the zone it claims. A replayed refusal
 repeats the first reason, because the reason is derived from the command's own
 code rather than from anything the caller sent.
 

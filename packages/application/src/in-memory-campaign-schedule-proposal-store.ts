@@ -27,9 +27,9 @@ export function createInMemoryCampaignScheduleProposalStore({
   function requestKey(
     siteId: string,
     campaignId: string,
-    requestId: string,
+    idempotencyKey: string,
   ) {
-    return `${siteId}:${campaignId}:${requestId}`;
+    return `${siteId}:${campaignId}:${idempotencyKey}`;
   }
 
   function newestUndeclined(siteId: string, campaignId: string) {
@@ -47,17 +47,17 @@ export function createInMemoryCampaignScheduleProposalStore({
   }
 
   return Object.freeze({
-    async findByRequest({ siteId, campaignId, requestId }) {
+    async findByRequest({ siteId, campaignId, idempotencyKey }) {
       const id = byRequest.get(
-        requestKey(String(siteId), campaignId, requestId),
+        requestKey(String(siteId), campaignId, idempotencyKey),
       );
       return id === undefined ? null : (proposals.get(id) ?? null);
     },
-    async save(proposal, requestId) {
+    async save(proposal, idempotencyKey) {
       const key = requestKey(
         String(proposal.siteId),
         proposal.campaignId,
-        requestId,
+        idempotencyKey,
       );
       const existing = byRequest.get(key);
       if (existing !== undefined) {

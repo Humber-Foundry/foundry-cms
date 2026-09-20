@@ -157,7 +157,7 @@ describe("the campaign schedule request store", () => {
       await store.findByRequest({
         siteId,
         campaignId,
-        requestId: "request-61",
+        idempotencyKey: "request-61",
       }),
     ).toMatchObject({ id: "schedule_request_61", createdBy: "mcp-agent-61" });
     expect(
@@ -238,7 +238,7 @@ describe("the campaign schedule request store", () => {
     const declined = await store.decline({
       siteId,
       proposalId: "schedule_request_61",
-      requestId: "decline-61",
+      idempotencyKey: "decline-61",
       declinedBy: "membership-owner",
       occurredAt: now,
     });
@@ -250,7 +250,7 @@ describe("the campaign schedule request store", () => {
     const again = await store.decline({
       siteId,
       proposalId: "schedule_request_61",
-      requestId: "decline-61-again",
+      idempotencyKey: "decline-61-again",
       declinedBy: "membership-owner",
       occurredAt: now,
     });
@@ -264,7 +264,7 @@ describe("the campaign schedule request store", () => {
       store.decline({
         siteId,
         proposalId: "schedule_request_61",
-        requestId: "decline-61",
+        idempotencyKey: "decline-61",
         declinedBy: "membership-removed",
         occurredAt: now,
       }),
@@ -280,7 +280,7 @@ describe("the campaign schedule request store", () => {
     await store.decline({
       siteId,
       proposalId: "schedule_request_61",
-      requestId: "decline-61",
+      idempotencyKey: "decline-61",
       declinedBy: "membership-owner",
       occurredAt: now,
     });

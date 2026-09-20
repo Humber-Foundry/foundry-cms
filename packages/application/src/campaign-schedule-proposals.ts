@@ -76,7 +76,7 @@ export type CampaignScheduleProposalStore = Readonly<{
   findByRequest(input: {
     siteId: SiteId | string;
     campaignId: CampaignId;
-    requestId: string;
+    idempotencyKey: string;
   }): Promise<CampaignScheduleProposal | null>;
   /**
    * Save one request. `authority` is present when an MCP connection asked, in
@@ -84,7 +84,7 @@ export type CampaignScheduleProposalStore = Readonly<{
    */
   save(
     proposal: CampaignScheduleProposal,
-    requestId: string,
+    idempotencyKey: string,
     authority?: McpCampaignOperationAuthority,
   ): Promise<CampaignScheduleProposal>;
   /**
@@ -107,7 +107,7 @@ export type CampaignScheduleProposalStore = Readonly<{
   decline(input: {
     siteId: SiteId | string;
     proposalId: string;
-    requestId: string;
+    idempotencyKey: string;
     declinedBy: string;
     occurredAt: string;
   }): Promise<CampaignScheduleProposal>;
@@ -260,7 +260,7 @@ export function createCampaignScheduleProposalApplication({
         const replay = await store.findByRequest({
           siteId,
           campaignId: input.campaignId,
-          requestId: input.idempotencyKey,
+          idempotencyKey: input.idempotencyKey,
         });
         if (replay !== null) {
           if (
@@ -302,6 +302,14 @@ export function createCampaignScheduleProposalApplication({
         if (campaign === null) {
           throw new CampaignScheduleProposalError("campaign_not_found");
         }
+        // A campaign whose send is already set has nothing left to ask for. A
+        // request recorded now would answer `pending_human_approval` while
+        // every screen showed nothing pending, so refuse it by name instead.
+        if (await hasActiveSchedule(campaign.id)) {
+          throw new CampaignScheduleProposalError(
+            "campaign_send_already_scheduled",
+          );
+        }
         return store.save(
           Object.freeze({
             id: createId(),
@@ -326,7 +334,7 @@ export function createCampaignScheduleProposalApplication({
         return store.decline({
           siteId,
           proposalId: input.proposalId,
-          requestId: input.idempotencyKey,
+          idempotencyKey: input.idempotencyKey,
           declinedBy: input.actorId,
           occurredAt: now(),
         });

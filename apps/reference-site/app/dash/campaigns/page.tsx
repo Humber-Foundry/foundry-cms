@@ -5,8 +5,6 @@ import { createBlogPostArtifactFingerprints } from "@humber-foundry/application"
 import { CampaignControls } from "@/components/campaign-controls";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
 import { loadPendingCampaignScheduleRequests } from "@/src/campaign-schedule-request-runtime";
-import { mcpScheduleRequestAgentName } from "@/src/mcp-schedule-request-agent";
-import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -23,39 +21,6 @@ export const dynamic = "force-dynamic";
  * can stand alone or start from a blog post; either way Foundry renders and
  * fingerprints the exact email that gets sent.
  */
-/**
- * Every pending send-time request, with the plain name of the app that asked.
- * A request a person made directly is left out, exactly as Overview and the
- * Blog list leave one out. An unreadable request store answers with an empty
- * list rather than stopping the page.
- */
-async function loadNamedScheduleRequests() {
-  try {
-    const environment = await loadHumanAccessEnvironment();
-    const requests = await loadPendingCampaignScheduleRequests();
-    const named = await Promise.all(
-      requests.map(async (request) => {
-        const agentName = await mcpScheduleRequestAgentName(
-          environment,
-          request.createdBy,
-        );
-        return agentName === null
-          ? null
-          : {
-              proposalId: request.proposalId,
-              campaignId: request.campaignId,
-              agentName,
-              localDateTime: request.localDateTime,
-              ianaTimeZone: request.ianaTimeZone,
-            };
-      }),
-    );
-    return named.filter((request) => request !== null);
-  } catch {
-    return [];
-  }
-}
-
 export default async function DashboardCampaignsPage({
   searchParams,
 }: {
@@ -72,12 +37,15 @@ export default async function DashboardCampaignsPage({
   const definition = await loadPublishedDefinition();
   const mutationToken = await loadMutationToken();
 
-  const campaigns = await (
-    await loadCampaignRequestContext(await headers())
-  ).application.queries.listCampaigns({ actor: access.identity });
+  const campaignContext = await loadCampaignRequestContext(await headers());
+  const campaigns = await campaignContext.application.queries.listCampaigns({
+    actor: access.identity,
+  });
   // The send-time requests an app has made that nobody has answered yet, each
   // named by the app that asked. See ADR-0039.
-  const scheduleRequests = await loadNamedScheduleRequests();
+  const scheduleRequests = await loadPendingCampaignScheduleRequests({
+    requests: campaignContext.scheduleProposals,
+  });
 
   const { contentRevision } = dashboardWorkspace;
   const postArtifacts = await createBlogPostArtifactFingerprints({

@@ -2,7 +2,6 @@ import {
   campaignBulkStateReport,
   CampaignValidationError,
   createCampaignApplication,
-  createCampaignScheduleProposalApplication,
   createCampaignTestDeliveryApplication,
   createSubscriberLedgerAudienceResolver,
   type CampaignActor,
@@ -33,6 +32,7 @@ import { createD1CampaignScheduleProposalStore } from "./d1-campaign-schedule-pr
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import { readBlogPostTimeZoneDatabaseVersion } from "./blog-post-operations-runtime";
+import { createCampaignScheduleRequests } from "./campaign-schedule-request-application";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
 import {
   HumanAccessConfigurationError,
@@ -180,13 +180,11 @@ async function loadInstallationParts(
   // A schedule request is a proposal and nothing else, so it needs only the
   // campaign it names and whether a send is already set for it. It never
   // reads the audience, the sender identity or the provider.
-  const scheduleProposals = createCampaignScheduleProposalApplication({
+  const scheduleProposals = createCampaignScheduleRequests({
     siteId,
-    store: createD1CampaignScheduleProposalStore(database),
-    loadCampaign: (campaignId) => store.findCampaign({ siteId, campaignId }),
-    hasActiveSchedule: async (campaignId) =>
-      (await bulkStateStore.findCampaignBulkState({ siteId, campaignId }))
-        .schedule !== null,
+    campaigns: store,
+    bulkState: bulkStateStore,
+    proposals: createD1CampaignScheduleProposalStore(database),
     timeZoneDatabaseVersion: () =>
       readBlogPostTimeZoneDatabaseVersion(environment),
   });

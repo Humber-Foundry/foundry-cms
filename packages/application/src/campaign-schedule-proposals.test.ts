@@ -269,8 +269,42 @@ describe("only a person answers a campaign schedule request", () => {
     ).rejects.toMatchObject({ code: "human_authority_required" });
   });
 
-  it("stops being pending once a send is already set for that campaign", async () => {
+  it("refuses a request when a send is already set for that campaign", async () => {
+    // Recording one would answer `pending_human_approval` while every screen
+    // showed nothing pending, so the tool says no by name instead.
     const { application } = harness({ activeSchedule: true });
+    await expect(
+      application.commands.proposeSchedule({
+        actorId: `mcp-${actorId}`,
+        campaignId,
+        resolvedTime,
+        idempotencyKey,
+        authority: mcpAuthority,
+      }),
+    ).rejects.toMatchObject({ code: "campaign_send_already_scheduled" });
+    expect(await application.queries.pending({ campaignId })).toBeNull();
+    expect(await application.queries.listPending()).toStrictEqual([]);
+  });
+
+  it("stops reporting a request once a person sets the send themselves", async () => {
+    // A person can answer a request by scheduling the send. Nothing is
+    // declined, and the request stops being pending. See ADR-0038 §1.
+    let sendIsSet = false;
+    const store = createInMemoryCampaignScheduleProposalStore({
+      humanAuthorities: new Set(["membership-owner"]),
+      mcpAuthorities: new Set([
+        `${connectionId}:${actorId}:publication.schedule`,
+      ]),
+    });
+    const application = createCampaignScheduleProposalApplication({
+      siteId,
+      store,
+      loadCampaign: async (id) => (id === campaignId ? campaign : null),
+      hasActiveSchedule: async () => sendIsSet,
+      now: () => now,
+      createId: () => "schedule_request_1",
+      timeZoneDatabaseVersion: () => "2026a",
+    });
     await application.commands.proposeSchedule({
       actorId: `mcp-${actorId}`,
       campaignId,
@@ -278,6 +312,8 @@ describe("only a person answers a campaign schedule request", () => {
       idempotencyKey,
       authority: mcpAuthority,
     });
+    expect(await application.queries.pending({ campaignId })).not.toBeNull();
+    sendIsSet = true;
     expect(await application.queries.pending({ campaignId })).toBeNull();
     expect(await application.queries.listPending()).toStrictEqual([]);
   });

@@ -96,22 +96,22 @@ export function createD1CampaignScheduleProposalStore(
   database: D1DatabaseBinding,
 ): CampaignScheduleProposalStore {
   const store: CampaignScheduleProposalStore = Object.freeze({
-    async findByRequest({ siteId, campaignId, requestId }) {
+    async findByRequest({ siteId, campaignId, idempotencyKey }) {
       const row = await database
         .prepare(
           `SELECT ${proposalProjection}
            FROM campaign_schedule_proposals
            WHERE site_id = ?1 AND campaign_id = ?2 AND request_id = ?3`,
         )
-        .bind(siteId, campaignId, requestId)
+        .bind(siteId, campaignId, idempotencyKey)
         .first<ProposalRow>();
       return row === null ? null : proposalFromRow(row);
     },
-    async save(proposal, requestId, authority) {
+    async save(proposal, idempotencyKey, authority) {
       const replay = await store.findByRequest({
         siteId: proposal.siteId,
         campaignId: proposal.campaignId,
-        requestId,
+        idempotencyKey,
       });
       if (replay !== null) return replay;
       const inserted = await database
@@ -151,7 +151,7 @@ export function createD1CampaignScheduleProposalStore(
           proposal.executeAtUtc,
           proposal.timeZoneDatabaseVersion,
           proposal.createdBy,
-          requestId,
+          idempotencyKey,
           proposal.createdAt,
           ...campaignAuthorityBinds(authority),
         )
@@ -166,7 +166,7 @@ export function createD1CampaignScheduleProposalStore(
            FROM campaign_schedule_proposals
            WHERE site_id = ?1 AND campaign_id = ?2 AND request_id = ?3`,
         )
-        .bind(proposal.siteId, proposal.campaignId, requestId)
+        .bind(proposal.siteId, proposal.campaignId, idempotencyKey)
         .first<ProposalRow>();
       if (concurrent !== null) {
         if (sameRequest(concurrent, proposal)) {
@@ -247,7 +247,13 @@ export function createD1CampaignScheduleProposalStore(
         .all<ProposalRow>();
       return Object.freeze(rows.results.map(proposalFromRow));
     },
-    async decline({ siteId, proposalId, requestId, declinedBy, occurredAt }) {
+    async decline({
+      siteId,
+      proposalId,
+      idempotencyKey,
+      declinedBy,
+      occurredAt,
+    }) {
       const row = await database
         .prepare(
           `SELECT ${proposalProjection}
@@ -274,7 +280,7 @@ export function createD1CampaignScheduleProposalStore(
            )
            ON CONFLICT (proposal_id) DO NOTHING`,
         )
-        .bind(proposalId, siteId, requestId, declinedBy, occurredAt)
+        .bind(proposalId, siteId, idempotencyKey, declinedBy, occurredAt)
         .run();
       if ((declined.meta.changes ?? 0) === 1) return proposalFromRow(row);
       // Declining twice is a no-op that answers the same request. Anything

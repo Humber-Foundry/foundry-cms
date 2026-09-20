@@ -268,6 +268,20 @@ function campaignScheduleRequestError(
       { reason: error.code },
     );
   }
+  if (error.code === "campaign_send_already_scheduled") {
+    return new McpReadError(
+      "VALIDATION_FAILED",
+      "A send is already set for this campaign, so there is nothing to ask for.",
+      { reason: error.code },
+    );
+  }
+  if (error.code === "schedule_request_idempotency_key_invalid") {
+    return new McpReadError(
+      "VALIDATION_FAILED",
+      "The idempotency key is not a shape this command accepts.",
+      { reason: error.code },
+    );
+  }
   return new McpReadError(
     "VALIDATION_FAILED",
     "The send time asked for is not one this campaign can take.",

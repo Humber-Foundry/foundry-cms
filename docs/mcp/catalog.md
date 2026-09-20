@@ -535,6 +535,24 @@ the request into a schedule, which is when `foundry.publication.schedule`'s
 rules apply. The result answers `state: "pending_human_approval"` with the
 request's own id.
 
+### Ask for a campaign to be sent at a time
+
+```json
+{
+  "campaignId": "8c3a1e52-7b40-4f19-9d2b-6f41a0c8e731",
+  "sendAt": "2026-10-01T15:00:00Z",
+  "reportingTimeZone": "America/Vancouver",
+  "idempotencyKey": "5f2c8a03-9d41-4e7b-8c16-2b9e0d4a7f53"
+}
+```
+
+`foundry.campaign.schedule_request` needs `publication.schedule`. It records a
+request and nothing else: it creates no schedule, and it sends nothing. An
+Owner confirms a delivered test of that exact email, approves it, and sets the
+send in the dashboard. The result answers `state: "pending_human_approval"`
+with the request's own id. A campaign whose send is already set is refused
+with `campaign_send_already_scheduled`.
+
 ### Patch design
 
 ```json

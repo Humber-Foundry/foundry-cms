@@ -1437,7 +1437,6 @@ const campaignListResult = {
   properties: {
     campaigns: {
       type: "array",
-      maxItems: 500,
       items: {
         type: "object",
         additionalProperties: false,
@@ -3436,7 +3435,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       input,
       context,
     ) => {
-      const campaignId =
+      const parsed =
         isRecord(input) &&
         hasExactKeys(input, [
           "campaignId",
@@ -3449,9 +3448,14 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         publishAtShape.test(input.sendAt) &&
         typeof input.reportingTimeZone === "string" &&
         input.reportingTimeZone.trim() !== ""
-          ? parseCampaignId(input.campaignId)
+          ? {
+              campaignId: parseCampaignId(input.campaignId),
+              sendAt: input.sendAt,
+              reportingTimeZone: input.reportingTimeZone,
+              idempotencyKey: input.idempotencyKey as string,
+            }
           : null;
-      if (campaignId === null || !isRecord(input)) {
+      if (parsed === null || parsed.campaignId === null) {
         return application.rejectInvalidInput(
           principal,
           "foundry.campaign.schedule_request",
@@ -3462,12 +3466,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
       }
       return application.requestSchedule!(
         principal,
-        {
-          campaignId,
-          sendAt: input.sendAt as string,
-          reportingTimeZone: input.reportingTimeZone as string,
-          idempotencyKey: input.idempotencyKey as string,
-        },
+        { ...parsed, campaignId: parsed.campaignId },
         context,
       );
     },

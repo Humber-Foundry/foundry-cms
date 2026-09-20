@@ -12,7 +12,6 @@ import {
   CampaignValidationError,
   createInMemoryCampaignBulkStateStore,
   createInMemoryCampaignScheduleProposalStore,
-  createCampaignScheduleProposalApplication,
   createInMemoryCampaignStore,
   createInMemorySubscriberLedgerStore,
   createSubscriberLedgerAudienceResolver,
@@ -46,6 +45,7 @@ import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
 import { createD1CampaignScheduleProposalStore } from "./d1-campaign-schedule-proposal-store";
+import { createCampaignScheduleRequests } from "./campaign-schedule-request-application";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
@@ -644,21 +644,11 @@ export async function loadCampaignRequestContext(
     fingerprintKey: bulkFingerprintKey,
     maximumAudienceRecipients: brevoBulkRecipientLimit,
   });
-  const scheduleProposals = createCampaignScheduleProposalApplication({
+  const scheduleProposals = createCampaignScheduleRequests({
     siteId: installedSite.application.siteId,
-    store: scheduleProposalStore,
-    loadCampaign: (campaignId) =>
-      store.findCampaign({
-        siteId: installedSite.application.siteId,
-        campaignId,
-      }),
-    hasActiveSchedule: async (campaignId) =>
-      (
-        await bulkStateStore.findCampaignBulkState({
-          siteId: installedSite.application.siteId,
-          campaignId,
-        })
-      ).schedule !== null,
+    campaigns: store,
+    bulkState: bulkStateStore,
+    proposals: scheduleProposalStore,
   });
   return {
     identity: human.identity,

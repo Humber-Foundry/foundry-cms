@@ -470,7 +470,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     },
     "inputSchemaSha256": "7760a5a5ce90f1c50ad52b3bb68cfcb409a0d348b55eb2f066cd92e85474cac1",
     "name": "foundry.campaign.list",
-    "outputSchemaSha256": "4830cef659c2fb5f8426b1b3143a79ab77618a59b0d62b27377946cbc4c12224",
+    "outputSchemaSha256": "a1d419716ea38f3c16c6d3ddd07d7418ab0d61144301b31bb0985eb53643fb1d",
   },
   {
     "annotations": {
