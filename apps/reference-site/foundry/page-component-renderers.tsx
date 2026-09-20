@@ -1,7 +1,12 @@
 import {
   homePage,
+  pagePath,
+  resolveSiteHref,
+  type PageHrefBuilder,
   type PageSection,
   type SiteDefinition,
+  type SiteHref,
+  type SitePage,
 } from "@humber-foundry/site-definition";
 import type { ReactNode } from "react";
 
@@ -47,6 +52,17 @@ export type PageComponentRenderContext = Readonly<{
    * there; the public site and the exact preview render them live.
    */
   editingSurface?: boolean;
+  /**
+   * The page this section belongs to, and how to resolve a `SiteHref` on it —
+   * the same three values `SiteHeader` reads. Defaults to the home page and
+   * the production builders, which is exactly right on every canvas today:
+   * the visual editor only ever shows the home page (#159 opens this to any
+   * page). `SiteRenderer` passes the real values for the public site and a
+   * revision preview.
+   */
+  currentPage?: SitePage;
+  pageHref?: PageHrefBuilder;
+  blogHref?: string;
 }>;
 
 export type PageComponentRenderer = (
@@ -62,6 +78,31 @@ function occurrenceFor(
   return media.find(
     (candidate) => candidate.occurrenceId === occurrenceId,
   ) ?? null;
+}
+
+/**
+ * The address a hero or call-to-action button's stored href resolves to.
+ *
+ * This is the one place either renderer turns a stored `SiteHref` into a
+ * real address, through the shared `resolveSiteHref` — the same function
+ * `SiteHeader` uses for navigation. Neither renderer prints a raw stored
+ * value. Without a `definition` (a bare unit test rendering one section on
+ * its own) the href is returned as written, since there is nothing to
+ * resolve a page id against.
+ */
+function resolveActionHref(
+  definition: SiteDefinition | undefined,
+  href: SiteHref,
+  currentPage: SitePage | undefined,
+  pageHref: PageHrefBuilder | undefined,
+  blogHref: string | undefined,
+): string {
+  if (definition === undefined) return href;
+  return resolveSiteHref(definition, href, {
+    currentPage: currentPage ?? homePage(definition),
+    pageHref: pageHref ?? pagePath,
+    blogHref: blogHref ?? "/blog",
+  });
 }
 
 /**
@@ -83,6 +124,9 @@ export const renderHeroPageComponent: PageComponentRenderer = ({
   mediaDelivery = "published",
   mediaAccessToken,
   inlineText,
+  currentPage,
+  pageHref,
+  blogHref,
 }) => {
   if (section.type !== "hero") throw new TypeError("hero_page_component_required");
   const t = inlineOr(inlineText);
@@ -96,8 +140,8 @@ export const renderHeroPageComponent: PageComponentRenderer = ({
       <p className="hero-summary">{t("summary", section.summary, { multiline: true, label: "Summary" })}</p>
       {occurrence === null ? null : <MediaOccurrence className="site-media site-media-hero" occurrence={occurrence} delivery={mediaDelivery} accessToken={mediaAccessToken} />}
       <div className="action-row">
-        <a className="button button-primary" href={section.primaryAction.href}>{section.primaryAction.label}</a>
-        <a className="text-link" href={section.secondaryAction.href}>{section.secondaryAction.label}<span aria-hidden="true"> ↘</span></a>
+        <a className="button button-primary" href={resolveActionHref(definition, section.primaryAction.href, currentPage, pageHref, blogHref)}>{section.primaryAction.label}</a>
+        <a className="text-link" href={resolveActionHref(definition, section.secondaryAction.href, currentPage, pageHref, blogHref)}>{section.secondaryAction.label}<span aria-hidden="true"> ↘</span></a>
       </div>
     </section>
   );
@@ -137,8 +181,12 @@ export const renderProofPageComponent: PageComponentRenderer = ({ section, inlin
 
 export const renderCallToActionPageComponent: PageComponentRenderer = ({
   section,
+  definition,
   callToActionBody,
   inlineText,
+  currentPage,
+  pageHref,
+  blogHref,
 }) => {
   if (section.type !== "callToAction") throw new TypeError("call_to_action_page_component_required");
   const t = inlineOr(inlineText);
@@ -146,7 +194,7 @@ export const renderCallToActionPageComponent: PageComponentRenderer = ({
     <section className="contact" data-component-variant={section.variant} id={sectionAnchor(section)} aria-labelledby={`${section.id}_title`}>
       <p className="eyebrow">{t("eyebrow", section.eyebrow, { label: "Eyebrow" })}</p><h2 id={`${section.id}_title`}>{t("title", section.title, { label: "Title" })}</h2>
       <div className="rich-text">{callToActionBody ?? <RichTextRenderer document={section.body} headingOffset={1} />}</div>
-      <a className="button button-light" href={section.action.href}>{section.action.label}</a>
+      <a className="button button-light" href={resolveActionHref(definition, section.action.href, currentPage, pageHref, blogHref)}>{section.action.label}</a>
     </section>
   );
 };
