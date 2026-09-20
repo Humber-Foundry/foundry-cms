@@ -110,6 +110,11 @@ function toolOutputSchema(result: unknown) {
                 type: ["string", "null"],
                 format: "uri-reference",
               },
+              // The named, machine-readable cause behind this refusal, e.g.
+              // `campaign_sender_details_not_configured` — see
+              // `McpReadError.reason`. `null` for a refusal with no named
+              // reason beyond its `code`.
+              reason: { type: ["string", "null"] },
             },
             required: [
               "code",
@@ -118,6 +123,7 @@ function toolOutputSchema(result: unknown) {
               "requiredScopes",
               "latestRevision",
               "conflictResource",
+              "reason",
             ],
           },
           meta,

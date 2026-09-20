@@ -21,6 +21,7 @@ import {
   type SitePage,
 } from "@humber-foundry/site-definition";
 
+import { pageCompositionFailureMessage } from "../src/page-composition-failure-message";
 import { definitionToPuckData, puckDataToDefinition } from "../src/page-composition-puck";
 import { CanvasImageField, type OpenPhotoPicker } from "./canvas-image-field";
 import { ChangePhotoField, type EditorMediaContext } from "./change-photo-field";
@@ -956,7 +957,12 @@ export function VisualComponentEditor({
       installedPageComponentRegistry,
     );
     if (!result.ok) {
-      setMessage(Object.values(result.errors)[0] ?? "Composition rejected.");
+      const reason = Object.values(result.errors)[0];
+      // The reason names the internal slot and component rules an owner does
+      // not need — log it for support and developers, and show the owner
+      // only the matching plain sentence. See `page-composition-failure-message.ts`.
+      console.error("[foundry-cms] page composition refused:", reason);
+      setMessage(pageCompositionFailureMessage(reason));
       return;
     }
     if (JSON.stringify(result.definition) === JSON.stringify(definition)) return;
