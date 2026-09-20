@@ -14,6 +14,7 @@ import {
   type ContentChangeSummary,
   type ContentRevision,
 } from "@humber-foundry/application";
+import type { PageHrefBuilder } from "@humber-foundry/site-definition";
 
 import { AccessIdentityError } from "./access-identity";
 import { loadContentRevisionApplication } from "./content-revision-runtime";
@@ -36,7 +37,7 @@ export type RevisionPreviewPageProps = {
   }>;
 };
 
-type RevisionPreview = ContentRevision & {
+export type RevisionPreview = ContentRevision & {
   mcpReview?: ContentChangeSummary &
     Readonly<{
       previewId: string;
@@ -143,4 +144,80 @@ export async function loadRevisionPreview({
     bookmark,
     typeof previewId === "string" ? previewId : "",
   );
+}
+
+/** The query string every preview route reads: capability, bookmark, and the optional media token and MCP preview id. */
+export type RevisionPreviewLinkParams = Readonly<{
+  capability?: string | string[];
+  bookmark?: string | string[];
+  accessToken?: string | string[];
+  previewId?: string | string[];
+}>;
+
+export type RevisionPreviewLinks = Readonly<{
+  /** The preview route for this revision with no page segment: the home page. */
+  previewPath: string;
+  /** The home page's preview address. Carries the capability and bookmark that let it render at all. */
+  homeHref: string;
+  /** The Blog index's preview address, on the home page. */
+  blogHref: string;
+  /** Builds one blog post's preview address. */
+  blogPostHref: (slug: string) => string;
+  /**
+   * Builds one page's preview address, for a page other than the home page.
+   * Pass this as `SiteRenderer`'s `pageHref` prop so a `page:` link resolves
+   * to that page's preview instead of its live public path. This is the one
+   * place every preview route builds this builder — see ADR-0022's `pageHref`
+   * seam and ADR-0029.
+   */
+  pageHref: PageHrefBuilder;
+  /** The verified media access token to carry forward, if the visitor has one. */
+  accessToken: string | undefined;
+}>;
+
+function firstString(value: string | string[] | undefined): string {
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * Every address a preview route can send a visitor to, all bound to the same
+ * revision, capability, bookmark and access token the visitor already holds.
+ *
+ * This is the one place that builds a preview address. The home page route,
+ * the blog post route and the page route all call it, so a link followed
+ * from any one of them carries the exact same query string and never drops
+ * the capability that lets the next page render.
+ */
+export function buildRevisionPreviewLinks(
+  revision: Pick<ContentRevision, "workspaceId" | "revision">,
+  searchParams: RevisionPreviewLinkParams,
+): RevisionPreviewLinks {
+  const accessToken =
+    typeof searchParams.accessToken === "string"
+      ? searchParams.accessToken
+      : undefined;
+  const previewId =
+    typeof searchParams.previewId === "string"
+      ? searchParams.previewId
+      : undefined;
+  const query = new URLSearchParams({
+    capability: firstString(searchParams.capability),
+    bookmark: firstString(searchParams.bookmark),
+    ...(accessToken === undefined ? {} : { accessToken }),
+    ...(previewId === undefined ? {} : { previewId }),
+  });
+  const queryString = query.toString();
+  const previewPath = `/__foundry/preview/${revision.workspaceId}/${revision.revision}`;
+  const withQuery = (path: string) => `${path}?${queryString}`;
+  const homeHref = withQuery(previewPath);
+  return {
+    previewPath,
+    homeHref,
+    blogHref: `${homeHref}#blog_index_title`,
+    blogPostHref: (slug) =>
+      withQuery(`${previewPath}/blog/${encodeURIComponent(slug)}`),
+    pageHref: (page) =>
+      withQuery(`${previewPath}/${encodeURIComponent(page.slug)}`),
+    accessToken,
+  };
 }

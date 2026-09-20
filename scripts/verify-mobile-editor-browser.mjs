@@ -109,6 +109,14 @@ try {
   await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
   await page.getByRole("heading", { name: "Pages" }).waitFor();
 
+  // Pages opens on the list of every page, at this width as well. The owner
+  // taps a row to open that page in the editor.
+  await page.locator(".pages-list-row").first().click();
+  await page.waitForURL(
+    /\/dash\/pages\?workspace=workspace_[a-f0-9]{24}&page=[A-Za-z0-9_-]+$/u,
+  );
+  await page.getByRole("heading", { name: "Pages" }).waitFor();
+
   // The floating Menu button is the only chrome on screen; the top bar controls
   // are off screen until it is tapped.
   const menu = page.locator(".editor-mobile-menu");
@@ -122,6 +130,12 @@ try {
   await menu.click();
   await page.getByRole("button", { name: "Edit", exact: true }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Undo" }).waitFor({ state: "visible" });
+  // The way to another page is inside the same sheet, so it is reachable at
+  // this width without a second menu.
+  await page
+    .getByLabel("Editing", { exact: true })
+    .waitFor({ state: "visible" });
+  await page.getByRole("link", { name: "All pages" }).waitFor({ state: "visible" });
   await settledRect(
     page, ".editor-topbar",
     (r) => r.top >= -1,

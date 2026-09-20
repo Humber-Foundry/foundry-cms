@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 
 import { homePage } from "@humber-foundry/site-definition";
 
+import { PreviewProvenance } from "@/components/preview-provenance";
 import { SiteRenderer } from "@/components/site-renderer";
 import { pageRouteMetadata } from "@/src/public-page";
 import {
+  buildRevisionPreviewLinks,
   loadRevisionPreview,
   type RevisionPreviewPageProps,
 } from "@/src/revision-preview-page";
@@ -24,101 +26,23 @@ export async function generateMetadata(
   };
 }
 
-/** One line per changed page, so long page names stay readable. */
-function ReviewLines({ lines }: { lines: ReadonlyArray<string> }) {
-  if (lines.length === 0) return <>Nothing</>;
-  return (
-    <ul>
-      {lines.map((line, index) => (
-        <li key={`${index}-${line}`}>{line}</li>
-      ))}
-    </ul>
-  );
-}
-
 export default async function RevisionPreviewPage(
   props: RevisionPreviewPageProps,
 ) {
   const revision = await loadRevisionPreview(props);
-  const { accessToken, capability, bookmark, previewId } =
-    await props.searchParams;
-  const previewQuery = new URLSearchParams({
-    capability: typeof capability === "string" ? capability : "",
-    bookmark: typeof bookmark === "string" ? bookmark : "",
-    ...(typeof accessToken === "string" ? { accessToken } : {}),
-    ...(typeof previewId === "string" ? { previewId } : {}),
-  });
-  const previewPath =
-    `/__foundry/preview/${revision.workspaceId}/${revision.revision}`;
-  const previewHomeHref = `${previewPath}?${previewQuery.toString()}`;
+  const links = buildRevisionPreviewLinks(revision, await props.searchParams);
   return (
     <>
-      <aside className="preview-provenance" aria-label="Preview provenance">
-        <div>
-          <strong>Exact saved preview · revision {revision.revision}</strong>
-          <span>Created {revision.createdAt}</span>
-        </div>
-        <dl>
-          <div>
-            <dt>Content</dt>
-            <dd>{revision.inputs.contentHash}</dd>
-          </div>
-          <div>
-            <dt>Schema</dt>
-            <dd>{revision.inputs.schemaVersion}</dd>
-          </div>
-          <div>
-            <dt>Renderer</dt>
-            <dd>{revision.inputs.rendererVersion}</dd>
-          </div>
-          <div>
-            <dt>Production base</dt>
-            <dd>{revision.inputs.productionBase}</dd>
-          </div>
-        </dl>
-        {revision.mcpReview === undefined ? null : (
-          <dl className="preview-review">
-            <div>
-              <dt>MCP actor</dt>
-              <dd>{revision.mcpReview.actorId}</dd>
-            </div>
-            <div>
-              <dt>Changed content</dt>
-              <dd>
-                <ReviewLines lines={revision.mcpReview.changedDocuments} />
-              </dd>
-            </div>
-            <div>
-              <dt>Design changes</dt>
-              <dd>
-                <ReviewLines lines={revision.mcpReview.designChanges} />
-              </dd>
-            </div>
-            <div>
-              <dt>Public effect</dt>
-              <dd>{revision.mcpReview.publicEffect}</dd>
-            </div>
-          </dl>
-        )}
-        <a
-          href={`/dash/pages?workspace=${encodeURIComponent(revision.workspaceId)}`}
-        >
-          Return to editor
-        </a>
-      </aside>
+      <PreviewProvenance revision={revision} />
       <SiteRenderer
         definition={revision.definition}
         page={homePage(revision.definition)}
         mediaDelivery="authenticated"
-        mediaAccessToken={
-          typeof accessToken === "string" ? accessToken : undefined
-        }
-        homeHref={previewHomeHref}
-        blogHref={`${previewHomeHref}#blog_index_title`}
-        blogPostHref={(slug) =>
-          previewPath +
-          `/blog/${encodeURIComponent(slug)}?${previewQuery.toString()}`
-        }
+        mediaAccessToken={links.accessToken}
+        homeHref={links.homeHref}
+        blogHref={links.blogHref}
+        blogPostHref={links.blogPostHref}
+        pageHref={links.pageHref}
       />
     </>
   );

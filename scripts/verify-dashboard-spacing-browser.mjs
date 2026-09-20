@@ -288,6 +288,15 @@ async function checkPagesSettingsPanel(page, origin, viewportLabel) {
   await page.goto(`${origin}/dash/pages`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
 
+  // Pages opens on the list of every page. Open the first one to reach the
+  // editor and the settings panel this check measures.
+  const firstPage = page.locator(".pages-list-row").first();
+  if ((await firstPage.count()) > 0) {
+    await firstPage.click({ timeout: 8000 });
+    await page.waitForURL(/&page=/u, { timeout: 8000 });
+    await page.waitForTimeout(600);
+  }
+
   if (viewportLabel === "phone") {
     await page.locator(".editor-mobile-menu").click({ timeout: 8000 });
     await page.waitForTimeout(300);

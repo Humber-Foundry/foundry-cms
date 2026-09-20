@@ -10,6 +10,7 @@ import {
   pageFieldGroups,
 } from "./content-editor";
 import { advanceWorkspaceRevisionHead } from "./workspace-revision";
+import type { EditorPageSummary } from "../src/editor-page-selection";
 // Type only — erased at compile, so the server-only module is never bundled
 // into this client component.
 import type { SiteImageTile } from "../src/site-used-photos";
@@ -50,6 +51,8 @@ export function WorkspaceEditorSurface({
   activeWorkspaceUrl,
   staleRecovery,
   siteImages,
+  selectedPageId,
+  pages = [],
 }: {
   variant: keyof typeof variants;
   csrfToken: string;
@@ -59,6 +62,10 @@ export function WorkspaceEditorSurface({
   activeWorkspaceUrl: string;
   staleRecovery?: Readonly<{ id: string; sourceWorkspaceId: string }>;
   siteImages: ReadonlyArray<SiteImageTile>;
+  /** The page the owner opened. Design edits the whole site and passes none. */
+  selectedPageId?: string;
+  /** Every page of the draft, for the page switcher. */
+  pages?: ReadonlyArray<EditorPageSummary>;
 }) {
   const [head, setHead] = useState({
     revision: contentRevision,
@@ -85,6 +92,8 @@ export function WorkspaceEditorSurface({
       activeWorkspaceUrl={activeWorkspaceUrl}
       staleRecovery={staleRecovery}
       siteImages={siteImages}
+      selectedPageId={selectedPageId}
+      pages={pages}
       {...variants[variant]}
     />
   );

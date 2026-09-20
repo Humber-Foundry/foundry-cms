@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { homePage, referenceSiteDefinition } from "@humber-foundry/site-definition";
+import { createContentWorkspaceId } from "@humber-foundry/application";
+import {
+  homePage,
+  referenceSiteDefinition,
+  resolveSiteHref,
+  type SiteHref,
+} from "@humber-foundry/site-definition";
+
+import { twoPageSiteDefinition } from "./test-support/two-page-site-definition";
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
@@ -51,7 +59,10 @@ vi.mock("./mcp-preview-review-runtime", () => ({
   loadMcpPreviewForHuman: mocks.loadMcpPreview,
 }));
 
-import { loadRevisionPreview } from "./revision-preview-page";
+import {
+  buildRevisionPreviewLinks,
+  loadRevisionPreview,
+} from "./revision-preview-page";
 
 describe("revision preview page", () => {
   beforeEach(() => {
@@ -192,5 +203,109 @@ describe("revision preview page", () => {
       siteId: referenceSiteDefinition.site.id,
     });
     expect(mocks.loadApplication).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The reference definition plus a second page, for proving links between
+ * pages inside a preview. Uses the shared two-page fixture from PR #188.
+ */
+function withSecondPage() {
+  const definition = twoPageSiteDefinition;
+  return {
+    definition,
+    home: homePage(definition),
+    about: definition.pages[1]!,
+  };
+}
+
+describe("buildRevisionPreviewLinks", () => {
+  const revision = {
+    workspaceId: createContentWorkspaceId("workspace_home"),
+    revision: 5,
+  };
+  const searchParams = { capability: "cap-123", bookmark: "bookmark-abc" };
+
+  it("keeps the home preview address unchanged, byte for byte", () => {
+    const links = buildRevisionPreviewLinks(revision, searchParams);
+    expect(links.previewPath).toBe("/__foundry/preview/workspace_home/5");
+    expect(links.homeHref).toBe(
+      "/__foundry/preview/workspace_home/5?capability=cap-123&bookmark=bookmark-abc",
+    );
+    expect(links.blogHref).toBe(`${links.homeHref}#blog_index_title`);
+    expect(links.blogPostHref("my-post")).toBe(
+      "/__foundry/preview/workspace_home/5/blog/my-post" +
+        "?capability=cap-123&bookmark=bookmark-abc",
+    );
+  });
+
+  it("carries the access token and MCP preview id forward on the home address", () => {
+    const links = buildRevisionPreviewLinks(revision, {
+      ...searchParams,
+      accessToken: "token-xyz",
+      previewId: "preview-1",
+    });
+    expect(links.homeHref).toContain("accessToken=token-xyz");
+    expect(links.homeHref).toContain("previewId=preview-1");
+    expect(links.accessToken).toBe("token-xyz");
+  });
+
+  it("builds another page's preview address under the same revision and query", () => {
+    const { about } = withSecondPage();
+    const links = buildRevisionPreviewLinks(revision, searchParams);
+    expect(links.pageHref(about)).toBe(
+      "/__foundry/preview/workspace_home/5/about" +
+        "?capability=cap-123&bookmark=bookmark-abc",
+    );
+  });
+
+  it("resolves a page: link to the target page's preview, not its live public path", () => {
+    const { definition, home, about } = withSecondPage();
+    const links = buildRevisionPreviewLinks(revision, searchParams);
+    const address = resolveSiteHref(definition, `page:${about.id}`, {
+      currentPage: home,
+      pageHref: links.pageHref,
+      blogHref: links.blogHref,
+    });
+    expect(address).toBe(links.pageHref(about));
+    expect(address.startsWith(links.previewPath)).toBe(true);
+    expect(address).not.toBe("/about");
+  });
+
+  it("leaves a link back to the current page's preview scoped to this revision only", () => {
+    const { definition, about } = withSecondPage();
+    const links = buildRevisionPreviewLinks(revision, searchParams);
+    // A crafted or stale link naming a page id this revision does not have
+    // resolves to no address at all, never a guess at another revision's
+    // page — resolveSiteHref only ever looks inside the given definition.
+    const address = resolveSiteHref(definition, "page:page_from_elsewhere", {
+      currentPage: about,
+      pageHref: links.pageHref,
+      blogHref: links.blogHref,
+    });
+    expect(address).toBe("");
+  });
+
+  it("leaves an external link and a mailto link unchanged", () => {
+    const { definition } = withSecondPage();
+    const links = buildRevisionPreviewLinks(revision, searchParams);
+    const context = {
+      currentPage: null,
+      pageHref: links.pageHref,
+      blogHref: links.blogHref,
+    };
+    expect(
+      resolveSiteHref(definition, "mailto:owner@example.com", context),
+    ).toBe("mailto:owner@example.com");
+    // `$defs/href` never stores a raw external URL (ADR-0022), but
+    // `resolveSiteHref` still must not rewrite one it is defensively given
+    // into a preview address — it is not a target the preview understands.
+    expect(
+      resolveSiteHref(
+        definition,
+        "https://example.com/offsite" as SiteHref,
+        context,
+      ),
+    ).toBe("https://example.com/offsite");
   });
 });
