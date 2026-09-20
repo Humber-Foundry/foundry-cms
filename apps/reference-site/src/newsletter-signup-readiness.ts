@@ -1,6 +1,16 @@
 import type { HumanAccessEnvironment } from "./human-access-configuration";
-import { readCampaignChannelConfiguration } from "./campaign-channel-configuration";
-import { CampaignChannelConfigurationError } from "./campaign-channel-configuration";
+import {
+  CampaignChannelConfigurationError,
+  readCampaignChannelConfiguration,
+} from "./campaign-channel-configuration";
+import {
+  emailDeliverySetupGuide,
+  isHttpsUrl,
+  isLongEnoughSecret,
+  isNonEmptyJsonObject,
+  isPresent,
+  type SettingCheck,
+} from "./settings-presence";
 
 /**
  * Whether this installation can run newsletter signup.
@@ -17,8 +27,7 @@ import { CampaignChannelConfigurationError } from "./campaign-channel-configurat
  * form is told yes or no and nothing else: a visitor has no business learning
  * how a site is configured.
  */
-export const newsletterSignupSetupGuide =
-  "docs/operations/brevo-test-delivery-readiness.md";
+export const newsletterSignupSetupGuide = emailDeliverySetupGuide;
 
 export type NewsletterSignupReadiness = Readonly<{
   state: "connected" | "not_configured" | "local_development";
@@ -44,48 +53,10 @@ export const newsletterSignupSettingNames = Object.freeze([
 export type NewsletterSignupSettingName =
   (typeof newsletterSignupSettingNames)[number];
 
-function isPresent(value: string | undefined): boolean {
-  return value !== undefined && value.trim() !== "";
-}
-
-function isLongEnoughSecret(value: string | undefined): boolean {
-  return isPresent(value) && value!.length >= 32;
-}
-
-function isNonEmptyJsonObject(value: string | undefined): boolean {
-  if (!isPresent(value)) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value!);
-  } catch {
-    return false;
-  }
-  return (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    !Array.isArray(parsed) &&
-    Object.keys(parsed).length > 0
-  );
-}
-
-function isHttpsUrl(value: string | undefined): boolean {
-  if (!isPresent(value)) return false;
-  try {
-    const parsed = new URL(value!.trim());
-    return (
-      parsed.protocol === "https:" &&
-      parsed.username === "" &&
-      parsed.password === ""
-    );
-  } catch {
-    return false;
-  }
-}
-
-const checks: Readonly<
+const newsletterSignupSettingChecks: Readonly<
   Record<
     NewsletterSignupSettingName,
-    (environment: NewsletterSignupEnvironment) => boolean
+    SettingCheck<NewsletterSignupEnvironment>
   >
 > = Object.freeze({
   FOUNDRY_CANONICAL_ORIGIN: (environment) =>
@@ -132,7 +103,7 @@ export function readNewsletterSignupReadiness(
     });
   }
   const missingSettings = newsletterSignupSettingNames.filter(
-    (name) => !checks[name](environment),
+    (name) => !newsletterSignupSettingChecks[name](environment),
   );
   return Object.freeze({
     state: missingSettings.length === 0 ? "connected" : "not_configured",
@@ -164,28 +135,4 @@ export function readNewsletterConfirmationDelivery(
     if (error instanceof CampaignChannelConfigurationError) return null;
     throw error;
   }
-}
-
-/**
- * What the public form is allowed to know. A visitor is told whether signup
- * works and, when it does, the public Turnstile site key the widget needs.
- * Setting names and every other configuration detail stay on the server: how a
- * site is configured is none of a visitor's business.
- */
-export type PublicNewsletterSignupStatus = Readonly<{
-  available: boolean;
-  turnstileSiteKey: string | null;
-}>;
-
-export function publicNewsletterSignupStatus(
-  readiness: NewsletterSignupReadiness,
-  environment: NewsletterSignupEnvironment,
-): PublicNewsletterSignupStatus {
-  const available = readiness.state === "connected";
-  return Object.freeze({
-    available,
-    turnstileSiteKey: available
-      ? (environment.FOUNDRY_TURNSTILE_SITE_KEY?.trim() ?? null)
-      : null,
-  });
 }

@@ -274,6 +274,30 @@ authorizes a second one.
 **Suppression** — A durable negative subscriber state that blocks delivery.
 Routine synchronization never reverses it.
 
+**Pending signup request** — Somebody who has typed an address into the public
+signup form but has not yet confirmed it. A pending request is not a subscriber
+and is never a recipient. It holds the address only until it is confirmed,
+superseded or expired, and then clears it.
+
+**Double opt-in** — The rule that an address joins the list only when the
+person who holds it opens a signed link sent to that address. It is what turns
+a pending signup request into a subscriber.
+
+**Confirmation link** — The signed, expiring address in the confirmation
+message. It carries the request id and the identity key, never the address, and
+a token signed for one purpose is refused for the other.
+
+**Confirmation job** — The durable record that a confirmation message is owed
+to one pending request. It is leased while it is being sent and gives up rather
+than risk a second message.
+
+**Consent wording** — The exact sentence a person was shown when they agreed. A
+site owner writes it on each signup block. The version recorded against a
+consent record is a fingerprint of those words, so it changes when they do.
+
+**Collection surface** — The page a person was on when they agreed. It is kept
+only when it is a page on this site.
+
 ## Messages
 
 **Submission** — One thing a visitor sent through a form on the site: the
@@ -514,6 +538,7 @@ editing page.
 - [Page-component image fields reference gallery photos](docs/decisions/ADR-0012-page-image-field-media-reference.md)
 - [Campaign images — header, share and inline images](docs/decisions/ADR-0014-campaign-images.md)
 - [Default newsletter-delivery adapter](docs/decisions/ADR-0002-default-newsletter-delivery-adapter.md)
+- [A newsletter signup is a pending request, not a subscriber](docs/decisions/ADR-0031-newsletter-signup-pending-request.md)
 - [Bulk campaign execution boundary](docs/decisions/ADR-0006-bulk-campaign-execution-boundary.md)
 - [The framework/installation-owned seam and three-way foundation sync](docs/decisions/ADR-0015-foundation-framework-sync-seam.md)
 - [A page collection replaces the single home page](docs/decisions/ADR-0016-site-definition-page-collection.md)

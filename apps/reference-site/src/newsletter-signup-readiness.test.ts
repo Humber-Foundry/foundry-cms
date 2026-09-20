@@ -4,9 +4,9 @@ import {
   newsletterSignupSettingNames,
   readNewsletterConfirmationDelivery,
   readNewsletterSignupReadiness,
-  publicNewsletterSignupStatus,
   type NewsletterSignupEnvironment,
 } from "./newsletter-signup-readiness";
+import { publicNewsletterSignupStatus } from "./newsletter-signup-public-status";
 
 const secret = "a-secret-value-long-enough-for-this-check";
 

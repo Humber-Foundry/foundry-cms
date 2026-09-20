@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { NewsletterConfirmationExpiredError } from "@humber-foundry/application";
+import {
+  NewsletterConfirmationExpiredError,
+  NewsletterConfirmationLinkInvalidError,
+} from "@humber-foundry/application";
 
 vi.mock("server-only", () => ({}));
 
@@ -67,7 +70,9 @@ describe("newsletter confirmation page", () => {
   });
 
   it("says the same thing for a token this site did not sign", async () => {
-    mocks.confirm.mockRejectedValue(new TypeError("confirm_token_invalid"));
+    mocks.confirm.mockRejectedValue(
+      new NewsletterConfirmationLinkInvalidError(),
+    );
     const invalid = await POST(post("token=forged"));
     mocks.confirm.mockRejectedValue(new NewsletterConfirmationExpiredError());
     const expired = await POST(post("token=abc"));
@@ -99,6 +104,15 @@ describe("newsletter confirmation page", () => {
     expect(await response.text()).not.toContain("@");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  it("does not blame the link for a fault in this code", async () => {
+    // A bare TypeError is a programming fault. Reporting it as a bad link
+    // would hide the fault and mislead the person who followed a good one.
+    mocks.confirm.mockRejectedValue(new TypeError("cannot read property"));
+    const response = await POST(post("token=abc"));
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("no longer valid");
   });
 
   it("asks the person to try again when the site cannot answer", async () => {

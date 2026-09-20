@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createNewsletterSignupRequestId } from "@humber-foundry/application";
+import {
+  createNewsletterSignupRequestId,
+  NewsletterConfirmationLinkInvalidError,
+} from "@humber-foundry/application";
 
 import {
   createNewsletterConfirmationToken,
@@ -65,7 +68,7 @@ describe("newsletter confirmation token", () => {
     });
     await expect(
       verifyNewsletterConfirmationToken({ token, secret, now: after }),
-    ).rejects.toBeInstanceOf(TypeError);
+    ).rejects.toBeInstanceOf(NewsletterConfirmationLinkInvalidError);
   });
 
   it("refuses a token signed with a different secret", async () => {
@@ -81,7 +84,7 @@ describe("newsletter confirmation token", () => {
         secret: "another-secret-that-is-also-long-enough-here",
         now: before,
       }),
-    ).rejects.toBeInstanceOf(TypeError);
+    ).rejects.toBeInstanceOf(NewsletterConfirmationLinkInvalidError);
   });
 
   it("refuses a tampered payload", async () => {
@@ -104,7 +107,7 @@ describe("newsletter confirmation token", () => {
         secret,
         now: before,
       }),
-    ).rejects.toBeInstanceOf(TypeError);
+    ).rejects.toBeInstanceOf(NewsletterConfirmationLinkInvalidError);
   });
 
   it("cannot be replayed as an unsubscribe token, or the other way round", async () => {
@@ -133,7 +136,25 @@ describe("newsletter confirmation token", () => {
         secret,
         now: before,
       }),
-    ).rejects.toBeInstanceOf(TypeError);
+    ).rejects.toBeInstanceOf(NewsletterConfirmationLinkInvalidError);
+  });
+
+  it("reports a secret that is too short as this site's fault, not a bad link", async () => {
+    const token = await createNewsletterConfirmationToken({
+      requestId,
+      identityKey,
+      expiresAt,
+      secret,
+    });
+    // A visitor followed a good link. Telling them the link was wrong would
+    // hide an installation fault behind their own action.
+    await expect(
+      verifyNewsletterConfirmationToken({
+        token,
+        secret: "too-short",
+        now: before,
+      }),
+    ).rejects.not.toBeInstanceOf(NewsletterConfirmationLinkInvalidError);
   });
 
   it("refuses a secret that is too short to sign with", async () => {

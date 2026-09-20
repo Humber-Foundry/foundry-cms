@@ -75,6 +75,17 @@ export function createD1NewsletterSignupStore(
   return {
     async savePendingSignup({ pending, job }) {
       const results = await database.batch([
+        // Supersede first, inside this same transaction. Two requests for one
+        // address that arrive together would otherwise both pass a separate
+        // check and then collide on the one-pending-request index, so a person
+        // would see a failure instead of a confirmation message.
+        database
+          .prepare(
+            `UPDATE newsletter_signup_requests
+             SET state = 'superseded', email = NULL, settled_at = ?3
+             WHERE site_id = ?1 AND identity_key = ?2 AND state = 'pending'`,
+          )
+          .bind(pending.siteId, pending.identityKey, pending.requestedAt),
         database
           .prepare(
             `INSERT INTO newsletter_signup_requests (
@@ -117,9 +128,10 @@ export function createD1NewsletterSignupStore(
             job.firstAvailableAt,
           ),
       ]);
+      // Index 1 is the request insert; index 0 is the supersede above.
       return {
         outcome:
-          (results[0]?.meta.changes ?? 0) > 0 ? "accepted" : "replayed",
+          (results[1]?.meta.changes ?? 0) > 0 ? "accepted" : "replayed",
       };
     },
 
@@ -143,17 +155,6 @@ export function createD1NewsletterSignupStore(
         .bind(siteId, requestId)
         .first<SignupRow>();
       return row === null ? null : pendingSignup(row);
-    },
-
-    async supersedePendingSignups({ siteId, identityKey, settledAt }) {
-      await database
-        .prepare(
-          `UPDATE newsletter_signup_requests
-           SET state = 'superseded', email = NULL, settled_at = ?3
-           WHERE site_id = ?1 AND identity_key = ?2 AND state = 'pending'`,
-        )
-        .bind(siteId, identityKey, settledAt)
-        .run();
     },
 
     async settlePendingSignup({ siteId, requestId, state, settledAt }) {

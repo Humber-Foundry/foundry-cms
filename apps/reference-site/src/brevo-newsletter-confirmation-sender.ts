@@ -84,8 +84,12 @@ export function createBrevoNewsletterConfirmationSender({
             to: [{ email: message.address }],
             subject,
             textContent: text,
-            // The provider must not treat two attempts at the same request as
-            // two messages.
+            // Carries the request id back on the provider's delivery events,
+            // so a bounce or a complaint can be matched to the request that
+            // caused it. It is not an idempotency key, and the provider makes
+            // no promise about repeats: the protection against a second message
+            // is the lease on the job, which treats an outcome it never learned
+            // as a failure rather than trying again.
             headers: { "X-Mailin-Custom": `foundry-confirm:${message.requestId}` },
           }),
           signal: AbortSignal.timeout(10_000),

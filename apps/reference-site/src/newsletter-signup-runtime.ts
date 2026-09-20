@@ -26,7 +26,7 @@ import {
 export {
   publicNewsletterSignupStatus,
   type PublicNewsletterSignupStatus,
-} from "./newsletter-signup-readiness";
+} from "./newsletter-signup-public-status";
 
 type RateLimitBinding = Readonly<{
   limit(input: { key: string }): Promise<Readonly<{ success: boolean }>>;

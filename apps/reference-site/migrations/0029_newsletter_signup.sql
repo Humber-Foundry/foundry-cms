@@ -7,6 +7,9 @@ PRAGMA foreign_keys = ON;
 -- request is confirmed, superseded or expired, the address is cleared here and
 -- the subscriber ledger is the only place it remains.
 
+-- `refused` records a confirmation this site would not act on: the address is
+-- erased or has reported our mail as spam. It must not be recorded as
+-- `confirmed`, because no consent was written.
 CREATE TABLE newsletter_signup_requests (
   id TEXT PRIMARY KEY,
   site_id TEXT NOT NULL,
@@ -18,7 +21,7 @@ CREATE TABLE newsletter_signup_requests (
   requested_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   state TEXT NOT NULL CHECK (
-    state IN ('pending', 'confirmed', 'expired', 'superseded')
+    state IN ('pending', 'confirmed', 'expired', 'superseded', 'refused')
   ),
   settled_at TEXT,
   -- An address may only be held while the request is still pending.

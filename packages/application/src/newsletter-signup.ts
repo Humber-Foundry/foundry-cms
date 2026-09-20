@@ -1,5 +1,7 @@
 import type { SiteId } from "@humber-foundry/site-definition";
 
+import { sha256Text } from "./deterministic-hash";
+
 import {
   InvalidSubscriberEmailError,
   createSubscriberId,
@@ -8,6 +10,7 @@ import {
   type ConsentEvidence,
   type Subscriber,
   type SubscriberEvent,
+  type SubscriberState,
   type SubscriberLedgerStore,
 } from "./subscriber-ledger";
 
@@ -42,7 +45,8 @@ export type NewsletterSignupRequestState =
   | "pending"
   | "confirmed"
   | "expired"
-  | "superseded";
+  | "superseded"
+  | "refused";
 
 export type PendingNewsletterSignup = Readonly<{
   id: NewsletterSignupRequestId;
@@ -107,21 +111,38 @@ export interface NewsletterConfirmationLinkFactory {
 }
 
 /**
- * The record of what wording the person agreed to. The signup form sends the
- * page it was shown on and the version of the consent sentence; the store keeps
- * both so the consent evidence written at confirmation time is the wording that
- * was actually on screen.
+ * What the person agreed to, and where.
+ *
+ * `wording` is the exact consent sentence that was on screen. A site owner can
+ * rewrite that sentence in the visual editor, so a hand-kept version number
+ * would go stale the moment they did. The version recorded in the consent
+ * evidence is therefore a fingerprint of the sentence itself: change a word and
+ * the version changes with it, and every record keeps pointing at the words it
+ * was actually given.
  */
 export type NewsletterSignupDisclosure = Readonly<{
-  version: string;
+  wording: string;
   surface: string;
 }>;
+
+/**
+ * The version recorded against a consent record. It identifies one exact
+ * consent sentence, and the same sentence always produces the same version.
+ */
+export async function newsletterConsentWordingVersion(wording: string) {
+  return `wording-sha256:${(await sha256Text(wording.trim())).slice(0, 32)}`;
+}
 
 export interface NewsletterSignupStore {
   /**
    * Writes the pending request and its confirmation job in one transaction, the
    * way the public form writes its submission and its outbox event. A repeated
    * submission id returns the first result instead of writing a second request.
+   *
+   * Any earlier pending request for the same address is superseded inside that
+   * same transaction. Doing it in a separate statement would let two requests
+   * arriving together both pass the check and then collide, so the person would
+   * see a failure instead of a confirmation message.
    */
   savePendingSignup(input: {
     pending: PendingNewsletterSignup;
@@ -135,11 +156,6 @@ export interface NewsletterSignupStore {
     siteId: SiteId;
     requestId: NewsletterSignupRequestId;
   }): Promise<PendingNewsletterSignup | null>;
-  supersedePendingSignups(input: {
-    siteId: SiteId;
-    identityKey: string;
-    settledAt: string;
-  }): Promise<void>;
   /**
    * Marks the request confirmed and clears the address in the same statement,
    * so a confirmed request never keeps a copy of the address the ledger already
@@ -182,10 +198,15 @@ export type NewsletterSignupResult = Readonly<{
   outcome: "check_your_inbox" | "not_available";
 }>;
 
-export class NewsletterSignupNotAvailableError extends Error {
+/**
+ * A confirmation link that this installation did not sign, or that no longer
+ * works. It is a typed error so a route can tell it apart from a genuine fault
+ * in this code, which must never be shown to a visitor as a bad link.
+ */
+export class NewsletterConfirmationLinkInvalidError extends Error {
   constructor() {
-    super("newsletter_signup_not_available");
-    this.name = "NewsletterSignupNotAvailableError";
+    super("newsletter_confirmation_link_invalid");
+    this.name = "NewsletterConfirmationLinkInvalidError";
   }
 }
 
@@ -212,6 +233,7 @@ const submissionIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const identityKeyPattern = /^[a-f0-9]{64}$/u;
 const maximumSurfaceLength = 200;
+const maximumWordingLength = 400;
 
 export function newsletterConfirmationRetryAt({
   attempts,
@@ -234,9 +256,9 @@ export function newsletterConfirmationRetryAt({
 
 function validateDisclosure(disclosure: NewsletterSignupDisclosure) {
   if (
-    typeof disclosure.version !== "string" ||
-    disclosure.version.trim() === "" ||
-    disclosure.version.length > 64 ||
+    typeof disclosure.wording !== "string" ||
+    disclosure.wording.trim() === "" ||
+    disclosure.wording.length > maximumWordingLength ||
     typeof disclosure.surface !== "string" ||
     disclosure.surface.trim() === "" ||
     disclosure.surface.length > maximumSurfaceLength
@@ -246,13 +268,29 @@ function validateDisclosure(disclosure: NewsletterSignupDisclosure) {
 }
 
 /**
- * The states a signup request may be raised from. An erased subscriber is
- * absent from this list on purpose: erasure is a standing instruction not to
- * hold the address again, and a form submission is not evidence that the person
- * who was erased asked to come back.
+ * The subscriber states a public signup may still lead to consent from.
+ *
+ * Two states are refused outright, and the form cannot tell you which.
+ *
+ * `erased` — erasure is a standing instruction not to hold the address again.
+ * A form submission is not evidence that the erased person asked to come back.
+ *
+ * `complained` — this address reported our mail as spam. Sending it a
+ * confirmation message would be sending it exactly the kind of mail it
+ * complained about. Coming back has to start somewhere other than this form.
+ *
+ * `unsubscribed` and `hard_bounced` may come back, because the person has to
+ * open a link in a message sent to that address to do it. That act is both the
+ * fresh consent and the proof that the address works again.
  */
+export const subscriberStatesRefusedBySignup: ReadonlyArray<SubscriberState> =
+  Object.freeze(["erased", "complained"]);
+
 export function subscriberCanBeConfirmedAgain(subscriber: Subscriber | null) {
-  return subscriber === null || subscriber.state !== "erased";
+  return (
+    subscriber === null ||
+    !subscriberStatesRefusedBySignup.includes(subscriber.state)
+  );
 }
 
 export function createNewsletterSignupApplication({
@@ -341,11 +379,6 @@ export function createNewsletterSignupApplication({
     );
     const requestedAtText = requestedAt.toISOString();
 
-    await store.supersedePendingSignups({
-      siteId,
-      identityKey,
-      settledAt: requestedAtText,
-    });
     await store.savePendingSignup({
       pending: Object.freeze({
         id: requestId,
@@ -353,7 +386,9 @@ export function createNewsletterSignupApplication({
         submissionId: input.submissionId,
         identityKey,
         email,
-        disclosureVersion: input.disclosure.version.trim(),
+        disclosureVersion: await newsletterConsentWordingVersion(
+          input.disclosure.wording,
+        ),
         collectionSurface: input.disclosure.surface.trim(),
         requestedAt: requestedAtText,
         expiresAt,
@@ -400,12 +435,13 @@ export function createNewsletterSignupApplication({
       identityKey: pending.identityKey,
     });
     if (!subscriberCanBeConfirmedAgain(subscriber)) {
-      // Nothing to write. The person still sees the same confirmation page,
-      // and the request stops being pending either way.
+      // No consent is written, so the request must not claim one. It is
+      // recorded as refused. The person still sees the same page, because the
+      // page must not report what the ledger already holds about them.
       await store.settlePendingSignup({
         siteId,
         requestId: pending.id,
-        state: "confirmed",
+        state: "refused",
         settledAt: now.toISOString(),
       });
       return Object.freeze({ outcome: "confirmed" as const });

@@ -9,19 +9,16 @@ const mocks = vi.hoisted(() => ({
   requestSignup: vi.fn(),
 }));
 
-vi.mock("../../../../src/newsletter-signup-runtime", async () => {
-  const readiness = await import(
-    "../../../../src/newsletter-signup-readiness"
-  );
-  return {
-    loadNewsletterSignupEnvironment: mocks.loadEnvironment,
-    allowNewsletterSignupAttempt: mocks.allow,
-    loadNewsletterSignupApplication: async () => ({
-      requestSignup: mocks.requestSignup,
-    }),
-    publicNewsletterSignupStatus: readiness.publicNewsletterSignupStatus,
-  };
-});
+vi.mock("../../../../src/newsletter-signup-runtime", () => ({
+  loadNewsletterSignupEnvironment: mocks.loadEnvironment,
+  allowNewsletterSignupAttempt: mocks.allow,
+  loadNewsletterSignupApplication: async () => ({
+    requestSignup: mocks.requestSignup,
+  }),
+}));
+vi.mock("../../../../foundry/newsletter-consent-wordings", () => ({
+  newsletterConsentWordings: () => [consentWording],
+}));
 vi.mock("../../../../src/cloudflare-turnstile", () => ({
   createCloudflareTurnstileVerifier: () => ({ verify: mocks.verifyTurnstile }),
 }));
@@ -31,6 +28,8 @@ import { GET, POST } from "./route";
 const secret = "a-secret-value-long-enough-for-this-check";
 const origin = "https://example.test";
 const address = "reader@example.test";
+const consentWording =
+  "We send you the newsletter and nothing else. Unsubscribe from any message.";
 
 const connected = Object.freeze({
   FOUNDRY_CANONICAL_ORIGIN: origin,
@@ -55,7 +54,7 @@ function body(overrides: Record<string, unknown> = {}) {
     schemaVersion: "1.0.0",
     submissionId: "3f6c2b3a-6f0f-4a19-9d2b-2f52f4a2a111",
     email: address,
-    disclosureVersion: "newsletter-consent-1.0.0",
+    consentWording,
     collectionSurface: `${origin}/#section_newsletter`,
     turnstileToken: "turnstile-token",
     honeypot: "",
@@ -112,7 +111,7 @@ describe("public newsletter signup route", () => {
       submissionId: "3f6c2b3a-6f0f-4a19-9d2b-2f52f4a2a111",
       email: address,
       disclosure: {
-        version: "newsletter-consent-1.0.0",
+        wording: consentWording,
         surface: `${origin}/#section_newsletter`,
       },
     });
@@ -214,6 +213,21 @@ describe("public newsletter signup route", () => {
     );
     expect(response.status).toBe(400);
     expect(mocks.requestSignup).not.toHaveBeenCalled();
+  });
+
+  it("refuses a consent sentence this site does not publish", async () => {
+    const response = await POST(
+      request(body({ consentWording: "We will sell your address." })),
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.requestSignup).not.toHaveBeenCalled();
+  });
+
+  it("sends the sentence that was on screen, so the version follows the words", async () => {
+    await POST(request(body()));
+    expect(mocks.requestSignup.mock.calls[0]![0].disclosure.wording).toBe(
+      consentWording,
+    );
   });
 
   it("says signup is not available, and reads no address, when a setting is missing", async () => {

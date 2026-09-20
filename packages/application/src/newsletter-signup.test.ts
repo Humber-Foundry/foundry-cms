@@ -6,6 +6,8 @@ import {
   createNewsletterSignupApplication,
   createNewsletterSignupRequestId,
   newsletterConfirmationRetryAt,
+  newsletterConsentWordingVersion,
+  subscriberCanBeConfirmedAgain,
   NewsletterConfirmationExpiredError,
   NewsletterSignupRejectedError,
   type NewsletterConfirmationMessage,
@@ -25,8 +27,10 @@ const secondSubmission = "3f6c2b3a-6f0f-4a19-9d2b-2f52f4a2a222";
 const address = "reader@example.test";
 const otherAddress = "another@example.test";
 
+const wording =
+  "We send you the newsletter and nothing else. Unsubscribe from any message.";
 const disclosure = Object.freeze({
-  version: "newsletter-consent-1.0.0",
+  wording,
   surface: "https://example.test/#section_newsletter",
 });
 
@@ -157,7 +161,7 @@ describe("newsletter signup", () => {
     expect(event.evidence).toMatchObject({
       lawfulBasis: "express",
       source: "public_form",
-      disclosureVersion: disclosure.version,
+      disclosureVersion: await newsletterConsentWordingVersion(wording),
       collectionSurface: disclosure.surface,
       occurredAt: "2026-03-01T10:00:00.000Z",
     });
@@ -347,7 +351,7 @@ describe("newsletter signup", () => {
       harness.application.requestSignup({
         submissionId: firstSubmission,
         email: address,
-        disclosure: { version: "  ", surface: disclosure.surface },
+        disclosure: { wording: "  ", surface: disclosure.surface },
       }),
     ).rejects.toBeInstanceOf(NewsletterSignupRejectedError);
     await expect(
@@ -447,6 +451,136 @@ describe("newsletter signup", () => {
       ["pending", address],
     ]);
     expect(harness.store.listJobs()).toHaveLength(1);
+  });
+
+
+  it("refuses an address that reported our mail as spam", async () => {
+    const harness = createHarness();
+    const identityKey = identityKeyFor(address);
+    await harness.ledgerStore.createWithEvent({
+      subscriber: {
+        id: createSubscriberId("subscriber-complained"),
+        siteId,
+        identityKey,
+        email: address,
+        state: "complained",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      event: {
+        id: createSubscriberEventId("event-complained"),
+        siteId,
+        subscriberId: createSubscriberId("subscriber-complained"),
+        type: "complained",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        recordedAt: "2026-01-01T00:00:00.000Z",
+        actor: { type: "provider", provider: "test", providerEventId: "c1" },
+        evidence: null,
+      },
+    });
+
+    await harness.application.requestSignup({
+      submissionId: firstSubmission,
+      email: address,
+      disclosure,
+    });
+    await harness.application.deliverDueConfirmations({ leaseToken: "lease" });
+
+    // No confirmation message is sent to somebody who called our mail spam.
+    expect(harness.sent).toHaveLength(0);
+    expect(
+      (await harness.ledgerStore.findByIdentityKey({ siteId, identityKey }))!
+        .state,
+    ).toBe("complained");
+  });
+
+  it("says which states a signup may not raise consent from", () => {
+    expect(
+      subscriberCanBeConfirmedAgain({ state: "erased" } as never),
+    ).toBe(false);
+    expect(
+      subscriberCanBeConfirmedAgain({ state: "complained" } as never),
+    ).toBe(false);
+    expect(
+      subscriberCanBeConfirmedAgain({ state: "unsubscribed" } as never),
+    ).toBe(true);
+    expect(
+      subscriberCanBeConfirmedAgain({ state: "hard_bounced" } as never),
+    ).toBe(true);
+    expect(subscriberCanBeConfirmedAgain(null)).toBe(true);
+  });
+
+  it("records a refused confirmation as refused, not as confirmed", async () => {
+    const harness = createHarness();
+    const message = await signUpAndSend(harness);
+
+    // The address is erased between the message going out and the link being
+    // opened. No consent may be written, and the request must not claim one.
+    await harness.ledgerStore.createWithEvent({
+      subscriber: {
+        id: createSubscriberId("subscriber-erased"),
+        siteId,
+        identityKey: identityKeyFor(address),
+        email: null,
+        state: "erased",
+        createdAt: "2026-03-01T10:30:00.000Z",
+        updatedAt: "2026-03-01T10:30:00.000Z",
+      },
+      event: {
+        id: createSubscriberEventId("event-erased-late"),
+        siteId,
+        subscriberId: createSubscriberId("subscriber-erased"),
+        type: "erased",
+        occurredAt: "2026-03-01T10:30:00.000Z",
+        recordedAt: "2026-03-01T10:30:00.000Z",
+        actor: { type: "provider", provider: "test", providerEventId: "e2" },
+        evidence: null,
+      },
+    });
+
+    await harness.application.confirmSignup({
+      token: harness.tokenFor(message),
+    });
+    expect(
+      harness.store.listSignups().map((signup) => signup.state),
+    ).toStrictEqual(["refused"]);
+    const snapshot = await harness.ledgerStore.readSnapshot(siteId);
+    expect(
+      snapshot.events.some((event) => event.type === "consent_recorded"),
+    ).toBe(false);
+  });
+
+  it("gives one version per set of words, and a new version when they change", async () => {
+    const first = await newsletterConsentWordingVersion(wording);
+    expect(await newsletterConsentWordingVersion(` ${wording} `)).toBe(first);
+    expect(
+      await newsletterConsentWordingVersion(`${wording} We never sell it.`),
+    ).not.toBe(first);
+    expect(first.startsWith("wording-sha256:")).toBe(true);
+  });
+
+  it("records the words that were on screen, not a number kept by hand", async () => {
+    const harness = createHarness();
+    const changed = "We send you the newsletter. Unsubscribe from any message.";
+    await harness.application.requestSignup({
+      submissionId: firstSubmission,
+      email: address,
+      disclosure: { wording: changed, surface: disclosure.surface },
+    });
+    await harness.application.deliverDueConfirmations({ leaseToken: "lease" });
+    await harness.application.confirmSignup({
+      token: harness.tokenFor(harness.sent.at(-1)!),
+    });
+    const snapshot = await harness.ledgerStore.readSnapshot(siteId);
+    const event = snapshot.events.find(
+      (candidate) => candidate.type === "consent_recorded",
+    )!;
+    expect(event.evidence!.disclosureVersion).toBe(
+      await newsletterConsentWordingVersion(changed),
+    );
+    expect(event.evidence!.disclosureVersion).not.toBe(
+      await newsletterConsentWordingVersion(wording),
+    );
   });
 
   it("keeps the address out of every value the caller can read back", async () => {

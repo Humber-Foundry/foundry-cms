@@ -1,4 +1,7 @@
-import { NewsletterConfirmationExpiredError } from "@humber-foundry/application";
+import {
+  NewsletterConfirmationExpiredError,
+  NewsletterConfirmationLinkInvalidError,
+} from "@humber-foundry/application";
 
 import { loadNewsletterSignupApplication } from "../../../src/newsletter-signup-runtime";
 
@@ -69,8 +72,11 @@ export async function POST(request: Request) {
     const application = await loadNewsletterSignupApplication();
     await application.confirmSignup({ token });
   } catch (error) {
+    // Only a link this site refuses is reported as a bad link. Anything else
+    // is a fault in this code, and a visitor must not be told their link was
+    // wrong when it was not.
     if (
-      error instanceof TypeError ||
+      error instanceof NewsletterConfirmationLinkInvalidError ||
       error instanceof NewsletterConfirmationExpiredError
     ) {
       return html(expiredPage, 400);

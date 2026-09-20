@@ -114,16 +114,20 @@ describe("the durable newsletter signup store", () => {
 
   it("allows only one pending request per address", async () => {
     await store().savePendingSignup({ pending: pending(), job: job() });
+    // The index is the last line of defence. The supersede inside
+    // savePendingSignup keeps an ordinary second signup from reaching it.
     await expect(
-      store().savePendingSignup({
-        pending: pending({
-          id: createNewsletterSignupRequestId("newsletter_signup-2"),
-          submissionId: "3f6c2b3a-6f0f-4a19-9d2b-2f52f4a2a222",
-        }),
-        job: job({
-          requestId: createNewsletterSignupRequestId("newsletter_signup-2"),
-        }),
-      }),
+      database
+        .prepare(
+          `INSERT INTO newsletter_signup_requests (
+             id, site_id, submission_id, identity_key, email,
+             disclosure_version, collection_surface, requested_at,
+             expires_at, state, settled_at
+           ) VALUES ('r3', ?1, 's3', ?2, ?3, 'v1', 'https://example.test/',
+                     ?4, ?5, 'pending', NULL)`,
+        )
+        .bind(siteId, identityKey, address, requestedAt, expiresAt)
+        .run(),
     ).rejects.toThrow();
   });
 
@@ -139,17 +143,8 @@ describe("the durable newsletter signup store", () => {
     expect(await jobAddresses()).toStrictEqual([]);
   });
 
-  it("clears the address when an earlier request is superseded", async () => {
+  it("supersedes an earlier request for the same address in one transaction", async () => {
     await store().savePendingSignup({ pending: pending(), job: job() });
-    await store().supersedePendingSignups({
-      siteId,
-      identityKey,
-      settledAt: "2026-03-01T11:00:00.000Z",
-    });
-    expect(await savedAddresses()).toStrictEqual([["superseded", null]]);
-    expect(await jobAddresses()).toStrictEqual([]);
-
-    // The address is free for a new pending request again.
     expect(
       await store().savePendingSignup({
         pending: pending({
@@ -161,6 +156,13 @@ describe("the durable newsletter signup store", () => {
         }),
       }),
     ).toStrictEqual({ outcome: "accepted" });
+    expect(await savedAddresses()).toStrictEqual([
+      ["superseded", null],
+      ["pending", address],
+    ]);
+    expect(await jobAddresses()).toStrictEqual([
+      { request_id: "newsletter_signup-2", status: "pending", address },
+    ]);
   });
 
   it("clears the address of a request that ran out of time", async () => {

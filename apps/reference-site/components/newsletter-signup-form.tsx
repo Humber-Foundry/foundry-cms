@@ -2,6 +2,11 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
+import {
+  newsletterSignupSchemaVersion,
+  newsletterSignupTurnstileAction,
+} from "../foundry/newsletter-signup-contract";
+
 /**
  * The public newsletter signup form.
  *
@@ -37,9 +42,6 @@ declare global {
 
 const turnstileScript =
   "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-
-/** The wording the person agrees to. Change the version whenever the words change. */
-export const newsletterConsentVersion = "newsletter-consent-1.0.0";
 
 export type NewsletterSignupFormProps = Readonly<{
   title: string;
@@ -131,7 +133,7 @@ export function NewsletterSignupForm({
         if (cancelled || challenge.current === null) return;
         widgetId.current = window.turnstile?.render(challenge.current, {
           sitekey: siteKey,
-          action: "newsletter-signup",
+          action: newsletterSignupTurnstileAction,
           callback: (value: string) => {
             token.current = value;
           },
@@ -165,10 +167,13 @@ export function NewsletterSignupForm({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          schemaVersion: "1.0.0",
+          schemaVersion: newsletterSignupSchemaVersion,
           submissionId: crypto.randomUUID(),
           email,
-          disclosureVersion: newsletterConsentVersion,
+          // The sentence on screen is sent as it stands. The server keeps it
+          // only when it matches a sentence this site publishes, and records a
+          // fingerprint of those exact words as the consent version.
+          consentWording: consentNote,
           collectionSurface: window.location.href,
           turnstileToken: token.current,
           honeypot: "",

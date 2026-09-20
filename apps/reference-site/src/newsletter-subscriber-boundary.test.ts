@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createInMemoryNewsletterSignupStore,
@@ -26,7 +26,7 @@ import {
 const siteId = referenceSiteDefinition.site.id;
 const address = "reader@example.test";
 const disclosure = Object.freeze({
-  version: "newsletter-consent-1.0.0",
+  wording: "We send you the newsletter and nothing else.",
   surface: "https://example.test/#section_newsletter",
 });
 const audienceDefinition = Object.freeze({
@@ -220,5 +220,68 @@ describe("agents see counts, never identities", () => {
     expect(result).toStrictEqual({ eligibleSubscriberCount: 1 });
     expect(JSON.stringify(result)).not.toContain(address);
     expect(JSON.stringify(result)).not.toContain("@");
+  });
+});
+
+describe("no address ever reaches a log or a report", () => {
+  it("writes nothing to the console through a whole signup and confirmation", async () => {
+    const written: string[] = [];
+    const record = (...parts: unknown[]) => {
+      written.push(parts.map((part) => String(part)).join(" "));
+    };
+    const spies = (
+      ["log", "info", "warn", "error", "debug", "trace"] as const
+    ).map((method) => vi.spyOn(console, method).mockImplementation(record));
+
+    try {
+      const { application, sent } = harness();
+      await application.requestSignup({
+        submissionId: "3f6c2b3a-6f0f-4a19-9d2b-2f52f4a2a111",
+        email: address,
+        disclosure,
+      });
+      await application.deliverDueConfirmations({ leaseToken: "lease" });
+      await application.confirmSignup({
+        token: new URL(sent[0]!.confirmationUrl).searchParams.get("token")!,
+      });
+      // A failing path too: a link this site did not sign.
+      await application.confirmSignup({ token: "forged" }).catch(() => {});
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    expect(written.join("\n")).not.toContain(address);
+    expect(written.join("\n")).not.toContain("@");
+  });
+
+  it("keeps the address out of the error raised by a bad link", async () => {
+    const { application } = harness();
+    let raised: unknown;
+    try {
+      await application.confirmSignup({ token: "forged" });
+    } catch (error) {
+      raised = error;
+    }
+    expect(String(raised)).not.toContain(address);
+    expect(String(raised)).not.toContain("@");
+  });
+
+  it("keeps the address out of the analytics-shaped audience count", async () => {
+    const { application, ledgerStore, sent } = harness();
+    await application.requestSignup({
+      submissionId: "3f6c2b3a-6f0f-4a19-9d2b-2f52f4a2a111",
+      email: address,
+      disclosure,
+    });
+    await application.deliverDueConfirmations({ leaseToken: "lease" });
+    await application.confirmSignup({
+      token: new URL(sent[0]!.confirmationUrl).searchParams.get("token")!,
+    });
+    const counted = await createSubscriberLedgerAudienceResolver({
+      siteId,
+      store: ledgerStore,
+    })(audienceDefinition);
+    expect(Object.keys(counted)).toStrictEqual(["eligibleSubscriberCount"]);
+    expect(JSON.stringify(counted)).not.toContain("@");
   });
 });

@@ -38,6 +38,23 @@ export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
           candidate.submissionId === pending.submissionId,
       );
       if (replayed) return { outcome: "replayed" };
+      // Superseding happens here, with the insert, the way the D1 store does it
+      // in one transaction.
+      for (const [id, candidate] of signups) {
+        if (
+          candidate.siteId === pending.siteId &&
+          candidate.identityKey === pending.identityKey &&
+          candidate.state === "pending"
+        ) {
+          signups.set(id, {
+            ...candidate,
+            email: null,
+            state: "superseded",
+            settledAt: pending.requestedAt,
+          });
+          jobs.delete(id);
+        }
+      }
       signups.set(pending.id, pending);
       jobs.set(pending.id, {
         ...job,
@@ -60,23 +77,6 @@ export function createInMemoryNewsletterSignupStore(): NewsletterSignupStore & {
     async findPendingSignupById({ siteId, requestId }) {
       const found = signups.get(requestId);
       return found !== undefined && found.siteId === siteId ? found : null;
-    },
-    async supersedePendingSignups({ siteId, identityKey, settledAt }) {
-      for (const [id, candidate] of signups) {
-        if (
-          candidate.siteId === siteId &&
-          candidate.identityKey === identityKey &&
-          candidate.state === "pending"
-        ) {
-          signups.set(id, {
-            ...candidate,
-            email: null,
-            state: "superseded",
-            settledAt,
-          });
-          jobs.delete(id);
-        }
-      }
     },
     async settlePendingSignup({ siteId, requestId, state, settledAt }) {
       const found = signups.get(requestId);

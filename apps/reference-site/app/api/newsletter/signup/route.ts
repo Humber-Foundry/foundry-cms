@@ -1,16 +1,24 @@
+import { NewsletterSignupRejectedError } from "@humber-foundry/application";
+
 import {
-  NewsletterSignupRejectedError,
-  publicFormMaximumBodySize,
-} from "@humber-foundry/application";
+  newsletterConsentWordings,
+} from "../../../../foundry/newsletter-consent-wordings";
+import {
+  newsletterConsentWordingMaximumLength,
+  newsletterSignupMaximumBodySize,
+  newsletterSignupMinimumFillTimeMs,
+  newsletterSignupSchemaVersion,
+  newsletterSignupTurnstileAction,
+} from "../../../../foundry/newsletter-signup-contract";
 
 import { createCloudflareTurnstileVerifier } from "../../../../src/cloudflare-turnstile";
 import {
   allowNewsletterSignupAttempt,
   loadNewsletterSignupApplication,
   loadNewsletterSignupEnvironment,
-  publicNewsletterSignupStatus,
 } from "../../../../src/newsletter-signup-runtime";
 import { readNewsletterSignupReadiness } from "../../../../src/newsletter-signup-readiness";
+import { publicNewsletterSignupStatus as publicStatus } from "../../../../src/newsletter-signup-public-status";
 
 /**
  * The public newsletter signup route.
@@ -25,15 +33,12 @@ import { readNewsletterSignupReadiness } from "../../../../src/newsletter-signup
  * No response, log line or error message contains the submitted address.
  */
 
-const turnstileAction = "newsletter-signup";
-const minimumFillTimeMs = 2_000;
-const maximumBodySize = 4 * 1_024;
 
 type SignupEnvelope = Readonly<{
   schemaVersion: string;
   submissionId: string;
   email: string;
-  disclosureVersion: string;
+  consentWording: string;
   collectionSurface: string;
   turnstileToken: string;
   honeypot: string;
@@ -44,14 +49,12 @@ const envelopeKeys = [
   "schemaVersion",
   "submissionId",
   "email",
-  "disclosureVersion",
+  "consentWording",
   "collectionSurface",
   "turnstileToken",
   "honeypot",
   "startedAt",
 ] as const;
-
-export const newsletterSignupSchemaVersion = "1.0.0";
 
 function isSignupEnvelope(value: unknown): value is SignupEnvelope {
   if (typeof value !== "object" || value === null) return false;
@@ -81,12 +84,12 @@ async function readBoundedJson(request: Request): Promise<unknown> {
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (
     Number.isFinite(declared) &&
-    declared > Math.min(maximumBodySize, publicFormMaximumBodySize)
+    declared > newsletterSignupMaximumBodySize
   ) {
     throw new NewsletterSignupRejectedError("invalid_request");
   }
   const text = await request.text();
-  if (new TextEncoder().encode(text).length > maximumBodySize) {
+  if (new TextEncoder().encode(text).length > newsletterSignupMaximumBodySize) {
     throw new NewsletterSignupRejectedError("invalid_request");
   }
   try {
@@ -101,7 +104,7 @@ export async function GET() {
   try {
     const environment = await loadNewsletterSignupEnvironment();
     return publicJson(
-      publicNewsletterSignupStatus(
+      publicStatus(
         readNewsletterSignupReadiness(environment),
         environment,
       ),
@@ -150,7 +153,7 @@ export async function POST(request: Request) {
   const startedAt = Date.parse(value.startedAt);
   if (
     !Number.isFinite(startedAt) ||
-    Date.now() - startedAt < minimumFillTimeMs
+    Date.now() - startedAt < newsletterSignupMinimumFillTimeMs
   ) {
     return publicJson({ error: "signup_rejected" }, 400);
   }
@@ -169,6 +172,18 @@ export async function POST(request: Request) {
     }
   })();
   if (collectionSurface === null) {
+    return publicJson({ error: "signup_rejected" }, 400);
+  }
+
+  // The consent sentence recorded against a person must be one this site
+  // actually shows. The form sends the sentence it displayed; it is kept only
+  // when it matches a sentence in this site's own published pages, so a caller
+  // cannot write words of their own into somebody's consent record.
+  const consentWording = value.consentWording.trim();
+  if (
+    consentWording.length > newsletterConsentWordingMaximumLength ||
+    !newsletterConsentWordings().includes(consentWording)
+  ) {
     return publicJson({ error: "signup_rejected" }, 400);
   }
 
@@ -195,7 +210,7 @@ export async function POST(request: Request) {
     }
     if (
       verified.hostname !== new URL(canonicalOrigin).hostname ||
-      verified.action !== turnstileAction
+      verified.action !== newsletterSignupTurnstileAction
     ) {
       return publicJson({ error: "signup_rejected" }, 400);
     }
@@ -210,10 +225,7 @@ export async function POST(request: Request) {
     const result = await application.requestSignup({
       submissionId: value.submissionId,
       email: value.email,
-      disclosure: {
-        version: value.disclosureVersion,
-        surface: collectionSurface,
-      },
+      disclosure: { wording: consentWording, surface: collectionSurface },
     });
     if (result.outcome === "not_available") {
       return publicJson({ error: "signup_not_available" }, 503);
