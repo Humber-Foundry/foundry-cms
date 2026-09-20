@@ -171,8 +171,10 @@ export function createContentChangeSummary(input: {
     );
   }
 
-  // A page name, a web address, a page's sections and the order of the pages
-  // are not editable fields, so compare them here. A visitor sees them all.
+  // A page's sections and the order of the pages are not editable fields, so
+  // compare them here. A visitor sees both. The page name and the web address
+  // are editable fields, so the loop above already reported them; see
+  // ADR-0033.
   //
   // `goneSections` holds the card heading of every section the draft dropped,
   // so the loop over the base fields below can leave those fields out: one
@@ -182,8 +184,6 @@ export function createContentChangeSummary(input: {
     const before = basePages.get(page.id);
     if (before === undefined) continue;
     const entries = bucket(buckets, `page:${page.id}`);
-    if (before.title !== page.title) entries.content.push("Page name");
-    if (before.slug !== page.slug) entries.content.push("Web address");
     const draftSectionIds = new Set(page.sections.map(({ id }) => id));
     const beforeSectionIds = new Set(before.sections.map(({ id }) => id));
     const gone = new Set<string>();

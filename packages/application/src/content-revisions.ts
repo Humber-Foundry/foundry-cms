@@ -1,8 +1,16 @@
 import {
+  addPageToDefinition,
   applyPageComposition,
   applySiteDefinitionEdits,
   bindSiteMediaOccurrence,
   blogPostIdsForSiteDefinitionEdits,
+  duplicatePageInDefinition,
+  findPageById,
+  mintedPageId,
+  removePageFromDefinition,
+  PageLifecycleError,
+  type PageLifecycleErrorCode,
+  type PageLinkReference,
   createBlogPostDefinition,
   editBlogPostDefinition,
   republishBlogPostDefinition,
@@ -242,6 +250,55 @@ export function compositionWithStoredSectionStyles(
   };
 }
 
+/**
+ * What every page operation needs, whoever asks for it.
+ *
+ * These are the same five things every other content operation takes: who is
+ * asking, which draft, which schema, which revision they read before they
+ * decided, and the key that makes a retry safe. The dashboard sends them
+ * through the revisions route; the MCP page tools (#161) send them directly.
+ * There is one implementation, so both refuse for the same reasons.
+ */
+export type PageMutationCommand = Readonly<{
+  actorId: ContentActorId;
+  workspaceId: ContentWorkspaceId;
+  schemaVersion: SiteDefinition["schemaVersion"];
+  baseRevision: number;
+  idempotencyKey: string;
+  joinedAudit?: JoinedMcpMutationAudit;
+}>;
+
+export type CreatePageCommand = PageMutationCommand &
+  Readonly<{
+    title: string;
+    slug: string;
+    /** One of the ids in `pageStartingLayouts`, such as `blank`. */
+    startingLayout: string;
+  }>;
+
+export type RenamePageCommand = PageMutationCommand &
+  Readonly<{ pageId: string; title: string; slug: string }>;
+
+export type DuplicatePageCommand = PageMutationCommand &
+  Readonly<{ pageId: string; title: string; slug: string }>;
+
+export type DeletePageCommand = PageMutationCommand &
+  Readonly<{ pageId: string }>;
+
+/**
+ * What a page operation gives back.
+ *
+ * `pageId` is the page the operation acted on: the new page for a create or a
+ * duplicate, the named page for a rename or a delete. `replayed` is true when
+ * this exact request had already been carried out, in which case no second
+ * page was made and no second revision was written.
+ */
+export type PageMutationResult = Readonly<{
+  revision: SavedContentRevision;
+  pageId: string;
+  replayed: boolean;
+}>;
+
 export type CreateContentWorkspaceCommand = Readonly<{
   actorId: ContentActorId;
   workspaceId: ContentWorkspaceId;
@@ -356,6 +413,29 @@ export class ContentRevisionValidationError extends Error {
     super("content_revision_validation_failed");
     this.name = "ContentRevisionValidationError";
     this.fields = fields;
+  }
+}
+
+/**
+ * A page operation the draft refused.
+ *
+ * It is a validation failure like any other, so every caller that already
+ * handles `ContentRevisionValidationError` answers it with the same 422 and
+ * the same per-field sentences. It carries two extra things for a caller that
+ * wants them: `code`, the stable word a program reads, and `references`, the
+ * links that still point at a page whose delete was refused. The dashboard
+ * uses `references` to name those links and offer to open them; the MCP page
+ * tools (#161) read `code`.
+ */
+export class ContentPageOperationError extends ContentRevisionValidationError {
+  readonly code: PageLifecycleErrorCode;
+  readonly references: ReadonlyArray<PageLinkReference>;
+
+  constructor(error: PageLifecycleError) {
+    super(error.fields);
+    this.name = "ContentPageOperationError";
+    this.code = error.code;
+    this.references = error.references;
   }
 }
 
@@ -1050,6 +1130,111 @@ export function createContentRevisionApplication({
     );
   }
 
+  /**
+   * The page id a create or a duplicate mints.
+   *
+   * It is built from the one thing that identifies this request and nothing
+   * else: its idempotency key, inside its workspace. Three things follow.
+   * Sending the same request twice mints the same id, so a retry can never
+   * leave two pages behind. The id is never built from the page's name or its
+   * web address, both of which change while a page id never does. And because
+   * a fresh request always carries a fresh key, a deleted page's id is never
+   * minted again. See ADR-0033.
+   */
+  async function mintPageId(command: PageMutationCommand): Promise<string> {
+    return mintedPageId(
+      await sha256CanonicalJson({
+        purpose: "foundry.page.id",
+        workspaceId: command.workspaceId,
+        idempotencyKey: command.idempotencyKey,
+      }),
+    );
+  }
+
+  /** Run one page operation as a new revision of the draft. */
+  async function runPageMutation(
+    command: PageMutationCommand,
+    pageId: string,
+    requestIdentity: unknown,
+    mutate: (base: SiteDefinition) => SiteDefinition,
+  ): Promise<PageMutationResult> {
+    const persisted = await persistDefinitionMutationWithReplay({
+      command,
+      requestIdentity,
+      mutate(base) {
+        try {
+          return mutate(base);
+        } catch (error) {
+          if (error instanceof PageLifecycleError) {
+            throw new ContentPageOperationError(error);
+          }
+          throw error;
+        }
+      },
+    });
+    return Object.freeze({
+      revision: persisted.revision,
+      pageId,
+      replayed: persisted.replayed,
+    });
+  }
+
+  /** The five things every page operation is identified by, minus the key. */
+  function pageRequestIdentity(
+    operation: string,
+    command: PageMutationCommand,
+  ) {
+    return {
+      operation,
+      actorId: command.actorId,
+      workspaceId: command.workspaceId,
+      schemaVersion: command.schemaVersion,
+      baseRevision: command.baseRevision,
+    };
+  }
+
+  /**
+   * Rename one page by editing its two fields.
+   *
+   * A page's name and its web address are editable fields, so a rename is the
+   * same write the editor makes when the owner retypes either one. That is why
+   * there is no second set of rules here: `applySiteDefinitionEdits` runs the
+   * field's own refusals, and the owner reads the same sentence on both
+   * surfaces. See ADR-0033.
+   */
+  function renamePageDefinition(
+    base: SiteDefinition,
+    command: RenamePageCommand,
+  ): SiteDefinition {
+    if (findPageById(base, command.pageId) === undefined) {
+      throw new PageLifecycleError("page_not_found", {
+        pageId: "That page is not in this draft any more.",
+      });
+    }
+    const titlePath = `${command.pageId}.title`;
+    const slugPath = `${command.pageId}.slug`;
+    const edited = applySiteDefinitionEdits(
+      base,
+      [
+        { path: titlePath, value: command.title },
+        { path: slugPath, value: command.slug },
+      ],
+      isDefinition,
+    );
+    if (edited.ok) {
+      return edited.definition;
+    }
+    // Report each refusal against the name the caller used for it, so a
+    // dashboard dialog and an MCP tool can both show it beside the right box.
+    const fields = Object.create(null) as Record<string, string>;
+    for (const [path, message] of Object.entries(edited.errors)) {
+      fields[
+        path === titlePath ? "title" : path === slugPath ? "slug" : path
+      ] = message;
+    }
+    throw new ContentRevisionValidationError(fields);
+  }
+
   return Object.freeze({
     workspaceId,
     rendererVersion,
@@ -1158,6 +1343,90 @@ export function createContentRevisionApplication({
       },
       async saveWithReplay(command: SaveContentRevisionCommand) {
         return saveDefinitionMutation(command);
+      },
+      async createPage(command: CreatePageCommand): Promise<PageMutationResult> {
+        await store.requireAccess(actorId);
+        assertMutationCommand(command);
+        const pageId = await mintPageId(command);
+        return runPageMutation(
+          command,
+          pageId,
+          {
+            ...pageRequestIdentity("create_page", command),
+            title: command.title,
+            slug: command.slug,
+            startingLayout: command.startingLayout,
+          },
+          (base) =>
+            addPageToDefinition(
+              base,
+              {
+                pageId,
+                title: command.title,
+                slug: command.slug,
+                startingLayout: command.startingLayout,
+              },
+              isDefinition,
+              pageComponents,
+            ),
+        );
+      },
+      async renamePage(command: RenamePageCommand): Promise<PageMutationResult> {
+        await store.requireAccess(actorId);
+        assertMutationCommand(command);
+        return runPageMutation(
+          command,
+          command.pageId,
+          {
+            ...pageRequestIdentity("rename_page", command),
+            pageId: command.pageId,
+            title: command.title,
+            slug: command.slug,
+          },
+          (base) => renamePageDefinition(base, command),
+        );
+      },
+      async duplicatePage(
+        command: DuplicatePageCommand,
+      ): Promise<PageMutationResult> {
+        await store.requireAccess(actorId);
+        assertMutationCommand(command);
+        const pageId = await mintPageId(command);
+        return runPageMutation(
+          command,
+          pageId,
+          {
+            ...pageRequestIdentity("duplicate_page", command),
+            pageId: command.pageId,
+            title: command.title,
+            slug: command.slug,
+          },
+          (base) =>
+            duplicatePageInDefinition(
+              base,
+              {
+                sourcePageId: command.pageId,
+                pageId,
+                title: command.title,
+                slug: command.slug,
+              },
+              isDefinition,
+              pageComponents,
+            ),
+        );
+      },
+      async deletePage(command: DeletePageCommand): Promise<PageMutationResult> {
+        await store.requireAccess(actorId);
+        assertMutationCommand(command);
+        return runPageMutation(
+          command,
+          command.pageId,
+          {
+            ...pageRequestIdentity("delete_page", command),
+            pageId: command.pageId,
+          },
+          (base) => removePageFromDefinition(base, command.pageId, isDefinition),
+        );
       },
       async createBlogPost(command: CreateBlogPostCommand) {
         return executeBlogMutation(
