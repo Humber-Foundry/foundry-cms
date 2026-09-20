@@ -324,6 +324,7 @@ const pageFieldsRefusedReason = "page_fields_refused";
  */
 const contentFieldNotEditableReason = "content_field_not_editable";
 const contentFieldFormatReason = "content_field_format_mismatch";
+const designFieldNotContentReason = "design_field_not_content";
 
 /**
  * Turn a refused page operation into the tool error an agent acts on.
@@ -378,20 +379,27 @@ function contentEdits(
   definition: SiteDefinition,
   operations: ReadonlyArray<McpContentPatchOperation>,
 ): ReadonlyArray<SiteDefinitionEdit> {
-  const contentFields = new Map(
-    listEditableSiteFields(definition)
-      .filter(({ group }) => group !== "Design")
-      .map((field) => [field.path, field]),
+  // Every field the draft holds, so a refusal can tell a path that is not
+  // there from a path that is there but is a design setting.
+  const draftFields = new Map(
+    listEditableSiteFields(definition).map((field) => [field.path, field]),
   );
   return operations.map(({ field, value, format }) => {
-    const contract = contentFields.get(field);
+    const contract = draftFields.get(field);
     if (contract === undefined) {
       // The draft's own field list is the answer, and the tool no longer
       // advertises one, so the refusal names the path it turned down.
       throw new McpReadError(
         "VALIDATION_FAILED",
-        `This draft has no content field at ${field}.`,
+        `This draft has no field at ${field}.`,
         { reason: contentFieldNotEditableReason },
+      );
+    }
+    if (contract.group === "Design") {
+      throw new McpReadError(
+        "VALIDATION_FAILED",
+        `The field ${field} is a design setting. Change it with foundry.design.patch.`,
+        { reason: designFieldNotContentReason },
       );
     }
     if (contract.format !== (format ?? "plainText")) {

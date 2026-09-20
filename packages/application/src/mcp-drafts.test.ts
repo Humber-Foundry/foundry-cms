@@ -1365,7 +1365,29 @@ describe("MCP page tools", () => {
     ).rejects.toMatchObject({
       code: "VALIDATION_FAILED",
       reason: "content_field_not_editable",
-      message: `This draft has no content field at ${missing}.`,
+      message: `This draft has no field at ${missing}.`,
+    });
+
+    // A design setting is in the draft, so the refusal says which tool
+    // changes it rather than claiming the field does not exist.
+    await expect(
+      fixtureValue.application.patchContent(
+        principalValue,
+        {
+          workspaceId,
+          expectedRevision: 0,
+          idempotencyKey: "patch-design-field-1",
+          operations: [
+            { op: "set", field: "design.colour.accent", value: "moss" },
+          ],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: "design_field_not_content",
+      message:
+        "The field design.colour.accent is a design setting. Change it with foundry.design.patch.",
     });
 
     await expect(

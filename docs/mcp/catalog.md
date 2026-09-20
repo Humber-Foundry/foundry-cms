@@ -280,8 +280,9 @@ Input schema constraints:
 - The output returns the workspace, new revision, content and preview hashes,
   schema version, validation result and replay status.
 - A refused edit carries a named `reason`: `content_field_not_editable` when
-  the draft has no such field, and `content_field_format_mismatch` when the
-  field holds the other kind of value. The message names the path.
+  the draft has no field at that path, `design_field_not_content` when the
+  path is a design setting, and `content_field_format_mismatch` when the field
+  holds the other kind of value. The message names the path.
 
 ### Add, rename, copy and remove a page
 

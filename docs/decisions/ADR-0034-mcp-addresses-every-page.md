@@ -117,10 +117,27 @@ nothing with it.
 
 A field only one side holds is now read as a content change whatever its
 group, because it belongs to a record the draft added or removed rather than
-to a value the agent chose. The variant on a new page is the default the
-starting point placed. Changing it still needs `foundry.design.patch`, which
-asks for `design.draft` itself, so nothing here lets a content-scoped
-connection change a design.
+to a value anyone chose on the site as it stands.
+
+The boundary this keeps is exact: **no design value on a record that both
+revisions hold can change without `design.draft`.** A design setting of the
+site, or of a page that was already there, still needs that scope, and
+`foundry.content.patch` refuses a design path outright with the reason
+`design_field_not_content`.
+
+The boundary this gives up is also exact. A page added inside the draft
+carries design values that are not compared against anything, because there
+is nothing to compare them with. An agent cannot set one itself:
+`foundry.design.patch` is the only MCP tool that writes a design value and it
+asks for `design.draft`. A person can, in the editor, and a connection
+holding only `content.draft` could then prepare a preview of that revision or
+publish it. Preparing a preview creates no approval, and publishing still
+needs that person's approval of that exact revision
+([ADR-0004](ADR-0004-draft-preview-publish-pipeline.md)), so what the
+connection can do is carry a design change the person made and approved. It
+cannot make one. Closing even that would mean knowing which value a starting
+point places for each section, which is a component registry question rather
+than a scope question, and it is not part of this ticket.
 
 The same rule fixes the other end. A delete changed no field, so the
 comparison found nothing and fell back to whichever draft scope the caller
