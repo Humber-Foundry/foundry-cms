@@ -45,6 +45,15 @@ describe("Overview's Needs attention list (issue #222)", () => {
               href: "/dash/blog?workspace=w#blog-post-1",
               label: 'Draft Assistant asked to publish "Tide notes" at 9am',
             },
+            {
+              // A campaign's send-time request reads the same way a post's
+              // does, and lands on that campaign. See ADR-0039.
+              key: "three",
+              href: "/dash/campaigns#campaign-1",
+              label:
+                'Draft Assistant asked to send "Harbour dispatch" at ' +
+                "September 24, 2026 at 9:30 AM (America/Vancouver)",
+            },
           ],
         }),
       );
@@ -67,7 +76,7 @@ describe("Overview's Needs attention list (issue #222)", () => {
     const links = Array.from(
       host!.querySelectorAll<HTMLAnchorElement>(".attention-list a"),
     );
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(3);
     for (const link of links) {
       expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
     }
@@ -76,7 +85,7 @@ describe("Overview's Needs attention list (issue #222)", () => {
   it("draws a divider between rows, but not above the first row", () => {
     render();
     const rows = Array.from(host!.querySelectorAll<HTMLLIElement>(".attention-list li"));
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(Number.parseFloat(getComputedStyle(rows[0]!).borderTopWidth)).toBe(
       0,
     );

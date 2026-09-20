@@ -1,4 +1,5 @@
 import {
+  campaignBulkStateReport,
   CampaignValidationError,
   createCampaignApplication,
   createCampaignTestDeliveryApplication,
@@ -8,6 +9,7 @@ import {
   type CampaignAudienceDefinition,
   type CampaignAuthor,
   type CampaignChannelConfigurationState,
+  type CampaignScheduleProposalApplication,
   type CampaignStore,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
@@ -25,8 +27,12 @@ import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { readBrevoCampaignDeliveryConfiguration } from "./brevo-campaign-delivery-configuration";
 import { resolveCampaignChannel } from "./campaign-channel-configuration";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
+import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
+import { createD1CampaignScheduleProposalStore } from "./d1-campaign-schedule-proposal-store";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
+import { readBlogPostTimeZoneDatabaseVersion } from "./blog-post-operations-runtime";
+import { createCampaignScheduleRequests } from "./campaign-schedule-request-application";
 import { createD1SubscriberLedgerStore } from "./d1-subscriber-ledger-store";
 import {
   HumanAccessConfigurationError,
@@ -87,6 +93,8 @@ type CampaignInstallationParts = Readonly<{
   rendererVersion: string;
   testRecipients: Readonly<Record<string, string>>;
   listActiveOwnerIds(): Promise<ReadonlyArray<string>>;
+  bulkStateStore: ReturnType<typeof createD1CampaignBulkStateStore>;
+  scheduleProposals: CampaignScheduleProposalApplication;
 }>;
 
 async function loadInstallationParts(
@@ -168,9 +176,24 @@ async function loadInstallationParts(
     }),
   });
 
+  const bulkStateStore = createD1CampaignBulkStateStore(database);
+  // A schedule request is a proposal and nothing else, so it needs only the
+  // campaign it names and whether a send is already set for it. It never
+  // reads the audience, the sender identity or the provider.
+  const scheduleProposals = createCampaignScheduleRequests({
+    siteId,
+    campaigns: store,
+    bulkState: bulkStateStore,
+    proposals: createD1CampaignScheduleProposalStore(database),
+    timeZoneDatabaseVersion: () =>
+      readBlogPostTimeZoneDatabaseVersion(environment),
+  });
+
   return Object.freeze({
     siteId,
     store,
+    bulkStateStore,
+    scheduleProposals,
     testDeliveryStore,
     adapter,
     channelConfiguration,
@@ -358,6 +381,57 @@ export function createMcpCampaignRuntime({
         testRecipientIds,
       });
       return { operation, replayed: priorOperation !== null };
+    },
+    async listCampaigns({ principal }) {
+      const installation = await load();
+      const { application } = bindApplications(
+        installation,
+        mcpCampaignActorId(principal),
+      );
+      return application.queries.listCampaigns({
+        actor: mcpUnusedCampaignActor,
+      });
+    },
+    async campaignStatus({ principal, campaignId }) {
+      const installation = await load();
+      const { application } = bindApplications(
+        installation,
+        mcpCampaignActorId(principal),
+      );
+      // The campaign is read through the campaign application, so a campaign
+      // this site does not hold is refused the same way every other campaign
+      // tool refuses one.
+      const campaign = await application.queries.getCampaign({
+        actor: mcpUnusedCampaignActor,
+        campaignId,
+      });
+      return {
+        campaign,
+        bulkState: campaignBulkStateReport(
+          await installation.bulkStateStore.findCampaignBulkState({
+            siteId: installation.siteId,
+            campaignId,
+          }),
+        ),
+        pendingScheduleRequest:
+          await installation.scheduleProposals.queries.pending({ campaignId }),
+      };
+    },
+    async requestSchedule({
+      principal,
+      campaignId,
+      resolvedTime,
+      idempotencyKey,
+      authority,
+    }) {
+      const installation = await load();
+      return installation.scheduleProposals.commands.proposeSchedule({
+        actorId: mcpCampaignActorId(principal),
+        campaignId,
+        resolvedTime,
+        idempotencyKey,
+        authority,
+      });
     },
     async testReadiness({ principal, campaignId }) {
       const installation = await load();

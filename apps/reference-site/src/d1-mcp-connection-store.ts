@@ -86,6 +86,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
               WHEN 'design.draft' THEN 2
               WHEN 'publication.schedule' THEN 3
               WHEN 'publication.publish' THEN 4
+              WHEN 'campaign.draft' THEN 5
+              WHEN 'campaign.test' THEN 6
+              WHEN 'analytics.read' THEN 7
               ELSE 99
             END
           )
@@ -578,6 +581,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                             WHEN 'design.draft' THEN 2
                             WHEN 'publication.schedule' THEN 3
                             WHEN 'publication.publish' THEN 4
+                            WHEN 'campaign.draft' THEN 5
+                            WHEN 'campaign.test' THEN 6
+                            WHEN 'analytics.read' THEN 7
                             ELSE 99
                           END
                         )
@@ -870,6 +876,9 @@ export function createD1McpConnectionStore(database: D1DatabaseBinding) {
                      WHEN 'design.draft' THEN 2
                      WHEN 'publication.schedule' THEN 3
                      WHEN 'publication.publish' THEN 4
+                     WHEN 'campaign.draft' THEN 5
+                     WHEN 'campaign.test' THEN 6
+                     WHEN 'analytics.read' THEN 7
                      ELSE 99
                    END
                  )

@@ -17,6 +17,7 @@ import {
   recoveryReasonOf,
   requireAuthorizedDashboardAccess,
 } from "@/src/dashboard-page-context";
+import { loadOverviewCampaignScheduleRequests } from "@/src/campaign-schedule-request-runtime";
 import { loadHumanAccessEnvironment } from "@/src/human-access-environment";
 import type { BlogPostId } from "@humber-foundry/site-definition";
 
@@ -127,6 +128,10 @@ export default async function DashboardOverviewPage({
         access.membership.siteId,
         contentRevision.definition.blog.posts,
       );
+  // Every campaign with a send-time request nobody has answered yet, each
+  // named by the app that asked. See ADR-0039.
+  const pendingCampaignRequests =
+    await loadOverviewCampaignScheduleRequests();
 
   return (
     <main className="dashboard-main" id="main">
@@ -180,7 +185,8 @@ export default async function DashboardOverviewPage({
         {messages.unreadCount === 0 &&
         messages.heldForReview === 0 &&
         previewsToReview.length === 0 &&
-        pendingScheduleRequests.length === 0 ? (
+        pendingScheduleRequests.length === 0 &&
+        pendingCampaignRequests.length === 0 ? (
           <p className="empty-state">
             Nothing is waiting for you. New messages, anything held as spam,
             and drafts or schedule requests an app made for you appear here.
@@ -202,6 +208,16 @@ export default async function DashboardOverviewPage({
                   dashboardWorkspace.workspaceId,
                 )}#blog-post-${encodeURIComponent(request.postId)}`,
                 label: `${request.agentName} asked to publish "${request.postTitle}" at ${request.requestedTime}`,
+              })),
+              ...pendingCampaignRequests.map((request) => ({
+                key: `campaign-schedule-${request.campaignId}`,
+                href: `/dash/campaigns#campaign-${encodeURIComponent(
+                  request.campaignId,
+                )}`,
+                label: `${request.agentName} asked to send "${request.subject}" at ${formatLocalScheduleTime(
+                  request.localDateTime,
+                  request.ianaTimeZone,
+                )}`,
               })),
               ...(messages.unreadCount > 0
                 ? [

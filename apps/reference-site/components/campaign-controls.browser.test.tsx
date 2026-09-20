@@ -103,6 +103,7 @@ describe("campaign controls browser acceptance", () => {
           postSources: [],
           role: "owner",
           initialCampaigns: [{ campaign, revision }],
+          initialScheduleRequests: [],
         }),
       );
     });
@@ -184,6 +185,7 @@ describe("campaign controls browser acceptance", () => {
       authorizationId: null as string | null,
       schedule: null as Record<string, unknown> | null,
       sendOperation: null as Record<string, unknown> | null,
+      scheduleRequests: [] as ReadonlyArray<Record<string, unknown>>,
     };
 
     function report() {
@@ -273,6 +275,10 @@ describe("campaign controls browser acceptance", () => {
             state.authorizationId = "50000000-0000-4000-8000-000000000001";
             return Response.json({ authorization: { id: state.authorizationId } });
           }
+          if (command.action === "decline_schedule_request") {
+            state.scheduleRequests = [];
+            return Response.json({ id: command.proposalId });
+          }
           if (command.action === "edit") {
             // A new revision renders to a new fingerprint, so the delivered
             // test no longer covers what the email says.
@@ -308,7 +314,10 @@ describe("campaign controls browser acceptance", () => {
           });
         }
         if (url.includes("campaignId=")) return Response.json(report());
-        return Response.json({ campaigns: [{ campaign, revision }] });
+        return Response.json({
+          campaigns: [{ campaign, revision }],
+          scheduleRequests: state.scheduleRequests,
+        });
       },
     );
     return { campaign, revision, commands, state };
@@ -318,6 +327,13 @@ describe("campaign controls browser acceptance", () => {
     campaign: Campaign,
     revision: CampaignRevision,
     role: "owner" | "editor",
+    scheduleRequests: ReadonlyArray<{
+      proposalId: string;
+      campaignId: string;
+      agentName: string;
+      localDateTime: string;
+      ianaTimeZone: string;
+    }> = [],
   ) {
     const host = document.createElement("div");
     document.body.append(host);
@@ -331,6 +347,7 @@ describe("campaign controls browser acceptance", () => {
           postSources: [],
           role,
           initialCampaigns: [{ campaign, revision }],
+          initialScheduleRequests: scheduleRequests,
         }),
       );
     });
@@ -590,6 +607,54 @@ describe("campaign controls browser acceptance", () => {
         expect(host.textContent).toContain("FOUNDRY_CAMPAIGN_LEGAL_NAME"),
       );
       expect(host.textContent).toContain("FOUNDRY_CAMPAIGN_POSTAL_ADDRESS");
+    });
+
+    it("shows an app's send-time request and lets a person decline it", async () => {
+      const server = fakeNewsletterServer();
+      server.state.scheduleRequests = [
+        {
+          proposalId: "schedule_request_1",
+          campaignId: server.campaign.id,
+          agentName: "client.example",
+          localDateTime: "2026-09-20T10:00:00",
+          ianaTimeZone: "America/Vancouver",
+        },
+      ];
+      const host = mount(server.campaign, server.revision, "owner", [
+        {
+          proposalId: "schedule_request_1",
+          campaignId: server.campaign.id,
+          agentName: "client.example",
+          localDateTime: "2026-09-20T10:00:00",
+          ianaTimeZone: "America/Vancouver",
+        },
+      ]);
+
+      // The owner reads who asked and when, in plain words.
+      expect(host.textContent).toContain(
+        "client.example asked to send this at",
+      );
+      // Declining is a person's step, and it is the only answer offered here;
+      // sending stays behind the sending steps.
+      expect(buttonNamed(host, "Decline")).toBeDefined();
+      await userEvent.click(buttonNamed(host, "Decline")!);
+
+      await vi.waitFor(() =>
+        expect(
+          server.commands.some(
+            ({ action }) => action === "decline_schedule_request",
+          ),
+        ).toBe(true),
+      );
+      expect(server.commands).toContainEqual({
+        action: "decline_schedule_request",
+        proposalId: "schedule_request_1",
+      });
+      await vi.waitFor(() =>
+        expect(host.textContent).not.toContain(
+          "client.example asked to send this at",
+        ),
+      );
     });
 
     it("leaves everything working once the settings are set", async () => {

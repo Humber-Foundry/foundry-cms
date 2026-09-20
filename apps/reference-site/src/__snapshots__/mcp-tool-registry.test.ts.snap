@@ -464,6 +464,49 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": true,
     },
+    "description": "List this site's campaigns with their subject and current version, without audience or recipient data.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "7760a5a5ce90f1c50ad52b3bb68cfcb409a0d348b55eb2f066cd92e85474cac1",
+    "name": "foundry.campaign.list",
+    "outputSchemaSha256": "a1d419716ea38f3c16c6d3ddd07d7418ab0d61144301b31bb0985eb53643fb1d",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
+    "description": "Read where one campaign stands: the owner's approval, a send that is set, a send that has run as a count, and a schedule request waiting for a person.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "c6302e4bb591ecc151a943905c4e06f1cb313c5b4c2aa581c9b31bde1edde7ad",
+    "name": "foundry.campaign.status",
+    "outputSchemaSha256": "1cb39a9e95389b2851a5834a698a30a665735e6ac96612489f80a1a67fb8547f",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+    },
+    "description": "Ask a person to send one campaign at a named time. It records the request only; a person confirms the test, approves the email and starts the send.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchemaSha256": "2ac757d46b44233bb6c71f78e2f0d80463d9324bbfa6c5612476c82e98e4254d",
+    "name": "foundry.campaign.schedule_request",
+    "outputSchemaSha256": "aa50101e459dae559f01806a3145839c887396968573bad2deb68004235b5a4d",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+    },
     "description": "Read one fixed bounded aggregate analytics view with metric metadata and small-cell suppression.",
     "execution": {
       "taskSupport": "forbidden",

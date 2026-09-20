@@ -4,6 +4,7 @@ import { createBlogPostArtifactFingerprints } from "@humber-foundry/application"
 
 import { CampaignControls } from "@/components/campaign-controls";
 import { loadCampaignRequestContext } from "@/src/campaign-runtime";
+import { loadPendingCampaignScheduleRequests } from "@/src/campaign-schedule-request-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -36,9 +37,15 @@ export default async function DashboardCampaignsPage({
   const definition = await loadPublishedDefinition();
   const mutationToken = await loadMutationToken();
 
-  const campaigns = await (
-    await loadCampaignRequestContext(await headers())
-  ).application.queries.listCampaigns({ actor: access.identity });
+  const campaignContext = await loadCampaignRequestContext(await headers());
+  const campaigns = await campaignContext.application.queries.listCampaigns({
+    actor: access.identity,
+  });
+  // The send-time requests an app has made that nobody has answered yet, each
+  // named by the app that asked. See ADR-0039.
+  const scheduleRequests = await loadPendingCampaignScheduleRequests({
+    requests: campaignContext.scheduleProposals,
+  });
 
   const { contentRevision } = dashboardWorkspace;
   const postArtifacts = await createBlogPostArtifactFingerprints({
@@ -72,6 +79,7 @@ export default async function DashboardCampaignsPage({
           contentRevision.definition,
         ).filter((image) => image.src.startsWith("https://"))}
         initialCampaigns={campaigns}
+        initialScheduleRequests={scheduleRequests}
         // The steps say whose step each one is. The server still decides every
         // command; this only lets the screen explain an Owner-only step to an
         // Editor instead of refusing it after the fact.

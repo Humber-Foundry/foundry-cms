@@ -57,7 +57,7 @@
       "apps/reference-site/src/mcp-http-runtime.test.ts::negotiates initialize by returning the server-supported protocol version",
       "apps/reference-site/src/mcp-http-runtime.test.ts::matches the reviewed sanitized protocol transcript snapshot",
       "apps/reference-site/src/mcp-http-runtime.test.ts::validates advertised success and error structuredContent with an independent JSON Schema validator",
-      "apps/reference-site/src/mcp-protocol-conformance.test.ts::independently validates protocol-wrapper success and business-error emissions for all 32 descriptors",
+      "apps/reference-site/src/mcp-protocol-conformance.test.ts::independently validates protocol-wrapper success and business-error emissions for all 35 descriptors",
       "apps/reference-site/src/mcp-tool-registry.test.ts::independently validates all advertised schemas with success and error examples",
       "apps/reference-site/src/mcp-tool-registry.test.ts::matches the reviewed complete MCP tool-schema snapshot",
       "apps/reference-site/src/mcp-http-runtime.test.ts::accepts every protocol revision current clients negotiate",

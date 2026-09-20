@@ -11,6 +11,7 @@ import {
   createInMemoryCampaignTestDeliveryStore,
   CampaignValidationError,
   createInMemoryCampaignBulkStateStore,
+  createInMemoryCampaignScheduleProposalStore,
   createInMemoryCampaignStore,
   createInMemorySubscriberLedgerStore,
   createSubscriberLedgerAudienceResolver,
@@ -20,6 +21,8 @@ import {
   type CampaignBulkDeliveryAdapter,
   type CampaignBulkDeliveryApplication,
   type CampaignBulkStateStore,
+  type CampaignScheduleProposalApplication,
+  type CampaignScheduleProposalStore,
   type SubscriberLedgerStore,
   type CampaignTestDeliveryApplication,
   type CampaignTestDeliveryStore,
@@ -41,6 +44,8 @@ import { upgradeInstalledSiteDefinition } from "../foundry/site-definition";
 import { readProviderOwnershipEvidence } from "./campaign-provider-ownership";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
+import { createD1CampaignScheduleProposalStore } from "./d1-campaign-schedule-proposal-store";
+import { createCampaignScheduleRequests } from "./campaign-schedule-request-application";
 import { createD1CampaignTestDeliveryStore } from "./d1-campaign-test-delivery-store";
 import { createD1BrevoTestWebhookEvidenceStore } from "./d1-brevo-test-webhook-evidence-store";
 import type { D1DatabaseBinding } from "./d1-human-access-store";
@@ -99,6 +104,14 @@ const localSubscriberStore = createInMemorySubscriberLedgerStore();
 const localBulkCurrentRevisions = new Map<string, string>();
 const localBulkActiveOwners = new Set(["membership-local-owner"]);
 const localBulkActiveSubscribers = new Set<string>();
+/**
+ * A development installation keeps its schedule requests in memory too, and
+ * admits the same local owner the local bulk state store admits.
+ */
+const localScheduleProposalStore =
+  createInMemoryCampaignScheduleProposalStore({
+    humanAuthorities: localBulkActiveOwners,
+  });
 const localBulkStateStore = createInMemoryCampaignBulkStateStore({
   currentRevision: (campaignId) => {
     const revisionId = localBulkCurrentRevisions.get(campaignId);
@@ -318,9 +331,16 @@ export async function loadCampaignRequestContext(
   identity: Awaited<
     ReturnType<typeof loadHumanAccessRequestContext>
   >["identity"];
+  membershipId: string;
   application: CampaignApplication;
   testDelivery: CampaignTestDeliveryApplication;
   bulkDelivery: CampaignBulkDeliveryApplication;
+  /**
+   * The campaign schedule requests an app has made, and a person's decline.
+   * A request is a proposal only: it creates no schedule and sends nothing.
+   * See ADR-0039.
+   */
+  scheduleProposals: CampaignScheduleProposalApplication;
   /**
    * The test recipients this installation has verified, by membership id only.
    * A test address is a person's own mailbox, so it is never returned, logged
@@ -339,6 +359,8 @@ export async function loadCampaignRequestContext(
   let store: CampaignStore = localCampaignStore;
   let subscriberStore: SubscriberLedgerStore = localSubscriberStore;
   let bulkStateStore: CampaignBulkStateStore = localBulkStateStore;
+  let scheduleProposalStore: CampaignScheduleProposalStore =
+    localScheduleProposalStore;
   let resolveAudience = createSubscriberLedgerAudienceResolver({
     siteId: installedSite.application.siteId,
     store: localSubscriberStore,
@@ -444,6 +466,9 @@ export async function loadCampaignRequestContext(
     store = createD1CampaignStore(environment.FOUNDRY_DB);
     durableDatabase = environment.FOUNDRY_DB;
     bulkStateStore = createD1CampaignBulkStateStore(environment.FOUNDRY_DB);
+    scheduleProposalStore = createD1CampaignScheduleProposalStore(
+      environment.FOUNDRY_DB,
+    );
     testDeliveryStore = createD1CampaignTestDeliveryStore(
       environment.FOUNDRY_DB,
     );
@@ -619,13 +644,23 @@ export async function loadCampaignRequestContext(
     fingerprintKey: bulkFingerprintKey,
     maximumAudienceRecipients: brevoBulkRecipientLimit,
   });
+  const scheduleProposals = createCampaignScheduleRequests({
+    siteId: installedSite.application.siteId,
+    campaigns: store,
+    bulkState: bulkStateStore,
+    proposals: scheduleProposalStore,
+  });
   return {
     identity: human.identity,
+    // The signed-in person's own membership id. A command that acts as a
+    // person, rather than through the campaign actor, names it.
+    membershipId: human.membership.id,
     application,
     delivery,
     senderDetails,
     readDeliveryHealth: () => testAdapter.health(),
     bulkDelivery,
+    scheduleProposals,
     listTestRecipients: async () => {
       const ownerIds =
         await human.application.queries.listActiveOwnerIdsForTestDelivery({

@@ -5,6 +5,7 @@ import {
   createContentWorkspaceId,
   ContentRevisionIdempotencyError,
   mcpContractVersion,
+  mcpSupportedScopes,
   type McpReadAuditEvent,
 } from "@humber-foundry/application";
 import { referenceSiteDefinition } from "@humber-foundry/site-definition";
@@ -43,6 +44,7 @@ describe("D1 MCP connection store", () => {
       "0028_mcp_preview_reviews.sql",
       "0030_mcp_page_operation_receipts.sql",
       "0031_mcp_page_restructure_receipts.sql",
+      "0036_mcp_connection_scopes_complete.sql",
     ],
     { compatibilityDate: "2026-07-26" },
   );
@@ -316,6 +318,37 @@ describe("D1 MCP connection store", () => {
           replayed: 0,
         },
       ],
+    });
+  });
+
+  it("stores every permission the product supports", async () => {
+    // The campaign and analytics tools have their own permissions, and an
+    // Owner's consent to one has to be storable. Migration 0024 listed only
+    // the five permissions that existed then, so consent to a campaign or
+    // analytics permission was refused by the database. See ADR-0039.
+    const store = createD1McpConnectionStore(database);
+    await store.createAuthorizationGrant({
+      connectionId: "connection-every-scope",
+      actorId: "agent-every-scope",
+      siteId: referenceSiteDefinition.site.id,
+      clientId: "https://client.example/metadata.json",
+      redirectUri: "https://client.example/callback",
+      ownerMembershipId: "membership-owner",
+      codeHash: "code-every-scope",
+      codeChallenge: "challenge-every-scope",
+      expiresAt: "2026-07-29T18:05:00.000Z",
+      now: "2026-07-29T18:00:00.000Z",
+      inputHash: "e".repeat(64),
+      scopes: [...mcpSupportedScopes],
+    });
+
+    await expect(
+      store.findCurrentConnection({
+        connectionId: "connection-every-scope",
+        siteId: referenceSiteDefinition.site.id,
+      }),
+    ).resolves.toMatchObject({
+      scopes: expect.arrayContaining([...mcpSupportedScopes]),
     });
   });
 

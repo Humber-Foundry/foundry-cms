@@ -518,6 +518,58 @@ export type CampaignBulkStateReport = Readonly<{
   }> | null;
 }>;
 
+/**
+ * Narrow one campaign's stored bulk rows down to what a screen or an agent
+ * may know. Every caller reads this one function, so "what is safe to show"
+ * is decided in one place for the dashboard and for `foundry.campaign.status`
+ * alike.
+ */
+export function campaignBulkStateReport(
+  state: Readonly<{
+    authorization: CampaignBulkAuthorization | null;
+    schedule: CampaignBulkSchedule | null;
+    operation: CampaignBulkSendOperation | null;
+  }>,
+): CampaignBulkStateReport {
+  return Object.freeze({
+    authorization:
+      state.authorization === null
+        ? null
+        : Object.freeze({
+            id: state.authorization.id,
+            campaignFingerprint: state.authorization.campaignFingerprint,
+            testExecutionId: state.authorization.testExecutionId,
+            state: state.authorization.state,
+            authorizedAt: state.authorization.authorizedAt,
+          }),
+    schedule:
+      state.schedule === null
+        ? null
+        : Object.freeze({
+            id: state.schedule.id,
+            state: state.schedule.state,
+            localDateTime: state.schedule.localDateTime,
+            ianaTimeZone: state.schedule.ianaTimeZone,
+            utcOffsetChoice: state.schedule.utcOffsetChoice,
+            executeAtUtc: state.schedule.executeAtUtc,
+          }),
+    sendOperation:
+      state.operation === null
+        ? null
+        : Object.freeze({
+            id: state.operation.id,
+            state: state.operation.state,
+            attempt: state.operation.attempt,
+            scheduledInstant: state.operation.scheduledInstant,
+            // A count, never who is in it.
+            recipientCount:
+              state.operation.audienceSnapshot?.recipientCount ?? null,
+            detail: state.operation.detail,
+            updatedAt: state.operation.updatedAt,
+          }),
+  });
+}
+
 export type CampaignBulkSource = Readonly<{
   campaign: Campaign;
   revision: CampaignRevision;
@@ -658,7 +710,31 @@ function localDateTimeAt(instant: Date, timeZone: string): string {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
-function requireResolvedFutureTime(
+/**
+ * The local time and UTC offset one instant has in one IANA zone.
+ *
+ * A campaign schedule request resolves the same way a campaign schedule
+ * does, so both read this one helper instead of repeating the arithmetic.
+ * See `resolveCampaignScheduleTime`.
+ */
+export function campaignScheduleCivilTime(
+  instant: Date,
+  ianaTimeZone: string,
+): Omit<CampaignBulkResolvedTime, "timeZoneDatabaseVersion"> {
+  return {
+    localDateTime: localDateTimeAt(instant, ianaTimeZone),
+    ianaTimeZone,
+    utcOffsetChoice: offsetAt(instant, ianaTimeZone),
+    executeAtUtc: instant.toISOString(),
+  };
+}
+
+/**
+ * Refuse a schedule time that is malformed, in the past, or does not match
+ * the zone it claims. A campaign schedule request applies the same rule as a
+ * campaign schedule, so both call this.
+ */
+export function requireResolvedFutureTime(
   input: CampaignBulkResolvedTime,
   now: Date,
 ) {
@@ -1692,44 +1768,9 @@ export function createCampaignBulkDeliveryApplication({
         campaignId: CampaignId;
       }): Promise<CampaignBulkStateReport> {
         await authorizeRead(actor);
-        const state = await store.findCampaignBulkState({ siteId, campaignId });
-        return Object.freeze({
-          authorization:
-            state.authorization === null
-              ? null
-              : Object.freeze({
-                  id: state.authorization.id,
-                  campaignFingerprint: state.authorization.campaignFingerprint,
-                  testExecutionId: state.authorization.testExecutionId,
-                  state: state.authorization.state,
-                  authorizedAt: state.authorization.authorizedAt,
-                }),
-          schedule:
-            state.schedule === null
-              ? null
-              : Object.freeze({
-                  id: state.schedule.id,
-                  state: state.schedule.state,
-                  localDateTime: state.schedule.localDateTime,
-                  ianaTimeZone: state.schedule.ianaTimeZone,
-                  utcOffsetChoice: state.schedule.utcOffsetChoice,
-                  executeAtUtc: state.schedule.executeAtUtc,
-                }),
-          sendOperation:
-            state.operation === null
-              ? null
-              : Object.freeze({
-                  id: state.operation.id,
-                  state: state.operation.state,
-                  attempt: state.operation.attempt,
-                  scheduledInstant: state.operation.scheduledInstant,
-                  // A count, never who is in it.
-                  recipientCount:
-                    state.operation.audienceSnapshot?.recipientCount ?? null,
-                  detail: state.operation.detail,
-                  updatedAt: state.operation.updatedAt,
-                }),
-        });
+        return campaignBulkStateReport(
+          await store.findCampaignBulkState({ siteId, campaignId }),
+        );
       },
     }),
     scheduler: Object.freeze({

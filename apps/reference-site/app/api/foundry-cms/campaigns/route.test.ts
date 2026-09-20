@@ -30,6 +30,9 @@ const mocks = vi.hoisted(() => ({
   readDeliveryHealth: vi.fn(),
   campaignBulkState: vi.fn(),
   listTestRecipients: vi.fn(),
+  pendingScheduleRequest: vi.fn(),
+  listPendingScheduleRequests: vi.fn(),
+  declineScheduleRequest: vi.fn(),
 }));
 const connectedDelivery = {
   state: "connected",
@@ -101,6 +104,13 @@ const bulkDelivery = {
     execute: mocks.executeBulk,
   },
 };
+const scheduleProposals = {
+  commands: { decline: mocks.declineScheduleRequest },
+  queries: {
+    pending: mocks.pendingScheduleRequest,
+    listPending: mocks.listPendingScheduleRequests,
+  },
+};
 
 vi.mock("../../../../src/campaign-runtime", () => ({
   loadCampaignRequestContext: mocks.loadContext,
@@ -122,9 +132,11 @@ describe("campaign endpoint", () => {
     vi.clearAllMocks();
     mocks.loadContext.mockResolvedValue({
       identity,
+      membershipId: "membership-owner",
       application,
       testDelivery,
       bulkDelivery,
+      scheduleProposals,
       delivery: connectedDelivery,
       senderDetails: connectedSenderDetails,
       readDeliveryHealth: mocks.readDeliveryHealth,
@@ -142,6 +154,8 @@ describe("campaign endpoint", () => {
       campaign: { id: "20000000-0000-4000-8000-000000000001" },
     });
     mocks.currentEvidence.mockResolvedValue(null);
+    mocks.pendingScheduleRequest.mockResolvedValue(null);
+    mocks.listPendingScheduleRequests.mockResolvedValue([]);
     mocks.campaignBulkState.mockResolvedValue({
       authorization: null,
       schedule: null,
@@ -903,9 +917,11 @@ describe("campaign delivery readiness", () => {
   it("still lists campaigns while delivery is not configured", async () => {
     mocks.loadContext.mockResolvedValue({
       identity,
+      membershipId: "membership-owner",
       application,
       testDelivery,
       bulkDelivery,
+      scheduleProposals,
       delivery: notConfiguredDelivery,
       senderDetails: connectedSenderDetails,
       readDeliveryHealth: mocks.readDeliveryHealth,
@@ -916,16 +932,21 @@ describe("campaign delivery readiness", () => {
       new Request("https://foundry.example/api/foundry-cms/campaigns"),
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ campaigns: [] });
+    expect(await response.json()).toEqual({
+      campaigns: [],
+      scheduleRequests: [],
+    });
   });
 
   describe("while the sender details are not configured", () => {
     beforeEach(() => {
       mocks.loadContext.mockResolvedValue({
         identity,
+        membershipId: "membership-owner",
         application,
         testDelivery,
         bulkDelivery,
+        scheduleProposals,
         delivery: connectedDelivery,
         senderDetails: notConfiguredSenderDetails,
         readDeliveryHealth: mocks.readDeliveryHealth,
@@ -960,7 +981,10 @@ describe("campaign delivery readiness", () => {
         new Request("https://foundry.example/api/foundry-cms/campaigns"),
       );
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ campaigns: [] });
+      expect(await response.json()).toEqual({
+      campaigns: [],
+      scheduleRequests: [],
+    });
     });
 
     it("refuses to create a campaign, with the named reason", async () => {
@@ -1021,6 +1045,27 @@ describe("campaign delivery readiness", () => {
       expect(mocks.activateBulkSchedule).not.toHaveBeenCalled();
     });
 
+    it("still lets a person decline an app's send-time request", async () => {
+      // Saying no sends nothing, and a person may need it exactly when
+      // delivery or the sender details have stopped working. See ADR-0039.
+      mocks.declineScheduleRequest.mockResolvedValue({
+        id: "schedule_request_1",
+      });
+      const response = await post(
+        {
+          action: "decline_schedule_request",
+          proposalId: "schedule_request_1",
+        },
+        "campaign-decline-without-footer-1",
+      );
+      expect(response.status).toBe(200);
+      expect(mocks.declineScheduleRequest).toHaveBeenCalledWith({
+        actorId: "membership-owner",
+        proposalId: "schedule_request_1",
+        idempotencyKey: "campaign-decline-without-footer-1",
+      });
+    });
+
     it("still lets an Owner cancel a scheduled send", async () => {
       mocks.cancelBulkSchedule.mockResolvedValue({
         schedule: { id: "70000000-0000-4000-8000-000000000001" },
@@ -1043,9 +1088,11 @@ describe("campaign delivery readiness", () => {
       // MCP runtime and the scheduled worker — reports one word.
       mocks.loadContext.mockResolvedValue({
         identity,
+        membershipId: "membership-owner",
         application,
         testDelivery,
         bulkDelivery,
+        scheduleProposals,
         delivery: notConfiguredDelivery,
         senderDetails: notConfiguredSenderDetails,
         readDeliveryHealth: mocks.readDeliveryHealth,
@@ -1070,9 +1117,11 @@ describe("campaign delivery readiness", () => {
     beforeEach(() => {
       mocks.loadContext.mockResolvedValue({
         identity,
+        membershipId: "membership-owner",
         application,
         testDelivery,
         bulkDelivery,
+        scheduleProposals,
         delivery: notConfiguredDelivery,
         senderDetails: connectedSenderDetails,
         readDeliveryHealth: mocks.readDeliveryHealth,

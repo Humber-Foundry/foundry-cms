@@ -4,6 +4,7 @@ import {
   CampaignConflictError,
   CampaignIdempotencyError,
   CampaignNotFoundError,
+  CampaignScheduleProposalError,
   CampaignValidationError,
   createCampaignId,
   isCampaignRequestId,
@@ -17,6 +18,7 @@ import {
   loadCampaignRequestContext,
   readCampaignDeliveryReadiness,
 } from "../../../../src/campaign-runtime";
+import { loadPendingCampaignScheduleRequests } from "../../../../src/campaign-schedule-request-runtime";
 import { verifyHumanMutation } from "../../../../src/human-mutation-runtime";
 
 type CampaignCommand =
@@ -73,6 +75,10 @@ type CampaignCommand =
       action: "retry_bulk_send";
       campaignId: string;
       operationId: string;
+    }>
+  | Readonly<{
+      action: "decline_schedule_request";
+      proposalId: string;
     }>;
 
 const maximumCampaignCommandBytes = 256 * 1024;
@@ -129,6 +135,9 @@ const actionsAllowedWithoutDelivery = Object.freeze([
   "create_from_post",
   "edit",
   "cancel_bulk_schedule",
+  // Saying no to an app's send-time request sends nothing, and a person needs
+  // it exactly when delivery has stopped working.
+  "decline_schedule_request",
 ] as const) satisfies ReadonlyArray<CampaignCommand["action"]>;
 
 /**
@@ -145,6 +154,7 @@ const actionsAllowedWithoutDelivery = Object.freeze([
  */
 const actionsAllowedWithoutSenderDetails = Object.freeze([
   "cancel_bulk_schedule",
+  "decline_schedule_request",
 ] as const) satisfies ReadonlyArray<CampaignCommand["action"]>;
 
 type BulkAction = (typeof bulkActions)[number];
@@ -372,6 +382,13 @@ function command(value: unknown): CampaignCommand | null {
         }
       : null;
   }
+  if (value.action === "decline_schedule_request") {
+    return Object.keys(value).length === 2 &&
+      "proposalId" in value &&
+      typeof value.proposalId === "string"
+      ? { action: value.action, proposalId: value.proposalId }
+      : null;
+  }
   if (value.action === "cancel_bulk_schedule") {
     return Object.keys(value).length === 2 &&
       "scheduleId" in value &&
@@ -465,7 +482,12 @@ export async function GET(request: Request) {
         actor: context.identity,
       });
       return Response.json(
-        { campaigns },
+        {
+          campaigns,
+          scheduleRequests: await loadPendingCampaignScheduleRequests({
+            requests: context.scheduleProposals,
+          }),
+        },
         { headers: { "cache-control": "private, no-store" } },
       );
     }
@@ -491,8 +513,25 @@ export async function GET(request: Request) {
       campaignId,
     });
     const testRecipients = await context.listTestRecipients();
+    // A send-time request an app made and nobody has answered yet. Only a
+    // request an app made is shown, named by the app, exactly as Overview and
+    // the Blog list show a post's request. See ADR-0039.
+    const scheduleRequest =
+      (
+        await loadPendingCampaignScheduleRequests({
+          requests: context.scheduleProposals,
+          campaignId,
+        })
+      )[0] ?? null;
     return Response.json(
-      { rendered, testEvidence, testReadiness, bulkState, testRecipients },
+      {
+        rendered,
+        testEvidence,
+        testReadiness,
+        bulkState,
+        testRecipients,
+        scheduleRequest,
+      },
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (error) {
@@ -698,6 +737,12 @@ export async function POST(request: Request) {
             requestId,
             executionId: parsed.executionId,
           })
+      : parsed.action === "decline_schedule_request"
+        ? await context.scheduleProposals.commands.decline({
+            actorId: context.membershipId,
+            proposalId: parsed.proposalId,
+            idempotencyKey: requestId,
+          })
       : parsed.action === "create_standalone"
       ? await context.application.commands.createStandalone({
           actor: context.identity,
@@ -722,6 +767,7 @@ export async function POST(request: Request) {
         parsed.action === "edit" ||
         parsed.action === "request_test" ||
         parsed.action === "confirm_test_receipt" ||
+        parsed.action === "decline_schedule_request" ||
         ("replayed" in result && result.replayed)
           ? 200
           : 201,
@@ -768,6 +814,19 @@ export async function POST(request: Request) {
                 : error.message === "test_delivery_in_progress"
                   ? 409
                   : 400,
+        },
+      );
+    }
+    if (error instanceof CampaignScheduleProposalError) {
+      return Response.json(
+        { error: error.code },
+        {
+          status:
+            error.code === "human_authority_required"
+              ? 403
+              : error.code === "schedule_request_not_found"
+                ? 404
+                : 400,
         },
       );
     }
