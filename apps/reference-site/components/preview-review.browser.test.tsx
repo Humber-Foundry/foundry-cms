@@ -89,6 +89,20 @@ function renderScreen() {
   return host;
 }
 
+function primaryControls(host: HTMLElement) {
+  return [...host.querySelectorAll<HTMLElement>(".review-decision .button")]
+    .filter((control) => control.classList.contains("button-primary"))
+    .map((control) => control.textContent);
+}
+
+function pressAskForChanges(host: HTMLElement) {
+  const ask = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "Ask for changes",
+  );
+  if (ask === undefined) throw new Error("ask_button_missing");
+  flushSync(() => ask.click());
+}
+
 function approveButton(host: HTMLElement) {
   const approve = [
     ...host.querySelectorAll<HTMLButtonElement>("button"),
@@ -116,10 +130,16 @@ describe("Draft review screen", () => {
   it("keeps every control at the 44px touch size on a phone", async () => {
     await page.viewport(390, 844);
     const host = renderScreen();
+    pressAskForChanges(host);
 
-    for (const control of host.querySelectorAll<HTMLElement>(
-      ".review-decision .button",
-    )) {
+    const controls = [
+      ...host.querySelectorAll<HTMLElement>(".review-decision .button"),
+      ...host.querySelectorAll<HTMLElement>(".review-decision textarea"),
+    ];
+    // Open the preview, Approve, Ask for changes, Send this answer, and the
+    // box the reason is typed into.
+    expect(controls).toHaveLength(5);
+    for (const control of controls) {
       expect(control.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
     }
     await page.screenshot({ path: "../../../.shots/review-screen-390.png" });
@@ -153,8 +173,10 @@ describe("Draft review screen", () => {
     const offColour = getComputedStyle(approve).backgroundColor;
     await openThePreview(host);
 
+    // It asks the small read whether the preview still stands, not the
+    // preview page itself, so one click renders the preview once.
     expect(asked).toEqual([
-      "/dash/review/preview_11111111-2222-3333-4444-555555555555/preview",
+      "/api/foundry-cms/preview-reviews/preview_11111111-2222-3333-4444-555555555555",
     ]);
     expect(approve.disabled).toBe(false);
     // `.button` fades its background over 180ms, so read the settled colour.
@@ -176,27 +198,24 @@ describe("Draft review screen", () => {
     expect(host.textContent).toContain("no longer available");
   });
 
-  it("gives the two controls in the answer one primary colour only", async () => {
+  it("gives the answer one primary colour only, open or closed", async () => {
     const host = renderScreen();
-    const primary = [
-      ...host.querySelectorAll<HTMLElement>(".review-decision .button"),
-    ].filter((control) => control.classList.contains("button-primary"));
 
     // Colour carries the hierarchy, so only the decision itself is primary.
-    expect(primary.map((control) => control.textContent)).toEqual([
-      "Approve this draft",
-    ]);
+    expect(primaryControls(host)).toEqual(["Approve this draft"]);
+
+    pressAskForChanges(host);
+
+    // The reason form adds a control, and it must not add a second primary.
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(primaryControls(host)).toEqual(["Approve this draft"]);
   });
 
   it("shows the reason field only after Ask for changes is pressed", async () => {
     const host = renderScreen();
     expect(host.querySelector("textarea")).toBeNull();
 
-    const ask = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Ask for changes",
-    );
-    if (ask === undefined) throw new Error("ask_button_missing");
-    flushSync(() => ask.click());
+    pressAskForChanges(host);
 
     const reason = host.querySelector<HTMLTextAreaElement>("textarea");
     expect(reason).not.toBeNull();

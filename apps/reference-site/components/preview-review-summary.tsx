@@ -1,6 +1,7 @@
 import type { ContentChangeSummary } from "@humber-foundry/application";
 import { contentChangeVisitorEffect } from "@humber-foundry/application";
 
+import { HelpTip } from "@/components/help-tip";
 import { mcpRelativeTime } from "@/src/mcp-connection-display";
 
 const pageStateWords: Readonly<Record<string, string>> = {
@@ -39,9 +40,12 @@ export function PreviewReviewSummary({
         <div>
           <h1>Review this draft</h1>
           <p>
-            {agentName} prepared this draft {mcpRelativeTime(preparedAt)}. That
-            name comes from the web address the app gave when it connected, so
-            it is what the app says about itself.
+            {agentName} prepared this draft {mcpRelativeTime(preparedAt)}.{" "}
+            <HelpTip label="Where does this name come from?">
+              The name comes from the web address the app gave when it
+              connected. It is what the app says about itself, not a name
+              anyone checked.
+            </HelpTip>
           </p>
         </div>
       </div>

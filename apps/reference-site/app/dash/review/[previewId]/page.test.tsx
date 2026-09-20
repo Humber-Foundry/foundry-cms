@@ -82,7 +82,9 @@ describe("Draft review screen", () => {
     const markup = await markupFor(review());
 
     expect(markup).toContain("helper.example");
-    expect(markup).toContain("what the app says about itself");
+    // Where the name comes from is explained by the shared help control, so
+    // the closed panel's words are not in the markup — its trigger is.
+    expect(markup).toContain("Where does this name come from?");
     expect(markup).toContain("About us");
     expect(markup).toContain("Visitors get a new page at /about.");
     // The sentence that says the review approves nothing belongs on a screen

@@ -126,6 +126,12 @@ length, and the catalog tells clients not to obey it.
 - Previews created before this change keep their bare identifiers and cannot be
   read through `foundry.publication.status`. They remain reviewable from the
   dashboard, which addresses a preview by id and not by shape.
+- Overview lists a preview as waiting on a cheap test: the workspace still sits
+  at the revision the preview was made from and nobody has answered it. It does
+  not recompute the artifact hash, so after a schema, renderer or production
+  base change it can still list a preview whose review screen then refuses to
+  open. Refusing there is what the contract requires, and the person is told to
+  ask the app for a new preview.
 - A preview read needs only `site.read` plus the exact revision's draft scopes,
   which is what preparing the preview needed. It does not need a publication
   scope. Tool discovery is unchanged, so `foundry.publication.status` is still

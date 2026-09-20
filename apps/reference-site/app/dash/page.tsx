@@ -1,6 +1,9 @@
 import { ContentDraftRecovery } from "@/components/content-draft-recovery";
 import { loadMessagesAttention } from "@/src/public-form-messages-runtime";
-import { loadPreviewsWaitingForReview } from "@/src/mcp-preview-review-runtime";
+import {
+  loadPreviewsWaitingForReview,
+  unnamedConnectedApp,
+} from "@/src/mcp-preview-review-runtime";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
@@ -105,8 +108,12 @@ export default async function DashboardOverviewPage({
           <ul className="attention-list">
             {previewsToReview.map((preview) => (
               <li key={preview.previewId}>
-                <a href={`/dash/review/${encodeURIComponent(preview.previewId)}`}>
-                  A draft from {preview.agentName} waiting for your review
+                <a
+                  href={`/dash/review/${encodeURIComponent(preview.previewId)}`}
+                >
+                  {preview.agentName === unnamedConnectedApp
+                    ? "A draft waiting for your review"
+                    : `A draft from ${preview.agentName} waiting for your review`}
                 </a>
               </li>
             ))}

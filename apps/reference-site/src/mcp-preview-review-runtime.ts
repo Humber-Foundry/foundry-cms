@@ -15,7 +15,7 @@ import { mcpConnectionDisplayName } from "./mcp-connection-display";
 export { previewChangeReasonLimit } from "./mcp-preview-review-limits";
 
 /** Shown when the connection record no longer names the client. */
-const unnamedAgent = "A connected app";
+export const unnamedConnectedApp = "A connected app";
 
 export type McpPreviewReviewDecision = Readonly<{
   decision: "approved" | "changes_requested";
@@ -50,7 +50,7 @@ type PreviewRow = {
  */
 function claimedAgentName(clientId: string | null | undefined) {
   return clientId === null || clientId === undefined || clientId === ""
-    ? unnamedAgent
+    ? unnamedConnectedApp
     : mcpConnectionDisplayName(clientId);
 }
 

@@ -8,13 +8,18 @@ import { previewChangeReasonLimit } from "@/src/mcp-preview-review-limits";
 
 const reviewsUrl = "/api/foundry-cms/preview-reviews";
 
+/** Asks whether one preview still stands. It answers a status and no body. */
+function previewCheckUrl(previewId: string) {
+  return `${reviewsUrl}/${encodeURIComponent(previewId)}`;
+}
+
 const errorMessages: Readonly<Record<string, string>> = {
   already_decided: "Someone has already answered this draft.",
   preview_not_current:
     "The draft changed after this preview was made. Ask the app to prepare a new preview.",
   not_authorized: "Your account cannot approve changes to this site.",
   request_check_failed:
-    "Your sign-in went stale. Reload the page and answer again.",
+    "Your sign-in is no longer valid. Reload the page and answer again.",
   request_check_unavailable:
     "The site could not be reached just now. Try again in a moment.",
   request_in_progress: "That answer is still being recorded. Wait a moment.",
@@ -65,18 +70,27 @@ export function PreviewReviewDecision({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const token = useRef(mutationToken);
+  const checking = useRef(false);
 
   /**
    * The person asked for the preview. The link itself opens it in a new tab;
-   * this read asks the server for the same address, so Approve turns on only
-   * when the server still serves that exact revision. A draft that moved on
-   * since the screen loaded is refused here, before the person can approve it.
+   * this read asks the server whether that exact revision still stands, so
+   * Approve turns on only when it does. A draft that moved on since the screen
+   * loaded is refused here, before the person can approve it.
+   *
+   * The read answers a status and no body, so asking costs far less than
+   * rendering the preview a second time.
    */
   async function openPreview() {
+    if (checking.current) return;
+    checking.current = true;
     setMessage(null);
     try {
-      const response = await fetch(previewHref, { cache: "no-store" });
+      const response = await fetch(previewCheckUrl(previewId), {
+        cache: "no-store",
+      });
       if (!response.ok) {
+        setPreviewOpened(false);
         setMessage(
           "That preview is no longer available. Ask the app to prepare a new one.",
         );
@@ -85,7 +99,10 @@ export function PreviewReviewDecision({
       }
       setPreviewOpened(true);
     } catch {
+      setPreviewOpened(false);
       setMessage("The preview could not be reached. Try again in a moment.");
+    } finally {
+      checking.current = false;
     }
   }
 
@@ -180,7 +197,7 @@ export function PreviewReviewDecision({
           <p className="panel-actions">
             <button
               type="button"
-              className="button button-primary"
+              className="button"
               disabled={busy || reason.trim().length === 0}
               onClick={() =>
                 send({

@@ -4103,6 +4103,16 @@ h3.media-places-heading {
   min-height: var(--dash-control-height);
 }
 
+/* Only the decision itself carries the accent colour. The controls beside it
+   carry a line instead, and the link and the buttons must look alike: the
+   shared `.button` class draws no border, which leaves a link looking like
+   ordinary text. */
+.review-decision .button:not(.button-primary) {
+  border: 1px solid var(--dash-line);
+  background: var(--dash-surface);
+  color: var(--dash-ink);
+}
+
 /* A control that cannot be used must not look like one that can. Approve is
    off until the person opens the preview, so it says so by sight as well as
    in words. */
