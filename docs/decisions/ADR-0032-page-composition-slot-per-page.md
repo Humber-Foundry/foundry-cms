@@ -125,21 +125,40 @@ the editor passes it the page it has open, and its section-style list follows
 the same page as the canvas. Design opens with no page in the address, so that
 page is the home page, which is what it showed before.
 
-`homePage(definition)` remains in the public site routes, the media API, the
-MCP read surface, the SEO share-image rule and the site technical detail panel.
-Each of those genuinely means the home page, or is a surface a later ticket
-moves: MCP page tools are ticket #161.
+`homePage(definition)` remains in the public site routes, the MCP read surface,
+the SEO share-image rule and the site technical detail panel. Each of those
+genuinely means the home page, or is a surface a later ticket moves: MCP page
+tools are ticket #161.
 
-Media recovery stays on the home page. The screen that offers a recovered
-media manifest and the sender that replays it both read one path, `home.media`,
-so a record for another page would be one nothing in that chain can use. A page
-below the home page therefore has no media record, exactly as before this
-change. Giving every page one is its own ticket.
+Two places keep the home page for a reason worth naming, because neither is
+"it genuinely means the home page":
+
+- **The media occurrence surface.** `bindSiteMediaOccurrence` writes into
+  `home.media`, and the media API reads the same place. ADR-0026 gave every
+  page its own occurrence ids, but the read and write path behind them is still
+  the home page's. Nothing in this change reaches it: a photo changed on the
+  canvas is written as a section field through the page's own composition, not
+  as a named occurrence. Moving that surface onto every page is its own ticket.
+- **Media recovery.** The screen that offers a recovered media manifest and the
+  sender that replays it both read one path, `home.media`, so a record for
+  another page would be one nothing in that chain can use. A page below the
+  home page therefore has no media record, exactly as before this change.
+
+Both are limits carried forward, not new ones. Saying so here is better than
+letting a later reader assume the whole editor is per-page.
 
 Ticket #159 adds creating, renaming, duplicating and deleting pages. A new page
 gets its slot id from its page id with no further work. A deleted page's stored
 recovery record resolves to no page, and the recovery refuses it rather than
 restoring it onto another page.
+
+One narrow case survives the release itself. A save is replayed by an
+idempotency key, and the stored receipt holds a hash of the request. A tab open
+across the release that retries a save it had already sent hashes the request
+in its new shape, so the receipt does not match and the save is refused with a
+conflict rather than replayed. The owner is told, their edits are still in the
+draft, and saving again succeeds. It is a loud failure in a short window, not a
+silent loss, so it is accepted rather than worked around.
 
 ## Alternatives considered
 

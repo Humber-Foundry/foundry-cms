@@ -454,8 +454,11 @@ function parseSaveBody(
   // It is read as a list of one, so an owner mid-edit at the moment of release
   // does not silently lose their unsaved structural change.
   const submitted =
-    candidate.compositions ??
-    (candidate.composition === undefined ? undefined : [candidate.composition]);
+    "compositions" in candidate
+      ? candidate.compositions
+      : candidate.composition === undefined
+        ? undefined
+        : [candidate.composition];
   const compositions =
     submitted === undefined
       ? undefined

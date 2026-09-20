@@ -366,17 +366,19 @@ export function ContentEditor({
    * on a page the owner is not looking at, and a save that carried the open
    * page alone would throw it away. See ADR-0032.
    */
-  const compositions = useMemo(
+  const changedPages = useMemo(
     () =>
-      state.workingDefinition.pages.flatMap((page) =>
-        pageCompositionChanged(
-          findPageById(state.persistedDefinition, page.id),
-          page,
-        )
-          ? [toPageComposition(page)]
-          : [],
-      ),
+      state.workingDefinition.pages.flatMap((page) => {
+        const persistedPage = findPageById(state.persistedDefinition, page.id);
+        return pageCompositionChanged(persistedPage, page)
+          ? [{ page, persistedPage, composition: toPageComposition(page) }]
+          : [];
+      }),
     [state.persistedDefinition, state.workingDefinition],
+  );
+  const compositions = useMemo(
+    () => changedPages.map(({ composition }) => composition),
+    [changedPages],
   );
   /**
    * Whether this draft holds a change the server has not stored yet.
@@ -399,20 +401,13 @@ export function ContentEditor({
       // change to the page it was made on.
       const compositionEdits: StaleRecoveryEdit[] = [];
       let keptFieldEdits = fieldEdits;
-      for (const composition of compositions) {
-        const workingPage = findPageByCompositionSlotId(
-          state.workingDefinition,
-          composition.slotId,
-        );
-        const persistedPage = findPageByCompositionSlotId(
-          state.persistedDefinition,
-          composition.slotId,
-        );
-        if (workingPage === undefined) continue;
+      for (const { page, persistedPage, composition } of changedPages) {
         compositionEdits.push({
           path: composition.slotId,
           value: JSON.stringify(composition),
           baseValue: JSON.stringify(
+            // A page this draft has but the stored one does not started empty,
+            // so its whole structure is the change.
             persistedPage === undefined
               ? { slotId: composition.slotId, components: [] }
               : toPageComposition(persistedPage),
@@ -420,7 +415,7 @@ export function ContentEditor({
         });
         keptFieldEdits = excludeCompositionOwnedEdits(
           keptFieldEdits,
-          workingPage,
+          page,
           composition.components.filter(
             (component) =>
               persistedPage === undefined ||
@@ -430,13 +425,7 @@ export function ContentEditor({
       }
       return [...compositionEdits, ...keptFieldEdits];
     },
-    [
-      compositions,
-      edits,
-      persistedFields,
-      state.persistedDefinition,
-      state.workingDefinition,
-    ],
+    [changedPages, edits, persistedFields],
   );
   const persistence = useContentEditorPersistence({
     workspaceId: initialRevision.workspaceId,

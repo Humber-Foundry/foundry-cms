@@ -995,9 +995,13 @@ export function createContentRevisionApplication({
               composition.slotId,
             );
             if (page === undefined) {
+              // Either this site has no such page, or two pages claim the
+              // slot and there is no single right answer. Both are refused,
+              // because writing the sections onto a guessed page would change
+              // a page the owner never edited.
               throw new ContentRevisionValidationError({
                 [composition.slotId]:
-                  "This slot is not registered by the Site Definition.",
+                  "This site has no one page for these sections.",
               });
             }
             const composed = applyPageComposition(

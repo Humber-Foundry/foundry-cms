@@ -1,7 +1,6 @@
 import {
   applyPageComposition,
   createDefaultPageSection,
-  pageCompositionContract,
   pageCompositionSlotId,
   remapPageSectionNestedIds,
   replacePage,

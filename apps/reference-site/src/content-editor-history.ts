@@ -539,8 +539,10 @@ export function contentEditorReducer(
               ? "saved"
               : state.status,
         errors: {
-          // Reported against the slot of the page that actually changed, so
-          // the owner is told which page needs their attention.
+          // Keyed by the slot of the page that actually changed, so the
+          // record says which page is in trouble. The editor renders errors by
+          // field path today, so this one is not yet put on screen; the
+          // message below is what the owner reads.
           ...Object.fromEntries(
             compositionConflicts.map((page) => [
               pageCompositionSlotId(page),

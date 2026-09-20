@@ -164,7 +164,11 @@ export function pageCompositionSlotId(page: SitePage): string {
     : `slot_${page.id}_sections`;
 }
 
-/** The one shape every page's section slot id matches. */
+/**
+ * The one shape every page's section slot id matches. The middle part is a
+ * page id, so this repeats the page id pattern in `index.ts` (`$defs.id`,
+ * `^[a-z][a-z0-9_]*$`). Change one and change the other.
+ */
 export const pageCompositionSlotIdPattern = /^slot_[a-z][a-z0-9_]*_sections$/u;
 
 /**
