@@ -211,7 +211,8 @@ export function AnalyticsDashboard({
     );
   }
 
-  const { overview, content, forms, audience, campaigns, health } = analytics;
+  const { overview, content, contentTitles, forms, audience, campaigns, health } =
+    analytics;
   // Two web sources reporting one referrer arrive as two rows. The source
   // name tells them apart, and is shown only when there is more than one.
   const referrerSourceNames = new Set(
@@ -287,7 +288,7 @@ export function AnalyticsDashboard({
       ) : (
         content.items.map((item) => (
           <div className="analytics-subject" key={item.subjectId}>
-            <h4>{item.subjectId}</h4>
+            <h4>{contentTitles[item.subjectId] ?? item.subjectId}</h4>
             <dl className="analytics-grid">
               {[...item.readings, ...item.vitals].map((reading) => (
                 <ReadingCell

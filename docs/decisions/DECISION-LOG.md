@@ -28,5 +28,6 @@
 | [ADR-0021](ADR-0021-connection-status-shared-component.md) | One shared component reports whether email and publishing are connected | Accepted | 2026-09-18 |
 | [ADR-0022](ADR-0022-navigation-links-to-pages.md) | A link can target a page, by its id, and this widens `SiteHref` without a schema step | Accepted | 2026-09-18 |
 | [ADR-0023](ADR-0023-approval-fingerprint-and-review-summary-cover-every-page.md) | The approval fingerprint and the review summary cover every page | Accepted | 2026-09-18 |
+| [ADR-0026](ADR-0026-analytics-and-media-occurrences-per-page.md) | A view and a media occurrence belong to the page that has them | Accepted | 2026-09-19 |
 | [ADR-0027](ADR-0027-settings-users-first-and-role-change.md) | Settings reads Users first, and a role change is a D1-only application command | Accepted | 2026-09-19 |
 | [ADR-0028](ADR-0028-connect-agent-screen-and-consent-restyle.md) | One connect-agent screen, one scope-phrase source of truth, and a readable consent failure page | Accepted | 2026-09-18 |

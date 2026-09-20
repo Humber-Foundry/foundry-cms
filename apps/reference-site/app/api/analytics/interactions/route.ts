@@ -1,7 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { homePage } from "@humber-foundry/site-definition";
 
-import { installedSiteDefinition } from "@/foundry/site-definition";
+import { publicSubjectIds } from "../../../../src/analytics-public-subjects";
 import {
   collectInteraction,
   writeInteractionPoint,
@@ -19,15 +18,6 @@ import {
 export const dynamic = "force-dynamic";
 
 const maximumBodySize = 512;
-
-/** Public CMS object IDs a browser may report an interaction against. */
-function publicSubjectIds(): ReadonlySet<string> {
-  return new Set([
-    homePage(installedSiteDefinition).id,
-    ...homePage(installedSiteDefinition).sections.map((section) => section.id),
-    ...installedSiteDefinition.blog.posts.map((post) => post.id),
-  ]);
-}
 
 function noContent() {
   return new Response(null, {
