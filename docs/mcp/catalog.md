@@ -141,7 +141,7 @@ Annotations are shown as
 | `foundry.page.duplicate` | `F / F / T / F` | Copy one page in the draft under a new name and web address, as a new immutable revision. |
 | `foundry.page.delete` | `F / T / T / F` | Remove one page from the draft, as a new immutable revision. |
 | `foundry.page.restructure` | `F / T / T / F` | Add, remove, move, copy and arrange the sections of one page in the draft, as a new immutable revision. |
-| `foundry.section.list` | `T / - / - / F` | List the section types a page can hold, with their arrangements and their editable fields. |
+| `foundry.section.list` | `T / - / - / F` | List the section types a page can hold, with their section styles and their editable fields. |
 | `foundry.design.patch` | `F / T / T / F` | Apply registered design tokens or component variants to a new immutable revision. |
 | `foundry.preview.prepare` | `F / F / T / F` | Prepare an immutable canonical preview and a human review URL without creating approval. |
 | `foundry.publication.request` | `F / T / T / T` | Publish one exact approved workspace revision through the canonical publication pipeline. |
@@ -299,7 +299,7 @@ Input schema constraints:
 }
 ```
 
-The four page tools call the same application operations the dashboard calls
+These four page tools call the same application operations the dashboard calls
 (ADR-0033), so they refuse for the same reasons and in the same words. Each one
 writes a new immutable revision and returns `pageId`: the new page for
 `foundry.page.create` and `foundry.page.duplicate`, the named page for
@@ -350,9 +350,9 @@ and a section a button still links to is never removed.
 No operation writes a section's words. `foundry.content.patch` does that, on
 the new sections as on any others.
 
-Every restructure needs `content.draft`. A request that names an arrangement —
+Every restructure needs `content.draft`. A request that names a section style —
 through `set_variant`, or through `variant` on an `add` — needs `design.draft`
-as well, because an arrangement is a design value (ADR-0035). The scopes are
+as well, because a section style is a design value (ADR-0035). The scopes are
 read from the request, so an agent without the design scope is told which scope
 it lacks before any work is planned.
 
@@ -367,7 +367,7 @@ schema instead, with `VALIDATION_FAILED` and no named reason.
 
 `foundry.section.list` takes no input and needs `site.read`. It answers with
 every registered section type, the words an owner reads for it, the
-arrangements it offers, and the fields `foundry.content.patch` can write on it.
+section styles it offers, and the fields `foundry.content.patch` can write on it.
 A field the Site Definition protects is not listed, because editing it is
 always refused.
 
@@ -396,10 +396,10 @@ CSS value, class name or component module is accepted.
 `componentId` is the section's own identifier on the home page, and the page
 identifier in front of it on every other page, which is the shape that
 section's editable field path has (ADR-0017). The schema checks its shape and
-names every arrangement any registered section offers; whether this draft holds
-that section, and whether that section offers that arrangement, is the draft's
+names every section style any registered section offers; whether this draft holds
+that section, and whether that section offers that section style, is the draft's
 own answer at call time, so a section on a page an agent made inside the draft
-can have its arrangement changed (ADR-0035). A refusal carries the reason
+can have its section style changed (ADR-0035). A refusal carries the reason
 `design_setting_not_found` or `design_value_not_registered`.
 
 ### Prepare preview

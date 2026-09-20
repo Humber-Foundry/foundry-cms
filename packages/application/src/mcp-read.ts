@@ -357,15 +357,13 @@ function isAuthenticConnection(
 /**
  * The section types a page can hold, as an agent needs to read them.
  *
- * Each one carries the words an owner reads for it, the arrangements it
+ * Each one carries the words an owner reads for it, the section styles it
  * offers, and the fields an agent may write with `foundry.content.patch`. A
  * field that the Site Definition protects, such as a section's nested item
  * list, is left out, because naming it would invite an edit that is always
  * refused. See ADR-0035.
  */
-export function registeredSectionTypes(
-  registry: PageComponentRegistry = foundationPageComponentRegistry,
-) {
+function registeredSectionTypes(registry: PageComponentRegistry) {
   return registry.allowedComponents.map((sectionType) => {
     const registration = registry.components[sectionType]!;
     const variant = Object.hasOwn(designContract.variants, sectionType)

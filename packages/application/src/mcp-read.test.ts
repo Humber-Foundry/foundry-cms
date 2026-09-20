@@ -289,7 +289,7 @@ describe("site-scoped MCP read application", () => {
     );
   });
 
-  it("names every registered section type, its arrangements and its editable fields", async () => {
+  it("names every registered section type, its section styles and its editable fields", async () => {
     const { application, audit } = fixture();
 
     const listed = await application.listSectionTypes(principal);

@@ -273,14 +273,14 @@ const plainTextValueMaxLength = 200_000;
 
 const editableFieldPathShape = new RegExp(editableFieldPathPattern, "u");
 
-const contentFieldPathSchema = {
+const editableFieldPathSchema = {
   type: "string",
   minLength: 1,
   maxLength: editableFieldPathMaxLength,
   pattern: editableFieldPathPattern,
 } as const;
 
-function isContentFieldPath(value: unknown): value is string {
+function isEditableFieldPath(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length <= editableFieldPathMaxLength &&
@@ -288,19 +288,34 @@ function isContentFieldPath(value: unknown): value is string {
   );
 }
 
-// A page id is an ordinary Site Definition identifier, so a hand-written id
-// and a minted `page_<digest>` are both well formed here. Whether the draft
-// holds a page with this id is the draft's answer, not the schema's.
-const pageIdMaxLength = 200;
+// A page id and a section id are both ordinary Site Definition identifiers, so
+// a hand-written id and a minted `page_<digest>` are both well formed here.
+// Whether the draft holds a page or a section with this id is the draft's
+// answer, not the schema's.
+const definitionIdentifierMaxLength = 200;
 
-const pageIdSchema = {
+const definitionIdentifierSchema = {
   type: "string",
   minLength: 1,
-  maxLength: pageIdMaxLength,
+  maxLength: definitionIdentifierMaxLength,
   pattern: siteDefinitionSchema.$defs.id.pattern,
 } as const;
 
-const pageIdShape = new RegExp(siteDefinitionSchema.$defs.id.pattern, "u");
+const definitionIdentifierShape = new RegExp(
+  siteDefinitionSchema.$defs.id.pattern,
+  "u",
+);
+
+function isDefinitionIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= definitionIdentifierMaxLength &&
+    definitionIdentifierShape.test(value)
+  );
+}
+
+const pageIdSchema = definitionIdentifierSchema;
 
 // A page name is the editable field `<pageId>.title`, so it takes the same
 // bound as any other plain-text field edit rather than a second limit.
@@ -337,11 +352,11 @@ const pageStartingLayoutSchema = {
  * The draft's own design field list answers whether the section is real, the
  * same way it already answered whether the value is registered. See ADR-0035.
  */
-const designComponentIdSchema = contentFieldPathSchema;
+const designComponentIdSchema = editableFieldPathSchema;
 
 /**
- * Every arrangement any registered section offers, sorted and without
- * repetition. The schema says which words are arrangements at all; which of
+ * Every section style any registered section offers, sorted and without
+ * repetition. The schema says which words are section styles at all; which of
  * them one section offers is the draft's answer.
  */
 const designVariantValues: ReadonlyArray<string> = [
@@ -365,14 +380,7 @@ const sectionPositionSchema = {
   maximum: pageCompositionContract.slot.maxItems,
 } as const;
 
-const sectionIdSchema = {
-  type: "string",
-  minLength: 1,
-  maxLength: pageIdMaxLength,
-  pattern: "^[a-z][a-z0-9_]*$",
-} as const;
-
-const sectionIdShape = new RegExp(sectionIdSchema.pattern, "u");
+const sectionIdSchema = definitionIdentifierSchema;
 
 const sectionTypeSchema = {
   enum: [...installedPageComponentRegistry.allowedComponents],
@@ -564,7 +572,7 @@ function parsePatchInput(input: unknown) {
       !isRecord(operation) ||
       !hasExactKeys(operation, ["op", "field", "value"], ["format"]) ||
       operation.op !== "set" ||
-      !isContentFieldPath(operation.field) ||
+      !isEditableFieldPath(operation.field) ||
       (operation.format !== undefined &&
         operation.format !== "plainText" &&
         operation.format !== "richText")
@@ -655,15 +663,6 @@ function isPageSlug(value: unknown): value is string {
   );
 }
 
-function isPageId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length >= 1 &&
-    value.length <= pageIdMaxLength &&
-    pageIdShape.test(value)
-  );
-}
-
 function parseCreatePageInput(input: unknown) {
   const common = parsePageMutationInput(input, [
     "title",
@@ -693,7 +692,7 @@ function parseNamedPageInput(input: unknown) {
   if (
     common === null ||
     !isRecord(input) ||
-    !isPageId(input.pageId) ||
+    !isDefinitionIdentifier(input.pageId) ||
     !isPageTitle(input.title) ||
     !isPageSlug(input.slug)
   ) {
@@ -709,19 +708,10 @@ function parseNamedPageInput(input: unknown) {
 
 function parseDeletePageInput(input: unknown) {
   const common = parsePageMutationInput(input, ["pageId"]);
-  if (common === null || !isRecord(input) || !isPageId(input.pageId)) {
+  if (common === null || !isRecord(input) || !isDefinitionIdentifier(input.pageId)) {
     return null;
   }
   return { ...common, pageId: input.pageId };
-}
-
-function isSectionId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length >= 1 &&
-    value.length <= pageIdMaxLength &&
-    sectionIdShape.test(value)
-  );
 }
 
 function isSectionPosition(value: unknown): value is number {
@@ -737,8 +727,8 @@ function isSectionPosition(value: unknown): value is number {
  *
  * Every operation is read by its own exact key set, so a key that belongs to
  * another operation is refused rather than ignored. Which section types and
- * arrangements exist is the schema's answer here; whether this page holds that
- * section, and whether that section offers that arrangement, is the draft's.
+ * section styles exist is the schema's answer here; whether this page holds that
+ * section, and whether that section offers that section style, is the draft's.
  */
 function parseSectionOperation(
   operation: unknown,
@@ -769,14 +759,14 @@ function parseSectionOperation(
   if (
     operation.op === "remove" &&
     hasExactKeys(operation, ["op", "sectionId"]) &&
-    isSectionId(operation.sectionId)
+    isDefinitionIdentifier(operation.sectionId)
   ) {
     return { op: "remove", sectionId: operation.sectionId };
   }
   if (
     operation.op === "move" &&
     hasExactKeys(operation, ["op", "sectionId", "position"]) &&
-    isSectionId(operation.sectionId) &&
+    isDefinitionIdentifier(operation.sectionId) &&
     isSectionPosition(operation.position)
   ) {
     return {
@@ -788,14 +778,14 @@ function parseSectionOperation(
   if (
     operation.op === "duplicate" &&
     hasExactKeys(operation, ["op", "sectionId"]) &&
-    isSectionId(operation.sectionId)
+    isDefinitionIdentifier(operation.sectionId)
   ) {
     return { op: "duplicate", sectionId: operation.sectionId };
   }
   if (
     operation.op === "set_variant" &&
     hasExactKeys(operation, ["op", "sectionId", "variant"]) &&
-    isSectionId(operation.sectionId) &&
+    isDefinitionIdentifier(operation.sectionId) &&
     typeof operation.variant === "string" &&
     designVariantValues.includes(operation.variant)
   ) {
@@ -808,12 +798,36 @@ function parseSectionOperation(
   return null;
 }
 
+/**
+ * The draft scopes a restructure request asks for, read from the request as it
+ * arrived rather than from a parsed one.
+ *
+ * `mcpRestructureScopes` answers this for a request that parsed. A request
+ * that did not parse is still audited, and naming only the content scope there
+ * would understate what the caller tried to do.
+ */
+function requestedRestructureScopes(
+  input: unknown,
+): ReadonlyArray<string> {
+  const namesASectionStyle =
+    isRecord(input) &&
+    Array.isArray(input.operations) &&
+    input.operations.some(
+      (operation) =>
+        isRecord(operation) &&
+        (operation.op === "set_variant" || operation.variant !== undefined),
+    );
+  return namesASectionStyle
+    ? [mcpContentDraftScope, mcpDesignDraftScope]
+    : [mcpContentDraftScope];
+}
+
 function parseRestructurePageInput(input: unknown) {
   const common = parsePageMutationInput(input, ["pageId", "operations"]);
   if (
     common === null ||
     !isRecord(input) ||
-    !isPageId(input.pageId) ||
+    !isDefinitionIdentifier(input.pageId) ||
     !Array.isArray(input.operations) ||
     input.operations.length < 1 ||
     input.operations.length > sectionOperationLimit
@@ -873,7 +887,7 @@ function parseDesignPatchInput(input: unknown) {
     if (
       operation.op === "set_variant" &&
       hasExactKeys(operation, ["op", "componentId", "value"]) &&
-      isContentFieldPath(operation.componentId) &&
+      isEditableFieldPath(operation.componentId) &&
       typeof operation.value === "string" &&
       designVariantValues.includes(operation.value)
     ) {
@@ -1561,7 +1575,7 @@ const descriptors = {
                 additionalProperties: false,
                 properties: {
                   op: { const: "set" },
-                  field: contentFieldPathSchema,
+                  field: editableFieldPathSchema,
                   format: { const: "plainText" },
                   value: {
                     type: "string",
@@ -1576,7 +1590,7 @@ const descriptors = {
                 additionalProperties: false,
                 properties: {
                   op: { const: "set" },
-                  field: contentFieldPathSchema,
+                  field: editableFieldPathSchema,
                   format: { const: "richText" },
                   value: { $ref: "#/$defs/richTextDocument" },
                 },
@@ -1728,7 +1742,7 @@ const descriptors = {
   "foundry.section.list": {
     name: "foundry.section.list",
     description:
-      "List the section types a page can hold, with their arrangements and their editable fields.",
+      "List the section types a page can hold, with their section styles and their editable fields.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -2313,12 +2327,15 @@ export function createMcpToolRegistry(application: McpReadApplication) {
     "foundry.page.restructure": async (principal, input, context) => {
       const parsed = parseRestructurePageInput(input);
       if (parsed === null) {
+        // A malformed request still says which scopes it was asking for, so
+        // the refusal names the design draft scope when the request tried to
+        // choose a section style. See ADR-0035.
         return application.rejectInvalidInput(
           principal,
           "foundry.page.restructure",
           input,
           context,
-          [mcpContentDraftScope],
+          requestedRestructureScopes(input),
         );
       }
       return application.restructurePage!(principal, parsed, context);

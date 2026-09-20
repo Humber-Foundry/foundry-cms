@@ -169,7 +169,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
       "openWorldHint": false,
       "readOnlyHint": true,
     },
-    "description": "List the section types a page can hold, with their arrangements and their editable fields.",
+    "description": "List the section types a page can hold, with their section styles and their editable fields.",
     "execution": {
       "taskSupport": "forbidden",
     },

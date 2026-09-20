@@ -663,7 +663,7 @@ export function pageDeleteBlockedMessage(
  * One change to the sections of one page.
  *
  * The five operations are the whole vocabulary: put a registered section on
- * the page, take one off, move one, copy one, and choose the arrangement a
+ * the page, take one off, move one, copy one, and choose the section style a
  * section is drawn in. There is no operation that writes a section's words,
  * because a section's words are editable fields and are written the same way
  * every other field is.
@@ -686,19 +686,23 @@ export type PageSectionOperation =
 
 /**
  * What one page will hold after a restructure, and which of the sections it
- * already held were given a different arrangement.
+ * already held were given a different section style.
  *
- * The two travel apart because they are written by two different rules. The
- * section list is a structure change, which the page composition boundary
- * checks. A variant on a section the page already held is a design value, which
- * the section's own editable field checks. See ADR-0035.
+ * They are answered as two separate fields because two different checks write
+ * them. The section list is a structure change, which the page composition
+ * boundary checks. A style on a section the page already held is a design
+ * value, which that section's own editable field checks. See ADR-0035.
  */
 export type PageRestructurePlan = Readonly<{
   sections: ReadonlyArray<PageSection>;
   variantChanges: Readonly<Record<string, string>>;
 }>;
 
-/** The arrangements this section type offers, or none for a registered one. */
+/**
+ * The section styles this kind of section offers. A section the installation
+ * registers itself has none, because a style is chosen from the design
+ * contract and that contract covers the foundation sections only.
+ */
 function sectionVariantValues(
   section: PageSection,
 ): ReadonlyArray<string> {
@@ -713,7 +717,7 @@ function withSectionVariant(
 ): PageSection {
   if (!sectionVariantValues(section).includes(variant)) {
     throw new PageLifecycleError("page_section_variant_unknown", {
-      variant: "That arrangement is not offered for this kind of section.",
+      variant: "That section style is not offered for this kind of section.",
     });
   }
   return { ...section, variant } as PageSection;

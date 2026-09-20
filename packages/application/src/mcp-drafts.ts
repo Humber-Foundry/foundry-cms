@@ -320,7 +320,7 @@ export type McpRestructurePageInput = McpPageMutationInput &
  * The draft scopes one restructure needs.
  *
  * Changing which sections a page holds is a content change, so every
- * restructure needs the content draft scope. Naming an arrangement is choosing
+ * restructure needs the content draft scope. Naming a section style is choosing
  * a design value, so a request that names one needs the design draft scope as
  * well. The request is read for this before anything is loaded, so an agent
  * that lacks the scope is told which scope it lacks rather than being refused
@@ -499,7 +499,7 @@ function designEdits(
       field.values === undefined
     ) {
       // The draft's own field list is the answer, so a section on a page the
-      // agent made in this draft can have its arrangement chosen (ADR-0035).
+      // agent made in this draft can have its section style chosen (ADR-0035).
       throw new McpReadError(
         "VALIDATION_FAILED",
         `This draft has no design setting at ${path}.`,

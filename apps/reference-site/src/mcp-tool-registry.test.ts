@@ -564,7 +564,7 @@ describe("MCP draft tool registry", () => {
         ],
       }),
     ).toBe(false);
-    // A word that is not an arrangement of any registered section is refused
+    // A word that is not a section style of any registered section is refused
     // here, before the call.
     expect(
       validate({
@@ -591,7 +591,7 @@ describe("MCP draft tool registry", () => {
         ],
       }),
     ).toBe(false);
-    // A real arrangement of another kind of section passes the schema and is
+    // A real section style of another kind of section passes the schema and is
     // refused by the draft instead, because only the draft knows which section
     // this is. That is what lets an agent arrange a section on a page it made
     // inside the draft. See ADR-0035.
@@ -1025,7 +1025,7 @@ describe("MCP campaign and analytics tool registry", () => {
         "foundry.page.delete": "content.draft",
         "foundry.page.restructure":
           "content.draft, and design.draft as well when the request names " +
-          "an arrangement",
+          "a section style",
         "foundry.section.list": "site.read",
         "foundry.design.patch": "design.draft",
         "foundry.preview.prepare": "matching draft scopes",

@@ -1988,6 +1988,45 @@ describe("MCP page restructure tool", () => {
     );
   });
 
+  it("prepares a preview of the page it restructured, on the content scope alone", async () => {
+    const { fixtureValue, workspaceId, pageId } = await draftWithPage(
+      [mcpInitialScope, mcpContentDraftScope],
+      "open-restructure-preview",
+    );
+    await fixtureValue.application.restructurePage(
+      fixtureValue.activePrincipal,
+      {
+        workspaceId,
+        expectedRevision: 1,
+        idempotencyKey: "restructure-preview-1",
+        pageId,
+        operations: [{ op: "add", sectionType: "proof", position: 1 }],
+      },
+      context,
+    );
+    const prepared = resultOf<{
+      previewId: string;
+      humanReviewUrl: string;
+      approvalStatus: string;
+    }>(
+      await fixtureValue.application.preparePreview(
+        fixtureValue.activePrincipal,
+        {
+          workspaceId,
+          expectedRevision: 2,
+          idempotencyKey: "restructure-preview-prepare-1",
+        },
+        context,
+      ),
+    );
+    expect(prepared.previewId).toEqual(expect.any(String));
+    // Preparing a preview never approves it; a person still has to.
+    expect(prepared.approvalStatus).toBe("pending_human_review");
+    expect(
+      fixtureValue.previewScopesEvaluated.at(-1),
+    ).toEqual([mcpContentDraftScope]);
+  });
+
   it("refuses a restructure with a named reason an agent can act on", async () => {
     const { fixtureValue, workspaceId, pageId } = await draftWithPage(
       [mcpInitialScope, mcpContentDraftScope],

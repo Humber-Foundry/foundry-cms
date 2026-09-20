@@ -526,7 +526,7 @@ describe("restructurePage", () => {
     ]);
   });
 
-  it("gives a section the page already held the arrangement that was chosen", async () => {
+  it("gives a section the page already held the section style that was chosen", async () => {
     const { application, pageId } = await draftWithPage();
     const result = await restructure(application, {
       pageId,
@@ -543,7 +543,7 @@ describe("restructurePage", () => {
     expect(section.type === "hero" && section.variant).toBe("focused");
   });
 
-  it("gives a section it adds the arrangement that was chosen", async () => {
+  it("gives a section it adds the section style that was chosen", async () => {
     const { application, pageId } = await draftWithPage();
     const result = await restructure(application, {
       pageId,
@@ -624,7 +624,7 @@ describe("restructurePage", () => {
     );
   });
 
-  it("refuses an arrangement the section type does not offer", async () => {
+  it("refuses a section style the section type does not offer", async () => {
     const { application, pageId } = await draftWithPage();
     const error = await refusal(() =>
       restructure(application, {

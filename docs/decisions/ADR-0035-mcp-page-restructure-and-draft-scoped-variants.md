@@ -1,4 +1,4 @@
-# ADR-0035: An agent changes a page's sections through one operation list, and every arrangement is checked against the draft
+# ADR-0035: An agent changes a page's sections through one operation list, and every section style is checked against the draft
 
 - **Status:** Accepted
 - **Date:** 2026-09-20
@@ -25,23 +25,23 @@ The second is the gap ADR-0034 left behind. `foundry.design.patch` built its
 list of component variants at module load from the installed site, so it could
 name only the sections the published home page already held. A section on
 another page, or on a page an agent made inside a draft, could not have its
-arrangement changed at all.
+section style changed at all.
 
 ## Decision
 
 **One tool changes a page's sections through a short list of named operations,
-and an arrangement is always checked against the draft.**
+and a section style is always checked against the draft.**
 
 ### 1. Five operations, and no section-writing among them
 
 `foundry.page.restructure` takes one page and one to twenty-four operations:
 
-- `add` a registered section type at a position, optionally with an
-  arrangement;
+- `add` a registered section type at a position, optionally with a
+  section style;
 - `remove` a section;
 - `move` a section to a position;
 - `duplicate` a section, which puts the copy straight after it;
-- `set_variant`, which chooses a section's arrangement.
+- `set_variant`, which chooses a section's style.
 
 The operations are carried out in the order they are given, against the section
 list as it stands at that step, so an agent can add a section and move it in
@@ -73,12 +73,12 @@ Nothing is repeated here, for the reason ADR-0033 gives.
 then applies field edits. `save`, which the dashboard calls, and
 `restructurePage` both go through it.
 
-### 3. Choosing an arrangement needs the design scope; changing the structure does not
+### 3. Choosing a section style needs the design scope; changing the structure does not
 
 A page's structure is content: which sections a page holds is what the page
 says, not how it looks. So every restructure needs `content.draft`.
 
-An arrangement is a design value. So a request that names one — through
+A section style is a design value. So a request that names one — through
 `set_variant`, or through `variant` on an `add` — needs `design.draft` as well.
 The scopes are read from the request before anything is loaded, so an agent
 that lacks the scope is told which scope it lacks and can ask the owner for it,
@@ -86,13 +86,13 @@ rather than being refused after the work is planned.
 
 This keeps the boundary ADR-0034 drew, and tightens one edge of it. ADR-0034
 allowed a content-scoped connection to add a page whose sections carry the
-arrangements the starting point placed, because those are defaults nobody
+section styles the starting point placed, because those are defaults nobody
 chose. Here the agent does choose, so the design scope is required whether the
 section is new or old.
 
-An arrangement on a section the page already held is written as an edit to that
+The style of a section the page already held is written as an edit to that
 section's own field, because it is a design value on a record both revisions
-hold. An arrangement on a section the request added is carried in the section
+hold. The style of a section the request added is carried in the section
 itself, because there is nothing to compare it with.
 
 ### 4. `foundry.design.patch` reads the draft, and stops advertising a closed list
@@ -103,10 +103,10 @@ section's editable field path has: the section's own identifier on the home
 page, and the page identifier in front of it on every other page
 ([ADR-0017](ADR-0017-page-scoped-editable-field-paths.md)).
 
-Whether that section exists, and whether it offers that arrangement, is
+Whether that section exists, and whether it offers that section style, is
 answered by the draft's own design field list at call time, where it was
-already answered before this change. The schema still names every arrangement
-any registered section offers, so a word that is not an arrangement at all is
+already answered before this change. The schema still names every section style
+any registered section offers, so a word that is not a section style at all is
 still refused at the client.
 
 This is the same move ADR-0034 made for `foundry.content.patch`, and for the
@@ -137,7 +137,7 @@ allows, so a refusal is stored and a replayed refusal repeats the first one.
 ### 6. An agent can read the section types it may use
 
 `foundry.section.list` answers with every registered section type, the words an
-owner reads for it, the arrangements it offers, and the fields
+owner reads for it, the section styles it offers, and the fields
 `foundry.content.patch` can write on it. It needs `site.read` only, because it
 describes the product rather than any one draft.
 
@@ -175,7 +175,7 @@ tampering. A short operation list says what changed and nothing else.
 gives: the dashboard and the agent must refuse for the same reasons, and a rule
 written twice drifts.
 
-**Let `content.draft` alone choose an arrangement.** Rejected. An arrangement is
+**Let `content.draft` alone choose a section style.** Rejected. A section style is
 a design value, and `design.draft` is the scope an owner grants for design
 values. Reading it as content because it arrives through a structure tool would
 make the scope mean less than the owner was told it means.

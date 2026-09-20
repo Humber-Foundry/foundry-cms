@@ -603,13 +603,13 @@ describe("planPageSectionRestructure", () => {
     expect(result.sections[4]!.id).toBe(`${firstPageId}_proof_2`);
   });
 
-  it("gives a new section the arrangement the caller chose", () => {
+  it("gives a new section the section style the caller chose", () => {
     const result = plan([
       { op: "add", sectionType: "proof", position: 3, variant: "panel" },
     ]);
     const added = result.sections[3]!;
     expect(added.type === "proof" && added.variant).toBe("panel");
-    // A section this request added carries its arrangement in the section
+    // A section this request added carries its section style in the section
     // itself, because there is no earlier value to compare it with.
     expect(result.variantChanges).toEqual({});
   });
@@ -651,7 +651,7 @@ describe("planPageSectionRestructure", () => {
     ]);
   });
 
-  it("reports an arrangement change on a section the page already held", () => {
+  it("reports a section style change on a section the page already held", () => {
     const result = plan([
       {
         op: "set_variant",
@@ -664,7 +664,7 @@ describe("planPageSectionRestructure", () => {
     });
   });
 
-  it("reports no arrangement change when the section keeps its arrangement", () => {
+  it("reports no section style change when the section keeps its section style", () => {
     const hero = page.sections[0]!;
     const result = plan([
       {
@@ -676,7 +676,7 @@ describe("planPageSectionRestructure", () => {
     expect(result.variantChanges).toEqual({});
   });
 
-  it("reports no arrangement change for a section the request removed again", () => {
+  it("reports no section style change for a section the request removed again", () => {
     const result = plan([
       {
         op: "set_variant",
@@ -728,7 +728,7 @@ describe("planPageSectionRestructure", () => {
     ).toBe("page_section_position_invalid");
   });
 
-  it("refuses an arrangement this kind of section does not offer", () => {
+  it("refuses a section style this kind of section does not offer", () => {
     expect(
       refusal(() =>
         plan([
