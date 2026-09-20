@@ -18,6 +18,7 @@ import {
   type PageComponentField,
   type PageSection,
   type SiteDefinition,
+  type SitePage,
 } from "@humber-foundry/site-definition";
 
 import { definitionToPuckData, puckDataToDefinition } from "../src/page-composition-puck";
@@ -691,6 +692,8 @@ function puckPropsToSection(
 export function createVisualComponentConfig(
   getProtectedComponentIds: () => ReadonlySet<string>,
   getDefinition: () => SiteDefinition,
+  /** The page the owner has open. A new section is scaffolded onto it. */
+  getPage: () => SitePage,
   onValidationChange: (source: string, invalid: boolean) => void = ignoreRichTextValidation,
   getDisabled: () => boolean = () => false,
   getMediaContext: () => EditorMediaContext | undefined = () => undefined,
@@ -704,7 +707,10 @@ export function createVisualComponentConfig(
     installedPageComponentRegistry.allowedComponents.map((type) => {
       const registration = installedPageComponentRegistry.components[type]!;
       const id = `section_new_${type.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`)}`;
-      const defaultSection = registration.createDefault(id, getDefinition());
+      const defaultSection = registration.createDefault(id, {
+        definition: getDefinition(),
+        page: getPage(),
+      });
       const defaultProps = defaultSection.type === "registered"
         ? {
             id: defaultSection.id,
@@ -821,6 +827,7 @@ function PanelSheetHeader({ onClose }: { onClose(): void }) {
 
 export function VisualComponentEditor({
   definition,
+  page,
   disabled,
   onChange,
   onValidationChange = ignoreRichTextValidation,
@@ -831,6 +838,11 @@ export function VisualComponentEditor({
   media,
 }: {
   definition: SiteDefinition;
+  /**
+   * The page the owner opened. The canvas draws this page's sections, and
+   * every add, move, duplicate and remove is written back onto it.
+   */
+  page: SitePage;
   disabled: boolean;
   onChange(definition: SiteDefinition): void;
   onValidationChange?(source: string, invalid: boolean): void;
@@ -860,13 +872,15 @@ export function VisualComponentEditor({
   media?: EditorMediaContext;
 }) {
   const initialData = useMemo(
-    () => definitionToPuckData(definition, installedPageComponentRegistry),
+    () => definitionToPuckData(page, installedPageComponentRegistry),
     [],
   );
   // Live values behind stable getters: a new config object would reset Puck's
   // UI state and drop the owner's selection after every accepted edit.
   const definitionRef = useRef(definition);
   definitionRef.current = definition;
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const disabledRef = useRef(disabled);
   disabledRef.current = disabled;
   const validationRef = useRef(onValidationChange);
@@ -884,8 +898,10 @@ export function VisualComponentEditor({
     setPhotoPickerChoose(() => onChoose);
   const config = useMemo(
     () => createVisualComponentConfig(
-      () => referencedPageComponentIds(definitionRef.current),
+      () =>
+        referencedPageComponentIds(definitionRef.current, pageRef.current),
       () => definitionRef.current,
+      () => pageRef.current,
       (source, invalid) => validationRef.current(source, invalid),
       () => disabledRef.current,
       () => mediaRef.current,
@@ -933,7 +949,12 @@ export function VisualComponentEditor({
 
   function accept(data: Data) {
     if (!active.current || disabled) return;
-    const result = puckDataToDefinition(definition, data, installedPageComponentRegistry);
+    const result = puckDataToDefinition(
+      definition,
+      page,
+      data,
+      installedPageComponentRegistry,
+    );
     if (!result.ok) {
       setMessage(Object.values(result.errors)[0] ?? "Composition rejected.");
       return;
@@ -986,7 +1007,10 @@ export function VisualComponentEditor({
                 <PanelSheetHeader onClose={() => setPanelOpen(false)} />
                 <SelectedSectionActions
                   disabled={disabled}
-                  protectedComponentIds={referencedPageComponentIds(definition)}
+                  protectedComponentIds={referencedPageComponentIds(
+                    definition,
+                    page,
+                  )}
                 />
                 <PanelFields />
                 <PanelWhenEmpty>{panelWhenEmpty}</PanelWhenEmpty>

@@ -139,6 +139,64 @@ export function pageMediaOccurrenceId(
 }
 
 /**
+ * The identifier of one page's section slot: the place the visual editor adds,
+ * moves and removes sections in.
+ *
+ * The home page keeps `slot_home_sections` unchanged. That identifier is the
+ * field path a stored draft writes its unsaved structural change under, so a
+ * new name would make every stored home-page recovery record unreadable. This
+ * is the same reason `pageFieldPath` gives the home page no prefix and
+ * `pageMediaOccurrenceId` keeps the home page's two occurrence ids. See
+ * ADR-0017, ADR-0026 and ADR-0032.
+ *
+ * Every other page's slot id is built from its own page id:
+ * `slot_<pageId>_sections`. A page id never changes, so a slug rename leaves
+ * the identifier alone. Two pages can never share a slot id, so a structural
+ * change stored for one page can never be applied to another.
+ */
+export function pageCompositionSlotId(page: SitePage): string {
+  return page.slug === homePageSlug
+    ? "slot_home_sections"
+    : `slot_${page.id}_sections`;
+}
+
+/** The one shape every page's section slot id matches. */
+export const pageCompositionSlotIdPattern = /^slot_[a-z][a-z0-9_]*_sections$/u;
+
+/**
+ * Whether a field path names a page's section slot rather than one field.
+ *
+ * A field path always holds a dot — `section_hero.title`, or a page id in
+ * front of it — and a slot id never does, so the two can never be confused.
+ */
+export function isPageCompositionSlotId(path: string): boolean {
+  return pageCompositionSlotIdPattern.test(path);
+}
+
+/**
+ * The page a section-slot identifier names, or `undefined` when this site has
+ * no such page.
+ *
+ * A stored draft holds a structural change under its slot id alone. This is
+ * how the editor reads that identifier back and finds the page the change
+ * belongs to, so a recovered change is restored to the page it was made on.
+ */
+export function findPageByCompositionSlotId(
+  definition: SiteDefinition,
+  slotId: string,
+): SitePage | undefined {
+  return definition.pages.find((page) => pageCompositionSlotId(page) === slotId);
+}
+
+/**
+ * The media manifest's field path on one page. The home page keeps
+ * `home.media`, for the same reason its slot id and field paths are unprefixed.
+ */
+export function pageMediaFieldPath(page: SitePage): string {
+  return page.slug === homePageSlug ? "home.media" : `${page.id}.media`;
+}
+
+/**
  * The same definition with one page swapped for a new version of itself.
  *
  * The page is matched by id, and the order of `pages` is kept, so a rewrite

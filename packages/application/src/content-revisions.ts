@@ -9,6 +9,7 @@ import {
   unpublishBlogPostDefinition,
   BlogPostSchemaError,
   foundationPageComponentRegistry,
+  findPageByCompositionSlotId,
   homePage,
   isSiteDefinitionWithPageComponents,
   pageFieldPath,
@@ -110,7 +111,12 @@ export type SaveContentRevisionCommand = Readonly<{
   schemaVersion: SiteDefinition["schemaVersion"];
   baseRevision: number;
   edits: ReadonlyArray<SiteDefinitionEdit>;
-  composition?: PageComposition;
+  /**
+   * The structural change of each page whose sections changed, at most one per
+   * page. Each composition names its own page through its `slotId`, so a save
+   * that carries several pages writes each one onto the page it belongs to.
+   */
+  compositions?: ReadonlyArray<PageComposition>;
   idempotencyKey: string;
   joinedAudit?: JoinedMcpMutationAudit;
 }>;
@@ -973,30 +979,44 @@ export function createContentRevisionApplication({
           schemaVersion: command.schemaVersion,
           baseRevision: command.baseRevision,
           edits: command.edits,
-          ...(command.composition === undefined
+          ...(command.compositions === undefined ||
+          command.compositions.length === 0
             ? {}
-            : { composition: command.composition }),
+            : { compositions: command.compositions }),
         },
         mutate(baseDefinition) {
-          const composed =
-            command.composition === undefined
-              ? { ok: true as const, definition: baseDefinition }
-              : applyPageComposition(
-                  baseDefinition,
-                  // A composition still applies to the home page. Ticket #158
-                  // passes the page the editor has open instead.
-                  compositionWithStoredSectionStyles(
-                    homePage(baseDefinition),
-                    command.composition,
-                    command.edits,
-                  ),
-                  pageComponents,
-                );
-          if (!composed.ok) {
-            throw new ContentRevisionValidationError(composed.errors);
+          // Each composition names its page through its slot id, so a save
+          // that carries two pages writes each one onto its own page and
+          // cannot move a section from one page to another.
+          let composedDefinition = baseDefinition;
+          for (const composition of command.compositions ?? []) {
+            const page = findPageByCompositionSlotId(
+              composedDefinition,
+              composition.slotId,
+            );
+            if (page === undefined) {
+              throw new ContentRevisionValidationError({
+                [composition.slotId]:
+                  "This slot is not registered by the Site Definition.",
+              });
+            }
+            const composed = applyPageComposition(
+              composedDefinition,
+              page,
+              compositionWithStoredSectionStyles(
+                page,
+                composition,
+                command.edits,
+              ),
+              pageComponents,
+            );
+            if (!composed.ok) {
+              throw new ContentRevisionValidationError(composed.errors);
+            }
+            composedDefinition = composed.definition;
           }
           const edited = applySiteDefinitionEdits(
-            composed.definition,
+            composedDefinition,
             command.edits,
             isDefinition,
           );

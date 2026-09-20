@@ -5,12 +5,42 @@ import {
   updateEditableSiteField,
   type SiteDefinition,
   type SiteDefinitionEdit,
-  homePage,
+  type SitePage,
   replacePage,
 } from "@humber-foundry/site-definition";
 
+/**
+ * The structure of every page of a draft, as one comparable value.
+ *
+ * Every page counts, not only the page the owner has open. A revision saved
+ * elsewhere can change any page, and an unsaved structural change of the
+ * owner's can be on any page, so a comparison of the home page alone would
+ * miss both. See ADR-0032.
+ */
 function compositionIdentity(definition: SiteDefinition): string {
-  return JSON.stringify(toPageCompositionIdentity(definition));
+  return JSON.stringify(
+    definition.pages.map((page) => toPageCompositionIdentity(page)),
+  );
+}
+
+/** The same definition with every page emptied of its sections. */
+function withoutAnySections(definition: SiteDefinition): SiteDefinition {
+  return {
+    ...definition,
+    pages: definition.pages.map((page) => ({ ...page, sections: [] })),
+  };
+}
+
+/** The same definition holding one section, on one page, and nothing else. */
+function withOnlySection(
+  definition: SiteDefinition,
+  page: SitePage,
+  sectionIndex: number,
+): SiteDefinition {
+  return replacePage(withoutAnySections(definition), {
+    ...page,
+    sections: [page.sections[sectionIndex]!],
+  });
 }
 
 function hasConcurrentCompositionConflict(
@@ -63,26 +93,41 @@ function concurrentFieldConflicts(
     .sort();
 }
 
+/**
+ * Put one locally edited section back into the incoming revision, on the page
+ * it was edited on.
+ *
+ * Every page is searched, because the owner may have edited a section of a
+ * page they are no longer looking at. The section is matched to its own page
+ * by id, so restoring an edit to page B never touches page A.
+ */
 function restoreLocalEditableOwner(
   definition: SiteDefinition,
   working: SiteDefinition,
   path: string,
 ): SiteDefinition | null {
   const baseFieldPaths = new Set(
-    listEditableSiteFields(
-      replacePage(working, { ...homePage(working), sections: [] }),
-    ).map((field) => field.path),
-  );
-  const localSectionIndex = homePage(working).sections.findIndex((section) =>
-    listEditableSiteFields(
-      replacePage(working, { ...homePage(working), sections: [section] }),
-    ).some(
-      (field) => field.path === path && !baseFieldPaths.has(field.path),
+    listEditableSiteFields(withoutAnySections(working)).map(
+      (field) => field.path,
     ),
   );
-  if (localSectionIndex >= 0) {
-    const localSection = homePage(working).sections[localSectionIndex]!;
-    const sections = [...homePage(definition).sections];
+  for (const workingPage of working.pages) {
+    const localSectionIndex = workingPage.sections.findIndex((_section, at) =>
+      listEditableSiteFields(
+        withOnlySection(working, workingPage, at),
+      ).some(
+        (field) => field.path === path && !baseFieldPaths.has(field.path),
+      ),
+    );
+    if (localSectionIndex < 0) continue;
+    const localSection = workingPage.sections[localSectionIndex]!;
+    const incomingPage = definition.pages.find(
+      ({ id }) => id === workingPage.id,
+    );
+    // The incoming revision no longer holds this page, so there is nowhere to
+    // put the section back. The caller keeps the edit as a conflict instead.
+    if (incomingPage === undefined) return null;
+    const sections = [...incomingPage.sections];
     const incomingIndex = sections.findIndex(
       (section) => section.id === localSection.id,
     );
@@ -95,7 +140,7 @@ function restoreLocalEditableOwner(
         localSection,
       );
     }
-    return replacePage(definition, { ...homePage(definition), sections });
+    return replacePage(definition, { ...incomingPage, sections });
   }
 
   const localNavigationIndex = working.site.navigation.findIndex(
@@ -146,20 +191,29 @@ function mergeExternalRevision(
   const incomingFields = hasConcurrentCompositionConflict(state, incoming)
     ? []
     : listEditableSiteFields(incoming);
-  const incomingSections = new Map(
-    homePage(incoming).sections.map((section) => [
-      `${section.type}:${section.id}`,
-      section,
-    ]),
-  );
+  // An unsaved structural change is kept on whichever page it was made on.
+  // Each page's sections are matched within that page alone, so the order the
+  // owner set on one page is never written onto another.
   let merged = compositionChanged
-    ? replacePage(incoming, {
-        ...homePage(incoming),
-        sections: homePage(state.workingDefinition).sections.map(
-          (section) =>
-            incomingSections.get(`${section.type}:${section.id}`) ?? section,
-        ),
-      })
+    ? state.workingDefinition.pages.reduce((definition, workingPage) => {
+        const incomingPage = definition.pages.find(
+          ({ id }) => id === workingPage.id,
+        );
+        if (incomingPage === undefined) return definition;
+        const incomingSections = new Map(
+          incomingPage.sections.map((section) => [
+            `${section.type}:${section.id}`,
+            section,
+          ]),
+        );
+        return replacePage(definition, {
+          ...incomingPage,
+          sections: workingPage.sections.map(
+            (section) =>
+              incomingSections.get(`${section.type}:${section.id}`) ?? section,
+          ),
+        });
+      }, incoming)
     : incoming;
   for (const field of workingFields) {
     if (!locallyDirtyPaths.has(field.path)) continue;

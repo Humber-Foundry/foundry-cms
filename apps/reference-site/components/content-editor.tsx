@@ -12,10 +12,11 @@ import {
 
 import type { ContentRevision } from "@humber-foundry/application";
 import {
-  homePage,
-  homePageSlug,
+  findPageByCompositionSlotId,
+  findPageById,
+  isPageCompositionSlotId,
   listEditableSiteFields,
-  pageCompositionContract,
+  pageCompositionSlotId,
   toPageComposition,
   toPageCompositionIdentity,
   updateEditableSiteField,
@@ -328,7 +329,6 @@ export function ContentEditor({
     () => resolveEditorPage(state.workingDefinition, selectedPageId).page,
     [state.workingDefinition, selectedPageId],
   );
-  const selectedPageIsHome = selectedPage.slug === homePageSlug;
   /**
    * The address of the editor on this page. A save and a recovery clean-up
    * both rewrite the address, so they must keep the page the owner is on
@@ -357,14 +357,25 @@ export function ContentEditor({
     () => changedFields(persistedFields, workingFields),
     [persistedFields, workingFields],
   );
-  const composition = useMemo(
+  /**
+   * The structural change of each page whose sections differ from the stored
+   * draft, at most one per page.
+   *
+   * Every page is checked, not only the page the owner has open. A restored
+   * draft or a revision saved elsewhere can leave an unsaved structural change
+   * on a page the owner is not looking at, and a save that carried the open
+   * page alone would throw it away. See ADR-0032.
+   */
+  const compositions = useMemo(
     () =>
-      pageCompositionChanged(
-        state.persistedDefinition,
-        state.workingDefinition,
-      )
-        ? toPageComposition(state.workingDefinition)
-        : undefined,
+      state.workingDefinition.pages.flatMap((page) =>
+        pageCompositionChanged(
+          findPageById(state.persistedDefinition, page.id),
+          page,
+        )
+          ? [toPageComposition(page)]
+          : [],
+      ),
     [state.persistedDefinition, state.workingDefinition],
   );
   /**
@@ -374,7 +385,7 @@ export function ContentEditor({
    * that is merely stale, or mid-save, has nothing the owner would lose, and
    * telling them otherwise would be untrue.
    */
-  const hasUnsavedEdits = edits.length > 0 || composition !== undefined;
+  const hasUnsavedEdits = edits.length > 0 || compositions.length > 0;
   const recoverableEdits = useMemo<StaleRecoveryEdit[]>(
     () => {
       const fieldEdits = edits.map((edit) => ({
@@ -383,28 +394,49 @@ export function ContentEditor({
           persistedFields.find((field) => field.path === edit.path)?.value ??
           "",
       }));
-      return composition === undefined
-        ? fieldEdits
-        : [
-            {
-              path: pageCompositionContract.slot.id,
-              value: JSON.stringify(composition),
-              baseValue: JSON.stringify(
-                toPageComposition(state.persistedDefinition),
-              ),
-            },
-            ...excludeCompositionOwnedEdits(
-              fieldEdits,
-              composition.components.filter(
-                (component) =>
-                  !homePage(state.persistedDefinition).sections.some(
-                    ({ id }) => id === component.id,
-                  ),
-              ),
-            ),
-          ];
+      // One structural record per changed page, written under that page's own
+      // slot id. A crash recovery reads the slot id back and restores each
+      // change to the page it was made on.
+      const compositionEdits: StaleRecoveryEdit[] = [];
+      let keptFieldEdits = fieldEdits;
+      for (const composition of compositions) {
+        const workingPage = findPageByCompositionSlotId(
+          state.workingDefinition,
+          composition.slotId,
+        );
+        const persistedPage = findPageByCompositionSlotId(
+          state.persistedDefinition,
+          composition.slotId,
+        );
+        if (workingPage === undefined) continue;
+        compositionEdits.push({
+          path: composition.slotId,
+          value: JSON.stringify(composition),
+          baseValue: JSON.stringify(
+            persistedPage === undefined
+              ? { slotId: composition.slotId, components: [] }
+              : toPageComposition(persistedPage),
+          ),
+        });
+        keptFieldEdits = excludeCompositionOwnedEdits(
+          keptFieldEdits,
+          workingPage,
+          composition.components.filter(
+            (component) =>
+              persistedPage === undefined ||
+              !persistedPage.sections.some(({ id }) => id === component.id),
+          ),
+        );
+      }
+      return [...compositionEdits, ...keptFieldEdits];
     },
-    [composition, edits, persistedFields, state.persistedDefinition],
+    [
+      compositions,
+      edits,
+      persistedFields,
+      state.persistedDefinition,
+      state.workingDefinition,
+    ],
   );
   const persistence = useContentEditorPersistence({
     workspaceId: initialRevision.workspaceId,
@@ -543,7 +575,7 @@ export function ContentEditor({
             });
             continue;
           }
-          if (edit.path === pageCompositionContract.slot.id) {
+          if (isPageCompositionSlotId(edit.path)) {
             const result = applyStructuralRecovery(
               recoveryDefinition,
               edit,
@@ -736,12 +768,17 @@ export function ContentEditor({
       ...workingFields.map(
         (field) => [field.path, field.value] as const,
       ),
-      [
-        pageCompositionContract.slot.id,
-        JSON.stringify(
-          toPageCompositionIdentity(state.workingDefinition, installedPageComponentRegistry),
-        ),
-      ] as const,
+      // Every page offers its own structure under its own slot id, so a
+      // stored record is compared with the page it was made on.
+      ...state.workingDefinition.pages.map(
+        (page) =>
+          [
+            pageCompositionSlotId(page),
+            JSON.stringify(
+              toPageCompositionIdentity(page, installedPageComponentRegistry),
+            ),
+          ] as const,
+      ),
     ]);
     let recovery = recoverStaleEdits(
       recoveryStorage,
@@ -794,7 +831,7 @@ export function ContentEditor({
       );
     let recoveryDefinition = state.workingDefinition;
     for (const edit of orderedRecovered) {
-      if (edit.path === pageCompositionContract.slot.id) {
+      if (isPageCompositionSlotId(edit.path)) {
         const result = resolveStructuralRecovery(
           recoveryDefinition,
           edit,
@@ -931,7 +968,7 @@ export function ContentEditor({
         schemaVersion: state.persistedDefinition.schemaVersion,
         baseRevision: state.persistedRevision,
         edits,
-        ...(composition === undefined ? {} : { composition }),
+        ...(compositions.length === 0 ? {} : { compositions }),
       }),
     );
     try {
@@ -1464,7 +1501,7 @@ export function ContentEditor({
       return;
     }
     if (resolution === "mine" && conflict.currentValue !== null) {
-      if (conflict.path === pageCompositionContract.slot.id) {
+      if (isPageCompositionSlotId(conflict.path)) {
         const result = applyStructuralRecovery(
           state.workingDefinition,
           conflict,
@@ -1728,7 +1765,7 @@ export function ContentEditor({
           className="copy-button"
           // editorLocked already covers recoveryConflicts.length > 0.
           disabled={
-            (edits.length === 0 && composition === undefined) ||
+            (edits.length === 0 && compositions.length === 0) ||
             hasInvalidRichText ||
             editorLocked
           }
@@ -1934,26 +1971,15 @@ export function ContentEditor({
       </div>
     );
 
-  /**
-   * The visual canvas still builds itself from the home page, so it is shown
-   * on the home page alone. On any other page the owner edits that page's
-   * words in the fields below, and the screen says so rather than showing a
-   * canvas of the wrong page. Ticket #158 moves the canvas onto the selected
-   * page.
-   */
-  const showCanvas = showComposition && selectedPageIsHome;
-  const canvasWaitingNode =
-    showComposition && !selectedPageIsHome ? (
-      <p className="dashboard-note" role="status">
-        You can change this page&rsquo;s words here. Adding, moving and
-        removing sections on this page is not ready yet; it works on your home
-        page today.
-      </p>
-    ) : null;
+  // The canvas draws the page the owner opened, so every page is edited the
+  // same way: its words, its photos, and adding, moving, duplicating and
+  // removing its sections.
+  const showCanvas = showComposition;
 
   const editorBodyNode = showDesignDestination ? (
     <DesignDestination
       definition={state.workingDefinition}
+      page={selectedPage}
       disabled={editorLocked}
       onEdit={edit}
       onEditMany={editMany}
@@ -1998,7 +2024,6 @@ export function ContentEditor({
         </div>
         {pageSwitcherNode}
         {pageSwitchPromptNode}
-        {canvasWaitingNode}
         {notesNode}
         {conflictsNode}
         {editorBodyNode}
@@ -2140,7 +2165,7 @@ export function ContentEditor({
         >
           <SiteRenderer
             definition={state.workingDefinition}
-            page={homePage(state.workingDefinition)}
+            page={selectedPage}
             editingSurface
           />
         </div>
@@ -2153,8 +2178,9 @@ export function ContentEditor({
             // what the canvas shows, so a save — including the automatic
             // ones — must not remount the editor and destroy the owner's
             // selection mid-edit.
-            key={`projection:${state.projectionVersion}`}
+            key={`projection:${selectedPage.id}:${state.projectionVersion}`}
             definition={state.workingDefinition}
+            page={selectedPage}
             disabled={editorLocked}
             media={{
               csrfToken: mutationToken,

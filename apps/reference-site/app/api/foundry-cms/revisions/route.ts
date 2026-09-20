@@ -18,6 +18,7 @@ import { installedSiteDefinition } from "@/foundry/site-definition";
 import {
   createSerializedRichTextDocument,
   createBlogPostId,
+  isPageCompositionSlotId,
   parseSerializedRichTextDocument,
   RichTextValidationError,
   siteDefinitionMediaAssetIds,
@@ -62,7 +63,7 @@ type SaveBody = {
   schemaVersion: SiteDefinition["schemaVersion"];
   baseRevision: number;
   edits: SiteDefinitionEdit[];
-  composition?: PageComposition;
+  compositions?: PageComposition[];
 };
 
 type BlogMutationBody =
@@ -437,24 +438,42 @@ function parseSaveBody(
   ) {
     return { ok: false };
   }
-  const composition =
-    typeof candidate.composition === "object" &&
-    candidate.composition !== null &&
-    "slotId" in candidate.composition &&
-    candidate.composition.slotId === "slot_home_sections" &&
-    "components" in candidate.composition &&
-    Array.isArray(candidate.composition.components)
-      ? (candidate.composition as PageComposition)
-      : undefined;
-  if (candidate.edits.length === 0 && composition === undefined) {
+  // A save carries one structural change per page, each naming its own page
+  // through its slot id. The shape is checked here; whether the site holds
+  // that page is the domain's decision. Two changes for the same page would
+  // make the result depend on their order, so they are refused.
+  const isComposition = (entry: unknown): entry is PageComposition =>
+    typeof entry === "object" &&
+    entry !== null &&
+    "slotId" in entry &&
+    typeof entry.slotId === "string" &&
+    isPageCompositionSlotId(entry.slotId) &&
+    "components" in entry &&
+    Array.isArray(entry.components);
+  const compositions =
+    candidate.compositions === undefined
+      ? undefined
+      : Array.isArray(candidate.compositions) &&
+          candidate.compositions.every(isComposition) &&
+          new Set(
+            (candidate.compositions as PageComposition[]).map(
+              ({ slotId }) => slotId,
+            ),
+          ).size === candidate.compositions.length
+        ? (candidate.compositions as PageComposition[])
+        : undefined;
+  if (
+    candidate.edits.length === 0 &&
+    (compositions === undefined || compositions.length === 0)
+  ) {
     return { ok: false };
   }
-  if (candidate.composition !== undefined && composition === undefined) {
+  if (candidate.compositions !== undefined && compositions === undefined) {
     return {
       ok: false,
       fields: {
-        composition:
-          "Provide a registered slot and its component collection.",
+        compositions:
+          "Provide a registered slot and its component collection for each page.",
       },
     };
   }
@@ -516,7 +535,7 @@ function parseSaveBody(
           candidate.schemaVersion as SiteDefinition["schemaVersion"],
         baseRevision: candidate.baseRevision as number,
         edits,
-        ...(composition === undefined ? {} : { composition }),
+        ...(compositions === undefined ? {} : { compositions }),
       },
     };
   } catch {
@@ -777,9 +796,9 @@ export async function POST(request: Request) {
       schemaVersion: body.schemaVersion,
       baseRevision: body.baseRevision,
       edits: body.edits,
-      ...(body.composition === undefined
+      ...(body.compositions === undefined
         ? {}
-        : { composition: body.composition }),
+        : { compositions: body.compositions }),
       idempotencyKey,
     });
     return Response.json(
