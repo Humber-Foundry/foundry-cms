@@ -72,6 +72,7 @@ export default async function BlogPostPreviewPage(
         preview
         homeHref={links.homeHref}
         blogHref={links.blogHref}
+        pageHref={links.pageHref}
         mediaDelivery="authenticated"
         mediaAccessToken={links.accessToken}
       />

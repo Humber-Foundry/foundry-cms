@@ -3,6 +3,7 @@ import {
   resolveMediaImageSrc,
   type BlogPost,
   type MediaImageDelivery,
+  type PageHrefBuilder,
   type SiteDefinition,
 } from "@humber-foundry/site-definition";
 
@@ -15,6 +16,7 @@ export function BlogPostRenderer({
   preview = false,
   homeHref = "/",
   blogHref = "/blog",
+  pageHref,
   mediaDelivery = "published",
   mediaAccessToken,
 }: {
@@ -23,6 +25,14 @@ export function BlogPostRenderer({
   preview?: boolean;
   homeHref?: string;
   blogHref?: string;
+  /**
+   * Builds one page's address, for a navigation link that targets a page
+   * other than the home page. Defaults to `pagePath` (the live public path),
+   * the same default `SiteHeader` uses. The blog post preview route passes
+   * its own preview-scoped builder here, the same way the home and page
+   * preview routes already pass it to `SiteRenderer`. See ADR-0029.
+   */
+  pageHref?: PageHrefBuilder;
   mediaDelivery?: MediaImageDelivery;
   mediaAccessToken?: string;
 }) {
@@ -42,6 +52,7 @@ export function BlogPostRenderer({
         definition={definition}
         homeHref={homeHref}
         blogHref={blogHref}
+        pageHref={pageHref}
       />
       <main id="main-content" className="blog-post" tabIndex={-1}>
         <article>
