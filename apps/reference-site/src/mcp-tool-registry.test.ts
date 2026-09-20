@@ -387,6 +387,7 @@ describe("MCP draft tool registry", () => {
           requiredScopes: [],
           latestRevision: 4,
           conflictResource: "foundry://workspaces/workspace_replay/revisions/4",
+          reason: null,
         },
         meta: {
           replayed: false,

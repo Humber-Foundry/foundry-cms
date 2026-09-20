@@ -1,3 +1,4 @@
+import { campaignSenderDetailsNotConfiguredReason } from "./campaign-channel-state";
 import {
   CampaignConflictError,
   CampaignIdempotencyError,
@@ -106,11 +107,35 @@ type McpCampaignApplicationBase = Readonly<{
  * command raised it. `requiredScope` is the scope the calling tool gates on,
  * so a denial reports the scope that operation needs rather than a fixed one.
  */
+/**
+ * The one sentence an agent reads for the one reason every path in the
+ * product reports while an installation has not set its sender details and
+ * email footer (ADR-0030). It names what the site owner must do, not the
+ * internal setting names.
+ */
+const campaignSenderDetailsNotConfiguredMessage =
+  "The site owner must set the sender details in the dashboard before this can be used.";
+
 function campaignError(
   error: unknown,
   requiredScope: typeof mcpCampaignDraftScope | typeof mcpCampaignTestScope,
 ): McpReadError {
   if (error instanceof McpReadError) return error;
+  // The MCP campaign runtime refuses to build at all while the sender
+  // details are absent (ADR-0030 §5), and `createCampaignApplication` itself
+  // refuses the same way if a caller ever reaches it first. Both report this
+  // exact word, so this check catches either path with the same sentence and
+  // the same named reason, instead of the generic refusal below.
+  if (
+    error instanceof Error &&
+    error.message === campaignSenderDetailsNotConfiguredReason
+  ) {
+    return new McpReadError(
+      "VALIDATION_FAILED",
+      campaignSenderDetailsNotConfiguredMessage,
+      { reason: campaignSenderDetailsNotConfiguredReason },
+    );
+  }
   if (error instanceof CampaignConflictError) {
     return new McpReadError(
       "STALE_REVISION",
