@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useReducer,
   useRef,
@@ -12,6 +13,7 @@ import {
 import type { ContentRevision } from "@humber-foundry/application";
 import {
   homePage,
+  homePageSlug,
   listEditableSiteFields,
   pageCompositionContract,
   toPageComposition,
@@ -60,6 +62,13 @@ import {
   useContentEditorPersistence,
 } from "../src/content-editor-persistence";
 import { pageCompositionChanged } from "../src/page-composition-puck";
+import {
+  editorPageForLinkPath,
+  editorPageHref,
+  fieldsForEditorPage,
+  resolveEditorPage,
+  type EditorPageSummary,
+} from "../src/editor-page-selection";
 import { PublishingConnectionStatus } from "./connection-status";
 import { DesignDestination } from "./design-destination";
 import { HelpTip } from "./help-tip";
@@ -81,12 +90,13 @@ import type { SiteImageTile } from "../src/site-used-photos";
  * including a middle-click opening a new tab — is stopped. Switching to Edit
  * is the way to change where a link goes.
  */
-function blockBrowseNavigation(event: React.MouseEvent) {
+function blockedNavigationHref(event: React.MouseEvent): string | undefined {
   const anchor = (event.target as HTMLElement).closest?.("a");
-  if (anchor === null || anchor === undefined) return;
+  if (anchor === null || anchor === undefined) return undefined;
   const href = anchor.getAttribute("href") ?? "";
-  if (href.startsWith("#")) return;
+  if (href.startsWith("#")) return undefined;
   event.preventDefault();
+  return href;
 }
 
 type SaveResponse = ContentRevision & Readonly<{ previewUrl: string }>;
@@ -160,6 +170,8 @@ export function ContentEditor({
   showDesignDestination = false,
   showPublicationHistory = true,
   siteImages = [],
+  selectedPageId,
+  pages = [],
 }: {
   csrfToken: string;
   initialRevision: ContentRevision;
@@ -196,6 +208,14 @@ export function ContentEditor({
    * existing photos, not only uploaded ones. Empty on surfaces that pass none.
    */
   siteImages?: ReadonlyArray<SiteImageTile>;
+  /**
+   * The page the owner opened, from `?page=` in the address. Absent on a
+   * destination that edits the whole site, which then works on the home page.
+   */
+  selectedPageId?: string;
+  /** Every page of the draft, for the page switcher. Empty when there is no
+   * switcher to show. */
+  pages?: ReadonlyArray<EditorPageSummary>;
 }) {
   const [state, dispatch] = useReducer(
     contentEditorReducer,
@@ -255,6 +275,12 @@ export function ContentEditor({
   // "conflict" while another session's revision has landed underneath, and
   // "stale" when the whole workspace is behind production.
   const hasUnsavedChanges = state.status !== "saved";
+  // The address the owner asked to go to while edits were still unsaved. The
+  // prompt holds it until they choose to leave or to stay.
+  const [addressToLeaveFor, setAddressToLeaveFor] = useState<string | null>(null);
+  // Ties the "Editing" label to its control. Generated, because the editor may
+  // be mounted more than once on a screen and an id must stay unique.
+  const pageChooserId = useId();
   const [recoveryConflicts, setRecoveryConflicts] = useState<
     ReadonlyArray<StaleRecoveryConflict>
   >([]);
@@ -296,6 +322,28 @@ export function ContentEditor({
     () => listEditableSiteFields(state.workingDefinition),
     [state.workingDefinition],
   );
+  // The page the owner opened. One rule, in editor-page-selection.ts, answers
+  // this for every screen that has to know.
+  const selectedPage = useMemo(
+    () => resolveEditorPage(state.workingDefinition, selectedPageId).page,
+    [state.workingDefinition, selectedPageId],
+  );
+  const selectedPageIsHome = selectedPage.slug === homePageSlug;
+  /**
+   * The address of the editor on this page. A save and a recovery clean-up
+   * both rewrite the address, so they must keep the page the owner is on
+   * instead of dropping back to the home page.
+   */
+  const editorUrl = editorPageHref(activeWorkspaceUrl, selectedPage.id);
+  /**
+   * The fields this page shows: its own, plus the fields that belong to the
+   * whole site. Every page's fields stay in the draft and stay saved; this
+   * only decides what is put in front of the owner.
+   */
+  const shownFields = useMemo(
+    () => fieldsForEditorPage(workingFields, selectedPage.id),
+    [workingFields, selectedPage.id],
+  );
   const richTextPaths = useMemo(
     () =>
       new Set(
@@ -319,6 +367,14 @@ export function ContentEditor({
         : undefined,
     [state.persistedDefinition, state.workingDefinition],
   );
+  /**
+   * Whether this draft holds a change the server has not stored yet.
+   *
+   * Read from the edits themselves, not from the editor's status. A workspace
+   * that is merely stale, or mid-save, has nothing the owner would lose, and
+   * telling them otherwise would be untrue.
+   */
+  const hasUnsavedEdits = edits.length > 0 || composition !== undefined;
   const recoverableEdits = useMemo<StaleRecoveryEdit[]>(
     () => {
       const fieldEdits = edits.map((edit) => ({
@@ -832,7 +888,7 @@ export function ContentEditor({
       recoveryPending.current = pending;
       if (pending.length === 0) {
         activeRecovery.current = undefined;
-        window.history.replaceState(null, "", activeWorkspaceUrl);
+        window.history.replaceState(null, "", editorUrl);
       }
     } catch {
       setMessage(
@@ -840,7 +896,7 @@ export function ContentEditor({
       );
     }
   }, [
-    activeWorkspaceUrl,
+    editorUrl,
     recoverableEdits,
     initialStale,
     persistence.coordinated,
@@ -968,7 +1024,7 @@ export function ContentEditor({
               staleRecovery.id,
               staleRecovery.sourceWorkspaceId,
             );
-            window.history.replaceState(null, "", activeWorkspaceUrl);
+            window.history.replaceState(null, "", editorUrl);
           } else {
             const unresolved = recoveryConflicts.map(
               ({ currentValue: _currentValue, reason: _reason, ...edit }) =>
@@ -983,7 +1039,7 @@ export function ContentEditor({
             );
           }
         } catch {
-          window.history.replaceState(null, "", activeWorkspaceUrl);
+          window.history.replaceState(null, "", editorUrl);
         }
       }
       dispatch({
@@ -1460,7 +1516,7 @@ export function ContentEditor({
             staleRecovery.id,
             staleRecovery.sourceWorkspaceId,
           );
-          window.history.replaceState(null, "", activeWorkspaceUrl);
+          window.history.replaceState(null, "", editorUrl);
         } else {
           preserveStaleEdits(
             window.localStorage,
@@ -1778,6 +1834,123 @@ export function ContentEditor({
       </div>
     ) : null;
 
+  /**
+   * Opening another page reloads the editor on that page. Edits that are not
+   * saved live only in this tab, so an owner with unsaved work is asked first.
+   */
+  /** Leaves the editor for another address in this workspace. */
+  function leaveEditorFor(address: string) {
+    window.location.assign(address);
+  }
+
+  function openPage(pageId: string) {
+    if (pageId === selectedPage.id) return;
+    if (hasUnsavedEdits) {
+      setAddressToLeaveFor(editorPageHref(activeWorkspaceUrl, pageId));
+      return;
+    }
+    leaveEditorFor(editorPageHref(activeWorkspaceUrl, pageId));
+  }
+
+  /** Goes back to the list of pages, asking first about unsaved edits. */
+  function openPagesList(event: React.MouseEvent) {
+    event.preventDefault();
+    if (hasUnsavedEdits) {
+      setAddressToLeaveFor(activeWorkspaceUrl);
+      return;
+    }
+    leaveEditorFor(activeWorkspaceUrl);
+  }
+
+  /**
+   * A click in the reading canvas. A link to another page of this site opens
+   * that page in the editor; every other link is stopped, because reading mode
+   * must not leave the editor.
+   */
+  function browseNavigation(event: React.MouseEvent) {
+    const href = blockedNavigationHref(event);
+    if (href === undefined) return;
+    // A middle click asks for a new tab. Opening the other page in this tab
+    // instead is not what was asked, so the click is only stopped.
+    if (event.button !== 0) return;
+    const target = editorPageForLinkPath(state.workingDefinition, href);
+    if (target !== undefined) openPage(target.id);
+  }
+
+  const pageSwitcherNode =
+    pages.length === 0 ? null : (
+      <div className="editor-page-switcher">
+        <span className="editor-page-choose">
+          {/* "Editing", not "Page": the screen is already headed Pages, and
+            * this says which one of them the owner has open. The label is tied
+            * to the control by id, so the name a screen reader reads is that
+            * one word and not the chosen page's title as well. */}
+          <label htmlFor={pageChooserId}>Editing</label>
+          <select
+            id={pageChooserId}
+            value={selectedPage.id}
+            onChange={(event) => openPage(event.target.value)}
+          >
+            {pages.map((page) => (
+              <option key={page.id} value={page.id}>
+                {page.title}
+              </option>
+            ))}
+          </select>
+        </span>
+        <a
+          className="editor-page-all"
+          href={activeWorkspaceUrl}
+          onClick={openPagesList}
+        >
+          All pages
+        </a>
+      </div>
+    );
+
+  const pageSwitchPromptNode =
+    addressToLeaveFor === null ? null : (
+      <div className="editor-page-switch-prompt" role="alert">
+        <p>
+          You have edits here that are not saved yet. Leaving this page now
+          loses them. Save first, or leave and lose them.
+        </p>
+        <span className="editor-page-switch-actions">
+          <button
+            type="button"
+            className="button"
+            onClick={() => setAddressToLeaveFor(null)}
+          >
+            Stay on this page
+          </button>
+          <button
+            type="button"
+            className="button"
+            onClick={() => leaveEditorFor(addressToLeaveFor)}
+          >
+            Leave and lose them
+          </button>
+        </span>
+      </div>
+    );
+
+  /**
+   * The visual canvas still builds itself from the home page, so it is shown
+   * on the home page alone. On any other page the owner edits that page's
+   * words in the fields below, and the screen says so rather than showing a
+   * canvas of the wrong page. Ticket #158 moves the canvas onto the selected
+   * page.
+   */
+  const showCanvas = showComposition && selectedPageIsHome;
+  const canvasWaitingNode =
+    showComposition && !selectedPageIsHome ? (
+      <p className="dashboard-note" role="status">
+        You can change this page&rsquo;s words here. Adding, moving and
+        removing sections on this page is not ready yet; it works on your home
+        page today.
+      </p>
+    ) : null;
+
   const editorBodyNode = showDesignDestination ? (
     <DesignDestination
       definition={state.workingDefinition}
@@ -1789,7 +1962,7 @@ export function ContentEditor({
     <EditorFieldGroups
       groups={groups}
       collapsed={false}
-      workingFields={workingFields}
+      workingFields={shownFields}
       errors={state.errors}
       editorLocked={editorLocked}
       edit={edit}
@@ -1812,8 +1985,8 @@ export function ContentEditor({
     ? activeWorkspaceUrl.slice(activeWorkspaceUrl.indexOf("?"))
     : "";
 
-  if (!showComposition) {
-    // Design and any other canvas-less destination: a toolbar and the fields.
+  if (!showCanvas) {
+    // Design, and a page whose canvas is not ready: a toolbar and the fields.
     return (
       <section className="content-editor" aria-label={heading}>
         <div className="editor-toolbar" role="group" aria-label="Draft controls">
@@ -1823,6 +1996,9 @@ export function ContentEditor({
             {workflowButtons}
           </span>
         </div>
+        {pageSwitcherNode}
+        {pageSwitchPromptNode}
+        {canvasWaitingNode}
         {notesNode}
         {conflictsNode}
         {editorBodyNode}
@@ -1887,6 +2063,9 @@ export function ContentEditor({
             ← Dashboard
           </a>
           <h1 className="topbar-title">{heading}</h1>
+          {/* Inside the controls, so on a phone the one Menu sheet carries the
+            * way to another page as well. */}
+          {pageSwitcherNode}
           <div className="mode-toggle" role="group" aria-label="Editor mode">
             <button
               type="button"
@@ -1951,12 +2130,13 @@ export function ContentEditor({
           )}
         </div>
       </div>
+      {pageSwitchPromptNode}
       {conflictsNode}
       {editorMode === "browse" ? (
         <div
           className="editor-browse"
-          onClickCapture={(event) => blockBrowseNavigation(event)}
-          onAuxClickCapture={(event) => blockBrowseNavigation(event)}
+          onClickCapture={(event) => browseNavigation(event)}
+          onAuxClickCapture={(event) => browseNavigation(event)}
         >
           <SiteRenderer
             definition={state.workingDefinition}
