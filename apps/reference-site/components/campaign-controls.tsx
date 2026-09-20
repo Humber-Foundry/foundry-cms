@@ -189,13 +189,6 @@ function testConfirmed(report: CampaignSendReport): boolean {
 }
 
 /**
- * Every command the sending steps can send.
- *
- * Naming them is what keeps a step from sending a shape the route will refuse:
- * a missing or misspelt field fails the build here rather than returning a
- * refusal to the person who pressed the button.
- */
-/**
  * One send-time request an app made, as the server reports it: which
  * campaign, which app, and the time asked for in the zone the request itself
  * carries (see ADR-0038 §4).
@@ -208,6 +201,13 @@ type PendingScheduleRequest = Readonly<{
   ianaTimeZone: string;
 }>;
 
+/**
+ * Every command the sending steps can send.
+ *
+ * Naming them is what keeps a step from sending a shape the route will refuse:
+ * a missing or misspelt field fails the build here rather than returning a
+ * refusal to the person who pressed the button.
+ */
 type SendFlowCommand =
   | Readonly<{
       action: "request_test";

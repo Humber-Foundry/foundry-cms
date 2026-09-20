@@ -7,11 +7,6 @@ import {
 } from "@humber-foundry/application";
 import type { SiteId } from "@humber-foundry/site-definition";
 
-import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
-import { createD1CampaignScheduleProposalStore } from "./d1-campaign-schedule-proposal-store";
-import { createD1CampaignStore } from "./d1-campaign-store";
-import type { HumanAccessEnvironment } from "./human-access-configuration";
-
 /**
  * One place to build the campaign schedule request application.
  *
@@ -52,17 +47,3 @@ export function createCampaignScheduleRequests({
         .schedule !== null,
   });
 }
-
-/** The same, built from one D1 binding. */
-export function createD1CampaignScheduleRequests(
-  siteId: SiteId,
-  database: NonNullable<HumanAccessEnvironment["FOUNDRY_DB"]>,
-): CampaignScheduleProposalApplication {
-  return createCampaignScheduleRequests({
-    siteId,
-    campaigns: createD1CampaignStore(database),
-    bulkState: createD1CampaignBulkStateStore(database),
-    proposals: createD1CampaignScheduleProposalStore(database),
-  });
-}
-

@@ -4,11 +4,16 @@ import {
   type CampaignId,
   type CampaignScheduleProposal,
   type CampaignScheduleProposalApplication,
+  type CampaignStore,
 } from "@humber-foundry/application";
+
+import type { SiteId } from "@humber-foundry/site-definition";
 
 import { installedSiteDefinition } from "../foundry/site-definition";
 
-import { createD1CampaignScheduleRequests } from "./campaign-schedule-request-application";
+import { createCampaignScheduleRequests } from "./campaign-schedule-request-application";
+import { createD1CampaignBulkStateStore } from "./d1-campaign-bulk-state-store";
+import { createD1CampaignScheduleProposalStore } from "./d1-campaign-schedule-proposal-store";
 import { createD1CampaignStore } from "./d1-campaign-store";
 import { loadHumanAccessEnvironment } from "./human-access-environment";
 import { mcpScheduleRequestAgentName } from "./mcp-schedule-request-agent";
@@ -27,7 +32,11 @@ import type { HumanAccessEnvironment } from "./human-access-configuration";
  */
 export type PendingCampaignScheduleRequest = Readonly<{
   proposalId: string;
-  campaignId: string;
+  /**
+   * The campaign this asks about, still branded. A screen turns it into text
+   * where it needs one; nothing has to parse it back into an id.
+   */
+  campaignId: CampaignId;
   agentName: string;
   localDateTime: string;
   ianaTimeZone: string;
@@ -53,7 +62,7 @@ async function nameScheduleRequests(
         ? null
         : {
             proposalId: proposal.id,
-            campaignId: String(proposal.campaignId),
+            campaignId: proposal.campaignId,
             agentName,
             localDateTime: proposal.localDateTime,
             ianaTimeZone: proposal.ianaTimeZone,
@@ -110,33 +119,47 @@ export async function loadOverviewCampaignScheduleRequests(): Promise<
     const siteId = installedSiteDefinition.site.id;
     const campaigns = createD1CampaignStore(database);
     const named = await loadPendingCampaignScheduleRequests({
-      requests: createD1CampaignScheduleRequests(siteId, database),
+      requests: createCampaignScheduleRequests({
+        siteId,
+        campaigns,
+        bulkState: createD1CampaignBulkStateStore(database),
+        proposals: createD1CampaignScheduleProposalStore(database),
+      }),
       environment,
     });
-    const described = await Promise.all(
-      named.map(async (request) => {
-        const campaign = await campaigns.findCampaign({
-          siteId,
-          campaignId: request.campaignId as CampaignId,
-        });
-        if (campaign === null) return null;
-        const revision = await campaigns.findRevision({
-          siteId,
-          campaignId: campaign.id,
-          revisionNumber: campaign.version,
-        });
-        return revision === null
-          ? null
-          : { ...request, subject: revision.subject };
-      }),
-    );
-    return described.filter(
-      (
-        request,
-      ): request is PendingCampaignScheduleRequest & { subject: string } =>
-        request !== null,
-    );
+    return await describeCampaigns(siteId, campaigns, named);
   } catch {
     return [];
   }
+}
+
+/** Add each request's own email subject, dropping a campaign that has gone. */
+async function describeCampaigns(
+  siteId: SiteId,
+  campaigns: CampaignStore,
+  requests: ReadonlyArray<PendingCampaignScheduleRequest>,
+): Promise<ReadonlyArray<PendingCampaignScheduleRequest & { subject: string }>> {
+  const described = await Promise.all(
+    requests.map(async (request) => {
+      const campaign = await campaigns.findCampaign({
+        siteId,
+        campaignId: request.campaignId,
+      });
+      if (campaign === null) return null;
+      const revision = await campaigns.findRevision({
+        siteId,
+        campaignId: campaign.id,
+        revisionNumber: campaign.version,
+      });
+      return revision === null
+        ? null
+        : { ...request, subject: revision.subject };
+    }),
+  );
+  return described.filter(
+    (
+      request,
+    ): request is PendingCampaignScheduleRequest & { subject: string } =>
+      request !== null,
+  );
 }

@@ -19,7 +19,7 @@ import type { Campaign, CampaignId, CampaignRevisionId } from "./campaign-types"
  * blog request this copies.
  */
 
-const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{15,199}$/u;
+const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{15,199}$/u;
 
 /**
  * Which campaign operations an MCP connection may carry out in its own name,
@@ -204,8 +204,8 @@ export function createCampaignScheduleProposalApplication({
   createId?: () => string;
   timeZoneDatabaseVersion?: () => string | undefined;
 }): CampaignScheduleProposalApplication {
-  function requireRequestId(value: string) {
-    if (!requestIdPattern.test(value)) {
+  function requireIdempotencyKey(value: string) {
+    if (!idempotencyKeyPattern.test(value)) {
       throw new CampaignScheduleProposalError(
         "schedule_request_idempotency_key_invalid",
       );
@@ -256,7 +256,7 @@ export function createCampaignScheduleProposalApplication({
     Object.freeze({
       async proposeSchedule(input) {
         await requireAuthority(input.actorId, input.authority);
-        requireRequestId(input.idempotencyKey);
+        requireIdempotencyKey(input.idempotencyKey);
         const replay = await store.findByRequest({
           siteId,
           campaignId: input.campaignId,
@@ -330,7 +330,7 @@ export function createCampaignScheduleProposalApplication({
         if (!(await store.hasHumanAuthority({ siteId, actorId: input.actorId }))) {
           throw new CampaignScheduleProposalError("human_authority_required");
         }
-        requireRequestId(input.idempotencyKey);
+        requireIdempotencyKey(input.idempotencyKey);
         return store.decline({
           siteId,
           proposalId: input.proposalId,

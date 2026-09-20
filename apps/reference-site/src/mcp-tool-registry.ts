@@ -2805,6 +2805,24 @@ const descriptors = {
   },
 } as const;
 
+/**
+ * One send-time request's arguments, or `null` when the campaign id is not
+ * one this product mints. The caller has already checked every other field,
+ * so this is the last thing that can turn the request down before the
+ * application sees it.
+ */
+function parseScheduleRequest(
+  campaignIdValue: unknown,
+  sendAt: string,
+  reportingTimeZone: string,
+  idempotencyKey: string,
+) {
+  const campaignId = parseCampaignId(campaignIdValue);
+  return campaignId === null
+    ? null
+    : { campaignId, sendAt, reportingTimeZone, idempotencyKey };
+}
+
 export function createMcpToolRegistry(application: McpReadApplication) {
   const handlers = {
     "foundry.site.get": async (
@@ -3448,14 +3466,14 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         publishAtShape.test(input.sendAt) &&
         typeof input.reportingTimeZone === "string" &&
         input.reportingTimeZone.trim() !== ""
-          ? {
-              campaignId: parseCampaignId(input.campaignId),
-              sendAt: input.sendAt,
-              reportingTimeZone: input.reportingTimeZone,
-              idempotencyKey: input.idempotencyKey as string,
-            }
+          ? parseScheduleRequest(
+              input.campaignId,
+              input.sendAt,
+              input.reportingTimeZone,
+              input.idempotencyKey,
+            )
           : null;
-      if (parsed === null || parsed.campaignId === null) {
+      if (parsed === null) {
         return application.rejectInvalidInput(
           principal,
           "foundry.campaign.schedule_request",
@@ -3464,11 +3482,7 @@ export function createMcpToolRegistry(application: McpReadApplication) {
           [mcpPublicationScheduleScope],
         );
       }
-      return application.requestSchedule!(
-        principal,
-        { ...parsed, campaignId: parsed.campaignId },
-        context,
-      );
+      return application.requestSchedule!(principal, parsed, context);
     },
     "foundry.analytics.read": async (principal, input, context) => {
       const parsed = parseAnalyticsInput(input);
