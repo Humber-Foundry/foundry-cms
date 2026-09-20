@@ -1284,22 +1284,24 @@ export function CampaignControls({
                     pendingRequest.localDateTime,
                     pendingRequest.ianaTimeZone,
                   )}
-                  . Open "Sending steps" below to send it then, or decline the
-                  request.{" "}
-                  <button
-                    type="button"
-                    className="copy-button"
-                    disabled={busy}
-                    onClick={() => {
-                      void declineScheduleRequest(pendingRequest.proposalId);
-                    }}
-                  >
-                    Decline
-                  </button>
+                  . Use "Sending steps" to send it then, or decline the
+                  request.
                 </p>
               )}
             </div>
             <div className="post-list-actions">
+              {pendingRequest === null ? null : (
+                <button
+                  type="button"
+                  className="copy-button"
+                  disabled={busy}
+                  onClick={() => {
+                    void declineScheduleRequest(pendingRequest.proposalId);
+                  }}
+                >
+                  Decline
+                </button>
+              )}
               <button
                 type="button"
                 className="copy-button"
