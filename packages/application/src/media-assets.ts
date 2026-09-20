@@ -1,4 +1,7 @@
-import type { SiteId } from "@humber-foundry/site-definition";
+import {
+  pageMediaOccurrenceIdPattern,
+  type SiteId,
+} from "@humber-foundry/site-definition";
 
 import type { ContentActorId, ContentWorkspaceId } from "./content-revisions";
 import { sha256CanonicalJson } from "./deterministic-hash";
@@ -51,8 +54,6 @@ export function requireRenderedMediaOccurrenceId(
 
 /** A page's hero or detail media occurrence id, home page or any other. */
 export type PageMediaOccurrenceId = `occurrence_${string}_${"hero" | "detail"}`;
-
-const pageMediaOccurrenceIdPattern = /^occurrence_[a-z][a-z0-9_]*_(?:hero|detail)$/u;
 
 /**
  * Accepts any page's hero or detail occurrence id, not only the home page's

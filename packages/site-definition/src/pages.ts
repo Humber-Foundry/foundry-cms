@@ -106,6 +106,17 @@ export const pageMediaSlots = ["hero", "detail"] as const;
 export type PageMediaSlot = (typeof pageMediaSlots)[number];
 
 /**
+ * The one shape every media occurrence id matches: the home page's own two
+ * ids, or `occurrence_<pageId>_hero`/`occurrence_<pageId>_detail` for any
+ * other page. The JSON Schema pattern in `index.ts` and the write-path
+ * validator in `@humber-foundry/application`'s `media-assets.ts` both read
+ * this pattern, so the two enforcement points cannot drift apart. See
+ * ADR-0026.
+ */
+export const pageMediaOccurrenceIdPattern =
+  /^occurrence_[a-z][a-z0-9_]*_(?:hero|detail)$/u;
+
+/**
  * The media occurrence id for one slot on one page.
  *
  * The home page keeps its two existing ids unchanged: `occurrence_home_hero`

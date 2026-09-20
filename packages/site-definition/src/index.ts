@@ -23,6 +23,7 @@ import { isSiteDefinitionWithPageComponents } from "./page-component-registry";
 import {
   homePageSlug,
   pageMediaOccurrenceId,
+  pageMediaOccurrenceIdPattern,
   pageMediaSlots,
   pageSlugMaxLength,
   pageSlugPattern,
@@ -673,7 +674,7 @@ export const siteDefinitionSchema = {
             "other page's id is occurrence_<pageId>_hero or " +
             "occurrence_<pageId>_detail. See ADR-0026.",
           type: "string",
-          pattern: "^occurrence_[a-z][a-z0-9_]*_(?:hero|detail)$",
+          pattern: pageMediaOccurrenceIdPattern.source,
         },
         revision: { type: "integer", minimum: 1 },
         asset: {
