@@ -35,14 +35,16 @@ export function PreviewReviewSummary({
     <>
       <div className="page-heading">
         <div>
-          <h1>Review this draft</h1>
-          <p>
-            {agentName} prepared this draft {mcpRelativeTime(preparedAt)}.{" "}
+          <h1>
+            Review this draft{" "}
             <HelpTip label="Where does this name come from?">
               The name comes from the web address the app gave when it
               connected. It is what the app says about itself, not a name
               anyone checked.
             </HelpTip>
+          </h1>
+          <p>
+            {agentName} prepared this draft {mcpRelativeTime(preparedAt)}.
           </p>
         </div>
       </div>

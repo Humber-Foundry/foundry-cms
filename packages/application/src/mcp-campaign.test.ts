@@ -4,6 +4,7 @@ import { referenceSiteDefinition } from "@humber-foundry/site-definition";
 
 import {
   AccessDeniedError,
+  campaignSenderDetailsNotConfiguredReason,
   CampaignConflictError,
   CampaignIdempotencyError,
   CampaignNotFoundError,
@@ -525,6 +526,73 @@ describe("mcp campaign assistance", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
+  it("gives a named reason and a plain sentence when the sender details are not configured", async () => {
+    // The MCP campaign runtime refuses to build at all while an installation
+    // has not set its sender details (ADR-0030 §5), and reports it with a
+    // bare `Error` carrying the shared reason word — the same word every
+    // other path in the product reports. This is what a real installation's
+    // `createMcpCampaignRuntime` throws before it builds any application.
+    const harness = fixture({
+      async createStandalone() {
+        throw new Error(campaignSenderDetailsNotConfiguredReason);
+      },
+    });
+    harness.activeGrant([mcpCampaignDraftScope]);
+    await expect(
+      harness.application.createCampaign(
+        principal([mcpCampaignDraftScope]),
+        {
+          idempotencyKey,
+          subject: "August news",
+          previewText: "What changed this month",
+          callToAction: { label: "Read more", href: "/blog/august" },
+          emailContent: {
+            type: "doc",
+            content: [],
+          } as unknown as CampaignRevision["emailContent"],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: campaignSenderDetailsNotConfiguredReason,
+      message:
+        "The site owner must set the sender details in the dashboard before this can be used.",
+    });
+  });
+
+  it("gives the same named reason for every campaign command, not only create", async () => {
+    const harness = fixture({
+      async edit() {
+        throw new CampaignValidationError(
+          campaignSenderDetailsNotConfiguredReason,
+        );
+      },
+    });
+    harness.activeGrant([mcpCampaignDraftScope]);
+    await expect(
+      harness.application.editCampaign(
+        principal([mcpCampaignDraftScope]),
+        {
+          campaignId,
+          expectedVersion: 1,
+          idempotencyKey,
+          subject: "August news",
+          previewText: "What changed this month",
+          callToAction: { label: "Read more", href: "/blog/august" },
+          emailContent: {
+            type: "doc",
+            content: [],
+          } as unknown as CampaignRevision["emailContent"],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      reason: campaignSenderDetailsNotConfiguredReason,
+    });
   });
 
   it("reports the test scope, not the draft scope, on a denied test", async () => {

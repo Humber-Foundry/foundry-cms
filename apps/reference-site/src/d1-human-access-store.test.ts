@@ -6,6 +6,7 @@ import {
   AccessDeniedError,
   createEligibilitySyncOperationId,
   createHumanAccessApplication,
+  LastOwnerError,
   type ExternalHumanIdentity,
 } from "@humber-foundry/application";
 import { createSiteId } from "@humber-foundry/site-definition";
@@ -401,6 +402,75 @@ describe("D1 human access store", () => {
         capability: "dashboard.view",
       }),
     ).rejects.toEqual(new AccessDeniedError("membership_not_active"));
+  });
+
+  it("changes role through the shared last-Owner trigger and writes an audit event", async () => {
+    let nextId = 0;
+    const application = createHumanAccessApplication({
+      siteId,
+      store: createD1HumanAccessStore(
+        database as unknown as D1DatabaseBinding,
+      ),
+      eligibilitySynchronizer: {
+        async replaceExactEmailEligibility() {},
+      },
+      clock: () => now,
+      createId: (kind) => `${kind}-${++nextId}`,
+    });
+
+    await application.commands.invite({
+      actor: owner,
+      email: editor.email,
+      role: "editor",
+    });
+    const membership = await application.commands.activateInvitation({
+      actor: editor,
+    });
+
+    await expect(
+      application.commands.changeRole({
+        actor: owner,
+        membershipId: membership.id,
+        role: "owner",
+      }),
+    ).resolves.toMatchObject({ id: membership.id, role: "owner" });
+
+    await expect(
+      database
+        .prepare(
+          `SELECT event_type FROM human_access_audit_events
+           WHERE site_id = ?1 AND subject_id = ?2
+           ORDER BY id`,
+        )
+        .bind(siteId, membership.id)
+        .all(),
+    ).resolves.toMatchObject({
+      results: [
+        { event_type: "membership.activated" },
+        { event_type: "membership.role_owner" },
+      ],
+    });
+
+    // Two active Owners now exist (the original and the promoted editor), so
+    // demoting the original is allowed.
+    await expect(
+      application.commands.changeRole({
+        actor: editor,
+        membershipId: "membership-owner" as never,
+        role: "editor",
+      }),
+    ).resolves.toMatchObject({ id: "membership-owner", role: "editor" });
+
+    // The DB trigger that protects the last active Owner (migration
+    // 0001_human_access.sql) fires on role the same way it fires on status,
+    // so the one remaining Owner cannot demote themselves either.
+    await expect(
+      application.commands.changeRole({
+        actor: editor,
+        membershipId: membership.id,
+        role: "editor",
+      }),
+    ).rejects.toEqual(new LastOwnerError());
   });
 
   it("atomically rejects an invitation for a current membership email", async () => {

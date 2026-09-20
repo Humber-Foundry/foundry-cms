@@ -12,6 +12,7 @@ import {
   createHumanMembershipId,
   createHumanUserId,
   createInvitationEligibilitySyncOperationId,
+  isMembershipRoleChangeAllowed,
   isMembershipStatusTransitionAllowed,
   readInvitationIdFromEligibilitySyncOperation,
 } from "@humber-foundry/application";
@@ -550,6 +551,72 @@ export function createD1HumanAccessStore(
           return { changed: false, reason: "membership_not_found" };
         }
 
+        const membership = await findMembershipById({
+          siteId,
+          membershipId,
+        });
+        if (membership === null) {
+          return { changed: false, reason: "membership_not_found" };
+        }
+        return { changed: true, membership };
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.toLowerCase().includes("last_owner")
+        ) {
+          return { changed: false, reason: "last_owner" };
+        }
+        throw error;
+      }
+    },
+    async changeMembershipRole({ siteId, membershipId, role, now }) {
+      try {
+        const existing = await findMembershipById({ siteId, membershipId });
+        if (existing === null) {
+          return { changed: false, reason: "membership_not_found" };
+        }
+        if (!isMembershipRoleChangeAllowed(existing.status)) {
+          return {
+            changed: false,
+            reason: "membership_transition_not_allowed",
+          };
+        }
+        const results = await database.batch([
+          database
+            .prepare(
+              `UPDATE human_memberships
+               SET role = ?1, updated_at = ?2
+               WHERE site_id = ?3
+                 AND id = ?4
+                 AND status <> 'revoked'`,
+            )
+            .bind(role, now, siteId, membershipId),
+          database
+            .prepare(
+              `INSERT INTO human_access_audit_events (
+                 site_id, event_type, subject_id, occurred_at
+               )
+               SELECT ?1, ?2, ?3, ?4
+               WHERE EXISTS (
+                 SELECT 1 FROM human_memberships
+                 WHERE site_id = ?1
+                   AND id = ?3
+                   AND role = ?5
+                   AND updated_at = ?4
+               )`,
+            )
+            .bind(
+              siteId,
+              `membership.role_${role}`,
+              membershipId,
+              now,
+              role,
+            ),
+        ]);
+        const result = results[0]!;
+        if ((result.meta.changes ?? 0) < 1) {
+          return { changed: false, reason: "membership_not_found" };
+        }
         const membership = await findMembershipById({
           siteId,
           membershipId,

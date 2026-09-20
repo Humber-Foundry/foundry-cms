@@ -82,7 +82,8 @@ Tool execution errors set MCP `isError: true` and use:
     "retryable": false,
     "requiredScopes": [],
     "latestRevision": 8,
-    "conflictResource": "foundry://workspaces/.../revisions/8"
+    "conflictResource": "foundry://workspaces/.../revisions/8",
+    "reason": null
   },
   "meta": {
     "replayed": false,
@@ -94,6 +95,12 @@ Tool execution errors set MCP `isError: true` and use:
 Malformed JSON-RPC, unknown tools and requests that do not satisfy the declared
 input schema use JSON-RPC protocol errors. Domain validation, authorization,
 conflict and provider failures use the structured execution error above.
+
+`reason` is a named, machine-readable cause the agent can act on beyond the
+generic `code` — for example `campaign_sender_details_not_configured`, which
+every campaign tool reports while an installation has not set the sender
+details a campaign email's footer needs (ADR-0030). It is `null` for a
+refusal that carries no named reason beyond its `code`.
 
 Stable error codes:
 
@@ -407,6 +414,12 @@ the campaign fingerprint. Output contains receipt IDs, accepted/failed counts
 and safe provider status, never addresses or provider message-recipient data.
 Editing the campaign invalidates the test receipt. This tool cannot activate a
 schedule or create bulk-send authorization.
+
+Every `foundry.campaign.*` tool refuses with `code: "VALIDATION_FAILED"` and
+`reason: "campaign_sender_details_not_configured"` while the installation has
+not set the sender details a campaign email's footer needs. The `message`
+tells the agent to ask the site owner to set them in the dashboard. Nothing is
+read or written while this reason is reported (ADR-0030).
 
 ### Aggregate analytics
 

@@ -36,18 +36,6 @@ export const mcpSupportedScopes = Object.freeze([
   mcpCampaignTestScope,
   mcpAnalyticsReadScope,
 ] as const);
-/** The words shown to a site Owner for each scope on the consent screen. */
-export const mcpScopeLabels: Readonly<Record<string, string>> = Object.freeze({
-  [mcpInitialScope]: "Read this site",
-  [mcpContentDraftScope]: "Draft content",
-  [mcpDesignDraftScope]: "Draft design",
-  [mcpPublicationScheduleScope]: "Schedule publication",
-  [mcpPublicationPublishScope]: "Publish approved work",
-  [mcpCampaignDraftScope]: "Draft newsletter campaigns",
-  [mcpCampaignTestScope]: "Send a campaign test to verified addresses",
-  [mcpAnalyticsReadScope]: "Read aggregate analytics",
-});
-
 /**
  * A client that may start an authorization. `environment` clients come from the
  * operator's allowlist. `dynamic` clients registered themselves under RFC 7591.
@@ -192,6 +180,16 @@ export class McpReadError extends Error {
   readonly conflictResource: string | null;
   readonly replayed: boolean;
   readonly auditRecorded: boolean;
+  /**
+   * The named, machine-readable cause behind this refusal — for example
+   * `campaign_sender_details_not_configured` — set only when application code
+   * has already prepared one exact, vetted sentence for that named cause.
+   * When set, the tool error's `message` is this error's own `message`
+   * instead of the generic per-`code` sentence, because the reason and
+   * message were written together and reviewed together, unlike an arbitrary
+   * thrown error's message. `null` for every other refusal.
+   */
+  readonly reason: string | null;
 
   constructor(
     code: McpReadErrorCode,
@@ -204,6 +202,7 @@ export class McpReadError extends Error {
       conflictResource?: string;
       replayed?: boolean;
       auditRecorded?: boolean;
+      reason?: string;
     }> | null = null,
   ) {
     super(message);
@@ -217,6 +216,7 @@ export class McpReadError extends Error {
     this.conflictResource = context?.conflictResource ?? null;
     this.replayed = context?.replayed ?? false;
     this.auditRecorded = context?.auditRecorded ?? false;
+    this.reason = context?.reason ?? null;
   }
 }
 
@@ -557,6 +557,7 @@ export function createMcpReadApplication({
           ...(safeError.conflictResource === null
             ? {}
             : { conflictResource: safeError.conflictResource }),
+          ...(safeError.reason === null ? {} : { reason: safeError.reason }),
           replayed: safeError.replayed,
           auditRecorded: safeError.auditRecorded,
         },
@@ -625,6 +626,7 @@ export function createMcpReadApplication({
             reportedError.latestRevision ?? undefined,
           conflictResource:
             reportedError.conflictResource ?? undefined,
+          reason: reportedError.reason ?? undefined,
           replayed: reportedError.replayed,
           auditRecorded: joinedFailureRecorded,
         },

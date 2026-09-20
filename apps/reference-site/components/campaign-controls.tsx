@@ -1302,11 +1302,12 @@ export function CampaignControls({
               <summary>How the email reads, and technical details</summary>
               <pre>{rendered.text.bytes}</pre>
               <p>
-                Content ID: <code>{rendered.html.fingerprint}</code>
+                Content ID{" "}
                 <HelpTip label="What's a Content ID?">
                   A code that proves this email's exact content, so support
                   can confirm nothing changed after it was approved.
                 </HelpTip>
+                : <code>{rendered.html.fingerprint}</code>
               </p>
             </details>
           )}
