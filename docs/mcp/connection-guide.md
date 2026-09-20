@@ -13,14 +13,51 @@ the agent your dashboard login, Cloudflare account, GitHub account or email
 provider credentials.
 
 Start with the smallest useful permission. Every connection includes **Read
-site** (`site.read`), which cannot be cleared. A client may also ask for
-**Draft content** (`content.draft`), **Draft design** (`design.draft`),
-**Schedule publication** (`publication.schedule`) or **Publish**
-(`publication.publish`) at the same time. The consent screen shows one control
-per requested permission. Clear anything you do not want; you can approve fewer
-permissions than the client asked for. A site Owner can also add permissions to
-an existing connection later. Removing a permission still means revoking the
-connection.
+the site** (`site.read`), which cannot be cleared. A client may also ask for
+**Draft page and post content** (`content.draft`), **Draft the site design**
+(`design.draft`), **Schedule publishing** (`publication.schedule`) or
+**Publish** (`publication.publish`) at the same time. The consent screen shows
+one control per requested permission. Clear anything you do not want; you can
+approve fewer permissions than the client asked for. A site Owner can also add
+permissions to an existing connection later. Removing a permission still means
+revoking the connection.
+
+These phrases come from one shared list
+(`apps/reference-site/src/mcp-connection-display.ts`), used on the dashboard's
+Connected agents list, the "Connect an AI agent" screen, and the consent
+screen itself, so an Owner reads the same words everywhere a permission is
+shown.
+
+## The "Connect an AI agent" screen
+
+The dashboard's Settings page has a "Connect an agent" button under Connected
+agents. It opens a screen with this site's agent address, a plain list of what
+a connected agent can and cannot do, and the published steps for Claude and
+ChatGPT. Nothing on that screen is pasted anywhere by the Owner: the address is
+not a secret, and the screen never shows a token, a client secret or a
+personal address.
+
+If the installation is not reachable from outside its own machine — a local
+development copy or a private preview — the screen says so, because Claude and
+ChatGPT run in their own cloud and cannot reach an address that only resolves
+locally.
+
+The steps for each client are read from that client's own published
+documentation, not from memory, and are dated:
+
+- Claude (claude.ai custom connector): read 18 September 2026 from
+  <https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp>.
+- Claude Code (`claude mcp add --transport http <name> <url>`): read 18
+  September 2026 from <https://code.claude.com/docs/en/mcp>.
+- ChatGPT (Developer mode custom connector): read 18 September 2026 from
+  <https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt>
+  and <https://developers.openai.com/api/docs/mcp>.
+
+Foundry has not tested a live connection against claude.ai, ChatGPT or Claude
+Code (see [the conformance plan](conformance.md)). The screen and this guide
+therefore both say "steps for Claude" and "steps for ChatGPT" — a set of
+published steps to follow, never a claim that this exact screen was seen
+working with that client.
 
 ## Installation configuration
 
