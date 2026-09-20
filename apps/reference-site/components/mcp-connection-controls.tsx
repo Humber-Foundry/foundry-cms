@@ -24,7 +24,7 @@ export function McpConnectionTable({
   if (connections.length === 0) {
     return (
       <p className="empty-state">
-        No agent is connected yet. Use Connect an agent above to start one.
+        No app is connected yet. Connecting one starts above.
       </p>
     );
   }

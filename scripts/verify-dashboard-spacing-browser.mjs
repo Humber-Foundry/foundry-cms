@@ -362,11 +362,10 @@ async function checkDestination(page, origin, name, href, viewportLabel) {
     // (`@puckeditor/core/puck.css`), which itself `@import`s a font
     // stylesheet from `https://rsms.me` — the one cross-origin request on
     // an otherwise same-origin page. `networkidle` waits for that request
-    // to go quiet too, and on a loaded machine (already a known source of
-    // socket contention here — see the D1/workerd port-exhaustion note in
-    // WORKER_RULES) that cross-origin fetch can stall past the 45s
-    // timeout while the page itself has already rendered. Settings pays
-    // for this more than the other destinations because it does the
+    // to go quiet too, and on a loaded machine that cross-origin fetch can
+    // stall past the 45s timeout while the page itself has already
+    // rendered. Settings pays for this more than the other destinations
+    // because it does the
     // heaviest server read of any dashboard screen (members, MCP
     // connections, owner-notification health, campaign context, email and
     // publishing readiness), which pushes the request later into the
