@@ -116,7 +116,7 @@ Stable error codes:
 | `APPROVAL_STALE` | Approval fingerprint no longer matches | New preview/review |
 | `WRONG_ARTIFACT_KIND` | Email/campaign artifact passed to publication scheduler | No |
 | `PUBLICATION_BUSY` | Another production publication owns the lease | After `retryAfterMs` |
-| `TEMPORARILY_UNAVAILABLE` | Dependency unavailable before safe completion | Same key after delay, unless the tool writes a draft revision: a draft mutation stores its refusal against the key it carried and replays it word for word, so that retry needs a new key. The refusal's own sentence says which |
+| `TEMPORARILY_UNAVAILABLE` | Dependency unavailable before safe completion | Same key after delay, unless the tool records a mutation receipt: such a tool stores its refusal against the key it carried and replays it word for word, so that retry needs a new key. The refusal's own sentence says which |
 | `RESULT_UNKNOWN` | Outcome reconciliation in progress | Poll status |
 | `RATE_LIMITED` | Connection/site budget exceeded | After `retryAfterMs` |
 | `CONNECTION_REVOKED` | D1 grant inactive | Owner reconnects |

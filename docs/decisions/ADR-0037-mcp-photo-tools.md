@@ -93,9 +93,10 @@ a page an agent made inside the draft can take a photo. It then calls
 Those two steps are not one transaction, and the dashboard's own Photos page
 has the same shape. If the second step is refused — a stale draft, say — the
 occurrence head has moved and the draft has not. Nothing is lost and nothing is
-published: the agent reads the draft again and retries, the media library
-answers the repeated placement from its own receipt, and the draft then catches
-up.
+published. The agent reads the draft again and sends the placement with a new
+retry key, because the refusal it received is stored against the old one. The
+media library then moves the occurrence on one more revision and the draft
+writes that revision, so the two agree again.
 
 Because the placement writes a draft revision, it records its receipt in
 `mcp_mutation_receipts` and migration 0033 widens that table's `operation`
