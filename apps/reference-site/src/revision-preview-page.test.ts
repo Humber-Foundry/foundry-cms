@@ -8,6 +8,8 @@ import {
   type SiteHref,
 } from "@humber-foundry/site-definition";
 
+import { twoPageSiteDefinition } from "./test-support/two-page-site-definition";
+
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   getRevision: vi.fn(),
@@ -206,26 +208,14 @@ describe("revision preview page", () => {
 
 /**
  * The reference definition plus a second page, for proving links between
- * pages inside a preview. `apps/reference-site/src/test-support/
- * two-page-site-definition.ts` (arriving with PR #188) will be the shared
- * version of this fixture; this file builds its own copy until that lands.
+ * pages inside a preview. Uses the shared two-page fixture from PR #188.
  */
 function withSecondPage() {
-  const home = homePage(referenceSiteDefinition);
-  const about = {
-    id: "page_about",
-    slug: "about",
-    title: "About",
-    seo: { title: "", description: "", keywords: [], shareImage: null },
-    sections: [],
-  };
+  const definition = twoPageSiteDefinition;
   return {
-    definition: {
-      ...referenceSiteDefinition,
-      pages: [home, about],
-    },
-    home,
-    about,
+    definition,
+    home: homePage(definition),
+    about: definition.pages[1]!,
   };
 }
 
