@@ -643,3 +643,119 @@
     flex-direction: column;
   }
 }
+
+/* Newsletter signup.
+   The address field and the button sit on one line on a wide screen and stack
+   on a phone. Both stay at least 44px high so they can be tapped, and keep
+   their corner radius: square corners are for photos. Two type sizes only —
+   the heading, and everything else — with colour carrying the hierarchy. */
+
+.newsletter-section {
+  width: min(100%, var(--design-content-width));
+  margin-inline: auto;
+  padding: clamp(4.5rem, 9vw, 8rem) var(--page-gutter);
+}
+
+.newsletter-signup-title {
+  max-width: 16ch;
+  margin: 0 0 1.25rem;
+  color: var(--ink);
+  font-family: var(--design-heading-font);
+  font-size: clamp(2.25rem, 5vw, 4.5rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+/* One size for every word below the heading. Colour separates the lead
+   paragraph and the consent sentence from the field label. */
+.newsletter-signup-body {
+  max-width: 36rem;
+  margin: 0 0 2rem;
+  color: var(--ink-soft);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.newsletter-signup-form {
+  max-width: 36rem;
+}
+
+.newsletter-signup-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.newsletter-signup-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.newsletter-signup-input {
+  flex: 1 1 18rem;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+}
+
+.newsletter-signup-input:focus-visible {
+  outline: 2px solid var(--design-accent);
+  outline-offset: 2px;
+}
+
+.newsletter-signup-button {
+  min-height: 3rem;
+  padding: 0.75rem 1.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: var(--design-accent-deep);
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.newsletter-signup-button:hover:not(:disabled) {
+  background: var(--design-accent);
+}
+
+.newsletter-signup-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.newsletter-signup-button:focus-visible {
+  outline: 2px solid var(--design-accent);
+  outline-offset: 2px;
+}
+
+.newsletter-signup-note {
+  max-width: 36rem;
+  margin: 1rem 0 0;
+  color: var(--ink-soft);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* The automated-traffic check. It is empty until the widget draws itself, so
+   it takes its spacing only once it holds something. */
+.newsletter-signup-check:not(:empty) {
+  margin-top: 1rem;
+}
+
+@media (max-width: 52rem) {
+  .newsletter-signup-input,
+  .newsletter-signup-button {
+    flex: 1 1 100%;
+  }
+}
