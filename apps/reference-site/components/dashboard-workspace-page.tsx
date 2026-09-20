@@ -1,10 +1,12 @@
-import { ContentWorkspaceStarter } from "./content-workspace-starter";
+import { ContentDraftRecovery } from "./content-draft-recovery";
 import { WorkspaceEditorSurface } from "./workspace-editor-surface";
 import {
   loadDashboardWorkspace,
   loadMutationToken,
   loadPublishedDefinition,
+  preservedRevisionOf,
   readWorkspaceSearchParams,
+  recoveryReasonOf,
 } from "@/src/dashboard-page-context";
 import { siteStaticImageTiles } from "@/src/site-used-photos";
 
@@ -37,12 +39,16 @@ export async function DashboardWorkspacePage({
   const dashboardWorkspace = await loadDashboardWorkspace(
     workspace,
     config.route,
+    staleRecovery,
   );
   const mutationToken = await loadMutationToken();
   const { contentRevision, previewUrl, schemaRecovery } = dashboardWorkspace;
-  const needsFreshWorkspace =
-    schemaRecovery !== undefined || contentRevision === undefined;
-  const showStarter = needsFreshWorkspace || previewUrl === undefined;
+  // The draft workspace always exists, so nothing interrupts a first visit.
+  // Only an older-schema draft sends the owner to the recovery screen here.
+  // A draft that is merely behind the published site stays editable: the
+  // editor below reports that state and offers its own way forward, which
+  // Overview and Blog do not have.
+  const showStarter = schemaRecovery !== undefined;
   // Every photo the site already shows, so the canvas photo picker lists
   // existing photos, not only uploaded ones.
   const publishedDefinition = showStarter
@@ -50,7 +56,7 @@ export async function DashboardWorkspacePage({
     : await loadPublishedDefinition();
   const siteImages = showStarter
     ? []
-    : siteStaticImageTiles(publishedDefinition, contentRevision?.definition);
+    : siteStaticImageTiles(publishedDefinition, contentRevision.definition);
 
   return (
     <main className="dashboard-main" id="main">
@@ -63,19 +69,12 @@ export async function DashboardWorkspacePage({
         </div>
       ) : null}
       {showStarter ? (
-        <ContentWorkspaceStarter
+        <ContentDraftRecovery
           csrfToken={mutationToken}
           staleRecovery={staleRecovery}
-          preservedRevision={
-            contentRevision && schemaRecovery
-              ? {
-                  workspaceId: contentRevision.workspaceId,
-                  revision: contentRevision.revision,
-                  schemaVersion: contentRevision.inputs.schemaVersion,
-                }
-              : undefined
-          }
+          preservedRevision={preservedRevisionOf(contentRevision)}
           durableRecoveryEdits={schemaRecovery}
+          reason={recoveryReasonOf(dashboardWorkspace)}
         />
       ) : (
         <WorkspaceEditorSurface

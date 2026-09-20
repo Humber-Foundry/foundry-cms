@@ -135,19 +135,9 @@ async function main() {
 
     // Start a workspace and land on the page editor.
     await page.goto(`${origin}/dash`);
-    const startWorkspace = page.getByRole("button", {
-      name: "Start workspace",
-    });
-    await startWorkspace.waitFor({ state: "visible" });
-    await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname === "/api/foundry-cms/revisions" &&
-          response.status() === 201,
-      ),
-      startWorkspace.click(),
-    ]);
+    // The dashboard creates the draft workspace on the server, so Overview
+    // links straight into the page editor.
+    await page.getByRole("link", { name: /^(Start|Continue) editing$/u }).click();
     await page.waitForURL(/\/dash\/pages\?workspace=workspace_[a-f0-9]{24}$/u);
     const workspace = new URL(page.url()).searchParams.get("workspace");
 
@@ -225,6 +215,18 @@ async function main() {
     }
     const changePhoto = canvas.getByRole("button", { name: "Change photo" });
     await changePhoto.first().waitFor({ state: "visible" });
+
+    // Let the add-section autosave land before touching the photo. The
+    // dashboard now creates the draft workspace while it renders, so this is
+    // the first request this run makes to the revision route, and a
+    // development server compiles that route before it answers. Waiting here
+    // keeps that one-off compile out of the swap being measured below.
+    for (let attempt = 0; photoBandSaves.length === 0 && attempt < 300; attempt += 1) {
+      await page.waitForTimeout(100);
+    }
+    if (photoBandSaves.length === 0) {
+      throw new Error("page_photo_add_section_never_saved");
+    }
 
     // Open the shared picker — it opens in the editor's own document, a
     // full-screen dialog, not a box trapped inside the canvas — and choose the
