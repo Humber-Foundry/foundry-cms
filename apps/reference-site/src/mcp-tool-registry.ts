@@ -534,12 +534,16 @@ function isMediaAssetId(value: unknown): value is string {
 }
 
 /**
- * The longest base64 text a photo may arrive as. It is the encoded length of
- * the largest picture one tool call may carry, padding included, so an
- * oversized request is refused by the advertised schema and never decoded.
+ * The longest base64 text a photo may arrive as.
+ *
+ * This is the transport bound, not the photo rule. It leaves a little room
+ * above the encoded length of the largest picture allowed, so a photo just
+ * over the limit reaches the application and is refused there with the named
+ * reason `media_too_large`, which says what to do. A picture far over the
+ * limit is refused by the schema instead, before anything is decoded.
  */
 const mediaUploadBase64MaxLength =
-  Math.ceil(mcpMediaUploadMaxByteLength / 3) * 4;
+  Math.ceil((mcpMediaUploadMaxByteLength + 64 * 1024) / 3) * 4;
 
 /**
  * What every photo tool reports about one photo. It carries no person, no
@@ -3244,21 +3248,23 @@ export function createMcpToolRegistry(application: McpReadApplication) {
         application.archiveBlogPost !== undefined;
       return Object.entries(descriptors)
         .filter(([name]) => {
+          // Every photo tool reads or writes this site's own media library,
+          // which is draft work: a photo is added and placed inside a draft a
+          // person reviews. See ADR-0037.
+          if (name.startsWith("foundry.media.")) {
+            return (
+              supportsDrafts &&
+              principal.scopes.includes(mcpContentDraftScope)
+            );
+          }
           if (
             name.startsWith("foundry.workspace.") ||
             name.startsWith("foundry.page.") ||
-            name.startsWith("foundry.media.") ||
             name === "foundry.content.patch" ||
             name === "foundry.design.patch" ||
             name === "foundry.preview.prepare"
           ) {
             if (!supportsDrafts) return false;
-          }
-          // Every photo tool reads or writes this site's own media library,
-          // which is draft work: a photo is added and placed inside a draft a
-          // person reviews. See ADR-0037.
-          if (name.startsWith("foundry.media.")) {
-            return principal.scopes.includes(mcpContentDraftScope);
           }
           // The two blog draft writes are draft work and need the content
           // draft scope. Archive and restore are blog collection work and

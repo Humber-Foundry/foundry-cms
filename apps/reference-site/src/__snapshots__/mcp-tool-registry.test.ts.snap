@@ -202,7 +202,7 @@ exports[`MCP campaign and analytics tool registry > matches the reviewed complet
     "execution": {
       "taskSupport": "forbidden",
     },
-    "inputSchemaSha256": "bcb10e4ffa5a9b87457c140195caec78c2855be844fd13b78d7c8284139b22af",
+    "inputSchemaSha256": "0777e65b21dabcb3ea93909ac9b94ecbf8288858dfcc9847f5efa903edb60560",
     "name": "foundry.media.upload",
     "outputSchemaSha256": "1e9699425b5cc9d927680c6b60eb9b1a994d0f9f718a8f3f52667810e122ba02",
   },

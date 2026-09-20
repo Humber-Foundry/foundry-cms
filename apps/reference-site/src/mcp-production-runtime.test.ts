@@ -7,8 +7,54 @@ import {
   checkMcpAccessBoundary,
   isMcpProductionRequest,
   mcpAccessBoundary,
+  mcpMediaAssetId,
   readMcpRegisteredClients,
 } from "./mcp-production-runtime";
+
+import type { McpConnectionPrincipal } from "@humber-foundry/application";
+import type { SiteId } from "@humber-foundry/site-definition";
+
+function mediaPrincipal(
+  overrides: Partial<McpConnectionPrincipal> = {},
+): McpConnectionPrincipal {
+  return {
+    connectionId: "connection-media",
+    actorId: "actor-media",
+    clientId: "https://client.example/media.json",
+    siteId: "site_media" as SiteId,
+    scopes: ["site.read", "content.draft"],
+    ...overrides,
+  };
+}
+
+describe("the photo id an upload mints", () => {
+  it("mints the same id for a retry and a different one for anyone else", async () => {
+    const key = "11111111-1111-4111-8111-111111111111";
+    const first = await mcpMediaAssetId(mediaPrincipal(), key);
+    // A retry after an unknown result mints the same id, so the site keeps
+    // one photo rather than two. See ADR-0037.
+    expect(await mcpMediaAssetId(mediaPrincipal(), key)).toBe(first);
+    expect(first).toMatch(/^asset_[0-9a-f]{32}$/u);
+
+    // A different connection, a different site, or a different retry key all
+    // mint a different id, so no agent can reach an id another actor holds.
+    expect(
+      await mcpMediaAssetId(mediaPrincipal({ actorId: "actor-other" }), key),
+    ).not.toBe(first);
+    expect(
+      await mcpMediaAssetId(
+        mediaPrincipal({ siteId: "site_other" as SiteId }),
+        key,
+      ),
+    ).not.toBe(first);
+    expect(
+      await mcpMediaAssetId(
+        mediaPrincipal(),
+        "22222222-2222-4222-8222-222222222222",
+      ),
+    ).not.toBe(first);
+  });
+});
 
 describe("production MCP configuration", () => {
   it("accepts only explicit clients with exact secure or loopback redirects", () => {

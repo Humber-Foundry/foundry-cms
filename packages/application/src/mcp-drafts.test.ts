@@ -3208,7 +3208,11 @@ describe("MCP photo tools", () => {
       )?.asset.assetId,
     ).toBe(uploaded.assetId);
 
-    const preview = resultOf<{ previewId: string; humanReviewUrl: string }>(
+    const preview = resultOf<{
+      previewId: string;
+      humanReviewUrl: string;
+      previewArtifact: string;
+    }>(
       await fixtureValue.application.preparePreview(
         principalValue,
         {
@@ -3219,6 +3223,20 @@ describe("MCP photo tools", () => {
         context,
       ),
     );
+    // The artifact a person reviews is the hash of this exact revision, and
+    // this revision is the one holding the photo. So the photo is inside
+    // what the preview shows, not merely inside the draft.
+    const reviewed = await fixtureValue.workspaces
+      .get(workspaceId)!
+      .queries.getRevision(placed.revision);
+    expect(preview.previewArtifact).toBe(
+      await createCanonicalPreviewArtifactHash(reviewed!),
+    );
+    expect(
+      (homePage(reviewed!.definition).media ?? []).find(
+        ({ occurrenceId }) => occurrenceId === "occurrence_home_hero",
+      )?.asset.assetId,
+    ).toBe(uploaded.assetId);
     // The preview is where the agent stops. Nothing here approves it.
     expect(preview.humanReviewUrl).toContain(preview.previewId);
   });

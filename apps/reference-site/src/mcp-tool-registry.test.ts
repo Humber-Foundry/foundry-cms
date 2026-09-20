@@ -20,6 +20,7 @@ import {
   mcpContentDraftScope,
   mcpDesignDraftScope,
   mcpInitialScope,
+  mcpMediaUploadMaxByteLength,
   mcpPublicationPublishScope,
   mcpPublicationScheduleScope,
   type McpConnectionPrincipal,
@@ -884,6 +885,32 @@ describe("MCP campaign and analytics tool registry", () => {
         }
       }
     }
+  });
+
+  it("lets a photo just over the limit reach its named refusal", () => {
+    // The schema is the transport bound, not the photo rule. A photo a little
+    // over 4 MiB has to reach the application, which refuses it with
+    // `media_too_large` and says to send a smaller copy. See ADR-0037.
+    const upload = fullRegistry()
+      .list(principal([mcpInitialScope, mcpContentDraftScope]))
+      .find(({ name }) => name === "foundry.media.upload")!;
+    const validate = new Ajv2020({
+      strict: false,
+      formats: { uuid: true },
+    }).compile(upload.inputSchema);
+    const base64Length = (byteLength: number) =>
+      Math.ceil(byteLength / 3) * 4;
+    const request = (length: number) => ({
+      fileName: "photo.jpg",
+      bytesBase64: "A".repeat(length),
+      idempotencyKey: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(
+      validate(request(base64Length(mcpMediaUploadMaxByteLength) + 8)),
+    ).toBe(true);
+    expect(
+      validate(request(base64Length(mcpMediaUploadMaxByteLength * 2))),
+    ).toBe(false);
   });
 
   it("takes no recipient selection on a test and no raw query on analytics", () => {

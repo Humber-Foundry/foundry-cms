@@ -20,7 +20,7 @@ export const mcpAgentCapabilityDescriptions: Readonly<
   "site.read":
     "Read your site's pages, posts, schema and design. Every connection includes this.",
   "content.draft":
-    "Prepare draft changes to your pages and posts — their words, which sections a page holds, pages it adds or removes, and new blog posts it writes — as a new draft you review before it goes live. It can also add photos to your photo library, put them on a page, take a post out of your blog and put one back.",
+    "Prepare draft changes to your pages and posts — their words, which sections a page holds, pages it adds or removes, and new blog posts it writes — as a new draft you review before it goes live. It can add photos to your photo library and put them on a page. It can also take a post out of your blog and put one back.",
   "design.draft":
     "Prepare draft changes to your site's design tokens and section styles, as a new draft you review before it goes live.",
   "publication.schedule":

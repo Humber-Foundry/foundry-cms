@@ -12,6 +12,7 @@ import {
   createSiteApplication,
   isMediaContentType,
   McpMediaValidationError,
+  McpReadError,
   MediaOccurrenceConflictError,
   MediaSiteAccessError,
   MediaValidationError,
@@ -20,7 +21,10 @@ import {
   type MediaAsset,
 } from "@humber-foundry/application";
 
-import { createBlogPostId } from "@humber-foundry/site-definition";
+import {
+  createBlogPostId,
+  mediaImageSrc,
+} from "@humber-foundry/site-definition";
 
 import {
   createMediaAssetId,
@@ -254,7 +258,7 @@ export function isMcpProductionRequest(request: Request): boolean {
  * sent, so a retry after an unknown result mints the same id and leaves one
  * photo, not two. An agent never chooses a photo's id.
  */
-async function mcpMediaAssetId(
+export async function mcpMediaAssetId(
   principal: McpConnectionPrincipal,
   idempotencyKey: string,
 ) {
@@ -285,7 +289,9 @@ function mcpMediaMutationKey(idempotencyKey: string) {
 function mcpMediaAssetOf(asset: MediaAsset): McpMediaAsset {
   return {
     assetId: asset.assetId,
-    mediaPath: `/api/media/${asset.assetId}`,
+    // The one place this site's media address is built, so a photo the tool
+    // names and a photo the renderer serves are the same address.
+    mediaPath: mediaImageSrc(asset.assetId),
     fileName: asset.fileName,
     contentType: asset.contentType,
     byteLength: asset.byteLength,
@@ -296,11 +302,14 @@ function mcpMediaAssetOf(asset: MediaAsset): McpMediaAsset {
 }
 
 /**
- * Turn a refused media command into a refusal with a named cause. A media
- * rule the library keeps becomes a validation refusal an agent can act on;
- * anything else is left alone so it is reported as the failure it is.
+ * Turn a refusal the media library raised into one an agent can act on.
+ *
+ * A rule the library keeps becomes a validation refusal with a named cause.
+ * Losing the library's short mutation lease is not a rule at all, so it
+ * becomes a retryable refusal rather than one that reads as a permission
+ * problem. Anything else is left alone and reported as the failure it is.
  */
-function mcpMediaRefusal(error: unknown, fallbackReason: string) {
+function mediaLibraryRefusal(error: unknown, fallbackReason: string) {
   if (error instanceof McpMediaValidationError) return error;
   if (error instanceof MediaValidationError) {
     return new McpMediaValidationError(
@@ -315,9 +324,13 @@ function mcpMediaRefusal(error: unknown, fallbackReason: string) {
     );
   }
   if (error instanceof MediaSiteAccessError) {
-    return new McpMediaValidationError(
-      fallbackReason,
-      "That photo is not available to this connection.",
+    // The media library raises this both for a photo of another site and for
+    // a mutation lease it could not renew. The second is transient and the
+    // two cannot be told apart here, so the refusal invites a retry rather
+    // than telling an agent to stop.
+    return new McpReadError(
+      "TEMPORARILY_UNAVAILABLE",
+      "The photo library is busy. Try the same request again.",
     );
   }
   return error;
@@ -451,7 +464,7 @@ export function createProductionMcpRuntime(
           });
           return mcpMediaAssetOf(asset);
         } catch (error) {
-          throw mcpMediaRefusal(error, "media_upload_refused");
+          throw mediaLibraryRefusal(error, "media_upload_refused");
         }
       },
       async placeMediaOccurrence({
@@ -499,7 +512,7 @@ export function createProductionMcpRuntime(
             },
           };
         } catch (error) {
-          throw mcpMediaRefusal(error, "media_place_refused");
+          throw mediaLibraryRefusal(error, "media_place_refused");
         }
       },
       cursors,

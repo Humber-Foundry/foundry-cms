@@ -64,16 +64,14 @@ export type McpMediaAsset = Readonly<{
   createdAt: string;
 }>;
 
-/** What placing a photo in one page slot gives back. */
+/**
+ * What placing a photo in one page slot gives back. The photo's own shape is
+ * the Site Definition's, so the two cannot drift apart.
+ */
 export type McpPlacedMediaOccurrence = Readonly<{
   occurrenceId: string;
   revision: number;
-  asset: Readonly<{
-    assetId: string;
-    width: number;
-    height: number;
-    contentType: "image/jpeg" | "image/png" | "image/webp" | "image/avif";
-  }>;
+  asset: SiteMediaOccurrence["asset"];
 }>;
 
 /**
@@ -139,7 +137,9 @@ export type McpDraftRuntime = Readonly<{
     assetId: string;
   }): Promise<boolean>;
   /**
-   * Every photo this site's media library holds, newest first. The list
+   * Every photo this site's media library holds, in the order the site added
+   * them, oldest first. That order is stable, so a photo added between two
+   * pages of a listing never pushes another photo past the reader. The list
    * carries only what an agent needs to name and size a photo; it carries no
    * person and no address. See ADR-0037.
    */
@@ -1710,9 +1710,10 @@ export function createMcpDraftApplication({
      * List the photos this site's media library holds.
      *
      * The list is a page at a time with an opaque marker, the same way the
-     * published content list is. It names each photo, its type and its size,
-     * and the site's own address for it, which is the address a blog post
-     * must use. It never names who added a photo. See ADR-0037.
+     * published content list is, and in the order the site added the photos.
+     * It names each photo, its type and its size, and the site's own address
+     * for it, which is the address a blog post must use. It never names who
+     * added a photo. See ADR-0037.
      */
     listMedia(
       principal: McpConnectionPrincipal,

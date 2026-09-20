@@ -48,10 +48,12 @@ const rpcBodyLimitBytes = 256 * 1024;
  * ceiling that applies to it.
  *
  * `foundry.media.upload` carries a photo's own bytes as base64, because no
- * MCP tool accepts a web address to fetch. Every other request keeps the
- * small limit: the body is read up to this ceiling, and a body above the
- * ordinary limit is refused unless the parsed request really is one call of
- * that tool. See ADR-0037.
+ * MCP tool accepts a web address to fetch. Two things keep the larger ceiling
+ * narrow. A connection without the content draft permission is held to the
+ * ordinary limit before its body is read at all, because no such connection
+ * can add a photo. A connection that has it is read this far, and its body is
+ * still refused above the ordinary limit unless the request really is one
+ * call of that tool. See ADR-0037.
  */
 const mediaUploadToolName = "foundry.media.upload";
 const rpcMediaUploadBodyLimitBytes = 6 * 1024 * 1024;
@@ -980,19 +982,32 @@ export function createMcpProtocolRuntime({
       let value: unknown;
       let bodyFailure: Response | null = null;
       try {
+        // Only a connection the Owner gave the content draft permission can
+        // add a photo, so only that connection's request is read past the
+        // ordinary limit. Every other connection is refused at 256 KiB
+        // before the body is read. See ADR-0037.
+        const mayUploadPhoto = principal.scopes.includes(
+          mcpContentDraftScope,
+        );
         const body = await context.run(() =>
           readBoundedBody(
             request,
-            rpcMediaUploadBodyLimitBytes,
+            mayUploadPhoto
+              ? rpcMediaUploadBodyLimitBytes
+              : rpcBodyLimitBytes,
             context.signal,
           ),
         );
-        value = JSON.parse(body.text);
-        if (
-          body.byteLength > rpcBodyLimitBytes &&
-          !isMediaUploadCall(value)
-        ) {
-          throw new RequestBodyLimitError();
+        if (body.byteLength > rpcBodyLimitBytes) {
+          // A large body is read only so the one tool that may carry a photo
+          // can be recognised. Anything else is refused, and the parse
+          // happens once.
+          value = JSON.parse(body.text);
+          if (!isMediaUploadCall(value)) {
+            throw new RequestBodyLimitError();
+          }
+        } else {
+          value = JSON.parse(body.text);
         }
       } catch (error) {
         if (error instanceof RequestBodyLimitError) {

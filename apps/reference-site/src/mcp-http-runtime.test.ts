@@ -2721,8 +2721,8 @@ describe("production MCP HTTP runtime", () => {
     ).toEqual(["site", "11111111-1111-4111-8111-111111111111"]);
 
     // A photo travels inside its own tool call, so that one call may carry a
-    // body above the ordinary limit. Every other method still cannot, even
-    // with the same body size. See ADR-0037.
+    // body above the ordinary limit — but only for a connection the Owner
+    // gave the content draft permission. See ADR-0037.
     const largeBody = "x".repeat(300_000);
     const oversizedListing = await ordinary.runtime.fetch(
       rpcRequest(accessToken, {
@@ -2733,7 +2733,9 @@ describe("production MCP HTTP runtime", () => {
       }),
     );
     expect(oversizedListing.status).toBe(413);
-    const largeUpload = await ordinary.runtime.fetch(
+    // This connection holds `site.read` alone, so it cannot add a photo and
+    // its body is refused at the ordinary limit whatever it claims to be.
+    const readOnlyUpload = await ordinary.runtime.fetch(
       rpcRequest(accessToken, {
         jsonrpc: "2.0",
         id: 92,
@@ -2744,13 +2746,43 @@ describe("production MCP HTTP runtime", () => {
         },
       }),
     );
-    expect(largeUpload.status).not.toBe(413);
-    // A body larger than the photo ceiling is refused whatever it claims to
-    // be, because the bytes are counted before the request is parsed.
-    const farTooLargeUpload = await ordinary.runtime.fetch(
-      rpcRequest(accessToken, {
+    expect(readOnlyUpload.status).toBe(413);
+
+    const drafting = fixture();
+    const draftToken = await authorizeAndExchange(
+      drafting.runtime,
+      "site.read content.draft",
+    );
+    await initializeMcpSession(drafting.runtime, draftToken.accessToken);
+    const largeUpload = await drafting.runtime.fetch(
+      rpcRequest(draftToken.accessToken, {
         jsonrpc: "2.0",
         id: 93,
+        method: "tools/call",
+        params: {
+          name: "foundry.media.upload",
+          arguments: { padding: largeBody },
+        },
+      }),
+    );
+    expect(largeUpload.status).not.toBe(413);
+    // Every other method still cannot carry that body, even on this
+    // connection.
+    const draftingListing = await drafting.runtime.fetch(
+      rpcRequest(draftToken.accessToken, {
+        jsonrpc: "2.0",
+        id: 94,
+        method: "tools/list",
+        params: { padding: largeBody },
+      }),
+    );
+    expect(draftingListing.status).toBe(413);
+    // A body larger than the photo ceiling is refused whatever it claims to
+    // be, because the bytes are counted while the body is read.
+    const farTooLargeUpload = await drafting.runtime.fetch(
+      rpcRequest(draftToken.accessToken, {
+        jsonrpc: "2.0",
+        id: 95,
         method: "tools/call",
         params: {
           name: "foundry.media.upload",

@@ -42,17 +42,31 @@ JSON-RPC body limit was 256 KiB.
 **An agent sends the picture's own bytes, never an address to fetch.**
 
 `foundry.media.upload` takes `bytesBase64`. Nothing fetches anything, so the
-SSRF control stands unchanged. A photo is capped at 4 MiB before it is decoded:
-the advertised schema bounds the base64 text, and the application bounds the
-decoded length again with the named reason `media_too_large`.
+SSRF control stands unchanged. A photo is capped at 4 MiB before it is decoded.
+The advertised schema bounds the base64 text a little above that, so a photo
+just over the limit reaches the application and is refused there with the named
+reason `media_too_large`, which says to send a smaller copy. A picture far over
+the limit is refused by the schema, and one above the transport ceiling by the
+transport, so nothing that large is ever decoded.
+
+The issue asks for the upload to arrive "with the same type and size limits as
+the dashboard". The type rule is the same rule, run by the same code: the
+`inspectImageSource` sniffer and `isMediaContentType`. The size rule is
+deliberately stricter — 4 MiB here against the dashboard route's 20 MiB —
+because a person sends a picture as a plain form request while an agent sends
+it inside a JSON-RPC call this server must hold in memory as text and again as
+bytes. Stricter is safe: nothing an agent can send would have been refused by
+the dashboard and accepted here.
 
 **The JSON-RPC body limit stays 256 KiB for every request but one.**
 
-The body is read up to 6 MiB, then the parsed request is inspected. A body
-above 256 KiB is refused with 413 unless the request really is one `tools/call`
-for `foundry.media.upload`. This keeps the small limit on every other method
-and every other tool, and gives the upload just enough room for 4 MiB of
-picture plus its base64 padding and the JSON around it.
+Only a connection holding `content.draft` can add a photo, so only that
+connection's body is read past 256 KiB at all. Its body is read up to 6 MiB,
+which is 4 MiB of picture plus its base64 padding and the JSON around it, and
+is then refused with 413 unless the parsed request really is one `tools/call`
+for `foundry.media.upload`. A connection without that permission, and every
+other method on any connection, keeps the 256 KiB limit at the point the body
+is read.
 
 **An upload runs the dashboard's own upload command, not a second path.**
 
@@ -76,6 +90,13 @@ draft, exactly as the dashboard does.**
 resolves `pageMediaOccurrenceId(page, slot)` from the draft's own page list, so
 a page an agent made inside the draft can take a photo. It then calls
 `commands.replaceOccurrence` and `commands.saveMediaOccurrence`, in that order.
+Those two steps are not one transaction, and the dashboard's own Photos page
+has the same shape. If the second step is refused — a stale draft, say — the
+occurrence head has moved and the draft has not. Nothing is lost and nothing is
+published: the agent reads the draft again and retries, the media library
+answers the repeated placement from its own receipt, and the draft then catches
+up.
+
 Because the placement writes a draft revision, it records its receipt in
 `mcp_mutation_receipts` and migration 0033 widens that table's `operation`
 check. A list writes nothing, and an upload writes no draft revision and keeps
@@ -92,6 +113,16 @@ the draft reports as "This draft has no page for that photo slot." The
 dashboard sends only `occurrence_home_*`, which still resolves to the home
 page, so nothing a person does changes.
 
+**A photo goes into a post through the post's own fields, not through
+`foundry.media.place`.**
+
+A page photo is a media occurrence with its own head and its own concurrency
+rule. A post's pictures are ordinary post fields, which `foundry.blog.create`
+and `foundry.blog.update` already write and already check against the media
+library (ADR-0036). Adding a second way to set them would be a second rule for
+the same field, so `foundry.media.place` covers pages only and the catalog says
+where a post's photo comes from.
+
 **Every photo tool needs `content.draft`, and no more.**
 
 Adding a photo and placing one are draft work: the photo reaches the public
@@ -103,7 +134,9 @@ published content either, so reading it needs the same permission rather than
 
 `McpMediaAsset` carries the photo's id, the site's own address for it, its file
 name, its type, its size, its dimensions and when it was added. It does not
-carry `createdBy`, and no photo tool returns the picture's bytes.
+carry `createdBy`, and no photo tool returns the picture's bytes. The photos
+come back in the order the site added them, oldest first, so a photo added
+between two pages of a listing never pushes another photo past the reader.
 
 **The consent screen now says what an agent can do.**
 
@@ -124,6 +157,12 @@ processing, so an MCP upload stores none. The gallery already handles a photo
 with no small copy — it shows the tile without a preview — so this is a
 smaller picture in the Photos page, not a failure. Making the small copy
 server-side is follow-up work.
+
+`foundry.media.list` reads the whole photo library and then cuts the page the
+agent asked for, exactly as `foundry.content.list` reads the whole published
+site. The page an agent receives is bounded; the read behind it is not. This is
+the existing pattern rather than a new one, and a library large enough for it to
+matter would want the same fix in both tools.
 
 A photo above 4 MiB cannot be sent through MCP. A person can still upload a
 larger original in the dashboard. An agent that has a larger picture must send
