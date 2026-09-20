@@ -4103,6 +4103,20 @@ h3.media-places-heading {
   min-height: var(--dash-control-height);
 }
 
+/* A control that cannot be used must not look like one that can. Approve is
+   off until the person opens the preview, so it says so by sight as well as
+   in words. */
+.review-decision .button:disabled {
+  background: var(--dash-line);
+  color: var(--dash-ink-soft);
+  cursor: not-allowed;
+}
+
+.review-decision .button:disabled:hover {
+  background: var(--dash-line);
+  transform: none;
+}
+
 .review-decision-changes {
   margin-top: 1rem;
 }
