@@ -310,8 +310,19 @@ function mcpMediaAssetOf(asset: MediaAsset): McpMediaAsset {
  * Losing the library's short mutation lease is not a rule at all, so it
  * becomes a retryable refusal rather than one that reads as a permission
  * problem. Anything else is left alone and reported as the failure it is.
+ *
+ * `busyMessage` differs by tool, because retrying is not the same act on both.
+ * An upload records no draft receipt and mints its photo id from the retry
+ * key, so the right retry carries the SAME key: a new one would mint a second
+ * id and could leave two photos. A placement records its refusal against the
+ * key it carried and replays that refusal word for word, so the right retry
+ * carries a NEW key.
  */
-function mediaLibraryRefusal(error: unknown, fallbackReason: string) {
+function mediaLibraryRefusal(
+  error: unknown,
+  fallbackReason: string,
+  busyMessage: string,
+) {
   if (error instanceof McpMediaValidationError) return error;
   if (error instanceof MediaValidationError) {
     return new McpMediaValidationError(
@@ -335,14 +346,7 @@ function mediaLibraryRefusal(error: unknown, fallbackReason: string) {
     // already refused earlier by the tool's own checks, so the refusal
     // invites a retry rather than telling an agent to stop. The dashboard's
     // own route answers the same errors with 409 and a retry.
-    //
-    // A placement records its refusal against the retry key it carried, and
-    // a repeated refusal replays word for word, so the retry has to carry a
-    // new retry key. The message says so.
-    return new McpReadError(
-      "TEMPORARILY_UNAVAILABLE",
-      "The photo library was busy. Send the request again with a new retry key.",
-    );
+    return new McpReadError("TEMPORARILY_UNAVAILABLE", busyMessage);
   }
   return error;
 }
@@ -478,6 +482,7 @@ export function createProductionMcpRuntime(
           throw mediaLibraryRefusal(
             error,
             mcpMediaRefusalReasons.uploadRefused,
+            "The photo library was busy. Send the same request again, with the same retry key, so this site keeps one photo.",
           );
         }
       },
@@ -529,6 +534,7 @@ export function createProductionMcpRuntime(
           throw mediaLibraryRefusal(
             error,
             mcpMediaRefusalReasons.placeRefused,
+            "The photo library was busy. Read the draft again and send the request with a new retry key.",
           );
         }
       },

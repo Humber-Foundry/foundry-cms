@@ -116,7 +116,7 @@ Stable error codes:
 | `APPROVAL_STALE` | Approval fingerprint no longer matches | New preview/review |
 | `WRONG_ARTIFACT_KIND` | Email/campaign artifact passed to publication scheduler | No |
 | `PUBLICATION_BUSY` | Another production publication owns the lease | After `retryAfterMs` |
-| `TEMPORARILY_UNAVAILABLE` | Dependency unavailable before safe completion | Same key after delay |
+| `TEMPORARILY_UNAVAILABLE` | Dependency unavailable before safe completion | Same key after delay, unless the tool writes a draft revision: a draft mutation stores its refusal against the key it carried and replays it word for word, so that retry needs a new key. The refusal's own sentence says which |
 | `RESULT_UNKNOWN` | Outcome reconciliation in progress | Poll status |
 | `RATE_LIMITED` | Connection/site budget exceeded | After `retryAfterMs` |
 | `CONNECTION_REVOKED` | D1 grant inactive | Owner reconnects |
@@ -421,9 +421,12 @@ naming a photo this site does not hold with `media_asset_not_found`. A slot
 another change moved first is refused with `media_place_conflict`, and any
 other rule the media library keeps with `media_place_refused`. A refusal that
 names a broken rule carries its `reason`; a stale revision and a busy photo
-library carry their `code` alone, because the code is the whole answer.
-Repeating the same request with the same retry key repeats the first refusal
-word for word, so retrying a busy photo library needs a new retry key.
+library carry their `code` alone, because the code is the whole answer. A
+placement stores its refusal against the retry key it carried and replays that
+refusal word for word, so retrying a busy photo library here needs a new retry
+key, and the refusal says so. An upload stores no such receipt and mints the
+photo id from the retry key, so its own retry keeps the same key and this site
+keeps one photo.
 
 A photo goes into a **post** through the post's own fields rather than through
 this tool: `foundry.blog.create` and `foundry.blog.update` take `mainImage`,
