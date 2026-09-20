@@ -16,6 +16,7 @@ import {
   editorPagePublishedStateLabels,
 } from "@/src/editor-page-selection";
 import type { PageActionSummary } from "@/src/page-lifecycle-view";
+import { HelpTip } from "./help-tip";
 
 /** Which dialog is open, and the page it is about. */
 type OpenDialog =
@@ -289,14 +290,22 @@ export function PageLifecycleList({
               >
                 Duplicate
               </button>
-              <button
-                type="button"
-                aria-label={`Delete ${page.title}`}
-                onClick={() => start({ kind: "delete", page })}
-                disabled={page.isHome}
-              >
-                Delete
-              </button>
+              <span className="pages-list-delete-group">
+                <button
+                  type="button"
+                  aria-label={`Delete ${page.title}`}
+                  onClick={() => start({ kind: "delete", page })}
+                  disabled={page.isHome}
+                >
+                  Delete
+                </button>
+                {page.isHome ? (
+                  <HelpTip label="Why can't I delete the home page?">
+                    The home page cannot be deleted. Every site needs a home
+                    page.
+                  </HelpTip>
+                ) : null}
+              </span>
             </div>
           </li>
         ))}

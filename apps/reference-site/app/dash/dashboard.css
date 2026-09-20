@@ -4285,7 +4285,6 @@ h3.media-places-heading {
 }
 
 .pages-list-rows {
-  overflow: hidden;
   margin: 0;
   padding: 0;
   border: 1px solid var(--dash-line);
@@ -4299,6 +4298,23 @@ h3.media-places-heading {
  * rows rather than above the link alone. */
 .pages-list-rows > li + li {
   border-top: 1px solid var(--dash-line);
+}
+
+/* The list has no `overflow: hidden`, because the home row's "Why can't I
+ * delete the home page?" HelpTip opens a panel below the row, and a hidden
+ * overflow would cut that panel off. The rounded card corners are matched by
+ * hand on the first and last row instead, only where a hover or focus
+ * background would otherwise show a square corner over the rounded border. */
+.pages-list-rows > li:first-child .pages-list-row:hover,
+.pages-list-rows > li:first-child .pages-list-row:focus-visible {
+  border-top-left-radius: var(--dash-radius);
+  border-top-right-radius: var(--dash-radius);
+}
+
+.pages-list-rows > li:last-child .pages-list-row:hover,
+.pages-list-rows > li:last-child .pages-list-row:focus-visible {
+  border-bottom-left-radius: var(--dash-radius);
+  border-bottom-right-radius: var(--dash-radius);
 }
 
 .pages-list-row {
@@ -4592,6 +4608,20 @@ h3.media-places-heading {
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0 1rem 0.85rem;
+}
+
+.pages-list-delete-group {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The Delete button sits near the right edge of the row, so its HelpTip opens
+ * from the trigger's right edge instead of its left. Opening from the left,
+ * as every other HelpTip does, would push the panel past the right edge of a
+ * phone screen. */
+.pages-list-delete-group .help-tip-panel {
+  left: auto;
+  right: 0;
 }
 
 .pages-list-row-actions button {
