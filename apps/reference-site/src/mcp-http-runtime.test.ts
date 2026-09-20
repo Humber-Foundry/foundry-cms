@@ -287,6 +287,7 @@ function fixture(
     beforeRecordInvocation?: () => Promise<void>;
     beforeGetLiveRelease?: () => Promise<void>;
     observeApplicationPrincipal?: (principal: unknown) => void;
+    denyOwnerAuthentication?: boolean;
   } = {},
 ) {
   initializedSessions.clear();
@@ -455,10 +456,15 @@ function fixture(
         redirectUris: options.registeredRedirectUris ?? [redirectUri],
       },
     },
-    authenticateOwner: async () => ({
-      membershipId: "membership-owner",
-      csrfToken: "owner-bound-csrf",
-    }),
+    authenticateOwner: async () => {
+      if (options.denyOwnerAuthentication === true) {
+        throw new Error("owner_authentication_denied");
+      }
+      return {
+        membershipId: "membership-owner",
+        csrfToken: "owner-bound-csrf",
+      };
+    },
     createAuthorizationCode: () => "opaque-authorization-code",
     createConnectionId: () =>
       options.connectionIds?.[connectionSequence++] ??
@@ -3641,6 +3647,31 @@ describe("MCP authorize parameter and scope compatibility", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     const page = await response.text();
     expect(page).not.toContain('"error"');
+    expect(connections.size).toBe(0);
+  });
+
+  it("shows a readable page, not JSON, when a consent submission cannot confirm the Owner's sign-in", async () => {
+    const { runtime, connections } = fixture({ denyOwnerAuthentication: true });
+    const parameters = await baseParameters();
+    const response = await runtime.fetch(
+      new Request(`${resourceUri}/oauth/authorize`, {
+        method: "POST",
+        headers: {
+          origin: canonicalOrigin,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams([
+          ...Object.entries(parameters),
+          ["csrf_token", "owner-bound-csrf"],
+          ["granted_scope", "site.read"],
+        ]),
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    const page = await response.text();
+    expect(page).not.toContain('"error"');
+    expect(page).toContain("Sign in as a site Owner");
     expect(connections.size).toBe(0);
   });
 });
